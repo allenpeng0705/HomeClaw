@@ -212,7 +212,7 @@ class ExternalPluginRegisterRequest(BaseModel):
     config: Dict = Field(default_factory=dict)
     capabilities: Optional[List[PluginCapability]] = None  # required for unified registration
     tools: Optional[List[PluginToolDefinition]] = None     # legacy; prefer capabilities
-    # Optional: UIs this plugin provides (dashboard, webchat, control, tui, custom). See docs_design/OpenClawInvestigationAndPluginUI.md.
+    # Optional: UIs this plugin provides (dashboard, webchat, control, tui, custom). See docs_design/PluginUIsAndHomeClawControlUI.md.
     ui: Optional[Dict[str, Any]] = None  # e.g. { "dashboard": "http://...", "webchat": "http://...", "control": "http://...", "tui": "npx ...", "custom": [{ "id": "...", "name": "...", "url": "..." }] }
 
 
@@ -570,6 +570,9 @@ class CoreMetadata:
     knowledge_base: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, collection_name, chunk_size, unused_ttl_days; see docs/MemoryAndDatabase.md
     profile: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, dir (base path for profiles); see docs/UserProfileDesign.md
     result_viewer: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, dir, retention_days, base_url; see docs/ComplexResultViewerDesign.md
+    # When true, Core starts and registers all (or allowlisted) plugins in system_plugins/ so one command runs Core + system plugins.
+    system_plugins_auto_start: bool = False
+    system_plugins: List[str] = field(default_factory=list)  # optional allowlist; empty = start all discovered system plugins
 
     @staticmethod
     def from_yaml(yaml_file: str) -> 'CoreMetadata':
@@ -724,6 +727,8 @@ class CoreMetadata:
             knowledge_base=data.get('knowledge_base') if isinstance(data.get('knowledge_base'), dict) else {},
             profile=data.get('profile') if isinstance(data.get('profile'), dict) else {},
             result_viewer=data.get('result_viewer') if isinstance(data.get('result_viewer'), dict) else {},
+            system_plugins_auto_start=bool(data.get('system_plugins_auto_start', False)),
+            system_plugins=list(data.get('system_plugins') or []) if isinstance(data.get('system_plugins'), list) else [],
         )
 
     # @staticmethod

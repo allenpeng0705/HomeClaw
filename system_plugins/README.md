@@ -2,6 +2,21 @@
 
 Plugins that ship with HomeClaw and provide core UI and automation features. They live at the **project root** under **system_plugins/** (not under examples).
 
+## Run all with Core (one command)
+
+Set **`system_plugins_auto_start: true`** in **config/core.yml**. When you start Core (e.g. `python -m main start`), it will:
+
+1. Start Core as usual.
+2. A background task **polls Core** (GET `/ui`) until it responds (or 60s timeout). Only then does it start plugins, so registration runs when Core is ready.
+3. Start each plugin in **system_plugins/** that has `register.js` and a server (`server.js` or `package.json` start script).
+4. After a short delay, run `node register.js` for each so they register with Core.
+
+You only need to run Core; all system plugins start and register automatically. Stopping Core also terminates the plugin processes.
+
+Optional: **`system_plugins: [homeclaw-browser]`** in core.yml limits auto-start to that list; leave empty to start all discovered plugins.
+
+**First-time setup** for a plugin (e.g. homeclaw-browser): run `npm install` and `npx playwright install chromium` once in that plugin folder. After that, Core can start it without extra steps.
+
 ## homeclaw-browser
 
 Single Node.js plugin that provides:

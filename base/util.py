@@ -155,7 +155,12 @@ class Util:
     def plugins_path(self):
         root = self.root_path()
         return os.path.join(root, 'plugins')
-    
+
+    def system_plugins_path(self):
+        """Directory for system plugins (e.g. homeclaw-browser). When system_plugins_auto_start is true, Core starts and registers them."""
+        root = self.root_path()
+        return os.path.join(root, 'system_plugins')
+
     def channels_path(self):
         root = self.root_path()
         return os.path.join(root, 'channels')

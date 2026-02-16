@@ -17,11 +17,12 @@
 1. [What is HomeClaw?](#1-what-is-homeclaw)
 2. [What Can HomeClaw Do?](#2-what-can-homeclaw-do)
 3. [How to Use HomeClaw](#3-how-to-use-homeclaw)
-4. [Skills and Plugins: Make HomeClaw Work for You](#4-skills-and-plugins-make-homeclaw-work-for-you)
-5. [Plugins: Extend HomeClaw](#5-plugins-extend-homeclaw)
-6. [Skills: Extend HomeClaw with Workflows](#6-skills-extend-homeclaw-with-workflows)
-7. [Acknowledgments](#7-acknowledgments)
-8. [Contributing & License](#8-contributing--license)
+4. [System plugin: homeclaw-browser](#4-system-plugin-homeclaw-browser)
+5. [Skills and Plugins: Make HomeClaw Work for You](#5-skills-and-plugins-make-homeclaw-work-for-you)
+6. [Plugins: Extend HomeClaw](#6-plugins-extend-homeclaw)
+7. [Skills: Extend HomeClaw with Workflows](#7-skills-extend-homeclaw-with-workflows)
+8. [Acknowledgments](#8-acknowledgments)
+9. [Contributing & License](#9-contributing--license)
 
 ---
 
@@ -202,6 +203,13 @@ sequenceDiagram
 
 For a full design reference, see **Design.md**. For tools vs skills vs plugins, see **docs_design/ToolsSkillsPlugins.md**.
 
+### Major features and recent changes
+
+- **Session management** — Sessions keyed by app/user/channel; pruning, compaction, and `GET /api/sessions` for UIs. Core’s **GET /ui** shows a session list and links to plugin UIs. See **docs_design/SessionAndDualMemoryDesign.md**.
+- **AGENT_MEMORY.md** — Optional long-term memory file in the workspace; configurable path, append tool, and prompt rule. See **config/workspace/AGENT_MEMORY.md**.
+- **System plugins** — Plugins in **system_plugins/** (e.g. **homeclaw-browser**) provide WebChat, browser automation, canvas, and nodes. You can run them with Core in one command via **system_plugins_auto_start** in `config/core.yml`. See **system_plugins/README.md** and [§4 System plugin: homeclaw-browser](#4-system-plugin-homeclaw-browser).
+- **Plugin/skill selection** — Configurable top-N and max-in-prompt for skills and plugins; optional vector retrieval. See `config/core.yml` (`skills_top_n_candidates`, `plugins_max_in_prompt`, etc.).
+
 ---
 
 ## 2. What Can HomeClaw Do?
@@ -320,6 +328,8 @@ HomeClaw runs on **macOS**, **Windows**, and **Linux**. You need:
    python -m main start
    ```
 
+   **Run Core and all system plugins in one command:** Set `system_plugins_auto_start: true` in `config/core.yml`. Core will then start each plugin in `system_plugins/` (e.g. homeclaw-browser) and register them automatically. See [§4 System plugin: homeclaw-browser](#4-system-plugin-homeclaw-browser) and **system_plugins/README.md**.
+
 5. **Run a channel** (in another terminal)
 
    ```bash
@@ -408,7 +418,27 @@ For faster pip installs, you can use a mirror, e.g.:
 
 ---
 
-## 4. Skills and Plugins: Make HomeClaw Work for You
+## 4. System plugin: homeclaw-browser
+
+The **homeclaw-browser** plugin lives in **system_plugins/homeclaw-browser**. It provides:
+
+- **WebChat / Control UI** — Browser UI at **http://127.0.0.1:3020/** (default). WebSocket proxy to Core so you can chat with the agent from the browser.
+- **Browser automation** — The LLM can open URLs, take snapshots, click, type, and fill forms via **route_to_plugin(homeclaw-browser, …)**. Set **tools.browser_enabled: false** in `config/core.yml` so Core does not register its own browser tools; then the agent uses this plugin for all browser actions.
+- **Canvas** — GET **/canvas**: the agent can push UI (title, blocks) to a canvas viewer.
+- **Nodes** — GET **/nodes** and WebSocket **/nodes-ws**: devices can register as nodes; the agent can list nodes and send commands (e.g. screen, camera).
+
+**How to use**
+
+1. **One-time setup** (in `system_plugins/homeclaw-browser`): `npm install` and `npx playwright install chromium`.
+2. **Option A — Run with Core in one command:** In `config/core.yml` set **system_plugins_auto_start: true**. Start Core (`python -m main start`). Core will start the plugin and run `node register.js` for you.
+3. **Option B — Run manually:** Start Core, then in another terminal run `node server.js` and `node register.js` in `system_plugins/homeclaw-browser`. Set **CORE_URL** (and **CORE_API_KEY** if Core has auth) in the environment if needed.
+4. Open **http://127.0.0.1:9000/ui** to see the launcher (sessions list and links to WebChat, Canvas, Nodes). Open **http://127.0.0.1:3020/** for WebChat.
+
+See **system_plugins/README.md** and **system_plugins/homeclaw-browser/README.md** for env vars (PORT, BROWSER_HEADLESS), capabilities, and testing.
+
+---
+
+## 5. Skills and Plugins: Make HomeClaw Work for You
 
 HomeClaw ships with **tools** (file, memory, web search, cron, browser, etc.), **plugins** (e.g. Weather, News, Mail), and **skills** (workflows described in SKILL.md). Together they let you:
 
@@ -421,7 +451,7 @@ You don’t have to “call” plugins or skills by name—just ask naturally. T
 
 ---
 
-## 5. Plugins: Extend HomeClaw
+## 6. Plugins: Extend HomeClaw
 
 **Plugins** are single-feature modules: one plugin = one focused capability (e.g. Weather, News, Mail, custom API).
 
@@ -456,7 +486,7 @@ Plugins can declare parameters (e.g. city, recipient). Core can fill them from *
 
 ---
 
-## 6. Skills: Extend HomeClaw with Workflows
+## 7. Skills: Extend HomeClaw with Workflows
 
 **Skills** are application-style capabilities: each skill is a **folder** under `config/skills/` with a **SKILL.md** (name, description, and optional body that describes how to use tools).
 
@@ -468,18 +498,18 @@ Example: a “social media agent” skill might describe posting to X/Twitter us
 
 ---
 
-## 7. Acknowledgments
+## 8. Acknowledgments
 
 HomeClaw would not exist without two projects that inspired it:
 
-- **GPT4People** — The author’s earlier project that explored decentralized, people-centric AI and channel-based interaction. Many of HomeClaw’s ideas—local-first agents, channels, memory, and the vision of AI “for the people”—grew from that work.
-- **OpenClaw** — A sibling ecosystem (gateway, extensions, channels, providers). OpenClaw and HomeClaw share a similar spirit: extensible, channel-based AI that users can run and customize. The contrast between OpenClaw’s gateway/extensions model and HomeClaw’s core/plugins model helped clarify HomeClaw’s design (see **docs_design/ToolsSkillsPlugins.md** §2.7).
+- **GPT4People** — The author’s earlier project that explored decentralized, people-centric AI and channel-based interaction. Many of HomeClaw’s ideas—local-first agents, channels, memory, and the vision of AI “for the people“—grew from that work.
+- **OpenClaw** — A sibling ecosystem (gateway, extensions, channels, providers). OpenClaw and HomeClaw share a similar spirit: extensible, channel-based AI that users can run and customize. The contrast between OpenClaw’s gateway/extensions model and HomeClaw’s core/plugins model helped clarify HomeClaw’s design (see **docs_design/ToolsSkillsPlugins.md** §2.8).
 
 Thank you to everyone who contributed to GPT4People and OpenClaw, and to the open-source communities behind llama.cpp, LiteLLM, Cognee, and the many channels and tools we build on.
 
 ---
 
-## 8. Contributing & License
+## 9. Contributing & License
 
 - **Contributing** — We welcome issues, pull requests, and discussions. See **CONTRIBUTING.md** for guidelines.
 - **License** — This project is licensed under the **Apache License 2.0**. See the **LICENSE** file.

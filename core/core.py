@@ -175,6 +175,7 @@ class Core(CoreInterface):
             self.request_queue_task = None
             self.response_queue_task = None
             self.memory_queue_task = None
+            self._system_plugin_processes: List[asyncio.subprocess.Process] = []
             #self.active_plugin = None
             logger.debug("Before initialize orchestrator")
             self.orchestratorInst = Orchestrator(self)
@@ -367,6 +368,122 @@ class Core(CoreInterface):
 
     def start_hot_reload(self):
         self.plugin_manager.start_hot_reload()
+
+    def _discover_system_plugins(self) -> List[Dict]:
+        """Discover plugins in system_plugins/ that have register.js and a server (server.js or package.json start). Returns list of {id, cwd, start_argv, register_argv}."""
+        root = Util().root_path()
+        base = getattr(Util(), "system_plugins_path", lambda: os.path.join(root, "system_plugins"))()
+        if not os.path.isdir(base):
+            return []
+        out = []
+        for name in sorted(os.listdir(base)):
+            if name.startswith("."):
+                continue
+            folder = os.path.join(base, name)
+            if not os.path.isdir(folder):
+                continue
+            register_js = os.path.join(folder, "register.js")
+            server_js = os.path.join(folder, "server.js")
+            pkg_json = os.path.join(folder, "package.json")
+            if not os.path.isfile(register_js):
+                continue
+            start_argv = None
+            if os.path.isfile(server_js):
+                start_argv = ["node", "server.js"]
+            elif os.path.isfile(pkg_json):
+                try:
+                    with open(pkg_json, "r", encoding="utf-8") as f:
+                        pkg = json.load(f)
+                    scripts = (pkg.get("scripts") or {})
+                    start_script = (scripts.get("start") or "").strip()
+                    if start_script:
+                        # "node server.js" -> ["node", "server.js"]; "npm run x" -> ["npm", "run", "x"]
+                        parts = start_script.split()
+                        if parts and parts[0] == "node" and len(parts) >= 2:
+                            start_argv = parts
+                        elif parts and parts[0] == "npm":
+                            start_argv = ["npm", "start"]
+                except Exception:
+                    pass
+            if not start_argv:
+                continue
+            out.append({
+                "id": name,
+                "cwd": folder,
+                "start_argv": start_argv,
+                "register_argv": ["node", "register.js"],
+            })
+        return out
+
+    async def _wait_for_core_ready(self, base_url: str, timeout_sec: float = 60.0, interval_sec: float = 0.5) -> bool:
+        """Poll GET {base_url}/ui until Core responds 200 or timeout. So plugins only register when Core is ready."""
+        url = (base_url.rstrip("/") + "/ui")
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    r = await client.get(url)
+                    if r.status_code == 200:
+                        return True
+            except Exception:
+                pass
+            await asyncio.sleep(interval_sec)
+        return False
+
+    async def _run_system_plugins_startup(self) -> None:
+        """Start each discovered system plugin (server process) then run register. Waits for Core to be ready first."""
+        meta = Util().get_core_metadata()
+        allowlist = getattr(meta, "system_plugins", None) or []
+        candidates = self._discover_system_plugins()
+        if not candidates:
+            return
+        to_start = [c for c in candidates if not allowlist or c["id"] in allowlist]
+        if not to_start:
+            return
+        core_url = f"http://{meta.host}:{meta.port}"
+        env = os.environ.copy()
+        env["CORE_URL"] = core_url
+        if getattr(meta, "auth_enabled", False) and getattr(meta, "auth_api_key", ""):
+            env["CORE_API_KEY"] = getattr(meta, "auth_api_key", "")
+        # Wait for Core to be ready so registration succeeds (poll GET /ui until 200)
+        ready = await self._wait_for_core_ready(core_url)
+        if not ready:
+            logger.warning("system_plugins: Core did not become ready in time; starting plugins anyway.")
+        else:
+            _component_log("system_plugins", "Core ready, starting plugin(s)")
+        for item in to_start:
+            cwd = item["cwd"]
+            start_argv = item["start_argv"]
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    start_argv[0],
+                    *start_argv[1:],
+                    cwd=cwd,
+                    env=env,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                self._system_plugin_processes.append(proc)
+                _component_log("system_plugins", f"started {item['id']} (pid={proc.pid})")
+            except Exception as e:
+                logger.warning("system_plugins: failed to start %s: %s", item["id"], e)
+        await asyncio.sleep(2)
+        for item in to_start:
+            try:
+                reg = await asyncio.create_subprocess_exec(
+                    "node", "register.js",
+                    cwd=item["cwd"],
+                    env=env,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await reg.communicate()
+                if reg.returncode == 0:
+                    _component_log("system_plugins", f"registered {item['id']}")
+                else:
+                    logger.debug("system_plugins: register %s stderr: %s", item["id"], (stderr or b"").decode(errors="replace")[:500])
+            except Exception as e:
+                logger.debug("system_plugins: register %s failed: %s", item["id"], e)
 
     # try to reduce the misunderstanding. All the input tests in EmbeddingBase should be
     # in a list[str]. If you just want to embedding one string, ok, put into one list first.
@@ -1009,21 +1126,42 @@ class Core(CoreInterface):
 
         @self.app.get("/ui")
         async def ui_launcher():
-            """Launcher page: list plugin UIs (WebChat, Control UI, Dashboard, TUI). Links to each plugin's declared URLs."""
+            """Launcher page: Sessions list (from Core) and plugin UIs (WebChat, Control UI, Dashboard, TUI)."""
+            session_cfg = getattr(Util().get_core_metadata(), "session", None) or {}
+            sessions_enabled = session_cfg.get("api_enabled", True)
+            sessions_list = []
+            if sessions_enabled:
+                try:
+                    sessions_list = self.get_sessions(num_rounds=50, fetch_all=True)
+                except Exception:
+                    pass
             plugins_with_ui = []
             for pid, plug in (getattr(self.plugin_manager, "plugin_by_id", None) or {}).items():
                 if not isinstance(plug, dict) or not plug.get("ui"):
                     continue
                 plugins_with_ui.append({"plugin_id": pid, "name": plug.get("name") or pid, "ui": plug["ui"]})
             html_parts = [
-                "<!DOCTYPE html><html><head><meta charset='utf-8'><title>HomeClaw Plugin UIs</title>",
-                "<style>body{font-family:system-ui;max-width:800px;margin:2rem auto;padding:0 1rem;}",
-                "h1{color:#333;} ul{list-style:none;padding:0;} li{margin:0.5rem 0;}",
-                "a{color:#e65100;} a:hover{text-decoration:underline;} .meta{color:#666;font-size:0.9rem;}</style></head><body>",
-                "<h1>HomeClaw Plugin UIs</h1>",
-                "<p class='meta'>Plugins that provide a WebChat, Control UI, Dashboard, or TUI. Open a link to use the UI.</p>",
-                "<ul>",
+                "<!DOCTYPE html><html><head><meta charset='utf-8'><title>HomeClaw UI</title>",
+                "<style>body{font-family:system-ui;max-width:900px;margin:2rem auto;padding:0 1rem;}",
+                "h1,h2{color:#333;} ul{list-style:none;padding:0;} li{margin:0.5rem 0;}",
+                "a{color:#e65100;} a:hover{text-decoration:underline;} .meta{color:#666;font-size:0.9rem;}",
+                "table{border-collapse:collapse;width:100%;margin-top:0.5rem;} th,td{border:1px solid #ddd;padding:0.4rem 0.6rem;text-align:left;} th{background:#f5f5f5;}</style></head><body>",
+                "<h1>HomeClaw</h1>",
+                "<h2>Sessions</h2>",
+                "<p class='meta'>Recent chat sessions (session_id, app_id, user_id, created). Data from Core; session.api_enabled in config.</p>",
             ]
+            if sessions_list:
+                html_parts.append("<table><thead><tr><th>session_id</th><th>app_id</th><th>user_id</th><th>created_at</th></tr></thead><tbody>")
+                for s in sessions_list[:30]:
+                    sid = (s.get("session_id") or "").replace("<", "&lt;").replace(">", "&gt;")
+                    aid = (s.get("app_id") or "").replace("<", "&lt;").replace(">", "&gt;")
+                    uid = (s.get("user_id") or "").replace("<", "&lt;").replace(">", "&gt;")
+                    created = (s.get("created_at") or "").replace("<", "&lt;").replace(">", "&gt;") if s.get("created_at") else ""
+                    html_parts.append(f"<tr><td><code>{sid}</code></td><td>{aid}</td><td>{uid}</td><td>{created}</td></tr>")
+                html_parts.append("</tbody></table>")
+            else:
+                html_parts.append("<p class='meta'>No sessions yet, or session API disabled.</p>")
+            html_parts.append("<h2>Plugin UIs</h2><p class='meta'>WebChat, Control UI, Dashboard, TUI. Open a link to use the UI.</p><ul>")
             for p in plugins_with_ui:
                 name = p["name"]
                 ui = p["ui"]
@@ -1039,7 +1177,7 @@ class Core(CoreInterface):
                     c_name = (c.get("name") or c.get("id") or "Custom") if isinstance(c, dict) else "Custom"
                     if c_url:
                         html_parts.append(f"<li><strong>{name}</strong> — <a href='{c_url}' target='_blank' rel='noopener'>{c_name}</a></li>")
-            html_parts.append("</ul><p class='meta'>Add plugins that declare <code>ui</code> in registration to see them here. See docs_design/OpenClawInvestigationAndPluginUI.md.</p></body></html>")
+            html_parts.append("</ul><p class='meta'>Add plugins that declare <code>ui</code> in registration to see them here. See docs_design/PluginUIsAndHomeClawControlUI.md.</p></body></html>")
             return HTMLResponse(content="".join(html_parts))
 
         @self.app.websocket("/ws")
@@ -1555,7 +1693,7 @@ class Core(CoreInterface):
         account_id: Optional[str] = None,
     ) -> str:
         """
-        Derive session key from dmScope and identityLinks (OpenClaw-compatible).
+        Derive session key from dmScope and identityLinks.
         main: one session for all DMs. per-peer: by sender. per-channel-peer: by channel+sender. per-account-channel-peer: by account+channel+sender.
         identity_links maps canonical id -> list of provider-prefixed ids (e.g. telegram:123); peer_id used in key is canonical when matched.
         """
@@ -1806,6 +1944,9 @@ class Core(CoreInterface):
             logger.debug("Starting LLM manager...")
             self.llmManager.run()
             logger.debug("LLM manager started!")
+            # Optionally start and register system_plugins (e.g. homeclaw-browser) so one command runs Core + plugins
+            if getattr(core_metadata, "system_plugins_auto_start", False):
+                asyncio.create_task(self._run_system_plugins_startup())
             # Start the server
             #server_task = asyncio.create_task(self.server.serve())
             #await asyncio.gather(llm_task, server_task)
@@ -1832,6 +1973,13 @@ class Core(CoreInterface):
         if getattr(self, "plugin_manager", None):
             self.plugin_manager.deinitialize_plugins()
         #logger.debug("Plugins are deinitialized!")
+        for proc in getattr(self, "_system_plugin_processes", []) or []:
+            try:
+                if proc.returncode is None:
+                    proc.terminate()
+            except Exception:
+                pass
+        self._system_plugin_processes = []
         self.stop_chroma_client()
 
         # Stop result viewer report server (runs on its own port)

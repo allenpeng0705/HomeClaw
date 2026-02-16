@@ -26,9 +26,8 @@ workspace_dir: config/workspace
 # Optional: inject curated long-term memory from a single Markdown file (AGENT_MEMORY.md). See docs_design/SessionAndDualMemoryDesign.md.
 use_agent_memory_file: true
 agent_memory_path: ""   # empty = workspace_dir/AGENT_MEMORY.md; or set path relative to project or absolute
-# Session management: pruning, lifecycle, API, dmScope (OpenClaw-compatible). See docs_design/SessionAndDualMemoryDesign.md.
+# Session management: pruning, lifecycle, API, dmScope. 
 session:
-  # How direct messages are grouped (same as OpenClaw dmScope). Aligns with https://docs.openclaw.ai/concepts/session
   dm_scope: main              # main | per-peer | per-channel-peer | per-account-channel-peer
   # main (default): all DMs share one session for continuity. per-peer: isolate by sender id across channels.
   # per-channel-peer: isolate by channel + sender (recommended for multi-user inboxes).
@@ -42,8 +41,8 @@ session:
   api_enabled: true           # expose GET /api/sessions for plugin UIs
 # Compaction: trim or summarize context when approaching model limit. Reduces token use and avoids overflows.
 compaction:
-  enabled: false              # when true, trim/summarize messages before LLM when over reserve_tokens
-  reserve_tokens: 4096        # keep this many tokens free for response; trim if (system + messages) would exceed context_window - reserve_tokens
+  enabled: false              # when true, trim/summarize messages before LLM when over limit
+  reserve_tokens: 4096        # tokens to leave free for the model's reply (not the same as ctx_size). Should be less than llama_cpp.ctx_size (e.g. 1024–4096); ctx_size is total window, this is just the reserve for output.
   max_messages_before_compact: 30   # max user+assistant+tool messages to keep (older trimmed or summarized)
   compact_tool_results: true  # when true, trim or replace large tool results in the tool loop with a short placeholder when over limit
 # Optional: enable tool layer (tool registry; model can call tools by name with args); see Design.md §3.6
@@ -74,6 +73,9 @@ plugins_vector_collection: homeclaw_plugins
 plugins_max_retrieved: 10
 plugins_similarity_threshold: 0.0
 plugins_refresh_on_startup: true
+# System plugins (system_plugins/): when true, Core starts each plugin (e.g. node server.js) and runs register (e.g. node register.js) so one command runs Core + all system plugins. See system_plugins/README.md.
+system_plugins_auto_start: true   # set true to start homeclaw-browser etc. with Core
+system_plugins: []                 # optional allowlist by plugin id (folder name); empty = start all discovered
 # Orchestrator + TAM + plugins are always enabled. Single choice: routing style.
 # orchestrator_unified_with_tools: true (default) — main LLM with tools does routing (route_to_tam / route_to_plugin). One LLM call.
 # orchestrator_unified_with_tools: false — separate orchestrator LLM call for intent + plugin selection, then plugin runs.
@@ -128,7 +130,7 @@ tools:
       fallback_max_results: 5 # max results from fallback (3–10)
   # --- Browser tools (Core vs external plugin) ---
   # browser_enabled: true  — Core registers built-in browser tools (browser_navigate, browser_snapshot, browser_click, browser_type) when Playwright is installed. The LLM can call these tools directly.
-  # browser_enabled: false — Core does NOT register browser tools. Use this when you want browser automation via the external plugin homeclaw-browser (Node.js): register that plugin and set browser_enabled false so the LLM routes all browser actions through route_to_plugin(homeclaw-browser, browser_navigate, ...). Avoids duplicate tools and lets you use the Node.js plugin (e.g. for stability or OpenClaw-style canvas/nodes). See examples/external_plugins/homeclaw-browser/README.md.
+  # browser_enabled: false — Core does NOT register browser tools. Use this when you want browser automation via the system plugin homeclaw-browser (Node.js): register that plugin and set browser_enabled false so the LLM routes all browser actions through route_to_plugin(homeclaw-browser, browser_navigate, ...). Avoids duplicate tools and lets you use the Node.js plugin for canvas/nodes. See system_plugins/homeclaw-browser/README.md.
   browser_enabled: false
   # When browser_enabled true and Playwright available: set to false to show the browser window (local testing only; on servers without a display use true or run under Xvfb).
   browser_headless: false
