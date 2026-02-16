@@ -8,6 +8,8 @@
 
 **其他语言 / Other languages:** [English](README.md) | [日本語](README_jp.md) | [한국어](README_kr.md)
 
+**文档:** [https://allenpeng0705.github.io/HomeClaw/](https://allenpeng0705.github.io/HomeClaw/)
+
 ---
 
 ## 目录
