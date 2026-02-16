@@ -1,0 +1,10 @@
+{
+  "name": "homeclaw-quote-plugin",
+  "version": "1.0.0",
+  "description": "External Quote plugin for HomeClaw (Node.js)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "register": "node register.js"
+  }
+}

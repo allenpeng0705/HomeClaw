@@ -1,0 +1,2 @@
+name: teams
+# Core connection: channels/.env only. Set TEAMS_APP_ID, TEAMS_APP_PASSWORD for Connector API (send replies).

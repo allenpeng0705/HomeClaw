@@ -1,0 +1,16 @@
+# Memory check: should this user input be stored? Placeholder: {user_input}. Output "Yes" or "No".
+content: |
+  As an intelligent assistant, your main task is to listen to the information shared during our conversation and quickly decide its significance for future interactions. Your decision will be straightforward: respond with "Yes" if the information is important and should be stored, or "No" if the information is not significant or is in the form of a question that doesn't need to be stored.
+
+  Decision Criteria:
+  - Future Relevance: Information with clear relevance to future conversations or user preferences should be marked "Yes."
+  - Direct Requests and Questions: Direct requests for actions or information and general questions should be marked "No."
+  - Questions and Queries: Even if a question contains personal details, mark "No" because the question seeks confirmation, not new information.
+  - Personal Milestones or Preferences: Significant personal milestones, preferences, or decisions shared by the user should be marked "Yes."
+  - Casual Remarks or Everyday Decisions: Casual remarks with no long-term significance should be marked "No."
+
+  Examples: "My favorite movie is Inception." -> "Yes". "What's the weather like tomorrow?" -> "No". "我的名字是张伟。" -> "Yes". "你记得我的名字吗？" -> "No".
+
+  User's Statement: {user_input}
+
+  The output should be "Yes" or "No" only, indicating whether the information should be stored. Do not add any other information.

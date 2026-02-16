@@ -1,0 +1,75 @@
+"""
+BlueBubbles channel: HTTP webhook that a BlueBubbles bridge calls.
+Bridge POSTs { user_id, text }; we forward to Core /inbound and return { text }.
+Bridge is responsible for sending the response back via BlueBubbles/iMessage. Core connection from channels/.env only.
+"""
+import os
+import sys
+from pathlib import Path
+
+_root = Path(__file__).resolve().parent.parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
+from dotenv import load_dotenv
+import httpx
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from typing import Optional
+
+load_dotenv(_root / "channels" / ".env")
+from base.util import Util
+
+app = FastAPI(title="HomeClaw BlueBubbles Channel")
+INBOUND_URL = f"{Util().get_channels_core_url()}/inbound"
+
+
+class BlueBubblesMessage(BaseModel):
+    user_id: str
+    text: str
+    user_name: Optional[str] = None
+
+
+@app.get("/")
+def read_root():
+    return {
+        "channel": "bluebubbles",
+        "usage": "Bridge POSTs to /message with {\"user_id\": \"bluebubbles_<id>\", \"text\": \"...\"}. Core connection from channels/.env.",
+    }
+
+
+@app.post("/message")
+async def message(body: BlueBubblesMessage):
+    """Bridge calls this when an iMessage arrives. We POST to Core /inbound and return the reply text."""
+    payload = {
+        "user_id": body.user_id if body.user_id.startswith("bluebubbles_") else f"bluebubbles_{body.user_id}",
+        "text": body.text,
+        "channel_name": "bluebubbles",
+        "user_name": body.user_name or body.user_id,
+    }
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(INBOUND_URL, json=payload, timeout=120.0)
+        data = r.json() if r.content else {}
+        reply = data.get("text", "")
+        if not reply and r.status_code != 200:
+            reply = data.get("error", "Request failed")
+    except httpx.ConnectError:
+        reply = "Core unreachable. Is HomeClaw running?"
+    except Exception as e:
+        reply = f"Error: {e}"
+    return {"text": reply or "(no reply)"}
+
+
+def main():
+    import uvicorn
+    port = int(os.getenv("BLUEBUBBLES_CHANNEL_PORT", "8017"))
+    host = os.getenv("BLUEBUBBLES_CHANNEL_HOST", "0.0.0.0")
+    print(f"BlueBubbles channel: webhook http://{host}:{port}/message (Core from channels/.env)")
+    print("Run your BlueBubbles bridge so it POSTs here and sends the response back via BlueBubbles API.")
+    uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+if __name__ == "__main__":
+    main()

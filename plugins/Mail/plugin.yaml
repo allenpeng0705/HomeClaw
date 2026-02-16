@@ -1,0 +1,9 @@
+id: mail
+name: Mail Plugin
+description: Send email. Use when the user wants to send an email or contact someone by email.
+description_long: Helps the user compose and send email. Extracts recipient, subject, and body from conversation; can use configured contacts. Use for: send email, email John, write to someone.
+type: inline
+config:
+  config_file: config.yml
+# Single entry point: run() handles the full flow (LLM to extract send_to/subject/body, then send). No separate capability methods.
+capabilities: []

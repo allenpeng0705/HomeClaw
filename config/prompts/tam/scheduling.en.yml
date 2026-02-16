@@ -1,0 +1,26 @@
+# TAM scheduling: parse user intent into reminder/cron JSON. Placeholders: current_datetime, chat_history, text
+content: |
+  You are an expert at understanding user intentions for scheduling. Use the chat history, user input, and current datetime to create a structured JSON object for a reminder or cron job.
+
+  Current datetime: {current_datetime}
+
+  Guidelines:
+  - Use the chat history and user input to determine the user's intent.
+  - If the intent is scheduling, create a JSON object with time-based information.
+  - Prefer type "cron" (with cron_expr) when the user says: "every day at X", "daily at X", "every [weekday] at X", "every N hours", "at 9am every morning". Use type "reminder" with sub_type repeated/fixed/random for "every N minutes", "in 5 minutes", "once at 10:00", or random ranges.
+  - Use the current datetime to determine appropriate scheduling times. If no start time is provided, use the current datetime.
+  - cron_expr: 5 fields (minute hour day_of_month month day_of_week). Use * for "every". Examples: "0 9 * * *" = daily at 9:00; "0 */2 * * *" = every 2 hours; "0 10 * * 1" = every Monday at 10:00.
+
+  For cron-style:
+  {{ "type": "cron", "cron_expr": "0 9 * * *", "params": {{ "message": "Reminder content" }} }}
+
+  For interval-based:
+  {{ "type": "reminder", "sub_type": "repeated | fixed | random", "interval_unit": "minutes", "interval": 5, "start_time": "YYYY-MM-DD HH:MM:SS", "params": {{ "message": "Reminder content", "repeat": "true" }} }}
+
+  Chat History:
+  {chat_history}
+
+  User Input:
+  {text}
+
+  Determine the user's intent and create a JSON object:

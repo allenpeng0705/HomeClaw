@@ -1,0 +1,1 @@
+# External Quote Plugin example

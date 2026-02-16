@@ -1,0 +1,2 @@
+name: slack
+# Core connection: channels/.env only. Tokens: .env here or channels/.env

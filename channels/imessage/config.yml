@@ -1,0 +1,2 @@
+name: imessage
+# Core connection: channels/.env only. Optional: IMESSAGE_CHANNEL_HOST, IMESSAGE_CHANNEL_PORT in channels/.env

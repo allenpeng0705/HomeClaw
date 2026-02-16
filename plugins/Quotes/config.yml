@@ -1,0 +1,8 @@
+# This is one repeated task
+tasks:
+  generate_random_quote:
+    type: random
+    interval_unit: hours
+    min_interval: 8
+    max_interval: 12 
+description: "This plugin generates motivational and uplifting quotes based on chat histories using a language model (LLM). It is designed to detect user emotions, such as depression or sadness, and provide comforting and encouraging quotes to help improve their mood. The plugin can be used to offer emotional support and positivity to users during their conversations." 

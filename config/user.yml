@@ -1,0 +1,16 @@
+# user.yml — allowlist for who can talk to Core via channels.
+# Each user has: id (optional, unique system user id; defaults to name), name (required), email / im / phone (channel identities), permissions.
+# All chat, memory, KB, and profile data are keyed by this system user id. Different users must use different email/im/phone (no overlap).
+#
+# im: list of "<channel>:<id>" for IM channels. Core matches the request's channel identity against this list.
+#   - Tinode: tinode:usrXXXX | WeChat: wechat:wxid | Telegram: telegram:<chat_id> | Discord: discord:<user_id>
+#   - Matrix: matrix:@localpart:domain (e.g. matrix:@shileipeng:matrix.org) | QQ: qq:<number>
+# For Email: add addresses to email:. For Phone/SMS: add numbers to phone:.
+# permissions: e.g. [IM, EMAIL, PHONE] or [] to allow all.
+users:
+  - id: HomeClaw
+    name: HomeClaw
+    email: []
+    im: ['matrix:@pengshilei:matrix.org']
+    phone: []
+    permissions: []

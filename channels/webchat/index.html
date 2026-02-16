@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HomeClaw WebChat</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 1rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.25rem; }
+    #log { border: 1px solid #ccc; min-height: 200px; padding: 0.5rem; margin: 0.5rem 0; overflow-y: auto; font-size: 0.9rem; }
+    #log .user { color: #06c; }
+    #log .bot { color: #080; }
+    #log .sys { color: #666; }
+    #input { display: flex; gap: 0.5rem; margin: 0.5rem 0; }
+    #input input { flex: 1; padding: 0.5rem; }
+    #input button { padding: 0.5rem 1rem; cursor: pointer; }
+    .status { font-size: 0.85rem; color: #666; margin-bottom: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>HomeClaw WebChat</h1>
+  <p class="status" id="status">Loading config…</p>
+  <div id="log"></div>
+  <div id="input" style="display:none;">
+    <input type="text" id="msg" placeholder="Type a message…" autocomplete="off">
+    <button id="send">Send</button>
+  </div>
+  <script>
+    (function() {
+      const logEl = document.getElementById('log');
+      const statusEl = document.getElementById('status');
+      const inputWrap = document.getElementById('input');
+      const msgInput = document.getElementById('msg');
+      const sendBtn = document.getElementById('send');
+
+      function addLog(cls, text) {
+        const p = document.createElement('p');
+        p.className = cls;
+        p.textContent = text;
+        logEl.appendChild(p);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      let ws = null;
+      let userId = 'webchat_local';
+
+      function connect(wsUrl) {
+        statusEl.textContent = 'Connecting…';
+        ws = new WebSocket(wsUrl);
+        ws.onopen = function() {
+          statusEl.textContent = 'Connected. Send a message.';
+          inputWrap.style.display = 'flex';
+          addLog('sys', 'Connected to Core.');
+        };
+        ws.onclose = function() {
+          statusEl.textContent = 'Disconnected. Refresh to reconnect.';
+          addLog('sys', 'Disconnected.');
+        };
+        ws.onerror = function() {
+          statusEl.textContent = 'Connection error. Is Core running?';
+        };
+        ws.onmessage = function(ev) {
+          try {
+            const data = JSON.parse(ev.data);
+            if (data.error) addLog('bot', 'Error: ' + data.error);
+            else if (data.text) addLog('bot', data.text);
+          } catch (e) {
+            addLog('bot', ev.data);
+          }
+        };
+      }
+
+      sendBtn.addEventListener('click', send);
+      msgInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') send();
+      });
+
+      function send() {
+        const text = (msgInput.value || '').trim();
+        if (!text) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          addLog('sys', 'Not connected.');
+          return;
+        }
+        addLog('user', text);
+        msgInput.value = '';
+        ws.send(JSON.stringify({ user_id: userId, text: text }));
+      }
+
+      fetch('/config')
+        .then(function(r) { return r.json(); })
+        .then(function(cfg) {
+          userId = cfg.user_id || userId;
+          connect(cfg.ws_url);
+        })
+        .catch(function() {
+          statusEl.textContent = 'Could not load config. Use Core WebSocket /ws with user_id in config/user.yml.';
+        });
+    })();
+  </script>
+</body>
+</html>

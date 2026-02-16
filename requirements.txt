@@ -1,0 +1,76 @@
+loguru
+PyYAML
+python-dotenv
+tqdm
+transformers
+chromadb
+numpy
+fastapi
+openai
+litellm>=1.50.0
+watchdog
+alembic
+schedule
+croniter
+pytz
+httpx>=0.24.0
+# Core HTTP / templates (used by core, base, memory, channels)
+aiohttp
+requests
+jinja2
+# DB: SQLite via sqlalchemy (memory/chat, memory/database)
+sqlalchemy
+# Pydantic (models; fastapi brings it, but explicit for non-FastAPI paths)
+pydantic
+# Constrain fsspec so datasets (transforms/cognee dep) is satisfied: datasets requires fsspec[http]<=2024.12.0
+fsspec[http]>=2023.1.0,<=2024.12.0
+# Full browser (navigate, snapshot, click, type). After pip install: playwright install chromium
+playwright>=1.40.0
+
+# For Channels
+# Wechat
+wcferry==39.2.3.0
+# whatsapp
+neonize==0.3.10
+# Matrix it'scol
+#simplematrixbotlib==2.12.3
+
+
+
+
+# Memory: Cognee is default (memory_backend=cognee). Alternative: chroma + optional graph (kuzu/neo4j).
+cognee   # default memory backend
+kuzu>=0.4.0   # optional graph for memory_backend=chroma
+# neo4j>=5.0.0   # optional: graph for memory_backend=chroma (uncomment if using Neo4j)
+
+# Optional (uncomment if needed):
+# document_read tool: PDF, PPT, Word, MD, HTML, XML, JSON, etc. (one powerful tool)
+unstructured[all-docs]
+# web_search: provider=duckduckgo (no key) or fallback when other providers fail
+duckduckgo-search
+# web_extract / web_crawl: better main-content extraction (free; no API key)
+# trafilatura   # preferred for article extraction
+# beautifulsoup4 # fallback if trafilatura not installed
+# pypdf   # fallback for PDF only if unstructured not installed
+# llama-cpp-python   # in-process LLM via LlamaCppPython (default is llama.cpp server subprocess or litellm)
+# simplematrixbotlib # Matrix channel (channels/matrix)
+# torch   # CUDA check in llama_cpp_platform; optional for GPU detection
+
+# Tests
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+httpx>=0.24.0
+
+#litellm
+#tqdm==4.66.4
+#transformers==4.41.1
+#gradio==4.44.0
+#pytest==8.2.0
+#pytest-asyncio==0.24.0
+#alembic==1.13.1
+#loguru==0.7.3
+#PyYAML==6.0.2
+#python-dotenv==1.0.1
+#schedule==1.2.2
+#simplematrixbotlib==2.12.3
+#neonize==0.3.10

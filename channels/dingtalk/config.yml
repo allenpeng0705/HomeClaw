@@ -1,0 +1,2 @@
+name: dingtalk
+# Core connection: channels/.env only. Set DINGTALK_CLIENT_ID, DINGTALK_CLIENT_SECRET.

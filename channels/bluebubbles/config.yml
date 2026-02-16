@@ -1,0 +1,2 @@
+name: bluebubbles
+# Core connection: channels/.env only. Optional: BLUEBUBBLES_CHANNEL_PORT (8017), BLUEBUBBLES_CHANNEL_HOST.

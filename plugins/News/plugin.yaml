@@ -1,0 +1,27 @@
+id: news
+name: News Plugin
+description: Latest news headlines and summaries. Use when the user wants news, headlines, or top stories.
+description_long: Fetches top headlines from configurable sources/categories. Can summarize and refine articles for the user.
+type: inline
+config:
+  config_file: config.yml
+capabilities:
+  - id: fetch_latest_news
+    name: Fetch latest news
+    description: Fetches latest news articles; parameters can filter by country, category, sources.
+    parameters:
+      - name: country
+        type: string
+        required: false
+        description: Country code, e.g. us.
+      - name: category
+        type: string
+        required: false
+        description: Category, e.g. business.
+      - name: sources
+        type: string
+        required: false
+        description: Source id, e.g. techcrunch.
+    output_description: '{"articles": [{"title": string, "content": string}], "raw_text": "formatted list of title and content per article"}'
+    post_process: true
+    post_process_prompt: Select top 3 latest articles; summarize and refine for the user.

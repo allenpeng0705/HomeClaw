@@ -1,0 +1,3 @@
+# Telegram channel (inbound API): long-poll getUpdates → Core /inbound
+name: telegram
+# Core connection: channels/.env only (core_host, core_port or CORE_URL). Bot token: .env here or channels/.env

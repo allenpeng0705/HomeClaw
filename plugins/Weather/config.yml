@@ -1,0 +1,49 @@
+id: weather
+# Fixed task example, the weather will be sent every day at 08:00
+tasks:
+  fetch_weather:
+    type: fixed
+    frequency: daily # daily, weekly, monthly, yearly
+    day_of_week: monday # it's only for weekly frequency, using monday, tuesday, wednesday, thursday, friday, saturday, sunday
+    day_of_month: 15 # it's only for monthly frequency and yearly frequency
+    month: 5 # it's only for yearly frequency
+    time: "08:00:00" # it's the specified time like 08:00:00, 14:30:00 -> The format is "HH:MM:SS"
+city: "北京"
+district: "大兴"
+api_key: "977700b6202349e208629ae14f1771d2"
+description: "This plugin retrieves the current weather and weather forecast for specified locations. It provides detailed information including temperature, humidity, weather conditions, wind direction, wind power, and air quality index (AQI). This plugin can be used to provide users with real-time weather updates and forecasts for any city."
+keywords:
+  - "weather"
+  - "forecast"
+  - "temperature"
+  - "humidity"
+  - "rain"
+  - "snow"
+  - "sunny"
+  - "cloudy"
+  - "storm"
+  - "wind"
+  - "air quality"
+  - "AQI"
+  - "will it rain"
+  - "is it going to rain"
+  - "how hot is it"
+  - "how cold is it"
+  - "what's the weather like"
+  - "current weather"
+  - "today's weather"
+  - "tomorrow's weather"
+  - "weekly weather"
+  - "weather report"
+  - "do I need an umbrella"
+  - "is it snowing"
+  - "is it windy"
+parameters:
+  - name: city
+    type: string
+    description: "The name of the city for which the weather forecast is retrieved. For example, '北京' for Beijing."
+  - name: district
+    type: string
+    description: "The name of the district within the city for which the weather forecast is retrieved. For example, '大兴' for Daxing."
+
+

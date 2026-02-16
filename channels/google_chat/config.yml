@@ -1,0 +1,2 @@
+name: google_chat
+# Core connection: channels/.env only. Optional: GOOGLE_CHAT_HOST, GOOGLE_CHAT_PORT in channels/.env

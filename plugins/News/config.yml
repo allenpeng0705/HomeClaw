@@ -1,0 +1,49 @@
+id: news
+tasks:
+  fetch_latest_news:
+    type: repeated
+    interval_unit: hours
+    interval: 4
+    start_time: "08:30:00"  # it's the specified time like 08:00:00, 14:30:00 -> The format is "HH:MM:SS"
+base_url: https://newsapi.org/v2/top-headlines
+apiKey: 2d9c07650f22468990ce44f53a2d5bb7
+country: us
+category: business
+sources: techcrunch
+q: apple
+description: "This plugin retrieves the latest news headlines and provides summaries of news articles based on specified categories, countries, sources, and keywords."
+keywords:
+  - "news"
+  - "headlines"
+  - "latest news"
+  - "breaking news"
+  - "current events"
+  - "news update"
+  - "top stories"
+  - "news summary"
+  - "world news"
+  - "local news"
+  - "national news"
+  - "international news"
+  - "business news"
+  - "tech news"
+  - "sports news"
+  - "entertainment news"
+  - "science news"
+  - "political news"
+  - "health news"
+  - "news today"
+  - "news report"
+  - "news article"
+  - "news brief"
+  - "news bulletin"
+parameters:
+  - name: country
+    type: string
+    description: "The country code for the news headlines. For example, 'us' for United States."
+  - name: category
+    type: string
+    description: "The category of news headlines. For example, 'business' for business news."
+  - name: sources
+    type: string
+    description: "The source of news headlines. For example, 'techcrunch' for TechCrunch."

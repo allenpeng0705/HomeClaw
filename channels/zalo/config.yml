@@ -1,0 +1,2 @@
+name: zalo
+# Core connection: channels/.env only. Optional: ZALO_CHANNEL_HOST, ZALO_CHANNEL_PORT in channels/.env

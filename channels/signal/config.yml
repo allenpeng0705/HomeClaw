@@ -1,0 +1,2 @@
+name: signal
+# Core connection: channels/.env only. Optional: SIGNAL_CHANNEL_HOST, SIGNAL_CHANNEL_PORT in channels/.env

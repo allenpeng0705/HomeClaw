@@ -1,0 +1,2 @@
+name: feishu
+# Core connection: channels/.env only. Set FEISHU_APP_ID, FEISHU_APP_SECRET. Optional: FEISHU_BASE_URL, FEISHU_EVENT_PATH, FEISHU_CHANNEL_PORT

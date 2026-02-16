@@ -1,0 +1,13 @@
+# Generic webhook channel: accept minimal JSON and forward to Core /inbound.
+# Use this so any bot (Telegram, Discord, n8n, etc.) can POST here and get a reply
+# without implementing a full channel. Set core_host/core_port in channels/.env or here.
+name: webhook
+host: 0.0.0.0
+port: 8005
+endpoints:
+  - path: /message
+    method: POST
+    description: Accept minimal message JSON and return Core reply
+    capabilities: []
+    input: {"user_id": "string", "text": "string", "channel_name?": "string", "user_name?": "string"}
+    output: {"text": "string"}

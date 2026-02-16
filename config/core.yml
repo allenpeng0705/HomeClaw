@@ -1,0 +1,490 @@
+# HomeClaw Core — single config (llama.cpp, local models, cloud models)
+# LLM support: (1) Local models via llama.cpp server — OpenAI-compatible HTTP (one server per model, different ports).
+#              (2) Cloud models via LiteLLM — same OpenAI-compatible API; set api_key_name and env var per provider.
+# Main LLM and embedding can each be local or cloud independently (e.g. local chat + cloud embedding, or both local).
+name: core
+host: 0.0.0.0
+port: 9000
+mode: dev
+model_path: ../models/
+# When false: log [memory], [tools], [skills], [plugin], [TAM], [orchestrator] activity at INFO. When true: suppress those component logs.
+silent: false
+use_memory: true
+reset_memory: false
+# memory_backend: cognee (always default) | chroma. Both backends supported. Cognee: configure via cognee: or Cognee .env. Chroma: in-house RAG via core.yml database, vectorDB, graphDB.
+# To empty memory for testing: POST or GET http://<core_host>:<core_port>/memory/reset (e.g. curl http://127.0.0.1:9000/memory/reset)
+# To empty knowledge base (all users): POST or GET http://<core_host>:<core_port>/knowledge_base/reset
+memory_backend: cognee   # default; set to chroma for in-house SQLite+Chroma
+# Per-user profile (learned facts: name, birthday, preferences, families, etc.). One JSON file per user under profile.dir (default: database/profiles). See docs/UserProfileDesign.md.
+profile:
+  enabled: true
+  dir: ""   # empty = database/profiles; or set a path for profile JSON files
+# Optional: inject workspace bootstrap (IDENTITY.md, AGENTS.md, TOOLS.md) into system prompt; see Comparison.md §7.4
+use_workspace_bootstrap: true
+# Which workspace dir to load (e.g. config/workspace_day vs config/workspace_night for day/night agents)
+workspace_dir: config/workspace
+# Optional: enable tool layer (tool registry; model can call tools by name with args); see Design.md §3.6
+use_tools: true
+# Optional: inject skills (SKILL.md) from skills_dir into system prompt; see Design.md §3.6
+use_skills: true
+skills_dir: config/skills
+# Cap skills/plugins in prompt to avoid large context; 0 = no limit. See docs/ToolsSkillsPlugins.md §5.1.
+skills_max_in_prompt: 10
+plugins_max_in_prompt: 10
+# Vector retrieval for skills (separate Chroma collection): retrieve by similarity to user query. See docs/ToolsSkillsPlugins.md §8.
+skills_use_vector_search: true
+skills_vector_collection: homeclaw_skills
+skills_max_retrieved: 10
+skills_similarity_threshold: 0.5
+skills_refresh_on_startup: true
+# Optional test folder: full sync every time (id = test__<folder>). Production skills_dir can be incremental (only new).
+skills_test_dir: ""
+skills_incremental_sync: false
+# Vector retrieval for plugins (separate collection): same design as skills. RAG finds relevant plugins; only those go into prompt.
+plugins_use_vector_search: false
+plugins_vector_collection: homeclaw_plugins
+plugins_max_retrieved: 10
+plugins_similarity_threshold: 0.0
+plugins_refresh_on_startup: true
+# Orchestrator + TAM + plugins are always enabled. Single choice: routing style.
+# orchestrator_unified_with_tools: true (default) — main LLM with tools does routing (route_to_tam / route_to_plugin). One LLM call.
+# orchestrator_unified_with_tools: false — separate orchestrator LLM call for intent + plugin selection, then plugin runs.
+orchestrator_unified_with_tools: true
+# Timeout for orchestrator intent/plugin LLM call and plugin.run() when unified is false. Unit: seconds. 0 = no timeout.
+orchestrator_timeout_seconds: 30
+# Prompt manager: load prompts from config/prompts with language/model overrides. See docs/PromptManagement.md.
+use_prompt_manager: true
+prompts_dir: config/prompts
+prompt_default_language: en
+prompt_cache_ttl_seconds: 0   # Unit: seconds. 0 = cache by file mtime; >0 = TTL
+# Optional: require API key for /inbound and /ws when exposing Core on the internet; see docs/RemoteAccess.md
+auth_enabled: false
+auth_api_key: ""   # when auth_enabled: true, require X-API-Key header or Authorization: Bearer <key>
+# Tool layer config (used when use_tools: true). Cross-platform (Mac/Linux/Windows) where possible.
+# Built-in tools: time, cron_*, sessions_*, session_status; memory_search, memory_get; file_*,
+# folder_list; fetch_url, web_search; browser_*; exec, process_*; image; channel_send; run_skill;
+# models_list, agents_list; webhook_trigger; env, cwd, platform_info, echo.
+# The keys below are the only ones read by the tool layer; other tools have no configurable options.
+tools:
+  # exec: allowed command names. Empty or omit = platform default (Unix: ls, cat, pwd; Windows: dir, type, cd). Set explicitly to override.
+  exec_allowlist: []   # e.g. [ "date", "whoami", "echo", "pwd", "ls", "cat" ] on Unix; [ "date", "whoami", "echo", "dir", "type", "cd" ] on Windows
+  exec_timeout: 30   # Unit: seconds
+  # file_read, file_write, etc.: paths UNDER this base only. "." = current working directory (cross-platform). Or use absolute path (e.g. /Users/you/Docs or C:\Users\you\Docs).
+  file_read_base: "."
+  # Max characters returned by file_read when the tool does not pass max_chars (default 32000). Increase for long PDFs/documents (e.g. 128000).
+  file_read_max_chars: 128000
+  run_skill_allowlist: ["run.sh", "main.py", "run.bat"]   # run_skill: if set, only these script names under skill/scripts/. .sh on Windows runs via bash/WSL if available.
+  run_skill_timeout: 60   # Unit: seconds
+  web:                  # web_search: free (no key) duckduckgo | free tier google_cse (100/day), bing (1000/mo) | tavily, brave, serpapi. Browser: web_search_browser (Google/Bing/Baidu, no key, needs Playwright).
+    search:
+      provider: tavily  # duckduckgo (no key) | google_cse (100 free/day) | bing (1000 free/mo) | tavily | brave | serpapi. When tavily: Tavily is used first (key under tavily below).
+      duckduckgo: {}    # provider=duckduckgo: no API key; pip install duckduckgo-search
+      google_cse:       # provider=google_cse: 100 free queries/day
+        api_key: ""     # or GOOGLE_CSE_API_KEY
+        cx: ""          # Search Engine ID from https://programmablesearchengine.google.com/ (or GOOGLE_CSE_CX)
+      bing:             # provider=bing: 1000 free transactions/month (APIs retiring Aug 2025)
+        api_key: ""     # or BING_SEARCH_SUBSCRIPTION_KEY (Azure)
+      brave:            # when provider=brave
+        api_key: ""     # or set BRAVE_API_KEY
+        search_type: web   # web (default) | news | video | image
+      serpapi:          # when provider=serpapi (paid; ~250 free/mo)
+        api_key: ""     # or set SERPAPI_API_KEY
+        engine: google # google (default) | bing | baidu
+      tavily:          # default provider (free tier: 1000 searches/month). Same key used for search, extract, crawl, research.
+        api_key: "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"    # Set here (e.g. tvly-xxx) OR set env TAVILY_API_KEY where Core runs. Get key: https://tavily.com
+        search_depth: basic   # search only: basic | fast | advanced | ultra-fast (affects latency vs relevance)
+        topic: general        # search only: general | news | finance
+        time_range: ""        # search only: day | week | month | year (empty = no filter)
+      # When no API key or primary fails (expired/rate limit), use DuckDuckGo (no key). Requires: pip install duckduckgo-search
+      fallback_no_key: true   # true = try DuckDuckGo when Tavily/Brave unavailable
+      fallback_max_results: 5 # max results from fallback (3–10)
+  # Browser tools (browser_navigate, browser_snapshot, browser_click, browser_type). Set to false to disable browser tools entirely — then only fetch_url and web_search are used for web (no Chromium required). When true, browser tools are registered only if Playwright is installed.
+  browser_enabled: true
+  # When browser_enabled true and Playwright available: set to false to show the browser window (local testing only; on servers without a display use true or run under Xvfb).
+  browser_headless: true
+  # Per-tool execution timeout. Unit: seconds. Prevents a single tool from hanging the system. 0 = no timeout.
+  tool_timeout_seconds: 0
+
+# Complex result viewer: save HTML result pages and optionally send a link. One web server for reports (port below); starts/stops with Core. Link = base_url + /result/<id>.html. We do not fetch public IP — you set base_url. Guide: docs/ComplexResultViewerDesign.md § "User guide: making the link work" (Cloudflare tunnel recommended: easy, cheap, stable; or use ngrok / any tunnel).
+result_viewer:
+  enabled: true
+  dir: ""   # empty = database/result_pages
+  port: 9001   # report server (http://localhost:9001). Expose via Cloudflare tunnel or similar; that URL = base_url.
+  bind_host: "0.0.0.0"
+  # URL that reaches the report server (e.g. from cloudflared or ngrok). We append /result/<id>.html. If empty, no link — full response goes to user in chat.
+  base_url: "https://homeclaw.gpt4people.online"
+  retention_days: 7   # auto-remove files older than this; 0 = keep forever
+  max_file_size_kb: 5000
+  max_files: 10000
+
+# Optional: user knowledge base (documents, web search, URLs, manual). See docs/MemoryAndDatabase.md.
+# backend: auto (default) = use same as memory_backend (cognee -> Cognee DB/vector, chroma -> core.yml vectorDB).
+# Set to "cognee" or "chroma" to override (e.g. Cognee memory + built-in RAG for KB).
+knowledge_base:
+  enabled: false
+  backend: auto          # auto | cognee | chroma
+  collection_name: homeclaw_kb   # used only when backend is chroma
+  chunk_size: 800
+  chunk_overlap: 100
+  unused_ttl_days: 30   # Unit: days. Cognee: remove sources older than this (age-based); chroma: remove by last_used_timestamp
+  max_sources_per_user: 0   # Cognee only: max KB sources per user (0 = no cap). Oldest evicted when over cap.
+  embed_timeout: 60   # Unit: seconds
+  store_timeout: 60   # Unit: seconds
+  # Configurable similarity threshold (0-1, higher = more relevant). Only inject chunks with score >= this; if none pass, no KB block. Set to null to disable (inject top-k regardless).
+  retrieval_min_score: null   # e.g. 0.5 or 0.7
+
+# ——— 1. llama.cpp server settings (for local models) ———
+# ctx_size, predict, temp are used when starting the llama.cpp server.
+# For chat completions, max_tokens and temperature are sent per request (see completion below).
+llama_cpp:
+  ctx_size: 32768
+  predict: 8192
+  temp: 0.7
+  threads: 8
+  n_gpu_layers: 99
+  verbose: false
+  repeat_penalty: 1.5
+  chat_format: null
+  function_calling: true
+
+# ——— Completion (per-request generation) ———
+# All parameters below are sent with every chat completion call. Omit or comment out to use server default or llama_cpp fallback where noted.
+# Fallbacks: max_tokens → llama_cpp.predict; temperature/top_p/repeat_penalty → llama_cpp.temp / (none) / llama_cpp.repeat_penalty.
+completion:
+  max_tokens: 8192          # max tokens to generate per response (fallback: llama_cpp.predict)
+  temperature: 0.7          # sampling temperature 0..2 (fallback: llama_cpp.temp)
+  top_p: 1.0                # nucleus sampling 0..1
+  presence_penalty: 0       # OpenAI-style; penalize tokens that appear in text so far
+  frequency_penalty: 0      # OpenAI-style; penalize by token frequency
+  repeat_penalty: 1.5       # llama.cpp-style; sent in extra_body (fallback: llama_cpp.repeat_penalty)
+  seed: null                 # optional; int for reproducible sampling
+  stop: null                 # optional; list of strings, e.g. ["</s>", "Human:"]
+  # logit_bias: {}          # optional; dict of token id to bias (-100..100)
+  # n: 1                    # number of completions (default 1)
+  # response_format: null   # optional; e.g. { "type": "json_object" }
+  # timeout: null            # optional; Unit: seconds
+
+# ——— 2. Local models (llama.cpp server per model; path relative to model_path) ———
+# Optional per model: mmproj (vision), lora (adapter(s)), lora_base (optional base for LoRA).
+#   mmproj: path to projector .gguf; llama-server -m <path> --mmproj <mmproj>
+#   lora: single path or array of paths to LoRA adapter .gguf; each gets --lora <path> (multi-LoRA if supported)
+#   lora_base: optional; only when the adapter requires a specific base; --lora-base <path>
+# Paths are relative to model_path (same as path).
+local_models:
+  - id: embedding_text_model
+    alias: embedding
+    path: bge-m3-Q5_K_M.gguf
+    host: 127.0.0.1
+    port: 5066
+    capabilities: [embedding]
+  # Example vision model (uncomment and set paths): mmproj required
+  # - id: llava_1_5_7b
+  #   alias: LLaVA 1.5 7B
+  #   path: llava/llava-v1.5-7b-model.gguf
+  #   mmproj: llava/llava-v1.5-7b-mmproj.gguf
+  #   host: 127.0.0.1
+  #   port: 5020
+  #   capabilities: [Chat]
+  # Example LoRA (uncomment): lora (single path or array), lora_base optional
+  # - id: base_with_lora
+  #   alias: Base + LoRA
+  #   path: base/base-model.gguf
+  #   lora: adapters/adapter-01.gguf
+  #   # lora_base: base/base-model.gguf   # optional; only if adapter needs a specific base
+  #   host: 127.0.0.1
+  #   port: 5021
+  #   capabilities: [Chat]
+  # Multi-LoRA (if llama-server supports multiple --lora): use array
+  #   lora: [adapters/a1.gguf, adapters/a2.gguf]
+  - id: Qwen3-14B-Q5_K_M
+    alias: Qwen3-14B-Q5_K_M
+    path: Qwen3-14B-Q5_K_M.gguf
+    host: 127.0.0.1
+    port: 5023
+    capabilities: [Chat]
+  - id: deepseek_r1_qwen_14B_q5_k_m
+    alias: DeepSeek-R1_qwen_14B
+    path: deepseek-r1/deepseek-qwen-14B_q5_k_m/DeepSeek-R1-Distill-Qwen-14B-Q5_K_M.gguf
+    host: 127.0.0.1
+    port: 5015
+    capabilities: [Chat]
+  - id: deepseek_r1_qwen_7B_q5_k_m
+    alias: DeepSeek-R1_qwen_7B
+    path: deepseek-r1/deepseek-qwen-7B_q5_k_m/DeepSeek-R1-Distill-Qwen-7B-Q5_K_M.gguf
+    host: 127.0.0.1
+    port: 5018
+    capabilities: [Chat]
+  - id: qwen25_7B_q5_k_m
+    alias: Qwen25_7B_q5_k_m
+    path: qwen25-7B/Qwen2.5-7B-Instruct-Q5_K_M.gguf
+    host: 127.0.0.1
+    port: 5018
+    capabilities: [Chat]
+
+# ——— 3. Cloud models (LiteLLM; one service per entry, each host/port) ———
+# Set env var per api_key_name (e.g. OPENAI_API_KEY). Start LiteLLM per model or use one proxy.
+# See https://github.com/BerriAI/litellm and docs.litellm.ai/docs/providers
+# Use as main LLM (Chat/Functioncall) or as embedding model (capabilities: [embedding]); main and embedding can mix local + cloud.
+cloud_models:
+  # OpenAI (chat and embedding)
+  - id: OpenAI-GPT4o
+    alias: OpenAI GPT-4o
+    path: openai/gpt-4o
+    host: 127.0.0.1
+    port: 4001
+    api_key_name: OPENAI_API_KEY
+    capabilities: [Functioncall, Chat]
+  - id: OpenAI-GPT4o-mini
+    alias: OpenAI GPT-4o mini
+    path: openai/gpt-4o-mini
+    host: 127.0.0.1
+    port: 4001
+    api_key_name: OPENAI_API_KEY
+    capabilities: [Functioncall, Chat]
+  # OpenAI embedding (use as embedding_llm for memory; same LiteLLM port as chat)
+  - id: OpenAI-Embedding-3-Small
+    alias: OpenAI text-embedding-3-small
+    path: openai/text-embedding-3-small
+    host: 127.0.0.1
+    port: 4001
+    api_key_name: OPENAI_API_KEY
+    capabilities: [embedding]
+  # Google Gemini
+  - id: Gemini-1.5-Pro
+    alias: Gemini 1.5 Pro
+    path: gemini/gemini-1.5-pro
+    host: 127.0.0.1
+    port: 4002
+    api_key_name: GEMINI_API_KEY
+    capabilities: [Functioncall, Chat]
+  - id: Gemini-1.5-Flash
+    alias: Gemini 1.5 Flash
+    path: gemini/gemini-1.5-flash
+    host: 127.0.0.1
+    port: 4002
+    api_key_name: GEMINI_API_KEY
+    capabilities: [Chat]
+  # Anthropic Claude
+  - id: Claude-Sonnet
+    alias: Claude 3.5 Sonnet
+    path: anthropic/claude-3-5-sonnet-20241022
+    host: 127.0.0.1
+    port: 4003
+    api_key_name: ANTHROPIC_API_KEY
+    capabilities: [Functioncall, Chat]
+  - id: Claude-Opus
+    alias: Claude 3 Opus
+    path: anthropic/claude-3-opus-20240229
+    host: 127.0.0.1
+    port: 4003
+    api_key_name: ANTHROPIC_API_KEY
+    capabilities: [Functioncall, Chat]
+  # Ollama (local; no API key)
+  - id: Ollama-llama3
+    alias: Ollama Llama 3
+    path: ollama/llama3.2
+    host: 127.0.0.1
+    port: 4004
+    capabilities: [Chat]
+  - id: Ollama-qwen2
+    alias: Ollama Qwen2
+    path: ollama/qwen2.5:7b
+    host: 127.0.0.1
+    port: 4004
+    capabilities: [Chat]
+  # DeepSeek
+  - id: DeepSeek-Chat
+    alias: DeepSeek Chat
+    path: deepseek/deepseek-chat
+    host: 127.0.0.1
+    port: 4005
+    api_key_name: DEEPSEEK_API_KEY
+    capabilities: [Chat]
+  - id: DeepSeek-Coder
+    alias: DeepSeek Coder
+    path: deepseek/deepseek-coder
+    host: 127.0.0.1
+    port: 4005
+    api_key_name: DEEPSEEK_API_KEY
+    capabilities: [Chat]
+  # Alibaba Qwen (Dashscope)
+  - id: Qwen-Plus
+    alias: Qwen Plus (Dashscope)
+    path: dashscope/qwen-plus
+    host: 127.0.0.1
+    port: 4006
+    api_key_name: DASHSCOPE_API_KEY
+    capabilities: [Chat]
+  - id: Qwen-Turbo
+    alias: Qwen Turbo (Dashscope)
+    path: dashscope/qwen-turbo
+    host: 127.0.0.1
+    port: 4006
+    api_key_name: DASHSCOPE_API_KEY
+    capabilities: [Chat]
+  # Groq
+  - id: Groq-Llama70B
+    alias: Groq Llama 3.1 70B
+    path: groq/llama-3.1-70b-versatile
+    host: 127.0.0.1
+    port: 4007
+    api_key_name: GROQ_API_KEY
+    capabilities: [Chat]
+  # Mistral
+  - id: Mistral-Large
+    alias: Mistral Large
+    path: mistral/mistral-large-latest
+    host: 127.0.0.1
+    port: 4008
+    api_key_name: MISTRAL_API_KEY
+    capabilities: [Functioncall, Chat]
+  # xAI (Grok)
+  - id: xAI-Grok
+    alias: xAI Grok 2
+    path: xai/grok-2
+    host: 127.0.0.1
+    port: 4009
+    api_key_name: XAI_API_KEY
+    capabilities: [Chat]
+  # OpenRouter (many models via one API)
+  - id: OpenRouter-GPT4o
+    alias: OpenRouter GPT-4o
+    path: openrouter/openai/gpt-4o
+    host: 127.0.0.1
+    port: 4010
+    api_key_name: OPENROUTER_API_KEY
+    capabilities: [Functioncall, Chat]
+  # Cohere
+  - id: Cohere-CommandR
+    alias: Cohere Command R+
+    path: cohere/command-r-plus
+    host: 127.0.0.1
+    port: 4011
+    api_key_name: COHERE_API_KEY
+    capabilities: [Chat]
+  # Perplexity (search-augmented)
+  - id: Perplexity-Sonar
+    alias: Perplexity Sonar
+    path: perplexity/llama-3.1-sonar-small-128k-online
+    host: 127.0.0.1
+    port: 4012
+    api_key_name: PERPLEXITY_API_KEY
+    capabilities: [Chat]
+
+# ——— Selected main and embedding model: local_models/<id> or cloud_models/<id> ———
+main_llm: local_models/Qwen3-14B-Q5_K_M
+# Language for main model (e.g. en, cn); used by core for prompts
+main_llm_language: en
+
+embedding_llm: local_models/embedding_text_model
+embeddingTokensLen: 8192
+
+# For cloud models: set the env var per api_key_name (e.g. OPENAI_API_KEY, ANTHROPIC_API_KEY,
+# DEEPSEEK_API_KEY, DASHSCOPE_API_KEY, GROQ_API_KEY, MISTRAL_API_KEY, XAI_API_KEY,
+# OPENROUTER_API_KEY, COHERE_API_KEY, PERPLEXITY_API_KEY, GEMINI_API_KEY). Ollama needs none.
+
+# Legacy fields (kept for backward compat; derived from model entry when using local_models/cloud_models)
+embedding_host: 127.0.0.1
+embedding_port: 5066
+main_llm_host: 127.0.0.1
+main_llm_port: 5023
+
+
+# ——— Relational DB (chat history, sessions, runs) ———
+# backend: sqlite | mysql | postgresql. For sqlite, url can be empty (uses database/chats.db).
+# For MySQL: url: "mysql+pymysql://user:password@host:3306/dbname"
+# For PostgreSQL: url: "postgresql+psycopg2://user:password@host:5432/dbname"
+database:
+  backend: sqlite
+  url: ""   # empty = default path (database/chats.db)
+
+# ——— Vector DB (RAG memory) ———
+# Used ONLY when memory_backend: chroma. When memory_backend: cognee, Cognee uses its own vector store; configure via Cognee .env (docs.cognee.ai).
+# backend: chroma | qdrant | milvus | pinecone | weaviate. Only the selected backend's block is used.
+vectorDB:
+  backend: chroma
+  Chroma:
+    anonymized_telemetry: false
+    api: chromadb.api.fastapi.FastAPI
+    host: 0.0.0.0
+    is_persistent: true
+    port: 5000
+    path: ""   # empty = use data_path (database/)
+  # Qdrant (when backend: qdrant)
+  Qdrant:
+    host: localhost
+    port: 6333
+    url: ""   # optional: http://localhost:6333
+    api_key: ""
+  # Milvus (when backend: milvus)
+  Milvus:
+    host: localhost
+    port: 19530
+    uri: ""   # optional: http://localhost:19530
+  # Pinecone (when backend: pinecone)
+  Pinecone:
+    api_key: ""
+    environment: ""
+    index_name: memory
+  # Weaviate (when backend: weaviate)
+  Weaviate:
+    url: http://localhost:8080
+    api_key: ""
+
+# ——— Graph DB (entities and relationships for in-house RAG)
+# Used ONLY when memory_backend: chroma. When memory_backend: cognee, Cognee uses its own graph store; configure via Cognee .env (docs.cognee.ai).
+# backend: kuzu | neo4j. When missing or kuzu not installed, graph is disabled and memory stays vector + relational only.
+graphDB:
+  backend: kuzu
+  Kuzu:
+    path: ""   # empty = use data_path/graph_kuzu (e.g. database/graph_kuzu)
+  # Neo4j (when backend: neo4j; for enterprise / multi-process)
+  Neo4j:
+    url: bolt://localhost:7687
+    username: neo4j
+    password: ""
+
+# ——— Cognee config (used only when memory_backend: cognee)
+# We convert these to Cognee env vars at runtime. See docs/MemoryAndDatabase.md.
+# SQLite, Chroma, Kuzu: no extra parameters needed (defaults work).
+# LLM and embedding: leave empty to use Core's main_llm and embedding_llm (same host/port as chat and embedding).
+# By default we set ENABLE_BACKEND_ACCESS_CONTROL=false so Cognee does not require a user (avoids UserNotFoundError).
+# To use Cognee's multi-user mode, set cognee.env.ENABLE_BACKEND_ACCESS_CONTROL: "true" and configure Cognee users.
+cognee:
+  # Relational: sqlite (no params) | postgres (set host, port, username, password)
+  relational:
+    provider: sqlite
+    name: cognee_db
+    host: ""
+    port: 5432
+    username: ""
+    password: ""
+  # Vector: chroma (no params) | lancedb | qdrant | pgvector | redis | falkordb | neptune_analytics
+  vector:
+    provider: chroma
+    url: ""
+    port: ""
+    key: ""
+  # Graph: kuzu (no params) | kuzu-remote | neo4j | neptune | neptune_analytics
+  graph:
+    provider: kuzu
+    url: ""
+    username: ""
+    password: ""
+  # LLM for Cognee: leave empty to use Core's main_llm (main_llm_host, main_llm_port). Else set provider (e.g. custom), model, endpoint, api_key.
+  llm:
+    provider: ""
+    model: ""
+    endpoint: ""
+    api_key: ""
+  # Embedding for Cognee: leave empty to use Core's embedding_llm (embedding_host, embedding_port). Else set provider, model, endpoint, api_key.
+  embedding:
+    provider: ""
+    model: ""
+    endpoint: ""
+    api_key: ""
+  # Optional: raw Cognee env vars (key: value). Override or add any Cognee env var by name.
+  # env:
+  #   TELEMETRY_DISABLED: "true"
+  #   VECTOR_STORE_PROVIDER: "qdrant"
+

@@ -1,0 +1,16 @@
+name: Tinode
+host: 0.0.0.0
+port: 8007
+endpoints: 
+  - path: /shutdown
+    method: GET
+    description: Shutdown the channel
+    capabilities: ['This is an channel module, the major functionality is to shutdown the channel.']
+    input: {}
+    output: {"result": "The result of the shutdown"}
+  - path: /connection_status
+    method: GET
+    description: Get current Tinode connection status
+    capabilities: ['Returns connection state, reconnect attempts, last connection time, and any connection errors']
+    input: {}
+    output: {"connected": "boolean", "reconnect_attempts": "integer", "last_connection_time": "timestamp", "connection_error": "string", "uptime": "seconds"}
