@@ -1,0 +1,20 @@
+# Minimal package so the MkDocs subpath plugin is installable.
+# From repo root: pip install -e .  then run mkdocs build.
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mkdocs-subpath-plugin"
+version = "0.1.0"
+description = "MkDocs plugin to fix asset/nav URLs when the site is served from a subpath (e.g. GitHub Pages)."
+requires-python = ">=3.8"
+dependencies = ["mkdocs>=1.4"]
+
+[project.entry-points."mkdocs.plugins"]
+mkdocs_subpath_plugin = "mkdocs_subpath_plugin:SubpathPlugin"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mkdocs_subpath_plugin*"]

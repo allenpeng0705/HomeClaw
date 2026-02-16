@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: mkdocs-subpath-plugin
+Version: 0.1.0
+Summary: MkDocs plugin to fix asset/nav URLs when the site is served from a subpath (e.g. GitHub Pages).
+Requires-Python: >=3.8
+License-File: LICENSE
+Requires-Dist: mkdocs>=1.4
+Dynamic: license-file

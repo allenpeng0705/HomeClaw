@@ -1,0 +1,11 @@
+LICENSE
+README.md
+pyproject.toml
+mkdocs_subpath_plugin/__init__.py
+mkdocs_subpath_plugin.egg-info/PKG-INFO
+mkdocs_subpath_plugin.egg-info/SOURCES.txt
+mkdocs_subpath_plugin.egg-info/dependency_links.txt
+mkdocs_subpath_plugin.egg-info/entry_points.txt
+mkdocs_subpath_plugin.egg-info/requires.txt
+mkdocs_subpath_plugin.egg-info/top_level.txt
+tests/test_litellm_service.py

@@ -1,0 +1,2 @@
+[mkdocs.plugins]
+mkdocs_subpath_plugin = mkdocs_subpath_plugin:SubpathPlugin

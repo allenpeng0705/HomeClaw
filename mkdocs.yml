@@ -36,6 +36,7 @@ theme:
 
 plugins:
   - search
+  - mkdocs_subpath_plugin: {}  # rewrites /assets/ and /... links for GitHub Pages subpath
 
 nav:
   - Home: index.md

@@ -29,8 +29,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install MkDocs and Material theme
-        run: pip install mkdocs-material
+      - name: Install MkDocs, Material theme, and subpath plugin
+        run: pip install mkdocs-material -e .
 
       - name: Build site
         run: mkdocs build --strict
