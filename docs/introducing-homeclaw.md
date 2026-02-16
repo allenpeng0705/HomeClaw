@@ -11,4 +11,4 @@ HomeClaw is a local-first AI assistant that runs on your machine. One installati
 - **Memory** — RAG-based, per-user; the assistant can recall across sessions.
 - **Plugins & skills** — Extend with plugins (Weather, News, Mail, custom) and OpenClaw-style skills.
 
-For the full intro, see [IntroducingHomeClaw.md](../docs_design/IntroducingHomeClaw.md) in the repo.
+For the full intro, see [IntroducingHomeClaw.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/IntroducingHomeClaw.md) in the repo.

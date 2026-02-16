@@ -6,4 +6,4 @@
 
 HomeClaw started as **GPT4People**: local LLM for security, channels to reach your home computer simply. It grew to include RAG memory, major IMs (WeChat, WhatsApp), then cloud model support, a plugin framework, multi-user and multi-model design, and learning from OpenClaw (skills, ideas) while keeping local-first and privacy.
 
-For the full story, see [HomeClaw_story.md](../docs_design/HomeClaw_story.md) in the repo.
+For the full story, see [HomeClaw_story.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/HomeClaw_story.md) in the repo.

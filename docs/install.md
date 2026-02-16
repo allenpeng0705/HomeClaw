@@ -30,4 +30,4 @@ For **cloud models** (OpenAI, Gemini, DeepSeek, etc.), set the API key as an env
 
 ## 4. Next step
 
-After install, see [Run](run.md) to start Core and a channel. For full setup (config, users, memory), see the main [HOW_TO_USE.md](../HOW_TO_USE.md) in the repo.
+After install, see [Run](run.md) to start Core and a channel. For full setup (config, users, memory), see the main [HOW_TO_USE.md](https://github.com/allenpeng0705/HomeClaw/blob/main/HOW_TO_USE.md) in the repo.

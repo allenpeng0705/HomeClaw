@@ -21,7 +21,7 @@ Channels are how you reach your HomeClaw assistant: WebChat, Telegram, Discord, 
 
 ## Allow who can talk
 
-Edit **`config/user.yml`**. Each user has `name`, `email`, `im` (e.g. `telegram_<chat_id>`, `discord_<user_id>`), and optional `permissions`. Only listed users can send messages to Core. See [Multi-user support](../docs_design/MultiUserSupport.md) in the repo for details.
+Edit **`config/user.yml`**. Each user has `name`, `email`, `im` (e.g. `telegram_<chat_id>`, `discord_<user_id>`), and optional `permissions`. Only listed users can send messages to Core. See [Multi-user support](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/MultiUserSupport.md) in the repo for details.
 
 ---
 
@@ -33,4 +33,4 @@ Any bot can POST to Core **`/inbound`** with:
 { "user_id": "telegram_123456789", "text": "Hello" }
 ```
 
-Response: `{ "text": "..." }`. Add `user_id` to `config/user.yml`. If Core is not reachable from the internet, use the **Webhook** channel as a relay. See [Channel.md](../Channel.md) and [HowToWriteAChannel.md](../docs_design/HowToWriteAChannel.md) in the repo.
+Response: `{ "text": "..." }`. Add `user_id` to `config/user.yml`. If Core is not reachable from the internet, use the **Webhook** channel as a relay. See [Channel.md](https://github.com/allenpeng0705/HomeClaw/blob/main/Channel.md) and [HowToWriteAChannel.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/HowToWriteAChannel.md) in the repo.

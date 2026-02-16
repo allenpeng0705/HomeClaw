@@ -9,4 +9,4 @@ Plugins add focused capabilities: weather, news, email, custom APIs. One plugin 
 - **Built-in (Python)** — In `plugins/` with `plugin.yaml`, `config.yml`, `plugin.py`. Core discovers them at startup.
 - **External (any language)** — Run as an HTTP server; register with Core via `POST /api/plugins/register`.
 
-See [PluginsGuide.md](../docs_design/PluginsGuide.md) and [HowToWriteAPlugin.md](../docs_design/HowToWriteAPlugin.md) in the repo.
+See [PluginsGuide.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/PluginsGuide.md) and [HowToWriteAPlugin.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/HowToWriteAPlugin.md) in the repo.

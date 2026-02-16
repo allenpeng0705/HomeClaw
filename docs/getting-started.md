@@ -18,4 +18,4 @@
 
 4. **Run a channel** — e.g. `python -m channels.run webchat` and open http://localhost:8014
 
-For full steps, see the main [README](../README.md) and [HOW_TO_USE.md](../HOW_TO_USE.md) in the repo.
+For full steps, see the main [README](https://github.com/allenpeng0705/HomeClaw/blob/main/README.md) and [HOW_TO_USE.md](https://github.com/allenpeng0705/HomeClaw/blob/main/HOW_TO_USE.md) in the repo.

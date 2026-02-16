@@ -112,7 +112,7 @@ result_viewer:
   port: 9001   # report server (http://localhost:9001). Expose via Cloudflare tunnel or similar; that URL = base_url.
   bind_host: "0.0.0.0"
   # URL that reaches the report server (e.g. from cloudflared or ngrok). We append /result/<id>.html. If empty, no link — full response goes to user in chat.
-  base_url: 
+  base_url: "https://homeclaw.gpt4people.online"
   retention_days: 7   # auto-remove files older than this; 0 = keep forever
   max_file_size_kb: 5000
   max_files: 10000

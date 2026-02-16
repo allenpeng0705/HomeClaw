@@ -9,7 +9,7 @@ repo_url: https://github.com/allenpeng0705/HomeClaw
 repo_name: HomeClaw
 
 docs_dir: docs
-strict: true
+strict: false  # allow links to repo files outside docs/ (docs_design, README, etc.)
 
 theme:
   name: material
@@ -39,12 +39,14 @@ plugins:
 
 nav:
   - Home: index.md
-    - Introducing HomeClaw: introducing-homeclaw.md
-    - Story: story.md
+  - Introducing HomeClaw: introducing-homeclaw.md
+  - Story: story.md
   - Install: install.md
   - Run: run.md
+  - Getting started: getting-started.md
   - Channels: channels.md
   - Tools: tools.md
+  - Plugins: plugins.md
   - Models: models.md
   - Platform: platform.md
   - Help: help.md
