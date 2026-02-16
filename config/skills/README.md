@@ -2,7 +2,9 @@
 
 **Full guide:** See **docs/SkillsGuide.md** for a complete user and developer guide: introduction, how to use skills, how to implement them, how to test them, and config reference.
 
-**Tools vs skills:** In HomeClaw, **tools** are the **static base**—callable actions (exec, browser, cron, sessions_*, memory, file, web, etc.). **Skills** are the **application layer**: many (ClawHub has thousands), each a task-oriented instruction package (SKILL.md) that tells the agent *how* to use different tools to finish different tasks. So: tools = capabilities; skills = know-how for specific tasks.
+**Tools vs skills:** In HomeClaw, **tools** are the **static base**—callable actions (exec, browser, cron, sessions_*, memory, file, web, **route_to_plugin**, run_skill, etc.). **Skills** are the **application layer**: each skill is a task-oriented instruction package (SKILL.md) that tells the agent *how* to use tools (and plugins) to finish tasks. So: tools = capabilities; skills = know-how.
+
+**Can skills use plugins?** Yes. Skills don’t call tools or plugins directly — the **agent** does. The agent has the **route_to_plugin** tool (plugin_id, capability_id, parameters). When a skill says “use the browser to navigate to X,” the agent can call **route_to_plugin**(plugin_id="homeclaw-browser", capability_id="browser_navigate", parameters={url: X}). So when browser (or canvas, nodes) are provided by the **homeclaw-browser** plugin (with tools.browser_enabled: false), skills that refer to browser/canvas/nodes still work: the agent uses route_to_plugin with the right capability_id. See **docs_design/ToolsSkillsPlugins.md** (§2.2 “Can skills use plugins?”).
 
 When **use_skills: true** in `config/core.yml`, HomeClaw scans this directory for **skill folders**: each subfolder that contains a **SKILL.md** file is loaded and injected into the system prompt as "Available skills".
 
@@ -25,8 +27,14 @@ Optional frontmatter: `homepage`, `user-invocable`, `disable-model-invocation`, 
 
 1. Create a subfolder under `config/skills/`, e.g. `config/skills/weather-help/`.
 2. Add **SKILL.md** with `name`, `description`, and optional body.
-3. Set **use_skills: true** and **skills_dir: config/skills** in `config/core.yml`.
-4. Restart or send a new message; the model will see "Available skills" in its context.
+3. (Optional) Add **scripts/** with runnable scripts; the agent can call **run_skill**(skill_name, script, args).
+4. Set **use_skills: true** and **skills_dir: config/skills** in `config/core.yml`.
+5. Restart or send a new message; the model will see "Available skills" in its context.
+
+## Bundled skills (Phase C – OpenClaw parity)
+
+- **desktop-ui** — macOS-only desktop UI automation (peekaboo). Use **run_skill**(skill_name="desktop-ui", script="run.py", args=[...]). On Windows/Linux, run.py returns a clear "not available on this platform" message; Core does not crash.
+- **ip-cameras** — RTSP/ONVIF IP cameras (camsnap + ffmpeg). Use **run_skill**(skill_name="ip-cameras", script="run.py", args=[...]). If camsnap or ffmpeg is missing, run.py returns a clear error; Core does not crash.
 
 You can copy skill folders from [ClawHub](https://clawhub.biz/) or other skill registries into this directory to reuse them. HomeClaw has equivalent tools for exec, browser, cron, sessions_*, memory, file, web; most community skills that don't rely on canvas/nodes/gateway are usable. See **Design.md §3.6**.
 

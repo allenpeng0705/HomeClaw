@@ -91,6 +91,12 @@ mvn compile exec:java -Dexec.mainClass="QuotePlugin"
 # In another terminal: ./register.sh
 ```
 
+## 6. HomeClaw Browser (system plugin — Control UI + browser + canvas + nodes)
+
+**Moved to project root:** The HomeClaw Control UI and HomeClaw Browser plugins are now a single **system plugin** at **system_plugins/homeclaw-browser**. The folders `homeclaw-browser` and `homeclaw-control-ui` in this directory are legacy; see [homeclaw-browser-MOVED.md](homeclaw-browser-MOVED.md) and [homeclaw-control-ui-MOVED.md](homeclaw-control-ui-MOVED.md). It provides WebChat (Control UI), browser automation, canvas, and nodes in one server.
+
+See **[system_plugins/README.md](../../system_plugins/README.md)** and **[system_plugins/homeclaw-browser/README.md](../../system_plugins/homeclaw-browser/README.md)** for run instructions, env vars (CORE_URL, CORE_API_KEY, PORT 3020), and how to test. Launcher: **http://127.0.0.1:9000/ui**; WebChat: **http://127.0.0.1:3020/**.
+
 ## Config
 
 - **CORE_URL**: Default `http://127.0.0.1:9000`. Core runs on port 9000 by default (config/core.yml). Set `CORE_URL` if your Core is elsewhere.
@@ -99,6 +105,7 @@ mvn compile exec:java -Dexec.mainClass="QuotePlugin"
 - Node.js Quote: `http://127.0.0.1:3111`
 - Go Time: `http://127.0.0.1:3112`
 - Java Quote: `http://127.0.0.1:3113`
+- HomeClaw Browser (system plugin): `http://127.0.0.1:3020` — see **system_plugins/homeclaw-browser**
 
 Run Python commands from the **project root** (e.g. `python -m examples.external_plugins.quote.server`). For Node/Go/Java, run from each sample directory as shown above.
 

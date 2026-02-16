@@ -6043,3 +6043,1083 @@ aiohttp.client_exceptions.ClientConnectorError: Cannot connect to host 127.0.0.1
 2026-02-15 20:53:07 | DEBUG    | llm.llmService:stop_all_apps:450 - LLM Service Stopping all apps...
 2026-02-15 20:53:07 | DEBUG    | base.PluginManager:deinitialize_plugins:191 - Plugins deinitialized and hot reload thread stopped.
 2026-02-15 20:53:07 | DEBUG    | __main__:stop_chroma_client:1633 - ChromaDB client disconnected
+2026-02-17 00:59:03 | DEBUG    | __main__:__init__:166 - Before initialize chat history
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 00:59:03 | DEBUG    | __main__:__init__:168 - After initialize chat history
+2026-02-17 00:59:03 | DEBUG    | __main__:__init__:179 - Before initialize orchestrator
+2026-02-17 00:59:03 | DEBUG    | core.tam:__init__:44 - TAM initializing...
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 00:59:03 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 00:59:03 | DEBUG    | core.tam:__init__:65 - TAM initialized!
+2026-02-17 00:59:03 | DEBUG    | __main__:__init__:181 - After initialize orchestrator
+2026-02-17 00:59:03 | DEBUG    | __main__:run:1604 - core is running!
+2026-02-17 00:59:03 | DEBUG    | __main__:run:1606 - Running core on 0.0.0.0:9000
+2026-02-17 00:59:03 | DEBUG    | __main__:initialize:571 - core initializing...
+2026-02-17 00:59:03 | DEBUG    | __main__:start_chroma_client:1764 - ChromaDB client created
+2026-02-17 00:59:06 | DEBUG    | __main__:initialize:637 - Memory backend: Cognee
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 00:59:06 | DEBUG    | __main__:initialize:1006 - core initialized and all the endpoints are registered!
+2026-02-17 00:59:06 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 00:59:06 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 00:59:06 | DEBUG    | base.util:embedding:852 - LlamaCppEmbedding.embed: text: example Example skill to show SKILL.md format. Does nothing by itself; the model can refer to it when use_skills is enabled. This is the optional body. You can add usage notes or instructions here. The model will see the name and description in the "Available skills" block; body can be included by changing the loader to include_body=True.
+2026-02-17 00:59:06 | DEBUG    | base.util:embedding:856 - LlamaCppEmbedding.embed: summarizedtext: example Example skill to show SKILL.md format. Does nothing by itself; the model can refer to it when use_skills is enabled. This is the optional body. You can add usage notes or instructions here. The model will see the name and description in the "Available skills" block; body can be included by changing the loader to include_body=True.
+2026-02-17 00:59:06 | DEBUG    | base.util:embedding:875 - Embedding URL: http://127.0.0.1:5066/v1/embeddings
+2026-02-17 00:59:08 | DEBUG    | base.util:embedding:893 - Embedding error:Failed to get embedding from LLM
+2026-02-17 00:59:08 | DEBUG    | base.util:embedding:894 - Cannot connect to host 127.0.0.1:5066 ssl:default [Connect call failed ('127.0.0.1', 5066)]
+2026-02-17 00:59:08 | DEBUG    | base.util:embedding:852 - LlamaCppEmbedding.embed: text: social-media-agent Autonomous social media management for X/Twitter using only HomeClaw native tools. Use when a user wants to automate X posting, generate content, track engagement, or build an audience. Triggers on requests about tweets, social media strategy, X engagement, content calendars, or growing a following. No API keys required — uses browser automation and web_fetch. # Social Media Agent  Manage an X/Twitter account autonomously using only HomeClaw's built-in tools. No external APIs, no npm packages, no API keys needed.  ## Core Tools  - `browser` — Post tweets, engage with posts, take screenshots - `web_fetch` — Scrape profiles, trending topics, news for content - `sessions_spawn` — Run content generation in parallel - `cron` — Schedule regular posting and engagement - `memory_search` / files — Track what was posted, engagement stats  ## Posting a Tweet  1.
+2026-02-17 00:59:08 | DEBUG    | base.util:embedding:856 - LlamaCppEmbedding.embed: summarizedtext: social-media-agent Autonomous social media management for X/Twitter using only HomeClaw native tools. Use when a user wants to automate X posting, generate content, track engagement, or build an audience. Triggers on requests about tweets, social media strategy, X engagement, content calendars, or growing a following. No API keys required — uses browser automation and web_fetch. # Social Media Agent  Manage an X/Twitter account autonomously using only HomeClaw's built-in tools. No external APIs, no npm packages, no API keys needed.  ## Core Tools  - `browser` — Post tweets, engage with posts, take screenshots - `web_fetch` — Scrape profiles, trending topics, news for content - `sessions_spawn` — Run content generation in parallel - `cron` — Schedule regular posting and engagement - `memory_search` / files — Track what was posted, engagement stats  ## Posting a Tweet  1.
+2026-02-17 00:59:08 | DEBUG    | base.util:embedding:875 - Embedding URL: http://127.0.0.1:5066/v1/embeddings
+2026-02-17 00:59:08 | DEBUG    | base.util:embedding:893 - Embedding error:Failed to get embedding from LLM
+2026-02-17 00:59:08 | DEBUG    | base.util:embedding:894 - Cannot connect to host 127.0.0.1:5066 ssl:default [Connect call failed ('127.0.0.1', 5066)]
+2026-02-17 00:59:08 | INFO     | __main__:_component_log:78 - [skills] synced 0 skill(s) to vector store
+2026-02-17 00:59:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:419 - Loading plugin: plugins.Quotes.plugin - QuotePlugin
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:425 - __init__ signature for QuotePlugin: (self, coreInst: core.coreInterface.CoreInterface)
+2026-02-17 00:59:08 | DEBUG    | plugins.Quotes.plugin:__init__:28 - QuotePlugin __init__...
+2026-02-17 00:59:08 | DEBUG    | plugins.Quotes.plugin:__init__:30 - config_path: /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Quotes/config.yml
+2026-02-17 00:59:08 | DEBUG    | plugins.Quotes.plugin:__init__:35 - QuotePlugin config: {'tasks': {'generate_random_quote': {'type': 'random', 'interval_unit': 'hours', 'min_interval': 8, 'max_interval': 12}}, 'description': 'This plugin generates motivational and uplifting quotes based on chat histories using a language model (LLM). It is designed to detect user emotions, such as depression or sadness, and provide comforting and encouraging quotes to help improve their mood. The plugin can be used to offer emotional support and positivity to users during their conversations.'}
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:431 - Calling initialize for plugin: plugins.Quotes.plugin - QuotePlugin
+2026-02-17 00:59:08 | DEBUG    | plugins.Quotes.plugin:initialize:88 - Initializing Quotes plugin
+2026-02-17 00:59:08 | DEBUG    | base.SchedulerPlugin:initialize:25 - Initializing SchedulerPlugin plugin
+2026-02-17 00:59:08 | DEBUG    | base.BasePlugin:initialize:34 - Initializing plugin: This plugin generates motivational and uplifting quotes based on chat histories using a language model (LLM). It is designed to detect user emotions, such as depression or sadness, and provide comforting and encouraging quotes to help improve their mood. The plugin can be used to offer emotional support and positivity to users during their conversations.
+2026-02-17 00:59:08 | DEBUG    | base.SchedulerPlugin:schedule_tasks_from_config:137 - Scheduling tasks from config: {'tasks': {'generate_random_quote': {'type': 'random', 'interval_unit': 'hours', 'min_interval': 8, 'max_interval': 12}}, 'description': 'This plugin generates motivational and uplifting quotes based on chat histories using a language model (LLM). It is designed to detect user emotions, such as depression or sadness, and provide comforting and encouraging quotes to help improve their mood. The plugin can be used to offer emotional support and positivity to users during their conversations.'}
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:register_plugin:73 - Registering plugin: This plugin generates motivational and uplifting quotes based on chat histories using a language model (LLM). It is designed to detect user emotions, such as depression or sadness, and provide comforting and encouraging quotes to help improve their mood. The plugin can be used to offer emotional support and positivity to users during their conversations. id=thisplugingenerates
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:451 - Loaded plugin: plugins.Quotes.plugin - QuotePlugin
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:414 - Skipping intermediate base class: SchedulerPlugin
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:419 - Loading plugin: plugins.Mail.plugin - MailPlugin
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:425 - __init__ signature for MailPlugin: (self, coreInst: core.coreInterface.CoreInterface)
+2026-02-17 00:59:08 | DEBUG    | plugins.Mail.plugin:__init__:24 - MailPlugin __init__...
+2026-02-17 00:59:08 | DEBUG    | plugins.Mail.plugin:__init__:26 - config_path: /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/config.yml
+2026-02-17 00:59:08 | DEBUG    | plugins.Mail.plugin:__init__:31 - MailPlugin config: {'id': 'mail', 'smtp_host': 'mail.homeclaw.ai', 'smtp_port': 465, 'email_user': 'shilei.peng@homeclaw.ai', 'email_pass': 'Eficode232410@', 'description': 'The Email Plugin helps the user to send email. If the user has intent to send one mail, this plugin should be selected for this task.', 'contacts': [{'name': 'Allen Peng', 'email': 'shilei.peng@qq.com'}, {'name': 'Gary Zhang', 'email': 'cosmic.iron@gmail.com'}]}
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:431 - Calling initialize for plugin: plugins.Mail.plugin - MailPlugin
+2026-02-17 00:59:08 | DEBUG    | plugins.Mail.plugin:initialize:249 - Initializing Mail plugin
+2026-02-17 00:59:08 | DEBUG    | base.BasePlugin:initialize:34 - Initializing plugin: The Email Plugin helps the user to send email. If the user has intent to send one mail, this plugin should be selected for this task.
+2026-02-17 00:59:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:register_plugin:73 - Registering plugin: The Email Plugin helps the user to send email. If the user has intent to send one mail, this plugin should be selected for this task. id=mail
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:451 - Loaded plugin: plugins.Mail.plugin - MailPlugin
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:419 - Loading plugin: plugins.News.plugin - NewsPlugin
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:425 - __init__ signature for NewsPlugin: (self, coreInst: core.coreInterface.CoreInterface)
+2026-02-17 00:59:08 | DEBUG    | plugins.News.plugin:__init__:14 - NewsPlugin __init__...
+2026-02-17 00:59:08 | DEBUG    | plugins.News.plugin:__init__:16 - config_path: /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/News/config.yml
+2026-02-17 00:59:08 | DEBUG    | plugins.News.plugin:__init__:21 - NewsPlugin description: This plugin retrieves the latest news headlines and provides summaries of news articles based on specified categories, countries, sources, and keywords.
+2026-02-17 00:59:08 | DEBUG    | plugins.News.plugin:__init__:39 - NewsPlugin config: {'id': 'news', 'tasks': {'fetch_latest_news': {'type': 'repeated', 'interval_unit': 'hours', 'interval': 4, 'start_time': '08:30:00'}}, 'base_url': 'https://newsapi.org/v2/top-headlines', 'apiKey': '2d9c07650f22468990ce44f53a2d5bb7', 'country': 'us', 'category': 'business', 'sources': 'techcrunch', 'q': 'apple', 'description': 'This plugin retrieves the latest news headlines and provides summaries of news articles based on specified categories, countries, sources, and keywords.', 'keywords': ['news', 'headlines', 'latest news', 'breaking news', 'current events', 'news update', 'top stories', 'news summary', 'world news', 'local news', 'national news', 'international news', 'business news', 'tech news', 'sports news', 'entertainment news', 'science news', 'political news', 'health news', 'news today', 'news report', 'news article', 'news brief', 'news bulletin'], 'parameters': [{'name': 'country', 'type': 'string', 'description': "The country code for the news headlines. For example, 'us' for United States."}, {'name': 'category', 'type': 'string', 'description': "The category of news headlines. For example, 'business' for business news."}, {'name': 'sources', 'type': 'string', 'description': "The source of news headlines. For example, 'techcrunch' for TechCrunch."}]}
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:431 - Calling initialize for plugin: plugins.News.plugin - NewsPlugin
+2026-02-17 00:59:08 | DEBUG    | plugins.News.plugin:initialize:86 - Initializing News plugin
+2026-02-17 00:59:08 | DEBUG    | base.SchedulerPlugin:initialize:25 - Initializing SchedulerPlugin plugin
+2026-02-17 00:59:08 | DEBUG    | base.BasePlugin:initialize:34 - Initializing plugin: This plugin retrieves the latest news headlines and provides summaries of news articles based on specified categories, countries, sources, and keywords.
+2026-02-17 00:59:08 | DEBUG    | base.SchedulerPlugin:schedule_tasks_from_config:137 - Scheduling tasks from config: {'id': 'news', 'tasks': {'fetch_latest_news': {'type': 'repeated', 'interval_unit': 'hours', 'interval': 4, 'start_time': '08:30:00'}}, 'base_url': 'https://newsapi.org/v2/top-headlines', 'apiKey': '2d9c07650f22468990ce44f53a2d5bb7', 'country': 'us', 'category': 'business', 'sources': 'techcrunch', 'q': 'apple', 'description': 'This plugin retrieves the latest news headlines and provides summaries of news articles based on specified categories, countries, sources, and keywords.', 'keywords': ['news', 'headlines', 'latest news', 'breaking news', 'current events', 'news update', 'top stories', 'news summary', 'world news', 'local news', 'national news', 'international news', 'business news', 'tech news', 'sports news', 'entertainment news', 'science news', 'political news', 'health news', 'news today', 'news report', 'news article', 'news brief', 'news bulletin'], 'parameters': [{'name': 'country', 'type': 'string', 'description': "The country code for the news headlines. For example, 'us' for United States."}, {'name': 'category', 'type': 'string', 'description': "The category of news headlines. For example, 'business' for business news."}, {'name': 'sources', 'type': 'string', 'description': "The source of news headlines. For example, 'techcrunch' for TechCrunch."}]}
+2026-02-17 00:59:08 | DEBUG    | base.SchedulerPlugin:schedule_repeated_task:48 - Scheduled task to start at 2026-02-17 08:30:00 and repeat every 4 hours
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:register_plugin:73 - Registering plugin: Latest news headlines and summaries. Use when the user wants news, headlines, or top stories. id=news
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:451 - Loaded plugin: plugins.News.plugin - NewsPlugin
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:414 - Skipping intermediate base class: SchedulerPlugin
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:414 - Skipping intermediate base class: SchedulerPlugin
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:419 - Loading plugin: plugins.Weather.plugin - WeatherPlugin
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:425 - __init__ signature for WeatherPlugin: (self, coreInst: core.coreInterface.CoreInterface)
+2026-02-17 00:59:08 | DEBUG    | plugins.Weather.plugin:__init__:20 - WeatherPlugin __init__...
+2026-02-17 00:59:08 | DEBUG    | plugins.Weather.plugin:__init__:22 - config_path: /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Weather/config.yml
+2026-02-17 00:59:08 | DEBUG    | plugins.Weather.plugin:__init__:27 - WeatherPlugin config: {'id': 'weather', 'tasks': {'fetch_weather': {'type': 'fixed', 'frequency': 'daily', 'day_of_week': 'monday', 'day_of_month': 15, 'month': 5, 'time': '08:00:00'}}, 'city': '北京', 'district': '大兴', 'api_key': '977700b6202349e208629ae14f1771d2', 'description': 'This plugin retrieves the current weather and weather forecast for specified locations. It provides detailed information including temperature, humidity, weather conditions, wind direction, wind power, and air quality index (AQI). This plugin can be used to provide users with real-time weather updates and forecasts for any city.', 'keywords': ['weather', 'forecast', 'temperature', 'humidity', 'rain', 'snow', 'sunny', 'cloudy', 'storm', 'wind', 'air quality', 'AQI', 'will it rain', 'is it going to rain', 'how hot is it', 'how cold is it', "what's the weather like", 'current weather', "today's weather", "tomorrow's weather", 'weekly weather', 'weather report', 'do I need an umbrella', 'is it snowing', 'is it windy'], 'parameters': [{'name': 'city', 'type': 'string', 'description': "The name of the city for which the weather forecast is retrieved. For example, '北京' for Beijing."}, {'name': 'district', 'type': 'string', 'description': "The name of the district within the city for which the weather forecast is retrieved. For example, '大兴' for Daxing."}]}
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:431 - Calling initialize for plugin: plugins.Weather.plugin - WeatherPlugin
+2026-02-17 00:59:08 | DEBUG    | plugins.Weather.plugin:initialize:84 - Initializing Weather plugin
+2026-02-17 00:59:08 | DEBUG    | base.SchedulerPlugin:initialize:25 - Initializing SchedulerPlugin plugin
+2026-02-17 00:59:08 | DEBUG    | base.BasePlugin:initialize:34 - Initializing plugin: This plugin retrieves the current weather and weather forecast for specified locations. It provides detailed information including temperature, humidity, weather conditions, wind direction, wind power, and air quality index (AQI). This plugin can be used to provide users with real-time weather updates and forecasts for any city.
+2026-02-17 00:59:08 | DEBUG    | base.SchedulerPlugin:schedule_tasks_from_config:137 - Scheduling tasks from config: {'id': 'weather', 'tasks': {'fetch_weather': {'type': 'fixed', 'frequency': 'daily', 'day_of_week': 'monday', 'day_of_month': 15, 'month': 5, 'time': '08:00:00'}}, 'city': '北京', 'district': '大兴', 'api_key': '977700b6202349e208629ae14f1771d2', 'description': 'This plugin retrieves the current weather and weather forecast for specified locations. It provides detailed information including temperature, humidity, weather conditions, wind direction, wind power, and air quality index (AQI). This plugin can be used to provide users with real-time weather updates and forecasts for any city.', 'keywords': ['weather', 'forecast', 'temperature', 'humidity', 'rain', 'snow', 'sunny', 'cloudy', 'storm', 'wind', 'air quality', 'AQI', 'will it rain', 'is it going to rain', 'how hot is it', 'how cold is it', "what's the weather like", 'current weather', "today's weather", "tomorrow's weather", 'weekly weather', 'weather report', 'do I need an umbrella', 'is it snowing', 'is it windy'], 'parameters': [{'name': 'city', 'type': 'string', 'description': "The name of the city for which the weather forecast is retrieved. For example, '北京' for Beijing."}, {'name': 'district', 'type': 'string', 'description': "The name of the district within the city for which the weather forecast is retrieved. For example, '大兴' for Daxing."}]}
+2026-02-17 00:59:08 | DEBUG    | base.SchedulerPlugin:schedule_fixed_task:95 - Scheduled daily task at 08:00:00
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:register_plugin:73 - Registering plugin: Current weather and forecast for a location. Use when the user asks about weather, temperature, or forecast. id=weather
+2026-02-17 00:59:08 | DEBUG    | base.PluginManager:load_plugins:451 - Loaded plugin: plugins.Weather.plugin - WeatherPlugin
+2026-02-17 00:59:08 | INFO     | __main__:_component_log:78 - [plugin] loaded 4 plugin(s)
+2026-02-17 00:59:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 00:59:08 | DEBUG    | core.result_viewer:start_report_server:252 - Result viewer: report server started on %s:%s
+2026-02-17 00:59:08 | INFO     | __main__:_component_log:78 - [result_viewer] report server on port 9001 (HTTP)
+2026-02-17 00:59:08 | DEBUG    | __main__:run:1663 - Starting LLM manager...
+2026-02-17 00:59:08 | DEBUG    | llm.llmService:start_llama_cpp_server:156 - model path /Users/shileipeng/Documents/mygithub/HomeClaw/models/bge-m3-Q5_K_M.gguf
+2026-02-17 00:59:08 | DEBUG    | llm.llmService:start_llama_cpp_server:160 - Full model path: /Users/shileipeng/Documents/mygithub/HomeClaw/models/bge-m3-Q5_K_M.gguf
+2026-02-17 00:59:08 | DEBUG    | llm.llmService:start_llama_cpp_server:202 - Pooling is enabled.
+2026-02-17 00:59:08 | DEBUG    | llm.llmService:start_llama_cpp_server:209 - llama.cpp server: /Users/shileipeng/Documents/mygithub/HomeClaw/llama.cpp-master/mac/llama-server (folder: mac), cmd: /Users/shileipeng/Documents/mygithub/HomeClaw/llama.cpp-master/mac/llama-server -m /Users/shileipeng/Documents/mygithub/HomeClaw/models/bge-m3-Q5_K_M.gguf --ctx-size 8192 --predict 8192 --temp 0.7 --threads 8 --host 127.0.0.1 --port 5066 --embedding --pooling cls -ub 8192
+2026-02-17 00:59:08 | DEBUG    | llm.llmService:start_llama_cpp_server:217 - Started LLM process on 127.0.0.1:5066 with PID 19840 (folder: mac), model: bge-m3-Q5_K_M.gguf
+2026-02-17 00:59:08 | DEBUG    | llm.llmService:run_embedding_llm:249 - Running Embedding services!
+2026-02-17 00:59:08 | DEBUG    | llm.llmService:start_llama_cpp_server:156 - model path /Users/shileipeng/Documents/mygithub/HomeClaw/models/Qwen3-14B-Q5_K_M.gguf
+2026-02-17 00:59:08 | DEBUG    | llm.llmService:start_llama_cpp_server:160 - Full model path: /Users/shileipeng/Documents/mygithub/HomeClaw/models/Qwen3-14B-Q5_K_M.gguf
+2026-02-17 00:59:08 | DEBUG    | llm.llmService:start_llama_cpp_server:199 - Function calling is enabled.
+2026-02-17 00:59:08 | DEBUG    | llm.llmService:start_llama_cpp_server:209 - llama.cpp server: /Users/shileipeng/Documents/mygithub/HomeClaw/llama.cpp-master/mac/llama-server (folder: mac), cmd: /Users/shileipeng/Documents/mygithub/HomeClaw/llama.cpp-master/mac/llama-server -m /Users/shileipeng/Documents/mygithub/HomeClaw/models/Qwen3-14B-Q5_K_M.gguf --ctx-size 32768 --predict 8192 --temp 0.7 --threads 8 --host 127.0.0.1 --port 5023 --repeat-penalty 1.5 --jinja
+2026-02-17 00:59:08 | DEBUG    | llm.llmService:start_llama_cpp_server:217 - Started LLM process on 127.0.0.1:5023 with PID 19841 (folder: mac), model: Qwen3-14B-Q5_K_M.gguf
+2026-02-17 00:59:08 | DEBUG    | llm.llmService:run_main_llm:288 - Running Main LLM Server Qwen3-14B-Q5_K_M on 127.0.0.1:5023
+2026-02-17 00:59:08 | DEBUG    | __main__:run:1665 - LLM manager started!
+2026-02-17 01:00:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:01:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:02:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:03:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:04:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:05:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:06:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:07:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:07:33 | ERROR    | __main__:websocket_chat:999 - 'text'
+Traceback (most recent call last):
+
+  File "/Users/shileipeng/Documents/mygithub/HomeClaw/core/core.py", line 2598, in <module>
+    main()
+    └ <function main at 0x111611760>
+
+  File "/Users/shileipeng/Documents/mygithub/HomeClaw/core/core.py", line 2591, in main
+    loop.run_until_complete(core.run())
+    │    │                  │    └ <function Core.run at 0x1166a9080>
+    │    │                  └ <__main__.Core object at 0x115b656a0>
+    │    └ <function BaseEventLoop.run_until_complete at 0x105999440>
+    └ <_UnixSelectorEventLoop running=True closed=False debug=False>
+
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/asyncio/base_events.py", line 678, in run_until_complete
+    self.run_forever()
+    │    └ <function BaseEventLoop.run_forever at 0x1059993a0>
+    └ <_UnixSelectorEventLoop running=True closed=False debug=False>
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/asyncio/base_events.py", line 645, in run_forever
+    self._run_once()
+    │    └ <function BaseEventLoop._run_once at 0x10599b1a0>
+    └ <_UnixSelectorEventLoop running=True closed=False debug=False>
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/asyncio/base_events.py", line 1999, in _run_once
+    handle._run()
+    │      └ <function Handle._run at 0x1058d94e0>
+    └ <Handle Task.task_wakeup(<Future finished result=None>)>
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/asyncio/events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+    │    │            │    │           │    └ <member '_args' of 'Handle' objects>
+    │    │            │    │           └ <Handle Task.task_wakeup(<Future finished result=None>)>
+    │    │            │    └ <member '_callback' of 'Handle' objects>
+    │    │            └ <Handle Task.task_wakeup(<Future finished result=None>)>
+    │    └ <member '_context' of 'Handle' objects>
+    └ <Handle Task.task_wakeup(<Future finished result=None>)>
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/uvicorn/protocols/websockets/websockets_impl.py", line 243, in run_asgi
+    result = await self.app(self.scope, self.asgi_receive, self.asgi_send)  # type: ignore[func-returns-value]
+                   │    │   │    │      │    │             │    └ <function WebSocketProtocol.asgi_send at 0x177555080>
+                   │    │   │    │      │    │             └ <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x17754ee40>
+                   │    │   │    │      │    └ <function WebSocketProtocol.asgi_receive at 0x177555120>
+                   │    │   │    │      └ <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x17754ee40>
+                   │    │   │    └ {'type': 'websocket', 'asgi': {'version': '3.0', 'spec_version': '2.4'}, 'http_version': '1.1', 'scheme': 'ws', 'server': ('1...
+                   │    │   └ <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x17754ee40>
+                   │    └ <uvicorn.middleware.proxy_headers.ProxyHeadersMiddleware object at 0x17528f590>
+                   └ <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x17754ee40>
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/uvicorn/middleware/proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+                 │    │   │      │        └ <bound method WebSocketProtocol.asgi_send of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1775...
+                 │    │   │      └ <bound method WebSocketProtocol.asgi_receive of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1...
+                 │    │   └ {'type': 'websocket', 'asgi': {'version': '3.0', 'spec_version': '2.4'}, 'http_version': '1.1', 'scheme': 'ws', 'server': ('1...
+                 │    └ <fastapi.applications.FastAPI object at 0x116402a80>
+                 └ <uvicorn.middleware.proxy_headers.ProxyHeadersMiddleware object at 0x17528f590>
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/fastapi/applications.py", line 1054, in __call__
+    await super().__call__(scope, receive, send)
+                           │      │        └ <bound method WebSocketProtocol.asgi_send of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1775...
+                           │      └ <bound method WebSocketProtocol.asgi_receive of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1...
+                           └ {'type': 'websocket', 'asgi': {'version': '3.0', 'spec_version': '2.4'}, 'http_version': '1.1', 'scheme': 'ws', 'server': ('1...
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/starlette/applications.py", line 112, in __call__
+    await self.middleware_stack(scope, receive, send)
+          │    │                │      │        └ <bound method WebSocketProtocol.asgi_send of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1775...
+          │    │                │      └ <bound method WebSocketProtocol.asgi_receive of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1...
+          │    │                └ {'type': 'websocket', 'asgi': {'version': '3.0', 'spec_version': '2.4'}, 'http_version': '1.1', 'scheme': 'ws', 'server': ('1...
+          │    └ <starlette.middleware.errors.ServerErrorMiddleware object at 0x17754d040>
+          └ <fastapi.applications.FastAPI object at 0x116402a80>
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/starlette/middleware/errors.py", line 152, in __call__
+    await self.app(scope, receive, send)
+          │    │   │      │        └ <bound method WebSocketProtocol.asgi_send of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1775...
+          │    │   │      └ <bound method WebSocketProtocol.asgi_receive of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1...
+          │    │   └ {'type': 'websocket', 'asgi': {'version': '3.0', 'spec_version': '2.4'}, 'http_version': '1.1', 'scheme': 'ws', 'server': ('1...
+          │    └ <starlette.middleware.exceptions.ExceptionMiddleware object at 0x17754d010>
+          └ <starlette.middleware.errors.ServerErrorMiddleware object at 0x17754d040>
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/starlette/middleware/exceptions.py", line 62, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+          │                            │    │    │     │      │        └ <bound method WebSocketProtocol.asgi_send of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1775...
+          │                            │    │    │     │      └ <bound method WebSocketProtocol.asgi_receive of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1...
+          │                            │    │    │     └ {'type': 'websocket', 'asgi': {'version': '3.0', 'spec_version': '2.4'}, 'http_version': '1.1', 'scheme': 'ws', 'server': ('1...
+          │                            │    │    └ <starlette.websockets.WebSocket object at 0x17528e5a0>
+          │                            │    └ <fastapi.routing.APIRouter object at 0x116402b40>
+          │                            └ <starlette.middleware.exceptions.ExceptionMiddleware object at 0x17754d010>
+          └ <function wrap_app_handling_exceptions at 0x1090cd1c0>
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+          │   │      │        └ <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x177555760>
+          │   │      └ <bound method WebSocketProtocol.asgi_receive of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1...
+          │   └ {'type': 'websocket', 'asgi': {'version': '3.0', 'spec_version': '2.4'}, 'http_version': '1.1', 'scheme': 'ws', 'server': ('1...
+          └ <fastapi.routing.APIRouter object at 0x116402b40>
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/starlette/routing.py", line 715, in __call__
+    await self.middleware_stack(scope, receive, send)
+          │    │                │      │        └ <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x177555760>
+          │    │                │      └ <bound method WebSocketProtocol.asgi_receive of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1...
+          │    │                └ {'type': 'websocket', 'asgi': {'version': '3.0', 'spec_version': '2.4'}, 'http_version': '1.1', 'scheme': 'ws', 'server': ('1...
+          │    └ <bound method Router.app of <fastapi.routing.APIRouter object at 0x116402b40>>
+          └ <fastapi.routing.APIRouter object at 0x116402b40>
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/starlette/routing.py", line 735, in app
+    await route.handle(scope, receive, send)
+          │     │      │      │        └ <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x177555760>
+          │     │      │      └ <bound method WebSocketProtocol.asgi_receive of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1...
+          │     │      └ {'type': 'websocket', 'asgi': {'version': '3.0', 'spec_version': '2.4'}, 'http_version': '1.1', 'scheme': 'ws', 'server': ('1...
+          │     └ <function WebSocketRoute.handle at 0x1090cec00>
+          └ APIWebSocketRoute(path='/ws', name='websocket_chat')
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/starlette/routing.py", line 362, in handle
+    await self.app(scope, receive, send)
+          │    │   │      │        └ <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x177555760>
+          │    │   │      └ <bound method WebSocketProtocol.asgi_receive of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1...
+          │    │   └ {'type': 'websocket', 'asgi': {'version': '3.0', 'spec_version': '2.4'}, 'http_version': '1.1', 'scheme': 'ws', 'server': ('1...
+          │    └ <function websocket_session.<locals>.app at 0x175280c20>
+          └ APIWebSocketRoute(path='/ws', name='websocket_chat')
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/starlette/routing.py", line 95, in app
+    await wrap_app_handling_exceptions(app, session)(scope, receive, send)
+          │                            │    │        │      │        └ <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x177555760>
+          │                            │    │        │      └ <bound method WebSocketProtocol.asgi_receive of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1...
+          │                            │    │        └ {'type': 'websocket', 'asgi': {'version': '3.0', 'spec_version': '2.4'}, 'http_version': '1.1', 'scheme': 'ws', 'server': ('1...
+          │                            │    └ <starlette.websockets.WebSocket object at 0x1752b0860>
+          │                            └ <function websocket_session.<locals>.app.<locals>.app at 0x177555bc0>
+          └ <function wrap_app_handling_exceptions at 0x1090cd1c0>
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+          │   │      │        └ <function wrap_app_handling_exceptions.<locals>.wrapped_app.<locals>.sender at 0x177555a80>
+          │   │      └ <bound method WebSocketProtocol.asgi_receive of <uvicorn.protocols.websockets.websockets_impl.WebSocketProtocol object at 0x1...
+          │   └ {'type': 'websocket', 'asgi': {'version': '3.0', 'spec_version': '2.4'}, 'http_version': '1.1', 'scheme': 'ws', 'server': ('1...
+          └ <function websocket_session.<locals>.app.<locals>.app at 0x177555bc0>
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/starlette/routing.py", line 93, in app
+    await func(session)
+          │    └ <starlette.websockets.WebSocket object at 0x1752b0860>
+          └ <function get_websocket_app.<locals>.app at 0x175280cc0>
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/fastapi/routing.py", line 383, in app
+    await dependant.call(**solved_result.values)
+          │         │      │             └ {'websocket': <starlette.websockets.WebSocket object at 0x1752b0860>}
+          │         │      └ SolvedDependency(values={'websocket': <starlette.websockets.WebSocket object at 0x1752b0860>}, errors=[], background_tasks=No...
+          │         └ <function Core.initialize.<locals>.websocket_chat at 0x175280b80>
+          └ Dependant(path_params=[], query_params=[], header_params=[], cookie_params=[], body_params=[], dependencies=[], security_requ...
+
+> File "/Users/shileipeng/Documents/mygithub/HomeClaw/core/core.py", line 976, in websocket_chat
+    raw = await websocket.receive_text()
+                │         └ <function WebSocket.receive_text at 0x109221ee0>
+                └ <starlette.websockets.WebSocket object at 0x1752b0860>
+
+  File "/opt/anaconda3/envs/pytorch/lib/python3.12/site-packages/starlette/websockets.py", line 120, in receive_text
+    return typing.cast(str, message["text"])
+           │      │         └ {'type': 'websocket.receive', 'bytes': b'{"user_id":"webchat_user","text":"\xe4\xbd\xa0\xe5\xa5\xbd"}'}
+           │      └ <function cast at 0x1059814e0>
+           └ <module 'typing' from '/opt/anaconda3/envs/pytorch/lib/python3.12/typing.py'>
+
+KeyError: 'text'
+2026-02-17 01:08:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:09:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:10:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:11:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:12:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:13:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:14:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:15:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:16:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:17:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:18:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:19:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:20:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:21:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:22:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:23:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:24:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:25:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:26:08 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:26:46 | DEBUG    | llm.llmService:stop_llama_cpp_process:83 - Stopped LLM process on 127.0.0.1:5066
+2026-02-17 01:26:46 | DEBUG    | llm.llmService:stop_llama_cpp_process:83 - Stopped LLM process on 127.0.0.1:5023
+2026-02-17 01:26:46 | DEBUG    | llm.llmService:stop_all_apps:450 - LLM Service Stopping all apps...
+2026-02-17 01:26:47 | DEBUG    | llm.llmService:stop_all_apps:450 - LLM Service Stopping all apps...
+2026-02-17 01:26:47 | DEBUG    | llm.llmService:stop_all_apps:450 - LLM Service Stopping all apps...
+2026-02-17 01:26:48 | DEBUG    | llm.llmService:stop_all_apps:450 - LLM Service Stopping all apps...
+2026-02-17 01:26:48 | DEBUG    | llm.llmService:stop_all_apps:450 - LLM Service Stopping all apps...
+2026-02-17 01:26:58 | DEBUG    | base.SchedulerPlugin:cleanup:173 - SchedulerPlugin cleanup done!
+2026-02-17 01:26:58 | DEBUG    | base.PluginManager:unload_plugin:474 - Unloaded plugin: plugins.News.plugin
+2026-02-17 01:26:58 | DEBUG    | base.PluginManager:deinitialize_plugins:522 - Unloaded plugin: plugins.News.plugin
+2026-02-17 01:27:08 | DEBUG    | base.PluginManager:hot_reload:502 - Hot reload thread stopped.
+2026-02-17 01:27:08 | DEBUG    | base.SchedulerPlugin:cleanup:173 - SchedulerPlugin cleanup done!
+2026-02-17 01:27:08 | DEBUG    | base.PluginManager:unload_plugin:474 - Unloaded plugin: plugins.Weather.plugin
+2026-02-17 01:27:08 | DEBUG    | base.PluginManager:deinitialize_plugins:522 - Unloaded plugin: plugins.Weather.plugin
+2026-02-17 01:27:08 | DEBUG    | base.PluginManager:unload_plugin:474 - Unloaded plugin: plugins.Mail.plugin
+2026-02-17 01:27:08 | DEBUG    | base.PluginManager:deinitialize_plugins:522 - Unloaded plugin: plugins.Mail.plugin
+2026-02-17 01:27:18 | DEBUG    | base.SchedulerPlugin:cleanup:173 - SchedulerPlugin cleanup done!
+2026-02-17 01:27:18 | DEBUG    | base.PluginManager:unload_plugin:474 - Unloaded plugin: plugins.Quotes.plugin
+2026-02-17 01:27:18 | DEBUG    | base.PluginManager:deinitialize_plugins:522 - Unloaded plugin: plugins.Quotes.plugin
+2026-02-17 01:27:18 | DEBUG    | base.PluginManager:deinitialize_plugins:529 - Plugins deinitialized and hot reload thread stopped.
+2026-02-17 01:27:18 | DEBUG    | __main__:stop_chroma_client:1770 - ChromaDB client disconnected
+2026-02-17 01:27:22 | DEBUG    | llm.llmService:stop_all_apps:450 - LLM Service Stopping all apps...
+2026-02-17 01:27:22 | DEBUG    | base.PluginManager:deinitialize_plugins:529 - Plugins deinitialized and hot reload thread stopped.
+2026-02-17 01:27:22 | DEBUG    | __main__:stop_chroma_client:1770 - ChromaDB client disconnected
+2026-02-17 01:27:29 | DEBUG    | __main__:__init__:166 - Before initialize chat history
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 01:27:29 | DEBUG    | __main__:__init__:168 - After initialize chat history
+2026-02-17 01:27:29 | DEBUG    | __main__:__init__:179 - Before initialize orchestrator
+2026-02-17 01:27:29 | DEBUG    | core.tam:__init__:44 - TAM initializing...
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 01:27:29 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 01:27:29 | DEBUG    | core.tam:__init__:65 - TAM initialized!
+2026-02-17 01:27:29 | DEBUG    | __main__:__init__:181 - After initialize orchestrator
+2026-02-17 01:27:29 | DEBUG    | __main__:run:1613 - core is running!
+2026-02-17 01:27:29 | DEBUG    | __main__:run:1615 - Running core on 0.0.0.0:9000
+2026-02-17 01:27:29 | DEBUG    | __main__:initialize:571 - core initializing...
+2026-02-17 01:27:29 | DEBUG    | __main__:start_chroma_client:1773 - ChromaDB client created
+2026-02-17 01:27:32 | DEBUG    | __main__:initialize:637 - Memory backend: Cognee
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | tools.builtin:_register_browser_tools_if_available:2638 - Browser tools skipped (tools.browser_enabled=false). Use fetch_url for web content.
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 01:27:32 | DEBUG    | __main__:initialize:1015 - core initialized and all the endpoints are registered!
+2026-02-17 01:27:32 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 01:27:32 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 01:27:32 | DEBUG    | base.util:embedding:852 - LlamaCppEmbedding.embed: text: example Example skill to show SKILL.md format. Does nothing by itself; the model can refer to it when use_skills is enabled. This is the optional body. You can add usage notes or instructions here. The model will see the name and description in the "Available skills" block; body can be included by changing the loader to include_body=True.
+2026-02-17 01:27:32 | DEBUG    | base.util:embedding:856 - LlamaCppEmbedding.embed: summarizedtext: example Example skill to show SKILL.md format. Does nothing by itself; the model can refer to it when use_skills is enabled. This is the optional body. You can add usage notes or instructions here. The model will see the name and description in the "Available skills" block; body can be included by changing the loader to include_body=True.
+2026-02-17 01:27:32 | DEBUG    | base.util:embedding:875 - Embedding URL: http://127.0.0.1:5066/v1/embeddings
+2026-02-17 01:27:34 | DEBUG    | base.util:embedding:893 - Embedding error:Failed to get embedding from LLM
+2026-02-17 01:27:34 | DEBUG    | base.util:embedding:894 - Cannot connect to host 127.0.0.1:5066 ssl:default [Connect call failed ('127.0.0.1', 5066)]
+2026-02-17 01:27:34 | DEBUG    | base.util:embedding:852 - LlamaCppEmbedding.embed: text: social-media-agent Autonomous social media management for X/Twitter using only HomeClaw native tools. Use when a user wants to automate X posting, generate content, track engagement, or build an audience. Triggers on requests about tweets, social media strategy, X engagement, content calendars, or growing a following. No API keys required — uses browser automation and web_fetch. # Social Media Agent  Manage an X/Twitter account autonomously using only HomeClaw's built-in tools. No external APIs, no npm packages, no API keys needed.  ## Core Tools  - `browser` — Post tweets, engage with posts, take screenshots - `web_fetch` — Scrape profiles, trending topics, news for content - `sessions_spawn` — Run content generation in parallel - `cron` — Schedule regular posting and engagement - `memory_search` / files — Track what was posted, engagement stats  ## Posting a Tweet  1.
+2026-02-17 01:27:34 | DEBUG    | base.util:embedding:856 - LlamaCppEmbedding.embed: summarizedtext: social-media-agent Autonomous social media management for X/Twitter using only HomeClaw native tools. Use when a user wants to automate X posting, generate content, track engagement, or build an audience. Triggers on requests about tweets, social media strategy, X engagement, content calendars, or growing a following. No API keys required — uses browser automation and web_fetch. # Social Media Agent  Manage an X/Twitter account autonomously using only HomeClaw's built-in tools. No external APIs, no npm packages, no API keys needed.  ## Core Tools  - `browser` — Post tweets, engage with posts, take screenshots - `web_fetch` — Scrape profiles, trending topics, news for content - `sessions_spawn` — Run content generation in parallel - `cron` — Schedule regular posting and engagement - `memory_search` / files — Track what was posted, engagement stats  ## Posting a Tweet  1.
+2026-02-17 01:27:34 | DEBUG    | base.util:embedding:875 - Embedding URL: http://127.0.0.1:5066/v1/embeddings
+2026-02-17 01:27:34 | DEBUG    | base.util:embedding:893 - Embedding error:Failed to get embedding from LLM
+2026-02-17 01:27:34 | DEBUG    | base.util:embedding:894 - Cannot connect to host 127.0.0.1:5066 ssl:default [Connect call failed ('127.0.0.1', 5066)]
+2026-02-17 01:27:34 | INFO     | __main__:_component_log:78 - [skills] synced 0 skill(s) to vector store
+2026-02-17 01:27:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:419 - Loading plugin: plugins.Quotes.plugin - QuotePlugin
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:425 - __init__ signature for QuotePlugin: (self, coreInst: core.coreInterface.CoreInterface)
+2026-02-17 01:27:34 | DEBUG    | plugins.Quotes.plugin:__init__:28 - QuotePlugin __init__...
+2026-02-17 01:27:34 | DEBUG    | plugins.Quotes.plugin:__init__:30 - config_path: /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Quotes/config.yml
+2026-02-17 01:27:34 | DEBUG    | plugins.Quotes.plugin:__init__:35 - QuotePlugin config: {'tasks': {'generate_random_quote': {'type': 'random', 'interval_unit': 'hours', 'min_interval': 8, 'max_interval': 12}}, 'description': 'This plugin generates motivational and uplifting quotes based on chat histories using a language model (LLM). It is designed to detect user emotions, such as depression or sadness, and provide comforting and encouraging quotes to help improve their mood. The plugin can be used to offer emotional support and positivity to users during their conversations.'}
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:431 - Calling initialize for plugin: plugins.Quotes.plugin - QuotePlugin
+2026-02-17 01:27:34 | DEBUG    | plugins.Quotes.plugin:initialize:88 - Initializing Quotes plugin
+2026-02-17 01:27:34 | DEBUG    | base.SchedulerPlugin:initialize:25 - Initializing SchedulerPlugin plugin
+2026-02-17 01:27:34 | DEBUG    | base.BasePlugin:initialize:34 - Initializing plugin: This plugin generates motivational and uplifting quotes based on chat histories using a language model (LLM). It is designed to detect user emotions, such as depression or sadness, and provide comforting and encouraging quotes to help improve their mood. The plugin can be used to offer emotional support and positivity to users during their conversations.
+2026-02-17 01:27:34 | DEBUG    | base.SchedulerPlugin:schedule_tasks_from_config:137 - Scheduling tasks from config: {'tasks': {'generate_random_quote': {'type': 'random', 'interval_unit': 'hours', 'min_interval': 8, 'max_interval': 12}}, 'description': 'This plugin generates motivational and uplifting quotes based on chat histories using a language model (LLM). It is designed to detect user emotions, such as depression or sadness, and provide comforting and encouraging quotes to help improve their mood. The plugin can be used to offer emotional support and positivity to users during their conversations.'}
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:register_plugin:73 - Registering plugin: This plugin generates motivational and uplifting quotes based on chat histories using a language model (LLM). It is designed to detect user emotions, such as depression or sadness, and provide comforting and encouraging quotes to help improve their mood. The plugin can be used to offer emotional support and positivity to users during their conversations. id=thisplugingenerates
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:451 - Loaded plugin: plugins.Quotes.plugin - QuotePlugin
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:414 - Skipping intermediate base class: SchedulerPlugin
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:419 - Loading plugin: plugins.Mail.plugin - MailPlugin
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:425 - __init__ signature for MailPlugin: (self, coreInst: core.coreInterface.CoreInterface)
+2026-02-17 01:27:34 | DEBUG    | plugins.Mail.plugin:__init__:24 - MailPlugin __init__...
+2026-02-17 01:27:34 | DEBUG    | plugins.Mail.plugin:__init__:26 - config_path: /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/config.yml
+2026-02-17 01:27:34 | DEBUG    | plugins.Mail.plugin:__init__:31 - MailPlugin config: {'id': 'mail', 'smtp_host': 'mail.homeclaw.ai', 'smtp_port': 465, 'email_user': 'shilei.peng@homeclaw.ai', 'email_pass': 'Eficode232410@', 'description': 'The Email Plugin helps the user to send email. If the user has intent to send one mail, this plugin should be selected for this task.', 'contacts': [{'name': 'Allen Peng', 'email': 'shilei.peng@qq.com'}, {'name': 'Gary Zhang', 'email': 'cosmic.iron@gmail.com'}]}
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:431 - Calling initialize for plugin: plugins.Mail.plugin - MailPlugin
+2026-02-17 01:27:34 | DEBUG    | plugins.Mail.plugin:initialize:249 - Initializing Mail plugin
+2026-02-17 01:27:34 | DEBUG    | base.BasePlugin:initialize:34 - Initializing plugin: The Email Plugin helps the user to send email. If the user has intent to send one mail, this plugin should be selected for this task.
+2026-02-17 01:27:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:register_plugin:73 - Registering plugin: The Email Plugin helps the user to send email. If the user has intent to send one mail, this plugin should be selected for this task. id=mail
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:451 - Loaded plugin: plugins.Mail.plugin - MailPlugin
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:419 - Loading plugin: plugins.News.plugin - NewsPlugin
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:425 - __init__ signature for NewsPlugin: (self, coreInst: core.coreInterface.CoreInterface)
+2026-02-17 01:27:34 | DEBUG    | plugins.News.plugin:__init__:14 - NewsPlugin __init__...
+2026-02-17 01:27:34 | DEBUG    | plugins.News.plugin:__init__:16 - config_path: /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/News/config.yml
+2026-02-17 01:27:34 | DEBUG    | plugins.News.plugin:__init__:21 - NewsPlugin description: This plugin retrieves the latest news headlines and provides summaries of news articles based on specified categories, countries, sources, and keywords.
+2026-02-17 01:27:34 | DEBUG    | plugins.News.plugin:__init__:39 - NewsPlugin config: {'id': 'news', 'tasks': {'fetch_latest_news': {'type': 'repeated', 'interval_unit': 'hours', 'interval': 4, 'start_time': '08:30:00'}}, 'base_url': 'https://newsapi.org/v2/top-headlines', 'apiKey': '2d9c07650f22468990ce44f53a2d5bb7', 'country': 'us', 'category': 'business', 'sources': 'techcrunch', 'q': 'apple', 'description': 'This plugin retrieves the latest news headlines and provides summaries of news articles based on specified categories, countries, sources, and keywords.', 'keywords': ['news', 'headlines', 'latest news', 'breaking news', 'current events', 'news update', 'top stories', 'news summary', 'world news', 'local news', 'national news', 'international news', 'business news', 'tech news', 'sports news', 'entertainment news', 'science news', 'political news', 'health news', 'news today', 'news report', 'news article', 'news brief', 'news bulletin'], 'parameters': [{'name': 'country', 'type': 'string', 'description': "The country code for the news headlines. For example, 'us' for United States."}, {'name': 'category', 'type': 'string', 'description': "The category of news headlines. For example, 'business' for business news."}, {'name': 'sources', 'type': 'string', 'description': "The source of news headlines. For example, 'techcrunch' for TechCrunch."}]}
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:431 - Calling initialize for plugin: plugins.News.plugin - NewsPlugin
+2026-02-17 01:27:34 | DEBUG    | plugins.News.plugin:initialize:86 - Initializing News plugin
+2026-02-17 01:27:34 | DEBUG    | base.SchedulerPlugin:initialize:25 - Initializing SchedulerPlugin plugin
+2026-02-17 01:27:34 | DEBUG    | base.BasePlugin:initialize:34 - Initializing plugin: This plugin retrieves the latest news headlines and provides summaries of news articles based on specified categories, countries, sources, and keywords.
+2026-02-17 01:27:34 | DEBUG    | base.SchedulerPlugin:schedule_tasks_from_config:137 - Scheduling tasks from config: {'id': 'news', 'tasks': {'fetch_latest_news': {'type': 'repeated', 'interval_unit': 'hours', 'interval': 4, 'start_time': '08:30:00'}}, 'base_url': 'https://newsapi.org/v2/top-headlines', 'apiKey': '2d9c07650f22468990ce44f53a2d5bb7', 'country': 'us', 'category': 'business', 'sources': 'techcrunch', 'q': 'apple', 'description': 'This plugin retrieves the latest news headlines and provides summaries of news articles based on specified categories, countries, sources, and keywords.', 'keywords': ['news', 'headlines', 'latest news', 'breaking news', 'current events', 'news update', 'top stories', 'news summary', 'world news', 'local news', 'national news', 'international news', 'business news', 'tech news', 'sports news', 'entertainment news', 'science news', 'political news', 'health news', 'news today', 'news report', 'news article', 'news brief', 'news bulletin'], 'parameters': [{'name': 'country', 'type': 'string', 'description': "The country code for the news headlines. For example, 'us' for United States."}, {'name': 'category', 'type': 'string', 'description': "The category of news headlines. For example, 'business' for business news."}, {'name': 'sources', 'type': 'string', 'description': "The source of news headlines. For example, 'techcrunch' for TechCrunch."}]}
+2026-02-17 01:27:34 | DEBUG    | base.SchedulerPlugin:schedule_repeated_task:48 - Scheduled task to start at 2026-02-17 08:30:00 and repeat every 4 hours
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:register_plugin:73 - Registering plugin: Latest news headlines and summaries. Use when the user wants news, headlines, or top stories. id=news
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:451 - Loaded plugin: plugins.News.plugin - NewsPlugin
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:414 - Skipping intermediate base class: SchedulerPlugin
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:414 - Skipping intermediate base class: SchedulerPlugin
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:419 - Loading plugin: plugins.Weather.plugin - WeatherPlugin
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:425 - __init__ signature for WeatherPlugin: (self, coreInst: core.coreInterface.CoreInterface)
+2026-02-17 01:27:34 | DEBUG    | plugins.Weather.plugin:__init__:20 - WeatherPlugin __init__...
+2026-02-17 01:27:34 | DEBUG    | plugins.Weather.plugin:__init__:22 - config_path: /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Weather/config.yml
+2026-02-17 01:27:34 | DEBUG    | plugins.Weather.plugin:__init__:27 - WeatherPlugin config: {'id': 'weather', 'tasks': {'fetch_weather': {'type': 'fixed', 'frequency': 'daily', 'day_of_week': 'monday', 'day_of_month': 15, 'month': 5, 'time': '08:00:00'}}, 'city': '北京', 'district': '大兴', 'api_key': '977700b6202349e208629ae14f1771d2', 'description': 'This plugin retrieves the current weather and weather forecast for specified locations. It provides detailed information including temperature, humidity, weather conditions, wind direction, wind power, and air quality index (AQI). This plugin can be used to provide users with real-time weather updates and forecasts for any city.', 'keywords': ['weather', 'forecast', 'temperature', 'humidity', 'rain', 'snow', 'sunny', 'cloudy', 'storm', 'wind', 'air quality', 'AQI', 'will it rain', 'is it going to rain', 'how hot is it', 'how cold is it', "what's the weather like", 'current weather', "today's weather", "tomorrow's weather", 'weekly weather', 'weather report', 'do I need an umbrella', 'is it snowing', 'is it windy'], 'parameters': [{'name': 'city', 'type': 'string', 'description': "The name of the city for which the weather forecast is retrieved. For example, '北京' for Beijing."}, {'name': 'district', 'type': 'string', 'description': "The name of the district within the city for which the weather forecast is retrieved. For example, '大兴' for Daxing."}]}
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:431 - Calling initialize for plugin: plugins.Weather.plugin - WeatherPlugin
+2026-02-17 01:27:34 | DEBUG    | plugins.Weather.plugin:initialize:84 - Initializing Weather plugin
+2026-02-17 01:27:34 | DEBUG    | base.SchedulerPlugin:initialize:25 - Initializing SchedulerPlugin plugin
+2026-02-17 01:27:34 | DEBUG    | base.BasePlugin:initialize:34 - Initializing plugin: This plugin retrieves the current weather and weather forecast for specified locations. It provides detailed information including temperature, humidity, weather conditions, wind direction, wind power, and air quality index (AQI). This plugin can be used to provide users with real-time weather updates and forecasts for any city.
+2026-02-17 01:27:34 | DEBUG    | base.SchedulerPlugin:schedule_tasks_from_config:137 - Scheduling tasks from config: {'id': 'weather', 'tasks': {'fetch_weather': {'type': 'fixed', 'frequency': 'daily', 'day_of_week': 'monday', 'day_of_month': 15, 'month': 5, 'time': '08:00:00'}}, 'city': '北京', 'district': '大兴', 'api_key': '977700b6202349e208629ae14f1771d2', 'description': 'This plugin retrieves the current weather and weather forecast for specified locations. It provides detailed information including temperature, humidity, weather conditions, wind direction, wind power, and air quality index (AQI). This plugin can be used to provide users with real-time weather updates and forecasts for any city.', 'keywords': ['weather', 'forecast', 'temperature', 'humidity', 'rain', 'snow', 'sunny', 'cloudy', 'storm', 'wind', 'air quality', 'AQI', 'will it rain', 'is it going to rain', 'how hot is it', 'how cold is it', "what's the weather like", 'current weather', "today's weather", "tomorrow's weather", 'weekly weather', 'weather report', 'do I need an umbrella', 'is it snowing', 'is it windy'], 'parameters': [{'name': 'city', 'type': 'string', 'description': "The name of the city for which the weather forecast is retrieved. For example, '北京' for Beijing."}, {'name': 'district', 'type': 'string', 'description': "The name of the district within the city for which the weather forecast is retrieved. For example, '大兴' for Daxing."}]}
+2026-02-17 01:27:34 | DEBUG    | base.SchedulerPlugin:schedule_fixed_task:95 - Scheduled daily task at 08:00:00
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:register_plugin:73 - Registering plugin: Current weather and forecast for a location. Use when the user asks about weather, temperature, or forecast. id=weather
+2026-02-17 01:27:34 | DEBUG    | base.PluginManager:load_plugins:451 - Loaded plugin: plugins.Weather.plugin - WeatherPlugin
+2026-02-17 01:27:34 | INFO     | __main__:_component_log:78 - [plugin] loaded 4 plugin(s)
+2026-02-17 01:27:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:27:34 | DEBUG    | core.result_viewer:start_report_server:252 - Result viewer: report server started on %s:%s
+2026-02-17 01:27:34 | INFO     | __main__:_component_log:78 - [result_viewer] report server on port 9001 (HTTP)
+2026-02-17 01:27:34 | DEBUG    | __main__:run:1672 - Starting LLM manager...
+2026-02-17 01:27:34 | DEBUG    | llm.llmService:start_llama_cpp_server:156 - model path /Users/shileipeng/Documents/mygithub/HomeClaw/models/bge-m3-Q5_K_M.gguf
+2026-02-17 01:27:34 | DEBUG    | llm.llmService:start_llama_cpp_server:160 - Full model path: /Users/shileipeng/Documents/mygithub/HomeClaw/models/bge-m3-Q5_K_M.gguf
+2026-02-17 01:27:34 | DEBUG    | llm.llmService:start_llama_cpp_server:202 - Pooling is enabled.
+2026-02-17 01:27:34 | DEBUG    | llm.llmService:start_llama_cpp_server:209 - llama.cpp server: /Users/shileipeng/Documents/mygithub/HomeClaw/llama.cpp-master/mac/llama-server (folder: mac), cmd: /Users/shileipeng/Documents/mygithub/HomeClaw/llama.cpp-master/mac/llama-server -m /Users/shileipeng/Documents/mygithub/HomeClaw/models/bge-m3-Q5_K_M.gguf --ctx-size 8192 --predict 8192 --temp 0.7 --threads 8 --host 127.0.0.1 --port 5066 --embedding --pooling cls -ub 8192
+2026-02-17 01:27:34 | DEBUG    | llm.llmService:start_llama_cpp_server:217 - Started LLM process on 127.0.0.1:5066 with PID 43788 (folder: mac), model: bge-m3-Q5_K_M.gguf
+2026-02-17 01:27:34 | DEBUG    | llm.llmService:run_embedding_llm:249 - Running Embedding services!
+2026-02-17 01:27:34 | DEBUG    | llm.llmService:start_llama_cpp_server:156 - model path /Users/shileipeng/Documents/mygithub/HomeClaw/models/Qwen3-14B-Q5_K_M.gguf
+2026-02-17 01:27:34 | DEBUG    | llm.llmService:start_llama_cpp_server:160 - Full model path: /Users/shileipeng/Documents/mygithub/HomeClaw/models/Qwen3-14B-Q5_K_M.gguf
+2026-02-17 01:27:34 | DEBUG    | llm.llmService:start_llama_cpp_server:199 - Function calling is enabled.
+2026-02-17 01:27:34 | DEBUG    | llm.llmService:start_llama_cpp_server:209 - llama.cpp server: /Users/shileipeng/Documents/mygithub/HomeClaw/llama.cpp-master/mac/llama-server (folder: mac), cmd: /Users/shileipeng/Documents/mygithub/HomeClaw/llama.cpp-master/mac/llama-server -m /Users/shileipeng/Documents/mygithub/HomeClaw/models/Qwen3-14B-Q5_K_M.gguf --ctx-size 32768 --predict 8192 --temp 0.7 --threads 8 --host 127.0.0.1 --port 5023 --repeat-penalty 1.5 --jinja
+2026-02-17 01:27:34 | DEBUG    | llm.llmService:start_llama_cpp_server:217 - Started LLM process on 127.0.0.1:5023 with PID 43789 (folder: mac), model: Qwen3-14B-Q5_K_M.gguf
+2026-02-17 01:27:34 | DEBUG    | llm.llmService:run_main_llm:288 - Running Main LLM Server Qwen3-14B-Q5_K_M on 127.0.0.1:5023
+2026-02-17 01:27:34 | DEBUG    | __main__:run:1674 - LLM manager started!
+2026-02-17 01:27:52 | DEBUG    | __main__:check_permission:1584 - User:  + User(name='WebChat User', email=[], im=[], phone=[], permissions=[], id='webchat_user')
+2026-02-17 01:27:52 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 01:27:52 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 01:27:52 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 01:27:52 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 01:27:52 | DEBUG    | base.util:embedding:852 - LlamaCppEmbedding.embed: text: 你好
+2026-02-17 01:27:52 | DEBUG    | base.util:embedding:856 - LlamaCppEmbedding.embed: summarizedtext: 你好
+2026-02-17 01:27:52 | DEBUG    | base.util:embedding:875 - Embedding URL: http://127.0.0.1:5066/v1/embeddings
+2026-02-17 01:27:53 | DEBUG    | memory.cognee_adapter:add:134 - Cognee add/cognify: %s
+2026-02-17 01:27:53 | INFO     | __main__:_component_log:78 - [memory] add: user_id=webchat_user text=你好...
+2026-02-17 01:27:53 | DEBUG    | __main__:process_memory_queue:1375 - User input added to memory: 你好
+2026-02-17 01:27:55 | WARNING  | base.skills:search_skills_by_query:287 - Skill vector search failed: %s
+2026-02-17 01:27:55 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 01:27:55 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 01:27:55 | INFO     | __main__:_component_log:78 - [skills] loaded 2 skill(s) from /Users/shileipeng/Documents/mygithub/HomeClaw/config/skills
+2026-02-17 01:27:57 | DEBUG    | memory.cognee_adapter:search:152 - Cognee search: %s
+2026-02-17 01:27:57 | INFO     | __main__:_component_log:78 - [memory] search: user_id=webchat_user limit=10 results=0
+2026-02-17 01:27:57 | DEBUG    | __main__:answer_from_memory:2133 - Start to generate the response for user input: 你好
+2026-02-17 01:27:57 | INFO     | __main__:answer_from_memory:2134 - Main LLM input (user query): %s
+2026-02-17 01:28:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:29:07 | INFO     | __main__:answer_from_memory:2216 - Main LLM output (final response): %s
+2026-02-17 01:29:07 | DEBUG    | memory.chat.chat:add:58 - Added chat history to db with id: 0878de68-32d1-4315-9f3a-22acf84d7aab, app_id: homeclaw, user_name: WebChat User, user_id: webchat_user, session_id: webchat_user
+2026-02-17 01:29:07 | INFO     | __main__:process_text_message:1552 - Core: response generated in 75.2s for user=webchat_user
+2026-02-17 01:29:07 | DEBUG    | __main__:process_text_message:1553 - LLM handling time: 75.18332695960999 seconds
+2026-02-17 01:29:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:30:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:31:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:32:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:33:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:34:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:35:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:36:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:37:33 | INFO     | base.PluginManager:register_external_via_api:169 - Registered external plugin via API: %s
+2026-02-17 01:37:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:38:21 | DEBUG    | __main__:check_permission:1584 - User:  + User(name='WebChat User', email=[], im=[], phone=[], permissions=[], id='webchat_user')
+2026-02-17 01:38:21 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 01:38:21 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 01:38:21 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 01:38:21 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 01:38:22 | DEBUG    | base.util:embedding:852 - LlamaCppEmbedding.embed: text: Open https://www.sina.com.cn in the browser.
+2026-02-17 01:38:22 | DEBUG    | base.util:embedding:856 - LlamaCppEmbedding.embed: summarizedtext: Open https://www.sina.com.cn in the browser.
+2026-02-17 01:38:22 | DEBUG    | base.util:embedding:875 - Embedding URL: http://127.0.0.1:5066/v1/embeddings
+2026-02-17 01:38:28 | DEBUG    | memory.cognee_adapter:add:134 - Cognee add/cognify: %s
+2026-02-17 01:38:28 | INFO     | __main__:_component_log:78 - [memory] add: user_id=webchat_user text=Open https://www.sina.com.cn in the browser....
+2026-02-17 01:38:28 | DEBUG    | __main__:process_memory_queue:1375 - User input added to memory: Open https://www.sina.com.cn in the browser.
+2026-02-17 01:38:30 | WARNING  | base.skills:search_skills_by_query:287 - Skill vector search failed: %s
+2026-02-17 01:38:30 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 01:38:30 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 01:38:30 | INFO     | __main__:_component_log:78 - [skills] loaded 2 skill(s) from /Users/shileipeng/Documents/mygithub/HomeClaw/config/skills
+2026-02-17 01:38:31 | DEBUG    | memory.cognee_adapter:search:152 - Cognee search: %s
+2026-02-17 01:38:31 | INFO     | __main__:_component_log:78 - [memory] search: user_id=webchat_user limit=10 results=0
+2026-02-17 01:38:31 | DEBUG    | __main__:answer_from_memory:2133 - Start to generate the response for user input: Open https://www.sina.com.cn in the browser.
+2026-02-17 01:38:31 | INFO     | __main__:answer_from_memory:2134 - Main LLM input (user query): %s
+2026-02-17 01:38:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:39:27 | INFO     | __main__:_component_log:78 - [tools] tool web_search(['query', 'count'])
+2026-02-17 01:39:30 | INFO     | __main__:answer_from_memory:2216 - Main LLM output (final response): %s
+2026-02-17 01:39:30 | DEBUG    | memory.chat.chat:add:58 - Added chat history to db with id: f8f883a1-407c-48e1-8859-5ac5b19d03d3, app_id: homeclaw, user_name: WebChat User, user_id: webchat_user, session_id: webchat_user
+2026-02-17 01:39:30 | INFO     | __main__:process_text_message:1552 - Core: response generated in 68.6s for user=webchat_user
+2026-02-17 01:39:30 | DEBUG    | __main__:process_text_message:1553 - LLM handling time: 68.60581398010254 seconds
+2026-02-17 01:39:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:40:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:41:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:42:20 | DEBUG    | __main__:check_permission:1584 - User:  + User(name='WebChat User', email=[], im=[], phone=[], permissions=[], id='webchat_user')
+2026-02-17 01:42:20 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 01:42:20 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 01:42:20 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 01:42:20 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 01:42:20 | DEBUG    | base.util:embedding:852 - LlamaCppEmbedding.embed: text: Update the canvas with title Hello and a button OK.
+2026-02-17 01:42:20 | DEBUG    | base.util:embedding:856 - LlamaCppEmbedding.embed: summarizedtext: Update the canvas with title Hello and a button OK.
+2026-02-17 01:42:20 | DEBUG    | base.util:embedding:875 - Embedding URL: http://127.0.0.1:5066/v1/embeddings
+2026-02-17 01:42:21 | DEBUG    | memory.cognee_adapter:add:134 - Cognee add/cognify: %s
+2026-02-17 01:42:21 | INFO     | __main__:_component_log:78 - [memory] add: user_id=webchat_user text=Update the canvas with title Hello and a button OK....
+2026-02-17 01:42:21 | DEBUG    | __main__:process_memory_queue:1375 - User input added to memory: Update the canvas with title Hello and a button OK.
+2026-02-17 01:42:23 | WARNING  | base.skills:search_skills_by_query:287 - Skill vector search failed: %s
+2026-02-17 01:42:23 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 01:42:23 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 01:42:23 | INFO     | __main__:_component_log:78 - [skills] loaded 2 skill(s) from /Users/shileipeng/Documents/mygithub/HomeClaw/config/skills
+2026-02-17 01:42:24 | DEBUG    | memory.cognee_adapter:search:152 - Cognee search: %s
+2026-02-17 01:42:24 | INFO     | __main__:_component_log:78 - [memory] search: user_id=webchat_user limit=10 results=0
+2026-02-17 01:42:24 | DEBUG    | __main__:answer_from_memory:2133 - Start to generate the response for user input: Update the canvas with title Hello and a button OK.
+2026-02-17 01:42:24 | INFO     | __main__:answer_from_memory:2134 - Main LLM input (user query): %s
+2026-02-17 01:42:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:43:28 | DEBUG    | base.util:openai_chat_completion:721 - Message Response from LLM: To update your canvas (assuming you meant the webpage content), here's how:
+
+**HTML**
+```html
+<h1>Hello</h1>
+<button>OK</button>
+```
+
+This adds:
+- A heading (`<h1>` tag) with text **"Hello."**
+- An `<input type="submit">` button labeled "Ok."
+
+Let me know if you want this styled or placed within a specific container.
+2026-02-17 01:43:28 | INFO     | __main__:_component_log:78 - [tools] tool sessions_spawn(['task', 'llm_name', 'capability'])
+2026-02-17 01:43:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:43:36 | INFO     | __main__:answer_from_memory:2216 - Main LLM output (final response): %s
+2026-02-17 01:43:36 | DEBUG    | memory.chat.chat:add:58 - Added chat history to db with id: 3dfcba6e-173c-4084-9ff9-8e55ee36366c, app_id: homeclaw, user_name: WebChat User, user_id: webchat_user, session_id: webchat_user
+2026-02-17 01:43:36 | INFO     | __main__:process_text_message:1552 - Core: response generated in 76.5s for user=webchat_user
+2026-02-17 01:43:36 | DEBUG    | __main__:process_text_message:1553 - LLM handling time: 76.46624064445496 seconds
+2026-02-17 01:44:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:45:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:46:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:47:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:48:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:48:56 | DEBUG    | __main__:check_permission:1584 - User:  + User(name='WebChat User', email=[], im=[], phone=[], permissions=[], id='webchat_user')
+2026-02-17 01:48:56 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 01:48:56 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 01:48:56 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 01:48:56 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 01:48:56 | DEBUG    | base.util:embedding:852 - LlamaCppEmbedding.embed: text: Open https://www.baidu.com in the browser.
+2026-02-17 01:48:56 | DEBUG    | base.util:embedding:856 - LlamaCppEmbedding.embed: summarizedtext: Open https://www.baidu.com in the browser.
+2026-02-17 01:48:56 | DEBUG    | base.util:embedding:875 - Embedding URL: http://127.0.0.1:5066/v1/embeddings
+2026-02-17 01:48:57 | DEBUG    | memory.cognee_adapter:add:134 - Cognee add/cognify: %s
+2026-02-17 01:48:57 | INFO     | __main__:_component_log:78 - [memory] add: user_id=webchat_user text=Open https://www.baidu.com in the browser....
+2026-02-17 01:48:57 | DEBUG    | __main__:process_memory_queue:1375 - User input added to memory: Open https://www.baidu.com in the browser.
+2026-02-17 01:48:59 | WARNING  | base.skills:search_skills_by_query:287 - Skill vector search failed: %s
+2026-02-17 01:48:59 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 01:48:59 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 01:48:59 | INFO     | __main__:_component_log:78 - [skills] loaded 2 skill(s) from /Users/shileipeng/Documents/mygithub/HomeClaw/config/skills
+2026-02-17 01:49:00 | DEBUG    | memory.cognee_adapter:search:152 - Cognee search: %s
+2026-02-17 01:49:00 | INFO     | __main__:_component_log:78 - [memory] search: user_id=webchat_user limit=10 results=0
+2026-02-17 01:49:00 | DEBUG    | __main__:answer_from_memory:2133 - Start to generate the response for user input: Open https://www.baidu.com in the browser.
+2026-02-17 01:49:00 | INFO     | __main__:answer_from_memory:2134 - Main LLM input (user query): %s
+2026-02-17 01:49:03 | INFO     | __main__:_component_log:78 - [plugin] routed from model: plugin_id=homeclaw-browser
+2026-02-17 01:49:03 | INFO     | __main__:_component_log:78 - [tools] tool route_to_plugin(['plugin_id'])
+2026-02-17 01:49:03 | INFO     | __main__:process_text_message:1552 - Core: response generated in 6.8s for user=webchat_user
+2026-02-17 01:49:03 | DEBUG    | __main__:process_text_message:1553 - LLM handling time: 6.817986011505127 seconds
+2026-02-17 01:49:03 | DEBUG    | __main__:process_response_queue:1390 - Attempting to send response to http://inbound:0/get_response
+2026-02-17 01:49:03 | ERROR    | __main__:process_response_queue:1406 - Unexpected error when sending to http://inbound:0/get_response: Server disconnected without sending a response.
+2026-02-17 01:49:34 | WARNING  | base.PluginManager:_load_plugin_manifest:47 - Failed to load manifest /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Mail/plugin.yaml: mapping values are not allowed here
+  in "<unicode string>", line 4, column 151:
+     ... use configured contacts. Use for: send email, email John, write  ... 
+                                         ^
+2026-02-17 01:50:31 | DEBUG    | llm.llmService:stop_llama_cpp_process:83 - Stopped LLM process on 127.0.0.1:5066
+2026-02-17 01:50:31 | DEBUG    | llm.llmService:stop_llama_cpp_process:83 - Stopped LLM process on 127.0.0.1:5023
+2026-02-17 01:50:31 | DEBUG    | llm.llmService:stop_all_apps:450 - LLM Service Stopping all apps...
+2026-02-17 01:50:32 | DEBUG    | llm.llmService:stop_all_apps:450 - LLM Service Stopping all apps...
+2026-02-17 01:50:32 | DEBUG    | llm.llmService:stop_all_apps:450 - LLM Service Stopping all apps...
+2026-02-17 01:50:34 | DEBUG    | base.PluginManager:hot_reload:502 - Hot reload thread stopped.
+2026-02-17 01:50:34 | DEBUG    | base.SchedulerPlugin:cleanup:173 - SchedulerPlugin cleanup done!
+2026-02-17 01:50:34 | DEBUG    | base.PluginManager:unload_plugin:474 - Unloaded plugin: plugins.Weather.plugin
+2026-02-17 01:50:34 | DEBUG    | base.PluginManager:deinitialize_plugins:522 - Unloaded plugin: plugins.Weather.plugin
+2026-02-17 01:50:34 | DEBUG    | base.PluginManager:unload_plugin:474 - Unloaded plugin: plugins.Mail.plugin
+2026-02-17 01:50:34 | DEBUG    | base.PluginManager:deinitialize_plugins:522 - Unloaded plugin: plugins.Mail.plugin
+2026-02-17 01:50:34 | DEBUG    | base.SchedulerPlugin:cleanup:173 - SchedulerPlugin cleanup done!
+2026-02-17 01:50:34 | DEBUG    | base.PluginManager:unload_plugin:474 - Unloaded plugin: plugins.News.plugin
+2026-02-17 01:50:34 | DEBUG    | base.PluginManager:deinitialize_plugins:522 - Unloaded plugin: plugins.News.plugin
+2026-02-17 01:50:43 | DEBUG    | llm.llmService:stop_all_apps:450 - LLM Service Stopping all apps...
+2026-02-17 01:50:44 | DEBUG    | llm.llmService:stop_all_apps:450 - LLM Service Stopping all apps...
+2026-02-17 01:50:44 | DEBUG    | llm.llmService:stop_all_apps:450 - LLM Service Stopping all apps...
+2026-02-17 01:50:44 | DEBUG    | base.SchedulerPlugin:cleanup:173 - SchedulerPlugin cleanup done!
+2026-02-17 01:50:44 | DEBUG    | base.PluginManager:unload_plugin:474 - Unloaded plugin: plugins.Quotes.plugin
+2026-02-17 01:50:44 | DEBUG    | base.PluginManager:deinitialize_plugins:522 - Unloaded plugin: plugins.Quotes.plugin
+2026-02-17 01:50:44 | DEBUG    | base.PluginManager:deinitialize_plugins:529 - Plugins deinitialized and hot reload thread stopped.
+2026-02-17 01:50:44 | DEBUG    | __main__:stop_chroma_client:1779 - ChromaDB client disconnected
+2026-02-17 02:13:41 | DEBUG    | llm.llmService:stop_all_apps:450 - LLM Service Stopping all apps...
+2026-02-17 02:13:41 | DEBUG    | base.PluginManager:deinitialize_plugins:529 - Plugins deinitialized and hot reload thread stopped.
+2026-02-17 02:13:41 | DEBUG    | __main__:stop_chroma_client:1779 - ChromaDB client disconnected
+2026-02-17 02:13:48 | DEBUG    | __main__:__init__:166 - Before initialize chat history
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 02:13:48 | DEBUG    | __main__:__init__:168 - After initialize chat history
+2026-02-17 02:13:48 | DEBUG    | __main__:__init__:179 - Before initialize orchestrator
+2026-02-17 02:13:48 | DEBUG    | core.tam:__init__:44 - TAM initializing...
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 02:13:48 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 02:13:48 | DEBUG    | core.tam:__init__:65 - TAM initialized!
+2026-02-17 02:13:48 | DEBUG    | __main__:__init__:181 - After initialize orchestrator
+2026-02-17 02:13:48 | DEBUG    | __main__:run:1613 - core is running!
+2026-02-17 02:13:48 | DEBUG    | __main__:run:1615 - Running core on 0.0.0.0:9000
+2026-02-17 02:13:48 | DEBUG    | __main__:initialize:571 - core initializing...
+2026-02-17 02:13:48 | DEBUG    | __main__:start_chroma_client:1773 - ChromaDB client created
+2026-02-17 02:13:50 | DEBUG    | __main__:initialize:637 - Memory backend: Cognee
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | tools.builtin:_register_browser_tools_if_available:2638 - Browser tools skipped (tools.browser_enabled=false). Use fetch_url for web content.
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | base.tools:register:83 - Registered tool: %s
+2026-02-17 02:13:50 | DEBUG    | __main__:initialize:1015 - core initialized and all the endpoints are registered!
+2026-02-17 02:13:50 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 02:13:50 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 02:13:50 | DEBUG    | base.util:embedding:852 - LlamaCppEmbedding.embed: text: example Example skill to show SKILL.md format. Does nothing by itself; the model can refer to it when use_skills is enabled. This is the optional body. You can add usage notes or instructions here. The model will see the name and description in the "Available skills" block; body can be included by changing the loader to include_body=True.
+2026-02-17 02:13:50 | DEBUG    | base.util:embedding:856 - LlamaCppEmbedding.embed: summarizedtext: example Example skill to show SKILL.md format. Does nothing by itself; the model can refer to it when use_skills is enabled. This is the optional body. You can add usage notes or instructions here. The model will see the name and description in the "Available skills" block; body can be included by changing the loader to include_body=True.
+2026-02-17 02:13:50 | DEBUG    | base.util:embedding:875 - Embedding URL: http://127.0.0.1:5066/v1/embeddings
+2026-02-17 02:13:52 | DEBUG    | base.util:embedding:893 - Embedding error:Failed to get embedding from LLM
+2026-02-17 02:13:52 | DEBUG    | base.util:embedding:894 - Cannot connect to host 127.0.0.1:5066 ssl:default [Connect call failed ('127.0.0.1', 5066)]
+2026-02-17 02:13:52 | DEBUG    | base.util:embedding:852 - LlamaCppEmbedding.embed: text: social-media-agent Autonomous social media management for X/Twitter using only HomeClaw native tools. Use when a user wants to automate X posting, generate content, track engagement, or build an audience. Triggers on requests about tweets, social media strategy, X engagement, content calendars, or growing a following. No API keys required — uses browser automation and web_fetch. # Social Media Agent  Manage an X/Twitter account autonomously using only HomeClaw's built-in tools. No external APIs, no npm packages, no API keys needed.  ## Core Tools  - `browser` — Post tweets, engage with posts, take screenshots - `web_fetch` — Scrape profiles, trending topics, news for content - `sessions_spawn` — Run content generation in parallel - `cron` — Schedule regular posting and engagement - `memory_search` / files — Track what was posted, engagement stats  ## Posting a Tweet  1.
+2026-02-17 02:13:52 | DEBUG    | base.util:embedding:856 - LlamaCppEmbedding.embed: summarizedtext: social-media-agent Autonomous social media management for X/Twitter using only HomeClaw native tools. Use when a user wants to automate X posting, generate content, track engagement, or build an audience. Triggers on requests about tweets, social media strategy, X engagement, content calendars, or growing a following. No API keys required — uses browser automation and web_fetch. # Social Media Agent  Manage an X/Twitter account autonomously using only HomeClaw's built-in tools. No external APIs, no npm packages, no API keys needed.  ## Core Tools  - `browser` — Post tweets, engage with posts, take screenshots - `web_fetch` — Scrape profiles, trending topics, news for content - `sessions_spawn` — Run content generation in parallel - `cron` — Schedule regular posting and engagement - `memory_search` / files — Track what was posted, engagement stats  ## Posting a Tweet  1.
+2026-02-17 02:13:52 | DEBUG    | base.util:embedding:875 - Embedding URL: http://127.0.0.1:5066/v1/embeddings
+2026-02-17 02:13:52 | DEBUG    | base.util:embedding:893 - Embedding error:Failed to get embedding from LLM
+2026-02-17 02:13:52 | DEBUG    | base.util:embedding:894 - Cannot connect to host 127.0.0.1:5066 ssl:default [Connect call failed ('127.0.0.1', 5066)]
+2026-02-17 02:13:52 | INFO     | __main__:_component_log:78 - [skills] synced 0 skill(s) to vector store
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:419 - Loading plugin: plugins.Quotes.plugin - QuotePlugin
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:425 - __init__ signature for QuotePlugin: (self, coreInst: core.coreInterface.CoreInterface)
+2026-02-17 02:13:52 | DEBUG    | plugins.Quotes.plugin:__init__:28 - QuotePlugin __init__...
+2026-02-17 02:13:52 | DEBUG    | plugins.Quotes.plugin:__init__:30 - config_path: /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Quotes/config.yml
+2026-02-17 02:13:52 | DEBUG    | plugins.Quotes.plugin:__init__:35 - QuotePlugin config: {'tasks': {'generate_random_quote': {'type': 'random', 'interval_unit': 'hours', 'min_interval': 8, 'max_interval': 12}}, 'description': 'This plugin generates motivational and uplifting quotes based on chat histories using a language model (LLM). It is designed to detect user emotions, such as depression or sadness, and provide comforting and encouraging quotes to help improve their mood. The plugin can be used to offer emotional support and positivity to users during their conversations.'}
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:431 - Calling initialize for plugin: plugins.Quotes.plugin - QuotePlugin
+2026-02-17 02:13:52 | DEBUG    | plugins.Quotes.plugin:initialize:88 - Initializing Quotes plugin
+2026-02-17 02:13:52 | DEBUG    | base.SchedulerPlugin:initialize:25 - Initializing SchedulerPlugin plugin
+2026-02-17 02:13:52 | DEBUG    | base.BasePlugin:initialize:34 - Initializing plugin: This plugin generates motivational and uplifting quotes based on chat histories using a language model (LLM). It is designed to detect user emotions, such as depression or sadness, and provide comforting and encouraging quotes to help improve their mood. The plugin can be used to offer emotional support and positivity to users during their conversations.
+2026-02-17 02:13:52 | DEBUG    | base.SchedulerPlugin:schedule_tasks_from_config:137 - Scheduling tasks from config: {'tasks': {'generate_random_quote': {'type': 'random', 'interval_unit': 'hours', 'min_interval': 8, 'max_interval': 12}}, 'description': 'This plugin generates motivational and uplifting quotes based on chat histories using a language model (LLM). It is designed to detect user emotions, such as depression or sadness, and provide comforting and encouraging quotes to help improve their mood. The plugin can be used to offer emotional support and positivity to users during their conversations.'}
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:register_plugin:73 - Registering plugin: This plugin generates motivational and uplifting quotes based on chat histories using a language model (LLM). It is designed to detect user emotions, such as depression or sadness, and provide comforting and encouraging quotes to help improve their mood. The plugin can be used to offer emotional support and positivity to users during their conversations. id=thisplugingenerates
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:451 - Loaded plugin: plugins.Quotes.plugin - QuotePlugin
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:414 - Skipping intermediate base class: SchedulerPlugin
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:419 - Loading plugin: plugins.News.plugin - NewsPlugin
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:425 - __init__ signature for NewsPlugin: (self, coreInst: core.coreInterface.CoreInterface)
+2026-02-17 02:13:52 | DEBUG    | plugins.News.plugin:__init__:14 - NewsPlugin __init__...
+2026-02-17 02:13:52 | DEBUG    | plugins.News.plugin:__init__:16 - config_path: /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/News/config.yml
+2026-02-17 02:13:52 | DEBUG    | plugins.News.plugin:__init__:21 - NewsPlugin description: This plugin retrieves the latest news headlines and provides summaries of news articles based on specified categories, countries, sources, and keywords.
+2026-02-17 02:13:52 | DEBUG    | plugins.News.plugin:__init__:39 - NewsPlugin config: {'id': 'news', 'tasks': {'fetch_latest_news': {'type': 'repeated', 'interval_unit': 'hours', 'interval': 4, 'start_time': '08:30:00'}}, 'base_url': 'https://newsapi.org/v2/top-headlines', 'apiKey': '2d9c07650f22468990ce44f53a2d5bb7', 'country': 'us', 'category': 'business', 'sources': 'techcrunch', 'q': 'apple', 'description': 'This plugin retrieves the latest news headlines and provides summaries of news articles based on specified categories, countries, sources, and keywords.', 'keywords': ['news', 'headlines', 'latest news', 'breaking news', 'current events', 'news update', 'top stories', 'news summary', 'world news', 'local news', 'national news', 'international news', 'business news', 'tech news', 'sports news', 'entertainment news', 'science news', 'political news', 'health news', 'news today', 'news report', 'news article', 'news brief', 'news bulletin'], 'parameters': [{'name': 'country', 'type': 'string', 'description': "The country code for the news headlines. For example, 'us' for United States."}, {'name': 'category', 'type': 'string', 'description': "The category of news headlines. For example, 'business' for business news."}, {'name': 'sources', 'type': 'string', 'description': "The source of news headlines. For example, 'techcrunch' for TechCrunch."}]}
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:431 - Calling initialize for plugin: plugins.News.plugin - NewsPlugin
+2026-02-17 02:13:52 | DEBUG    | plugins.News.plugin:initialize:86 - Initializing News plugin
+2026-02-17 02:13:52 | DEBUG    | base.SchedulerPlugin:initialize:25 - Initializing SchedulerPlugin plugin
+2026-02-17 02:13:52 | DEBUG    | base.BasePlugin:initialize:34 - Initializing plugin: This plugin retrieves the latest news headlines and provides summaries of news articles based on specified categories, countries, sources, and keywords.
+2026-02-17 02:13:52 | DEBUG    | base.SchedulerPlugin:schedule_tasks_from_config:137 - Scheduling tasks from config: {'id': 'news', 'tasks': {'fetch_latest_news': {'type': 'repeated', 'interval_unit': 'hours', 'interval': 4, 'start_time': '08:30:00'}}, 'base_url': 'https://newsapi.org/v2/top-headlines', 'apiKey': '2d9c07650f22468990ce44f53a2d5bb7', 'country': 'us', 'category': 'business', 'sources': 'techcrunch', 'q': 'apple', 'description': 'This plugin retrieves the latest news headlines and provides summaries of news articles based on specified categories, countries, sources, and keywords.', 'keywords': ['news', 'headlines', 'latest news', 'breaking news', 'current events', 'news update', 'top stories', 'news summary', 'world news', 'local news', 'national news', 'international news', 'business news', 'tech news', 'sports news', 'entertainment news', 'science news', 'political news', 'health news', 'news today', 'news report', 'news article', 'news brief', 'news bulletin'], 'parameters': [{'name': 'country', 'type': 'string', 'description': "The country code for the news headlines. For example, 'us' for United States."}, {'name': 'category', 'type': 'string', 'description': "The category of news headlines. For example, 'business' for business news."}, {'name': 'sources', 'type': 'string', 'description': "The source of news headlines. For example, 'techcrunch' for TechCrunch."}]}
+2026-02-17 02:13:52 | DEBUG    | base.SchedulerPlugin:schedule_repeated_task:48 - Scheduled task to start at 2026-02-17 08:30:00 and repeat every 4 hours
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:register_plugin:73 - Registering plugin: Latest news headlines and summaries. Use when the user wants news, headlines, or top stories. id=news
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:451 - Loaded plugin: plugins.News.plugin - NewsPlugin
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:414 - Skipping intermediate base class: SchedulerPlugin
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:414 - Skipping intermediate base class: SchedulerPlugin
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:419 - Loading plugin: plugins.Weather.plugin - WeatherPlugin
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:425 - __init__ signature for WeatherPlugin: (self, coreInst: core.coreInterface.CoreInterface)
+2026-02-17 02:13:52 | DEBUG    | plugins.Weather.plugin:__init__:20 - WeatherPlugin __init__...
+2026-02-17 02:13:52 | DEBUG    | plugins.Weather.plugin:__init__:22 - config_path: /Users/shileipeng/Documents/mygithub/HomeClaw/plugins/Weather/config.yml
+2026-02-17 02:13:52 | DEBUG    | plugins.Weather.plugin:__init__:27 - WeatherPlugin config: {'id': 'weather', 'tasks': {'fetch_weather': {'type': 'fixed', 'frequency': 'daily', 'day_of_week': 'monday', 'day_of_month': 15, 'month': 5, 'time': '08:00:00'}}, 'city': '北京', 'district': '大兴', 'api_key': '977700b6202349e208629ae14f1771d2', 'description': 'This plugin retrieves the current weather and weather forecast for specified locations. It provides detailed information including temperature, humidity, weather conditions, wind direction, wind power, and air quality index (AQI). This plugin can be used to provide users with real-time weather updates and forecasts for any city.', 'keywords': ['weather', 'forecast', 'temperature', 'humidity', 'rain', 'snow', 'sunny', 'cloudy', 'storm', 'wind', 'air quality', 'AQI', 'will it rain', 'is it going to rain', 'how hot is it', 'how cold is it', "what's the weather like", 'current weather', "today's weather", "tomorrow's weather", 'weekly weather', 'weather report', 'do I need an umbrella', 'is it snowing', 'is it windy'], 'parameters': [{'name': 'city', 'type': 'string', 'description': "The name of the city for which the weather forecast is retrieved. For example, '北京' for Beijing."}, {'name': 'district', 'type': 'string', 'description': "The name of the district within the city for which the weather forecast is retrieved. For example, '大兴' for Daxing."}]}
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:431 - Calling initialize for plugin: plugins.Weather.plugin - WeatherPlugin
+2026-02-17 02:13:52 | DEBUG    | plugins.Weather.plugin:initialize:84 - Initializing Weather plugin
+2026-02-17 02:13:52 | DEBUG    | base.SchedulerPlugin:initialize:25 - Initializing SchedulerPlugin plugin
+2026-02-17 02:13:52 | DEBUG    | base.BasePlugin:initialize:34 - Initializing plugin: This plugin retrieves the current weather and weather forecast for specified locations. It provides detailed information including temperature, humidity, weather conditions, wind direction, wind power, and air quality index (AQI). This plugin can be used to provide users with real-time weather updates and forecasts for any city.
+2026-02-17 02:13:52 | DEBUG    | base.SchedulerPlugin:schedule_tasks_from_config:137 - Scheduling tasks from config: {'id': 'weather', 'tasks': {'fetch_weather': {'type': 'fixed', 'frequency': 'daily', 'day_of_week': 'monday', 'day_of_month': 15, 'month': 5, 'time': '08:00:00'}}, 'city': '北京', 'district': '大兴', 'api_key': '977700b6202349e208629ae14f1771d2', 'description': 'This plugin retrieves the current weather and weather forecast for specified locations. It provides detailed information including temperature, humidity, weather conditions, wind direction, wind power, and air quality index (AQI). This plugin can be used to provide users with real-time weather updates and forecasts for any city.', 'keywords': ['weather', 'forecast', 'temperature', 'humidity', 'rain', 'snow', 'sunny', 'cloudy', 'storm', 'wind', 'air quality', 'AQI', 'will it rain', 'is it going to rain', 'how hot is it', 'how cold is it', "what's the weather like", 'current weather', "today's weather", "tomorrow's weather", 'weekly weather', 'weather report', 'do I need an umbrella', 'is it snowing', 'is it windy'], 'parameters': [{'name': 'city', 'type': 'string', 'description': "The name of the city for which the weather forecast is retrieved. For example, '北京' for Beijing."}, {'name': 'district', 'type': 'string', 'description': "The name of the district within the city for which the weather forecast is retrieved. For example, '大兴' for Daxing."}]}
+2026-02-17 02:13:52 | DEBUG    | base.SchedulerPlugin:schedule_fixed_task:95 - Scheduled daily task at 08:00:00
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:register_plugin:73 - Registering plugin: Current weather and forecast for a location. Use when the user asks about weather, temperature, or forecast. id=weather
+2026-02-17 02:13:52 | DEBUG    | base.PluginManager:load_plugins:451 - Loaded plugin: plugins.Weather.plugin - WeatherPlugin
+2026-02-17 02:13:52 | INFO     | __main__:_component_log:78 - [plugin] loaded 4 plugin(s)
+2026-02-17 02:13:52 | DEBUG    | core.result_viewer:start_report_server:252 - Result viewer: report server started on %s:%s
+2026-02-17 02:13:52 | INFO     | __main__:_component_log:78 - [result_viewer] report server on port 9001 (HTTP)
+2026-02-17 02:13:52 | DEBUG    | __main__:run:1672 - Starting LLM manager...
+2026-02-17 02:13:52 | DEBUG    | llm.llmService:start_llama_cpp_server:156 - model path /Users/shileipeng/Documents/mygithub/HomeClaw/models/bge-m3-Q5_K_M.gguf
+2026-02-17 02:13:52 | DEBUG    | llm.llmService:start_llama_cpp_server:160 - Full model path: /Users/shileipeng/Documents/mygithub/HomeClaw/models/bge-m3-Q5_K_M.gguf
+2026-02-17 02:13:52 | DEBUG    | llm.llmService:start_llama_cpp_server:202 - Pooling is enabled.
+2026-02-17 02:13:52 | DEBUG    | llm.llmService:start_llama_cpp_server:209 - llama.cpp server: /Users/shileipeng/Documents/mygithub/HomeClaw/llama.cpp-master/mac/llama-server (folder: mac), cmd: /Users/shileipeng/Documents/mygithub/HomeClaw/llama.cpp-master/mac/llama-server -m /Users/shileipeng/Documents/mygithub/HomeClaw/models/bge-m3-Q5_K_M.gguf --ctx-size 8192 --predict 8192 --temp 0.7 --threads 8 --host 127.0.0.1 --port 5066 --embedding --pooling cls -ub 8192
+2026-02-17 02:13:52 | DEBUG    | llm.llmService:start_llama_cpp_server:217 - Started LLM process on 127.0.0.1:5066 with PID 82461 (folder: mac), model: bge-m3-Q5_K_M.gguf
+2026-02-17 02:13:52 | DEBUG    | llm.llmService:run_embedding_llm:249 - Running Embedding services!
+2026-02-17 02:13:52 | DEBUG    | llm.llmService:start_llama_cpp_server:156 - model path /Users/shileipeng/Documents/mygithub/HomeClaw/models/Qwen3-14B-Q5_K_M.gguf
+2026-02-17 02:13:52 | DEBUG    | llm.llmService:start_llama_cpp_server:160 - Full model path: /Users/shileipeng/Documents/mygithub/HomeClaw/models/Qwen3-14B-Q5_K_M.gguf
+2026-02-17 02:13:52 | DEBUG    | llm.llmService:start_llama_cpp_server:199 - Function calling is enabled.
+2026-02-17 02:13:52 | DEBUG    | llm.llmService:start_llama_cpp_server:209 - llama.cpp server: /Users/shileipeng/Documents/mygithub/HomeClaw/llama.cpp-master/mac/llama-server (folder: mac), cmd: /Users/shileipeng/Documents/mygithub/HomeClaw/llama.cpp-master/mac/llama-server -m /Users/shileipeng/Documents/mygithub/HomeClaw/models/Qwen3-14B-Q5_K_M.gguf --ctx-size 32768 --predict 8192 --temp 0.7 --threads 8 --host 127.0.0.1 --port 5023 --repeat-penalty 1.5 --jinja
+2026-02-17 02:13:52 | DEBUG    | llm.llmService:start_llama_cpp_server:217 - Started LLM process on 127.0.0.1:5023 with PID 82462 (folder: mac), model: Qwen3-14B-Q5_K_M.gguf
+2026-02-17 02:13:52 | DEBUG    | llm.llmService:run_main_llm:288 - Running Main LLM Server Qwen3-14B-Q5_K_M on 127.0.0.1:5023
+2026-02-17 02:13:52 | DEBUG    | __main__:run:1674 - LLM manager started!
+2026-02-17 02:16:14 | INFO     | base.PluginManager:register_external_via_api:169 - Registered external plugin via API: %s
+2026-02-17 02:18:40 | DEBUG    | __main__:check_permission:1584 - User:  + User(name='WebChat User', email=[], im=[], phone=[], permissions=[], id='webchat_user')
+2026-02-17 02:18:40 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 02:18:40 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 02:18:40 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 02:18:40 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 02:18:40 | DEBUG    | base.util:embedding:852 - LlamaCppEmbedding.embed: text: 你好
+2026-02-17 02:18:40 | DEBUG    | base.util:embedding:856 - LlamaCppEmbedding.embed: summarizedtext: 你好
+2026-02-17 02:18:40 | DEBUG    | base.util:embedding:875 - Embedding URL: http://127.0.0.1:5066/v1/embeddings
+2026-02-17 02:18:41 | DEBUG    | memory.cognee_adapter:add:134 - Cognee add/cognify: %s
+2026-02-17 02:18:41 | INFO     | __main__:_component_log:78 - [memory] add: user_id=webchat_user text=你好...
+2026-02-17 02:18:41 | DEBUG    | __main__:process_memory_queue:1375 - User input added to memory: 你好
+2026-02-17 02:18:43 | WARNING  | base.skills:search_skills_by_query:287 - Skill vector search failed: %s
+2026-02-17 02:18:43 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 02:18:43 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 02:18:43 | INFO     | __main__:_component_log:78 - [skills] loaded 2 skill(s) from /Users/shileipeng/Documents/mygithub/HomeClaw/config/skills
+2026-02-17 02:18:44 | DEBUG    | memory.cognee_adapter:search:152 - Cognee search: %s
+2026-02-17 02:18:44 | INFO     | __main__:_component_log:78 - [memory] search: user_id=webchat_user limit=10 results=0
+2026-02-17 02:18:44 | DEBUG    | __main__:answer_from_memory:2139 - Start to generate the response for user input: 你好
+2026-02-17 02:18:44 | INFO     | __main__:answer_from_memory:2140 - Main LLM input (user query): %s
+2026-02-17 02:20:13 | INFO     | __main__:answer_from_memory:2222 - Main LLM output (final response): %s
+2026-02-17 02:20:13 | DEBUG    | memory.chat.chat:add:58 - Added chat history to db with id: af3ad13e-ee27-4c1a-96c3-0099e82189e5, app_id: homeclaw, user_name: WebChat User, user_id: webchat_user, session_id: webchat_user
+2026-02-17 02:20:13 | INFO     | __main__:process_text_message:1552 - Core: response generated in 93.0s for user=webchat_user
+2026-02-17 02:20:13 | DEBUG    | __main__:process_text_message:1553 - LLM handling time: 93.02751588821411 seconds
+2026-02-17 02:34:30 | DEBUG    | __main__:check_permission:1584 - User:  + User(name='WebChat User', email=[], im=[], phone=[], permissions=[], id='webchat_user')
+2026-02-17 02:34:30 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 02:34:30 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 02:34:30 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 02:34:30 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 02:34:30 | DEBUG    | base.util:embedding:852 - LlamaCppEmbedding.embed: text: Help me to open https://www.baidu.com in browser.
+2026-02-17 02:34:30 | DEBUG    | base.util:embedding:856 - LlamaCppEmbedding.embed: summarizedtext: Help me to open https://www.baidu.com in browser.
+2026-02-17 02:34:30 | DEBUG    | base.util:embedding:875 - Embedding URL: http://127.0.0.1:5066/v1/embeddings
+2026-02-17 02:34:31 | DEBUG    | memory.cognee_adapter:add:134 - Cognee add/cognify: %s
+2026-02-17 02:34:31 | INFO     | __main__:_component_log:78 - [memory] add: user_id=webchat_user text=Help me to open https://www.baidu.com in browser....
+2026-02-17 02:34:31 | DEBUG    | __main__:process_memory_queue:1375 - User input added to memory: Help me to open https://www.baidu.com in browser.
+2026-02-17 02:34:33 | WARNING  | base.skills:search_skills_by_query:287 - Skill vector search failed: %s
+2026-02-17 02:34:33 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 02:34:33 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 02:34:33 | INFO     | __main__:_component_log:78 - [skills] loaded 2 skill(s) from /Users/shileipeng/Documents/mygithub/HomeClaw/config/skills
+2026-02-17 02:34:34 | DEBUG    | memory.cognee_adapter:search:152 - Cognee search: %s
+2026-02-17 02:34:34 | INFO     | __main__:_component_log:78 - [memory] search: user_id=webchat_user limit=10 results=0
+2026-02-17 02:34:34 | DEBUG    | __main__:answer_from_memory:2139 - Start to generate the response for user input: Help me to open https://www.baidu.com in browser.
+2026-02-17 02:34:34 | INFO     | __main__:answer_from_memory:2140 - Main LLM input (user query): %s
+2026-02-17 02:35:06 | INFO     | __main__:_component_log:78 - [plugin] routed from model: plugin_id=homeclaw_browser
+2026-02-17 02:35:06 | INFO     | __main__:_component_log:78 - [tools] tool route_to_plugin(['plugin_id', 'capability_id', 'parameters'])
+2026-02-17 02:35:23 | INFO     | __main__:process_text_message:1552 - Core: response generated in 52.7s for user=webchat_user
+2026-02-17 02:35:23 | DEBUG    | __main__:process_text_message:1553 - LLM handling time: 52.71116304397583 seconds
+2026-02-17 02:35:46 | DEBUG    | __main__:check_permission:1584 - User:  + User(name='WebChat User', email=[], im=[], phone=[], permissions=[], id='webchat_user')
+2026-02-17 02:35:46 | DEBUG    | memory.database.database:setup_engine:74 - create session factory
+2026-02-17 02:35:46 | DEBUG    | memory.database.database:setup_engine:78 - session factory created
+2026-02-17 02:35:46 | DEBUG    | memory.database.database:create_tables:63 - All the tables created successfully.
+2026-02-17 02:35:46 | DEBUG    | memory.database.database:get_session:90 - Database Manager get session
+2026-02-17 02:35:46 | DEBUG    | base.util:embedding:852 - LlamaCppEmbedding.embed: text: Help me to open https://www.baidu.com in browser.
+2026-02-17 02:35:46 | DEBUG    | base.util:embedding:856 - LlamaCppEmbedding.embed: summarizedtext: Help me to open https://www.baidu.com in browser.
+2026-02-17 02:35:46 | DEBUG    | base.util:embedding:875 - Embedding URL: http://127.0.0.1:5066/v1/embeddings
+2026-02-17 02:35:46 | DEBUG    | memory.cognee_adapter:add:134 - Cognee add/cognify: %s
+2026-02-17 02:35:46 | INFO     | __main__:_component_log:78 - [memory] add: user_id=webchat_user text=Help me to open https://www.baidu.com in browser....
+2026-02-17 02:35:46 | DEBUG    | __main__:process_memory_queue:1375 - User input added to memory: Help me to open https://www.baidu.com in browser.
+2026-02-17 02:35:48 | WARNING  | base.skills:search_skills_by_query:287 - Skill vector search failed: %s
+2026-02-17 02:35:48 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 02:35:48 | DEBUG    | base.skills:load_skills:89 - Loaded skill: %s from %s
+2026-02-17 02:35:48 | INFO     | __main__:_component_log:78 - [skills] loaded 2 skill(s) from /Users/shileipeng/Documents/mygithub/HomeClaw/config/skills
+2026-02-17 02:35:49 | DEBUG    | memory.cognee_adapter:search:152 - Cognee search: %s
+2026-02-17 02:35:49 | INFO     | __main__:_component_log:78 - [memory] search: user_id=webchat_user limit=10 results=0
+2026-02-17 02:35:49 | DEBUG    | __main__:answer_from_memory:2139 - Start to generate the response for user input: Help me to open https://www.baidu.com in browser.
+2026-02-17 02:35:49 | INFO     | __main__:answer_from_memory:2140 - Main LLM input (user query): %s
+2026-02-17 02:35:51 | INFO     | __main__:_component_log:78 - [plugin] routed from model: plugin_id=homeclaw-browser
+2026-02-17 02:35:51 | INFO     | __main__:_component_log:78 - [tools] tool route_to_plugin(['plugin_id'])
+2026-02-17 02:35:51 | INFO     | __main__:process_text_message:1552 - Core: response generated in 5.4s for user=webchat_user
+2026-02-17 02:35:51 | DEBUG    | __main__:process_text_message:1553 - LLM handling time: 5.366136074066162 seconds
+2026-02-17 02:35:51 | DEBUG    | __main__:process_response_queue:1390 - Attempting to send response to http://inbound:0/get_response
+2026-02-17 02:35:52 | ERROR    | __main__:process_response_queue:1406 - Unexpected error when sending to http://inbound:0/get_response: Server disconnected without sending a response.

@@ -72,6 +72,14 @@ So:
 
 **Summary:** Skills register by **folder + SKILL.md** under skills_dir. Core discovers them at **request time** (load_skills → skills block in the prompt). The LLM selects by **matching the user request to the skill’s name/description** and either follows the workflow (using tools) or calls **run_skill(folder_name, script)**. Skills run when the LLM uses tools for the workflow or when it calls run_skill for a script.
 
+#### Can skills use plugins? Yes — via route_to_plugin
+
+Skills do **not** call tools or plugins directly. The **agent** (LLM) reads the skill's instructions and then **chooses which tools to call**. The tool set includes **route_to_plugin**(plugin_id, capability_id, parameters). So when a skill says "use the browser to navigate to X" or "open a URL in the browser," the agent can call **route_to_plugin**(plugin_id="homeclaw-browser", capability_id="browser_navigate", parameters={url: X}).
+
+**When browser (or canvas, nodes) are in a plugin:** If Core has **tools.browser_enabled: false** and the **homeclaw-browser** plugin is registered, there are no built-in browser_* tools — browser actions are provided by the plugin. The agent still has the **route_to_plugin** tool. The "Available plugins" block in the prompt lists each plugin with its description (e.g. "homeclaw-browser: Browser automation (navigate, snapshot, click, type), canvas, nodes…"). So the agent can still do everything a skill asks: it calls **route_to_plugin** with the right plugin_id and **capability_id** (e.g. browser_navigate, browser_snapshot, canvas_update, node_list). Skills that refer to "browser," "canvas," or "nodes" therefore **still work** — the agent uses route_to_plugin with the appropriate plugin and capability instead of a direct browser tool.
+
+**Summary:** Skills can "use" plugins because the agent has **route_to_plugin** and can invoke any registered plugin and capability. Skills don't need to be updated when a capability moves from a built-in tool to a plugin; the agent maps the skill's intent to the right tool call (route_to_plugin with the right capability_id).
+
 ### 2.3 Plugins
 
 - **Target:** One plugin = one focused feature (Weather, News, Quotes, Mail, etc.). Each plugin is **independent** and has its own **config.yml** (id, description) and Python **run()** method. The LLM selects by **description** (shown in the routing block) and calls **route_to_plugin(plugin_id)**.

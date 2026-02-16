@@ -25,6 +25,8 @@ from typing import Any, Dict, List, Optional
 
 from base.tools import ToolContext, ToolDefinition, ToolRegistry, ROUTING_RESPONSE_ALREADY_SENT
 from base.skills import get_skills_dir
+from base.workspace import get_workspace_dir, get_agent_memory_file_path
+from base.util import Util
 from loguru import logger
 import time as _time
 
@@ -439,6 +441,31 @@ async def _memory_get_executor(arguments: Dict[str, Any], context: ToolContext) 
     if mem is None:
         return json.dumps({"memory": None, "message": "Not found or memory not enabled."})
     return json.dumps({"memory": mem.get("memory"), "id": mem.get("id"), "metadata": {k: v for k, v in mem.items() if k not in ("memory", "id")}})
+
+
+async def _append_agent_memory_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Append content to AGENT_MEMORY.md (curated long-term memory). Only works when use_agent_memory_file is enabled."""
+    content = (arguments.get("content") or "").strip()
+    if not content:
+        return "Error: content is required"
+    try:
+        meta = Util().get_core_metadata()
+        if not getattr(meta, "use_agent_memory_file", False):
+            return json.dumps({"ok": False, "message": "AGENT_MEMORY.md is disabled (use_agent_memory_file: false). Enable in config/core.yml to use append_agent_memory."})
+        ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
+        agent_path = getattr(meta, "agent_memory_path", None) or ""
+        path = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=agent_path or None)
+        if path is None:
+            return json.dumps({"ok": False, "message": "AGENT_MEMORY path not configured."})
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("\n\n")
+            f.write(content)
+            f.write("\n")
+        return json.dumps({"ok": True, "message": f"Appended to {path.name}", "path": str(path)})
+    except Exception as e:
+        logger.exception("append_agent_memory failed")
+        return json.dumps({"ok": False, "message": str(e)})
 
 
 def _web_search_error_user_message(provider: str, status_code: Optional[int], body_text: str, fallback: str) -> str:
@@ -2992,6 +3019,20 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": [],
             },
             execute_async=_memory_get_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="append_agent_memory",
+            description="Append a note to the curated long-term memory file (AGENT_MEMORY.md). Use when the user says 'remember this' or to store important facts/preferences. This file is authoritative over RAG when both mention the same fact. Only works when use_agent_memory_file is true in config.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "The text to append (e.g. a fact, preference, or note)."},
+                },
+                "required": ["content"],
+            },
+            execute_async=_append_agent_memory_executor,
         )
     )
     registry.register(

@@ -1,0 +1,17 @@
+{
+  "name": "homeclaw-browser",
+  "version": "0.1.0",
+  "description": "HomeClaw external plugin: browser automation (Playwright), canvas, and nodes. Phase 1: browser capabilities.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "register": "node register.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0",
+    "ws": "^8.18.0"
+  }
+}

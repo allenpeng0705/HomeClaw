@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>HomeClaw Nodes</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 1rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.25rem; }
+    .section { margin-bottom: 1.5rem; }
+    .section h2 { font-size: 1rem; margin-bottom: 0.5rem; }
+    ul { list-style: none; padding: 0; }
+    li { padding: 0.5rem; border: 1px solid #eee; border-radius: 4px; margin-bottom: 0.5rem; }
+    button { padding: 0.5rem 1rem; margin-right: 0.5rem; margin-top: 0.5rem; }
+    .status { color: #666; font-size: 0.875rem; }
+    .empty { color: #999; }
+  </style>
+</head>
+<body>
+  <h1>HomeClaw Nodes</h1>
+  <div class="section">
+    <h2>Connected nodes</h2>
+    <p class="status">Nodes that connected via WebSocket and registered appear here. The agent can call node_list and node_command.</p>
+    <ul id="nodeList">
+      <li class="empty">Loading…</li>
+    </ul>
+    <button type="button" id="refresh">Refresh</button>
+  </div>
+  <div class="section">
+    <h2>Connect as test node</h2>
+    <p class="status">Register a test node so the agent can send commands. Commands will be echoed back with a placeholder result.</p>
+    <input type="text" id="nodeId" value="test-node-1" placeholder="Node ID" />
+    <button type="button" id="connect">Connect as node</button>
+    <button type="button" id="disconnect" disabled>Disconnect</button>
+    <p id="nodeStatus" class="status"></p>
+  </div>
+
+  <script>
+    const nodeListEl = document.getElementById('nodeList');
+    const refreshBtn = document.getElementById('refresh');
+    const nodeIdInput = document.getElementById('nodeId');
+    const connectBtn = document.getElementById('connect');
+    const disconnectBtn = document.getElementById('disconnect');
+    const nodeStatusEl = document.getElementById('nodeStatus');
+
+    function base() {
+      return window.location.origin.replace(/^http/, 'ws');
+    }
+
+    async function loadNodes() {
+      try {
+        const res = await fetch('/api/nodes');
+        const list = await res.json();
+        if (list.length === 0) {
+          nodeListEl.innerHTML = '<li class="empty">No nodes connected.</li>';
+        } else {
+          nodeListEl.innerHTML = list.map(n => '<li><strong>' + escapeHtml(n.node_id) + '</strong>: ' + (n.capabilities || []).join(', ') + '</li>').join('');
+        }
+      } catch (e) {
+        nodeListEl.innerHTML = '<li class="empty">Error loading nodes.</li>';
+      }
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    refreshBtn.addEventListener('click', loadNodes);
+    loadNodes();
+    setInterval(loadNodes, 5000);
+
+    let nodeWs = null;
+    connectBtn.addEventListener('click', () => {
+      if (nodeWs) return;
+      const nodeId = (nodeIdInput.value || '').trim() || 'test-node-1';
+      const url = base() + '/nodes-ws';
+      nodeStatusEl.textContent = 'Connecting…';
+      nodeWs = new WebSocket(url);
+      nodeWs.onopen = () => {
+        nodeWs.send(JSON.stringify({ type: 'register', node_id: nodeId, capabilities: ['canvas', 'screen', 'camera', 'location'] }));
+      };
+      nodeWs.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'registered') {
+            nodeStatusEl.textContent = 'Connected as ' + nodeId;
+            connectBtn.disabled = true;
+            disconnectBtn.disabled = false;
+            loadNodes();
+          }
+          if (msg.type === 'command') {
+            const result = { type: 'command_result', id: msg.id, payload: { success: true, text: 'Echo: ' + msg.command + (msg.params ? ' ' + JSON.stringify(msg.params) : '') } };
+            nodeWs.send(JSON.stringify(result));
+          }
+        } catch (e) {}
+      };
+      nodeWs.onclose = () => {
+        nodeWs = null;
+        nodeStatusEl.textContent = 'Disconnected';
+        connectBtn.disabled = false;
+        disconnectBtn.disabled = true;
+        loadNodes();
+      };
+    });
+
+    disconnectBtn.addEventListener('click', () => {
+      if (nodeWs) {
+        nodeWs.close();
+        nodeWs = null;
+      }
+    });
+  </script>
+</body>
+</html>

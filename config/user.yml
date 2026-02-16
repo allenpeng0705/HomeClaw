@@ -8,9 +8,12 @@
 # For Email: add addresses to email:. For Phone/SMS: add numbers to phone:.
 # permissions: e.g. [IM, EMAIL, PHONE] or [] to allow all.
 users:
-  - id: HomeClaw
-    name: HomeClaw
+  - id: webchat_user
+    name: WebChat User
+  - id: AllenPeng
+    name: AllenPeng
     email: []
     im: ['matrix:@pengshilei:matrix.org']
     phone: []
     permissions: []
+

@@ -23,14 +23,42 @@ profile:
 use_workspace_bootstrap: true
 # Which workspace dir to load (e.g. config/workspace_day vs config/workspace_night for day/night agents)
 workspace_dir: config/workspace
+# Optional: inject curated long-term memory from a single Markdown file (AGENT_MEMORY.md). See docs_design/SessionAndDualMemoryDesign.md.
+use_agent_memory_file: true
+agent_memory_path: ""   # empty = workspace_dir/AGENT_MEMORY.md; or set path relative to project or absolute
+# Session management: pruning, lifecycle, API, dmScope (OpenClaw-compatible). See docs_design/SessionAndDualMemoryDesign.md.
+session:
+  # How direct messages are grouped (same as OpenClaw dmScope). Aligns with https://docs.openclaw.ai/concepts/session
+  dm_scope: main              # main | per-peer | per-channel-peer | per-account-channel-peer
+  # main (default): all DMs share one session for continuity. per-peer: isolate by sender id across channels.
+  # per-channel-peer: isolate by channel + sender (recommended for multi-user inboxes).
+  # per-account-channel-peer: isolate by account + channel + sender (multi-account inboxes).
+  identity_links: {}          # optional: map canonical id -> list of provider-prefixed peer ids so same person shares DM across channels
+  # e.g. { "alice": ["telegram:123", "discord:456"] } — then telegram:123 and discord:456 resolve to "alice" for session key
+  prune_keep_last_n: 50       # after each turn (if prune_after_turn) or manually: keep last N turns per session
+  prune_after_turn: false     # when true, run transcript prune after each reply (keeps last prune_keep_last_n)
+  daily_reset_at_hour: -1     # -1 = disabled; 0-23 = new session when last activity was before today at this hour (local time)
+  idle_minutes: -1            # -1 = disabled; >0 = new session when last activity older than N minutes
+  api_enabled: true           # expose GET /api/sessions for plugin UIs
+# Compaction: trim or summarize context when approaching model limit. Reduces token use and avoids overflows.
+compaction:
+  enabled: false              # when true, trim/summarize messages before LLM when over reserve_tokens
+  reserve_tokens: 4096        # keep this many tokens free for response; trim if (system + messages) would exceed context_window - reserve_tokens
+  max_messages_before_compact: 30   # max user+assistant+tool messages to keep (older trimmed or summarized)
+  compact_tool_results: true  # when true, trim or replace large tool results in the tool loop with a short placeholder when over limit
 # Optional: enable tool layer (tool registry; model can call tools by name with args); see Design.md §3.6
 use_tools: true
 # Optional: inject skills (SKILL.md) from skills_dir into system prompt; see Design.md §3.6
 use_skills: true
 skills_dir: config/skills
-# Cap skills/plugins in prompt to avoid large context; 0 = no limit. See docs/ToolsSkillsPlugins.md §5.1.
-skills_max_in_prompt: 10
-plugins_max_in_prompt: 10
+# Cap skills/plugins in prompt: take top N candidates, apply threshold, then up to M in prompt. See docs_design/SessionAndDualMemoryDesign.md.
+# Flow: retrieve/load top skills_top_n_candidates (e.g. 10), drop below skills_similarity_threshold, then take up to skills_max_in_prompt (e.g. 5). If only 1, 1 is fine.
+skills_top_n_candidates: 10
+skills_max_in_prompt: 5
+plugins_top_n_candidates: 10
+plugins_max_in_prompt: 5
+# Max chars per plugin description in the routing block. 0 = no truncation (default). With RAG (plugins_use_vector_search) or plugins_max_in_prompt we already limit how many plugins appear; this only caps per-description length. Use 0 for full descriptions; set 512 or 300 only to shrink prompt or cap one very long description.
+plugins_description_max_chars: 0
 # Vector retrieval for skills (separate Chroma collection): retrieve by similarity to user query. See docs/ToolsSkillsPlugins.md §8.
 skills_use_vector_search: true
 skills_vector_collection: homeclaw_skills
@@ -98,10 +126,12 @@ tools:
       # When no API key or primary fails (expired/rate limit), use DuckDuckGo (no key). Requires: pip install duckduckgo-search
       fallback_no_key: true   # true = try DuckDuckGo when Tavily/Brave unavailable
       fallback_max_results: 5 # max results from fallback (3–10)
-  # Browser tools (browser_navigate, browser_snapshot, browser_click, browser_type). Set to false to disable browser tools entirely — then only fetch_url and web_search are used for web (no Chromium required). When true, browser tools are registered only if Playwright is installed.
-  browser_enabled: true
+  # --- Browser tools (Core vs external plugin) ---
+  # browser_enabled: true  — Core registers built-in browser tools (browser_navigate, browser_snapshot, browser_click, browser_type) when Playwright is installed. The LLM can call these tools directly.
+  # browser_enabled: false — Core does NOT register browser tools. Use this when you want browser automation via the external plugin homeclaw-browser (Node.js): register that plugin and set browser_enabled false so the LLM routes all browser actions through route_to_plugin(homeclaw-browser, browser_navigate, ...). Avoids duplicate tools and lets you use the Node.js plugin (e.g. for stability or OpenClaw-style canvas/nodes). See examples/external_plugins/homeclaw-browser/README.md.
+  browser_enabled: false
   # When browser_enabled true and Playwright available: set to false to show the browser window (local testing only; on servers without a display use true or run under Xvfb).
-  browser_headless: true
+  browser_headless: false
   # Per-tool execution timeout. Unit: seconds. Prevents a single tool from hanging the system. 0 = no timeout.
   tool_timeout_seconds: 0
 
@@ -136,6 +166,9 @@ knowledge_base:
 # ——— 1. llama.cpp server settings (for local models) ———
 # ctx_size, predict, temp are used when starting the llama.cpp server.
 # For chat completions, max_tokens and temperature are sent per request (see completion below).
+# ctx_size: total context window (input + output). Increase if you see truncation, "context length exceeded",
+#   or poor routing when using many plugins/skills (full descriptions), long chat history, or large tool lists.
+# Typical values: 32768 (32K, default), 65536 (64K), 131072 (128K). Higher = more VRAM/RAM and may slow inference; check your model's max context.
 llama_cpp:
   ctx_size: 32768
   predict: 8192

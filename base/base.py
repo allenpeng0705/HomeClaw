@@ -212,6 +212,8 @@ class ExternalPluginRegisterRequest(BaseModel):
     config: Dict = Field(default_factory=dict)
     capabilities: Optional[List[PluginCapability]] = None  # required for unified registration
     tools: Optional[List[PluginToolDefinition]] = None     # legacy; prefer capabilities
+    # Optional: UIs this plugin provides (dashboard, webchat, control, tui, custom). See docs_design/OpenClawInvestigationAndPluginUI.md.
+    ui: Optional[Dict[str, Any]] = None  # e.g. { "dashboard": "http://...", "webchat": "http://...", "control": "http://...", "tui": "npx ...", "custom": [{ "id": "...", "name": "...", "url": "..." }] }
 
 
 @dataclass
@@ -536,11 +538,18 @@ class CoreMetadata:
     cloud_models: List[Dict[str, Any]] = field(default_factory=list)    # [{ id, path, host, port, api_key_name?, capabilities? }]
     use_workspace_bootstrap: bool = True  # inject config/workspace (IDENTITY.md, AGENTS.md, TOOLS.md) into system prompt
     workspace_dir: str = "config/workspace"  # which workspace dir to load (e.g. config/workspace_day vs config/workspace_night for day/night agents)
+    use_agent_memory_file: bool = False  # inject AGENT_MEMORY.md (curated long-term memory); see SessionAndDualMemoryDesign.md
+    agent_memory_path: str = ""  # empty = workspace_dir/AGENT_MEMORY.md
+    session: Dict[str, Any] = field(default_factory=dict)  # prune_keep_last_n, prune_after_turn, daily_reset_at_hour, idle_minutes, api_enabled
+    compaction: Dict[str, Any] = field(default_factory=dict)  # enabled, reserve_tokens, max_messages_before_compact, compact_tool_results
     use_tools: bool = False  # enable tool layer (tool registry, execute tool_calls in chat loop)
     use_skills: bool = False  # inject skills (SKILL.md from skills_dir) into system prompt; see Design.md §3.6
     skills_dir: str = "config/skills"  # directory to scan for skill folders (each with SKILL.md)
-    skills_max_in_prompt: int = 0  # max skills to inject into system prompt; 0 = no limit (avoids large prompt with many skills)
-    plugins_max_in_prompt: int = 0  # max plugins to list in routing block; 0 = no limit (avoids large prompt with many plugins)
+    skills_top_n_candidates: int = 10  # retrieve/load this many skills first; then threshold; then cap by skills_max_in_prompt
+    skills_max_in_prompt: int = 5  # max skills in prompt after threshold (top 10 → threshold → up to 5)
+    plugins_top_n_candidates: int = 10  # same for plugins
+    plugins_max_in_prompt: int = 5  # max plugins in prompt after threshold (top 10 → threshold → up to 5)
+    plugins_description_max_chars: int = 0  # max chars per plugin description in routing block; 0 = no truncation. With RAG or plugins_max_in_prompt we already cap how many plugins appear; this only limits per-item length. Use 0 (default) for full descriptions; set 512 or 300 only if you need to shrink prompt or cap one very long description.
     # Vector retrieval for skills (separate collection from memory); see docs/ToolsSkillsPlugins.md §8
     skills_use_vector_search: bool = False  # when True, retrieve skills by similarity to user query instead of injecting all/first N
     skills_vector_collection: str = "homeclaw_skills"  # Chroma collection name for skills (separate from memory)
@@ -684,11 +693,18 @@ class CoreMetadata:
             cloud_models=cloud_models,
             use_workspace_bootstrap=data.get('use_workspace_bootstrap', True),
             workspace_dir=data.get('workspace_dir', 'config/workspace'),
+            use_agent_memory_file=bool(data.get('use_agent_memory_file', False)),
+            agent_memory_path=(data.get('agent_memory_path') or '').strip(),
+            session=data.get('session') if isinstance(data.get('session'), dict) else {},
+            compaction=data.get('compaction') if isinstance(data.get('compaction'), dict) else {},
             use_tools=data.get('use_tools', False),
             use_skills=data.get('use_skills', False),
             skills_dir=data.get('skills_dir', 'config/skills'),
-            skills_max_in_prompt=max(0, int(data.get('skills_max_in_prompt', 0) or 0)),
-            plugins_max_in_prompt=max(0, int(data.get('plugins_max_in_prompt', 0) or 0)),
+            skills_top_n_candidates=max(1, min(100, int(data.get('skills_top_n_candidates', 10) or 10))),
+            skills_max_in_prompt=max(0, int(data.get('skills_max_in_prompt', 5) or 5)),
+            plugins_top_n_candidates=max(1, min(100, int(data.get('plugins_top_n_candidates', 10) or 10))),
+            plugins_max_in_prompt=max(0, int(data.get('plugins_max_in_prompt', 5) or 5)),
+            plugins_description_max_chars=max(0, int(data.get('plugins_description_max_chars', 0) or 0)),
             skills_use_vector_search=bool(data.get('skills_use_vector_search', False)),
             skills_vector_collection=(data.get('skills_vector_collection') or 'homeclaw_skills').strip(),
             skills_max_retrieved=max(1, min(100, int(data.get('skills_max_retrieved', 10) or 10))),
@@ -744,6 +760,7 @@ class CoreMetadata:
                 'skills_dir': getattr(core, 'skills_dir', 'config/skills'),
                 'skills_max_in_prompt': getattr(core, 'skills_max_in_prompt', 0),
                 'plugins_max_in_prompt': getattr(core, 'plugins_max_in_prompt', 0),
+                'plugins_description_max_chars': getattr(core, 'plugins_description_max_chars', 0),
                 'skills_use_vector_search': getattr(core, 'skills_use_vector_search', False),
                 'skills_vector_collection': getattr(core, 'skills_vector_collection', 'homeclaw_skills') or 'homeclaw_skills',
                 'skills_max_retrieved': getattr(core, 'skills_max_retrieved', 10),

@@ -159,12 +159,12 @@ class PluginManager:
         descriptor = dict(descriptor)
         descriptor["_source"] = "api"
         descriptor["id"] = pid
-        # Replace if already api-registered
+        # Replace if already api-registered (same plugin_id = update, not duplicate)
         self.api_registered_plugins = [d for d in self.api_registered_plugins if _normalize_plugin_id(d.get("id")) != pid]
         self.api_registered_plugins.append(descriptor)
         self.plugin_by_id[pid] = descriptor
-        if descriptor not in self.external_plugins:
-            self.external_plugins.append(descriptor)
+        self.external_plugins = [d for d in self.external_plugins if _normalize_plugin_id(d.get("id")) != pid]
+        self.external_plugins.append(descriptor)
         self._save_api_registered_to_file()
         logger.info("Registered external plugin via API: %s", pid)
         return pid
@@ -183,6 +183,15 @@ class PluginManager:
         logger.info("Unregistered external plugin: %s", pid)
         return True
 
+    def unregister_all_external_plugins(self) -> list:
+        """Unregister all API-registered external plugins. Returns list of plugin_ids that were removed. For testing."""
+        ids = [_normalize_plugin_id(d.get("id") or d.get("plugin_id") or "") for d in self.api_registered_plugins]
+        removed = []
+        for pid in ids:
+            if pid and self.unregister_external_plugin(pid):
+                removed.append(pid)
+        return removed
+
     async def check_plugin_health(self, descriptor: Dict[str, Any]) -> bool:
         """Call the plugin's health_check_url (GET). Return True if 2xx."""
         url = (descriptor.get("health_check_url") or "").strip()
@@ -198,16 +207,16 @@ class PluginManager:
             return False
 
     def get_plugin_list_for_prompt(self) -> List[Dict[str, str]]:
-        """Return list of { id, description } for all plugins (inline + external) for routing block."""
+        """Return list of { id, description } for all plugins (inline + external) for routing block. No truncation here; Core applies plugins_description_max_chars when building the prompt."""
         out = []
         for p in self.plugin_instances:
             pid = getattr(p, "plugin_id", None) or ""
-            desc = (p.get_description() or "")[:200]
+            desc = (p.get_description() or "").strip()
             if pid:
                 out.append({"id": pid, "description": desc})
         for d in self.external_plugins:
             pid = (d.get("id") or "").strip().lower().replace(" ", "_")
-            desc = (d.get("description") or "")[:200]
+            desc = (d.get("description") or "").strip()
             if pid:
                 out.append({"id": pid, "description": desc})
         return out

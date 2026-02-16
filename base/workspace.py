@@ -12,6 +12,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_WORKSPACE_DIR = _PROJECT_ROOT / "config" / "workspace"
 
 WORKSPACE_FILES = ("IDENTITY.md", "AGENTS.md", "TOOLS.md")
+AGENT_MEMORY_FILENAME = "AGENT_MEMORY.md"
 KEY_IDENTITY = "identity"
 KEY_AGENTS = "agents"
 KEY_TOOLS = "tools"
@@ -68,3 +69,30 @@ def build_workspace_system_prefix(workspace: Dict[str, str]) -> str:
     if not parts:
         return ""
     return "\n\n".join(parts) + "\n\n"
+
+
+def get_agent_memory_file_path(workspace_dir: Optional[Path] = None, agent_memory_path: Optional[str] = None) -> Optional[Path]:
+    """Return the Path for AGENT_MEMORY.md, or None if not configured. Used for read and append."""
+    root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
+    if agent_memory_path and agent_memory_path.strip():
+        p = Path(agent_memory_path.strip())
+        if not p.is_absolute():
+            p = _PROJECT_ROOT / p
+        return p
+    return root / AGENT_MEMORY_FILENAME
+
+
+def load_agent_memory_file(workspace_dir: Optional[Path] = None, agent_memory_path: Optional[str] = None) -> str:
+    """
+    Load AGENT_MEMORY.md (curated long-term memory). Used with RAG; AGENT_MEMORY is authoritative on conflict.
+    If agent_memory_path is set and is a valid path, use it; otherwise workspace_dir/AGENT_MEMORY.md.
+    Returns file content or empty string.
+    """
+    root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
+    path = get_agent_memory_file_path(workspace_dir=root, agent_memory_path=agent_memory_path)
+    if path is None or not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""

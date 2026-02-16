@@ -27,7 +27,7 @@ import aiohttp
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from typing import Optional, Dict, List, Tuple, Union
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi import FastAPI, Request, Response
 from loguru import logger
 import requests
@@ -60,7 +60,7 @@ from memory.chat.chat import ChatHistory
 from memory.base import MemoryBase, VectorStoreBase, EmbeddingBase, LLMBase
 from base.prompt_manager import get_prompt_manager
 from memory.prompts import RESPONSE_TEMPLATE, MEMORY_CHECK_PROMPT
-from base.workspace import get_workspace_dir, load_workspace, build_workspace_system_prefix
+from base.workspace import get_workspace_dir, load_workspace, build_workspace_system_prefix, load_agent_memory_file
 from base.skills import get_skills_dir, load_skills, build_skills_system_block
 from base.tools import ToolContext, get_tool_registry, ROUTING_RESPONSE_ALREADY_SENT
 from base import last_channel as last_channel_store
@@ -905,6 +905,16 @@ class Core(CoreInterface):
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"detail": str(e)})
 
+        @self.app.post("/api/plugins/unregister-all")
+        async def api_plugins_unregister_all():
+            """Unregister all API-registered external plugins. For testing."""
+            try:
+                removed = self.plugin_manager.unregister_all_external_plugins()
+                return JSONResponse(content={"removed": removed, "count": len(removed)})
+            except Exception as e:
+                logger.exception(e)
+                return JSONResponse(status_code=500, content={"detail": str(e)})
+
         @self.app.get("/api/plugins/health/{plugin_id}")
         async def api_plugins_health(plugin_id: str):
             """Core calls the plugin's health_check_url and returns { ok: true/false }."""
@@ -914,19 +924,146 @@ class Core(CoreInterface):
             ok = await self.plugin_manager.check_plugin_health(plug)
             return JSONResponse(content={"ok": ok, "plugin_id": plugin_id})
 
+        @self.app.get("/api/plugin-ui")
+        async def api_plugin_ui_list():
+            """Return list of plugins that declare UIs (dashboard, webchat, control, tui, custom). For launcher page."""
+            out = []
+            for pid, plug in (getattr(self.plugin_manager, "plugin_by_id", None) or {}).items():
+                if not isinstance(plug, dict) or not plug.get("ui"):
+                    continue
+                ui = plug["ui"]
+                entry = {"plugin_id": pid, "name": plug.get("name") or pid, "ui": ui}
+                out.append(entry)
+            return JSONResponse(content={"plugins": out})
+
+        @self.app.post("/api/skills/clear-vector-store")
+        async def api_skills_clear_vector_store():
+            """Clear all skills from the skills vector store. For testing (e.g. no skills retrieved until next sync)."""
+            try:
+                vs = getattr(self, "skills_vector_store", None)
+                if not vs:
+                    return JSONResponse(content={"cleared": 0, "message": "Skills vector store not enabled"})
+                list_ids_fn = getattr(vs, "list_ids", None)
+                if not list_ids_fn:
+                    return JSONResponse(content={"cleared": 0, "message": "Vector store has no list_ids"})
+                ids = list_ids_fn(limit=10000)
+                if ids:
+                    delete_ids_fn = getattr(vs, "delete_ids", None)
+                    if delete_ids_fn:
+                        delete_ids_fn(ids)
+                    else:
+                        for vid in ids:
+                            try:
+                                vs.delete(vid)
+                            except Exception:
+                                pass
+                return JSONResponse(content={"cleared": len(ids)})
+            except Exception as e:
+                logger.exception(e)
+                return JSONResponse(status_code=500, content={"detail": str(e)})
+
+        @self.app.post("/api/testing/clear-all")
+        async def api_testing_clear_all():
+            """Unregister all external plugins and clear the skills vector store. For testing."""
+            try:
+                removed_plugins = self.plugin_manager.unregister_all_external_plugins()
+                cleared_skills = 0
+                vs = getattr(self, "skills_vector_store", None)
+                if vs:
+                    list_ids_fn = getattr(vs, "list_ids", None)
+                    if list_ids_fn:
+                        ids = list_ids_fn(limit=10000)
+                        if ids:
+                            delete_ids_fn = getattr(vs, "delete_ids", None)
+                            if delete_ids_fn:
+                                delete_ids_fn(ids)
+                            else:
+                                for vid in ids:
+                                    try:
+                                        vs.delete(vid)
+                                    except Exception:
+                                        pass
+                        cleared_skills = len(ids)
+                return JSONResponse(content={
+                    "removed_plugins": removed_plugins,
+                    "plugins_count": len(removed_plugins),
+                    "skills_cleared": cleared_skills,
+                })
+            except Exception as e:
+                logger.exception(e)
+                return JSONResponse(status_code=500, content={"detail": str(e)})
+
+        @self.app.get("/api/sessions")
+        async def api_sessions_list():
+            """List sessions for plugin UIs. Requires session.api_enabled in config. Returns app_id, user_name, user_id, session_id, created_at."""
+            try:
+                session_cfg = getattr(Util().get_core_metadata(), "session", None) or {}
+                if not session_cfg.get("api_enabled", True):
+                    return JSONResponse(status_code=403, content={"detail": "Session API disabled"})
+                limit = max(1, min(500, int(session_cfg.get("sessions_list_limit", 100))))
+                sessions = self.get_sessions(num_rounds=limit, fetch_all=True)
+                return JSONResponse(content={"sessions": sessions})
+            except Exception as e:
+                logger.exception(e)
+                return JSONResponse(status_code=500, content={"detail": str(e)})
+
+        @self.app.get("/ui")
+        async def ui_launcher():
+            """Launcher page: list plugin UIs (WebChat, Control UI, Dashboard, TUI). Links to each plugin's declared URLs."""
+            plugins_with_ui = []
+            for pid, plug in (getattr(self.plugin_manager, "plugin_by_id", None) or {}).items():
+                if not isinstance(plug, dict) or not plug.get("ui"):
+                    continue
+                plugins_with_ui.append({"plugin_id": pid, "name": plug.get("name") or pid, "ui": plug["ui"]})
+            html_parts = [
+                "<!DOCTYPE html><html><head><meta charset='utf-8'><title>HomeClaw Plugin UIs</title>",
+                "<style>body{font-family:system-ui;max-width:800px;margin:2rem auto;padding:0 1rem;}",
+                "h1{color:#333;} ul{list-style:none;padding:0;} li{margin:0.5rem 0;}",
+                "a{color:#e65100;} a:hover{text-decoration:underline;} .meta{color:#666;font-size:0.9rem;}</style></head><body>",
+                "<h1>HomeClaw Plugin UIs</h1>",
+                "<p class='meta'>Plugins that provide a WebChat, Control UI, Dashboard, or TUI. Open a link to use the UI.</p>",
+                "<ul>",
+            ]
+            for p in plugins_with_ui:
+                name = p["name"]
+                ui = p["ui"]
+                for label, val in [("WebChat", ui.get("webchat")), ("Control UI", ui.get("control")), ("Dashboard", ui.get("dashboard")), ("TUI", ui.get("tui"))]:
+                    url = val if isinstance(val, str) else (val.get("url") or val.get("base_path") if isinstance(val, dict) else None)
+                    if url:
+                        if label == "TUI" and not (url.startswith("http://") or url.startswith("https://")):
+                            html_parts.append(f"<li><strong>{name}</strong> — <span class='meta'>{label}: run <code>{url}</code></span></li>")
+                        else:
+                            html_parts.append(f"<li><strong>{name}</strong> — <a href='{url}' target='_blank' rel='noopener'>{label}</a></li>")
+                for c in (ui.get("custom") or []):
+                    c_url = c.get("url") or c.get("base_path") if isinstance(c, dict) else None
+                    c_name = (c.get("name") or c.get("id") or "Custom") if isinstance(c, dict) else "Custom"
+                    if c_url:
+                        html_parts.append(f"<li><strong>{name}</strong> — <a href='{c_url}' target='_blank' rel='noopener'>{c_name}</a></li>")
+            html_parts.append("</ul><p class='meta'>Add plugins that declare <code>ui</code> in registration to see them here. See docs_design/OpenClawInvestigationAndPluginUI.md.</p></body></html>")
+            return HTMLResponse(content="".join(html_parts))
+
         @self.app.websocket("/ws")
         async def websocket_chat(websocket: WebSocket):
             """
             WebSocket for our own clients (e.g. WebChat). Send JSON {"user_id": "...", "text": "..."}; receive {"text": "..."}.
             Same permission as /inbound (user_id in config/user.yml). When auth_enabled, send X-API-Key or Authorization: Bearer in handshake headers.
             """
-            if not _ws_auth_ok(websocket):
-                await websocket.close(code=1008, reason="Unauthorized: invalid or missing API key")
-                return
-            await websocket.accept()
             try:
+                if not _ws_auth_ok(websocket):
+                    await websocket.close(code=1008, reason="Unauthorized: invalid or missing API key")
+                    return
+                await websocket.accept()
                 while True:
-                    raw = await websocket.receive_text()
+                    # Receive handles both text and binary frames (e.g. from plugin proxy); Starlette receive_text() expects "text" key and can KeyError when frame has "bytes".
+                    msg = await websocket.receive()
+                    if msg.get("type") == "websocket.disconnect":
+                        break
+                    raw = msg.get("text")
+                    if raw is None and "bytes" in msg:
+                        raw = msg["bytes"].decode("utf-8", errors="replace")
+                    if raw is None:
+                        await websocket.send_json({"error": "Invalid frame: expected text or bytes", "text": ""})
+                        continue
                     try:
                         data = json.loads(raw)
                         req = InboundRequest(
@@ -1283,7 +1420,9 @@ class Core(CoreInterface):
                         logger.debug(f"email_addr: {email_addr}, subject: {subject}, body: {body}")
                     else:
                         human_message = content
-                    session_id = self.get_session_id(app_id=app_id, user_name=user_name, user_id=user_id)
+                    channel_name = getattr(request, "channel_name", None)
+                    account_id = (request.request_metadata or {}).get("account_id") if getattr(request, "request_metadata", None) else None
+                    session_id = self.get_session_id(app_id=app_id, user_name=user_name, user_id=user_id, channel_name=channel_name, account_id=account_id)
                     run_id = self.get_run_id(agent_id=app_id, user_name=user_name, user_id=user_id)
 
                     # Check if the user input should be added to memory, For performance, comment this for now.
@@ -1329,14 +1468,18 @@ class Core(CoreInterface):
                 try:
                     host = response.host if response.host != '0.0.0.0' else '127.0.0.1'
                     port = response.port
-                    path = '/get_response'
-                    resp_url = f"http://{host}:{port}{path}"
-                    logger.debug(f"Attempting to send response to {resp_url}")
+                    # Sync inbound (/inbound or /ws) use host=inbound, port=0; response was already returned in the HTTP/WS response.
+                    if host == "inbound" and (port == 0 or port == "0"):
+                        logger.debug(f"Skip get_response for sync inbound channel {response.from_channel}; response already sent.")
+                    else:
+                        path = '/get_response'
+                        resp_url = f"http://{host}:{port}{path}"
+                        logger.debug(f"Attempting to send response to {resp_url}")
 
-                    response_dict = response.model_dump()
+                        response_dict = response.model_dump()
 
-                    try:
-                        resp = await client.post(url=resp_url, json=response_dict, timeout=10.0)
+                        try:
+                            resp = await client.post(url=resp_url, json=response_dict, timeout=10.0)
                         if resp.status_code == 200:
                             logger.info(f"Core: response sent to channel {response.from_channel}")
                             logger.debug(f"Response sent to channel: {response.from_channel}")
@@ -1404,26 +1547,71 @@ class Core(CoreInterface):
             histories = [history for history in histories if timestamp - history.created_at < timedelta(minutes=30)]
         return histories
 
-    def get_session_id(self, app_id, user_name=None, user_id=None, validity_period=timedelta(hours=24)):
+    def _resolve_session_key(
+        self,
+        app_id: str,
+        user_id: str,
+        channel_name: Optional[str] = None,
+        account_id: Optional[str] = None,
+    ) -> str:
+        """
+        Derive session key from dmScope and identityLinks (OpenClaw-compatible).
+        main: one session for all DMs. per-peer: by sender. per-channel-peer: by channel+sender. per-account-channel-peer: by account+channel+sender.
+        identity_links maps canonical id -> list of provider-prefixed ids (e.g. telegram:123); peer_id used in key is canonical when matched.
+        """
+        session_cfg = getattr(Util().get_core_metadata(), "session", None) or {}
+        dm_scope = (session_cfg.get("dm_scope") or "main").strip().lower()
+        identity_links = session_cfg.get("identity_links") or {}
+        peer_id = user_id or ""
+        if isinstance(identity_links, dict):
+            for canonical, prefixes in identity_links.items():
+                if isinstance(prefixes, list) and (user_id in prefixes or peer_id in prefixes):
+                    peer_id = str(canonical)
+                    break
+                if isinstance(prefixes, str) and (user_id == prefixes or peer_id == prefixes):
+                    peer_id = str(canonical)
+                    break
+        app = (app_id or "homeclaw").strip() or "homeclaw"
+        channel = (channel_name or "").strip() or "im"
+        account = (account_id or "").strip() or "default"
+        if dm_scope == "main":
+            return f"{app}:main"
+        if dm_scope == "per-peer":
+            return f"{app}:dm:{peer_id}"
+        if dm_scope == "per-channel-peer":
+            return f"{app}:{channel}:dm:{peer_id}"
+        if dm_scope == "per-account-channel-peer":
+            return f"{app}:{channel}:{account}:dm:{peer_id}"
+        return f"{app}:dm:{peer_id}"
+
+    def get_session_id(
+        self,
+        app_id,
+        user_name=None,
+        user_id=None,
+        channel_name: Optional[str] = None,
+        account_id: Optional[str] = None,
+        validity_period=timedelta(hours=24),
+    ):
+        session_cfg = getattr(Util().get_core_metadata(), "session", None) or {}
+        dm_scope = (session_cfg.get("dm_scope") or "").strip().lower()
+        if dm_scope in ("main", "per-peer", "per-channel-peer", "per-account-channel-peer"):
+            return self._resolve_session_key(
+                app_id=app_id,
+                user_id=user_id or "",
+                channel_name=channel_name,
+                account_id=account_id,
+            )
         if user_id in self.session_ids:
             session_id, timestamp = self.session_ids[user_id]
             return session_id
-            #if datetime.now() - timestamp < validity_period:
-            #    return session_id
 
         current_time = datetime.now()
-        sessions: List[dict] =self.chatDB.get_sessions(app_id=app_id, user_name=user_name, user_id=user_id, num_rounds=1, fetch_all=False)
+        sessions: List[dict] = self.chatDB.get_sessions(app_id=app_id, user_name=user_name, user_id=user_id, num_rounds=1, fetch_all=False)
         for session in sessions:
-            session_id = session['session_id']
+            session_id = session["session_id"]
             return session_id
-            #timestamp = session['created_at']
-            #if current_time - timestamp < validity_period:
-            #    return session_id
         return user_id
-        #new_session_id = uuid.uuid4().hex
-        #self.session_ids[user_id] = (new_session_id, current_time)
-        #self.chatDB.add_session(app_id=app_id, user_name=user_name, user_id=user_id, session_id=new_session_id, created_at=current_time)
-        #return new_session_id
 
     def _image_item_to_data_url(self, item: str) -> str:
         """Convert image item (data URL, file path, or raw base64) to a data URL for vision API."""
@@ -1468,9 +1656,11 @@ class Core(CoreInterface):
                 logger.debug(f"email_addr: {email_addr}, subject: {subject}, body: {body}")
             else:
                 human_message = content
-            session_id = self.get_session_id(app_id=app_id, user_name=user_name, user_id=user_id)
+            channel_name = getattr(request, "channel_name", None)
+            account_id = (request.request_metadata or {}).get("account_id") if getattr(request, "request_metadata", None) else None
+            session_id = self.get_session_id(app_id=app_id, user_name=user_name, user_id=user_id, channel_name=channel_name, account_id=account_id)
             run_id = self.get_run_id(agent_id=app_id, user_name=user_name, user_id=user_id)
-            histories: List[ChatMessage] = self.chatDB.get(app_id=app_id, user_name=user_name, user_id=user_id, num_rounds=6, fetch_all=False, display_format=False)
+            histories: List[ChatMessage] = self.chatDB.get(app_id=app_id, user_name=user_name, user_id=user_id, session_id=session_id, num_rounds=6, fetch_all=False, display_format=False)
             messages = []
 
             if histories is not None and len(histories) > 0:
@@ -1886,6 +2076,17 @@ class Core(CoreInterface):
                 if workspace_prefix:
                     system_parts.append(workspace_prefix)
 
+            # AGENT_MEMORY.md (curated long-term memory); see SessionAndDualMemoryDesign.md. Authoritative when conflict with RAG.
+            if getattr(Util().core_metadata, 'use_agent_memory_file', False):
+                ws_dir = get_workspace_dir(getattr(Util().core_metadata, 'workspace_dir', None) or 'config/workspace')
+                agent_path = getattr(Util().core_metadata, 'agent_memory_path', None) or ''
+                agent_content = load_agent_memory_file(workspace_dir=ws_dir, agent_memory_path=agent_path or None)
+                if agent_content:
+                    system_parts.append(
+                        "## Agent memory (curated)\n" + agent_content + "\n\n"
+                        "When both this section and the RAG context below mention the same fact, prefer this curated agent memory as authoritative."
+                    )
+
             # Skills (SKILL.md from skills_dir) — optional; see Design.md §3.6
             if getattr(Util().core_metadata, 'use_skills', False):
                 try:
@@ -1895,7 +2096,7 @@ class Core(CoreInterface):
                     skills_list = []
                     if getattr(meta_skills, 'skills_use_vector_search', False) and getattr(self, 'skills_vector_store', None) and getattr(self, 'embedder', None):
                         from base.skills import search_skills_by_query, load_skill_by_folder, TEST_ID_PREFIX
-                        max_retrieved = max(1, min(100, int(getattr(meta_skills, 'skills_max_retrieved', 10) or 10)))
+                        max_retrieved = max(1, min(100, int(getattr(meta_skills, 'skills_top_n_candidates', 10) or 10)))
                         threshold = float(getattr(meta_skills, 'skills_similarity_threshold', 0.0) or 0.0)
                         hits = await search_skills_by_query(
                             self.skills_vector_store, self.embedder, query or "",
@@ -1922,9 +2123,16 @@ class Core(CoreInterface):
                             skills_list.append(skill_dict)
                         if skills_list:
                             _component_log("skills", f"retrieved {len(skills_list)} skill(s) by vector search")
+                        skills_max = max(0, int(getattr(meta_skills, 'skills_max_in_prompt', 5) or 5))
+                        if skills_max > 0 and len(skills_list) > skills_max:
+                            skills_list = skills_list[:skills_max]
+                            _component_log("skills", f"capped to {skills_max} skill(s) after threshold (skills_max_in_prompt)")
                     if not skills_list:
                         skills_list = load_skills(skills_path, include_body=False)
-                        skills_max = max(0, int(getattr(meta_skills, 'skills_max_in_prompt', 0) or 0))
+                        top_n = max(1, min(100, int(getattr(meta_skills, 'skills_top_n_candidates', 10) or 10)))
+                        if len(skills_list) > top_n:
+                            skills_list = skills_list[:top_n]
+                        skills_max = max(0, int(getattr(meta_skills, 'skills_max_in_prompt', 5) or 5))
                         if skills_max > 0 and len(skills_list) > skills_max:
                             skills_list = skills_list[:skills_max]
                             _component_log("skills", f"capped to {skills_max} skill(s) in prompt (skills_max_in_prompt)")
@@ -2018,37 +2226,49 @@ class Core(CoreInterface):
                 meta_plugins = Util().get_core_metadata()
                 if getattr(meta_plugins, "plugins_use_vector_search", False) and getattr(self, "plugins_vector_store", None) and getattr(self, "embedder", None):
                     from base.plugins_registry import search_plugins_by_query
-                    max_retrieved = max(1, min(100, int(getattr(meta_plugins, "plugins_max_retrieved", 10) or 10)))
+                    max_retrieved = max(1, min(100, int(getattr(meta_plugins, "plugins_top_n_candidates", 10) or 10)))
                     threshold = float(getattr(meta_plugins, "plugins_similarity_threshold", 0.0) or 0.0)
                     try:
                         hits = await search_plugins_by_query(
                             self.plugins_vector_store, self.embedder, query or "",
                             limit=max_retrieved, min_similarity=threshold,
                         )
+                        desc_max_rag = max(0, int(getattr(meta_plugins, "plugins_description_max_chars", 0) or 0))
                         for hit_id, _ in hits:
                             plug = self.plugin_manager.get_plugin_by_id(hit_id)
                             if plug is None:
                                 continue
                             if isinstance(plug, dict):
                                 pid = (plug.get("id") or hit_id).strip().lower().replace(" ", "_")
-                                desc = (plug.get("description") or "")[:200]
+                                desc_raw = (plug.get("description") or "").strip()
                             else:
                                 pid = getattr(plug, "plugin_id", None) or hit_id
-                                desc = (plug.get_description() or "")[:200]
+                                desc_raw = (plug.get_description() or "").strip()
+                            desc = desc_raw[:desc_max_rag] if desc_max_rag > 0 else desc_raw
                             plugin_list.append({"id": pid, "description": desc})
                         if plugin_list:
                             _component_log("plugin", f"retrieved {len(plugin_list)} plugin(s) by vector search")
+                        plugins_max = max(0, int(getattr(Util().get_core_metadata(), "plugins_max_in_prompt", 5) or 5))
+                        if plugins_max > 0 and len(plugin_list) > plugins_max:
+                            plugin_list = plugin_list[:plugins_max]
+                            _component_log("plugin", f"capped to {plugins_max} plugin(s) after threshold (plugins_max_in_prompt)")
                     except Exception as e:
                         logger.warning("Plugin vector search failed: %s", e)
                 if not plugin_list:
                     plugin_list = getattr(self.plugin_manager, "get_plugin_list_for_prompt", lambda: [])()
-                plugin_lines = []
-                if plugin_list:
-                    plugins_max = max(0, int(getattr(Util().get_core_metadata(), "plugins_max_in_prompt", 0) or 0))
+                    plugins_top = max(1, min(100, int(getattr(Util().get_core_metadata(), "plugins_top_n_candidates", 10) or 10)))
+                    if len(plugin_list) > plugins_top:
+                        plugin_list = plugin_list[:plugins_top]
+                    plugins_max = max(0, int(getattr(Util().get_core_metadata(), "plugins_max_in_prompt", 5) or 5))
                     if plugins_max > 0 and len(plugin_list) > plugins_max:
                         plugin_list = plugin_list[:plugins_max]
-                        _component_log("plugin", f"capped to {plugins_max} plugin(s) in prompt (plugins_max_in_prompt)")
-                    plugin_lines = [f"  - {p.get('id', '') or 'plugin'}: {(p.get('description') or '')[:120]}" for p in plugin_list]
+                plugin_lines = []
+                if plugin_list:
+                    desc_max = max(0, int(getattr(Util().get_core_metadata(), "plugins_description_max_chars", 0) or 0))
+                    def _desc(d: str) -> str:
+                        s = d or ""
+                        return s[:desc_max] if desc_max > 0 else s
+                    plugin_lines = [f"  - {p.get('id', '') or 'plugin'}: {_desc(p.get('description'))}" for p in plugin_list]
                 routing_block = (
                     "## Routing (choose one)\n"
                     "For time-related requests prefer tools (no second LLM): one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only if the request is time-related but too complex for those tools.\n"
@@ -2069,6 +2289,14 @@ class Core(CoreInterface):
 
             if system_parts:
                 llm_input = [{"role": "system", "content": "\n".join(system_parts)}]
+
+            # Compaction: trim messages when over limit so we stay within context window
+            compaction_cfg = getattr(Util().get_core_metadata(), "compaction", None) or {}
+            if compaction_cfg.get("enabled") and isinstance(messages, list) and len(messages) > 0:
+                max_msg = max(2, int(compaction_cfg.get("max_messages_before_compact", 30) or 30))
+                if len(messages) > max_msg:
+                    messages = messages[-max_msg:]
+                    _component_log("compaction", f"trimmed to last {max_msg} messages")
 
             llm_input += messages
             if len(llm_input) > 0:
@@ -2146,7 +2374,10 @@ class Core(CoreInterface):
                         _component_log("tools", f"tool {name}({list(args.keys()) if isinstance(args, dict) else '...'})")
                         if result == ROUTING_RESPONSE_ALREADY_SENT and name in ("route_to_tam", "route_to_plugin"):
                             routing_sent = True
-                        current_messages.append({"role": "tool", "tool_call_id": tcid, "content": result})
+                        tool_content = result
+                        if compaction_cfg.get("compact_tool_results") and isinstance(tool_content, str) and len(tool_content) > 4000:
+                            tool_content = tool_content[:4000] + "\n[Output truncated for context.]"
+                        current_messages.append({"role": "tool", "tool_call_id": tcid, "content": tool_content})
                     if routing_sent:
                         return ROUTING_RESPONSE_ALREADY_SENT
                 else:
@@ -2162,6 +2393,16 @@ class Core(CoreInterface):
             message.add_user_message(query)
             message.add_ai_message(response)
             self.chatDB.add(app_id=app_id, user_name=user_name, user_id=user_id, session_id=session_id, chat_message=message)
+            # Session pruning: optionally keep only last N turns per session after each reply
+            session_cfg = getattr(Util().get_core_metadata(), "session", None) or {}
+            if session_cfg.get("prune_after_turn") and app_id and user_id and session_id:
+                keep_n = max(10, int(session_cfg.get("prune_keep_last_n", 50) or 50))
+                try:
+                    pruned = self.prune_session_transcript(app_id=app_id, user_name=user_name, user_id=user_id, session_id=session_id, keep_last_n=keep_n)
+                    if pruned > 0:
+                        _component_log("session", f"pruned {pruned} old turns, kept last {keep_n}")
+                except Exception as e:
+                    logger.debug("Session prune after turn failed: %s", e)
             #if use_memory:
             #    await self.mem_instance.add(query, user_name=user_name, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata, filters=filters)
 

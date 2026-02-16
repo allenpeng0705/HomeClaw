@@ -42,7 +42,15 @@ Core exposes a **registration API** that external plugins call to register thems
 |--------|------|---------|
 | `POST` | `/api/plugins/register` | Register an external plugin (body = descriptor). Returns `{ "plugin_id", "registered": true }` or error. |
 | `POST` | `/api/plugins/unregister` | Unregister by `plugin_id` (body: `{ "plugin_id": "..." }`). Optional. |
+| `POST` | `/api/plugins/unregister-all` | Unregister **all** API-registered external plugins. Returns `{ "removed": [...], "count": n }`. For testing. |
 | `GET` | `/api/plugins/health/{plugin_id}` | Core calls the plugin health URL and returns `{ "ok": true/false }` (proxy of plugin health). |
+
+**Testing / reset:**
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/api/skills/clear-vector-store` | Clear all skills from the skills vector store. Returns `{ "cleared": n }`. For testing. |
+| `POST` | `/api/testing/clear-all` | Unregister all external plugins **and** clear the skills vector store. Returns `{ "removed_plugins": [...], "plugins_count", "skills_cleared" }`. For testing. |
 
 ### 3.2 Registration request body
 
@@ -56,6 +64,8 @@ The plugin sends a JSON body that matches **ExternalPluginRegisterRequest** (see
 - **type** (string, required) – One of `http`, `subprocess`, `mcp`. For `http`, the plugin runs its own server; Core POSTs PluginRequest to it.
 - **config** (object, required) – Type-specific config (e.g. for `http`: `base_url`, `path`, `timeout_sec`).
 - **tools** (array, optional) – If omitted, the plugin is a single entry point: Core sends PluginRequest and gets PluginResult. Optional metadata for future use (plugins are feature-oriented and do one specific thing; they are not the same as Core tools).
+
+**Re-registration (same plugin_id):** If you call `POST /api/plugins/register` again with the same `plugin_id`, Core **updates** the stored descriptor (name, description, health_check_url, config, etc.); it does **not** create a second entry. So re-registering is safe and idempotent for updates.
 
 ### 3.3 Health check
 

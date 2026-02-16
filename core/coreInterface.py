@@ -52,7 +52,7 @@ class CoreInterface(ABC):
         pass
     
     @abstractmethod
-    def get_session_id(self, app_id, user_name=None, user_id=None, validity_period=timedelta(hours=24)):
+    def get_session_id(self, app_id, user_name=None, user_id=None, channel_name=None, account_id=None, validity_period=timedelta(hours=24)):
         pass
     
     @abstractmethod

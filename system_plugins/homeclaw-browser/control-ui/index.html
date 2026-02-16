@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HomeClaw WebChat</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 1rem; max-width: 640px; margin-left: auto; margin-right: auto; }
+    h1 { font-size: 1.25rem; color: #333; }
+    .meta { font-size: 0.875rem; color: #666; margin-bottom: 1rem; }
+    #log { border: 1px solid #ddd; border-radius: 8px; min-height: 200px; max-height: 50vh; overflow-y: auto; padding: 0.75rem; background: #fafafa; margin-bottom: 1rem; }
+    .msg { margin: 0.5rem 0; }
+    .msg.user { color: #0d47a1; }
+    .msg.assistant { color: #1b5e20; }
+    .msg.error { color: #b71c1c; }
+    .input-row { display: flex; gap: 0.5rem; }
+    #user_id { width: 120px; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
+    #text { flex: 1; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
+    button { padding: 0.5rem 1rem; background: #e65100; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #f57c00; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    #status { font-size: 0.8rem; color: #666; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>HomeClaw WebChat</h1>
+  <p class="meta">Chat with HomeClaw. Ensure <code>user_id</code> exists in <code>config/user.yml</code> (e.g. add <code>webchat_user</code>).</p>
+  <div id="log"></div>
+  <div class="input-row">
+    <input type="text" id="user_id" placeholder="user_id" value="webchat_user" title="Must exist in config/user.yml">
+    <input type="text" id="text" placeholder="Type a message..." autocomplete="off">
+    <button type="button" id="send">Send</button>
+  </div>
+  <div id="status"></div>
+
+  <script>
+    const logEl = document.getElementById('log');
+    const userIdEl = document.getElementById('user_id');
+    const textEl = document.getElementById('text');
+    const sendBtn = document.getElementById('send');
+    const statusEl = document.getElementById('status');
+
+    function addLog(msg, cls) {
+      const p = document.createElement('p');
+      p.className = 'msg ' + (cls || '');
+      p.textContent = msg;
+      logEl.appendChild(p);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    const wsUrl = (location.origin.replace(/^http/, 'ws') + '/ws');
+    let ws = null;
+
+    function connect() {
+      statusEl.textContent = 'Connecting…';
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        statusEl.textContent = 'Connected.';
+        sendBtn.disabled = false;
+      };
+      ws.onclose = () => {
+        statusEl.textContent = 'Disconnected.';
+        sendBtn.disabled = true;
+        setTimeout(connect, 3000);
+      };
+      ws.onerror = () => {
+        statusEl.textContent = 'Connection error.';
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (data.error) {
+            addLog('Error: ' + data.error, 'error');
+          } else if (data.text) {
+            addLog('Assistant: ' + data.text, 'assistant');
+          }
+        } catch (_) {
+          addLog(ev.data, 'assistant');
+        }
+      };
+    }
+
+    sendBtn.addEventListener('click', () => {
+      const user_id = (userIdEl.value || '').trim();
+      const text = (textEl.value || '').trim();
+      if (!user_id || !text) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        addLog('Not connected.', 'error');
+        return;
+      }
+      addLog('You: ' + text, 'user');
+      textEl.value = '';
+      ws.send(JSON.stringify({ user_id, text }));
+    });
+
+    textEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendBtn.click();
+    });
+
+    connect();
+  </script>
+</body>
+</html>
