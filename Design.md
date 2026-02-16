@@ -2,6 +2,8 @@
 
 This document describes the architecture, components, and data flow of **HomeClaw**. It serves as the base reference for understanding the project and for future development.
 
+**Other languages / 其他语言 / 他の言語 / 다른 언어:** [简体中文](Design_zh.md) | [日本語](Design_jp.md) | [한국어](Design_kr.md)
+
 ---
 
 ## 1. Project Overview
@@ -13,8 +15,8 @@ This document describes the architecture, components, and data flow of **HomeCla
 - Runs on the user’s machine (e.g. home computer).
 - Supports **local LLMs** (via llama.cpp server) and **cloud AI** (via OpenAI-compatible APIs, using **LiteLLM**).
 - Exposes the assistant through **multiple channels** (email, IM, CLI) so users can interact from anywhere (e.g. from a phone) with their home instance.
-- Uses a **RAG-style memory** (SQLite + Chroma) for context and personalization.
-- Extends behavior through **plugins** that the core routes requests to when it cannot handle them directly.
+- Uses **RAG-style memory**: **Cognee** (default) or in-house SQLite + Chroma; optional per-user **profile** and **knowledge base**. See docs/MemoryAndDatabase.md.
+- Extends behavior through **plugins** (plugin.yaml + config.yml + plugin.py; route_to_plugin or orchestrator), **skills** (SKILL.md under config/skills/; optional vector search; run_skill tool), and a **tool layer** (use_tools: true — exec, browser, cron, sessions_*, memory_*, file_*, etc.). See docs/ToolsSkillsPlugins.md.
 
 ### 1.2 Design Goals
 
@@ -58,9 +60,9 @@ This document describes the architecture, components, and data flow of **HomeCla
                             ▼
                     ┌─────────────────────────────────────────────────────────┐
                     │  Memory (memory/)                                        │
-                    │  • SQLite (chat history, sessions, runs)                 │
-                    │  • Chroma (vector store for RAG)                         │
-                    │  • Embedding model (e.g. BGE) for vectorization           │
+                    │  • Cognee (default) or SQLite + Chroma (RAG)             │
+                    │  • Chat history, sessions, runs; optional profile, KB    │
+                    │  • Embedding model (local or cloud) for vectorization     │
                     └─────────────────────────────────────────────────────────┘
 ```
 
@@ -88,7 +90,7 @@ This document describes the architecture, components, and data flow of **HomeCla
   2. If **orchestrator + plugins** are enabled: Orchestrator turns request into an **Intent** (e.g. TIME vs OTHER). For OTHER, Core uses LLM to pick a plugin by description; if one matches, it runs that plugin and the plugin sends the response (e.g. via `send_response_to_latest_channel`).
   3. If Core handles it: load chat history (SQLite), optionally enqueue to memory, run RAG (`answer_from_memory`), call LLM, store turn in chat DB, and send response back to the channel.
 - **Queues**: `request_queue`, `response_queue`, `memory_queue` for async processing and response delivery.
-- **Config**: `config/core.yml` (host, port, main_llm, embedding_llm, vectorDB, use_memory, mode, etc.).
+- **Config**: `config/core.yml` (host, port, main_llm, embedding_llm, memory_backend, use_memory, use_tools, use_skills, use_workspace_bootstrap, tools.*, result_viewer, auth_enabled, auth_api_key, mode, etc.). **Auth**: When `auth_enabled: true`, /inbound and /ws require X-API-Key or Authorization: Bearer; see docs/RemoteAccess.md. **Result viewer**: Optional save_result_page tool and report server (port, base_url); see docs/ComplexResultViewerDesign.md.
 
 **Orchestrator** (`core/orchestrator.py`): Classifies intent (TIME / OTHER) from chat history + user input; for OTHER, Core selects a plugin. **TAM** (`core/tam.py`): Time Awareness Module; handles TIME intents (e.g. scheduling). Orchestrator + TAM + plugins are always enabled. Routing style is controlled by **orchestrator_unified_with_tools** in `core.yml` (default true = main LLM with tools does routing; false = separate orchestrator_handler runs first with one LLM call).
 
@@ -132,7 +134,16 @@ Full channels use `channels/.env` (e.g. `core_host`, `core_port`) to reach the C
 | **Telegram** | `channels/telegram/` | Inbound: long-poll getUpdates → POST to Core `/inbound` → send reply. | `channels/telegram/.env` (TELEGRAM_BOT_TOKEN, CORE_URL); user.yml: `telegram_<chat_id>`. |
 | **Discord** | `channels/discord/` | Inbound: bot on_message → POST to Core `/inbound` → reply in channel. | `channels/discord/.env` (DISCORD_BOT_TOKEN, CORE_URL); user.yml: `discord_<user_id>`. |
 | **Slack** | `channels/slack/` | Inbound: Socket Mode events → POST to Core `/inbound` → post reply. | `channels/slack/.env` (SLACK_APP_TOKEN, SLACK_BOT_TOKEN, CORE_URL); user.yml: `slack_<user_id>`. |
-| **CLI** | `main.py` | In-process “channel”: user types in terminal; `Channel` builds `PromptRequest` and calls Core **POST /local_chat** (sync); reply is returned in HTTP body and printed. Core runs in a background thread. | No separate config; uses same Core. Prefixes `+` / `?` for memory store/retrieve. |
+| **WebChat** | (e.g. channels/webchat/) | Web UI; connects to Core WebSocket `/ws` or HTTP; user_id from session. | CORE_URL; user.yml allowlist. |
+| **Google Chat** | `channels/google_chat/` | Inbound: bot events → POST to Core `/inbound` → reply. | channels/.env; user.yml. |
+| **Signal** | `channels/signal/` | Inbound → Core `/inbound` → reply. | channels/.env; user.yml. |
+| **iMessage** | `channels/imessage/` | Inbound → Core `/inbound` → reply. | channels/.env; user.yml. |
+| **Teams** | `channels/teams/` | Inbound → Core `/inbound` → reply. | channels/.env; user.yml. |
+| **Zalo** | `channels/zalo/` | Inbound → Core `/inbound` → reply. | channels/.env; user.yml. |
+| **Feishu** | `channels/feishu/` | Inbound → Core `/inbound` → reply. | channels/.env; user.yml. |
+| **DingTalk** | `channels/dingtalk/` | Inbound → Core `/inbound` → reply. | channels/.env; user.yml. |
+| **BlueBubbles** | `channels/bluebubbles/` | Inbound → Core `/inbound` → reply. | channels/.env; user.yml. |
+| **CLI** | `main.py` | In-process “channel”: user types in terminal; `Channel` builds `PromptRequest` and calls Core **POST /local_chat** (sync); reply is returned in HTTP body and printed. Core runs in a background thread. | No separate config; uses same Core. Prefixes `+` / `?` for memory store/retrieve. **Onboarding**: `python main.py onboard` (wizard), `python main.py doctor` (config + LLM connectivity). |
 
 **Run any channel**: From repo root, `python -m channels.run <name>` (e.g. `telegram`, `discord`, `slack`, `webhook`, `whatsapp`, `matrix`, `wechat`, `tinode`). Each channel is a separate process; run multiple channels in separate terminals. See `channels/README.md`.
 
@@ -186,7 +197,7 @@ Summary:
 
 **Cloud (LiteLLM)**:
 
-- `llm/litellmService.py`: **LiteLLMService** exposes FastAPI routes (`/v1/chat/completions`, etc.) and forwards to LiteLLM (`litellm.acompletion`, etc.). API keys are set from `core.yml` (e.g. `main_llm_api_key_name` / `main_llm_api_key`).
+- `llm/litellmService.py`: **LiteLLMService** exposes FastAPI routes (`/v1/chat/completions`, etc.) and forwards to LiteLLM (`litellm.acompletion`, etc.). API keys: each **cloud_models** entry has **`api_key_name`** (e.g. OPENAI_API_KEY); set the **environment variable** with that name where Core runs. Do not put API keys in core.yml in version control.
 - When `main_llm_type` is `litellm`, Core’s chat completion still calls `http://main_llm_host:main_llm_port/v1/chat/completions` — that request is served by LiteLLMService, which can target OpenAI, Anthropic, Gemini, etc.
 
 So: **one URL per role** (main vs embedding); local = llama-server, cloud = LiteLLM. Multi-model: define multiple entries in `core.yml` under `local_models` and `cloud_models` (each with its own host/port); set `main_llm` / `embedding_llm` by id. Run multiple llama-server processes for different local models if needed.
@@ -198,10 +209,11 @@ So: **one URL per role** (main vs embedding); local = llama-server, cloud = Lite
 
 **Backends** (`config/core.yml`):
 
-- **memory_backend**: `cognee` (default; Cognee engine) | `chroma` (in-house RAG). When `cognee`, Core uses `CogneeMemory` (Cognee Python API); requires `pip install cognee` and Cognee env (`.env`).
-- **database**: `sqlite` | `postgresql` — relational (chat sessions, runs; memory history uses SQLite in `memory/storage.py` unless extended).
-- **vectorDB.backend**: `chroma` | `qdrant` | `milvus` | `pinecone` | `weaviate` — vector store for RAG.
-- **graphDB.backend**: `kuzu` | `neo4j` — graph store for entities/relationships; optional. When set, add flow extracts entities/relations (main LLM) and search expands via 1-hop graph.
+- **memory_backend**: `cognee` (default; Cognee engine) | `chroma` (in-house RAG). When `cognee`, Core uses `CogneeMemory`; configure via **`cognee:`** in core.yml and/or Cognee `.env`. When `chroma`, **vectorDB** and **graphDB** in core.yml are used; when cognee, they are **not** used for memory (Cognee uses its own stores).
+- **database**: `sqlite` | `postgresql` — always used for **Core’s** chat sessions, runs, turns. When memory_backend is chroma, in-house memory may also use it.
+- **vectorDB** and **graphDB**: Used **only when memory_backend: chroma**. vectorDB.backend: `chroma` | qdrant | milvus | pinecone | weaviate. graphDB.backend: `kuzu` | neo4j — optional. See docs/MemoryAndDatabase.md.
+- **profile** (optional): Per-user JSON store; `profile.enabled`, `profile.dir` (default database/profiles). Injected as “About the user” in prompt. See docs/UserProfileDesign.md.
+- **knowledge_base** (optional): Separate from RAG memory; user documents/sources; `knowledge_base.enabled`, `knowledge_base.backend` (auto | cognee | chroma). See core.yml and docs/MemoryAndDatabase.md.
 
 **Components**:
 
@@ -246,16 +258,28 @@ So: **one URL per role** (main vs embedding); local = llama-server, cloud = Lite
 
 ### 3.5 Plugins (`plugins/`)
 
-- **Role**: Feature-specific handlers when Core decides not to answer with generic chat + RAG.
-- **Base**: `base/BasePlugin.py` — `BasePlugin(coreInst)`, with `description`, `config`, `user_input`, `promptRequest`, `run()`, `check_best_plugin()`.
-- **Loading**: `base/PluginManager.py` scans `plugins/` directories, loads classes inheriting `BasePlugin`, registers descriptions; Core uses an LLM to match user text to a plugin description and invokes `plugin.run()`.
-- **Example**: `plugins/Weather/` — uses config (e.g. city, API key), fetches weather, then `await self.coreInst.send_response_to_latest_channel(response=...)`.
+- **Role**: Feature-specific handlers when Core decides not to answer with generic chat + RAG. Model can call **route_to_plugin** (when use_tools and orchestrator_unified_with_tools) or orchestrator selects plugin by intent.
 
-Plugins get the same `CoreInterface` (chat completion, send response, memory, session/run IDs) so they can use the same LLM and channels.
+**Built-in vs external plugins**
+
+| Type | Language | Where it runs | Manifest | When to use |
+|------|----------|---------------|----------|-------------|
+| **Built-in** | Python only | In-process with Core | `plugin.yaml` with **type: inline**, `config.yml`, `plugin.py` (subclass `BasePlugin`) under `plugins/<Name>/` | Fast integration, no extra process, use Python libs (e.g. Weather, News, Mail). |
+| **External** | Any (Node.js, Go, Java, etc.) | Separate process or remote HTTP service | `plugin.yaml` with **type: http** in a folder under `plugins/`, or register via **POST /api/plugins/register** | Existing service, different language, or independent deployment; server accepts POST with `PluginRequest` and returns `PluginResult`. |
+
+Core discovers **built-in** plugins by scanning `plugins/` and loading plugin.yaml + plugin.py; **external** plugins are either declared in a folder (plugin.yaml with type: http + endpoint URL) or registered at runtime via the API. Both are routed the same way (orchestrator or route_to_plugin). See **docs/PluginsGuide.md** (§2 Built-in, §3 External), **docs/PluginStandard.md**, **docs/RunAndTestPlugins.md**.
+
+- **Manifest**: **plugin.yaml** (id, name, description, **type: inline** for built-in or **type: http** for external, capabilities with parameters). **config.yml** for runtime config (API keys, defaults). **plugin.py** (built-in only) — class extending `BasePlugin`, implements `run()` and/or capability methods.
+- **Base**: `base/BasePlugin.py` — `BasePlugin(coreInst)` (built-in plugins), with `description`, `config`, `user_input`, `promptRequest`, `run()`, `check_best_plugin()`.
+- **Loading**: `base/PluginManager.py` scans `plugins/` directories, loads **plugin.yaml** (and plugin.py for type: inline), registers descriptions; Core uses an LLM to match user text to a plugin (or **route_to_plugin** tool) and invokes `plugin.run()` (built-in) or HTTP POST (external).
+- **Example (built-in)**: `plugins/Weather/` — plugin.yaml (type: inline), config.yml, plugin.py; uses config (e.g. city, API key), fetches weather, then `await self.coreInst.send_response_to_latest_channel(response=...)`.
+- **Example (external)**: Run an HTTP server that accepts POST with `PluginRequest` and returns `PluginResult`; put a folder under `plugins/` with plugin.yaml (type: http, endpoint URL) or call **POST /api/plugins/register**. Core forwards requests to that endpoint like built-in plugins.
+
+Plugins get the same `CoreInterface` (chat completion, send response, memory, session/run IDs) so built-in plugins can use the same LLM and channels; external plugins receive the same contract (PluginRequest/PluginResult) over HTTP.
 
 ### 3.6 Plugins vs tools: difference and design
 
-This subsection clarifies the **difference** between HomeClaw’s current **plugins** and **callable tools** (“work”), and proposes a **design** so HomeClaw can gain tool layer capabilities (exec, browser, nodes, etc.) in a coherent way. 
+This subsection clarifies the **difference** between HomeClaw’s **plugins** and **callable tools**, and describes the **implemented** tool layer (exec, browser, cron, sessions_*, memory_*, file_*, run_skill, route_to_plugin, etc.). Nodes/canvas remain out of scope; see **docs/ToolsSkillsPlugins.md** and **Comparison.md** §7.10.2. 
 #### Difference: plugin vs tool
 
 | Aspect | HomeClaw plugin | Tool (model-invoked) |
@@ -279,7 +303,7 @@ So: **Plugin** = “route this message to one handler that does a thing and retu
 - **webhooks**: In/out webhooks.
 - **sessions_***: List sessions, get history (transcript), send to another session (agent-to-agent).
 
-We already have **session transcript** (and workspace); we lack **exec, browser, canvas, nodes, cron, webhooks, sessions_send** as first-class callable tools.
+All of the above except **canvas** and **nodes** are implemented as first-class callable tools when `use_tools: true`. Canvas and nodes remain out of scope (see Comparison.md §7.10.2).
 
 #### Proposed design: tool layer alongside plugins
 
@@ -307,7 +331,7 @@ We already have **session transcript** (and workspace); we lack **exec, browser,
    - **sessions_***: We already have transcript and chat; add tools: `sessions_list`, `sessions_transcript(session_id)`, `sessions_send(session_id, message)` that call Core/chat APIs and return results. These are thin wrappers over existing APIs.
 
 5. **Safety and config**
-   - **exec**: Mandatory allowlist or sandbox; no arbitrary shell by default. Config in `core.yml` or `tools.yml`: `exec_allowed: true`, `exec_allowlist: ["ls", "date", ...]`, `exec_timeout`, `exec_sandbox: docker|none`.
+   - **exec**: Mandatory allowlist or sandbox; no arbitrary shell by default. Config in **`core.yml`** under **`tools:`**: `exec_allowlist`, `exec_timeout`. File tools: `file_read_base`, `file_read_max_chars`. Web: `tools.web.search` (provider, API keys, fallback_no_key). Browser: `browser_enabled`, `browser_headless`. **run_skill**: `run_skill_allowlist`, `run_skill_timeout`. See core.yml and **docs/ToolsDesign.md**.
    - **Permissions**: Tool execution can be gated by `user_id` / channel (e.g. only certain users can call exec). Reuse or extend `user.yml` / permission layer.
    - **Rate limits**: Optional per-user or per-session limits on tool calls to avoid abuse.
 
@@ -322,11 +346,11 @@ We already have **session transcript** (and workspace); we lack **exec, browser,
 
 #### Implementation (step by step) and how to extend
 
-**Done (step 1)**  
+**Implemented**  
 - **`base/tools.py`**: `ToolDefinition` (name, description, parameters schema, `execute_async`), `ToolContext` (core, app_id, user_name, user_id, session_id, run_id, request), `ToolRegistry` (register, get_openai_tools, execute_async), `get_tool_registry()`.  
-- **`tools/builtin.py`**: Built-in tools; `register_builtin_tools(registry)` called from Core at startup. **Tools included**: `sessions_transcript`, `sessions_list`; `time`, `echo`, `platform_info`, `cwd`, `env`; `exec` (allowlist in config); `file_read`, `folder_list`; `fetch_url`; **full browser** (`browser_navigate`, **`browser_snapshot`** (elements + selectors), **`browser_click`**, **`browser_type`**) with a **request-scoped Playwright session** (shared page across tool calls; cleanup via `close_browser_session` after the tool loop); `webhook_trigger`. File/folder use `tools.file_read_base`. Requires **Playwright** for browser (`pip install playwright && playwright install chromium`).  
+- **`tools/builtin.py`**: Built-in tools; `register_builtin_tools(registry)` called from Core at startup. **Tools included**: `sessions_transcript`, `sessions_list`, `sessions_send`, `sessions_spawn`, `session_status`; `time`, `echo`, `platform_info`, `cwd`, `env`; `exec` (allowlist in config; background for job_id); `process_list`, `process_poll`, `process_kill`; `file_read`, `file_write`, `file_edit`, `apply_patch`, `folder_list`, `file_find`, **document_read** (PDF, Word, etc. via Unstructured); `fetch_url`, **web_search** (provider + API keys in config), **web_search_browser** (Google/Bing/Baidu when Playwright available); **full browser** (`browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`) with request-scoped Playwright; `webhook_trigger`, **http_request** (GET/POST/PUT/PATCH/DELETE); **memory_search**, **memory_get** (when use_memory); **cron_schedule**, **cron_list**, **cron_remove**; **remind_me**, **record_date**, **recorded_events_list** (TAM one-shot and recorded events); **run_skill** (script from skill’s scripts/ with allowlist); **route_to_plugin**, **route_to_tam**; **save_result_page** (result viewer); **models_list**, **agents_list**; **channel_send** (send to last-used channel); **image** (vision/multimodal); **profile_get**, **profile_update**, **profile_list** (per-user profile when profile.enabled); **knowledge_base_search**, **knowledge_base_add**, **knowledge_base_remove**, **knowledge_base_list** (when knowledge_base.enabled); **tavily_extract**, **tavily_crawl**, **tavily_research** (Tavily API when configured); **web_extract**, **web_crawl**. File/folder use `tools.file_read_base`. Requires **Playwright** for browser (`pip install playwright && playwright install chromium`). See **docs/ToolsDesign.md**, **docs/ToolsAndSkillsTesting.md**.  
 - **Core**: In `initialize()`, `register_builtin_tools(get_tool_registry())`. In `answer_from_memory`, when `use_tools` is true and the registry has tools, use `Util().openai_chat_completion_message` with tools and run the tool loop (execute tool_calls, append results, repeat until the model returns text).  
-- **Config**: `core.yml` → `use_tools: false` (set to `true` to enable). `CoreMetadata.use_tools` in `base/base.py`.
+- **Config**: `core.yml` → **`use_tools: true`** to enable. **`tools:`** section: `exec_allowlist`, `exec_timeout`, `file_read_base`, `file_read_max_chars`, `tools.web` (search provider, API keys), `browser_enabled`, `browser_headless`, `run_skill_allowlist`, `run_skill_timeout`, `tool_timeout_seconds`. `CoreMetadata.use_tools` in `base/base.py`. See **docs/ToolsDesign.md**, **docs/ToolsAndSkillsTesting.md**.
 
 **How to add a new tool (keep it clear and simple)**  
 1. **Define an executor**: `async def my_tool_executor(arguments: dict, context: ToolContext) -> str:` — use `context.core`, `context.user_id`, etc.; return a string result.  
@@ -355,7 +379,7 @@ No inheritance or extra classes needed; the registry is the single extension poi
 6. **If Core handles it**:  
    - Get session/run IDs; load recent **chat history** from SQLite.  
    - Optionally put request in **memory_queue** (async add to RAG).  
-   - **answer_from_memory**: fetch relevant memories from Chroma, build messages with context, call **openai_chat_completion** (main LLM), save turn to chat DB.  
+   - **answer_from_memory**: fetch relevant memories (Cognee or Chroma), build messages with context, call **openai_chat_completion** (main LLM; when use_tools, run tool loop for tool_calls), save turn to chat DB.  
    - Push **AsyncResponse** to response_queue → same delivery path to channel → user sees reply.
 
 ### 4.2 Local CLI (`main.py`)
@@ -370,13 +394,12 @@ No inheritance or extra classes needed; the registry is the single extension poi
 
 | File | Purpose |
 |------|--------|
-| `config/core.yml` | Core host/port, main_llm, embedding_llm, vectorDB (Chroma), **memory_backend** (cognee default \| chroma), **graphDB** (kuzu \| neo4j), use_memory, use_workspace_bootstrap, mode, endpoints. |
-| `config/core.yml` | Single config: `llama_cpp`, `local_models` (array), `cloud_models` (array), `main_llm` / `embedding_llm` (id). Optional: `memory_backend`, `graphDB`, `use_workspace_bootstrap`, `use_tools`, `use_skills`, `skills_dir` (inject workspace and/or skills into system prompt). |
-| `config/user.yml` | Users: name, email, im, phone, permissions (which channel types they can use). |
+| `config/core.yml` | **Single config** for Core: host/port, **model_path**, **local_models** (array: id, path, host, port, capabilities), **cloud_models** (array: id, path, host, port, **api_key_name** → set env var), **main_llm** / **embedding_llm** (refs: local_models/<id> or cloud_models/<id>). **memory_backend** (cognee default \| chroma), **cognee:** (when cognee), database, vectorDB, graphDB (when chroma). **use_memory**, **use_workspace_bootstrap**, **workspace_dir**. **use_tools**, **tools:** (exec_allowlist, file_read_base, web, browser_*, run_skill_*, etc.). **use_skills**, **skills_dir**, **skills_use_vector_search**, etc. **profile** (enabled, dir). **knowledge_base**. **result_viewer** (enabled, port, base_url). **auth_enabled**, **auth_api_key**. Prompts, TAM, orchestrator_unified_with_tools. See HOW_TO_USE.md. |
+| `config/user.yml` | Allowlist: users (id, name, email, im, phone, permissions). All chat/memory/profile keyed by system user id. |
 | `config/email_account.yml` | IMAP/SMTP and credentials for the email channel. |
-| `channels/.env` | core_host, core_port (and optionally channel mode). |
+| `channels/.env` | CORE_URL (e.g. http://127.0.0.1:9000), channel bot tokens (TELEGRAM_BOT_TOKEN, etc.). |
 
-Core reads `main_llm` / `embedding_llm` (id) from `core.yml` and resolves host/port and type from `local_models` or `cloud_models`. Local model paths are relative to `model_path`.
+Core reads **main_llm** / **embedding_llm** (id) from `core.yml` and resolves host/port and type from **local_models** or **cloud_models**. Local model **path** is relative to **model_path**. Llama.cpp server binary is placed in **llama.cpp-master/** subfolder for the platform (mac/, win_cuda/, linux_cpu/, etc.); see llama.cpp-master/README.md. Cloud API keys: set the **environment variable** matching each cloud model’s **api_key_name** (e.g. OPENAI_API_KEY).
 
 ---
 
@@ -385,9 +408,9 @@ Core reads `main_llm` / `embedding_llm` (id) from `core.yml` and resolves host/p
 - **Channels**: Two options. (1) **Minimal**: Any bot can POST to Core `/inbound` (or Webhook `/message`) with `{ user_id, text }` and get `{ text }`; add user_id to user.yml. Ready-made: `channels/telegram/`, `channels/discord/`, `channels/slack/`; run with `python -m channels.run <name>`. (2) **Full**: New folder under `channels/` with `BaseChannel` subclass and config; register with Core, implement `/get_response` for async delivery. A **dedicated HomeClaw app** can use WebSocket `/ws` for a persistent connection.
 - **LLM**: Add entries in `core.yml` under `local_models` or `cloud_models`; for local, llama-server is started per main/embedding model (LLMServiceManager); multiple processes for multiple models are supported via host/port per entry).
 - **Memory/RAG**: **Default**: Cognee — SQLite + ChromaDB + Kuzu (Cognee defaults); Postgres, enterprise vector DBs, Neo4j via Cognee `.env`. **Alternative**: in-house RAG — `memory_backend: chroma` with SQLite/Chroma/optional graph (kuzu \| neo4j) via `core.yml`. See **docs/MemoryAndDatabase.md** (support matrix), **docs/MemoryUpgradePlan.md**, **docs/MemoryCogneeEvaluation.md**.
-- **Plugins**: Add a folder under `plugins/` with `config.yml` and a `BasePlugin` subclass; PluginManager always loads plugins. Routing: **orchestrator_unified_with_tools** in `core.yml` (default true = main LLM with route_to_plugin tool; false = separate orchestrator_handler runs first).
+- **Plugins**: Add a folder under `plugins/` with **plugin.yaml** (manifest: id, description, capabilities), **config.yml**, and **plugin.py** (BasePlugin subclass, run() or capability methods). PluginManager loads plugins; routing: **orchestrator_unified_with_tools** in `core.yml` (default true = main LLM with **route_to_plugin** tool; false = separate orchestrator LLM call). External HTTP plugins: plugin.yaml with type: http or POST /api/plugins/register. See **docs/PluginsGuide.md**, **docs/PluginStandard.md**, **docs/RunAndTestPlugins.md**.
 - **Tool layer**: See §3.6. Add a central **tool registry**, tool schemas for the LLM, and a **tool-aware chat flow** (execute tool_calls, append results, loop). Implement built-in tools: exec (sandboxed), browser, nodes adapter, cron, webhooks, sessions_*. Optionally let plugins expose tools via `get_tools()` / `run_tool()`. This gives “do things” (exec, browser, devices) while keeping plugins for feature bundles.
-- **Skills (SKILL.md format)**: **Implemented**: `base/skills.py` loads **SKILL.md** (YAML frontmatter + body) from **config/skills/** (or `skills_dir` in core.yml). When **use_skills: true**, Core injects an “Available skills” block (name + description per skill) into the system prompt. Add skill folders under `config/skills/` with a SKILL.md each; you can copy from ClawHub. Optional later: **run_skill** tool to execute scripts from a skill’s `scripts/` folder.
+- **Skills (SKILL.md format)**: **Implemented**: `base/skills.py` loads **SKILL.md** (name, description, body) from **config/skills/** (or `skills_dir` in core.yml). When **use_skills: true**, Core injects an “Available skills” block into the system prompt. **skills_use_vector_search: true** (optional) retrieves skills by similarity to the query (separate Chroma collection). **run_skill** tool executes scripts from a skill’s `scripts/` folder (allowlist in `tools.run_skill_allowlist`). Add skill folders under `config/skills/` with a SKILL.md each; reuse format from OpenClaw/ClawHub. See **docs/SkillsGuide.md**, **docs/ToolsSkillsPlugins.md**.
 - **TAM**: Time intents are already classified; TAM can be extended to more scheduling/reminder actions and integrations.
 
 ---
@@ -399,8 +422,9 @@ Core reads `main_llm` / `embedding_llm` (id) from `core.yml` and resolves host/p
 | Core | `core/core.py`, `core/coreInterface.py`, `core/orchestrator.py`, `core/tam.py` |
 | Channels | `base/BaseChannel.py`, `base/base.py` (InboundRequest), `channels/` (webhook, telegram, discord, slack, whatsapp, matrix, wechat, tinode), `main.py` (CLI). Run any channel: `python -m channels.run <name>`. |
 | LLM | `llm/llmService.py`, `llm/litellmService.py` |
-| Memory | `memory/base.py`, `memory/mem.py`, `memory/chroma.py`, `memory/storage.py`, `memory/embedding.py`, `memory/chat/chat.py` (ChatHistory, get_transcript). **Graph**: `memory/graph/` (base, kuzu_store, neo4j_store, null_store, get_graph_store). **Cognee**: `memory/cognee_adapter.py` (default when memory_backend=cognee). Workspace bootstrap: `base/workspace.py`, `config/workspace/` (IDENTITY.md, AGENTS.md, TOOLS.md). Skills: `base/skills.py`, `config/skills/` (SKILL.md per folder); enable with `use_skills: true`, `skills_dir` in core.yml. See **docs/MemoryUpgradePlan.md**, **docs/MemoryCogneeEvaluation.md**. |
-| Plugins | `base/BasePlugin.py`, `base/PluginManager.py`, `plugins/Weather/plugin.py` |
+| Memory | `memory/base.py`, `memory/mem.py`, `memory/chroma.py`, `memory/storage.py`, `memory/embedding.py`, `memory/chat/chat.py` (ChatHistory, get_transcript). **Graph**: `memory/graph/` (when memory_backend=chroma). **Cognee**: `memory/cognee_adapter.py` (default when memory_backend=cognee). **Profile**: `base/profile_store.py`, database/profiles/. **Knowledge base**: see core.yml knowledge_base, docs/MemoryAndDatabase.md. Workspace bootstrap: `base/workspace.py`, `config/workspace/` (IDENTITY.md, AGENTS.md, TOOLS.md). Skills: `base/skills.py`, `config/skills/` (SKILL.md per folder); `use_skills`, `skills_dir`, `skills_use_vector_search`; run_skill in tools/builtin.py. See **docs/MemoryAndDatabase.md**, **docs/SkillsGuide.md**. |
+| Tools | `base/tools.py` (ToolRegistry, ToolContext), `tools/builtin.py` (register_builtin_tools). Config: core.yml `tools:` (exec_allowlist, file_read_base, web, browser_*, run_skill_*, etc.). See **docs/ToolsDesign.md**, **docs/ToolsAndSkillsTesting.md**. |
+| Plugins | `base/BasePlugin.py`, `base/PluginManager.py`, `plugins/Weather/` (plugin.yaml, config.yml, plugin.py). External: POST /api/plugins/register. See **docs/PluginsGuide.md**, **docs/PluginStandard.md**. |
 | Shared | `base/base.py` (PromptRequest, AsyncResponse, enums, config dataclasses), `base/util.py` (config, LLM calls, paths) |
 
 ---

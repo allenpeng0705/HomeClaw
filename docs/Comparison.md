@@ -10,7 +10,7 @@ This document describes **HomeClaw** in the context of home-agent design (local 
 |---|------------|----------|
 | **Repo** | This repository | (other project) |
 | **Tagline** | Local-first AI assistant; RAG + transcript memory; multi-channel (email, IM, CLI, webhook, WebSocket). | Personal AI assistant; multi-channel (WhatsApp, Telegram, Slack, Discord, etc.); tools and skills. |
-| **Stack** | Python, FastAPI, SQLite, Chroma, llama.cpp, LiteLLM | Node/TypeScript, single Gateway (WS + HTTP), pi-mono–derived agent |
+| **Stack** | Python, FastAPI, SQLite, Cognee (default) or Chroma, llama.cpp, LiteLLM | Node/TypeScript, single Gateway (WS + HTTP), pi-mono–derived agent |
 | **Primary LLM** | **Local** (llama.cpp) + optional cloud (LiteLLM) | **Cloud** (Anthropic/OpenAI) + optional local (e.g. Ollama) |
 | **Control plane** | Core (FastAPI); channels are **separate** processes (or external bot code); Webhook/WebSocket also separate from Core | Single Gateway process (one port); **channel code runs inside** the Gateway or in extensions |
 
@@ -25,14 +25,14 @@ This document describes **HomeClaw** in the context of home-agent design (local 
 | **Adding a new bot** | POST to Core `/inbound` or Webhook `/message` with `{ user_id, text }`; no new channel code. Channels (Telegram, Discord, Slack, etc.) in `channels/`. Example: `channels/telegram/` | Implement or enable a channel in the Gateway; bot tokens (Telegram, Discord, etc.) configured in gateway config |
 | **Access from anywhere** | Yes (email/IM to home Core; or Webhook relay; or Tailscale/SSH + WebSocket) | Yes (channels + Tailscale/SSH for Control UI / WebChat) |
 | **Control plane** | Core (FastAPI, HTTP + WebSocket); channels = separate processes or external bots calling /inbound | Single Gateway (WebSocket + HTTP on one port); channels run inside or connect to Gateway |
-| **Memory** | **RAG** (SQLite + Chroma) + **session transcript** (JSONL, prune, summarize); embedding model for retrieval | Session transcripts (JSONL); workspace bootstrap files (AGENTS.md, SOUL.md, TOOLS.md) |
-| **Extensibility** | Plugins (Python, description-based routing when orchestrator on); optional TAM (time intents) | Skills (SKILL.md, AgentSkills-compatible), plugins/extensions; ClawHub skill registry |
+| **Memory** | **RAG**: Cognee (default) or in-house Chroma + SQLite; **session transcript** (JSONL, prune, summarize); per-user profile (optional); optional knowledge base. Embedding model (local or cloud) for retrieval. See docs/MemoryAndDatabase.md. | Session transcripts (JSONL); workspace bootstrap files (AGENTS.md, SOUL.md, TOOLS.md) |
+| **Extensibility** | **Plugins** (plugin.yaml + config.yml + plugin.py; orchestrator or **route_to_plugin** tool); **Skills** (SKILL.md under config/skills/, optional vector search, **run_skill** tool); **Tools** (use_tools: true — exec, browser, cron, sessions_*, memory_*, file_*, etc.); TAM (time/cron). See docs/ToolsSkillsPlugins.md, docs/PluginsGuide.md, docs/SkillsGuide.md. | Skills (SKILL.md, AgentSkills-compatible), plugins/extensions; ClawHub skill registry |
 | **Agent capabilities** | Chat + RAG + optional plugin; **tool layer** (use_tools: true): exec, browser, cron, sessions_*, memory_*, file_*, etc. — most other agent-style tools | Chat + **tools**: exec, browser, canvas, nodes, cron, webhooks, sessions_* (agent-to-agent) |
 | **Device control** | Not yet | **Nodes**: camera, screen, location, system.run/notify; exec on gateway or node; sandbox (Docker) for non-main |
-| **Onboarding** | Manual config (YAML: core.yml, llm.yml, user.yml); CLI in main.py | Wizard (e.g. onboard, doctor) |
+| **Onboarding** | CLI: `python main.py onboard` (wizard for workspace, LLM, skills), `python main.py doctor` (config + LLM connectivity); config: **core.yml**, **user.yml** (no separate llm.yml) | Wizard (e.g. onboard, doctor) |
 | **Remote exposure** | Channels/Core host:port; optional Webhook relay; no built-in tunnel (docs suggest Tailscale/SSH) | Tailscale Serve/Funnel, SSH tunnel; gateway auth (token/password) |
 | **Multi-agent / sessions** | Single Core; user/session/run for chat and memory; user.yml allowlists | Multi-agent routing (workspace per agent); session model (main vs group, activation, queue) |
-| **Config** | YAML (core.yml, llm.yml, user.yml, email_account.yml); channels/.env | JSON config; env vars; credentials in config directory |
+| **Config** | YAML: **core.yml** (Core, LLM, memory, tools, skills, plugins, result_viewer, auth), **user.yml** (allowlist), **email_account.yml** (email channel); channels/.env | JSON config; env vars; credentials in config directory |
 
 ---
 
@@ -50,7 +50,7 @@ Channels (Email, Matrix, WeChat, WhatsApp, CLI, Webhook, or any bot → /inbound
     Core (FastAPI) → Permission → RAG + LLM → Reply (or route to Plugin)
                     │
                     ├── LLM: llama.cpp (local) or LiteLLM (cloud)
-                    └── Memory: SQLite + Chroma + transcript
+                    └── Memory: Cognee (default) or SQLite + Chroma + transcript; optional profile, knowledge base
 ```
 
 **other agent**
@@ -111,24 +111,24 @@ Both are valid “home agent, accessible anywhere” designs; the choice depends
 
 This section explains how each project handles memory and context, and analyzes the design difference: **conversation-centric** (HomeClaw, like ChatGPT) vs **action-centric** (other agent, “do real things”). The goal is to learn from other agent while keeping our own strengths.
 
-### 7.1 HomeClaw memory (RAG: SQLite + Chroma; transcript: JSONL, prune, summarize)
+### 7.1 HomeClaw memory (RAG: Cognee default or Chroma; transcript: JSONL, prune, summarize)
 
 **What we have**
 
-- **SQLite** (via SQLAlchemy + `memory/storage.py`, `memory/database/`):
+- **Memory backend** (`config/core.yml`): **`memory_backend: cognee`** (default) — Cognee handles relational, vector, and graph storage; configure via **`cognee:`** in core.yml and/or Cognee `.env`. **`memory_backend: chroma`** — in-house RAG using SQLite + Chroma + optional graph (Kuzu/Neo4j) via core.yml. See **docs/MemoryAndDatabase.md**.
+- **SQLite** (via SQLAlchemy + `memory/storage.py`, `memory/database/`): Used for **chat history** (Core’s sessions, runs, turns) regardless of memory_backend. When memory_backend is chroma, also used for in-house memory change history.
   - **Chat history**: `homeclaw_chat_history` — per turn: `app_id`, `user_id`, `session_id`, `question`, `answer`, `metadata`, `created_at`. Used to load the last N turns (e.g. 6) into the prompt as recent conversation.
   - **Sessions**: `homeclaw_session_history` — session metadata per app/user/session.
   - **Runs**: `homeclaw_run_history` — run metadata per agent/user/run.
-  - **Memory change history**: `memory/storage.py` — history table for memory CRUD events (old/new value, event type) for audit/debug.
-- **Chroma** (vector store in `memory/chroma.py`):
-  - Stores **embedded snippets** of past user/assistant content (and optional deduced “memories”). Each record has vector + payload (`data`, `user_id`, `session_id`, `run_id`, etc.).
-  - Used for **semantic retrieval**: given the current query (and optional filters), we search for the top‑k similar vectors and inject that text as “relevant memories” into the system/context.
-- **Embedding model**: Same config as `embedding_llm` (local llama.cpp or cloud). Used to embed text before storing in Chroma and to embed the query for search.
+- **Vector store**: **Cognee** (default) uses its own ChromaDB/vector store; **Chroma** (in-house, `memory/chroma.py`) stores **embedded snippets** of past user/assistant content. Each record has vector + payload (`data`, `user_id`, etc.). Used for **semantic retrieval**: given the current query, we search for the top‑k similar vectors and inject “relevant memories” into the system/context.
+- **Profile** (optional): Per-user JSON store (e.g. `database/profiles/`); loaded each request and injected as “About the user.” See **docs/UserProfileDesign.md**.
+- **Knowledge base** (optional): Separate from RAG memory; user documents/sources; backend auto or cognee/chroma. See core.yml `knowledge_base`.
+- **Embedding model**: Same config as `embedding_llm` (local_models or cloud_models). Used to embed text before storing and to embed the query for search.
 - **Flow**:
   1. Incoming user message → permission check → load **recent chat** from SQLite (last 6 turns) → optionally enqueue to **memory_queue**.
-  2. Background worker: `process_memory_queue()` takes the request and calls `mem_instance.add(...)` → embed text → insert into Chroma (and optional SQLite history).
-  3. When generating a reply: `answer_from_memory()` → `_fetch_relevant_memories(query, …)` runs **vector search** in Chroma (by query, scoped by user_id/session_id/run_id etc.) → builds a “memories” string → injects it into the **system prompt** (e.g. “Background information: …”) → then **LLM** (main_llm) with **recent chat + current query** → response saved to **chat history** (SQLite).
-- **Function calling**: Used for chat/completion (and for plugin routing when orchestrator is on). No built-in exec or device tools; plugins (Weather, News, etc.) are feature-specific.
+  2. Background worker: `process_memory_queue()` takes the request and calls `mem_instance.add(...)` → embed text → insert into Cognee or Chroma (and optional SQLite history when chroma).
+  3. When generating a reply: `answer_from_memory()` → `_fetch_relevant_memories(query, …)` runs **vector search** (Cognee or Chroma, by query, scoped by user_id etc.) → builds a “memories” string → injects it into the **system prompt** → then **LLM** (main_llm) with **recent chat + current query** (and optional **tools** when use_tools: true) → response saved to **chat history** (SQLite).
+- **Function calling**: Used for chat/completion, **tool calls** (when use_tools: true — exec, browser, cron, sessions_*, memory_*, file_*, run_skill, route_to_plugin, etc.), and plugin routing. Plugins (Weather, News, etc.) are feature-specific; model can call **route_to_plugin** or orchestrator selects plugin.
 
 - **Session transcript** (first-class; Design §3.4): Chat history exposed as **session transcript** per (app_id, user, session_id) — list or **JSONL**; optional **prune** (keep last N turns) and **summarize** (LLM summary). APIs: `get_transcript`, `get_transcript_jsonl`, `prune_session`, `summarize_session_transcript`.
 
@@ -206,7 +206,7 @@ This section explains how each project handles memory and context, and analyzes 
 
 ### 7.5 Short summary
 
-- **HomeClaw memory**: **RAG** (SQLite for chat/sessions/runs + Chroma for vector retrieval) + **session transcript** (JSONL, prune, summarize); **conversation-centric**; function calling for chat and plugin routing.
+- **HomeClaw memory**: **RAG** — Cognee (default) or in-house SQLite + Chroma for vector retrieval; **chat** (SQLite: sessions, runs, turns); **session transcript** (JSONL, prune, summarize); optional **profile**, **knowledge base**; **conversation-centric**; function calling for chat, tools (when use_tools: true), and plugin routing.
 - **other agent memory**: **Session transcript** (JSONL-like) + **workspace bootstrap** (AGENTS.md, SOUL.md, TOOLS.md); **action-centric**; tools for exec, browser, nodes, sessions.
 - **Takeaway**: We keep **RAG and chat history**; we can add **workspace bootstrap files** (identity + tools description) and **session transcript** as first-class concepts to move slightly toward “do real things” and clearer identity, without dropping what already works.
 
@@ -279,8 +279,8 @@ So: **better at what?** HomeClaw = recall + personal context; other agent = acti
 | | HomeClaw | other agent |
 |---|------------|----------|
 | **What counts as “memory”** | **Conversation**: SQLite chat (last N turns in prompt). **Long-term**: Chroma vector store (embed → search → inject “relevant memories”). **Transcript**: Session transcript (list/JSONL, prune, summarize) per session. | **Conversation**: Session transcript (e.g. JSONL); linear log of this session. **Identity/capabilities**: Workspace bootstrap (AGENTS, SOUL, TOOLS) loaded at session start — not “recall” but fixed context. |
-| **Storage** | SQLite (chat, sessions, runs) + Chroma (vectors). | Transcript per session (file/DB); no vector store in core. |
-| **Retrieval** | Embedding model → vector search (Chroma) → top‑k snippets into system prompt. | No semantic retrieval; context = full/recent transcript + bootstrap. |
+| **Storage** | SQLite (chat, sessions, runs); Cognee (default) or Chroma (vectors). Optional profile (JSON per user), knowledge base. | Transcript per session (file/DB); no vector store in core. |
+| **Retrieval** | Embedding model → vector search (Cognee or Chroma) → top‑k snippets into system prompt. | No semantic retrieval; context = full/recent transcript + bootstrap. |
 | **Scope** | **Cross-session**: RAG can recall “what we said about X” across users/sessions. Chat window = current session’s last N turns. | **Per-session**: Transcript is this session only. No built-in “remember across sessions.” |
 | **Pruning / summarization** | Optional: `prune_session_transcript`, `summarize_session_transcript` (Design §3.4). RAG naturally limits by top‑k. | Transcript may be pruned/summarized to control context size. |
 | **Strength** | **Recall**: “Remember when I said…”, “what did we discuss about X?” — semantic search over past content. | **Session focus**: Clear “this conversation” context; simple; good for action loops (exec, browser, nodes) where identity + transcript matter. |
@@ -288,7 +288,7 @@ So: **better at what?** HomeClaw = recall + personal context; other agent = acti
 
 **Summary**
 
-- **HomeClaw memory** = **chat (SQLite)** + **RAG (Chroma)** + **transcript** (JSONL, prune, summarize). Conversation-centric: recent turns in the prompt plus *retrieved* past content; session transcript available for export/prune/summary like other agent. Best when you want **long-term, semantic recall** (“remember me”, “things like X”) across sessions.
+- **HomeClaw memory** = **chat (SQLite)** + **RAG** (Cognee default or Chroma) + **transcript** (JSONL, prune, summarize); optional **profile**, **knowledge base**. Conversation-centric: recent turns in the prompt plus *retrieved* past content; session transcript available for export/prune/summary like other agent. Best when you want **long-term, semantic recall** (“remember me”, “things like X”) across sessions.
 - **other agent memory** = **session transcript** + **bootstrap (AGENTS, SOUL, TOOLS)**. Action-centric: “what was said in this thread” plus “who I am and what I can do.” Best when you want **this-session context** and **tools/identity** without a vector store.
 - **Choose HomeClaw** if recall and personal context across time matter more; **choose other agent** if session-scoped context and action-oriented tools matter more. For **how memory is used** in each system and **how to use RAG and transcript together** in HomeClaw, see §7.9.
 
@@ -548,5 +548,5 @@ This subsection lists **modules or features other agent has that HomeClaw does n
 
 ## 8. References
 
-- **HomeClaw**: `Design.md`, `Improvement.md`, `docs/RemoteAccess.md`, `docs/Multimodal.md`, `channels/README.md`, `channels/telegram/README.md`, `channels/webhook/README.md`
+- **HomeClaw**: `Design.md`, `Improvement.md`, `HOW_TO_USE.md`, `docs/MemoryAndDatabase.md`, `docs/RemoteAccess.md`, `docs/Multimodal.md`, `docs/ToolsSkillsPlugins.md`, `docs/PluginsGuide.md`, `docs/SkillsGuide.md`, `docs/UserProfileDesign.md`, `channels/README.md`, `channels/telegram/README.md`, `channels/webhook/README.md`
 - **other agent**: (other project), (external docs), [Templates: AGENTS / SOUL / TOOLS]((external docs)reference/templates/AGENTS), [Session model]((external docs)concepts/session), [ClawHub]((external docs)clawdhub) (skill registry), [Skills]((external docs)tools/skills)
