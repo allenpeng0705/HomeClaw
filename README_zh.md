@@ -38,6 +38,31 @@ HomeClaw 围绕以下原则构建：
 
 HomeClaw 由 **Core**（单进程）、**渠道**（独立进程或 HTTP 客户端）、**LLM 层**（本地和/或云端）、**记忆**（RAG + 对话历史）、**档案**（每用户学习）以及 **插件** + **工具** + **技能** 组成。下图展示所有模块及数据流，包括 LLM（本地或云端）的使用方式以及工具、技能、插件的选择方式。
 
+**简单概览**
+
+```mermaid
+flowchart LR
+  subgraph CH["渠道"]
+    A[WebChat、Telegram、邮件...]
+  end
+  subgraph CO["Core"]
+    B[编排器 · 工具 · 插件]
+  end
+  subgraph LL["LLM"]
+    C[本地 / 云端]
+  end
+  subgraph ME["记忆"]
+    D[RAG + 对话]
+  end
+  CH -->|消息| CO
+  CO --> LL
+  ME <--> CO
+  style CH fill:#e3f2fd,stroke:#1976d2
+  style CO fill:#fff3e0,stroke:#ef6c00
+  style LL fill:#e8f5e9,stroke:#388e3c
+  style ME fill:#fce4ec,stroke:#c2185b
+```
+
 **系统概览：所有模块**
 
 ```mermaid

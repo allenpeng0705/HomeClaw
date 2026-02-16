@@ -38,6 +38,31 @@ HomeClaw is built around a few principles:
 
 HomeClaw is organized into a **Core** (one process), **channels** (separate processes or HTTP clients), **LLM layer** (local and/or cloud), **memory** (RAG + chat history), **profile** (per-user learning), and **plugins** + **tools** + **skills**. The diagrams below show all modules and how data flows through the system, including how the LLM (local or cloud) is used and how tools, skills, and plugins are selected.
 
+**Simple overview**
+
+```mermaid
+flowchart LR
+  subgraph CH["Channels"]
+    A[WebChat, Telegram, Email...]
+  end
+  subgraph CO["Core"]
+    B[Orchestrator · Tools · Plugins]
+  end
+  subgraph LL["LLM"]
+    C[Local / Cloud]
+  end
+  subgraph ME["Memory"]
+    D[RAG + Chat]
+  end
+  CH -->|message| CO
+  CO --> LL
+  ME <--> CO
+  style CH fill:#e3f2fd,stroke:#1976d2
+  style CO fill:#fff3e0,stroke:#ef6c00
+  style LL fill:#e8f5e9,stroke:#388e3c
+  style ME fill:#fce4ec,stroke:#c2185b
+```
+
 **System overview: all modules**
 
 ```mermaid

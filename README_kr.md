@@ -38,6 +38,31 @@ HomeClaw는 다음 원칙을 따릅니다.
 
 HomeClaw는 **Core**(단일 프로세스), **채널**(별도 프로세스 또는 HTTP 클라이언트), **LLM 계층**(로컬 및/또는 클라우드), **메모리**(RAG + 채팅 기록), **프로필**(사용자별 학습), **플러그인** + **도구** + **스킬**로 구성됩니다. 아래 다이어그램은 모든 모듈과 데이터 흐름, LLM(로컬 또는 클라우드) 사용 방식, 도구·스킬·플러그인 선택 방식을 보여 줍니다.
 
+**간단 개요**
+
+```mermaid
+flowchart LR
+  subgraph CH["채널"]
+    A[WebChat, Telegram, 이메일...]
+  end
+  subgraph CO["Core"]
+    B[오케스트레이터 · 도구 · 플러그인]
+  end
+  subgraph LL["LLM"]
+    C[로컬 / 클라우드]
+  end
+  subgraph ME["메모리"]
+    D[RAG + 채팅]
+  end
+  CH -->|메시지| CO
+  CO --> LL
+  ME <--> CO
+  style CH fill:#e3f2fd,stroke:#1976d2
+  style CO fill:#fff3e0,stroke:#ef6c00
+  style LL fill:#e8f5e9,stroke:#388e3c
+  style ME fill:#fce4ec,stroke:#c2185b
+```
+
 **시스템 개요: 모든 모듈**
 
 ```mermaid
