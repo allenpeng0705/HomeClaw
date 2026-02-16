@@ -2,6 +2,8 @@
 
 Channels are how users (or bots) reach your HomeClaw Core. This document has two parts: **Part I for users** (how to use and configure channels), **Part II for developers** (design, comparison with other agent, and improvements).
 
+**Other languages / 其他语言 / 他の言語 / 다른 언어:** [简体中文](Channel_zh.md) | [日本語](Channel_jp.md) | [한국어](Channel_kr.md)
+
 ---
 
 # Part I — For Users
@@ -59,6 +61,22 @@ Use your machine’s IP or hostname if channels run on another machine.
 ---
 
 ## 3. Channels you can use
+
+**All supported channels**
+
+| Channel | Type | Run |
+|---------|------|-----|
+| **CLI** | In-process (local_chat) | `python main.py` |
+| **Email** | Full (BaseChannel) | Start separately; see §3.2. Email code: `core/emailChannel/` or `channels/emailChannel/`. |
+| **Matrix, Tinode, WeChat, WhatsApp** | Full (BaseChannel) | `python -m channels.run matrix` (or tinode, wechat, whatsapp) |
+| **Telegram, Discord, Slack** | Inbound (POST /inbound) | `python -m channels.run telegram` (or discord, slack) |
+| **Google Chat, Signal, iMessage, Teams, Zalo, Feishu, DingTalk, BlueBubbles** | Inbound / HTTP / webhook | `python -m channels.run google_chat` (or signal, imessage, teams, zalo, feishu, dingtalk, bluebubbles) |
+| **WebChat** | WebSocket /ws | `python -m channels.run webchat` |
+| **Webhook** | Relay (forwards to Core /inbound) | `python -m channels.run webhook` |
+
+**Auth (when exposing Core on the internet):** Set **auth_enabled: true** and **auth_api_key** in `config/core.yml`; then **POST /inbound** and **WebSocket /ws** require **X-API-Key** or **Authorization: Bearer**. See **docs/RemoteAccess.md**.
+
+---
 
 ### 3.1 CLI (terminal)
 
@@ -151,6 +169,7 @@ HomeClaw is the same pattern: run the WhatsApp channel on the home computer, log
 
 1. **`config/user.yml`**: Add the **user_id** your bot will send (e.g. `telegram_123456789`, `discord_98765`) under **im** for a user that has **IM** (or allow all with empty permissions).
 2. **Core reachable**: Your bot must be able to POST to `http://<core_host>:<core_port>/inbound`. If the Core is only on your home LAN, use the Webhook (next) or expose Core via Tailscale/SSH.
+3. **Auth (optional)**: When exposing Core on the internet, set **auth_enabled: true** and **auth_api_key** in `config/core.yml`; send **X-API-Key** or **Authorization: Bearer** with each request. See docs/RemoteAccess.md.
 
 **Request**
 
@@ -231,7 +250,7 @@ ws://<core_host>:<core_port>/ws
 - Send JSON: `{ "user_id": "...", "text": "..." }`.
 - Receive JSON: `{ "text": "...", "error": "..." }`.
 
-**Config**: Same **user_id** allowlist in `config/user.yml` (e.g. under **im** with **IM** permission). To use from another device, make the Core reachable (e.g. Tailscale or SSH tunnel) and connect to `ws://<reachable_host>:<port>/ws`.
+**Config**: Same **user_id** allowlist in `config/user.yml` (e.g. under **im** with **IM** permission). When **auth_enabled: true**, send **X-API-Key** or **Authorization: Bearer** in the WebSocket handshake headers. To use from another device, make the Core reachable (e.g. Tailscale or SSH tunnel) and connect to `ws://<reachable_host>:<port>/ws`.
 
 ---
 
@@ -356,22 +375,29 @@ So: we **learn from other agent** (one clear contract, WebSocket for our client,
 
 ---
 
-## 4. What we should improve (learn from other agent, keep our goals)
+## 4. What we have and what we can improve
 
-- **Onboarding**: A **CLI wizard** (e.g. `python main.py setup` or `homeclaw onboard`) for first-time config: Core host/port, one channel (e.g. email or CLI), user allowlist, optional memory. Output: minimal core.yml, llm.yml, user.yml. Reduces friction for “run at home, use from anywhere.”
-- **Health / doctor**: A **doctor** command that checks Core reachable, LLM and embedding endpoints, config validity, and channel credentials; suggests fixes. Like other agent’s `other-agent doctor`.
-- **Single entry point**: One command or script to start **Core + one or more channels** (e.g. Core + email, or Core + webhook) so deployment is “run this and you have core + channel(s).” We can keep separate processes but present one logical start.
-- **Remote access docs**: One short doc that explains: (1) channels (email/IM) already allow remote use; (2) **Webhook** when Core isn’t public; (3) **Tailscale or SSH** to expose Core (or Webhook) for WebSocket or a future WebChat; (4) optional auth (token/password or reverse proxy).
-- **Pairing (optional)**: For IM/bots, an optional **pairing** step (e.g. first contact gets a code, user approves in config or CLI) so the assistant isn’t open to anyone who finds the number/id. other agent does this for DMs; we can add a minimal version.
-- **WebChat**: A minimal **Web UI** that talks to the Core (e.g. over **WebSocket /ws** or POST /inbound) so users can chat from the browser without configuring another IM. Fits “connect to home” via Tailscale/SSH + browser.
+**Already available**
 
-We **don’t** need to copy other agent’s single binary or full tool set; we keep **local LLM + RAG** and **minimal bot API**, and improve **onboarding**, **ops**, and **documentation** so “channel to home computer” is clear and easy.
+- **Onboarding**: `python main.py onboard` — wizard to set workspace, LLM, channels, skills; updates core.yml.
+- **Doctor**: `python main.py doctor` — checks config and LLM connectivity; suggests fixes.
+- **Remote access and auth**: **docs/RemoteAccess.md** — auth_enabled/auth_api_key for /inbound and /ws; Tailscale or SSH to expose Core.
+
+**Possible improvements (keep our goals)**
+
+- **Single entry point**: One command or script to start **Core + one or more channels** (e.g. Core + webhook) so deployment is “run this and you have core + channel(s).”
+- **Pairing (optional)**: For IM/bots, an optional **pairing** step (e.g. first contact gets a code, user approves in config or CLI) so the assistant isn’t open to anyone who finds the number/id.
+- **WebChat**: A minimal **Web UI** that talks to the Core (e.g. over **WebSocket /ws**) so users can chat from the browser without configuring another IM. We have **channels/webchat/**; fits “connect to home” via Tailscale/SSH + browser.
+
+We **don’t** need to copy other agent’s single binary or full tool set; we keep **local LLM + RAG** and **minimal bot API**, and improve **ops** and **documentation** so “channel to home computer” is clear and easy.
 
 ---
 
 ## 5. References
 
 - **Design**: `Design.md` (Core, channels, /inbound, /ws, webhook).
+- **How to write a new channel**: **docs/HowToWriteAChannel.md** (full channel vs webhook/inbound; two methods for developers).
 - **Improvement ideas**: `Improvement.md` (other agent summary, comparison, channel vs gateway, HTTP vs WS, example).
 - **Comparison with other agent**: `Comparison.md`.
+- **Remote access and auth**: **docs/RemoteAccess.md**.
 - **Channel usage**: `channels/README.md`, `channels/webhook/README.md`, `channels/telegram/README.md`.
