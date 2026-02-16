@@ -1,0 +1,50 @@
+# MkDocs config for HomeClaw documentation site
+# Source: docs/ (website content). Design/internal docs are in docs_design/.
+# Build: mkdocs build. Deploy to GitHub Pages via GitHub Actions.
+
+site_name: HomeClaw
+site_description: Local-first AI assistant — your home, your AI, your control.
+site_url: https://allenpeng0705.github.io/HomeClaw/  # adjust if you use a custom domain
+repo_url: https://github.com/allenpeng0705/HomeClaw
+repo_name: HomeClaw
+
+docs_dir: docs
+strict: true
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: deep orange
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: deep orange
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - search.suggest
+    - search.highlight
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+    - Introducing HomeClaw: introducing-homeclaw.md
+    - Story: story.md
+  - Install: install.md
+  - Run: run.md
+  - Channels: channels.md
+  - Tools: tools.md
+  - Models: models.md
+  - Platform: platform.md
+  - Help: help.md

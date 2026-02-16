@@ -193,12 +193,12 @@ sequenceDiagram
 - **チャネル** — Email、Matrix、Tinode、WeChat、WhatsApp、Telegram、Discord、Slack、WebChat、webhook、Google Chat、Signal、iMessage、Teams、Zalo、Feishu、DingTalk、BlueBubbles。各チャネルは HTTP（`/inbound`、`/process`）または WebSocket（`/ws`）で Core に接続。 [チャネル](#2-homeclaw-でできること) と `channels/README.md` を参照。
 - **Core** — 単一の FastAPI アプリ：権限チェック（`config/user.yml`）、オーケストレータ（意図 TIME vs OTHER；プラグイン選択）、TAM（リマインダー、cron）、ツール実行（ファイル、メモリ、ウェブ検索、ブラウザ、cron、`route_to_plugin`、`run_skill`）、プラグイン呼び出し、チャット + RAG。設定：`config/core.yml`。
 - **LLM 層** — Core が利用する単一の OpenAI 互換 API。**ローカルモデル**（llama.cpp サーバ、GGUF）および/または**クラウドモデル**（LiteLLM：OpenAI、Google Gemini、DeepSeek、Anthropic、Groq、Mistral 等）で提供。メインと埋め込みモデルは独立に選択可能。`config/core.yml`（`local_models`、`cloud_models`、`main_llm`、`embedding_llm`）を参照。
-- **メモリ** — **Cognee**（デフォルト）または自前 **Chroma** バックエンド：ベクトル + リレーショナル + オプションでグラフ。RAG とチャット履歴に使用。`docs/MemoryAndDatabase.md` を参照。
-- **プロフィール** — ユーザーごとの JSON ストア（例: `database/profiles/`）。リクエストごとに読み込み、プロンプトに「ユーザーについて」として注入；パーソナライズとプラグインのパラメータ解決に使用。`docs/UserProfileDesign.md` を参照。
+- **メモリ** — **Cognee**（デフォルト）または自前 **Chroma** バックエンド：ベクトル + リレーショナル + オプションでグラフ。RAG とチャット履歴に使用。`docs_design/MemoryAndDatabase.md` を参照。
+- **プロフィール** — ユーザーごとの JSON ストア（例: `database/profiles/`）。リクエストごとに読み込み、プロンプトに「ユーザーについて」として注入；パーソナライズとプラグインのパラメータ解決に使用。`docs_design/UserProfileDesign.md` を参照。
 - **プラグイン** — 組み込み（Python、`plugins/`）と外部（HTTP、任意言語）。リクエストが一致したとき Core がユーザー意図をプラグイン（例: Weather、News、Mail）にルーティング。 [§5 プラグイン](#5-プラグインhomeclaw-の拡張) を参照。
 - **スキル** — `config/skills/` 下のフォルダと `SKILL.md`（名前、説明、ワークフロー）。LLM がツールでスキルワークフローを実行；オプションで `run_skill` でスクリプト実行。 [§6 スキル](#6-スキルワークフローで-homeclaw-を拡張) を参照。
 
-設計の詳細は **Design.md** を、ツール・スキル・プラグインの違いは **docs/ToolsSkillsPlugins.md** を参照してください。
+設計の詳細は **Design.md** を、ツール・スキル・プラグインの違いは **docs_design/ToolsSkillsPlugins.md** を参照してください。
 
 ---
 
@@ -214,7 +214,7 @@ sequenceDiagram
 - **Email、Matrix、Tinode、WeChat、WhatsApp** — フルチャネル；設定は `channels/README.md` を参照。
 - **Webhook** — 任意のクライアントが webhook の `/message` に POST して返信を取得（Core の `/inbound` に中継）。Core に直接届かない場合（NAT 内など）に便利。
 
-すべてのチャネルが同じ Core を利用：1エージェント、1メモリ、1セットのプラグインとスキル。 **docs/RunAndTestPlugins.md** でクイック実行・テスト手順を参照。
+すべてのチャネルが同じ Core を利用：1エージェント、1メモリ、1セットのプラグインとスキル。 **docs_design/RunAndTestPlugins.md** でクイック実行・テスト手順を参照。
 
 ### マルチユーザー対応
 
@@ -226,16 +226,16 @@ Core は `config/user.yml` の**許可リスト**を使用します。各ユー�
 - **phone** — SMS/電話チャネル用。
 - **permissions** — オプション（例: IM、EMAIL）；空はすべて許可。
 
-リストされたユーザーのみが Core にメッセージを送信できます。チャット、メモリ、ナレッジベース、プロフィールデータはこのシステムユーザー id でキー付けされます。**docs/MultiUserSupport.md** と **docs/UserProfileDesign.md** を参照。
+リストされたユーザーのみが Core にメッセージを送信できます。チャット、メモリ、ナレッジベース、プロフィールデータはこのシステムユーザー id でキー付けされます。**docs_design/MultiUserSupport.md** と **docs_design/UserProfileDesign.md** を参照。
 
 ### 安全：ローカル vs クラウドモデル
 
 - **ローカルモデル** — ご自身のマシンで llama.cpp サーバ経由で GGUF モデルを実行。データは端末に残り、サードパーティ API は不要。`config/core.yml` の `local_models` で設定；`main_llm` と `embedding_llm` を例: `local_models/Qwen3-14B-Q5_K_M` に設定。
 - **クラウドモデル** — `config/core.yml` の `cloud_models` で LiteLLM を使用。`api_key_name`（例: `OPENAI_API_KEY`、`GEMINI_API_KEY`、`DEEPSEEK_API_KEY`）と対応する環境変数を設定。HomeClaw は選択したプロバイダにプロンプトを送信；プライバシーと利用規約はそのプロバイダに従います。
 - **併用** — チャットにローカル、埋め込みにクラウド（またはその逆）が可能。CLI の `llm set` / `llm cloud` または `config/core.yml` の `main_llm` / `embedding_llm` の編集で切り替え。
-- **リモートアクセス** — Core をインターネットに公開する場合（WebChat やボット用）、`config/core.yml` で **auth** を有効に：`auth_enabled: true` と `auth_api_key: "<secret>"`。クライアントは `/inbound` と `/ws` で `X-API-Key` または `Authorization: Bearer <key>` を送信する必要があります。**docs/RemoteAccess.md** を参照。
+- **リモートアクセス** — Core をインターネットに公開する場合（WebChat やボット用）、`config/core.yml` で **auth** を有効に：`auth_enabled: true` と `auth_api_key: "<secret>"`。クライアントは `/inbound` と `/ws` で `X-API-Key` または `Authorization: Bearer <key>` を送信する必要があります。**docs_design/RemoteAccess.md** を参照。
 
-対応クラウドプロバイダ（LiteLLM 経由）には **OpenAI**（GPT-4o 等）、**Google Gemini**、**DeepSeek**、**Anthropic**、**Groq**、**Mistral**、**xAI**、**Cohere**、**Together AI**、**OpenRouter**、**Perplexity** など。`config/core.yml` と [LiteLLM ドキュメント](https://docs.litellm.ai/docs/providers) を参照。
+対応クラウドプロバイダ（LiteLLM 経由）には **OpenAI**（GPT-4o 等）、**Google Gemini**、**DeepSeek**、**Anthropic**、**Groq**、**Mistral**、**xAI**、**Cohere**、**Together AI**、**OpenRouter**、**Perplexity** など。`config/core.yml` と [LiteLLM ドキュメント](https://docs.litellm.ai/docs_design/providers) を参照。
 
 ---
 
@@ -294,7 +294,7 @@ HomeClaw は **macOS**、**Windows**、**Linux** で動作します。必要環�
 
 6. **テスト**
 
-   - WebChat または CLI でメッセージを送信。ツール/スキル/プラグインは **docs/ToolsAndSkillsTesting.md** と **docs/RunAndTestPlugins.md** を参照。
+   - WebChat または CLI でメッセージを送信。ツール/スキル/プラグインは **docs_design/ToolsAndSkillsTesting.md** と **docs_design/RunAndTestPlugins.md** を参照。
    - 設定と LLM 接続の確認：`python -m main doctor`。
 
 ### コマンド（対話 CLI、`python -m main start`）
@@ -329,7 +329,7 @@ HomeClaw には**ツール**（ファイル、メモリ、ウェブ検索、cron
 - **ワークフロー実行** — `config/core.yml` で**スキル**を有効に（`use_skills: true`）。LLM は「利用可能なスキル」を見て、スキルの指示に従いツールを使うか、**run_skill** でスクリプトを実行します。
 - **スケジュールとリマインダー** — **TAM**（Time Awareness Module）を使用：「5分後にリマインド」「毎日9時」など；または `remind_me`、`record_date`、`cron_schedule` などのツール。
 
-プラグインやスキルを名前で「呼ぶ」必要はありません。自然に依頼すれば、意図が一致したときにプラグインにルーティングされ、モデルが判断したときにツール/スキルが使われます。LLM がツール・スキル・プラグインをどう選ぶかは **docs/ToolsSkillsPlugins.md** を参照。
+プラグインやスキルを名前で「呼ぶ」必要はありません。自然に依頼すれば、意図が一致したときにプラグインにルーティングされ、モデルが判断したときにツール/スキルが使われます。LLM がツール・スキル・プラグインをどう選ぶかは **docs_design/ToolsSkillsPlugins.md** を参照。
 
 ---
 
@@ -349,7 +349,7 @@ HomeClaw には**ツール**（ファイル、メモリ、ウェブ検索、cron
   - `GET /health` → 2xx
   - `POST /run`（または任意パス）→ ボディ = PluginRequest JSON、応答 = PluginResult JSON。
 - **Core に登録**：`POST http://<core>:9000/api/plugins/register` で plugin id、name、description、`health_check_url`、`type: "http"`、`config`（base_url、path、timeout_sec）、`capabilities` を送信。
-- 登録後、Core は組み込みプラグインと同様にあなたのサーバにルーティングします。**docs/PluginStandard.md** と **docs/PluginsGuide.md** を参照。
+- 登録後、Core は組み込みプラグインと同様にあなたのサーバにルーティングします。**docs_design/PluginStandard.md** と **docs_design/PluginsGuide.md** を参照。
 
 ### 例：多言語外部プラグイン
 
@@ -360,11 +360,11 @@ HomeClaw には**ツール**（ファイル、メモリ、ウェブ検索、cron
 - **Go** — Time（ポート 3112）。
 - **Java** — Quote（ポート 3113）。
 
-各フォルダに README と登録スクリプトあり。**examples/external_plugins/README.md** と **docs/RunAndTestPlugins.md** を参照。
+各フォルダに README と登録スクリプトあり。**examples/external_plugins/README.md** と **docs_design/RunAndTestPlugins.md** を参照。
 
 ### パラメータ収集
 
-プラグインはパラメータ（例: 都市、宛先）を宣言できます。Core は**ユーザープロフィール**、**設定**、**ユーザーメッセージ**から値を埋められます；オプションの **confirm_if_uncertain** と **use_default_directly_for** で確認を制御。**docs/PluginsGuide.md** と **docs/PluginParameterCollection.md** を参照。
+プラグインはパラメータ（例: 都市、宛先）を宣言できます。Core は**ユーザープロフィール**、**設定**、**ユーザーメッセージ**から値を埋められます；オプションの **confirm_if_uncertain** と **use_default_directly_for** で確認を制御。**docs_design/PluginsGuide.md** と **docs_design/PluginParameterCollection.md** を参照。
 
 ---
 
@@ -374,7 +374,7 @@ HomeClaw には**ツール**（ファイル、メモリ、ウェブ検索、cron
 
 - **役割** — LLM はシステムプロンプトで「利用可能なスキル」を見ます。ユーザーリクエストがスキルの説明と一致すると、LLM は**ツール**（file_read、web_search、browser、cron 等）でワークフローを実行します。スキルに **scripts/** フォルダがある場合は、LLM が **run_skill(skill_name, script, ...)** でスクリプト（例: `run.sh`、`main.py`）を実行できます。
 - **別プロセスなし** — スキルは別プロセスでは動きません；「ランタイム」はメイン LLM + ツールループです。スキルは**ツール駆動のワークフロー**です。
-- **有効化** — `config/core.yml` で：`use_skills: true`、`skills_dir: config/skills`。オプションで **skills_use_vector_search** によりクエリに似たスキルのみが注入されます。**docs/SkillsGuide.md** と **docs/ToolsSkillsPlugins.md** を参照。
+- **有効化** — `config/core.yml` で：`use_skills: true`、`skills_dir: config/skills`。オプションで **skills_use_vector_search** によりクエリに似たスキルのみが注入されます。**docs_design/SkillsGuide.md** と **docs_design/ToolsSkillsPlugins.md** を参照。
 
 例：「ソーシャルメディアエージェント」スキルは、ブラウザと cron で X/Twitter に投稿する手順を記述；LLM がその指示に従い適切なツールを呼びます。
 
@@ -385,7 +385,7 @@ HomeClaw には**ツール**（ファイル、メモリ、ウェブ検索、cron
 HomeClaw は次の二つのプロジェクトに触発されています。
 
 - **GPT4People** — 作者の以前のプロジェクト。分散型・人中心の AI とチャネルベースの対話を探求。HomeClaw の多くのアイデア—ローカルファーストのエージェント、チャネル、メモリ、「人々のため」のビジョン—はここから育ちました。
-- **OpenClaw** — 兄弟的なエコシステム（ゲートウェイ、拡張、チャネル、プロバイダ）。OpenClaw と HomeClaw は、拡張可能でチャネルベースの AI をユーザーが実行・カスタマイズするという同じ精神を共有しています。OpenClaw のゲートウェイ/拡張モデルと HomeClaw のコア/プラグインモデルの対比が、HomeClaw の設計を明確にする助けになりました（**docs/ToolsSkillsPlugins.md** §2.7 参照）。
+- **OpenClaw** — 兄弟的なエコシステム（ゲートウェイ、拡張、チャネル、プロバイダ）。OpenClaw と HomeClaw は、拡張可能でチャネルベースの AI をユーザーが実行・カスタマイズするという同じ精神を共有しています。OpenClaw のゲートウェイ/拡張モデルと HomeClaw のコア/プラグインモデルの対比が、HomeClaw の設計を明確にする助けになりました（**docs_design/ToolsSkillsPlugins.md** §2.7 参照）。
 
 GPT4People と OpenClaw に貢献したすべての方、そして llama.cpp、LiteLLM、Cognee および多数のチャネルとツールを支えるオープンソースコミュニティに感謝します。
 

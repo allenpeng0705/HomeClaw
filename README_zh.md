@@ -193,12 +193,12 @@ sequenceDiagram
 - **渠道** — Email、Matrix、Tinode、WeChat、WhatsApp、Telegram、Discord、Slack、WebChat、webhook、Google Chat、Signal、iMessage、Teams、Zalo、Feishu、DingTalk、BlueBubbles。各渠道通过 HTTP（`/inbound`、`/process`）或 WebSocket（`/ws`）连接 Core。参见 [渠道](#2-homeclaw-能做什么) 与 `channels/README.md`。
 - **Core** — 单一 FastAPI 应用：权限检查（`config/user.yml`）、编排器（意图 TIME vs OTHER；插件选择）、TAM（提醒、cron）、工具执行（文件、记忆、网页搜索、浏览器、cron、`route_to_plugin`、`run_skill`）、插件调用及对话 + RAG。配置：`config/core.yml`。
 - **LLM 层** — Core 使用的统一 OpenAI 兼容 API。由**本地模型**（llama.cpp 服务、GGUF）和/或**云端模型**（LiteLLM：OpenAI、Google Gemini、DeepSeek、Anthropic、Groq、Mistral 等）提供。主模型与嵌入模型可独立选择。参见 `config/core.yml`（`local_models`、`cloud_models`、`main_llm`、`embedding_llm`）。
-- **记忆** — **Cognee**（默认）或自研 **Chroma** 后端：向量 + 关系 + 可选图。用于 RAG 与对话历史。参见 `docs/MemoryAndDatabase.md`。
-- **档案** — 每用户 JSON 存储（如 `database/profiles/`）。每次请求加载并作为「关于用户」注入提示；用于个性化与插件参数解析。参见 `docs/UserProfileDesign.md`。
+- **记忆** — **Cognee**（默认）或自研 **Chroma** 后端：向量 + 关系 + 可选图。用于 RAG 与对话历史。参见 `docs_design/MemoryAndDatabase.md`。
+- **档案** — 每用户 JSON 存储（如 `database/profiles/`）。每次请求加载并作为「关于用户」注入提示；用于个性化与插件参数解析。参见 `docs_design/UserProfileDesign.md`。
 - **插件** — 内置（Python，位于 `plugins/`）与外部（HTTP，任意语言）。当请求匹配时 Core 将用户意图路由到插件（如 Weather、News、Mail）。参见 [§5 插件](#5-插件扩展-homeclaw)。
 - **技能** — 位于 `config/skills/` 下的文件夹，含 `SKILL.md`（名称、描述、工作流）。LLM 使用工具完成技能工作流；可选 `run_skill` 运行脚本。参见 [§6 技能](#6-技能用工作流扩展-homeclaw)。
 
-完整设计参见 **Design.md**。工具、技能与插件的区别参见 **docs/ToolsSkillsPlugins.md**。
+完整设计参见 **Design.md**。工具、技能与插件的区别参见 **docs_design/ToolsSkillsPlugins.md**。
 
 ---
 
@@ -214,7 +214,7 @@ sequenceDiagram
 - **Email、Matrix、Tinode、WeChat、WhatsApp** — 完整渠道；参见 `channels/README.md` 配置。
 - **Webhook** — 任意客户端可向 webhook 的 `/message` 发送 POST 并获回复（转发到 Core `/inbound`）。适用于 Core 无法直接访问时（如 NAT 后）。
 
-所有渠道共用同一 Core：一个智能体、一套记忆、一套插件与技能。参见 **docs/RunAndTestPlugins.md** 快速运行与测试。
+所有渠道共用同一 Core：一个智能体、一套记忆、一套插件与技能。参见 **docs_design/RunAndTestPlugins.md** 快速运行与测试。
 
 ### 多用户支持
 
@@ -260,16 +260,16 @@ users:
     permissions: []
 ```
 
-完整行为（匹配逻辑、每用户数据、直接回复）参见 **docs/MultiUserSupport.md**。每用户档案（学习到的事实）参见 **docs/UserProfileDesign.md**。
+完整行为（匹配逻辑、每用户数据、直接回复）参见 **docs_design/MultiUserSupport.md**。每用户档案（学习到的事实）参见 **docs_design/UserProfileDesign.md**。
 
 ### 安全与隐私：本地 vs 云端模型
 
 - **本地模型** — 通过本机上的 llama.cpp 服务运行 GGUF 模型。数据留在本机；无需第三方 API。在 `config/core.yml` 的 `local_models` 下配置；将 `main_llm` 与 `embedding_llm` 设为如 `local_models/Qwen3-14B-Q5_K_M`。
 - **云端模型** — 在 `config/core.yml` 的 `cloud_models` 下使用 LiteLLM。设置 `api_key_name`（如 `OPENAI_API_KEY`、`GEMINI_API_KEY`、`DEEPSEEK_API_KEY`）及对应环境变量。HomeClaw 将提示发送到您选择的提供商；隐私与条款以该提供商为准。
 - **混合** — 可对话用本地模型、嵌入用云端模型（或反之）。通过 CLI 的 `llm set` / `llm cloud` 或编辑 `config/core.yml` 中的 `main_llm` / `embedding_llm` 切换。
-- **远程访问** — 若将 Core 暴露到公网（如 WebChat 或机器人），请在 `config/core.yml` 中启用 **auth**：`auth_enabled: true` 与 `auth_api_key: "<secret>"`。客户端在 `/inbound` 与 `/ws` 上须发送 `X-API-Key` 或 `Authorization: Bearer <key>`。参见 **docs/RemoteAccess.md**。
+- **远程访问** — 若将 Core 暴露到公网（如 WebChat 或机器人），请在 `config/core.yml` 中启用 **auth**：`auth_enabled: true` 与 `auth_api_key: "<secret>"`。客户端在 `/inbound` 与 `/ws` 上须发送 `X-API-Key` 或 `Authorization: Bearer <key>`。参见 **docs_design/RemoteAccess.md**。
 
-支持的云端提供商（通过 LiteLLM）包括 **OpenAI**（GPT-4o 等）、**Google Gemini**、**DeepSeek**、**Anthropic**、**Groq**、**Mistral**、**xAI**、**Cohere**、**Together AI**、**OpenRouter**、**Perplexity** 等。参见 `config/core.yml` 与 [LiteLLM 文档](https://docs.litellm.ai/docs/providers)。
+支持的云端提供商（通过 LiteLLM）包括 **OpenAI**（GPT-4o 等）、**Google Gemini**、**DeepSeek**、**Anthropic**、**Groq**、**Mistral**、**xAI**、**Cohere**、**Together AI**、**OpenRouter**、**Perplexity** 等。参见 `config/core.yml` 与 [LiteLLM 文档](https://docs.litellm.ai/docs_design/providers)。
 
 ---
 
@@ -328,7 +328,7 @@ HomeClaw 支持 **macOS**、**Windows** 与 **Linux**。需要：
 
 6. **测试**
 
-   - 在 WebChat 或 CLI 中发送消息。工具/技能/插件测试参见 **docs/ToolsAndSkillsTesting.md** 与 **docs/RunAndTestPlugins.md**。
+   - 在 WebChat 或 CLI 中发送消息。工具/技能/插件测试参见 **docs_design/ToolsAndSkillsTesting.md** 与 **docs_design/RunAndTestPlugins.md**。
    - 检查配置与 LLM 连通性：`python -m main doctor`。
 
 ### 命令（交互式 CLI，`python -m main start`）
@@ -369,7 +369,7 @@ HomeClaw 支持 **macOS**、**Windows** 与 **Linux**。需要：
   - **Mistral**：`MISTRAL_API_KEY`
   - **xAI**：`XAI_API_KEY`
   - **OpenRouter**：`OPENROUTER_API_KEY`
-  - （更多见 `config/core.yml` 与 [LiteLLM providers](https://docs.litellm.ai/docs/providers)。）
+  - （更多见 `config/core.yml` 与 [LiteLLM providers](https://docs.litellm.ai/docs_design/providers)。）
 - **运行 LiteLLM** — 配置中每个云端条目有各自的 `host`/`port`。在该 host/port 上运行 LiteLLM 代理（或按提供商运行一个代理），提供 OpenAI 兼容的 `/v1/chat/completions` 与 `/v1/embeddings`，并配置对应 API 密钥。Core 只调用该 URL；API 密钥不写入 `core.yml`，仅写环境变量名。
 - **运行时切换** — 使用 CLI **`llm cloud`** 选择云端模型作为主 LLM，或编辑 `config/core.yml` 中的 `main_llm` / `embedding_llm` 后重启 Core。
 
@@ -390,7 +390,7 @@ HomeClaw 使用**关系型 DB**（对话历史、会话）、**向量 DB**（RAG
   - **图**：将 **`graphDB.backend`** 设为 **`neo4j`**，并设置 **`graphDB.Neo4j.url`**、`username`、`password` 以使用企业图存储。
 - **Core 的对话 DB** — **`database:`** 小节始终用于 Core 自身的对话历史、会话与运行。因此即使 `memory_backend: cognee`，也可设置 `database.backend: postgresql` 和 `database.url`，将 Core 的关系型数据放到 Postgres。
 
-完整支持矩阵与分步示例见 **docs/MemoryAndDatabase.md**。
+完整支持矩阵与分步示例见 **docs_design/MemoryAndDatabase.md**。
 
 ### 开发者（Windows 说明）
 
@@ -415,7 +415,7 @@ HomeClaw 自带**工具**（文件、记忆、网页搜索、cron、浏览器等
 - **运行工作流** — 在 `config/core.yml` 中启用**技能**（`use_skills: true`）。LLM 会看到「可用技能」并按技能说明使用工具，或调用 **run_skill** 运行脚本。
 - **日程与提醒** — 使用 **TAM**（时间感知模块）：说「5 分钟后提醒我」或「每天 9 点」；或使用工具 `remind_me`、`record_date`、`cron_schedule`。
 
-无需按名称「调用」插件或技能，自然表达即可。系统在意图匹配时路由到插件，在模型决定时使用工具/技能。LLM 如何在工具、技能与插件间选择参见 **docs/ToolsSkillsPlugins.md**。
+无需按名称「调用」插件或技能，自然表达即可。系统在意图匹配时路由到插件，在模型决定时使用工具/技能。LLM 如何在工具、技能与插件间选择参见 **docs_design/ToolsSkillsPlugins.md**。
 
 ---
 
@@ -435,7 +435,7 @@ HomeClaw 自带**工具**（文件、记忆、网页搜索、cron、浏览器等
   - `GET /health` → 2xx
   - `POST /run`（或自定义路径）→ 请求体为 PluginRequest JSON，响应为 PluginResult JSON。
 - **向 Core 注册**：`POST http://<core>:9000/api/plugins/register`，提交插件 id、name、description、`health_check_url`、`type: "http"`、`config`（base_url、path、timeout_sec）及 `capabilities`。
-- 注册后 Core 会像内置插件一样将请求路由到您的服务。参见 **docs/PluginStandard.md** 与 **docs/PluginsGuide.md**。
+- 注册后 Core 会像内置插件一样将请求路由到您的服务。参见 **docs_design/PluginStandard.md** 与 **docs_design/PluginsGuide.md**。
 
 ### 示例：多语言外部插件
 
@@ -446,11 +446,11 @@ HomeClaw 自带**工具**（文件、记忆、网页搜索、cron、浏览器等
 - **Go** — Time（端口 3112）。
 - **Java** — Quote（端口 3113）。
 
-每个目录有 README 与注册脚本。参见 **examples/external_plugins/README.md** 与 **docs/RunAndTestPlugins.md**。
+每个目录有 README 与注册脚本。参见 **examples/external_plugins/README.md** 与 **docs_design/RunAndTestPlugins.md**。
 
 ### 参数收集
 
-插件可声明参数（如城市、收件人）。Core 可从**用户档案**、**配置**或**用户消息**中填充；可选 **confirm_if_uncertain** 与 **use_default_directly_for** 控制确认行为。参见 **docs/PluginsGuide.md** 与 **docs/PluginParameterCollection.md**。
+插件可声明参数（如城市、收件人）。Core 可从**用户档案**、**配置**或**用户消息**中填充；可选 **confirm_if_uncertain** 与 **use_default_directly_for** 控制确认行为。参见 **docs_design/PluginsGuide.md** 与 **docs_design/PluginParameterCollection.md**。
 
 ---
 
@@ -460,7 +460,7 @@ HomeClaw 自带**工具**（文件、记忆、网页搜索、cron、浏览器等
 
 - **作用** — LLM 在系统提示中看到「可用技能」。当用户请求与某技能描述匹配时，LLM 使用**工具**（file_read、web_search、browser、cron 等）完成工作流。若技能有 **scripts/** 文件夹，LLM 可调用 **run_skill(skill_name, script, ...)** 运行脚本（如 `run.sh`、`main.py`）。
 - **无独立运行时** — 技能不在单独进程中运行；「运行时」即主 LLM + 工具循环。因此技能是**工具驱动的工作流**。
-- **启用** — 在 `config/core.yml` 中：`use_skills: true`、`skills_dir: config/skills`。可选 **skills_use_vector_search** 使仅与查询相似的技能被注入。参见 **docs/SkillsGuide.md** 与 **docs/ToolsSkillsPlugins.md**。
+- **启用** — 在 `config/core.yml` 中：`use_skills: true`、`skills_dir: config/skills`。可选 **skills_use_vector_search** 使仅与查询相似的技能被注入。参见 **docs_design/SkillsGuide.md** 与 **docs_design/ToolsSkillsPlugins.md**。
 
 例如：「社交媒体代理」技能可描述如何使用浏览器与 cron 在 X/Twitter 发帖；LLM 按技能说明调用相应工具。
 
@@ -471,7 +471,7 @@ HomeClaw 自带**工具**（文件、记忆、网页搜索、cron、浏览器等
 HomeClaw 的诞生离不开两个项目的启发：
 
 - **GPT4People** — 作者早先的项目，探索去中心化、以人为中心的 AI 与基于渠道的交互。HomeClaw 的许多想法——本地优先智能体、渠道、记忆以及「为人们服务」的愿景——都源于此。
-- **OpenClaw** — 姊妹生态（网关、扩展、渠道、提供商）。OpenClaw 与 HomeClaw 理念相近：可扩展、基于渠道的 AI，用户可自运行与定制。OpenClaw 的网关/扩展模式与 HomeClaw 的 Core/插件模式的对比，帮助厘清了 HomeClaw 的设计（参见 **docs/ToolsSkillsPlugins.md** §2.7）。
+- **OpenClaw** — 姊妹生态（网关、扩展、渠道、提供商）。OpenClaw 与 HomeClaw 理念相近：可扩展、基于渠道的 AI，用户可自运行与定制。OpenClaw 的网关/扩展模式与 HomeClaw 的 Core/插件模式的对比，帮助厘清了 HomeClaw 的设计（参见 **docs_design/ToolsSkillsPlugins.md** §2.7）。
 
 感谢所有为 GPT4People 与 OpenClaw 做出贡献的人，以及 llama.cpp、LiteLLM、Cognee 与众多渠道与工具背后的开源社区。
 

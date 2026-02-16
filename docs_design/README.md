@@ -1,0 +1,6 @@
+# Design and internal docs
+
+This folder (**docs_design/**) holds **design documents and internal guides** (PluginsGuide, MemoryAndDatabase, ToolsDesign, Comparison, etc.). These are used for development and deep reference.
+
+- The **documentation website** (GitHub Pages) is built from the **`docs/`** folder, not from this folder. See **`docs/README.md`** and **`mkdocs.yml`** at the repo root.
+- Links from README, Design.md, Channel.md, and other repo files to “design docs” point to **docs_design/** (e.g. `docs_design/PluginsGuide.md`).

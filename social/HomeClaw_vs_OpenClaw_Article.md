@@ -141,7 +141,7 @@ You can run **HomeClaw** entirely on your own hardware with local models and sti
 ## Links and repo
 
 - **HomeClaw:** [https://github.com/allenpeng0705/HomeClaw](https://github.com/allenpeng0705/HomeClaw)  
-- **Docs:** README, Design.md, Channel.md, docs/Comparison.md, docs/ToolsSkillsPlugins.md  
+- **Docs:** README, Design.md, Channel.md, docs_design/Comparison.md, docs_design/ToolsSkillsPlugins.md  
 
 *If you found this useful, star the repo or share it with others who care about local-first and home AI.*
 

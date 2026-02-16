@@ -43,7 +43,7 @@ We learned from **OpenClaw** and made it easy to **reuse Skills** from OpenClaw 
 We also support **extending** HomeClaw in two ways:
 
 - **Built-in plugins** (Python): live in the `plugins/` folder; one plugin = one focused feature (e.g. Weather, News, Mail). The LLM routes to them via `route_to_plugin`.
-- **External plugins** (any language): run as a separate HTTP service (Node.js, Go, Java, etc.); you register with the Core and implement a simple request/response contract. See docs/PluginsGuide.md and docs/PluginStandard.md.
+- **External plugins** (any language): run as a separate HTTP service (Node.js, Go, Java, etc.); you register with the Core and implement a simple request/response contract. See docs_design/PluginsGuide.md and docs_design/PluginStandard.md.
 
 So you get **one agent**, but you can extend it simply with skills and plugins—and you can **run more HomeClaw instances** on the same computer or on multiple computers if you need more capacity or isolation.
 
@@ -59,7 +59,7 @@ So you get **one agent**, but you can extend it simply with skills and plugins�
 
 - **External plugins (any language):** Run as a **separate HTTP server** (Node.js, Go, Java, Rust, etc.). You implement a simple contract: accept a request (user input, context) and return a result. You **register** with Core via `POST /api/plugins/register`; after that, Core routes to your server like built-in plugins. So you can extend HomeClaw in the language you prefer, or plug in an existing service.
 
-Plugins work alongside **tools** (exec, browser, cron, file, memory, web search, etc.) and **skills** (workflows described in SKILL.md). Together they give you one agent that can chat, remember, and do things—and you extend that power by adding plugins. For details, see **docs/PluginsGuide.md**, **docs/HowToWriteAPlugin.md**, and **docs/PluginStandard.md**.
+Plugins work alongside **tools** (exec, browser, cron, file, memory, web search, etc.) and **skills** (workflows described in SKILL.md). Together they give you one agent that can chat, remember, and do things—and you extend that power by adding plugins. For details, see **docs_design/PluginsGuide.md**, **docs_design/HowToWriteAPlugin.md**, and **docs_design/PluginStandard.md**.
 
 ---
 
@@ -74,7 +74,7 @@ We are **one agent** (one identity, one memory, one set of tools and skills), bu
 For **memory** we offer a simple default and an enterprise-style option:
 
 - **Simple:** **SQLite** (chat history, sessions) + **Chroma** (vector store for RAG) + **Kuzu** (optional graph). No extra services; good for home and small setups.
-- **Enterprise:** You can switch to **PostgreSQL** (relational), **Qdrant** or **LanceDB** (vector), and **Neo4j** (graph). We also support **Cognee** as the default memory engine, which unifies relational, vector, and graph and can use the same backends. See docs/MemoryAndDatabase.md.
+- **Enterprise:** You can switch to **PostgreSQL** (relational), **Qdrant** or **LanceDB** (vector), and **Neo4j** (graph). We also support **Cognee** as the default memory engine, which unifies relational, vector, and graph and can use the same backends. See docs_design/MemoryAndDatabase.md.
 
 So you can start simple and scale up when you need to.
 
@@ -106,6 +106,6 @@ So you can start simple and scale up when you need to.
 - **Design.md** — Architecture, Core, channels, memory, tools, plugins.  
 - **Channel.md** — How to use and configure channels.  
 - **HOW_TO_USE.md** — Step-by-step setup and usage.  
-- **docs/** — PluginsGuide, SkillsGuide, MemoryAndDatabase, ToolsSkillsPlugins, etc.
+- **docs_design/** — PluginsGuide, SkillsGuide, MemoryAndDatabase, ToolsSkillsPlugins, etc.
 
 Thank you for your interest in HomeClaw. We hope it helps you bring AI home—your way.

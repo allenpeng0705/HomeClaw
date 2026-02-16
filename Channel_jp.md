@@ -53,7 +53,7 @@ mode=dev
 | **WebChat** | WebSocket /ws | `python -m channels.run webchat` |
 | **Webhook** | リレー（Core /inbound に転送） | `python -m channels.run webhook` |
 
-**認証（Core をインターネットに公開する場合）：** `config/core.yml` で **auth_enabled: true** と **auth_api_key** を設定；**POST /inbound** と **WebSocket /ws** には **X-API-Key** または **Authorization: Bearer** が必要。**docs/RemoteAccess.md** 参照。
+**認証（Core をインターネットに公開する場合）：** `config/core.yml` で **auth_enabled: true** と **auth_api_key** を設定；**POST /inbound** と **WebSocket /ws** には **X-API-Key** または **Authorization: Bearer** が必要。**docs_design/RemoteAccess.md** 参照。
 
 ---
 
@@ -71,7 +71,7 @@ mode=dev
 
 ### 3.4 Inbound API（任意ボット、新チャネルコード不要）
 
-**用途**：任意ボット（Telegram、Discord、Slack、n8n、自前スクリプト）が「1 メッセージ 1 HTTP リクエスト」で Core に接続。**設定**：`config/user.yml` にボットが送る **user_id**（例：`telegram_123456789`）を **im** に追加し IM 権限；ボットが `http://<core_host>:<core_port>/inbound` に POST 可能に；公開時は auth 設定任意、docs/RemoteAccess.md 参照。**リクエスト**：`POST /inbound`、JSON 体 `{ "user_id", "text", "channel_name?", "user_name?" }`。**レスポンス**：`{ "text": "..." }`。例：`channels/telegram/`（BotFather でトークン取得、.env と user.yml 設定、`python -m channels.run telegram`）。
+**用途**：任意ボット（Telegram、Discord、Slack、n8n、自前スクリプト）が「1 メッセージ 1 HTTP リクエスト」で Core に接続。**設定**：`config/user.yml` にボットが送る **user_id**（例：`telegram_123456789`）を **im** に追加し IM 権限；ボットが `http://<core_host>:<core_port>/inbound` に POST 可能に；公開時は auth 設定任意、docs_design/RemoteAccess.md 参照。**リクエスト**：`POST /inbound`、JSON 体 `{ "user_id", "text", "channel_name?", "user_name?" }`。**レスポンス**：`{ "text": "..." }`。例：`channels/telegram/`（BotFather でトークン取得、.env と user.yml 設定、`python -m channels.run telegram`）。
 
 ### 3.5 Webhook チャネル（Core に届かない場合のリレー）
 
@@ -116,11 +116,11 @@ HomeClaw：Core + 独立チャネルプロセス（または外部ボット）�
 
 ## 4. 既にあるものと改善案
 
-**既存**：**Onboarding** `python main.py onboard`；**Doctor** `python main.py doctor`；**リモートアクセスと認証** docs/RemoteAccess.md。**改善案**：Core+チャネルを一括起動する単一エントリポイント、任意のペアリング、WebChat（channels/webchat/ は既存）。
+**既存**：**Onboarding** `python main.py onboard`；**Doctor** `python main.py doctor`；**リモートアクセスと認証** docs_design/RemoteAccess.md。**改善案**：Core+チャネルを一括起動する単一エントリポイント、任意のペアリング、WebChat（channels/webchat/ は既存）。
 
 ## 5. 参照
 
 - **Design**：`Design.md`
-- **新チャネルの書き方**：**docs/HowToWriteAChannel.md**（フルチャネル vs webhook/inbound、二つの方法）
-- **Improvement**：`Improvement.md`；**Comparison**：`Comparison.md`；**RemoteAccess**：**docs/RemoteAccess.md**
+- **新チャネルの書き方**：**docs_design/HowToWriteAChannel.md**（フルチャネル vs webhook/inbound、二つの方法）
+- **Improvement**：`Improvement.md`；**Comparison**：`Comparison.md`；**RemoteAccess**：**docs_design/RemoteAccess.md**
 - **チャネル利用**：`channels/README.md`、`channels/webhook/README.md`、`channels/telegram/README.md`

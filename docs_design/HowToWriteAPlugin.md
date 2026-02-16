@@ -2,7 +2,7 @@
 
 This document describes how to develop **built-in Python plugins** and **external plugins** in other languages (Go, Java, Node.js, etc.), and how plugins can use **MCP (Model Context Protocol)**.
 
-For the full plugin standard (manifest schema, run contract, registration API), see **docs/PluginStandard.md** and **docs/PluginRegistration.md**. For a complete user guide and parameter collection, see **docs/PluginsGuide.md**.
+For the full plugin standard (manifest schema, run contract, registration API), see **docs_design/PluginStandard.md** and **docs_design/PluginRegistration.md**. For a complete user guide and parameter collection, see **docs_design/PluginsGuide.md**.
 
 ---
 
@@ -83,7 +83,7 @@ city: Beijing
 api_key: "your-api-key"
 ```
 
-Use **config_key** in capability parameters to fill values from this config when the user does not provide them (see docs/PluginParameterCollection.md).
+Use **config_key** in capability parameters to fill values from this config when the user does not provide them (see docs_design/PluginParameterCollection.md).
 
 ### 2.4 Python class: plugin.py
 
@@ -181,7 +181,7 @@ config:
   timeout_sec: 30
 ```
 
-**Registration (API)** example: POST to `http://<core_host>:9000/api/plugins/register` with a body that includes **plugin_id**, **name**, **description**, **health_check_url** (e.g. `http://127.0.0.1:3101/health`), **type: "http"**, **config** (base_url, path, timeout_sec). See **base/base.py** (ExternalPluginRegisterRequest) and **docs/PluginStandard.md** §3.
+**Registration (API)** example: POST to `http://<core_host>:9000/api/plugins/register` with a body that includes **plugin_id**, **name**, **description**, **health_check_url** (e.g. `http://127.0.0.1:3101/health`), **type: "http"**, **config** (base_url, path, timeout_sec). See **base/base.py** (ExternalPluginRegisterRequest) and **docs_design/PluginStandard.md** §3.
 
 **Implementing the server (any language)**
 
@@ -308,7 +308,7 @@ Core does **not** need to know about these MCP servers. The plugin:
 2. Inside its logic, uses an MCP client to call one or more MCP servers (tools/resources).
 3. Combines the results and returns a **PluginResult** (or sends the response to the channel).
 
-This gives you “do anything possible” inside the plugin while keeping the Core ↔ plugin contract simple (PluginRequest / PluginResult). For more on MCP, see [Model Context Protocol](https://modelcontextprotocol.io/) and **docs/PluginStandard.md** §7.
+This gives you “do anything possible” inside the plugin while keeping the Core ↔ plugin contract simple (PluginRequest / PluginResult). For more on MCP, see [Model Context Protocol](https://modelcontextprotocol.io/) and **docs_design/PluginStandard.md** §7.
 
 ---
 
@@ -325,10 +325,10 @@ This gives you “do anything possible” inside the plugin while keeping the Co
 
 ## 6. References
 
-- **Plugin standard (manifest, run contract, registration API)**: **docs/PluginStandard.md**
-- **Registration schema and capabilities**: **docs/PluginRegistration.md**
-- **Plugins user guide and parameter collection**: **docs/PluginsGuide.md**
-- **Run and test plugins**: **docs/RunAndTestPlugins.md**
+- **Plugin standard (manifest, run contract, registration API)**: **docs_design/PluginStandard.md**
+- **Registration schema and capabilities**: **docs_design/PluginRegistration.md**
+- **Plugins user guide and parameter collection**: **docs_design/PluginsGuide.md**
+- **Run and test plugins**: **docs_design/RunAndTestPlugins.md**
 - **External plugin examples**: **examples/external_plugins/** (Python, Node.js, Go, Java) and **examples/external_plugins/README.md**
 - **Built-in example**: **plugins/Weather/** (plugin.yaml, config.yml, plugin.py)
 - **Base classes**: **base/BasePlugin.py**, **base/PluginManager.py**, **base/base.py** (PluginRequest, PluginResult)

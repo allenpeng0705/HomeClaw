@@ -59,7 +59,7 @@ mode=dev
 | **WebChat** | WebSocket /ws | `python -m channels.run webchat` |
 | **Webhook** | 中继（转发到 Core /inbound） | `python -m channels.run webhook` |
 
-**鉴权（对外暴露 Core 时）：** 在 `config/core.yml` 中设置 **auth_enabled: true** 和 **auth_api_key**；则 **POST /inbound** 与 **WebSocket /ws** 需携带 **X-API-Key** 或 **Authorization: Bearer**。见 **docs/RemoteAccess.md**。
+**鉴权（对外暴露 Core 时）：** 在 `config/core.yml` 中设置 **auth_enabled: true** 和 **auth_api_key**；则 **POST /inbound** 与 **WebSocket /ws** 需携带 **X-API-Key** 或 **Authorization: Bearer**。见 **docs_design/RemoteAccess.md**。
 
 ---
 
@@ -77,7 +77,7 @@ mode=dev
 
 ### 3.4 Inbound API（任意机器人，无需新渠道代码）
 
-**用途**：任意机器人（Telegram、Discord、Slack、n8n、自写脚本）通过“每条消息一次 HTTP 请求”连接 Core。**配置**：`config/user.yml` 中添加机器人使用的 **user_id**（如 `telegram_123456789`）到 **im** 并设 **IM** 权限；机器人需能 POST 到 `http://<core_host>:<core_port>/inbound`；对外暴露时可选配置 auth，见 docs/RemoteAccess.md。**请求**：`POST /inbound`，JSON 体 `{ "user_id", "text", "channel_name?", "user_name?" }`。**响应**：`{ "text": "..." }`。示例：`channels/telegram/`（BotFather 取 token，配置 .env 与 user.yml，`python -m channels.run telegram`）。
+**用途**：任意机器人（Telegram、Discord、Slack、n8n、自写脚本）通过“每条消息一次 HTTP 请求”连接 Core。**配置**：`config/user.yml` 中添加机器人使用的 **user_id**（如 `telegram_123456789`）到 **im** 并设 **IM** 权限；机器人需能 POST 到 `http://<core_host>:<core_port>/inbound`；对外暴露时可选配置 auth，见 docs_design/RemoteAccess.md。**请求**：`POST /inbound`，JSON 体 `{ "user_id", "text", "channel_name?", "user_name?" }`。**响应**：`{ "text": "..." }`。示例：`channels/telegram/`（BotFather 取 token，配置 .env 与 user.yml，`python -m channels.run telegram`）。
 
 ### 3.5 Webhook 渠道（Core 不可达时的中继）
 
@@ -122,11 +122,11 @@ HomeClaw：Core + 独立渠道进程（或外部机器人）；可经 IM 渠道�
 
 ## 4. 已有与可改进项
 
-**已有**：**Onboarding** `python main.py onboard`；**Doctor** `python main.py doctor`；**远程与鉴权** docs/RemoteAccess.md。**可改进**：单一入口启动 Core+渠道、可选配对、WebChat（已有 channels/webchat/）。
+**已有**：**Onboarding** `python main.py onboard`；**Doctor** `python main.py doctor`；**远程与鉴权** docs_design/RemoteAccess.md。**可改进**：单一入口启动 Core+渠道、可选配对、WebChat（已有 channels/webchat/）。
 
 ## 5. 参考
 
 - **Design**：`Design.md`
-- **如何编写新渠道**：**docs/HowToWriteAChannel.md**（完整渠道 vs webhook/inbound，两种方法）
-- **Improvement**：`Improvement.md`；**Comparison**：`Comparison.md`；**RemoteAccess**：**docs/RemoteAccess.md**
+- **如何编写新渠道**：**docs_design/HowToWriteAChannel.md**（完整渠道 vs webhook/inbound，两种方法）
+- **Improvement**：`Improvement.md`；**Comparison**：`Comparison.md`；**RemoteAccess**：**docs_design/RemoteAccess.md**
 - **渠道使用**：`channels/README.md`、`channels/webhook/README.md`、`channels/telegram/README.md`

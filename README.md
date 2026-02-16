@@ -193,12 +193,12 @@ sequenceDiagram
 - **Channels** — Email, Matrix, Tinode, WeChat, WhatsApp, Telegram, Discord, Slack, WebChat, webhook, Google Chat, Signal, iMessage, Teams, Zalo, Feishu, DingTalk, BlueBubbles. Each channel connects to Core via HTTP (`/inbound`, `/process`) or WebSocket (`/ws`). See [Channels](#2-what-can-homeclaw-do) and `channels/README.md`.
 - **Core** — Single FastAPI app: permission check (`config/user.yml`), orchestrator (intent TIME vs OTHER; plugin selection), TAM (reminders, cron), tool execution (file, memory, web search, browser, cron, `route_to_plugin`, `run_skill`), plugin invocation, and chat + RAG. Config: `config/core.yml`.
 - **LLM layer** — One OpenAI-compatible API used by Core. Filled by **local models** (llama.cpp server, GGUF) and/or **cloud models** (LiteLLM: OpenAI, Google Gemini, DeepSeek, Anthropic, Groq, Mistral, etc.). Main and embedding model can be chosen independently. See `config/core.yml` (`local_models`, `cloud_models`, `main_llm`, `embedding_llm`).
-- **Memory** — **Cognee** (default) or in-house **Chroma** backend: vector + relational + optional graph. Used for RAG and chat history. See `docs/MemoryAndDatabase.md`.
-- **Profile** — Per-user JSON store (e.g. `database/profiles/`). Loaded each request and injected as “About the user” in the prompt; used for personalization and plugin parameter resolution. See `docs/UserProfileDesign.md`.
+- **Memory** — **Cognee** (default) or in-house **Chroma** backend: vector + relational + optional graph. Used for RAG and chat history. See `docs_design/MemoryAndDatabase.md`.
+- **Profile** — Per-user JSON store (e.g. `database/profiles/`). Loaded each request and injected as “About the user” in the prompt; used for personalization and plugin parameter resolution. See `docs_design/UserProfileDesign.md`.
 - **Plugins** — Built-in (Python in `plugins/`) and external (HTTP, any language). Core routes user intent to a plugin (e.g. Weather, News, Mail) when the request matches. See [§5 Plugins](#5-plugins-extend-homeclaw).
 - **Skills** — Folders under `config/skills/` with `SKILL.md` (name, description, workflow). The LLM uses tools to accomplish skill workflows; optional `run_skill` runs scripts. See [§6 Skills](#6-skills-extend-homeclaw-with-workflows).
 
-For a full design reference, see **Design.md**. For tools vs skills vs plugins, see **docs/ToolsSkillsPlugins.md**.
+For a full design reference, see **Design.md**. For tools vs skills vs plugins, see **docs_design/ToolsSkillsPlugins.md**.
 
 ---
 
@@ -214,7 +214,7 @@ You can talk to HomeClaw from:
 - **Email, Matrix, Tinode, WeChat, WhatsApp** — Full channels; see `channels/README.md` for setup.
 - **Webhook** — Any client can POST to the webhook’s `/message` and get a reply (relay to Core `/inbound`). Useful when Core is not directly reachable (e.g. behind NAT).
 
-All channels use the same Core: one agent, one memory, one set of plugins and skills. See **docs/RunAndTestPlugins.md** for a quick run/test flow.
+All channels use the same Core: one agent, one memory, one set of plugins and skills. See **docs_design/RunAndTestPlugins.md** for a quick run/test flow.
 
 ### Multi-user support
 
@@ -260,16 +260,16 @@ users:
     permissions: []
 ```
 
-For full behaviour (matching logic, per-user data, direct reply), see **docs/MultiUserSupport.md**. For per-user profile (learned facts), see **docs/UserProfileDesign.md**.
+For full behaviour (matching logic, per-user data, direct reply), see **docs_design/MultiUserSupport.md**. For per-user profile (learned facts), see **docs_design/UserProfileDesign.md**.
 
 ### Secure and safe: local vs cloud models
 
 - **Local models** — Run GGUF models via llama.cpp server on your machine. Data stays on your hardware; no third-party API. Configure in `config/core.yml` under `local_models`; set `main_llm` and `embedding_llm` to e.g. `local_models/Qwen3-14B-Q5_K_M`.
 - **Cloud models** — Use LiteLLM in `config/core.yml` under `cloud_models`. Set `api_key_name` (e.g. `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`) and the corresponding environment variable. HomeClaw sends prompts to the provider you choose; their privacy and terms apply.
 - **Mix** — You can use a local model for chat and a cloud model for embedding (or vice versa). Switch at runtime via `llm set` / `llm cloud` in the CLI or by editing `main_llm` / `embedding_llm` in `config/core.yml`.
-- **Remote access** — If you expose Core on the internet (e.g. for WebChat or bots), enable **auth** in `config/core.yml`: `auth_enabled: true` and `auth_api_key: "<secret>"`. Clients must send `X-API-Key` or `Authorization: Bearer <key>` on `/inbound` and `/ws`. See **docs/RemoteAccess.md**.
+- **Remote access** — If you expose Core on the internet (e.g. for WebChat or bots), enable **auth** in `config/core.yml`: `auth_enabled: true` and `auth_api_key: "<secret>"`. Clients must send `X-API-Key` or `Authorization: Bearer <key>` on `/inbound` and `/ws`. See **docs_design/RemoteAccess.md**.
 
-Supported cloud providers (via LiteLLM) include **OpenAI** (GPT-4o, etc.), **Google Gemini**, **DeepSeek**, **Anthropic**, **Groq**, **Mistral**, **xAI**, **Cohere**, **Together AI**, **OpenRouter**, **Perplexity**, and others. See `config/core.yml` and [LiteLLM docs](https://docs.litellm.ai/docs/providers).
+Supported cloud providers (via LiteLLM) include **OpenAI** (GPT-4o, etc.), **Google Gemini**, **DeepSeek**, **Anthropic**, **Groq**, **Mistral**, **xAI**, **Cohere**, **Together AI**, **OpenRouter**, **Perplexity**, and others. See `config/core.yml` and [LiteLLM docs](https://docs.litellm.ai/docs_design/providers).
 
 ---
 
@@ -328,7 +328,7 @@ HomeClaw runs on **macOS**, **Windows**, and **Linux**. You need:
 
 6. **Test**
 
-   - Send a message in WebChat or the CLI. For tools/skills/plugins, see **docs/ToolsAndSkillsTesting.md** and **docs/RunAndTestPlugins.md**.
+   - Send a message in WebChat or the CLI. For tools/skills/plugins, see **docs_design/ToolsAndSkillsTesting.md** and **docs_design/RunAndTestPlugins.md**.
    - Check config and LLM connectivity: `python -m main doctor`.
 
 ### Commands (interactive CLI, `python -m main start`)
@@ -369,7 +369,7 @@ Place GGUF files in a `models/` directory. In `config/core.yml`, define `local_m
   - **Mistral**: `MISTRAL_API_KEY`
   - **xAI**: `XAI_API_KEY`
   - **OpenRouter**: `OPENROUTER_API_KEY`
-  - (See `config/core.yml` and [LiteLLM providers](https://docs.litellm.ai/docs/providers) for more.)
+  - (See `config/core.yml` and [LiteLLM providers](https://docs.litellm.ai/docs_design/providers) for more.)
 - **Running LiteLLM** — Each cloud entry has its own `host`/`port` in config. Run a LiteLLM proxy (or one proxy per provider) that serves OpenAI-compatible `/v1/chat/completions` and `/v1/embeddings` on that host/port, with the corresponding API key. Then Core calls that URL; no API key is stored in `core.yml`—only the env var name.
 - **Switch at runtime** — Use the CLI: **`llm cloud`** to choose a cloud model as the main LLM, or edit `main_llm` / `embedding_llm` in `config/core.yml` and restart Core.
 
@@ -390,7 +390,7 @@ HomeClaw uses a **relational DB** (chat history, sessions), a **vector DB** (RAG
   - **Graph**: Set **`graphDB.backend`** to **`neo4j`** and set **`graphDB.Neo4j.url`**, `username`, `password` for enterprise graph storage.
 - **Core’s chat DB** — The **`database:`** section in `core.yml` is always used for Core’s own chat history, sessions, and runs. So even with `memory_backend: cognee`, you can set `database.backend: postgresql` and `database.url` to put Core’s relational data on Postgres.
 
-For a full support matrix and step-by-step examples, see **docs/MemoryAndDatabase.md**.
+For a full support matrix and step-by-step examples, see **docs_design/MemoryAndDatabase.md**.
 
 ### For developers (Windows notes)
 
@@ -415,7 +415,7 @@ HomeClaw ships with **tools** (file, memory, web search, cron, browser, etc.), *
 - **Run workflows** — Enable **skills** in `config/core.yml` (`use_skills: true`). The LLM sees “Available skills” and can follow a skill’s instructions (using tools) or call **run_skill** to run a script.
 - **Schedule and remind** — Use **TAM** (Time Awareness Module): say “remind me in 5 minutes” or “every day at 9am”; or use tools like `remind_me`, `record_date`, `cron_schedule`.
 
-You don’t have to “call” plugins or skills by name—just ask naturally. The system routes to plugins when the intent matches and uses tools/skills when the model decides. See **docs/ToolsSkillsPlugins.md** for how the LLM chooses between tools, skills, and plugins.
+You don’t have to “call” plugins or skills by name—just ask naturally. The system routes to plugins when the intent matches and uses tools/skills when the model decides. See **docs_design/ToolsSkillsPlugins.md** for how the LLM chooses between tools, skills, and plugins.
 
 ---
 
@@ -435,7 +435,7 @@ You don’t have to “call” plugins or skills by name—just ask naturally. T
   - `GET /health` → 2xx
   - `POST /run` (or your path) → body = PluginRequest JSON, response = PluginResult JSON.
 - **Register** with Core: `POST http://<core>:9000/api/plugins/register` with plugin id, name, description, `health_check_url`, `type: "http"`, `config` (base_url, path, timeout_sec), and `capabilities`.
-- After registration, Core routes to your server like built-in plugins. See **docs/PluginStandard.md** and **docs/PluginsGuide.md**.
+- After registration, Core routes to your server like built-in plugins. See **docs_design/PluginStandard.md** and **docs_design/PluginsGuide.md**.
 
 ### Example: external plugins (multi-language)
 
@@ -446,11 +446,11 @@ In `examples/external_plugins/` we provide:
 - **Go** — Time (port 3112).
 - **Java** — Quote (port 3113).
 
-Each folder has a README and a register script. See **examples/external_plugins/README.md** and **docs/RunAndTestPlugins.md**.
+Each folder has a README and a register script. See **examples/external_plugins/README.md** and **docs_design/RunAndTestPlugins.md**.
 
 ### Parameter collection
 
-Plugins can declare parameters (e.g. city, recipient). Core can fill them from **user profile**, **config**, or **user message**; optional **confirm_if_uncertain** and **use_default_directly_for** control confirmation. See **docs/PluginsGuide.md** and **docs/PluginParameterCollection.md**.
+Plugins can declare parameters (e.g. city, recipient). Core can fill them from **user profile**, **config**, or **user message**; optional **confirm_if_uncertain** and **use_default_directly_for** control confirmation. See **docs_design/PluginsGuide.md** and **docs_design/PluginParameterCollection.md**.
 
 ---
 
@@ -460,7 +460,7 @@ Plugins can declare parameters (e.g. city, recipient). Core can fill them from *
 
 - **What they do** — The LLM sees “Available skills” in the system prompt. When the user request matches a skill’s description, the LLM uses **tools** (file_read, web_search, browser, cron, etc.) to accomplish the workflow. Optionally the skill has a **scripts/** folder; then the LLM can call **run_skill(skill_name, script, ...)** to run a script (e.g. `run.sh`, `main.py`).
 - **No separate runtime** — Skills don’t run in a separate process; the “runtime” is the main LLM + tool loop. So skills are **tool-driven workflows**.
-- **Enable** — In `config/core.yml`: `use_skills: true`, `skills_dir: config/skills`. Optionally use **skills_use_vector_search** so only relevant skills are injected by similarity to the query. See **docs/SkillsGuide.md** and **docs/ToolsSkillsPlugins.md**.
+- **Enable** — In `config/core.yml`: `use_skills: true`, `skills_dir: config/skills`. Optionally use **skills_use_vector_search** so only relevant skills are injected by similarity to the query. See **docs_design/SkillsGuide.md** and **docs_design/ToolsSkillsPlugins.md**.
 
 Example: a “social media agent” skill might describe posting to X/Twitter using browser and cron; the LLM follows the skill’s instructions and calls the appropriate tools.
 
@@ -471,7 +471,7 @@ Example: a “social media agent” skill might describe posting to X/Twitter us
 HomeClaw would not exist without two projects that inspired it:
 
 - **GPT4People** — The author’s earlier project that explored decentralized, people-centric AI and channel-based interaction. Many of HomeClaw’s ideas—local-first agents, channels, memory, and the vision of AI “for the people”—grew from that work.
-- **OpenClaw** — A sibling ecosystem (gateway, extensions, channels, providers). OpenClaw and HomeClaw share a similar spirit: extensible, channel-based AI that users can run and customize. The contrast between OpenClaw’s gateway/extensions model and HomeClaw’s core/plugins model helped clarify HomeClaw’s design (see **docs/ToolsSkillsPlugins.md** §2.7).
+- **OpenClaw** — A sibling ecosystem (gateway, extensions, channels, providers). OpenClaw and HomeClaw share a similar spirit: extensible, channel-based AI that users can run and customize. The contrast between OpenClaw’s gateway/extensions model and HomeClaw’s core/plugins model helped clarify HomeClaw’s design (see **docs_design/ToolsSkillsPlugins.md** §2.7).
 
 Thank you to everyone who contributed to GPT4People and OpenClaw, and to the open-source communities behind llama.cpp, LiteLLM, Cognee, and the many channels and tools we build on.
 

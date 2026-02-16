@@ -15,8 +15,8 @@
 - ユーザーのマシン（例：自宅 PC）で動作する。
 - **ローカル LLM**（llama.cpp サーバ経由）と**クラウド AI**（OpenAI 互換 API、**LiteLLM** 使用）をサポートする。
 - **複数チャネル**（メール、IM、CLI）でアシスタントを公開し、どこからでも（例：スマートフォンから）自宅インスタンスとやり取りできる。
-- **RAG 型メモリ**を使用：**Cognee**（デフォルト）または自前 SQLite + Chroma；オプションでユーザーごとの**プロフィール**と**ナレッジベース**。docs/MemoryAndDatabase.md 参照。
-- **プラグイン**（plugin.yaml + config.yml + plugin.py；route_to_plugin または orchestrator）、**スキル**（config/skills/ 下の SKILL.md；オプションでベクトル検索；run_skill ツール）、**ツール層**（use_tools: true — exec、browser、cron、sessions_*、memory_*、file_* など）で振る舞いを拡張。docs/ToolsSkillsPlugins.md 参照。
+- **RAG 型メモリ**を使用：**Cognee**（デフォルト）または自前 SQLite + Chroma；オプションでユーザーごとの**プロフィール**と**ナレッジベース**。docs_design/MemoryAndDatabase.md 参照。
+- **プラグイン**（plugin.yaml + config.yml + plugin.py；route_to_plugin または orchestrator）、**スキル**（config/skills/ 下の SKILL.md；オプションでベクトル検索；run_skill ツール）、**ツール層**（use_tools: true — exec、browser、cron、sessions_*、memory_*、file_* など）で振る舞いを拡張。docs_design/ToolsSkillsPlugins.md 参照。
 
 ### 1.2 設計目標
 
@@ -46,7 +46,7 @@
 - **役割**：中央ルーター、権限チェック、チャット + メモリのハンドラ。
 - **エントリ**：`core/core.py` — `Core`（シングルトン）が FastAPI アプリを実行し LLM マネージャを起動。
 - **主なエンドポイント**：`POST /process`、`POST /local_chat`、`POST /inbound`、`WebSocket /ws`、`POST /register_channel`、`POST /deregister_channel`。
-- **設定**：`config/core.yml`（host、port、main_llm、embedding_llm、memory_backend、use_tools、use_skills、tools.*、result_viewer、auth_enabled、auth_api_key など）。**認証**：auth_enabled: true のとき /inbound と /ws に X-API-Key または Authorization: Bearer が必要。docs/RemoteAccess.md 参照。**結果ビューア**：オプションの save_result_page ツールとレポートサーバ（port、base_url）。docs/ComplexResultViewerDesign.md 参照。
+- **設定**：`config/core.yml`（host、port、main_llm、embedding_llm、memory_backend、use_tools、use_skills、tools.*、result_viewer、auth_enabled、auth_api_key など）。**認証**：auth_enabled: true のとき /inbound と /ws に X-API-Key または Authorization: Bearer が必要。docs_design/RemoteAccess.md 参照。**結果ビューア**：オプションの save_result_page ツールとレポートサーバ（port、base_url）。docs_design/ComplexResultViewerDesign.md 参照。
 
 **Orchestrator**（`core/orchestrator.py`）：チャット履歴とユーザー入力から意図（TIME/OTHER）を分類；OTHER のとき Core がプラグインを選択。**TAM**（`core/tam.py`）：時間意識モジュール；TIME 意図（スケジューリングなど）を処理。ルーティングスタイルは core.yml の **orchestrator_unified_with_tools** で制御（デフォルト true = メイン LLM がツール付きでルーティング；false = 別途 orchestrator が先に 1 回 LLM 呼び出し）。
 
@@ -70,7 +70,7 @@
 ### 3.4 メモリ（`memory/`）
 
 - **役割**：チャット履歴 + RAG（現在クエリに関連する過去コンテンツの保存と検索）。
-- **設計**：**Cognee（デフォルト）**：デフォルトで SQLite + ChromaDB + Kuzu；Cognee `.env` で Postgres、Qdrant などに対応。**自前（chroma）**：core.yml で SQLite + Chroma + オプションで Kuzu/Neo4j。docs/MemoryAndDatabase.md 参照。
+- **設計**：**Cognee（デフォルト）**：デフォルトで SQLite + ChromaDB + Kuzu；Cognee `.env` で Postgres、Qdrant などに対応。**自前（chroma）**：core.yml で SQLite + Chroma + オプションで Kuzu/Neo4j。docs_design/MemoryAndDatabase.md 参照。
 - **memory_backend**：`cognee`（デフォルト）または `chroma`。cognee 時は **cognee:** および/または Cognee `.env` で設定；chroma 時は core.yml の vectorDB、graphDB を使用。**database** は常に Core のチャットセッション、runs、ターンに使用。**profile**（オプション）：ユーザーごと JSON；profile.enabled、profile.dir。**knowledge_base**（オプション）：RAG メモリとは別；knowledge_base.enabled、knowledge_base.backend。
 - **ワークスペースブートストラップ（オプション）**：`config/workspace/` の IDENTITY.md、AGENTS.md、TOOLS.md；base/workspace.py で読み込みシステムプロンプトに付加。core.yml：use_workspace_bootstrap、workspace_dir。
 - **セッション記録**：ChatHistory.get_transcript、get_transcript_jsonl、prune_session、Core.summarize_session_transcript など。Comparison.md §7.6 参照。
@@ -87,15 +87,15 @@
 | **組み込み** | Python のみ | Core と同プロセス | `plugin.yaml` で **type: inline**、`config.yml`、`plugin.py`（BasePlugin 継承）を `plugins/<Name>/` に配置 | 高速統合、追加プロセスなし、Python ライブラリ利用（Weather、News、Mail など）。 |
 | **外部** | 任意（Node.js、Go、Java など） | 別プロセスまたはリモート HTTP サービス | `plugins/` 下のフォルダに `plugin.yaml` で **type: http**、または **POST /api/plugins/register** で登録 | 既存サービス、他言語、独立デプロイ；サーバが POST PluginRequest を受け取り PluginResult を返す。 |
 
-Core は `plugins/` をスキャンして plugin.yaml + plugin.py を読み込み**組み込み**プラグインを発見；**外部**プラグインはフォルダ内の宣言（plugin.yaml type: http + エンドポイント URL）または実行時 API で登録。どちらも同じルーティング（orchestrator または route_to_plugin）。**docs/PluginsGuide.md**（§2 組み込み、§3 外部）、**docs/PluginStandard.md**、**docs/RunAndTestPlugins.md** 参照。
+Core は `plugins/` をスキャンして plugin.yaml + plugin.py を読み込み**組み込み**プラグインを発見；**外部**プラグインはフォルダ内の宣言（plugin.yaml type: http + エンドポイント URL）または実行時 API で登録。どちらも同じルーティング（orchestrator または route_to_plugin）。**docs_design/PluginsGuide.md**（§2 組み込み、§3 外部）、**docs_design/PluginStandard.md**、**docs_design/RunAndTestPlugins.md** 参照。
 
 - **マニフェスト**：**plugin.yaml**（id、name、description、**type: inline** または **type: http**、capabilities とパラメータ）。**config.yml** で実行時設定。**plugin.py**（組み込みのみ）— BasePlugin 継承、run() および/または能力メソッドを実装。**読み込み**：PluginManager が plugins/ をスキャンし plugin.yaml（および type: inline のとき plugin.py）を読み込み説明を登録；Core は LLM でユーザーテキストにマッチするプラグインまたは **route_to_plugin** を実行し、組み込みは plugin.run()、外部は HTTP POST。
 
 ### 3.6 プラグインとツール：違いと設計
 
-**プラグイン** = メッセージを 1 つのハンドラにルーティングし、実行して応答を返す。**ツール** = モデルが名前と構造化引数で関数を呼び出し；実行結果を会話に追加し、モデルが続けて呼び出しまたは返答。HomeClaw は**ツール層**を実装済み（exec、browser、cron、sessions_*、memory_*、file_*、document_read、web_search、run_skill、route_to_plugin、route_to_tam、save_result_page、models_list、agents_list、channel_send、image；remind_me、record_date、recorded_events_list；profile_*、knowledge_base_*；tavily_extract/crawl/research、web_extract、web_crawl、web_search_browser、http_request など）；nodes/canvas は対象外。一覧は **Design.md §3.6** 参照。**docs/ToolsSkillsPlugins.md**、**Comparison.md** §7.10.2 参照。
+**プラグイン** = メッセージを 1 つのハンドラにルーティングし、実行して応答を返す。**ツール** = モデルが名前と構造化引数で関数を呼び出し；実行結果を会話に追加し、モデルが続けて呼び出しまたは返答。HomeClaw は**ツール層**を実装済み（exec、browser、cron、sessions_*、memory_*、file_*、document_read、web_search、run_skill、route_to_plugin、route_to_tam、save_result_page、models_list、agents_list、channel_send、image；remind_me、record_date、recorded_events_list；profile_*、knowledge_base_*；tavily_extract/crawl/research、web_extract、web_crawl、web_search_browser、http_request など）；nodes/canvas は対象外。一覧は **Design.md §3.6** 参照。**docs_design/ToolsSkillsPlugins.md**、**Comparison.md** §7.10.2 参照。
 
-- **実装**：`base/tools.py`（ToolDefinition、ToolContext、ToolRegistry）、`tools/builtin.py`（register_builtin_tools）；Core は initialize() で登録し、answer_from_memory で use_tools が true のときツール付きで呼び出し tool_calls ループを実行。**設定**：core.yml で **use_tools: true** と **tools:**（exec_allowlist、file_read_base、tools.web、browser_*、run_skill_* など）。**docs/ToolsDesign.md**、**docs/ToolsAndSkillsTesting.md** 参照。新規ツール：execute_async を定義、ToolDefinition を組み立て、register_builtin_tools 内または get_tool_registry().register(tool) で登録。
+- **実装**：`base/tools.py`（ToolDefinition、ToolContext、ToolRegistry）、`tools/builtin.py`（register_builtin_tools）；Core は initialize() で登録し、answer_from_memory で use_tools が true のときツール付きで呼び出し tool_calls ループを実行。**設定**：core.yml で **use_tools: true** と **tools:**（exec_allowlist、file_read_base、tools.web、browser_*、run_skill_* など）。**docs_design/ToolsDesign.md**、**docs_design/ToolsAndSkillsTesting.md** 参照。新規ツール：execute_async を定義、ToolDefinition を組み立て、register_builtin_tools 内または get_tool_registry().register(tool) で登録。
 
 ---
 
@@ -128,10 +128,10 @@ Core は core.yml から main_llm、embedding_llm（id）を読み、**local_mod
 
 - **チャネル**：最小 — 任意ボットが POST /inbound または Webhook /message；フル — channels/ に BaseChannel サブクラスを追加し /get_response を実装。専用アプリは WebSocket /ws を使用可能。
 - **LLM**：core.yml の local_models または cloud_models にエントリを追加；ローカルはエントリごとに llama-server を起動。
-- **メモリ/RAG**：デフォルトは Cognee；代替は memory_backend: chroma。docs/MemoryAndDatabase.md 参照。
-- **プラグイン**：plugins/ 下にフォルダを追加し plugin.yaml、config.yml、plugin.py（組み込み）または type: http + エンドポイント（外部）；外部は POST /api/plugins/register も可。docs/PluginsGuide.md、docs/PluginStandard.md、docs/RunAndTestPlugins.md 参照。
+- **メモリ/RAG**：デフォルトは Cognee；代替は memory_backend: chroma。docs_design/MemoryAndDatabase.md 参照。
+- **プラグイン**：plugins/ 下にフォルダを追加し plugin.yaml、config.yml、plugin.py（組み込み）または type: http + エンドポイント（外部）；外部は POST /api/plugins/register も可。docs_design/PluginsGuide.md、docs_design/PluginStandard.md、docs_design/RunAndTestPlugins.md 参照。
 - **ツール層**：§3.6 参照；組み込みツールは実装済み；オプションでプラグインが get_tools()/run_tool() でツールを公開可能。
-- **スキル（SKILL.md）**：実装済み；base/skills.py が config/skills/ から読み込み；use_skills、skills_dir、skills_use_vector_search；run_skill ツール。docs/SkillsGuide.md、docs/ToolsSkillsPlugins.md 参照。
+- **スキル（SKILL.md）**：実装済み；base/skills.py が config/skills/ から読み込み；use_skills、skills_dir、skills_use_vector_search；run_skill ツール。docs_design/SkillsGuide.md、docs_design/ToolsSkillsPlugins.md 参照。
 - **TAM**：時間意図は分類済み；スケジューリング/リマインダーの拡張が可能。
 
 ---
@@ -143,9 +143,9 @@ Core は core.yml から main_llm、embedding_llm（id）を読み、**local_mod
 | Core | core/core.py、core/coreInterface.py、core/orchestrator.py、core/tam.py |
 | Channels | base/BaseChannel.py、base/base.py（InboundRequest）、channels/、main.py。実行：`python -m channels.run <name>`。 |
 | LLM | llm/llmService.py、llm/litellmService.py |
-| Memory | memory/base.py、memory/mem.py、memory/chroma.py、memory/storage.py、memory/embedding.py、memory/chat/chat.py；memory/graph/（chroma 時）；memory/cognee_adapter.py（cognee 時）；base/profile_store.py、database/profiles/；ナレッジベースは core.yml 参照。ワークスペース：base/workspace.py、config/workspace/。スキル：base/skills.py、config/skills/；run_skill は tools/builtin.py。docs/MemoryAndDatabase.md、docs/SkillsGuide.md 参照。 |
-| Tools | base/tools.py、tools/builtin.py；設定は core.yml tools:。docs/ToolsDesign.md、docs/ToolsAndSkillsTesting.md 参照。 |
-| Plugins | base/BasePlugin.py、base/PluginManager.py、plugins/Weather/（plugin.yaml、config.yml、plugin.py）；外部：POST /api/plugins/register。docs/PluginsGuide.md、docs/PluginStandard.md 参照。 |
+| Memory | memory/base.py、memory/mem.py、memory/chroma.py、memory/storage.py、memory/embedding.py、memory/chat/chat.py；memory/graph/（chroma 時）；memory/cognee_adapter.py（cognee 時）；base/profile_store.py、database/profiles/；ナレッジベースは core.yml 参照。ワークスペース：base/workspace.py、config/workspace/。スキル：base/skills.py、config/skills/；run_skill は tools/builtin.py。docs_design/MemoryAndDatabase.md、docs_design/SkillsGuide.md 参照。 |
+| Tools | base/tools.py、tools/builtin.py；設定は core.yml tools:。docs_design/ToolsDesign.md、docs_design/ToolsAndSkillsTesting.md 参照。 |
+| Plugins | base/BasePlugin.py、base/PluginManager.py、plugins/Weather/（plugin.yaml、config.yml、plugin.py）；外部：POST /api/plugins/register。docs_design/PluginsGuide.md、docs_design/PluginStandard.md 参照。 |
 | Shared | base/base.py（PromptRequest、AsyncResponse、列挙、設定データクラス）、base/util.py |
 
 ---

@@ -15,8 +15,8 @@
 - 运行在用户本机（如家庭电脑）。
 - 支持**本地 LLM**（通过 llama.cpp 服务）与**云端 AI**（通过 OpenAI 兼容 API，使用 **LiteLLM**）。
 - 通过**多种渠道**（邮件、IM、CLI）暴露助手，使用户可从任意位置（如手机）与家中实例交互。
-- 使用 **RAG 式记忆**：**Cognee**（默认）或自管 SQLite + Chroma；可选每用户**档案**与**知识库**。见 docs/MemoryAndDatabase.md。
-- 通过**插件**（plugin.yaml + config.yml + plugin.py；route_to_plugin 或 orchestrator）、**技能**（config/skills/ 下的 SKILL.md；可选向量检索；run_skill 工具）与**工具层**（use_tools: true — exec、browser、cron、sessions_*、memory_*、file_* 等）扩展行为。见 docs/ToolsSkillsPlugins.md。
+- 使用 **RAG 式记忆**：**Cognee**（默认）或自管 SQLite + Chroma；可选每用户**档案**与**知识库**。见 docs_design/MemoryAndDatabase.md。
+- 通过**插件**（plugin.yaml + config.yml + plugin.py；route_to_plugin 或 orchestrator）、**技能**（config/skills/ 下的 SKILL.md；可选向量检索；run_skill 工具）与**工具层**（use_tools: true — exec、browser、cron、sessions_*、memory_*、file_* 等）扩展行为。见 docs_design/ToolsSkillsPlugins.md。
 
 ### 1.2 设计目标
 
@@ -81,7 +81,7 @@
 - **入口**：`core/core.py` — `Core`（单例）运行 FastAPI 应用并启动 LLM 管理器。
 - **主要端点**：`POST /process`（渠道异步）、`POST /local_chat`（CLI 同步）、`POST /inbound`（任意机器人最小 API）、`WebSocket /ws`、`POST /register_channel`、`POST /deregister_channel`。
 - **行为**：校验权限（config/user.yml）→ 若启用 orchestrator + 插件则做意图分类与插件选择 → 否则由 Core 处理：加载聊天历史、可选入队记忆、RAG（answer_from_memory）、调用 LLM、写回聊天 DB 并回复渠道。
-- **配置**：`config/core.yml`（host、port、main_llm、embedding_llm、memory_backend、use_tools、use_skills、tools.*、result_viewer、auth_enabled、auth_api_key 等）。**认证**：auth_enabled: true 时，/inbound 与 /ws 需 X-API-Key 或 Authorization: Bearer；见 docs/RemoteAccess.md。**结果查看器**：可选 save_result_page 工具与报告服务（port、base_url）；见 docs/ComplexResultViewerDesign.md。
+- **配置**：`config/core.yml`（host、port、main_llm、embedding_llm、memory_backend、use_tools、use_skills、tools.*、result_viewer、auth_enabled、auth_api_key 等）。**认证**：auth_enabled: true 时，/inbound 与 /ws 需 X-API-Key 或 Authorization: Bearer；见 docs_design/RemoteAccess.md。**结果查看器**：可选 save_result_page 工具与报告服务（port、base_url）；见 docs_design/ComplexResultViewerDesign.md。
 
 **Orchestrator**（`core/orchestrator.py`）：根据聊天历史与用户输入分类意图（TIME/OTHER）；对 OTHER 由 Core 选择插件。**TAM**（`core/tam.py`）：时间感知模块，处理 TIME 意图（如定时）。路由风格由 core.yml 中 **orchestrator_unified_with_tools** 控制（默认 true = 主 LLM 带工具做路由；false = 单独 orchestrator 先跑一轮 LLM）。
 
@@ -105,7 +105,7 @@
 ### 3.4 记忆（`memory/`）
 
 - **角色**：聊天历史 + RAG（存储与检索与当前查询相关的历史内容）。
-- **设计**：**Cognee（默认）**：默认 SQLite + ChromaDB + Kuzu；可通过 Cognee `.env` 使用 Postgres、Qdrant 等。**自管（chroma）**：core.yml 中 SQLite + Chroma + 可选 Kuzu/Neo4j。见 docs/MemoryAndDatabase.md。
+- **设计**：**Cognee（默认）**：默认 SQLite + ChromaDB + Kuzu；可通过 Cognee `.env` 使用 Postgres、Qdrant 等。**自管（chroma）**：core.yml 中 SQLite + Chroma + 可选 Kuzu/Neo4j。见 docs_design/MemoryAndDatabase.md。
 - **memory_backend**：`cognee`（默认）或 `chroma`。cognee 时通过 **cognee:** 与/或 Cognee `.env` 配置；chroma 时使用 core.yml 的 vectorDB、graphDB。**database** 始终用于 Core 的聊天会话、runs、轮次。**profile**（可选）：每用户 JSON；profile.enabled、profile.dir。**knowledge_base**（可选）：独立于 RAG 记忆；knowledge_base.enabled、knowledge_base.backend。
 - **工作区引导（可选）**：`config/workspace/` 下 IDENTITY.md、AGENTS.md、TOOLS.md；由 base/workspace.py 加载并拼入系统提示。core.yml：use_workspace_bootstrap、workspace_dir。
 - **会话记录**：ChatHistory.get_transcript、get_transcript_jsonl、prune_session、Core.summarize_session_transcript 等；见 Comparison.md §7.6。
@@ -122,15 +122,15 @@
 | **内置** | 仅 Python | 与 Core 同进程 | `plugin.yaml` 中 **type: inline**，`config.yml`，`plugin.py`（继承 BasePlugin）置于 `plugins/<Name>/` | 快速集成、无额外进程、使用 Python 库（如 Weather、News、Mail）。 |
 | **外部** | 任意（Node.js、Go、Java 等） | 独立进程或远程 HTTP 服务 | 在 `plugins/` 下目录中 `plugin.yaml` 设 **type: http**，或通过 **POST /api/plugins/register** 注册 | 已有服务、其他语言或独立部署；服务接受 POST PluginRequest 并返回 PluginResult。 |
 
-Core 通过扫描 `plugins/` 并加载 plugin.yaml + plugin.py 发现**内置**插件；**外部**插件通过在目录中声明（plugin.yaml type: http + 端点 URL）或运行时 API 注册。两者路由方式相同（orchestrator 或 route_to_plugin）。见 **docs/PluginsGuide.md**（§2 内置、§3 外部）、**docs/PluginStandard.md**、**docs/RunAndTestPlugins.md**。
+Core 通过扫描 `plugins/` 并加载 plugin.yaml + plugin.py 发现**内置**插件；**外部**插件通过在目录中声明（plugin.yaml type: http + 端点 URL）或运行时 API 注册。两者路由方式相同（orchestrator 或 route_to_plugin）。见 **docs_design/PluginsGuide.md**（§2 内置、§3 外部）、**docs_design/PluginStandard.md**、**docs_design/RunAndTestPlugins.md**。
 
 - **清单**：**plugin.yaml**（id、name、description、**type: inline** 或 **type: http**、capabilities 及参数）。**config.yml** 为运行时配置。**plugin.py**（仅内置）— 继承 BasePlugin，实现 run() 和/或能力方法。**加载**：PluginManager 扫描 plugins/，加载 plugin.yaml（及 type: inline 时的 plugin.py），注册描述；Core 用 LLM 匹配用户文本或 **route_to_plugin** 调用，内置走 plugin.run()，外部走 HTTP POST。
 
 ### 3.6 插件与工具：区别与设计
 
-**插件** = 将本条消息路由到一个处理器，执行后返回响应。**工具** = 模型按名称与结构化参数调用函数；执行后结果回填，模型可继续调用或回复。HomeClaw 已实现**工具层**（exec、browser、cron、sessions_*、memory_*、file_*、document_read、web_search、run_skill、route_to_plugin、route_to_tam、save_result_page、models_list、agents_list、channel_send、image；remind_me、record_date、recorded_events_list；profile_*、knowledge_base_*；tavily_extract/crawl/research、web_extract、web_crawl、web_search_browser、http_request 等）；nodes/canvas 不在范围内。完整列表见 **Design.md §3.6**。见 **docs/ToolsSkillsPlugins.md**、**Comparison.md** §7.10.2。
+**插件** = 将本条消息路由到一个处理器，执行后返回响应。**工具** = 模型按名称与结构化参数调用函数；执行后结果回填，模型可继续调用或回复。HomeClaw 已实现**工具层**（exec、browser、cron、sessions_*、memory_*、file_*、document_read、web_search、run_skill、route_to_plugin、route_to_tam、save_result_page、models_list、agents_list、channel_send、image；remind_me、record_date、recorded_events_list；profile_*、knowledge_base_*；tavily_extract/crawl/research、web_extract、web_crawl、web_search_browser、http_request 等）；nodes/canvas 不在范围内。完整列表见 **Design.md §3.6**。见 **docs_design/ToolsSkillsPlugins.md**、**Comparison.md** §7.10.2。
 
-- **实现**：`base/tools.py`（ToolDefinition、ToolContext、ToolRegistry）、`tools/builtin.py`（register_builtin_tools）；Core 在 initialize() 中注册，在 answer_from_memory 中当 use_tools 为 true 时带工具调用并执行 tool_calls 循环。**配置**：core.yml 中 **use_tools: true** 及 **tools:**（exec_allowlist、file_read_base、tools.web、browser_*、run_skill_* 等）。见 **docs/ToolsDesign.md**、**docs/ToolsAndSkillsTesting.md**。新增工具：定义 execute_async、构造 ToolDefinition、在 register_builtin_tools 中或通过 get_tool_registry().register(tool) 注册。
+- **实现**：`base/tools.py`（ToolDefinition、ToolContext、ToolRegistry）、`tools/builtin.py`（register_builtin_tools）；Core 在 initialize() 中注册，在 answer_from_memory 中当 use_tools 为 true 时带工具调用并执行 tool_calls 循环。**配置**：core.yml 中 **use_tools: true** 及 **tools:**（exec_allowlist、file_read_base、tools.web、browser_*、run_skill_* 等）。见 **docs_design/ToolsDesign.md**、**docs_design/ToolsAndSkillsTesting.md**。新增工具：定义 execute_async、构造 ToolDefinition、在 register_builtin_tools 中或通过 get_tool_registry().register(tool) 注册。
 
 ---
 
@@ -163,10 +163,10 @@ Core 从 core.yml 读取 main_llm、embedding_llm（id），并从 local_models 
 
 - **渠道**：最小 — 任意机器人 POST /inbound 或 Webhook /message；完整 — 在 channels/ 下新增 BaseChannel 子类并实现 /get_response。专用 app 可用 WebSocket /ws。
 - **LLM**：在 core.yml 的 local_models 或 cloud_models 中增加条目；本地按条目启动 llama-server。
-- **记忆/RAG**：默认 Cognee；替代为 memory_backend: chroma。见 docs/MemoryAndDatabase.md。
-- **插件**：在 plugins/ 下新增目录，含 plugin.yaml、config.yml、plugin.py（内置）或 type: http + 端点（外部）；外部也可 POST /api/plugins/register。见 docs/PluginsGuide.md、docs/PluginStandard.md、docs/RunAndTestPlugins.md。
+- **记忆/RAG**：默认 Cognee；替代为 memory_backend: chroma。见 docs_design/MemoryAndDatabase.md。
+- **插件**：在 plugins/ 下新增目录，含 plugin.yaml、config.yml、plugin.py（内置）或 type: http + 端点（外部）；外部也可 POST /api/plugins/register。见 docs_design/PluginsGuide.md、docs_design/PluginStandard.md、docs_design/RunAndTestPlugins.md。
 - **工具层**：见 §3.6；已实现内置工具；可选让插件通过 get_tools()/run_tool() 暴露工具。
-- **技能（SKILL.md）**：已实现；base/skills.py 从 config/skills/ 加载；use_skills、skills_dir、skills_use_vector_search；run_skill 工具。见 docs/SkillsGuide.md、docs/ToolsSkillsPlugins.md。
+- **技能（SKILL.md）**：已实现；base/skills.py 从 config/skills/ 加载；use_skills、skills_dir、skills_use_vector_search；run_skill 工具。见 docs_design/SkillsGuide.md、docs_design/ToolsSkillsPlugins.md。
 - **TAM**：时间意图已分类；可扩展更多定时/提醒行为与集成。
 
 ---
@@ -178,9 +178,9 @@ Core 从 core.yml 读取 main_llm、embedding_llm（id），并从 local_models 
 | Core | core/core.py、core/coreInterface.py、core/orchestrator.py、core/tam.py |
 | Channels | base/BaseChannel.py、base/base.py（InboundRequest）、channels/、main.py。运行：`python -m channels.run <name>`。 |
 | LLM | llm/llmService.py、llm/litellmService.py |
-| Memory | memory/base.py、memory/mem.py、memory/chroma.py、memory/storage.py、memory/embedding.py、memory/chat/chat.py；memory/graph/（chroma 时）；memory/cognee_adapter.py（cognee 时）；base/profile_store.py、database/profiles/；知识库见 core.yml。工作区：base/workspace.py、config/workspace/。技能：base/skills.py、config/skills/；run_skill 在 tools/builtin.py。见 docs/MemoryAndDatabase.md、docs/SkillsGuide.md。 |
-| Tools | base/tools.py、tools/builtin.py；配置见 core.yml tools:。见 docs/ToolsDesign.md、docs/ToolsAndSkillsTesting.md。 |
-| Plugins | base/BasePlugin.py、base/PluginManager.py、plugins/Weather/（plugin.yaml、config.yml、plugin.py）；外部：POST /api/plugins/register。见 docs/PluginsGuide.md、docs/PluginStandard.md。 |
+| Memory | memory/base.py、memory/mem.py、memory/chroma.py、memory/storage.py、memory/embedding.py、memory/chat/chat.py；memory/graph/（chroma 时）；memory/cognee_adapter.py（cognee 时）；base/profile_store.py、database/profiles/；知识库见 core.yml。工作区：base/workspace.py、config/workspace/。技能：base/skills.py、config/skills/；run_skill 在 tools/builtin.py。见 docs_design/MemoryAndDatabase.md、docs_design/SkillsGuide.md。 |
+| Tools | base/tools.py、tools/builtin.py；配置见 core.yml tools:。见 docs_design/ToolsDesign.md、docs_design/ToolsAndSkillsTesting.md。 |
+| Plugins | base/BasePlugin.py、base/PluginManager.py、plugins/Weather/（plugin.yaml、config.yml、plugin.py）；外部：POST /api/plugins/register。见 docs_design/PluginsGuide.md、docs_design/PluginStandard.md。 |
 | Shared | base/base.py（PromptRequest、AsyncResponse、枚举、配置数据类）、base/util.py |
 
 ---

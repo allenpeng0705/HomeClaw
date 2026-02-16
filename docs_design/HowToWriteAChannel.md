@@ -117,7 +117,7 @@ If Core is unreachable or returns an error, you may get `{"error": "...", "text"
    - **config/user.yml**: Add **user_id** (e.g. `telegram_123456789`) under **im** for a user with **IM** permission (or leave permissions empty to allow all).
    - **Core or Webhook URL**: Your bot must know the Core URL (e.g. `http://127.0.0.1:9000`) or Webhook URL (e.g. `http://relay:8005`). For in-repo bots, use **channels/.env** (`core_host`, `core_port` or `CORE_URL`).
 
-3. **Auth (optional)**: When Core is exposed on the internet, set **auth_enabled: true** and **auth_api_key** in `config/core.yml`; send **X-API-Key** or **Authorization: Bearer** with each request. See **docs/RemoteAccess.md**.
+3. **Auth (optional)**: When Core is exposed on the internet, set **auth_enabled: true** and **auth_api_key** in `config/core.yml`; send **X-API-Key** or **Authorization: Bearer** with each request. See **docs_design/RemoteAccess.md**.
 
 ### 3.5 Example: Telegram bot (inbound)
 
@@ -154,5 +154,5 @@ Both use **config/user.yml** for permission (user_id allowlist). For full channe
 
 - **Channel.md** — User guide: configuration, channels list, troubleshooting.
 - **Design.md** §3.2 — Channels architecture, full vs minimal, Core endpoints.
-- **docs/RemoteAccess.md** — Auth for /inbound and /ws when exposing Core.
+- **docs_design/RemoteAccess.md** — Auth for /inbound and /ws when exposing Core.
 - **channels/README.md** — List of channels and how to run them.

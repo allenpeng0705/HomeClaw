@@ -74,7 +74,7 @@ Use your machine’s IP or hostname if channels run on another machine.
 | **WebChat** | WebSocket /ws | `python -m channels.run webchat` |
 | **Webhook** | Relay (forwards to Core /inbound) | `python -m channels.run webhook` |
 
-**Auth (when exposing Core on the internet):** Set **auth_enabled: true** and **auth_api_key** in `config/core.yml`; then **POST /inbound** and **WebSocket /ws** require **X-API-Key** or **Authorization: Bearer**. See **docs/RemoteAccess.md**.
+**Auth (when exposing Core on the internet):** Set **auth_enabled: true** and **auth_api_key** in `config/core.yml`; then **POST /inbound** and **WebSocket /ws** require **X-API-Key** or **Authorization: Bearer**. See **docs_design/RemoteAccess.md**.
 
 ---
 
@@ -169,7 +169,7 @@ HomeClaw is the same pattern: run the WhatsApp channel on the home computer, log
 
 1. **`config/user.yml`**: Add the **user_id** your bot will send (e.g. `telegram_123456789`, `discord_98765`) under **im** for a user that has **IM** (or allow all with empty permissions).
 2. **Core reachable**: Your bot must be able to POST to `http://<core_host>:<core_port>/inbound`. If the Core is only on your home LAN, use the Webhook (next) or expose Core via Tailscale/SSH.
-3. **Auth (optional)**: When exposing Core on the internet, set **auth_enabled: true** and **auth_api_key** in `config/core.yml`; send **X-API-Key** or **Authorization: Bearer** with each request. See docs/RemoteAccess.md.
+3. **Auth (optional)**: When exposing Core on the internet, set **auth_enabled: true** and **auth_api_key** in `config/core.yml`; send **X-API-Key** or **Authorization: Bearer** with each request. See docs_design/RemoteAccess.md.
 
 **Request**
 
@@ -381,7 +381,7 @@ So: we **learn from other agent** (one clear contract, WebSocket for our client,
 
 - **Onboarding**: `python main.py onboard` — wizard to set workspace, LLM, channels, skills; updates core.yml.
 - **Doctor**: `python main.py doctor` — checks config and LLM connectivity; suggests fixes.
-- **Remote access and auth**: **docs/RemoteAccess.md** — auth_enabled/auth_api_key for /inbound and /ws; Tailscale or SSH to expose Core.
+- **Remote access and auth**: **docs_design/RemoteAccess.md** — auth_enabled/auth_api_key for /inbound and /ws; Tailscale or SSH to expose Core.
 
 **Possible improvements (keep our goals)**
 
@@ -396,8 +396,8 @@ We **don’t** need to copy other agent’s single binary or full tool set; we k
 ## 5. References
 
 - **Design**: `Design.md` (Core, channels, /inbound, /ws, webhook).
-- **How to write a new channel**: **docs/HowToWriteAChannel.md** (full channel vs webhook/inbound; two methods for developers).
+- **How to write a new channel**: **docs_design/HowToWriteAChannel.md** (full channel vs webhook/inbound; two methods for developers).
 - **Improvement ideas**: `Improvement.md` (other agent summary, comparison, channel vs gateway, HTTP vs WS, example).
 - **Comparison with other agent**: `Comparison.md`.
-- **Remote access and auth**: **docs/RemoteAccess.md**.
+- **Remote access and auth**: **docs_design/RemoteAccess.md**.
 - **Channel usage**: `channels/README.md`, `channels/webhook/README.md`, `channels/telegram/README.md`.

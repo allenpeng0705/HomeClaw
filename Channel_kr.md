@@ -53,7 +53,7 @@ mode=dev
 | **WebChat** | WebSocket /ws | `python -m channels.run webchat` |
 | **Webhook** | 릴레이(Core /inbound로 전달) | `python -m channels.run webhook` |
 
-**인증(Core를 인터넷에 노출할 때):** `config/core.yml`에서 **auth_enabled: true**와 **auth_api_key** 설정; **POST /inbound** 및 **WebSocket /ws**에는 **X-API-Key** 또는 **Authorization: Bearer** 필요. **docs/RemoteAccess.md** 참조.
+**인증(Core를 인터넷에 노출할 때):** `config/core.yml`에서 **auth_enabled: true**와 **auth_api_key** 설정; **POST /inbound** 및 **WebSocket /ws**에는 **X-API-Key** 또는 **Authorization: Bearer** 필요. **docs_design/RemoteAccess.md** 참조.
 
 ---
 
@@ -71,7 +71,7 @@ mode=dev
 
 ### 3.4 Inbound API(임의 봇, 새 채널 코드 불필요)
 
-**용도**: 임의 봇(Telegram, Discord, Slack, n8n, 자체 스크립트)이 “메시지당 HTTP 요청 1회”로 Core에 연결. **설정**: `config/user.yml`에 봇이 보낼 **user_id**(예: `telegram_123456789`)를 **im**에 추가하고 IM 권한 부여; 봇이 `http://<core_host>:<core_port>/inbound`로 POST 가능해야 함; 노출 시 auth 설정은 선택, docs/RemoteAccess.md 참조. **요청**: `POST /inbound`, JSON 본문 `{ "user_id", "text", "channel_name?", "user_name?" }`. **응답**: `{ "text": "..." }`. 예: `channels/telegram/`(BotFather에서 토큰 발급, .env 및 user.yml 설정, `python -m channels.run telegram`).
+**용도**: 임의 봇(Telegram, Discord, Slack, n8n, 자체 스크립트)이 “메시지당 HTTP 요청 1회”로 Core에 연결. **설정**: `config/user.yml`에 봇이 보낼 **user_id**(예: `telegram_123456789`)를 **im**에 추가하고 IM 권한 부여; 봇이 `http://<core_host>:<core_port>/inbound`로 POST 가능해야 함; 노출 시 auth 설정은 선택, docs_design/RemoteAccess.md 참조. **요청**: `POST /inbound`, JSON 본문 `{ "user_id", "text", "channel_name?", "user_name?" }`. **응답**: `{ "text": "..." }`. 예: `channels/telegram/`(BotFather에서 토큰 발급, .env 및 user.yml 설정, `python -m channels.run telegram`).
 
 ### 3.5 Webhook 채널(Core에 도달 불가 시 릴레이)
 
@@ -116,11 +116,11 @@ HomeClaw: Core + 독립 채널 프로세스(또는 외부 봇); IM 채널, POST 
 
 ## 4. 있는 것과 개선 가능 항목
 
-**이미 있음**: **Onboarding** `python main.py onboard`; **Doctor** `python main.py doctor`; **원격 접근 및 인증** docs/RemoteAccess.md. **개선 가능**: Core+채널을 한 번에 시작하는 단일 진입점, 선택적 페어링, WebChat(channels/webchat/ 이미 있음).
+**이미 있음**: **Onboarding** `python main.py onboard`; **Doctor** `python main.py doctor`; **원격 접근 및 인증** docs_design/RemoteAccess.md. **개선 가능**: Core+채널을 한 번에 시작하는 단일 진입점, 선택적 페어링, WebChat(channels/webchat/ 이미 있음).
 
 ## 5. 참고
 
 - **Design**: `Design.md`
-- **새 채널 작성 방법**: **docs/HowToWriteAChannel.md** (풀 채널 vs webhook/inbound, 두 가지 방법)
-- **Improvement**: `Improvement.md`; **Comparison**: `Comparison.md`; **RemoteAccess**: **docs/RemoteAccess.md**
+- **새 채널 작성 방법**: **docs_design/HowToWriteAChannel.md** (풀 채널 vs webhook/inbound, 두 가지 방법)
+- **Improvement**: `Improvement.md`; **Comparison**: `Comparison.md`; **RemoteAccess**: **docs_design/RemoteAccess.md**
 - **채널 사용**: `channels/README.md`, `channels/webhook/README.md`, `channels/telegram/README.md`
