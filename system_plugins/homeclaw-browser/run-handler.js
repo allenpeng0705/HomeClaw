@@ -32,12 +32,32 @@ function normalizeCapId(id) {
   return (id || '').toString().trim().toLowerCase().replace(/\s+/g, '_');
 }
 
+// Extract first URL from text (e.g. "open https://www.baidu.com" -> "https://www.baidu.com")
+function extractUrlFromText(text) {
+  if (!text || typeof text !== 'string') return null;
+  const withProtocol = text.match(/https?:\/\/[^\s"'<>)\]]+/i);
+  if (withProtocol) return withProtocol[0].replace(/[.,;:!?)]+$/, '');
+  const hostOnly = text.match(/(?:^|\s)([a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,})(?:\s|$|[,;:!?)])/);
+  return hostOnly ? 'https://' + hostOnly[1] : null;
+}
+
 async function handleRun(body) {
   const requestId = body.request_id || '';
   const pluginId = body.plugin_id || 'homeclaw-browser';
-  const capId = normalizeCapId(body.capability_id);
-  const params = body.capability_parameters || {};
+  let capId = normalizeCapId(body.capability_id);
+  const rawParams = body.capability_parameters;
+  let params = (rawParams && typeof rawParams === 'object' && !Array.isArray(rawParams)) ? rawParams : {};
   const userId = (body.user_id || '').trim();
+  const userInput = (body.user_input || '').trim();
+
+  // When no capability_id: if user_input contains a URL, treat as browser_navigate (e.g. "open https://www.baidu.com")
+  if (!capId && userInput) {
+    const url = extractUrlFromText(userInput) || (params.url && String(params.url).trim());
+    if (url) {
+      capId = 'browser_navigate';
+      params = { ...params, url };
+    }
+  }
 
   if (capId === 'canvas_update') {
     try {
@@ -152,12 +172,13 @@ async function handleRun(body) {
   const fn = CAP_MAP[capId];
   if (!fn) {
     const allCaps = [...Object.keys(CAP_MAP).filter(k => CAP_MAP[k] !== null), ...Object.keys(NODE_CONVENIENCE)];
+    const hint = !capId ? ' Pass capability_id (e.g. browser_navigate) and parameters (e.g. url), or include a URL in your message.' : '';
     return {
       request_id: requestId,
       plugin_id: pluginId,
       success: false,
       text: '',
-      error: `Unknown capability: ${capId}. Supported: ${allCaps.join(', ')}`,
+      error: `Unknown or missing capability: "${capId || '(empty)'}". Supported: ${allCaps.join(', ')}.${hint}`,
       metadata: {},
     };
   }

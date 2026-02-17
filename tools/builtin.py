@@ -155,7 +155,7 @@ async def _time_executor(arguments: Dict[str, Any], context: ToolContext) -> str
 
 
 async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Schedule a reminder (or cron-style task) using a cron expression. Runs at each matching time (e.g. daily at 9am)."""
+    """Schedule a reminder (or cron-style task) using a cron expression. Runs at each matching time (e.g. daily at 9am). Optional: tz (e.g. America/New_York), delivery_target 'latest' or 'session' (session = current channel)."""
     core = context.core
     orchestrator = getattr(core, "orchestratorInst", None)
     if orchestrator is None:
@@ -167,18 +167,33 @@ async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContex
     message = (arguments.get("message") or "").strip() or "Scheduled reminder"
     if not cron_expr:
         return "Error: cron_expr is required (e.g. '0 9 * * *' for daily at 9:00). Format: minute hour day month weekday (5 fields, * for every)."
-    async def task():
-        # Append hint so user knows they can list and remove recurring reminders
-        hint = "\n(To cancel this recurring reminder, say 'list my recurring reminders' and ask to remove it.)"
-        await tam.coreInst.send_response_to_latest_channel(response=message + hint)
-    job_id = tam.schedule_cron_task(task, cron_expr, params={"message": message})
+    tz = (arguments.get("tz") or "").strip() or None
+    delivery_target = (arguments.get("delivery_target") or "latest").strip().lower()
+    params: Dict[str, Any] = {"message": message}
+    if tz:
+        params["tz"] = tz
+    if delivery_target == "session" and context.app_id and context.user_id and context.session_id:
+        params["channel_key"] = f"{context.app_id}:{context.user_id}:{context.session_id}"
+    hint = "\n(To cancel this recurring reminder, say 'list my recurring reminders' and ask to remove it.)"
+
+    def make_task(msg: str, prms: Dict[str, Any]):
+        async def _task():
+            await tam.send_reminder_to_channel(msg + hint, prms)
+        return _task
+
+    job_id = tam.schedule_cron_task(make_task(message, params), cron_expr, params=params)
     if job_id is None:
         return "Error: Failed to schedule (invalid cron expression or croniter not installed)."
-    return json.dumps({"scheduled": True, "job_id": job_id, "cron_expr": cron_expr, "message": message})
+    out = {"scheduled": True, "job_id": job_id, "cron_expr": cron_expr, "message": message}
+    if tz:
+        out["tz"] = tz
+    if delivery_target:
+        out["delivery_target"] = delivery_target
+    return json.dumps(out)
 
 
 async def _cron_list_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """List all recurring (cron) reminders: job_id, message, cron_expr, next_run. User can identify which to remove by message (e.g. 'remove the pills reminder') then use cron_remove(job_id)."""
+    """List all recurring (cron) reminders: job_id, message, cron_expr, next_run, enabled, last_run_at, last_status, delivery_target. User can identify which to remove by message then use cron_remove(job_id) or cron_update(job_id, enabled=false)."""
     core = context.core
     orchestrator = getattr(core, "orchestratorInst", None)
     if orchestrator is None:
@@ -186,13 +201,28 @@ async def _cron_list_executor(arguments: Dict[str, Any], context: ToolContext) -
     tam = getattr(orchestrator, "tam", None)
     if tam is None or not hasattr(tam, "cron_jobs"):
         return json.dumps({"cron_jobs": []})
+
     def _job_row(j):
-        return {
+        p = j.get("params") or {}
+        row = {
             "job_id": j.get("job_id"),
-            "message": (j.get("params") or {}).get("message", ""),
+            "message": p.get("message", ""),
             "cron_expr": j.get("cron_expr"),
             "next_run": str(j.get("next_run", "")),
+            "enabled": p.get("enabled", True),
+            "last_run_at": p.get("last_run_at"),
+            "last_status": p.get("last_status"),
+            "last_duration_ms": p.get("last_duration_ms"),
         }
+        if p.get("channel_key"):
+            row["delivery_target"] = "session"
+            row["channel_key"] = p.get("channel_key")
+        else:
+            row["delivery_target"] = "latest"
+        if p.get("tz"):
+            row["tz"] = p.get("tz")
+        return row
+
     lock = getattr(tam, "_cron_lock", None)
     if lock:
         with lock:
@@ -216,6 +246,54 @@ async def _cron_remove_executor(arguments: Dict[str, Any], context: ToolContext)
         return json.dumps({"removed": False, "error": "TAM cron not available"})
     removed = tam.remove_cron_job(job_id)
     return json.dumps({"removed": removed, "job_id": job_id})
+
+
+async def _cron_update_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Update a cron job: enable or disable (enabled=true/false). Use cron_list to get job_ids."""
+    job_id = (arguments.get("job_id") or "").strip()
+    if not job_id:
+        return "Error: job_id is required (use cron_list to get job_ids)"
+    enabled = arguments.get("enabled")
+    if enabled is None:
+        return "Error: enabled is required (true or false)"
+    core = context.core
+    orchestrator = getattr(core, "orchestratorInst", None)
+    if orchestrator is None:
+        return json.dumps({"updated": False, "error": "Orchestrator/TAM not available"})
+    tam = getattr(orchestrator, "tam", None)
+    if tam is None or not hasattr(tam, "update_cron_job"):
+        return json.dumps({"updated": False, "error": "TAM cron not available"})
+    ok = tam.update_cron_job(job_id, enabled=bool(enabled))
+    return json.dumps({"updated": ok, "job_id": job_id, "enabled": bool(enabled)})
+
+
+async def _cron_run_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Run a cron job once now (force run). Use cron_list to get job_ids."""
+    job_id = (arguments.get("job_id") or "").strip()
+    if not job_id:
+        return "Error: job_id is required (use cron_list to get job_ids)"
+    core = context.core
+    orchestrator = getattr(core, "orchestratorInst", None)
+    if orchestrator is None:
+        return json.dumps({"run": False, "error": "Orchestrator/TAM not available"})
+    tam = getattr(orchestrator, "tam", None)
+    if tam is None or not hasattr(tam, "run_cron_job_now"):
+        return json.dumps({"run": False, "error": "TAM cron not available"})
+    ok = tam.run_cron_job_now(job_id)
+    return json.dumps({"run": ok, "job_id": job_id})
+
+
+async def _cron_status_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Return cron scheduler status: scheduler_enabled, next_wake_at, jobs_count. For UI or debugging."""
+    core = context.core
+    orchestrator = getattr(core, "orchestratorInst", None)
+    if orchestrator is None:
+        return json.dumps({"scheduler_enabled": False, "error": "Orchestrator/TAM not available"})
+    tam = getattr(orchestrator, "tam", None)
+    if tam is None or not hasattr(tam, "get_cron_status"):
+        return json.dumps({"scheduler_enabled": False, "jobs_count": 0})
+    status = tam.get_cron_status()
+    return json.dumps(status)
 
 
 async def _remind_me_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
@@ -1675,6 +1753,66 @@ async def _document_read_executor(arguments: Dict[str, Any], context: ToolContex
         return f"Error: {e!s}"
 
 
+async def _file_understand_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Classify a file (image, audio, video, document) and for documents return extracted text. Reuses file-understanding; never raises."""
+    try:
+        from base.file_understanding import (
+            FILE_TYPE_IMAGE,
+            FILE_TYPE_AUDIO,
+            FILE_TYPE_VIDEO,
+            FILE_TYPE_DOCUMENT,
+            FILE_TYPE_UNKNOWN,
+            detect_file_type,
+            extract_document_text,
+        )
+        try:
+            config = _get_tools_config() or {}
+        except Exception:
+            config = {}
+        base_str = str(config.get("file_read_base") or ".")
+        path_arg = (arguments.get("path") or "").strip()
+        if not path_arg:
+            return "Error: path is required."
+        try:
+            default_max = int(config.get("file_read_max_chars") or 0) or 64_000
+        except (TypeError, ValueError):
+            default_max = 64_000
+        try:
+            max_chars = int(arguments.get("max_chars") or 0) or default_max
+        except (TypeError, ValueError):
+            max_chars = default_max
+        try:
+            base = Path(base_str).resolve()
+            full = (base / path_arg).resolve()
+            if not str(full).startswith(str(base)):
+                return "Error: path must be under the configured base directory."
+            if not full.is_file():
+                return f"Error: not a file or not found: {path_arg}"
+        except (OSError, TypeError, ValueError) as path_e:
+            logger.debug("file_understand path resolution failed: %s", path_e)
+            return f"Error: invalid path or file not found: {path_arg}"
+        path_str = str(full)
+        ftype = detect_file_type(path_str)
+        if ftype == FILE_TYPE_DOCUMENT:
+            text = extract_document_text(path_str, base_str, max_chars)
+            if text:
+                return f"type: document\npath: {path_arg}\n\nExtracted text:\n\n{text}"
+            return f"type: document\npath: {path_arg}\n\nError: could not extract text from this document."
+        if ftype == FILE_TYPE_IMAGE:
+            return f"type: image\npath: {path_arg}\n\nThis is an image file. Use image_analyze(path) to describe or answer questions about the image if the user asks."
+        if ftype == FILE_TYPE_AUDIO:
+            return f"type: audio\npath: {path_arg}\n\nThis is an audio file. The model may support audio input; otherwise describe that you detected audio at this path."
+        if ftype == FILE_TYPE_VIDEO:
+            return f"type: video\npath: {path_arg}\n\nThis is a video file. The model may support video input; otherwise describe that you detected video at this path."
+        return f"type: unknown\npath: {path_arg}\n\nFile type could not be determined. Use file_read(path) for raw content or document_read(path) if it might be a document."
+    except ImportError as e:
+        logger.debug("file_understand import failed: %s", e)
+        return f"Error: file_understand is not available: {e!s}"
+    except Exception as e:
+        logger.debug("file_understand failed: %s", e)
+        return f"Error: {e!s}"
+
+
 # ---- Knowledge base tools (only when core.knowledge_base is enabled) ----
 async def _knowledge_base_search_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Search the user's knowledge base (saved documents, web, URLs). Never raises; returns message on failure."""
@@ -2519,7 +2657,10 @@ async def _route_to_tam_executor(arguments: Dict[str, Any], context: ToolContext
             timestamp=_time.time(),
             chatHistory="",
         )
-        await core.orchestratorInst.tam.process_intent(intent, request)
+        result = await core.orchestratorInst.tam.process_intent(intent, request)
+        # Sync inbound/ws: return message so caller can send it (response queue is skipped for host=inbound port=0).
+        if _is_sync_inbound(request) and isinstance(result, str) and result.strip():
+            return result
         return ROUTING_RESPONSE_ALREADY_SENT
     except Exception as e:
         logger.exception(e)
@@ -2609,8 +2750,17 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
                 # No capability: run() returns result; Core sends (plugin does not call Core LLM or send)
                 result_text = await plugin.run()
         if result_text is None:
+            # Plugin ran but returned no message; send fallback so user gets feedback (avoid "Handled by routing" with nothing else).
+            fallback = "The action was completed."
+            try:
+                await core.send_response_to_request_channel(fallback, request)
+            except Exception as send_err:
+                logger.warning("route_to_plugin: failed to send fallback message: %s", send_err)
+            # Sync inbound/ws: return text so caller can send it (process_response_queue skips host=inbound port=0).
+            if _is_sync_inbound(request):
+                return fallback
             return ROUTING_RESPONSE_ALREADY_SENT
-        # Post-process with LLM if capability has post_process and post_process_prompt
+        # Post-process with LLM if capability has post_process and post_process_prompt (only prompt + plugin output; no extra info)
         if capability and capability.get("post_process") and capability.get("post_process_prompt"):
             try:
                 messages = [
@@ -2622,11 +2772,22 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
                     result_text = refined.strip()
             except Exception as e:
                 logger.warning("Plugin post_process LLM failed: %s", e)
+        # Core applies markdown outbound (config outbound_markdown_format) when sending to channel
         await core.send_response_to_request_channel(result_text, request)
+        # Sync inbound/ws: return text so caller can send it (process_response_queue skips host=inbound port=0).
+        if _is_sync_inbound(request):
+            return result_text
         return ROUTING_RESPONSE_ALREADY_SENT
     except Exception as e:
         logger.exception(e)
         return f"Error running plugin: {e!s}"
+
+
+def _is_sync_inbound(request: Any) -> bool:
+    """True when request is from /inbound or /ws (host=inbound, port=0); response is returned directly, not via response_queue."""
+    host = getattr(request, "host", None)
+    port = getattr(request, "port", None)
+    return host == "inbound" and (port in (0, "0") or port is None)
 
 
 def register_routing_tools(registry: ToolRegistry, core: Any) -> None:
@@ -2869,12 +3030,14 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="cron_schedule",
-            description="Schedule a reminder at cron times. Use cron_expr: 5 fields (minute hour day month weekday), e.g. '0 9 * * *' = daily at 9:00, '0 */2 * * *' = every 2 hours, '0 10 * * 1' = every Monday at 10:00. Time-related scheduling is important.",
+            description="Schedule a reminder at cron times. Use cron_expr: 5 fields (minute hour day month weekday), e.g. '0 9 * * *' = daily at 9:00, '0 */2 * * *' = every 2 hours. Optional: tz (e.g. America/New_York), delivery_target 'latest' (default) or 'session' (deliver to this conversation's channel). Time-related scheduling is important.",
             parameters={
                 "type": "object",
                 "properties": {
                     "cron_expr": {"type": "string", "description": "Cron expression (e.g. '0 9 * * *' for daily at 9:00)."},
                     "message": {"type": "string", "description": "Message to send at each run (reminder content).", "default": "Scheduled reminder"},
+                    "tz": {"type": "string", "description": "Optional timezone (e.g. America/New_York, Europe/London). Server local if omitted."},
+                    "delivery_target": {"type": "string", "description": "Where to deliver: 'latest' (default) or 'session' (this channel).", "default": "latest"},
                 },
                 "required": ["cron_expr"],
             },
@@ -2884,7 +3047,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="cron_list",
-            description="List all recurring (cron) reminders: job_id, message, cron_expr, next_run. Use so the user can see their recurring reminders and choose which to remove (e.g. 'remove the pills one' -> use job_id from the matching entry).",
+            description="List all recurring (cron) reminders: job_id, message, cron_expr, next_run, enabled, last_run_at, last_status, delivery_target. Use so the user can see their recurring reminders and choose which to remove or disable (cron_remove, cron_update).",
             parameters={"type": "object", "properties": {}, "required": []},
             execute_async=_cron_list_executor,
         )
@@ -2899,6 +3062,41 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["job_id"],
             },
             execute_async=_cron_remove_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="cron_update",
+            description="Enable or disable a cron job by job_id. Get job_id from cron_list. Use enabled=false to pause, enabled=true to resume.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "job_id": {"type": "string", "description": "Job id from cron_list."},
+                    "enabled": {"type": "boolean", "description": "True to enable, false to disable (pause) the job."},
+                },
+                "required": ["job_id", "enabled"],
+            },
+            execute_async=_cron_update_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="cron_run",
+            description="Run a cron job once immediately (force run). Use cron_list to get job_ids.",
+            parameters={
+                "type": "object",
+                "properties": {"job_id": {"type": "string", "description": "Job id from cron_list."}},
+                "required": ["job_id"],
+            },
+            execute_async=_cron_run_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="cron_status",
+            description="Return cron scheduler status: scheduler_enabled, next_wake_at, jobs_count. For UI or debugging.",
+            parameters={"type": "object", "properties": {}, "required": []},
+            execute_async=_cron_status_executor,
         )
     )
     registry.register(
@@ -3262,6 +3460,21 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path"],
             },
             execute_async=_document_read_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="file_understand",
+            description="Classify a file as image, audio, video, or document and return type + path. For documents, returns extracted text (same as document_read). For image/audio/video, returns type and path so you know what the file is; use image_analyze(path) for images if the user asks to describe. Path relative to tools.file_read_base.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative path to the file (e.g. report.pdf, photo.jpg, recording.mp3)."},
+                    "max_chars": {"type": "integer", "description": "Max characters to extract for documents (default from config).", "default": 64000},
+                },
+                "required": ["path"],
+            },
+            execute_async=_file_understand_executor,
         )
     )
     registry.register(

@@ -105,9 +105,10 @@ class Channel(BaseChannel):
                 action=action,
                 host=self.metadata.host,
                 port=self.metadata.port,
-                images=images,
+                images=images or [],
                 videos=[],
                 audios=[],
+                files=None,
                 timestamp=datetime.now().timestamp()
             )
             self.syncTransferTocore(request=request)
@@ -131,27 +132,51 @@ class Channel(BaseChannel):
         
         
     async def handle_async_response(self, response: AsyncResponse):
-        """Handle the response from the core"""
-        request_id = response.request_id
-        response_data = response.response_data
-        sender = response.request_metadata['sender']
-        if 'text' in response_data:
-            text = response_data['text']
-            self.wcf.send_text(text, sender)
-        if 'image' in response_data:
-            # Eg. C:/Projs/WeChatRobot/TEQuant.jpeg
-            # or https://raw.githubusercontent.com/lich0821/WeChatFerry/master/assets/TEQuant.jpg
-            image_path = response_data['image']
-            await asyncio.to_thread(self.wcf.send_image, image_path, sender)
-        if 'video' in response_data:
-            video_path = response_data['video']
-            await asyncio.to_thread(self.wcf.send_file, video_path, sender)
-        if 'file' in response_data:
-            file_path = response_data['file']
-            await asyncio.to_thread(self.wcf.send_file, file_path, sender)
-        if 'audio' in response_data:
-            audio_path = response_data['audio']
-            await asyncio.to_thread(self.wcf.send_file, audio_path, sender)   
+        """Handle the response from the core. Never raises; logs errors."""
+        try:
+            response_data = getattr(response, "response_data", None) or {}
+            request_meta = getattr(response, "request_metadata", None) or {}
+            sender = request_meta.get("sender")
+            if not sender:
+                logger.debug("WeChat: no sender in response")
+                return
+            if "text" in response_data:
+                text = response_data.get("text")
+                if isinstance(text, str) and text:
+                    try:
+                        self.wcf.send_text(text, sender)
+                    except Exception as e:
+                        logger.error("WeChat send_text: %s", e)
+            if "image" in response_data:
+                image_path = response_data.get("image")
+                if isinstance(image_path, str) and os.path.isfile(image_path):
+                    try:
+                        await asyncio.to_thread(self.wcf.send_image, image_path, sender)
+                    except Exception as e:
+                        logger.error("WeChat send_image: %s", e)
+            if "video" in response_data:
+                video_path = response_data.get("video")
+                if isinstance(video_path, str) and os.path.isfile(video_path):
+                    try:
+                        await asyncio.to_thread(self.wcf.send_file, video_path, sender)
+                    except Exception as e:
+                        logger.error("WeChat send_file (video): %s", e)
+            if "file" in response_data:
+                file_path = response_data.get("file")
+                if isinstance(file_path, str) and os.path.isfile(file_path):
+                    try:
+                        await asyncio.to_thread(self.wcf.send_file, file_path, sender)
+                    except Exception as e:
+                        logger.error("WeChat send_file: %s", e)
+            if "audio" in response_data:
+                audio_path = response_data.get("audio")
+                if isinstance(audio_path, str) and os.path.isfile(audio_path):
+                    try:
+                        await asyncio.to_thread(self.wcf.send_file, audio_path, sender)
+                    except Exception as e:
+                        logger.error("WeChat send_file (audio): %s", e)
+        except Exception as e:
+            logger.exception("WeChat handle_async_response: %s", e)   
 
 shutdown_url = ""
 def main():

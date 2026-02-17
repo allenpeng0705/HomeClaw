@@ -39,6 +39,14 @@ session:
   daily_reset_at_hour: -1     # -1 = disabled; 0-23 = new session when last activity was before today at this hour (local time)
   idle_minutes: -1            # -1 = disabled; >0 = new session when last activity older than N minutes
   api_enabled: true           # expose GET /api/sessions for plugin UIs
+# When an unknown user (not in user.yml) tries to access, notify the owner via last-used channel so they can add to user.yml. See docs_design/OutboundMarkdownAndUnknownRequest.md.
+notify_unknown_request: false
+# Outbound reply: only when the result looks like Markdown, Core converts it before sending; otherwise original text is sent. whatsapp (default) = *bold* _italic_ ~strikethrough~ (most IMs); plain = strip to plaintext (use if channel doesn't support whatsapp format); none = no conversion. See docs_design/OutboundMarkdownAndUnknownRequest.md.
+outbound_markdown_format: whatsapp
+# Max concurrent LLM calls (channel queue + plugin API /api/plugins/llm/generate).
+# Local model: use 1 (default) to avoid overloading one GPU/process.
+# Cloud model: may use 2–10 (or per-provider limit) for parallel channel + plugin API; stay under provider RPM/TPM. See docs_design/PluginLLMAndQueueDesign.md.
+llm_max_concurrent: 1
 # Compaction: trim or summarize context when approaching model limit. Reduces token use and avoids overflows.
 compaction:
   enabled: false              # when true, trim/summarize messages before LLM when over limit
@@ -75,7 +83,16 @@ plugins_similarity_threshold: 0.0
 plugins_refresh_on_startup: true
 # System plugins (system_plugins/): when true, Core starts each plugin (e.g. node server.js) and runs register (e.g. node register.js) so one command runs Core + all system plugins. See system_plugins/README.md.
 system_plugins_auto_start: true   # set true to start homeclaw-browser etc. with Core
-system_plugins: []                 # optional allowlist by plugin id (folder name); empty = start all discovered
+system_plugins: [homeclaw-browser]                 # optional allowlist by plugin id (folder name); empty = start all discovered
+system_plugins_env:
+  homeclaw-browser:
+    BROWSER_HEADLESS: "false"
+# Per-plugin env vars (plugin id = folder name under system_plugins/). Each plugin gets only its own env.
+# system_plugins_env:
+#   homeclaw-browser:
+#     BROWSER_HEADLESS: "false"
+#   other-plugin:
+#     FOO: "bar"
 # Orchestrator + TAM + plugins are always enabled. Single choice: routing style.
 # orchestrator_unified_with_tools: true (default) — main LLM with tools does routing (route_to_tam / route_to_plugin). One LLM call.
 # orchestrator_unified_with_tools: false — separate orchestrator LLM call for intent + plugin selection, then plugin runs.
@@ -165,6 +182,11 @@ knowledge_base:
   # Configurable similarity threshold (0-1, higher = more relevant). Only inject chunks with score >= this; if none pass, no KB block. Set to null to disable (inject top-k regardless).
   retrieval_min_score: null   # e.g. 0.5 or 0.7
 
+# File-understanding (request.files from channels): always inject short notice with paths so the model uses document_read / knowledge_base_add. When user sends file(s) only (no text) and doc is not too big, add to KB directly. See docs_design/FileUnderstandingDesign.md.
+file_understanding:
+  # When user sends only file(s) (no or negligible text): add extracted document to the user's KB only if extracted text length <= this (chars). If larger, skip; user can say what they want and model uses document_read / knowledge_base_add. 0 = never auto-add (tool-based only).
+  add_to_kb_max_chars: 50000   # e.g. 50000; 0 = never add to KB on file-only
+
 # ——— 1. llama.cpp server settings (for local models) ———
 # ctx_size, predict, temp are used when starting the llama.cpp server.
 # For chat completions, max_tokens and temperature are sent per request (see completion below).
@@ -204,6 +226,9 @@ completion:
 #   mmproj: path to projector .gguf; llama-server -m <path> --mmproj <mmproj>
 #   lora: single path or array of paths to LoRA adapter .gguf; each gets --lora <path> (multi-LoRA if supported)
 #   lora_base: optional; only when the adapter requires a specific base; --lora-base <path>
+# Optional supported_media: list of media types the model can handle — [image], [image, audio], or [image, audio, video].
+#   If omitted: local model defaults to [] (text-only) unless mmproj is set, then [image]. Cloud model defaults to [image, audio, video].
+#   Use supported_media to override (e.g. restrict cloud to [image] or enable image for a local model without mmproj).
 # Paths are relative to model_path (same as path).
 local_models:
   - id: embedding_text_model
@@ -212,11 +237,12 @@ local_models:
     host: 127.0.0.1
     port: 5066
     capabilities: [embedding]
-  # Example vision model (uncomment and set paths): mmproj required
+  # Example vision model (uncomment and set paths): mmproj required; supported_media defaults to [image]
   # - id: llava_1_5_7b
   #   alias: LLaVA 1.5 7B
   #   path: llava/llava-v1.5-7b-model.gguf
   #   mmproj: llava/llava-v1.5-7b-mmproj.gguf
+  #   # supported_media: [image]   # optional; default [image] when mmproj is set
   #   host: 127.0.0.1
   #   port: 5020
   #   capabilities: [Chat]
@@ -260,14 +286,16 @@ local_models:
 # Set env var per api_key_name (e.g. OPENAI_API_KEY). Start LiteLLM per model or use one proxy.
 # See https://github.com/BerriAI/litellm and docs.litellm.ai/docs/providers
 # Use as main LLM (Chat/Functioncall) or as embedding model (capabilities: [embedding]); main and embedding can mix local + cloud.
+# Optional supported_media per entry: [image], [image, audio], or [image, audio, video]. If omitted, cloud models default to [image, audio, video].
 cloud_models:
-  # OpenAI (chat and embedding)
+  # OpenAI (chat and embedding). supported_media: gpt-4o supports image only; gpt-4o-audio-preview supports audio only (see MediaSupportAndProviders.md).
   - id: OpenAI-GPT4o
     alias: OpenAI GPT-4o
     path: openai/gpt-4o
     host: 127.0.0.1
     port: 4001
     api_key_name: OPENAI_API_KEY
+    supported_media: [image]   # gpt-4o = vision only; audio is a different model (gpt-4o-audio-preview)
     capabilities: [Functioncall, Chat]
   - id: OpenAI-GPT4o-mini
     alias: OpenAI GPT-4o mini
@@ -275,6 +303,7 @@ cloud_models:
     host: 127.0.0.1
     port: 4001
     api_key_name: OPENAI_API_KEY
+    # supported_media: [image, audio, video]   # optional; cloud default is all
     capabilities: [Functioncall, Chat]
   # OpenAI embedding (use as embedding_llm for memory; same LiteLLM port as chat)
   - id: OpenAI-Embedding-3-Small
@@ -406,10 +435,28 @@ cloud_models:
     api_key_name: PERPLEXITY_API_KEY
     capabilities: [Chat]
 
+# ——— Media support (image / audio / video) for main_llm ———
+# See docs_design/MediaSupportAndProviders.md for how LiteLLM, OpenAI, and Gemini support image/audio/video.
+# WHERE TO SET: Add optional "supported_media" on the model entry that you use as main_llm (that entry is under
+#   local_models: or cloud_models: below; main_llm points to it, e.g. main_llm: cloud_models/OpenAI-GPT4o).
+# CLOUD: We do not call the API to discover capabilities. We default cloud to [image, audio, video]; for OpenAI
+#   you must set supported_media per model: gpt-4o supports image only → supported_media: [image]; gpt-4o-audio-preview
+#   supports audio only → supported_media: [audio]. Gemini (e.g. 1.5 Pro) often supports all → [image, audio, video].
+# LOCAL: Default [] (text-only); if the model has mmproj (vision), default [image]. Override with supported_media if needed.
+# HOW IT WORKS: Core calls main_llm_supported_media() and only sends image/audio/video parts in that list; others
+#   are omitted and a short note is added so the model does not crash.
+
 # ——— Selected main and embedding model: local_models/<id> or cloud_models/<id> ———
 main_llm: local_models/Qwen3-14B-Q5_K_M
-# Language for main model (e.g. en, cn); used by core for prompts
-main_llm_language: en
+# main_llm_language: list of allowed/preferred response languages (e.g. [zh, en] or [en]).
+#   - First item = primary: used for prompt file loading (e.g. response.en.yml, prompt_en.yml) and default when user language is unknown.
+#   - Full list = allowed response languages: you can add a system-line like "Respond only in one of: {languages}; if the user's language is unknown, use the first."
+# How to set: use a YAML list. Examples:
+#   main_llm_language: [en]
+#   main_llm_language: [zh, en]
+#   main_llm_language: [ja, en]
+# Single string is still accepted and normalized to a one-element list (e.g. en → [en]).
+main_llm_language: [en, zh]
 
 embedding_llm: local_models/embedding_text_model
 embeddingTokensLen: 8192

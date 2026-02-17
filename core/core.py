@@ -46,7 +46,7 @@ from base.PluginManager import PluginManager
 from base.util import Util
 from base.base import (
     LLM, EmbeddingRequest, Intent, IntentType, RegisterChannelRequest, PromptRequest, AsyncResponse, User, InboundRequest,
-    ExternalPluginRegisterRequest,
+    ExternalPluginRegisterRequest, PluginLLMGenerateRequest,
 )
 from base.BaseChannel import BaseChannel
 from base.BasePlugin import BasePlugin
@@ -60,10 +60,11 @@ from memory.chat.chat import ChatHistory
 from memory.base import MemoryBase, VectorStoreBase, EmbeddingBase, LLMBase
 from base.prompt_manager import get_prompt_manager
 from memory.prompts import RESPONSE_TEMPLATE, MEMORY_CHECK_PROMPT
-from base.workspace import get_workspace_dir, load_workspace, build_workspace_system_prefix, load_agent_memory_file
+from base.workspace import get_workspace_dir, load_workspace, build_workspace_system_prefix, load_agent_memory_file, clear_agent_memory_file
 from base.skills import get_skills_dir, load_skills, build_skills_system_block
 from base.tools import ToolContext, get_tool_registry, ROUTING_RESPONSE_ALREADY_SENT
 from base import last_channel as last_channel_store
+from base.markdown_outbound import markdown_to_channel, looks_like_markdown
 from tools.builtin import register_builtin_tools, register_routing_tools, close_browser_session
 from core.coreInterface import CoreInterface
 from core.emailChannel import channel
@@ -441,10 +442,11 @@ class Core(CoreInterface):
         if not to_start:
             return
         core_url = f"http://{meta.host}:{meta.port}"
-        env = os.environ.copy()
-        env["CORE_URL"] = core_url
+        base_env = os.environ.copy()
+        base_env["CORE_URL"] = core_url
         if getattr(meta, "auth_enabled", False) and getattr(meta, "auth_api_key", ""):
-            env["CORE_API_KEY"] = getattr(meta, "auth_api_key", "")
+            base_env["CORE_API_KEY"] = getattr(meta, "auth_api_key", "")
+        plugin_env_config = getattr(meta, "system_plugins_env", None) or {}
         # Wait for Core to be ready so registration succeeds (poll GET /ui until 200)
         ready = await self._wait_for_core_ready(core_url)
         if not ready:
@@ -454,6 +456,9 @@ class Core(CoreInterface):
         for item in to_start:
             cwd = item["cwd"]
             start_argv = item["start_argv"]
+            env = {**base_env}
+            for k, v in plugin_env_config.get(item["id"], {}).items():
+                env[k] = v
             try:
                 proc = await asyncio.create_subprocess_exec(
                     start_argv[0],
@@ -469,6 +474,9 @@ class Core(CoreInterface):
                 logger.warning("system_plugins: failed to start %s: %s", item["id"], e)
         await asyncio.sleep(2)
         for item in to_start:
+            env = {**base_env}
+            for k, v in plugin_env_config.get(item["id"], {}).items():
+                env[k] = v
             try:
                 reg = await asyncio.create_subprocess_exec(
                     "node", "register.js",
@@ -845,17 +853,43 @@ class Core(CoreInterface):
                 content_type: ContentType = request.contentType
                 channel_name: str = getattr(request, "channel_name", "?")
                 logger.info(f"Core: received /process from channel={channel_name} user={user_id} type={content_type}")
-                if request is not None:
-                    self.latestPromptRequest = copy.deepcopy(request)
-                    logger.debug(f'latestPromptRequest set to: {self.latestPromptRequest}')
-                    self._persist_last_channel(request)
-
                 logger.debug(f"Received request from channel: {user_name}, {user_id}, {channel_type}, {content_type}")
                 user: User = None
                 has_permission, user = self.check_permission(user_name, user_id, channel_type, content_type)
                 if not has_permission or user is None:
+                    # Optional: notify owner via last-used channel so they can add this identity to user.yml (do not update last channel so owner gets the notification)
+                    try:
+                        meta = Util().get_core_metadata()
+                        if getattr(meta, "notify_unknown_request", False):
+                            from base.last_channel import get_last_channel
+                            last = get_last_channel()
+                            if last and getattr(self, "response_queue", None):
+                                ch_name = last.get("channel_name") or "?"
+                                msg = (
+                                    f"Unknown request from channel={channel_name} user_id={user_id}. "
+                                    "Add this identity to config/user.yml (under im, email, or phone) to allow access."
+                                )
+                                try:
+                                    port = int(last.get("port") or 0)
+                                except (TypeError, ValueError):
+                                    port = 0
+                                async_resp = AsyncResponse(
+                                    request_id=last.get("request_id") or "",
+                                    request_metadata=last.get("request_metadata") or {},
+                                    host=last.get("host") or "",
+                                    port=port,
+                                    from_channel=ch_name,
+                                    response_data={"text": self._format_outbound_text(msg)},
+                                )
+                                await self.response_queue.put(async_resp)
+                    except Exception as notify_e:
+                        logger.debug("notify_unknown_request failed: %s", notify_e)
                     return Response(content="Permission denied", status_code=401)
 
+                if request is not None:
+                    self.latestPromptRequest = copy.deepcopy(request)
+                    logger.debug(f'latestPromptRequest set to: {self.latestPromptRequest}')
+                    self._persist_last_channel(request)
                 if len(user.name) > 0:
                     request.user_name = user.name
                 request.system_user_id = user.id or user.name
@@ -947,7 +981,7 @@ class Core(CoreInterface):
                 ok, text, status = await self._handle_inbound_request(request)
                 if not ok:
                     return JSONResponse(status_code=status, content={"error": text, "text": ""})
-                return JSONResponse(content={"text": text})
+                return JSONResponse(content={"text": self._format_outbound_text(text) if text else ""})
             except Exception as e:
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"error": str(e), "text": ""})
@@ -957,6 +991,7 @@ class Core(CoreInterface):
         async def memory_reset():
             """
             Empty the memory store (for testing). Uses the configured memory backend's reset().
+            If use_agent_memory_file is true, also clears AGENT_MEMORY.md.
             No auth required by default; protect in production if needed.
             """
             mem = getattr(self, "mem_instance", None)
@@ -965,7 +1000,15 @@ class Core(CoreInterface):
             try:
                 mem.reset()
                 logger.info("Memory reset completed (backend=%s)", type(mem).__name__)
-                return JSONResponse(content={"result": "ok", "message": "Memory cleared."})
+                message = "Memory cleared."
+                meta = Util().get_core_metadata()
+                if getattr(meta, "use_agent_memory_file", False):
+                    workspace_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "")
+                    agent_path = getattr(meta, "agent_memory_path", "") or ""
+                    if clear_agent_memory_file(workspace_dir=workspace_dir, agent_memory_path=agent_path if agent_path else None):
+                        logger.info("AGENT_MEMORY.md cleared.")
+                        message = "Memory and AGENT_MEMORY.md cleared."
+                return JSONResponse(content={"result": "ok", "message": message})
             except Exception as e:
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"detail": str(e)})
@@ -1040,6 +1083,26 @@ class Core(CoreInterface):
                 return JSONResponse(status_code=404, content={"detail": "Plugin not found", "ok": False})
             ok = await self.plugin_manager.check_plugin_health(plug)
             return JSONResponse(content={"ok": ok, "plugin_id": plugin_id})
+
+        @self.app.post("/api/plugins/llm/generate", dependencies=[Depends(_verify_inbound_auth)])
+        async def api_plugins_llm_generate(body: PluginLLMGenerateRequest):
+            """
+            Generate text using Core's LLM. For external plugins (or any authorised caller) that need LLM without going through the channel queue.
+            Body: { "messages": [ {"role": "user"|"assistant"|"system", "content": "..."}, ... ], "llm_name": null|"key" }.
+            Returns { "text": "..." } or { "error": "..." }. Auth: same as /inbound when auth_enabled (X-API-Key or Bearer).
+            """
+            try:
+                messages = getattr(body, "messages", None) or []
+                if not messages or not isinstance(messages, list):
+                    return JSONResponse(status_code=400, content={"error": "messages (list) is required", "text": ""})
+                llm_name = getattr(body, "llm_name", None)
+                text = await self.openai_chat_completion(messages, llm_name=llm_name)
+                if text is None:
+                    return JSONResponse(status_code=502, content={"error": "LLM returned no response", "text": ""})
+                return JSONResponse(content={"text": text})
+            except Exception as e:
+                logger.exception(e)
+                return JSONResponse(status_code=500, content={"error": str(e), "text": ""})
 
         @self.app.get("/api/plugin-ui")
         async def api_plugin_ui_list():
@@ -1212,15 +1275,25 @@ class Core(CoreInterface):
                             app_id=data.get("app_id"),
                             action=data.get("action"),
                             images=data.get("images"),
+                            videos=data.get("videos"),
+                            audios=data.get("audios"),
+                            files=data.get("files"),
                         )
                     except Exception as e:
                         await websocket.send_json({"error": str(e), "text": ""})
                         continue
-                    if not req.user_id or not req.text:
-                        await websocket.send_json({"error": "user_id and text required", "text": ""})
+                    has_media = bool(
+                        (getattr(req, "images", None) or [])
+                        or (getattr(req, "videos", None) or [])
+                        or (getattr(req, "audios", None) or [])
+                        or (getattr(req, "files", None) or [])
+                    )
+                    if not req.user_id or (not req.text and not has_media):
+                        await websocket.send_json({"error": "user_id and (text or media) required", "text": ""})
                         continue
                     ok, text, _ = await self._handle_inbound_request(req)
-                    await websocket.send_json({"text": text if ok else "", "error": "" if ok else text})
+                    out_text = (self._format_outbound_text(text) if text else "") if ok else ""
+                    await websocket.send_json({"text": out_text, "error": "" if ok else text})
             except WebSocketDisconnect:
                 logger.debug("WebSocket client disconnected")
             except Exception as e:
@@ -1240,6 +1313,17 @@ class Core(CoreInterface):
         req_id = str(datetime.now().timestamp())
         user_name = request.user_name or request.user_id
         images_list = list(request.images) if getattr(request, "images", None) else []
+        videos_list = list(request.videos) if getattr(request, "videos", None) else []
+        audios_list = list(request.audios) if getattr(request, "audios", None) else []
+        files_list = list(request.files) if getattr(request, "files", None) else []
+        if videos_list:
+            content_type_for_perm = ContentType.VIDEO
+        elif audios_list:
+            content_type_for_perm = ContentType.AUDIO
+        elif images_list:
+            content_type_for_perm = ContentType.TEXTWITHIMAGE
+        else:
+            content_type_for_perm = ContentType.TEXT
         pr = PromptRequest(
             request_id=req_id,
             channel_name=request.channel_name or "webhook",
@@ -1248,17 +1332,17 @@ class Core(CoreInterface):
             user_name=user_name,
             app_id=request.app_id or "homeclaw",
             user_id=request.user_id,
-            contentType=ContentType.TEXTWITHIMAGE if images_list else ContentType.TEXT,
+            contentType=content_type_for_perm,
             text=request.text,
             action=request.action or "respond",
             host="inbound",
             port=0,
             images=images_list,
-            videos=[],
-            audios=[],
+            videos=videos_list,
+            audios=audios_list,
+            files=files_list if files_list else None,
             timestamp=datetime.now().timestamp(),
         )
-        content_type_for_perm = ContentType.TEXTWITHIMAGE if images_list else ContentType.TEXT
         has_permission, user = self.check_permission(pr.user_name, pr.user_id, ChannelType.IM, content_type_for_perm)
         if not has_permission or user is None:
             return False, "Permission denied", 401
@@ -1280,10 +1364,11 @@ class Core(CoreInterface):
         return True, resp_text, 200
 
     def _persist_last_channel(self, request: PromptRequest) -> None:
-        """Persist last channel to DB and atomic file (database/latest_channel.json) for robust send_response_to_latest_channel."""
+        """Persist last channel to DB and atomic file (database/latest_channel.json) for robust send_response_to_latest_channel. Also saves with per-session key for cron delivery_target='session'."""
         if request is None:
             return
         try:
+            app_id = getattr(request, "app_id", None) or ""
             last_channel_store.save_last_channel(
                 request_id=request.request_id,
                 host=request.host,
@@ -1291,8 +1376,29 @@ class Core(CoreInterface):
                 channel_name=request.channel_name,
                 request_metadata=request.request_metadata or {},
                 key=last_channel_store._DEFAULT_KEY,
-                app_id=getattr(request, "app_id", None) or "",
+                app_id=app_id,
             )
+            # Per-session key so cron can deliver to this session (delivery_target='session')
+            try:
+                session_id = self.get_session_id(
+                    app_id=app_id,
+                    user_name=getattr(request, "user_name", None),
+                    user_id=getattr(request, "user_id", None),
+                    channel_name=getattr(request, "channel_name", None),
+                )
+                if session_id and app_id and getattr(request, "user_id", None):
+                    session_key = f"{app_id}:{request.user_id}:{session_id}"
+                    last_channel_store.save_last_channel(
+                        request_id=request.request_id,
+                        host=request.host,
+                        port=int(request.port),
+                        channel_name=request.channel_name,
+                        request_metadata=request.request_metadata or {},
+                        key=session_key,
+                        app_id=app_id,
+                    )
+            except Exception as sk:
+                logger.debug("Failed to persist last channel session key: %s", sk)
         except Exception as e:
             logger.warning("Failed to persist last channel: %s", e)
 
@@ -1422,7 +1528,7 @@ class Core(CoreInterface):
                         host=request.host,
                         port=request.port,
                         from_channel=request.channel_name,
-                        response_data={"text": "Permission denied.", "error": True},
+                        response_data={"text": self._format_outbound_text("Permission denied."), "error": True},
                     )
                     await self.response_queue.put(err_resp)
                     continue
@@ -1432,7 +1538,15 @@ class Core(CoreInterface):
                 request.system_user_id = user.id or user.name
 
                 #if intent is not None and (intent.type == IntentType.RESPOND or intent.type == IntentType.QUERY):
-                if request.contentType == ContentType.TEXT:
+                # Process all message content types (text, text+image, image, audio, video); process_text_message uses request.images/videos/audios/files
+                processable = request.contentType in (
+                    ContentType.TEXT,
+                    ContentType.TEXTWITHIMAGE,
+                    ContentType.IMAGE,
+                    ContentType.AUDIO,
+                    ContentType.VIDEO,
+                )
+                if processable:
                     txt = (request.text or "")[:50]
                     if len(request.text or "") > 50:
                         txt += "..."
@@ -1444,11 +1558,11 @@ class Core(CoreInterface):
                     if resp_text == ROUTING_RESPONSE_ALREADY_SENT:
                         logger.debug("Routing tool already sent response to channel")
                         continue
-                    resp_data = {"text": resp_text}
+                    resp_data = {"text": self._format_outbound_text(resp_text)}
                     async_resp: AsyncResponse = AsyncResponse(request_id=request.request_id, request_metadata=request.request_metadata, host=request.host, port=request.port, from_channel=request.channel_name, response_data=resp_data)
                     await self.response_queue.put(async_resp)
                 else:
-                    # Handle other content types
+                    # Unsupported content type (e.g. HTML, OTHER)
                     pass
 
             except Exception as e:
@@ -1457,45 +1571,72 @@ class Core(CoreInterface):
                 self.request_queue.task_done()
 
 
+    def _format_outbound_text(self, text: str) -> str:
+        """Convert outbound reply only when it looks like Markdown; otherwise return original. Format from config (outbound_markdown_format). Never raises."""
+        if text is None or not isinstance(text, str):
+            return text if text is not None else ""
+        try:
+            meta = Util().get_core_metadata()
+            fmt = (getattr(meta, "outbound_markdown_format", None) or "whatsapp").strip().lower()
+            if fmt == "none" or fmt == "":
+                return text
+            if not looks_like_markdown(text):
+                return text
+            if fmt != "plain" and fmt != "whatsapp":
+                fmt = "whatsapp"
+            return markdown_to_channel(text, fmt)
+        except Exception:
+            return text
+
     async def send_response_to_latest_channel(self, response: str):
-        resp_data = {"text": response}
-        request: Optional[PromptRequest] = self.latestPromptRequest
-        if request is None:
-            # Load from DB or atomic file (database/latest_channel.json)
-            stored = last_channel_store.get_last_channel()
-            if stored is None:
-                logger.warning("send_response_to_latest_channel: no last channel (in-memory, DB, or file)")
+        """Send to the default (latest) channel. See send_response_to_channel_by_key for per-session delivery."""
+        await self.send_response_to_channel_by_key(last_channel_store._DEFAULT_KEY, response)
+
+    async def send_response_to_channel_by_key(self, key: str, response: str):
+        """Send response to the channel identified by key (e.g. 'default' or 'app_id:user_id:session_id' for cron per-session delivery). Never raises (logs and returns)."""
+        try:
+            if not key:
+                key = last_channel_store._DEFAULT_KEY
+            resp_data = {"text": self._format_outbound_text(response)}
+            request: Optional[PromptRequest] = self.latestPromptRequest
+            if key != last_channel_store._DEFAULT_KEY or request is None:
+                stored = last_channel_store.get_last_channel(key)
+                if stored is None:
+                    if key != last_channel_store._DEFAULT_KEY:
+                        logger.warning("send_response_to_channel_by_key: no channel for key=%s", key)
+                    return
+                app_id = stored.get("app_id") or ""
+                if app_id == "homeclaw":
+                    print(response)
+                    return
+                async_resp = AsyncResponse(
+                    request_id=stored.get("request_id", ""),
+                    request_metadata=stored.get("request_metadata") or {},
+                    host=stored.get("host", ""),
+                    port=int(stored.get("port", 0)),
+                    from_channel=stored.get("channel_name", ""),
+                    response_data=resp_data,
+                )
+                await self.response_queue.put(async_resp)
                 return
-            app_id = stored.get("app_id") or ""
-            if app_id == "homeclaw":
+            if request.app_id == "homeclaw":
                 print(response)
-                return
-            async_resp = AsyncResponse(
-                request_id=stored["request_id"],
-                request_metadata=stored.get("request_metadata") or {},
-                host=stored["host"],
-                port=stored["port"],
-                from_channel=stored["channel_name"],
-                response_data=resp_data,
-            )
-            await self.response_queue.put(async_resp)
-            return
-        if request.app_id == "homeclaw":
-            print(response)
-        else:
-            async_resp = AsyncResponse(
-                request_id=request.request_id,
-                request_metadata=request.request_metadata,
-                host=request.host,
-                port=request.port,
-                from_channel=request.channel_name,
-                response_data=resp_data,
-            )
-            await self.response_queue.put(async_resp)
+            else:
+                async_resp = AsyncResponse(
+                    request_id=request.request_id,
+                    request_metadata=request.request_metadata,
+                    host=request.host,
+                    port=request.port,
+                    from_channel=request.channel_name,
+                    response_data=resp_data,
+                )
+                await self.response_queue.put(async_resp)
+        except Exception as e:
+            logger.warning("send_response_to_channel_by_key failed: %s", e)
 
 
     async def send_response_to_request_channel(self, response: str, request: PromptRequest):
-        resp_data = {"text": response}
+        resp_data = {"text": self._format_outbound_text(response)}
         if request is None:
             return
         async_resp: AsyncResponse = AsyncResponse(request_id=request.request_id, request_metadata=request.request_metadata, host=request.host, port=request.port, from_channel=request.channel_name, response_data=resp_data)
@@ -1574,7 +1715,7 @@ class Core(CoreInterface):
                                     default_language=getattr(meta, "prompt_default_language", "en"),
                                     cache_ttl_seconds=float(getattr(meta, "prompt_cache_ttl_seconds", 0) or 0),
                                 )
-                                lang = getattr(meta, "main_llm_language", "en") or "en"
+                                lang = Util().main_llm_language()
                                 prompt = pm.get_content("memory", "memory_check", lang=lang, user_input=human_message)
                             except Exception as e:
                                 logger.debug("Prompt manager fallback for memory_check: %s", e)
@@ -1618,17 +1759,17 @@ class Core(CoreInterface):
 
                         try:
                             resp = await client.post(url=resp_url, json=response_dict, timeout=10.0)
-                        if resp.status_code == 200:
-                            logger.info(f"Core: response sent to channel {response.from_channel}")
-                            logger.debug(f"Response sent to channel: {response.from_channel}")
-                        else:
-                            logger.error(f"Failed to send response to channel: {response.from_channel}. Status: {resp.status_code}")
-                    except httpx.ConnectError as e:
-                        logger.error(f"Connection error when sending to {resp_url}: {str(e)}")
-                    except httpx.TimeoutException:
-                        logger.error(f"Timeout when sending to {resp_url}")
-                    except Exception as e:
-                        logger.error(f"Unexpected error when sending to {resp_url}: {str(e)}")
+                            if resp.status_code == 200:
+                                logger.info(f"Core: response sent to channel {response.from_channel}")
+                                logger.debug(f"Response sent to channel: {response.from_channel}")
+                            else:
+                                logger.error(f"Failed to send response to channel: {response.from_channel}. Status: {resp.status_code}")
+                        except httpx.ConnectError as e:
+                            logger.error(f"Connection error when sending to {resp_url}: {str(e)}")
+                        except httpx.TimeoutException:
+                            logger.error(f"Timeout when sending to {resp_url}")
+                        except Exception as e:
+                            logger.error(f"Unexpected error when sending to {resp_url}: {str(e)}")
                 except Exception as e:
                     logger.exception(f"Error sending response back to channel {response.from_channel}: {e}")
                 finally:
@@ -1768,6 +1909,83 @@ class Core(CoreInterface):
                 return ""
         return f"data:image/jpeg;base64,{item}"
 
+    def _audio_item_to_base64_and_format(self, item: str) -> Optional[Tuple[str, str]]:
+        """Convert audio item (data URL or file path) to (base64_string, format) for input_audio. Format: wav, mp3, etc."""
+        if not item or not isinstance(item, str):
+            return None
+        item = item.strip()
+        if item.startswith("data:"):
+            # data:audio/wav;base64,... or data:audio/mpeg;base64,...
+            try:
+                header, _, b64 = item.partition(",")
+                if not b64:
+                    return None
+                mime = header.replace("data:", "").split(";")[0].strip().lower()
+                if "wav" in mime or "wave" in mime:
+                    return (b64, "wav")
+                if "mpeg" in mime or "mp3" in mime:
+                    return (b64, "mp3")
+                if "ogg" in mime:
+                    return (b64, "ogg")
+                if "webm" in mime:
+                    return (b64, "webm")
+                return (b64, "wav")
+            except Exception:
+                return None
+        if os.path.isfile(item):
+            try:
+                with open(item, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("ascii")
+                ext = (os.path.splitext(item)[1] or "").lower()
+                fmt = "wav"
+                if ext in (".mp3", ".mpeg"):
+                    fmt = "mp3"
+                elif ext == ".ogg":
+                    fmt = "ogg"
+                elif ext == ".webm":
+                    fmt = "webm"
+                elif ext == ".wav":
+                    fmt = "wav"
+                return (b64, fmt)
+            except Exception as e:
+                logger.warning("Failed to read audio file %s: %s", item, e)
+                return None
+        return None
+
+    def _video_item_to_base64_and_format(self, item: str) -> Optional[Tuple[str, str]]:
+        """Convert video item (data URL or file path) to (base64_string, format) for input_video. Format: mp4, webm, etc."""
+        if not item or not isinstance(item, str):
+            return None
+        item = item.strip()
+        if item.startswith("data:"):
+            try:
+                header, _, b64 = item.partition(",")
+                if not b64:
+                    return None
+                mime = header.replace("data:", "").split(";")[0].strip().lower()
+                if "mp4" in mime:
+                    return (b64, "mp4")
+                if "webm" in mime:
+                    return (b64, "webm")
+                return (b64, "mp4")
+            except Exception:
+                return None
+        if os.path.isfile(item):
+            try:
+                with open(item, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode("ascii")
+                ext = (os.path.splitext(item)[1] or "").lower()
+                fmt = "mp4"
+                if ext == ".webm":
+                    fmt = "webm"
+                elif ext in (".mp4", ".m4v"):
+                    fmt = "mp4"
+                return (b64, fmt)
+            except Exception as e:
+                logger.warning("Failed to read video file %s: %s", item, e)
+                return None
+        return None
+
     async def process_text_message(self, request: PromptRequest):
         try:
             user_name: str = request.user_name
@@ -1805,16 +2023,196 @@ class Core(CoreInterface):
                 for item in histories:
                     messages.append({'role': 'user', 'content': item.human_message.content})
                     messages.append({'role': 'assistant', 'content': item.ai_message.content})
-            images_list = getattr(request, "images", None) or []
-            if images_list:
-                content_parts: List[Dict] = [{"type": "text", "text": human_message or ""}]
+            images_list = list(getattr(request, "images", None) or [])
+            audios_list = list(getattr(request, "audios", None) or [])
+            videos_list = list(getattr(request, "videos", None) or [])
+            supported_media = []
+            try:
+                supported_media = Util().main_llm_supported_media() or []
+            except Exception:
+                supported_media = []
+            text_only = human_message or ""
+
+            # File-understanding: process request.files (detect type, handle image/audio/video/doc). Stable: catch all, merge results, never crash.
+            # Documents: always inject short notice with paths so the model uses document_read / knowledge_base_add. When user sent file(s) only (no text) and doc size <= add_to_kb_max_chars, add to KB directly so they can query/summarize without saying more.
+            # Resolve data URLs to temp paths so process_files can read from disk (e.g. /inbound sends files as data URLs).
+            files_list = getattr(request, "files", None) or []
+            if not isinstance(files_list, list):
+                files_list = []
+            resolved_files = []
+            for f in files_list:
+                if not f or not isinstance(f, str):
+                    continue
+                if f.strip().startswith("data:"):
+                    try:
+                        import base64
+                        import tempfile
+                        idx = f.find(";base64,")
+                        if idx > 0:
+                            payload = f[idx + 8:]
+                            raw = base64.b64decode(payload)
+                            suffix = ".bin"
+                            if f.startswith("data:application/pdf"):
+                                suffix = ".pdf"
+                            elif "image/" in f[:30]:
+                                suffix = ".jpg"
+                            elif "audio/" in f[:30]:
+                                suffix = ".m4a"
+                            elif "video/" in f[:30]:
+                                suffix = ".mp4"
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tf:
+                                tf.write(raw)
+                                resolved_files.append(tf.name)
+                        else:
+                            resolved_files.append(f)
+                    except Exception as _e:
+                        logger.debug("file_understanding data URL resolve: %s", _e)
+                else:
+                    resolved_files.append(f)
+            files_list = resolved_files
+            if files_list:
+                try:
+                    try:
+                        root = Util().root_path()
+                    except Exception as root_e:
+                        logger.debug("file_understanding root_path failed: %s", root_e)
+                        root = Path(".").resolve()
+                    from base.file_understanding import process_files
+                    config_path = Path(str(root)) / "config" / "core.yml"
+                    data = {}
+                    if Path(config_path).exists():
+                        try:
+                            data = Util().load_yml_config(str(config_path)) or {}
+                        except Exception as cfg_e:
+                            logger.debug("file_understanding config load failed: %s", cfg_e)
+                    tools_cfg = (data or {}).get("tools") or {}
+                    fu_cfg = (data or {}).get("file_understanding") or {}
+                    base_dir = str(tools_cfg.get("file_read_base") or ".")
+                    try:
+                        max_chars = int(tools_cfg.get("file_read_max_chars") or 0) or 64000
+                    except (TypeError, ValueError):
+                        max_chars = 64000
+                    try:
+                        add_to_kb_max = int(fu_cfg.get("add_to_kb_max_chars") or 0)
+                    except (TypeError, ValueError):
+                        add_to_kb_max = 0
+                    try:
+                        result = process_files(files_list, supported_media, base_dir, max_chars)
+                    except Exception as proc_e:
+                        logger.debug("file_understanding process_files raised: %s", proc_e)
+                        result = None
+                    if result is None:
+                        result = type("_Empty", (), {"document_texts": [], "document_paths": [], "images": [], "audios": [], "videos": [], "errors": []})()
+                    # Defensive: ensure result has list attributes so we never crash on extend/iterate
+                    def _safe_list(val):
+                        return val if isinstance(val, list) else []
+
+                    doc_texts = _safe_list(getattr(result, "document_texts", None))
+                    doc_paths = _safe_list(getattr(result, "document_paths", None))
+                    images_list.extend(_safe_list(getattr(result, "images", None)))
+                    audios_list.extend(_safe_list(getattr(result, "audios", None)))
+                    videos_list.extend(_safe_list(getattr(result, "videos", None)))
+
+                    if doc_texts and doc_paths and len(doc_texts) == len(doc_paths):
+                        try:
+                            base_path = Path(base_dir).resolve()
+                        except Exception:
+                            base_path = Path(".").resolve()
+
+                        def path_for_tool(p: str) -> str:
+                            try:
+                                if p is None or not isinstance(p, str):
+                                    return str(p) if p is not None else ""
+                                rel = Path(p).resolve().relative_to(base_path)
+                                return str(rel)
+                            except (ValueError, TypeError, OSError):
+                                return str(p) if p is not None else ""
+
+                        notice_lines = []
+                        for p in doc_paths:
+                            try:
+                                notice_lines.append("- " + os.path.basename(str(p) if p is not None else "") + " (path: " + path_for_tool(p) + ")")
+                            except Exception:
+                                try:
+                                    notice_lines.append("- (path: " + path_for_tool(p) + ")")
+                                except Exception:
+                                    notice_lines.append("- (path: )")
+                        try:
+                            sep = "\n".join(notice_lines) if notice_lines else ""
+                            doc_block = (
+                                "User attached the following document(s). Use **document_read**(path) when the user asks to summarize, query, or edit; use **knowledge_base_add** after reading if they ask to save to their knowledge base.\n\n"
+                                + sep
+                            )
+                            text_only = (doc_block + "\n\n" + text_only).strip() if text_only else doc_block
+                        except Exception as block_e:
+                            logger.debug("file_understanding doc_block build failed: %s", block_e)
+
+                        # When user sent file(s) only (no or negligible text) and KB enabled: add docs to KB if size <= add_to_kb_max_chars; too big = skip
+                        user_text_only = (human_message or "").strip()
+                        if not user_text_only and add_to_kb_max > 0:
+                            kb = getattr(self, "knowledge_base", None)
+                            kb_cfg = (data or {}).get("knowledge_base") or {}
+                            if kb and kb_cfg.get("enabled") and user_id:
+                                for path, text in zip(doc_paths, doc_texts):
+                                    if path is None or text is None:
+                                        continue
+                                    if not isinstance(text, str):
+                                        continue
+                                    try:
+                                        if len(text) > add_to_kb_max:
+                                            continue
+                                    except Exception:
+                                        continue
+                                    try:
+                                        source_id = path_for_tool(path) if path is not None else "doc"
+                                        if not source_id or not isinstance(source_id, str):
+                                            source_id = (str(path)[:200] if path is not None else "doc") or "doc"
+                                        err = await asyncio.wait_for(
+                                            kb.add(user_id=user_id, content=text, source_type="document", source_id=source_id, metadata=None),
+                                            timeout=60,
+                                        )
+                                        if err and "Error" in str(err):
+                                            logger.debug("file_understanding add_to_kb: %s", err)
+                                    except asyncio.TimeoutError:
+                                        logger.debug("file_understanding add_to_kb timed out for %s", path)
+                                    except Exception as e:
+                                        logger.debug("file_understanding add_to_kb failed for %s: %s", path, e)
+                    for err in getattr(result, "errors", None) or []:
+                        logger.debug("file_understanding: %s", err)
+                except Exception as e:
+                    logger.debug("file_understanding failed: %s", e)
+            if images_list and "image" not in supported_media:
+                text_only = (text_only + " (Image(s) omitted - model does not support images.)").strip()
+            if (audios_list or videos_list) and "audio" not in supported_media and "video" not in supported_media:
+                text_only = (text_only + " (Audio/video omitted - model does not support media.)").strip()
+            # Build content_parts when we have any supported media (image/audio/video) so we add proper params for cloud and local.
+            content_parts: List[Dict] = []
+            if images_list and "image" in supported_media:
+                content_parts.append({"type": "text", "text": text_only or ""})
                 for img in images_list:
                     data_url = self._image_item_to_data_url(img)
                     if data_url:
                         content_parts.append({"type": "image_url", "image_url": {"url": data_url}})
+            if audios_list and "audio" in supported_media:
+                if not content_parts:
+                    content_parts.append({"type": "text", "text": text_only or ""})
+                for aud in audios_list:
+                    out = self._audio_item_to_base64_and_format(aud)
+                    if out:
+                        b64_str, fmt = out
+                        content_parts.append({"type": "input_audio", "input_audio": {"data": b64_str, "format": fmt}})
+            if videos_list and "video" in supported_media:
+                if not content_parts:
+                    content_parts.append({"type": "text", "text": text_only or ""})
+                for vid in videos_list:
+                    out = self._video_item_to_base64_and_format(vid)
+                    if out:
+                        b64_str, fmt = out
+                        content_parts.append({"type": "input_video", "input_video": {"data": b64_str, "format": fmt}})
+            if content_parts:
                 messages.append({"role": "user", "content": content_parts})
             else:
-                messages.append({'role': 'user', 'content': human_message})
+                messages.append({"role": "user", "content": text_only})
             use_memory = Util().has_memory()
             if use_memory:
                 await self.memory_queue.put(request)
@@ -2354,7 +2752,7 @@ class Core(CoreInterface):
                             default_language=getattr(meta, "prompt_default_language", "en"),
                             cache_ttl_seconds=float(getattr(meta, "prompt_cache_ttl_seconds", 0) or 0),
                         )
-                        lang = getattr(meta, "main_llm_language", "en") or "en"
+                        lang = Util().main_llm_language()
                         prompt = pm.get_content("chat", "response", lang=lang, context=context_val)
                     except Exception as e:
                         logger.debug("Prompt manager fallback for chat/response: %s", e)
@@ -2364,6 +2762,15 @@ class Core(CoreInterface):
                 if not prompt or not prompt.strip():
                     prompt = RESPONSE_TEMPLATE.format(context=context_val)
                 system_parts.append(prompt)
+                # Language and format: use main_llm_languages so reply matches user and stays direct
+                allowed = Util().main_llm_languages()
+                if allowed:
+                    lang_list = ", ".join(allowed)
+                    system_parts.append(
+                        f"## Response language and format\n"
+                        f"Respond only in one of these languages: {lang_list}. Prefer the same language as the user's message (e.g. if the user writes in Chinese, respond in Chinese; if in English, respond in English). "
+                        f"Output only your direct reply to the user. Do not explain your response, translate it, or add commentary (e.g. do not say \"The user said...\", \"My response was...\", or \"which translates to...\")."
+                    )
 
             unified = (
                 getattr(Util().get_core_metadata(), "orchestrator_unified_with_tools", True)
@@ -2419,8 +2826,11 @@ class Core(CoreInterface):
                     plugin_lines = [f"  - {p.get('id', '') or 'plugin'}: {_desc(p.get('description'))}" for p in plugin_list]
                 routing_block = (
                     "## Routing (choose one)\n"
-                    "For time-related requests prefer tools (no second LLM): one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only if the request is time-related but too complex for those tools.\n"
-                    "If it clearly matches one of these plugins, call route_to_plugin with that plugin_id.\n"
+                    "Do NOT use route_to_tam for: opening URLs, listing nodes, canvas, or any non-scheduling request. Use route_to_plugin for those.\n"
+                    "Opening a URL in a browser or any browser automation -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=browser_navigate, parameters={\"url\": \"<URL>\"}).\n"
+                    "Listing connected nodes or \"what nodes are connected\" -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_list).\n"
+                    "If the request clearly matches one of the available plugins below, call route_to_plugin with that plugin_id (and capability_id/parameters when relevant).\n"
+                    "For time-related requests only: one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only when the user clearly asks to schedule or remind (e.g. \"remind me in 5 minutes\", \"every day at 9am\").\n"
                     "For script-based workflows (see Available skills above), use run_skill(skill_name, script, ...).\n"
                     "Otherwise respond or use other tools.\n"
                     + ("Available plugins:\n" + "\n".join(plugin_lines) if plugin_lines else "")
@@ -2449,7 +2859,7 @@ class Core(CoreInterface):
             llm_input += messages
             if len(llm_input) > 0:
             #    llm_input[-1]["content"] = f"Context for your reference: '{memories_text}'. When responding to the following user input: {query}, aim for a natural interaction instead of trying to provide a direct response. Let's focus on having an engaging conversation based on the chat histories, using the context only when it seamlessly fits."
-                llm_input[-1]["content"] = f"Please provide a response to my input: '{query}'. Assume that you have memory and all content provided in this context is authorized for discussion and is your memory, no privacy issues at all.If you need more context or information to answer accurately, please let me know."
+                llm_input[-1]["content"] = f"Reply directly to: '{query}'. Assume context and memory are authorized. Reply only in your chosen language; do not explain, translate, or comment on your reply."
             logger.debug("Start to generate the response for user input: " + query)
             logger.info("Main LLM input (user query): %s", _truncate_for_log(query, 500))
 
@@ -2493,6 +2903,7 @@ class Core(CoreInterface):
                             response = content_str
                         break
                     routing_sent = False
+                    routing_response_text = None  # when route_to_plugin/route_to_tam return text (sync inbound/ws), use as final response
                     meta = Util().get_core_metadata()
                     tool_timeout_sec = max(0, int(getattr(meta, "tool_timeout_seconds", 120) or 0))
                     for tc in tool_calls:
@@ -2520,14 +2931,21 @@ class Core(CoreInterface):
                         elif name == "route_to_plugin":
                             _component_log("plugin", f"routed from model: plugin_id={args.get('plugin_id', args)}")
                         _component_log("tools", f"tool {name}({list(args.keys()) if isinstance(args, dict) else '...'})")
-                        if result == ROUTING_RESPONSE_ALREADY_SENT and name in ("route_to_tam", "route_to_plugin"):
-                            routing_sent = True
+                        if name in ("route_to_tam", "route_to_plugin"):
+                            if result == ROUTING_RESPONSE_ALREADY_SENT:
+                                routing_sent = True
+                            elif isinstance(result, str) and result.strip():
+                                # route_to_plugin: sync inbound/ws returns text so caller can send it
+                                if name == "route_to_plugin":
+                                    routing_sent = True
+                                    routing_response_text = result
+                                # route_to_tam: fallback string means TAM couldn't parse as scheduling; don't set routing_sent so the tool result is appended and the loop continues — model can then try route_to_plugin or other tools
                         tool_content = result
                         if compaction_cfg.get("compact_tool_results") and isinstance(tool_content, str) and len(tool_content) > 4000:
                             tool_content = tool_content[:4000] + "\n[Output truncated for context.]"
                         current_messages.append({"role": "tool", "tool_call_id": tcid, "content": tool_content})
                     if routing_sent:
-                        return ROUTING_RESPONSE_ALREADY_SENT
+                        return (routing_response_text if routing_response_text is not None else ROUTING_RESPONSE_ALREADY_SENT)
                 else:
                     response = (current_messages[-1].get("content") or "").strip() if current_messages else None
                 await close_browser_session(context)
@@ -2854,6 +3272,12 @@ class Core(CoreInterface):
 
     async def analyze_image(self, prompt: str, image_base64: str, mime_type: str = "image/jpeg") -> Optional[str]:
         """Analyze an image with the LLM (vision/multimodal). For image tool. Returns model response or None."""
+        try:
+            supported = Util().main_llm_supported_media() or []
+        except Exception:
+            supported = []
+        if "image" not in supported:
+            return "Image analysis is not supported by the current model."
         data_url = f"data:{mime_type};base64,{image_base64}"
         content = [
             {"type": "text", "text": prompt or "Describe the image."},

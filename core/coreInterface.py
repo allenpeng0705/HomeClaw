@@ -41,7 +41,12 @@ class CoreInterface(ABC):
     @abstractmethod
     async def send_response_to_latest_channel(self, response: str):
         pass
-    
+
+    @abstractmethod
+    async def send_response_to_channel_by_key(self, key: str, response: str):
+        """Send response to channel identified by key ('default' or 'app_id:user_id:session_id' for per-session cron)."""
+        pass
+
     @abstractmethod
     async def send_response_to_request_channel(self, response: str, request: PromptRequest):
         pass

@@ -24,6 +24,7 @@
   <div id="log"></div>
   <div id="input" style="display:none;">
     <input type="text" id="msg" placeholder="Type a message…" autocomplete="off">
+    <input type="file" id="files" multiple accept="image/*,video/*,audio/*,*/*">
     <button id="send">Send</button>
   </div>
   <script>
@@ -32,6 +33,7 @@
       const statusEl = document.getElementById('status');
       const inputWrap = document.getElementById('input');
       const msgInput = document.getElementById('msg');
+      const filesInput = document.getElementById('files');
       const sendBtn = document.getElementById('send');
 
       function addLog(cls, text) {
@@ -76,16 +78,58 @@
         if (e.key === 'Enter') send();
       });
 
+      function mediaKind(type) {
+        if (!type) return 'file';
+        type = type.toLowerCase();
+        if (type.startsWith('image/')) return 'image';
+        if (type.startsWith('video/')) return 'video';
+        if (type.startsWith('audio/')) return 'audio';
+        return 'file';
+      }
+
       function send() {
         const text = (msgInput.value || '').trim();
-        if (!text) return;
+        const fileList = filesInput && filesInput.files ? filesInput.files : [];
+        if (!text && fileList.length === 0) return;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           addLog('sys', 'Not connected.');
           return;
         }
-        addLog('user', text);
+        if (text) addLog('user', text);
+        if (fileList.length) addLog('user', fileList.length + ' file(s)');
         msgInput.value = '';
-        ws.send(JSON.stringify({ user_id: userId, text: text }));
+        filesInput.value = '';
+
+        const payload = { user_id: userId, text: text || '(no text)' };
+        if (fileList.length === 0) {
+          ws.send(JSON.stringify(payload));
+          return;
+        }
+        const images = [], videos = [], audios = [], files = [];
+        let done = 0;
+        function onAllRead() {
+          if (images.length) payload.images = images;
+          if (videos.length) payload.videos = videos;
+          if (audios.length) payload.audios = audios;
+          if (files.length) payload.files = files;
+          ws.send(JSON.stringify(payload));
+        }
+        for (let i = 0; i < fileList.length; i++) {
+          (function(file) {
+            const r = new FileReader();
+            r.onload = function() {
+              const dataUrl = r.result;
+              const k = mediaKind(file.type);
+              if (k === 'image') images.push(dataUrl);
+              else if (k === 'video') videos.push(dataUrl);
+              else if (k === 'audio') audios.push(dataUrl);
+              else files.push(dataUrl);
+              done++;
+              if (done === fileList.length) onAllRead();
+            };
+            r.readAsDataURL(file);
+          })(fileList[i]);
+        }
       }
 
       fetch('/config')

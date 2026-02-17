@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import tempfile
 from datetime import datetime
 import json
 import os
@@ -142,7 +144,60 @@ class Channel(BaseChannel):
                 if ret:
                     return ret
         return None
-    
+
+    def _media_kind(self, content_type: str) -> str:
+        """Return 'image', 'video', 'audio', or 'file' from MIME type."""
+        ct = (content_type or "").lower().split(";")[0].strip()
+        if ct.startswith("image/"):
+            return "image"
+        if ct.startswith("video/"):
+            return "video"
+        if ct.startswith("audio/"):
+            return "audio"
+        return "file"
+
+    def _extract_attachments_from_message(self, msg: Message):
+        """
+        Walk email parts and collect attachments (Content-Disposition attachment or inline with filename).
+        Returns (images, videos, audios, files) as lists of temp file paths.
+        """
+        images, videos, audios, files = [], [], [], []
+        for part in msg.walk():
+            if part.get_content_maintype() == "multipart":
+                continue
+            disp = (part.get("Content-Disposition") or "").lower()
+            if "attachment" not in disp and "inline" not in disp:
+                continue
+            filename = part.get_filename()
+            if not filename:
+                continue
+            content_type = part.get_content_type() or "application/octet-stream"
+            try:
+                payload = part.get_payload(decode=True)
+                if not payload:
+                    continue
+            except Exception:
+                continue
+            kind = self._media_kind(content_type)
+            ext = Path(filename).suffix or ".bin"
+            if kind == "image" and not ext.lower().startswith("."):
+                ext = ".jpg"
+            try:
+                fd, path = tempfile.mkstemp(suffix=ext)
+                os.close(fd)
+                with open(path, "wb") as f:
+                    f.write(payload)
+                if kind == "image":
+                    images.append(path)
+                elif kind == "video":
+                    videos.append(path)
+                elif kind == "audio":
+                    audios.append(path)
+                else:
+                    files.append(path)
+            except Exception as e:
+                logger.debug("Email attachment write failed %s: %s", filename, e)
+        return images, videos, audios, files
 
     # Fetch a number of email based on email address and email id.
     async def fetch_email_content(self, mail_server: imaplib, email_id: str):
@@ -150,6 +205,8 @@ class Channel(BaseChannel):
         Fetch email content based on email id
         """
         _, data = mail_server.fetch(email_id, '(RFC822)')
+        if not data or not isinstance(data[0], (list, tuple)) or len(data[0]) < 2:
+            return "", "", "", "", [], [], [], []
 
         def extract_email_address(email_str: str) -> str:
             match = re.search(r'<(.*?)>', email_str)
@@ -157,15 +214,25 @@ class Channel(BaseChannel):
                 return match.group(1)
             return email_str
 
+        try:
+            msg = email.message_from_bytes(data[0][1], policy=default)
+        except Exception as e:
+            logger.debug("Email decode failed for id %s: %s", email_id, e)
+            return "", "", "", "", [], [], [], []
+
         # Decode subject, From address and message id
-        msg = email.message_from_bytes(data[0][1], policy=default)
         from_addr = extract_email_address(msg["From"])
         message_id = msg["Message-ID"]
         subject, encoding = decode_header(msg["Subject"])[0]
         if isinstance(subject, bytes):
             subject = subject.decode(encoding or 'utf-8', errors='replace')
-        body = self.get_email_content(msg)
-        return message_id, from_addr, subject, body
+        body = self.get_email_content(msg) or ""
+        try:
+            images, videos, audios, files = self._extract_attachments_from_message(msg)
+        except Exception as e:
+            logger.debug("Email attachment extraction failed: %s", e)
+            images, videos, audios, files = [], [], [], []
+        return message_id, from_addr, subject, body, images, videos, audios, files
         
 
     async def monitor_inbox(self, imap_server: imaplib):
@@ -189,8 +256,14 @@ class Channel(BaseChannel):
                         last_checked_ids = current_ids
                         logger.debug("New mail coming")
                         for email_id in new_ids:
-                            msg_id, from_addr, subject, body = await self.fetch_email_content(imap_server, email_id)
-                            
+                            msg_id, from_addr, subject, body, images, videos, audios, files = await self.fetch_email_content(imap_server, email_id)
+                            if not msg_id and not from_addr:
+                                continue
+                            images = images or []
+                            videos = videos or []
+                            audios = audios or []
+                            files = list(files) if files else None
+
                             prompt_json = {
                                 "MessageID": msg_id,
                                 "From": from_addr,
@@ -199,14 +272,22 @@ class Channel(BaseChannel):
                             }
                             logger.debug(prompt_json)
 
-                            subject = subject.lower()
-                            if subject == '++' or subject == 'store':
+                            subject_lower = (subject or "").lower()
+                            if subject_lower == '++' or subject_lower == 'store':
                                 action = 'store'
-                            elif subject == '??' or subject == 'retrieve':
+                            elif subject_lower == '??' or subject_lower == 'retrieve':
                                 action = 'retrieve'
                             else:
                                 action = ''
                             prompt = json.dumps(prompt_json)
+                            if videos:
+                                content_type = ContentType.VIDEO.value
+                            elif audios:
+                                content_type = ContentType.AUDIO.value
+                            elif images:
+                                content_type = ContentType.TEXTWITHIMAGE.value
+                            else:
+                                content_type = ContentType.TEXT.value
                             request = PromptRequest(
                                 request_id= msg_id,
                                 channel_name= self.metadata.name,
@@ -215,14 +296,15 @@ class Channel(BaseChannel):
                                 user_name= from_addr.split('@')[0],
                                 app_id= 'email',
                                 user_id= from_addr,
-                                contentType=ContentType.TEXT.value,
+                                contentType=content_type,
                                 text= prompt,
                                 action=action,
                                 host = self.metadata.host,
                                 port = self.metadata.port,
-                                images=[],
-                                videos=[],
-                                audios=[],
+                                images=images,
+                                videos=videos,
+                                audios=audios,
+                                files=files,
                                 timestamp= datetime.now().timestamp()
                             )
                             await self.transferTocore(request=request)

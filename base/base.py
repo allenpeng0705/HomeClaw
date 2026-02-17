@@ -55,6 +55,7 @@ class PromptRequest(BaseModel):
     images: List[str] # only for TEXTWITHIMAGE and IMAGE, the value is path with name of the images
     videos: List[str] # only for VIDEO, the value is path with the name of videos
     audios: List[str] # only for AUDIO, the value is path with the name of audios
+    files: Optional[List[str]] = None  # optional: list of file paths; Core runs file-understanding (detect type, handle image/audio/video/doc)
     timestamp: float
 
 
@@ -66,8 +67,12 @@ class InboundRequest(BaseModel):
     user_name: Optional[str] = None  # display name; defaults to user_id if omitted
     app_id: Optional[str] = "homeclaw"
     action: Optional[str] = "respond"
-    # For multimodal (vision): list of image data URLs (data:image/...;base64,...) or raw base64 strings
+    # For multimodal: list of data URLs (data:...;base64,...) or paths Core can read
     images: Optional[List[str]] = None
+    videos: Optional[List[str]] = None
+    audios: Optional[List[str]] = None
+    # Optional file paths (Core must be able to read) or data URLs; Core runs file-understanding
+    files: Optional[List[str]] = None
 
 class IntentType(Enum):
     TIME = "TIME"
@@ -199,6 +204,12 @@ class PluginToolDefinition(BaseModel):
     url_template: Optional[str] = None
     parameters: List[PluginToolParam] = Field(default_factory=list)
     response_extraction: Optional[ResponseExtraction] = None
+
+
+class PluginLLMGenerateRequest(BaseModel):
+    """Request body for POST /api/plugins/llm/generate. Lets external plugins (or any authorised caller) use Core's LLM. See docs_design/PluginLLMAndQueueDesign.md."""
+    messages: List[Dict[str, Any]]  # e.g. [{"role": "user", "content": "..."}] or content as list for multimodal
+    llm_name: Optional[str] = None  # optional model key from config; None = main LLM
 
 
 class ExternalPluginRegisterRequest(BaseModel):
@@ -504,6 +515,18 @@ class Endpoint:
     input: Dict[str, Any]
     output: Dict[str, Any]
 
+
+def _normalize_main_llm_language(raw: Union[str, List[str], None]) -> List[str]:
+    """Normalize main_llm_language config to List[str]. Accepts string (e.g. 'en') or list (e.g. [zh, en]). Default ['en']."""
+    if raw is None:
+        return ["en"]
+    if isinstance(raw, list):
+        out = [str(x).strip() for x in raw if str(x).strip()]
+        return out if out else ["en"]
+    s = str(raw).strip() or "en"
+    return [s]
+
+
 @dataclass
 class CoreMetadata:
     name: str
@@ -520,7 +543,8 @@ class CoreMetadata:
     main_llm_host: str
     main_llm_port: int
     main_llm_type: str
-    main_llm_language: str
+    # Response languages: list of allowed/preferred languages (e.g. [zh, en]). First = primary (prompt file loading) and default when user language unknown. See config/core.yml main_llm_language comment.
+    main_llm_language: List[str]
     main_llm_api_key_name: str
     main_llm_api_key: str
     silent: bool
@@ -567,12 +591,30 @@ class CoreMetadata:
     prompt_cache_ttl_seconds: float = 0  # 0 = cache by mtime only; >0 = TTL in seconds
     auth_enabled: bool = False  # when True, require API key for /inbound and /ws; see RemoteAccess.md
     auth_api_key: str = ""  # key to require (X-API-Key header or Authorization: Bearer <key>); empty = auth disabled
+    llm_max_concurrent: int = 1  # max concurrent LLM calls (channel + plugin API); 1 = serialize, avoid backend overload; see PluginLLMAndQueueDesign.md
     knowledge_base: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, collection_name, chunk_size, unused_ttl_days; see docs/MemoryAndDatabase.md
     profile: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, dir (base path for profiles); see docs/UserProfileDesign.md
     result_viewer: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, dir, retention_days, base_url; see docs/ComplexResultViewerDesign.md
     # When true, Core starts and registers all (or allowlisted) plugins in system_plugins/ so one command runs Core + system plugins.
     system_plugins_auto_start: bool = False
     system_plugins: List[str] = field(default_factory=list)  # optional allowlist; empty = start all discovered system plugins
+    system_plugins_env: Dict[str, Dict[str, str]] = field(default_factory=dict)  # per-plugin env: plugin_id -> { VAR: "value" }; e.g. homeclaw-browser: { BROWSER_HEADLESS: "false" }
+    # When true, on permission denied (unknown user) notify owner via last-used channel so they can add to user.yml. See docs_design/OutboundMarkdownAndUnknownRequest.md.
+    notify_unknown_request: bool = False
+    # Outbound text format: Core converts assistant reply (Markdown) before sending to channels. "whatsapp" (default) = *bold* _italic_ ~strikethrough~ (works for most IMs); "plain" = strip Markdown; "none" = no conversion.
+    outbound_markdown_format: str = "whatsapp"
+
+    @staticmethod
+    def _normalize_system_plugins_env(raw: Any) -> Dict[str, Dict[str, str]]:
+        """Convert system_plugins_env from YAML to Dict[plugin_id, Dict[var_name, str]]. Values may be non-string in YAML."""
+        if not raw or not isinstance(raw, dict):
+            return {}
+        out: Dict[str, Dict[str, str]] = {}
+        for plugin_id, vars_dict in raw.items():
+            if not isinstance(vars_dict, dict):
+                continue
+            out[str(plugin_id)] = {str(k): str(v) for k, v in vars_dict.items()}
+        return out
 
     @staticmethod
     def from_yaml(yaml_file: str) -> 'CoreMetadata':
@@ -678,7 +720,7 @@ class CoreMetadata:
             main_llm=data.get('main_llm', ''),
             main_llm_host=data.get('main_llm_host', '127.0.0.1'),
             main_llm_port=data.get('main_llm_port', 5088),
-            main_llm_language=data.get('main_llm_language', 'en'),
+            main_llm_language=_normalize_main_llm_language(data.get('main_llm_language', 'en')),
             main_llm_api_key_name=data.get('main_llm_api_key_name') or '',
             main_llm_api_key=data.get('main_llm_api_key') or '',
             silent=data.get('silent', False),
@@ -724,11 +766,15 @@ class CoreMetadata:
             prompt_cache_ttl_seconds=float(data.get('prompt_cache_ttl_seconds', 0) or 0),
             auth_enabled=data.get('auth_enabled', False),
             auth_api_key=(data.get('auth_api_key') or '').strip(),
+            llm_max_concurrent=max(1, min(32, int(data.get('llm_max_concurrent', 1) or 1))),
             knowledge_base=data.get('knowledge_base') if isinstance(data.get('knowledge_base'), dict) else {},
             profile=data.get('profile') if isinstance(data.get('profile'), dict) else {},
             result_viewer=data.get('result_viewer') if isinstance(data.get('result_viewer'), dict) else {},
             system_plugins_auto_start=bool(data.get('system_plugins_auto_start', False)),
             system_plugins=list(data.get('system_plugins') or []) if isinstance(data.get('system_plugins'), list) else [],
+            system_plugins_env=CoreMetadata._normalize_system_plugins_env(data.get('system_plugins_env')),
+            notify_unknown_request=bool(data.get('notify_unknown_request', False)),
+            outbound_markdown_format=(data.get('outbound_markdown_format') or 'whatsapp').strip().lower() or 'whatsapp',
         )
 
     # @staticmethod
@@ -776,12 +822,15 @@ class CoreMetadata:
                 'orchestrator_timeout_seconds': getattr(core, 'orchestrator_timeout_seconds', 30),
                 'tool_timeout_seconds': getattr(core, 'tool_timeout_seconds', 120),
                 'orchestrator_unified_with_tools': getattr(core, 'orchestrator_unified_with_tools', True),
+                'notify_unknown_request': getattr(core, 'notify_unknown_request', False),
+                'outbound_markdown_format': getattr(core, 'outbound_markdown_format', 'whatsapp') or 'whatsapp',
                 'use_prompt_manager': getattr(core, 'use_prompt_manager', True),
                 'prompts_dir': getattr(core, 'prompts_dir', 'config/prompts') or 'config/prompts',
                 'prompt_default_language': getattr(core, 'prompt_default_language', 'en') or 'en',
                 'prompt_cache_ttl_seconds': getattr(core, 'prompt_cache_ttl_seconds', 0),
                 'auth_enabled': getattr(core, 'auth_enabled', False),
                 'auth_api_key': getattr(core, 'auth_api_key', '') or '',
+                'llm_max_concurrent': getattr(core, 'llm_max_concurrent', 1),
                 'embedding_llm': core.embedding_llm,
                 'llama_cpp': core.llama_cpp or {},
                 'completion': getattr(core, 'completion', {}) or {},

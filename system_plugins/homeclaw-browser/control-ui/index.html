@@ -14,9 +14,10 @@
     .msg.user { color: #0d47a1; }
     .msg.assistant { color: #1b5e20; }
     .msg.error { color: #b71c1c; }
-    .input-row { display: flex; gap: 0.5rem; }
+    .input-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
     #user_id { width: 120px; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
-    #text { flex: 1; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
+    #text { flex: 1; min-width: 120px; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
+    #files { font-size: 0.85rem; }
     button { padding: 0.5rem 1rem; background: #e65100; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
     button:hover { background: #f57c00; }
     button:disabled { background: #ccc; cursor: not-allowed; }
@@ -30,6 +31,7 @@
   <div class="input-row">
     <input type="text" id="user_id" placeholder="user_id" value="webchat_user" title="Must exist in config/user.yml">
     <input type="text" id="text" placeholder="Type a message..." autocomplete="off">
+    <input type="file" id="files" multiple accept="image/*,video/*,audio/*,*/*" title="Attach images, video, audio, or files">
     <button type="button" id="send">Send</button>
   </div>
   <div id="status"></div>
@@ -38,8 +40,18 @@
     const logEl = document.getElementById('log');
     const userIdEl = document.getElementById('user_id');
     const textEl = document.getElementById('text');
+    const filesEl = document.getElementById('files');
     const sendBtn = document.getElementById('send');
     const statusEl = document.getElementById('status');
+
+    function mediaKind(type) {
+      if (!type) return 'file';
+      type = type.toLowerCase();
+      if (type.startsWith('image/')) return 'image';
+      if (type.startsWith('video/')) return 'video';
+      if (type.startsWith('audio/')) return 'audio';
+      return 'file';
+    }
 
     function addLog(msg, cls) {
       const p = document.createElement('p');
@@ -84,14 +96,50 @@
     sendBtn.addEventListener('click', () => {
       const user_id = (userIdEl.value || '').trim();
       const text = (textEl.value || '').trim();
-      if (!user_id || !text) return;
+      const fileList = filesEl && filesEl.files ? filesEl.files : [];
+      if (!user_id || (!text && fileList.length === 0)) return;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         addLog('Not connected.', 'error');
         return;
       }
-      addLog('You: ' + text, 'user');
+      if (text) addLog('You: ' + text, 'user');
+      if (fileList.length) addLog('You: ' + fileList.length + ' file(s)', 'user');
       textEl.value = '';
-      ws.send(JSON.stringify({ user_id, text }));
+      filesEl.value = '';
+
+      const payload = { user_id, text: text || '(no text)' };
+      if (fileList.length === 0) {
+        ws.send(JSON.stringify(payload));
+        return;
+      }
+      const images = [], videos = [], audios = [], files = [];
+      let done = 0;
+      function onAllRead() {
+        if (images.length) payload.images = images;
+        if (videos.length) payload.videos = videos;
+        if (audios.length) payload.audios = audios;
+        if (files.length) payload.files = files;
+        ws.send(JSON.stringify(payload));
+      }
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        const r = new FileReader();
+        r.onload = () => {
+          const dataUrl = r.result;
+          const k = mediaKind(file.type);
+          if (k === 'image') images.push(dataUrl);
+          else if (k === 'video') videos.push(dataUrl);
+          else if (k === 'audio') audios.push(dataUrl);
+          else files.push(dataUrl);
+          done++;
+          if (done === fileList.length) onAllRead();
+        };
+        r.onerror = () => {
+          done++;
+          if (done === fileList.length) onAllRead();
+        };
+        r.readAsDataURL(file);
+      }
     });
 
     textEl.addEventListener('keydown', (e) => {

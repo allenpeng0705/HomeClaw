@@ -63,11 +63,16 @@ In another terminal (Core must be running):
 node register.js
 ```
 
-**See the browser window:** By default the browser runs **headless** (no visible window). To see the Chromium window when the agent opens a page, restart the plugin with:
+**See the browser window:** By default the browser runs **headless** (no visible window). To see the Chromium window when the agent opens a page:
 
-```bash
-BROWSER_HEADLESS=false node server.js
-```
+- **If you start the plugin yourself:** run `BROWSER_HEADLESS=false node server.js`.
+- **If Core auto-starts the plugin** (e.g. `system_plugins_auto_start: true`): set it in **config/core.yml** under `system_plugins_env` with the **plugin id** (folder name) so each plugin gets only its own env:
+  ```yaml
+  system_plugins_env:
+    homeclaw-browser:
+      BROWSER_HEADLESS: "false"
+  ```
+  Core passes these env vars only to the `homeclaw-browser` process when it starts it.
 
 Env:
 
@@ -95,13 +100,31 @@ Use these steps to verify browser, canvas, and nodes. Ensure Core is running, th
 
 ### 2. Test canvas
 
-- Open **http://127.0.0.1:3020/canvas** in your browser, enter a session (e.g. `default`), click **Connect**. That page is the canvas viewer; updates pushed by the plugin appear there in real time.
-- The canvas updates when the plugin’s **`canvas_update`** capability is called. If the agent doesn’t call the plugin when you ask to “update the canvas”, re-register the plugin (`node register.js`) and try again.
-- To see an update without the LLM, call the plugin directly:
-  ```bash
-  curl -X POST http://127.0.0.1:3020/run -H "Content-Type: application/json" -d '{"request_id":"1","plugin_id":"homeclaw-browser","capability_id":"canvas_update","capability_parameters":{"document":{"title":"Hello","blocks":[{"type":"text","content":"Hello"},{"type":"button","label":"OK"}]}}}'
-  ```
-  With the canvas page open at http://127.0.0.1:3020/canvas and connected with session **default**, you should see the title “Hello” and an “OK” button. For another session, add `"session_id": "your_session"` in `capability_parameters` and use that session in the canvas page.
+**What to do**
+
+1. **Prerequisites:** Core running, plugin server running (`node server.js`), plugin registered (`node register.js`). Default plugin URL: **http://127.0.0.1:3020**.
+2. Open **http://127.0.0.1:3020/canvas** in your browser.
+3. Leave **Session** as `default` (or type another name, e.g. `my-session`).
+4. Click **Connect**.
+5. In another terminal, call the plugin to push content to the canvas:
+   ```bash
+   curl -X POST http://127.0.0.1:3020/run -H "Content-Type: application/json" -d '{"request_id":"1","plugin_id":"homeclaw-browser","capability_id":"canvas_update","capability_parameters":{"document":{"title":"Hello","blocks":[{"type":"text","content":"Hello"},{"type":"button","label":"OK"}]}}}'
+   ```
+   If you use a session other than `default`, add `"session_id": "your_session"` inside `capability_parameters` and use that same session name in the canvas page:
+   ```bash
+   curl -X POST http://127.0.0.1:3020/run -H "Content-Type: application/json" -d '{"request_id":"1","plugin_id":"homeclaw-browser","capability_id":"canvas_update","capability_parameters":{"session_id":"my-session","document":{"title":"Hello","blocks":[{"type":"text","content":"Hello"},{"type":"button","label":"OK"}]}}}'
+   ```
+
+**What you should see (in detail)**
+
+- **Before Connect:** Status line: *"Disconnected. Enter session and click Connect."* The content area shows: *"No canvas content yet. The agent can push UI via canvas_update."*
+- **After Connect:** Status changes to *"Connected to session: default"* (or the session name you entered). Content area stays empty until an update is pushed.
+- **After the curl call:** The page updates in real time (no refresh). You should see:
+  - **Title:** "Hello" at the top (bold).
+  - **Blocks:** A text line "Hello", then a dark **OK** button. Clicking the button updates the status to *"Clicked: "* (and the button id if set).
+- **If nothing appears:** Ensure the session in the canvas page matches the one used in the request (default vs `session_id` in the JSON). If you used `session_id: "my-session"`, type `my-session` in the Session field and click Connect before running curl.
+
+The canvas updates whenever the plugin’s **`canvas_update`** capability is called (by the LLM via `route_to_plugin` or by a direct POST to `/run`). If the agent doesn’t call the plugin when you ask to “update the canvas”, re-register the plugin (`node register.js`) and try again. 
 
 ### 3. Test nodes
 
@@ -113,6 +136,37 @@ Use these steps to verify browser, canvas, and nodes. Ensure Core is running, th
   curl -X POST http://127.0.0.1:3020/run -H "Content-Type: application/json" -d '{"request_id":"1","plugin_id":"homeclaw-browser","capability_id":"node_list"}'
   curl -X POST http://127.0.0.1:3020/run -H "Content-Type: application/json" -d '{"request_id":"2","plugin_id":"homeclaw-browser","capability_id":"node_command","capability_parameters":{"node_id":"test-node-1","command":"screen"}}'
   ```
+
+### 4. Test camera and microphone
+
+Camera and mic are controlled via **node** commands. The **node** (e.g. the Nodes page tab, or a phone/desktop app) must support `camera_snap` and/or `camera_clip`; the plugin only forwards the command and returns the node’s result.
+
+**Test the command path (echo only)**
+
+1. Open **http://127.0.0.1:3020/nodes**, set Node ID (e.g. `test-node-1`), click **Connect as node**.
+2. From another terminal, call the plugin:
+   ```bash
+   # Camera snap (params: node_id, optional facing, maxWidth)
+   curl -X POST http://127.0.0.1:3020/run -H "Content-Type: application/json" -d '{"request_id":"1","plugin_id":"homeclaw-browser","capability_id":"node_camera_snap","capability_parameters":{"node_id":"test-node-1"}}'
+   # Camera clip with microphone (params: node_id, optional duration, includeAudio)
+   curl -X POST http://127.0.0.1:3020/run -H "Content-Type: application/json" -d '{"request_id":"2","plugin_id":"homeclaw-browser","capability_id":"node_camera_clip","capability_parameters":{"node_id":"test-node-1","duration":"3s","includeAudio":true}}'
+   ```
+3. With the **default test node** (Nodes page), the node only **echoes** the command: you get a result like `Echo: camera_snap` or `Echo: camera_clip ...` — no real camera/mic is used. This confirms the path (Core → plugin → node → result) works.
+
+**Test real camera and microphone (browser test node)**
+
+If the Nodes page has been updated to support real camera/mic (see below), use **HTTPS or localhost** and grant camera/mic when the browser prompts:
+
+1. Open **http://127.0.0.1:3020/nodes** (or https if required by the browser for getUserMedia).
+2. Click **Connect as node**; when prompted, allow camera and microphone.
+3. From chat, ask e.g. *“Take a photo on test-node-1”* or *“Record a short video with sound on test-node-1.”* Or use the `curl` calls above. The node will use the device camera (and mic for `camera_clip` when `includeAudio: true`) and return a snapshot or clip (e.g. as a data URL or MEDIA path in the result).
+
+**From chat**
+
+- *“Take a photo on test-node-1”* → `node_camera_snap` (or `node_command` with `camera_snap`).
+- *“Record a 3 second video with microphone on test-node-1”* → `node_camera_clip` with `duration: "3s"`, `includeAudio: true`.
+
+**Note:** Real camera/mic require a node that implements `getUserMedia` (and, for video, `MediaRecorder`). The built-in test node can be extended to do this in the browser; otherwise use a phone or desktop app that implements the node protocol and device APIs.
 
 ---
 

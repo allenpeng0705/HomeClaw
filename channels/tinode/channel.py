@@ -530,6 +530,7 @@ def client_message_loop(stream):
                                 images=[],
                                 videos=[],
                                 audios=[],
+                                files=None,
                                 timestamp=datetime.now().timestamp(),
                             )
                             try:
@@ -565,6 +566,7 @@ def client_message_loop(stream):
                                 images=[data_url],
                                 videos=[],
                                 audios=[],
+                                files=None,
                                 timestamp=datetime.now().timestamp(),
                             )
                             if _tinode_channel is not None:
@@ -572,22 +574,126 @@ def client_message_loop(stream):
                             else:
                                 client_post(publish(msg.data.topic, 'Image received'))
                         except Exception as err:
-                            log("Error handling image:", err)
+                            log("Error handling image: %s" % err)
                             client_post(publish(msg.data.topic, 'Image received'))
                     elif data_type == 'audio':
-                        # TODO: Respond with audio
-                        audio_bytes = base64.b64decode(content_dict['ent'][0]['data']['val'])
-                        filename = 'output' + '.' + subtype
-                        with open(filename, 'wb') as f:
-                            f.write(audio_bytes)
-                            
-                        client_post(publish(msg.data.topic, 'Audio file received'))
-                        audio = AudioSegment.from_file(filename, format=subtype)
-                        # Play the audio file
-                        play(audio)
+                        try:
+                            b64_val = content_dict.get('ent', [{}])[0].get('data', {}).get('val')
+                            if b64_val:
+                                audio_bytes = base64.b64decode(b64_val)
+                                root = Path(__file__).resolve().parent.parent.parent
+                                docs_dir = root / "channels" / "tinode" / "docs"
+                                docs_dir.mkdir(parents=True, exist_ok=True)
+                                ext = (subtype or 'bin').split(';')[0].strip() or 'bin'
+                                filename = docs_dir / f"audio_{msg.data.seq_id}_{int(time.time())}.{ext}"
+                                filename.write_bytes(audio_bytes)
+                                msg_id = str(msg.data.seq_id)
+                                if _tinode_channel is not None:
+                                    _tinode_channel.chats[msg_id] = msg.data.topic
+                                    request = PromptRequest(
+                                        request_id=msg_id,
+                                        channel_name=_tinode_channel.metadata.name,
+                                        request_metadata={'sender': msg.data.topic, 'msg_id': msg_id, 'channel': 'tinode'},
+                                        channelType=ChannelType.IM,
+                                        user_name=msg.data.topic,
+                                        app_id='tinode',
+                                        user_id='tinode:' + msg.data.topic,
+                                        contentType=ContentType.AUDIO,
+                                        text='User sent audio',
+                                        action='respond',
+                                        host=getattr(_tinode_channel, 'metadata', None) and _tinode_channel.metadata.host or 0,
+                                        port=getattr(_tinode_channel, 'metadata', None) and _tinode_channel.metadata.port or 0,
+                                        images=[],
+                                        videos=[],
+                                        audios=[str(filename.resolve())],
+                                        files=None,
+                                        timestamp=datetime.now().timestamp(),
+                                    )
+                                    _tinode_channel.syncTransferTocore(request=request)
+                                else:
+                                    client_post(publish(msg.data.topic, 'Audio received'))
+                        except Exception as err:
+                            log("Error handling audio: %s" % err)
+                            client_post(publish(msg.data.topic, 'Audio received'))
+                    elif data_type == 'video':
+                        try:
+                            b64_val = content_dict.get('ent', [{}])[0].get('data', {}).get('val')
+                            if b64_val:
+                                video_bytes = base64.b64decode(b64_val)
+                                root = Path(__file__).resolve().parent.parent.parent
+                                docs_dir = root / "channels" / "tinode" / "docs"
+                                docs_dir.mkdir(parents=True, exist_ok=True)
+                                ext = (subtype or 'mp4').split(';')[0].strip() or 'mp4'
+                                filename = docs_dir / f"video_{msg.data.seq_id}_{int(time.time())}.{ext}"
+                                filename.write_bytes(video_bytes)
+                                msg_id = str(msg.data.seq_id)
+                                if _tinode_channel is not None:
+                                    _tinode_channel.chats[msg_id] = msg.data.topic
+                                    request = PromptRequest(
+                                        request_id=msg_id,
+                                        channel_name=_tinode_channel.metadata.name,
+                                        request_metadata={'sender': msg.data.topic, 'msg_id': msg_id, 'channel': 'tinode'},
+                                        channelType=ChannelType.IM,
+                                        user_name=msg.data.topic,
+                                        app_id='tinode',
+                                        user_id='tinode:' + msg.data.topic,
+                                        contentType=ContentType.VIDEO,
+                                        text='User sent video',
+                                        action='respond',
+                                        host=getattr(_tinode_channel.metadata, 'host', 0),
+                                        port=getattr(_tinode_channel.metadata, 'port', 0),
+                                        images=[],
+                                        videos=[str(filename.resolve())],
+                                        audios=[],
+                                        files=None,
+                                        timestamp=datetime.now().timestamp(),
+                                    )
+                                    _tinode_channel.syncTransferTocore(request=request)
+                                else:
+                                    client_post(publish(msg.data.topic, 'Video received'))
+                        except Exception as err:
+                            log("Error handling video: %s" % err)
+                            client_post(publish(msg.data.topic, 'Video received'))
                     else:
-                        # TODO: Respond with unknown data type
-                        pass
+                        # file / application / other: save to docs and send as files
+                        try:
+                            b64_val = content_dict.get('ent', [{}])[0].get('data', {}).get('val')
+                            if b64_val:
+                                raw = base64.b64decode(b64_val)
+                                root = Path(__file__).resolve().parent.parent.parent
+                                docs_dir = root / "channels" / "tinode" / "docs"
+                                docs_dir.mkdir(parents=True, exist_ok=True)
+                                ext = (subtype or 'bin').split(';')[0].strip() or 'bin'
+                                filename = docs_dir / f"file_{msg.data.seq_id}_{int(time.time())}.{ext}"
+                                filename.write_bytes(raw)
+                                msg_id = str(msg.data.seq_id)
+                                if _tinode_channel is not None:
+                                    _tinode_channel.chats[msg_id] = msg.data.topic
+                                    request = PromptRequest(
+                                        request_id=msg_id,
+                                        channel_name=_tinode_channel.metadata.name,
+                                        request_metadata={'sender': msg.data.topic, 'msg_id': msg_id, 'channel': 'tinode'},
+                                        channelType=ChannelType.IM,
+                                        user_name=msg.data.topic,
+                                        app_id='tinode',
+                                        user_id='tinode:' + msg.data.topic,
+                                        contentType=ContentType.TEXT,
+                                        text='User sent a file',
+                                        action='respond',
+                                        host=getattr(_tinode_channel.metadata, 'host', 0),
+                                        port=getattr(_tinode_channel.metadata, 'port', 0),
+                                        images=[],
+                                        videos=[],
+                                        audios=[],
+                                        files=[str(filename.resolve())],
+                                        timestamp=datetime.now().timestamp(),
+                                    )
+                                    _tinode_channel.syncTransferTocore(request=request)
+                                else:
+                                    client_post(publish(msg.data.topic, 'File received'))
+                        except Exception as err:
+                            log("Error handling file: %s" % err)
+                            client_post(publish(msg.data.topic, 'File received'))
 
             elif msg.HasField("pres"):
                 # log("presence:", msg.pres.topic, msg.pres.what)

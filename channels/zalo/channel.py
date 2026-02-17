@@ -27,8 +27,12 @@ INBOUND_URL = f"{Util().get_channels_core_url()}/inbound"
 
 class ZaloMessage(BaseModel):
     user_id: str
-    text: str
+    text: Optional[str] = None
     user_name: Optional[str] = None
+    images: Optional[list[str]] = None
+    videos: Optional[list[str]] = None
+    audios: Optional[list[str]] = None
+    files: Optional[list[str]] = None
 
 
 @app.get("/")
@@ -44,10 +48,18 @@ async def message(body: ZaloMessage):
     """Bridge calls this when a Zalo message arrives. We POST to Core /inbound and return the reply text."""
     payload = {
         "user_id": body.user_id if body.user_id.startswith("zalo_") else f"zalo_{body.user_id}",
-        "text": body.text,
+        "text": (body.text or "").strip() or "(no text)",
         "channel_name": "zalo",
         "user_name": body.user_name or body.user_id,
     }
+    if body.images:
+        payload["images"] = body.images
+    if body.videos:
+        payload["videos"] = body.videos
+    if body.audios:
+        payload["audios"] = body.audios
+    if body.files:
+        payload["files"] = body.files
     try:
         async with httpx.AsyncClient() as client:
             r = await client.post(INBOUND_URL, json=payload, timeout=120.0)

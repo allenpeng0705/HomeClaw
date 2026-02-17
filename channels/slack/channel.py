@@ -1,10 +1,12 @@
 """
 Minimal Slack channel using Core POST /inbound (Socket Mode: no public URL needed).
-Run: set SLACK_APP_TOKEN, SLACK_BOT_TOKEN in channels/.env; core connection from channels/.env (core_host, core_port or CORE_URL).
+Supports text and file attachments. Run: set SLACK_APP_TOKEN, SLACK_BOT_TOKEN in channels/.env.
 Add slack_<user_id> to config/user.yml (im: list) for allowed users.
 """
+import base64
 import os
 from pathlib import Path
+from typing import List, Optional
 
 _root = Path(__file__).resolve().parent.parent.parent
 if str(_root) not in __import__("sys").path:
@@ -28,13 +30,44 @@ if not SLACK_APP_TOKEN or not SLACK_BOT_TOKEN:
     raise SystemExit("Set SLACK_APP_TOKEN and SLACK_BOT_TOKEN in .env or environment")
 
 
-def post_to_core_sync(user_id: str, user_name: str, text: str) -> str:
+def download_slack_file_to_data_url(url: str, bot_token: str, content_type: Optional[str] = None) -> Optional[str]:
+    """Download Slack file URL (with auth) and return data URL. Never raises."""
+    try:
+        headers = {"Authorization": f"Bearer {bot_token}"}
+        with httpx.Client(timeout=30.0) as client:
+            r = client.get(url, headers=headers)
+        if r.status_code != 200 or not r.content:
+            return None
+        ct = content_type or r.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
+        b64 = base64.b64encode(r.content).decode("ascii")
+        return f"data:{ct};base64,{b64}"
+    except Exception:
+        return None
+
+
+def post_to_core_sync(
+    user_id: str,
+    user_name: str,
+    text: str,
+    images: Optional[List[str]] = None,
+    videos: Optional[List[str]] = None,
+    audios: Optional[List[str]] = None,
+    files: Optional[List[str]] = None,
+) -> str:
     payload = {
         "user_id": user_id,
-        "text": text,
+        "text": text or "(no text)",
         "channel_name": "slack",
         "user_name": user_name,
     }
+    if images:
+        payload["images"] = images
+    if videos:
+        payload["videos"] = videos
+    if audios:
+        payload["audios"] = audios
+    if files:
+        payload["files"] = files
     try:
         with httpx.Client() as client:
             r = client.post(INBOUND_URL, json=payload, timeout=120.0)
@@ -68,25 +101,51 @@ def main():
         if event.get("type") != "message" or event.get("subtype"):
             return
         text = (event.get("text") or "").strip()
-        if not text:
-            return
         user_id = event.get("user", "")
         channel_id = event.get("channel", "")
         ts = event.get("ts", "")
         if not user_id or not channel_id:
             return
+        images, videos, audios, files = [], [], [], []
+        for f in event.get("files") or []:
+            url = f.get("url_private") or f.get("url_private_download")
+            if not url:
+                continue
+            mimetype = (f.get("mimetype") or "").lower()
+            data_url = download_slack_file_to_data_url(url, SLACK_BOT_TOKEN, f.get("mimetype"))
+            if not data_url:
+                continue
+            if "image/" in mimetype:
+                images.append(data_url)
+            elif "video/" in mimetype:
+                videos.append(data_url)
+            elif "audio/" in mimetype:
+                audios.append(data_url)
+            else:
+                files.append(data_url)
+        if not text and not (images or videos or audios or files):
+            return
+        if not text:
+            text = "Image" if images else "Video" if videos else "Audio" if audios else "File" if files else "(no text)"
         # Acknowledge immediately
         client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
-        # Resolve user name
         try:
             u = web_client.users_info(user=user_id)
             user_name = (u.get("user") or {}).get("real_name") or user_id
         except Exception:
             user_name = user_id
         inbound_id = f"slack_{user_id}"
-        reply = post_to_core_sync(inbound_id, user_name, text)
+        reply = post_to_core_sync(
+            inbound_id,
+            user_name,
+            text,
+            images=images if images else None,
+            videos=videos if videos else None,
+            audios=audios if audios else None,
+            files=files if files else None,
+        )
         try:
-            web_client.chat_postMessage(channel=channel_id, thread_ts=ts, text=reply)
+            web_client.chat_postMessage(channel=channel_id, thread_ts=ts, text=reply[:4000] if len(reply) > 4000 else reply)
         except Exception as e:
             print("Slack post error:", e)
 

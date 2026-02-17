@@ -29,6 +29,10 @@ class SignalMessage(BaseModel):
     user_id: str
     text: str
     user_name: Optional[str] = None
+    images: Optional[list] = None
+    videos: Optional[list] = None
+    audios: Optional[list] = None
+    files: Optional[list] = None
 
 
 @app.get("/")
@@ -44,10 +48,18 @@ async def message(body: SignalMessage):
     """Bridge calls this when a Signal message arrives. We POST to Core /inbound and return the reply text."""
     payload = {
         "user_id": body.user_id if body.user_id.startswith("signal_") else f"signal_{body.user_id}",
-        "text": body.text,
+        "text": body.text or "(no text)",
         "channel_name": "signal",
         "user_name": body.user_name or body.user_id,
     }
+    if getattr(body, "images", None):
+        payload["images"] = body.images
+    if getattr(body, "videos", None):
+        payload["videos"] = body.videos
+    if getattr(body, "audios", None):
+        payload["audios"] = body.audios
+    if getattr(body, "files", None):
+        payload["files"] = body.files
     try:
         async with httpx.AsyncClient() as client:
             r = await client.post(INBOUND_URL, json=payload, timeout=120.0)

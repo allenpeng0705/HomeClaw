@@ -1,3 +1,4 @@
+import asyncio
 import atexit
 import json
 from multiprocessing import Process
@@ -43,6 +44,18 @@ def run_script_silent(script_path):
 
 def run_script(script_path):
     result = runpy.run_path(script_path, run_name='__main__')
+
+
+def _normalize_language_list(language):
+    """Normalize language to List[str] for main_llm_language. Accepts str (e.g. 'en') or list (e.g. [zh, en])."""
+    if language is None:
+        return ["en"]
+    if isinstance(language, list):
+        out = [str(x).strip() for x in language if str(x).strip()]
+        return out if out else ["en"]
+    s = str(language).strip() or "en"
+    return [s]
+
 
 class Util:
     _instance = None
@@ -174,7 +187,16 @@ class Util:
         host = env_vars.get('core_host', '127.0.0.1')
         port = env_vars.get('core_port', '9000')
         return f"http://{host}:{port}"
-                 
+
+    def get_core_url(self) -> str:
+        """Core's own HTTP URL (from config core.yml host/port). For built-in plugins calling Core REST API (e.g. /api/plugins/llm/generate). 0.0.0.0 -> 127.0.0.1."""
+        meta = self.get_core_metadata()
+        host = (getattr(meta, 'host', None) or '0.0.0.0').strip()
+        if host == '0.0.0.0':
+            host = '127.0.0.1'
+        port = int(getattr(meta, 'port', 9000) or 9000)
+        return f"http://{host}:{port}"
+
     def config_path(self):
         return os.path.join(self.root_path(), 'config')
     
@@ -321,7 +343,7 @@ class Util:
             if entry is None:
                 return None
             self.core_metadata.main_llm = main_llm_name
-            self.core_metadata.main_llm_language = language
+            self.core_metadata.main_llm_language = _normalize_language_list(language)
             if type == "litellm":
                 self.core_metadata.main_llm_api_key_name = api_key_name or entry.get("api_key_name") or ""
                 self.core_metadata.main_llm_api_key = api_key
@@ -333,14 +355,14 @@ class Util:
         if type == "local":
             if main_llm_name in self.llms:
                 self.core_metadata.main_llm = main_llm_name
-                self.core_metadata.main_llm_language = language
+                self.core_metadata.main_llm_language = _normalize_language_list(language)
                 self.core_metadata.main_llm_api_key_name = api_key_name
                 self.core_metadata.main_llm_api_key = api_key
                 CoreMetadata.to_yaml(self.core_metadata, os.path.join(self.config_path(), 'core.yml'))
                 return main_llm_name
             return None
         self.core_metadata.main_llm = main_llm_name
-        self.core_metadata.main_llm_language = language
+        self.core_metadata.main_llm_language = _normalize_language_list(language)
         self.core_metadata.main_llm_api_key_name = api_key_name
         self.core_metadata.main_llm_api_key = api_key
         CoreMetadata.to_yaml(self.core_metadata, os.path.join(self.config_path(), 'core.yml'))
@@ -439,10 +461,58 @@ class Util:
         return llms[0]
         
     def main_llm_language(self):
-        return self.core_metadata.main_llm_language
-    
+        """Primary language for prompt file loading (e.g. response.en.yml). First element of main_llm_language list."""
+        lst = self.core_metadata.main_llm_language
+        if not lst or not isinstance(lst, list):
+            return "en"
+        return (lst[0] or "en") if lst else "en"
+
+    def main_llm_languages(self):
+        """Full list of allowed/preferred response languages. Use in system prompt: respond only in one of these; if unknown use first."""
+        lst = self.core_metadata.main_llm_language
+        if not lst or not isinstance(lst, list):
+            return ["en"]
+        return [x for x in lst if x] or ["en"]
+
     def main_llm_type(self):
         return self._effective_main_llm_type()
+
+    def main_llm_supported_media(self) -> List[str]:
+        """What media types the main model can handle: image, audio, video. Used so Core does not send unsupported content and does not crash.
+        - Cloud model (main_llm = cloud_models/...): default [image, audio, video] unless the model entry has supported_media.
+        - Local model: default [] unless the entry has mmproj (vision) then [image], or has supported_media.
+        Returns normalized list (lowercase, only image/audio/video). Never raises; returns [] on any error."""
+        try:
+            main_llm_name = self.core_metadata.main_llm
+            if not main_llm_name:
+                return []
+            entry, mtype = self._get_model_entry(main_llm_name)
+            allowed = {"image", "audio", "video"}
+
+            def normalize(raw) -> List[str]:
+                if not raw:
+                    return []
+                if isinstance(raw, list):
+                    out = [str(x).strip().lower() for x in raw if x]
+                else:
+                    out = [str(raw).strip().lower()]
+                return [x for x in out if x in allowed]
+
+            if entry is not None:
+                explicit = entry.get("supported_media")
+                if explicit is not None:
+                    return normalize(explicit)
+                if mtype == "litellm":
+                    return ["image", "audio", "video"]
+                if mtype == "local":
+                    if entry.get("mmproj"):
+                        return ["image"]
+                    return []
+            if self._effective_main_llm_type() == "litellm":
+                return ["image", "audio", "video"]
+            return []
+        except Exception:
+            return []
     
 
     def get_ollama_supported_models(self):
@@ -659,6 +729,20 @@ class Util:
 
         return data_updates, extra_body_updates
 
+    def _get_llm_semaphore(self):
+        """Lazy-create a semaphore to limit concurrent LLM calls (channel + plugin API). Config: llm_max_concurrent (default 1). Thread-safe creation."""
+        if getattr(self, '_llm_semaphore', None) is None:
+            lock = getattr(Util, '_llm_semaphore_creation_lock', None)
+            if lock is None:
+                Util._llm_semaphore_creation_lock = threading.Lock()
+                lock = Util._llm_semaphore_creation_lock
+            with lock:
+                if getattr(self, '_llm_semaphore', None) is None:
+                    meta = self.get_core_metadata()
+                    n = max(1, min(32, int(getattr(meta, 'llm_max_concurrent', 1) or 1)))
+                    self._llm_semaphore = asyncio.Semaphore(n)
+        return self._llm_semaphore
+
     async def openai_chat_completion(self, messages: list[dict], 
                                      grammar: str=None,
                                      tools: Optional[List[Dict]] = None,
@@ -667,6 +751,21 @@ class Util:
                                      function_call: Optional[str] = None,
                                      llm_name: Optional[str] = None,
                                      ) -> str | None:    
+        sem = self._get_llm_semaphore()
+        async with sem:
+            return await self._openai_chat_completion_impl(
+                messages, grammar=grammar, tools=tools, tool_choice=tool_choice,
+                functions=functions, function_call=function_call, llm_name=llm_name,
+            )
+
+    async def _openai_chat_completion_impl(self, messages: list[dict],
+                                     grammar: str=None,
+                                     tools: Optional[List[Dict]] = None,
+                                     tool_choice: str = "auto",
+                                     functions: Optional[List] = None,
+                                     function_call: Optional[str] = None,
+                                     llm_name: Optional[str] = None,
+                                     ) -> str | None:
         try:
             resolved = Util()._resolve_llm(llm_name)
             if resolved is None:
@@ -734,6 +833,41 @@ class Util:
             logger.exception(e)
             return None
 
+    async def plugin_llm_generate(
+        self,
+        messages: list[dict],
+        llm_name: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Call Core's REST API POST /api/plugins/llm/generate. Use this from built-in plugins so both built-in and external plugins use the same API.
+        Returns generated text or None on error. Auth: when auth_enabled, uses auth_api_key from config (X-API-Key header).
+        """
+        try:
+            base_url = self.get_core_url().rstrip('/')
+            url = f"{base_url}/api/plugins/llm/generate"
+            body = {"messages": messages}
+            if llm_name is not None:
+                body["llm_name"] = llm_name
+            headers = {"Content-Type": "application/json"}
+            meta = self.get_core_metadata()
+            if getattr(meta, 'auth_enabled', False) and (getattr(meta, 'auth_api_key', '') or '').strip():
+                key = (getattr(meta, 'auth_api_key', '') or '').strip()
+                headers["X-API-Key"] = key
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=body, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                    try:
+                        data = await resp.json() if (getattr(resp, 'content_type', None) or '').startswith('application/json') else {}
+                    except Exception:
+                        data = {}
+                    if resp.status_code != 200:
+                        err = data.get("error") or data.get("detail") or resp.reason or str(resp.status_code)
+                        logger.warning("plugin_llm_generate failed: %s", err)
+                        return None
+                    return (data.get("text") or "").strip() or None
+        except Exception as e:
+            logger.exception(e)
+            return None
+
     async def openai_chat_completion_message(
         self,
         messages: list[dict],
@@ -745,7 +879,21 @@ class Util:
         Same as openai_chat_completion but returns the full assistant message dict for tool loop.
         Returns: {"role": "assistant", "content": str or None, "tool_calls": [...] or None}.
         Caller can append to messages and, if tool_calls present, execute tools and call again.
+        Uses same llm_max_concurrent semaphore as openai_chat_completion.
         """
+        sem = self._get_llm_semaphore()
+        async with sem:
+            return await self._openai_chat_completion_message_impl(
+                messages, tools=tools, tool_choice=tool_choice, grammar=grammar,
+            )
+
+    async def _openai_chat_completion_message_impl(
+        self,
+        messages: list[dict],
+        tools: Optional[List[Dict]] = None,
+        tool_choice: str = "auto",
+        grammar: Optional[str] = None,
+    ) -> Optional[dict]:
         try:
             _, model, type, model_host, model_port = Util().main_llm()
             data = {"model": model, "messages": messages}

@@ -119,10 +119,12 @@ class MyPlugin(BasePlugin):
         return await self.do_something()
 ```
 
-- **`coreInst`** — Access to Core: `coreInst.send_response_to_request_channel()`, `coreInst.get_latest_chats()`, etc.
+- **`coreInst`** — Access to Core: `coreInst.send_response_to_request_channel()` (send reply; Core applies markdown), `coreInst.get_latest_chats()`, etc. For LLM generation use **`Util().plugin_llm_generate(messages, llm_name=None)`** so built-in and external plugins use the same REST API; see [PluginLLMAndQueueDesign.md](PluginLLMAndQueueDesign.md).
 - **`self.config`** — Your runtime config (API keys, defaults). Merged with capability parameters at invoke time.
 - **`self.promptRequest`** — The current request (set by Core before `run()` or capability call).
 - **`self.user_input`** — The user's message text.
+
+For how channel requests and plugin LLM calls are handled (queue, post_process, markdown outbound), see [PluginLLMAndQueueDesign.md](PluginLLMAndQueueDesign.md).
 
 ### 2.4 Runtime Config: config.yml
 
@@ -153,7 +155,7 @@ See `plugins/Weather/` for a full example:
 
 ## 3. External Plugins (Any Language)
 
-External plugins run as **separate processes** or **HTTP services**. They register with Core via the registration API and receive `PluginRequest`; they return `PluginResult`.
+External plugins run as **separate processes** or **HTTP services**. They register with Core via the registration API and receive `PluginRequest`; they return `PluginResult`. To use Core's LLM from an external plugin, call **POST /api/plugins/llm/generate** with body `{ "messages": [ {"role": "user", "content": "..."}, ... ], "llm_name": null }`; Core returns `{ "text": "..." }`. Auth: when `auth_enabled` in config, use the same API key as `/inbound` (X-API-Key or Bearer). See [PluginLLMAndQueueDesign.md](PluginLLMAndQueueDesign.md).
 
 ### 3.1 Two Ways to Run External Plugins
 

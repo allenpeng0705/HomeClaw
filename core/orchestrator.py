@@ -64,7 +64,7 @@ class Orchestrator:
                     default_language=getattr(meta, "prompt_default_language", "en"),
                     cache_ttl_seconds=float(getattr(meta, "prompt_cache_ttl_seconds", 0) or 0),
                 )
-                lang = getattr(meta, "main_llm_language", "en") or "en"
+                lang = Util().main_llm_language()
                 content = pm.get_content("orchestrator", "intent", lang=lang, text=text, chat_history=chat_history or "")
                 if content and content.strip():
                     return content.strip()
@@ -259,7 +259,7 @@ Reply with only the JSON object:"""
                     default_language=getattr(meta, "prompt_default_language", "en"),
                     cache_ttl_seconds=float(getattr(meta, "prompt_cache_ttl_seconds", 0) or 0),
                 )
-                lang = getattr(meta, "main_llm_language", "en") or "en"
+                lang = Util().main_llm_language()
                 lines = []
                 for i, p in enumerate(plugin_infos):
                     pid = (p.get("id") or "").strip() or f"plugin_{i + 1}"

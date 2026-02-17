@@ -32,6 +32,11 @@ class WebhookMessage(BaseModel):
     user_name: Optional[str] = None
     app_id: Optional[str] = "homeclaw"
     action: Optional[str] = "respond"
+    # Optional media: data URLs (data:...;base64,...) for vision/audio/video/files
+    images: Optional[list] = None
+    videos: Optional[list] = None
+    audios: Optional[list] = None
+    files: Optional[list] = None
 
 
 def core_url() -> str:
@@ -52,10 +57,10 @@ def status():
 async def message(body: WebhookMessage):
     """
     Forward to Core /inbound. Same schema as Core /inbound.
-    Ensure user_id is in config/user.yml allowlist (IM permission).
+    Optional: images, videos, audios, files (lists of data URLs). Ensure user_id is in config/user.yml allowlist (IM permission).
     """
     url = f"{core_url()}/inbound"
-    payload = body.model_dump()
+    payload = body.model_dump(exclude_none=True)
     try:
         async with httpx.AsyncClient() as client:
             r = await client.post(url, json=payload, timeout=120.0)

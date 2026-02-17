@@ -2,7 +2,7 @@
   {
     "plugin_id": "homeclaw-browser",
     "name": "HomeClaw Browser",
-    "description": "Browser automation (navigate, snapshot, click, type), canvas (push title/blocks to the canvas viewer at /canvas), and nodes (list connected nodes, send commands). Use when the user asks to: open a URL or interact with a web page; update or show content on the canvas (e.g. \"update the canvas with title X and a button Y\"); list nodes or send a command to a node.",
+    "description": "Browser automation (navigate, snapshot, click, type), canvas (push title/blocks to /canvas), nodes (list/send commands), and Control UI (WebChat at /, WS proxy to Core). Use when the user asks to: open a URL or interact with a web page; update or show content on the canvas; list nodes or send a command to a node; or open WebChat/dashboard to chat with the agent.",
     "description_long": "Playwright-based browser automation in Node.js. One browser context per user/session. Capabilities: browser_navigate, browser_snapshot, browser_click, browser_type, browser_fill, browser_scroll, browser_close_session; canvas_update (push UI to canvas viewer); node_list, node_command. Set tools.browser_enabled: false in Core to use this plugin for browser actions.",
     "health_check_url": "http://127.0.0.1:3020/health",
     "type": "http",
@@ -287,6 +287,312 @@
         "path": "/run"
       },
       {
+        "id": "browser_set_color_scheme",
+        "name": "Set color scheme",
+        "description": "Set the page color scheme (prefers-color-scheme): dark, light, no-preference, or none.",
+        "parameters": [
+          {
+            "name": "color_scheme",
+            "type": "string",
+            "required": true,
+            "default": null,
+            "description": "dark, light, no-preference, or none.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "session_id",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "Optional session key.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          }
+        ],
+        "output_description": null,
+        "post_process": false,
+        "post_process_prompt": null,
+        "method": "POST",
+        "path": "/run"
+      },
+      {
+        "id": "browser_set_geolocation",
+        "name": "Set geolocation",
+        "description": "Set or clear geolocation for the page (for location-aware sites).",
+        "parameters": [
+          {
+            "name": "latitude",
+            "type": "number",
+            "required": false,
+            "default": null,
+            "description": "Latitude (required unless clear).",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "longitude",
+            "type": "number",
+            "required": false,
+            "default": null,
+            "description": "Longitude (required unless clear).",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "accuracy",
+            "type": "number",
+            "required": false,
+            "default": null,
+            "description": "Optional accuracy in meters.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "clear",
+            "type": "boolean",
+            "required": false,
+            "default": null,
+            "description": "Set true to clear geolocation.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "session_id",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "Optional session key.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          }
+        ],
+        "output_description": null,
+        "post_process": false,
+        "post_process_prompt": null,
+        "method": "POST",
+        "path": "/run"
+      },
+      {
+        "id": "browser_set_timezone",
+        "name": "Set timezone",
+        "description": "Set browser timezone (e.g. America/New_York).",
+        "parameters": [
+          {
+            "name": "timezone",
+            "type": "string",
+            "required": true,
+            "default": null,
+            "description": "IANA timezone (e.g. America/New_York).",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "session_id",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "Optional session key.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          }
+        ],
+        "output_description": null,
+        "post_process": false,
+        "post_process_prompt": null,
+        "method": "POST",
+        "path": "/run"
+      },
+      {
+        "id": "browser_set_locale",
+        "name": "Set locale",
+        "description": "Set Accept-Language header (e.g. en-US).",
+        "parameters": [
+          {
+            "name": "locale",
+            "type": "string",
+            "required": true,
+            "default": null,
+            "description": "Locale (e.g. en-US).",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "session_id",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "Optional session key.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          }
+        ],
+        "output_description": null,
+        "post_process": false,
+        "post_process_prompt": null,
+        "method": "POST",
+        "path": "/run"
+      },
+      {
+        "id": "browser_set_device",
+        "name": "Set device viewport",
+        "description": "Set viewport size for device emulation (e.g. iPhone 14, Desktop 1920x1080).",
+        "parameters": [
+          {
+            "name": "device",
+            "type": "string",
+            "required": true,
+            "default": null,
+            "description": "Device name: iPhone 14, iPad Pro, Pixel 5, Desktop 1920x1080, etc.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "session_id",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "Optional session key.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          }
+        ],
+        "output_description": null,
+        "post_process": false,
+        "post_process_prompt": null,
+        "method": "POST",
+        "path": "/run"
+      },
+      {
+        "id": "browser_set_offline",
+        "name": "Set offline mode",
+        "description": "Emulate offline (true) or online (false).",
+        "parameters": [
+          {
+            "name": "offline",
+            "type": "boolean",
+            "required": true,
+            "default": null,
+            "description": "true = offline, false = online.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "session_id",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "Optional session key.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          }
+        ],
+        "output_description": null,
+        "post_process": false,
+        "post_process_prompt": null,
+        "method": "POST",
+        "path": "/run"
+      },
+      {
+        "id": "browser_set_extra_headers",
+        "name": "Set extra HTTP headers",
+        "description": "Set extra headers for requests from this context.",
+        "parameters": [
+          {
+            "name": "headers",
+            "type": "object",
+            "required": true,
+            "default": null,
+            "description": "Object of header name -> value.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "session_id",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "Optional session key.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          }
+        ],
+        "output_description": null,
+        "post_process": false,
+        "post_process_prompt": null,
+        "method": "POST",
+        "path": "/run"
+      },
+      {
+        "id": "browser_set_credentials",
+        "name": "Set HTTP credentials",
+        "description": "Set or clear HTTP Basic auth credentials for this context.",
+        "parameters": [
+          {
+            "name": "username",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "Username (required unless clear).",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "password",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "Password.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "clear",
+            "type": "boolean",
+            "required": false,
+            "default": null,
+            "description": "Set true to clear credentials.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "session_id",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "Optional session key.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          }
+        ],
+        "output_description": null,
+        "post_process": false,
+        "post_process_prompt": null,
+        "method": "POST",
+        "path": "/run"
+      },
+      {
         "id": "canvas_update",
         "name": "Update canvas",
         "description": "Push content to the canvas viewer (the page at /canvas). Use when the user asks to \"update the canvas\", \"show on the canvas\", or \"put a title and button on the canvas\". Call with document: { title: string, blocks: [ { type: \"text\", content } | { type: \"button\", label } ] }. The canvas page at http://plugin:3020/canvas shows this in real time.",
@@ -369,7 +675,7 @@
             "type": "string",
             "required": true,
             "default": null,
-            "description": "Command: screen, camera, canvas, location, or custom.",
+            "description": "Command: notify, camera_snap, camera_clip, screen_record, location_get, or custom.",
             "profile_key": null,
             "config_key": null,
             "confirm_if_uncertain": null
@@ -390,11 +696,230 @@
         "post_process_prompt": null,
         "method": "POST",
         "path": "/run"
+      },
+      {
+        "id": "node_notify",
+        "name": "Node notify",
+        "description": "Send a system notification on the node (e.g. system.notify). Convenience for node_command with command \"notify\".",
+        "parameters": [
+          {
+            "name": "node_id",
+            "type": "string",
+            "required": true,
+            "default": null,
+            "description": "Node id from node_list.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "title",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "Notification title.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "body",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "Notification body.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          }
+        ],
+        "output_description": null,
+        "post_process": false,
+        "post_process_prompt": null,
+        "method": "POST",
+        "path": "/run"
+      },
+      {
+        "id": "node_camera_snap",
+        "name": "Node camera snap",
+        "description": "Take a photo on the node (front/back/both). Returns MEDIA path. Node must support camera_snap.",
+        "parameters": [
+          {
+            "name": "node_id",
+            "type": "string",
+            "required": true,
+            "default": null,
+            "description": "Node id from node_list.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "facing",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "front, back, or both.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "maxWidth",
+            "type": "number",
+            "required": false,
+            "default": null,
+            "description": "Max width in pixels.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          }
+        ],
+        "output_description": null,
+        "post_process": false,
+        "post_process_prompt": null,
+        "method": "POST",
+        "path": "/run"
+      },
+      {
+        "id": "node_camera_clip",
+        "name": "Node camera clip",
+        "description": "Record a short video clip from the node camera. Node must support camera_clip.",
+        "parameters": [
+          {
+            "name": "node_id",
+            "type": "string",
+            "required": true,
+            "default": null,
+            "description": "Node id from node_list.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "facing",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "front or back.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "duration",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "Duration (e.g. 5s).",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "includeAudio",
+            "type": "boolean",
+            "required": false,
+            "default": null,
+            "description": "Include microphone.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          }
+        ],
+        "output_description": null,
+        "post_process": false,
+        "post_process_prompt": null,
+        "method": "POST",
+        "path": "/run"
+      },
+      {
+        "id": "node_screen_record",
+        "name": "Node screen record",
+        "description": "Start or get screen recording from the node. Node must support screen_record.",
+        "parameters": [
+          {
+            "name": "node_id",
+            "type": "string",
+            "required": true,
+            "default": null,
+            "description": "Node id from node_list.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "fps",
+            "type": "number",
+            "required": false,
+            "default": null,
+            "description": "Frames per second.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "duration",
+            "type": "string",
+            "required": false,
+            "default": null,
+            "description": "Duration (e.g. 10s).",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          }
+        ],
+        "output_description": null,
+        "post_process": false,
+        "post_process_prompt": null,
+        "method": "POST",
+        "path": "/run"
+      },
+      {
+        "id": "node_location_get",
+        "name": "Node location get",
+        "description": "Get device location from the node (lat/lon/accuracy). Node must support location_get.",
+        "parameters": [
+          {
+            "name": "node_id",
+            "type": "string",
+            "required": true,
+            "default": null,
+            "description": "Node id from node_list.",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          },
+          {
+            "name": "maxAgeMs",
+            "type": "number",
+            "required": false,
+            "default": null,
+            "description": "Max age of cached location (ms).",
+            "profile_key": null,
+            "config_key": null,
+            "confirm_if_uncertain": null
+          }
+        ],
+        "output_description": null,
+        "post_process": false,
+        "post_process_prompt": null,
+        "method": "POST",
+        "path": "/run"
       }
     ],
     "tools": null,
     "ui": {
+      "webchat": "http://127.0.0.1:3020/",
+      "control": "http://127.0.0.1:3020/",
+      "dashboard": "http://127.0.0.1:3020/",
+      "tui": "node /Users/shileipeng/Documents/mygithub/HomeClaw/system_plugins/homeclaw-browser/tui.js",
       "custom": [
+        {
+          "id": "webchat",
+          "name": "WebChat",
+          "url": "http://127.0.0.1:3020/"
+        },
         {
           "id": "canvas",
           "name": "Canvas",

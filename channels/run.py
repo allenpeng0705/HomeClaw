@@ -7,7 +7,7 @@ All channels live under channels/<name>/ and expose channel.py with main().
 Run from repo root so that channels/ and config/ are on the path.
 
 Supported channels: webhook, telegram, discord, slack, whatsapp, matrix, wechat,
-tinode, google_chat, signal, imessage, teams, webchat, zalo, feishu, dingtalk, bluebubbles.
+tinode, line, google_chat, signal, imessage, teams, webchat, zalo, feishu, dingtalk, bluebubbles.
 
 Before calling the channel's main(), sys.argv is set to [argv[0]] so the channel
 name is not seen by the channel's code (e.g. Tinode's argparse in work() uses
@@ -32,6 +32,7 @@ CHANNELS = [
     "matrix",
     "wechat",
     "tinode",
+    "line",
     "google_chat",
     "signal",
     "imessage",

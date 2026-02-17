@@ -1,0 +1,16 @@
+name: Line
+host: 0.0.0.0
+port: 8010
+endpoints:
+  - path: /line/webhook
+    method: POST
+    description: LINE Messaging API webhook (set this URL in LINE Developers Console)
+    capabilities: ['Receives message, image, video, audio, file events from LINE.']
+    input: {}
+    output: {}
+  - path: /shutdown
+    method: GET
+    description: Shutdown the channel
+    capabilities: ['Shutdown the channel.']
+    input: {}
+    output: {}

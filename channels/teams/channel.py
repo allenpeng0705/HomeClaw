@@ -85,10 +85,40 @@ def read_root():
     return {"channel": "teams", "usage": "Configure this URL as your Bot Framework / Teams bot messaging endpoint."}
 
 
+def _content_type_media_kind(content_type: str) -> str:
+    """Return 'image', 'video', 'audio', or 'file' from MIME type."""
+    ct = (content_type or "").lower()
+    if ct.startswith("image/"):
+        return "image"
+    if ct.startswith("video/"):
+        return "video"
+    if ct.startswith("audio/"):
+        return "audio"
+    return "file"
+
+
+async def _download_teams_attachment_to_data_url(content_url: str) -> str | None:
+    """Download Bot Framework attachment URL and return data URL. Returns None on failure."""
+    if (content_url or "").startswith("data:"):
+        return content_url
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(content_url, timeout=30)
+        if r.status_code != 200:
+            return None
+        import base64
+        b64 = base64.b64encode(r.content).decode("ascii")
+        ct = r.headers.get("content-type", "application/octet-stream").split(";")[0].strip()
+        return f"data:{ct};base64,{b64}"
+    except Exception:
+        return None
+
+
 @app.post("/api/messages")
 async def api_messages(request: Request):
     """
     Bot Framework sends activities here. On type=message: forward to Core /inbound, send reply via Connector.
+    Supports text and attachments (image, video, audio, file).
     """
     try:
         activity = await request.json()
@@ -97,18 +127,49 @@ async def api_messages(request: Request):
     if activity.get("type") != "message":
         return JSONResponse(status_code=200, content={})
     text = (activity.get("text") or "").strip()
-    if not text:
-        return JSONResponse(status_code=200, content={})
+    attachments = activity.get("attachments") or []
     from_act = activity.get("from") or {}
     user_id = from_act.get("id", "")
     user_name = from_act.get("name") or user_id
     inbound_id = f"teams_{user_id}"
+
+    images, videos, audios, files = [], [], [], []
+    for att in attachments[:15]:
+        content_url = (att.get("contentUrl") or "").strip()
+        if not content_url:
+            continue
+        content_type = att.get("contentType") or ""
+        kind = _content_type_media_kind(content_type)
+        data_url = await _download_teams_attachment_to_data_url(content_url)
+        if data_url:
+            if kind == "image":
+                images.append(data_url)
+            elif kind == "video":
+                videos.append(data_url)
+            elif kind == "audio":
+                audios.append(data_url)
+            else:
+                files.append(data_url)
+
+    if not text and not (images or videos or audios or files):
+        return JSONResponse(status_code=200, content={})
+    if not text:
+        text = "(no text)"
+
     payload = {
         "user_id": inbound_id,
         "text": text,
         "channel_name": "teams",
         "user_name": user_name,
     }
+    if images:
+        payload["images"] = images
+    if videos:
+        payload["videos"] = videos
+    if audios:
+        payload["audios"] = audios
+    if files:
+        payload["files"] = files
     try:
         async with httpx.AsyncClient() as client:
             r = await client.post(INBOUND_URL, json=payload, timeout=120.0)

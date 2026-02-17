@@ -45,6 +45,8 @@ users:
 4. The **first** matching user wins. If a match is found, Core can set `request.user_name = user.name` (so the display name comes from `user.yml`).
 5. If no user matches, the request is **denied** (“Permission denied”).
 
+**Empty list = allow all:** If a user’s `im`, `email`, or `phone` list is **empty** for that channel type, that user is still a match — i.e. **allow all** senders for that channel. We encourage setting permission lists correctly (non-empty when you want to restrict access).
+
 **So “multi-user” at the gate:** You add one entry per person (or per identity) in `user.yml`, each with its own `name` and list of IDs (`im`, `email`, `phone`). Each channel must send a `user_id` that appears in one of those lists. One person can have multiple IDs (e.g. same person on Matrix and Telegram) by listing both under one `users` entry or splitting into two entries.
 
 **Where `user_id` comes from:** The **channel** sets it when building the `PromptRequest`, e.g.:

@@ -70,10 +70,20 @@ async def handle_event(request: Request):
     user_name = user.get("displayName") or user_id
     payload = {
         "user_id": user_id,
-        "text": text,
+        "text": text or "(no text)",
         "channel_name": "google_chat",
         "user_name": user_name,
     }
+    # Optional: attachment data URLs (if bridge or app provides them)
+    msg = body.get("message") or {}
+    if msg.get("images"):
+        payload["images"] = msg["images"]
+    if msg.get("videos"):
+        payload["videos"] = msg["videos"]
+    if msg.get("audios"):
+        payload["audios"] = msg["audios"]
+    if msg.get("files"):
+        payload["files"] = msg["files"]
     try:
         async with httpx.AsyncClient() as client:
             r = await client.post(INBOUND_URL, json=payload, timeout=120.0)

@@ -96,3 +96,24 @@ def load_agent_memory_file(workspace_dir: Optional[Path] = None, agent_memory_pa
         return path.read_text(encoding="utf-8").strip()
     except Exception:
         return ""
+
+
+def clear_agent_memory_file(
+    workspace_dir: Optional[Path] = None,
+    agent_memory_path: Optional[str] = None,
+) -> bool:
+    """
+    Clear AGENT_MEMORY.md (write empty file). Used when memory is reset (e.g. /memory/reset) so curated
+    long-term memory is cleared together with RAG. Creates parent dirs and file if needed.
+    Returns True if the file was cleared (or created empty), False if path is not configured.
+    """
+    root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
+    path = get_agent_memory_file_path(workspace_dir=root, agent_memory_path=agent_memory_path)
+    if path is None:
+        return False
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+        return True
+    except Exception:
+        return False

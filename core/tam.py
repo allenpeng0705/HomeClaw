@@ -32,6 +32,11 @@ try:
 except ImportError:
     CRONITER_AVAILABLE = False
 
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    ZoneInfo = None  # type: ignore
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from base.base import IntentType, Intent, PromptRequest
 from base.prompt_manager import get_prompt_manager
@@ -111,9 +116,10 @@ class TAM:
             await asyncio.sleep(0.1)  # Small sleep to avoid tight loop
     '''
 
-    async def process_intent(self, intent: Intent, request: PromptRequest):
+    async def process_intent(self, intent: Intent, request: PromptRequest) -> Optional[str]:
+        """Process time/scheduling intent. Returns the message sent to the user (if any) so sync inbound can return it; otherwise None."""
         if intent is None:
-            return
+            return None
         try:
             logger.debug(f"TAM process_intent: {intent}")
             # Analyze the intent using LLM and create a data object
@@ -121,22 +127,22 @@ class TAM:
             logger.debug(f"TAM got data_object: {data_object}")
             if data_object is None or not isinstance(data_object, dict):
                 logger.warning("TAM: No valid scheduling data from LLM; cannot schedule.")
-                await self.coreInst.send_response_to_request_channel(
-                    response="I couldn't parse that as a reminder. Try something like: \"Remind me in 5 minutes\" or \"Remind me at 3pm\" with a clear time and what to remind you about.",
-                    request=request,
+                # Return as tool result only (do not send to channel). Model will see it and can call route_to_plugin or other tools; user never sees this internal message.
+                msg = (
+                    "That request was not a scheduling intent. Use route_to_plugin for: list nodes (plugin homeclaw-browser, capability node_list), open URL (browser_navigate), canvas (canvas_update), or other plugins. Use remind_me/record_date/cron_schedule only for time-related requests. Do not repeat this message to the user; call the appropriate tool or reply naturally."
                 )
-                return
+                return msg
             # Use the data object to schedule a job
             self.schedule_job_from_intent(data_object, request)
+            return None
         except Exception as e:
             logger.exception(f"TAM: Error processing intent: {e}")
+            msg = "Something went wrong setting the reminder. Please try again with a clear time (e.g. \"remind me in 5 minutes\")."
             try:
-                await self.coreInst.send_response_to_request_channel(
-                    response="Something went wrong setting the reminder. Please try again with a clear time (e.g. \"remind me in 5 minutes\").",
-                    request=request,
-                )
+                await self.coreInst.send_response_to_request_channel(response=msg, request=request)
             except Exception:
                 pass
+            return msg
 
 
     async def analyze_intent_with_llm(self, intent: Intent) -> Dict:
@@ -432,7 +438,7 @@ class TAM:
                     default_language=getattr(meta, "prompt_default_language", "en"),
                     cache_ttl_seconds=float(getattr(meta, "prompt_cache_ttl_seconds", 0) or 0),
                 )
-                lang = getattr(meta, "main_llm_language", "en") or "en"
+                lang = Util().main_llm_language()
                 content = pm.get_content(
                     "tam", "scheduling", lang=lang,
                     current_datetime=current_datetime, chat_history=chat_history or "", text=text,
@@ -451,6 +457,9 @@ class TAM:
         job_type = data_object.get('type')
         params: Dict = data_object.get('params', {})
 
+        if job_type is None or job_type == "null":
+            logger.debug("TAM: intent is not scheduling (type is null); skip scheduling.")
+            return
         if job_type == "cron":
             cron_expr = data_object.get("cron_expr")
             if not cron_expr:
@@ -487,6 +496,22 @@ class TAM:
 
     async def send_reminder_to_latest_channel(self, message: str):
         await self.coreInst.send_response_to_latest_channel(response=message)
+
+    async def send_reminder_to_channel(self, message: str, params: Optional[Dict[str, Any]] = None):
+        """Send reminder to latest channel or to the channel identified by params['channel_key'] (for per-session cron)."""
+        params = params or {}
+        channel_key = params.get("channel_key")
+        if channel_key and hasattr(self.coreInst, "send_response_to_channel_by_key"):
+            await self.coreInst.send_response_to_channel_by_key(channel_key, message)
+        else:
+            await self.send_reminder_to_latest_channel(message)
+
+    async def _send_reminder_to_channel_safe(self, message: str, params: Optional[Dict[str, Any]] = None) -> None:
+        """Like send_reminder_to_channel but never raises (logs and continues). Used by cron tasks so Core does not crash."""
+        try:
+            await self.send_reminder_to_channel(message, params or {})
+        except Exception as e:
+            logger.exception("TAM: send_reminder_to_channel failed: %s", e)
 
 
     def schedule_repeated_task(self, task, interval_unit, interval, start_time=None):
@@ -597,6 +622,43 @@ class TAM:
         job = self.scheduler.every().day.at(next_run_time.strftime("%H:%M:%S")).do(wrapped_task)
         self.scheduled_jobs.append(job)
 
+    def _cron_now(self, tz: Optional[str] = None) -> datetime:
+        """Current time for cron: timezone-aware if tz given (e.g. 'America/New_York'), else naive local. Never raises."""
+        if tz and ZoneInfo:
+            try:
+                return datetime.now(ZoneInfo(tz))
+            except Exception as e:
+                logger.debug("TAM: Invalid cron tz %s, using local: %s", tz, e)
+        return datetime.now()
+
+    def _cron_prev_run(self, cron_expr: str, before_dt: datetime, tz: Optional[str] = None, max_iter: int = 1000) -> Optional[datetime]:
+        """Last run time for cron_expr that is < before_dt (for restart catch-up). Returns None if none or error. Never raises."""
+        if not CRONITER_AVAILABLE:
+            return None
+        try:
+            start = before_dt - timedelta(days=8)
+            it = croniter(cron_expr, start)
+            prev = None
+            for _ in range(max_iter):
+                n = it.get_next(datetime)
+                if n >= before_dt:
+                    return prev
+                prev = n
+            return prev
+        except Exception as e:
+            logger.debug("TAM: _cron_prev_run failed for %s: %s", cron_expr, e)
+            return None
+
+    def _cron_next_run(self, cron_expr: str, from_dt: datetime, tz: Optional[str] = None) -> datetime:
+        """Next run time for cron_expr after from_dt. Uses tz for timezone-aware scheduling if ZoneInfo available."""
+        if not CRONITER_AVAILABLE:
+            return from_dt + timedelta(minutes=1)
+        try:
+            it = croniter(cron_expr, from_dt)
+            return it.get_next(datetime)
+        except Exception:
+            return from_dt + timedelta(minutes=1)
+
     def schedule_cron_task(
         self,
         task,
@@ -606,47 +668,147 @@ class TAM:
         skip_persist: bool = False,
     ) -> Optional[str]:
         """Schedule a task to run on cron expression (e.g. '0 9 * * *' = daily at 9:00).
+        params may include: message, tz (e.g. 'America/New_York'), enabled (bool), channel_key (for per-session delivery).
         Persisted to DB unless skip_persist=True (e.g. when loading from DB).
-        Returns job_id if scheduled, None if croniter unavailable or invalid expression."""
-        if not CRONITER_AVAILABLE:
-            logger.warning("TAM: croniter not installed; cron scheduling disabled")
-            return None
+        Returns job_id if scheduled, None if croniter unavailable or invalid expression. Never raises."""
         try:
-            it = croniter(cron_expr, datetime.now())
-            next_run = it.get_next(datetime)
-        except Exception as e:
-            logger.error(f"TAM: Invalid cron expression '{cron_expr}': {e}")
-            return None
-        jid = job_id or f"cron_{id(task)}_{datetime.now().timestamp()}"
-        with self._cron_lock:
-            self.cron_jobs.append({
-                "job_id": jid,
-                "cron_expr": cron_expr,
-                "task": task,
-                "next_run": next_run,
-                "params": params or {},
-            })
-        if not skip_persist:
+            if not CRONITER_AVAILABLE:
+                logger.warning("TAM: croniter not installed; cron scheduling disabled")
+                return None
+            params = params or {}
+            now = self._cron_now(params.get("tz"))
             try:
-                tam_storage.save_cron_job(jid, cron_expr, params or {})
+                next_run = self._cron_next_run(cron_expr, now, params.get("tz"))
             except Exception as e:
-                logger.debug("TAM: Could not persist cron job to DB: %s", e)
-        logger.debug(f"TAM: Scheduled cron job {jid} '{cron_expr}' next at {next_run}")
-        return jid
+                logger.error("TAM: Invalid cron expression '%s': %s", cron_expr, e)
+                return None
+            jid = job_id or f"cron_{id(task)}_{datetime.now().timestamp()}"
+            with self._cron_lock:
+                self.cron_jobs.append({
+                    "job_id": jid,
+                    "cron_expr": cron_expr,
+                    "task": task,
+                    "next_run": next_run,
+                    "params": params,
+                })
+            if not skip_persist:
+                try:
+                    tam_storage.save_cron_job(jid, cron_expr, params)
+                except Exception as e:
+                    logger.debug("TAM: Could not persist cron job to DB: %s", e)
+            logger.debug("TAM: Scheduled cron job %s '%s' next at %s", jid, cron_expr, next_run)
+            return jid
+        except Exception as e:
+            logger.warning("TAM: schedule_cron_task failed: %s", e)
+            return None
+
+    def update_cron_job(
+        self,
+        job_id: str,
+        enabled: Optional[bool] = None,
+        cron_expr: Optional[str] = None,
+        params_update: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Update a cron job: enabled, cron_expr, or merge params_update into params. Persists to DB. Returns True if job found and updated. Never raises."""
+        try:
+            with self._cron_lock:
+                job = next((j for j in self.cron_jobs if j.get("job_id") == job_id), None)
+                if not job:
+                    return False
+                params = dict(job.get("params") or {})
+                if enabled is not None:
+                    params["enabled"] = enabled
+                if params_update:
+                    params.update(params_update)
+                if cron_expr is not None:
+                    job["cron_expr"] = cron_expr
+                    tz = params.get("tz")
+                    now = self._cron_now(tz)
+                    try:
+                        job["next_run"] = self._cron_next_run(cron_expr, now, tz)
+                    except Exception:
+                        job["next_run"] = now + timedelta(minutes=1)
+                job["params"] = params
+            try:
+                pupdate = dict(params_update) if params_update else {}
+                if enabled is not None:
+                    pupdate["enabled"] = enabled
+                return tam_storage.update_cron_job(job_id, cron_expr=cron_expr, params_update=pupdate if pupdate else params)
+            except Exception as e:
+                logger.debug("TAM: update_cron_job persist failed: %s", e)
+                return True  # in-memory updated
+        except Exception as e:
+            logger.warning("TAM: update_cron_job failed: %s", e)
+            return False
+
+    def run_cron_job_now(self, job_id: str) -> bool:
+        """Run a cron job once immediately (like OpenClaw cron.run force). Advances next_run so it does not fire again in the same tick. Records run state. Returns True if job found and run. Never raises."""
+        try:
+            with self._cron_lock:
+                job = next((j for j in self.cron_jobs if j.get("job_id") == job_id), None)
+                if not job:
+                    return False
+                task = job.get("task")
+                tz = (job.get("params") or {}).get("tz")
+                now = self._cron_now(tz)
+                try:
+                    job["next_run"] = self._cron_next_run(job.get("cron_expr", "0 * * * *"), now, tz)
+                except Exception:
+                    job["next_run"] = now + timedelta(minutes=1)
+            self._run_one_cron_job(job)
+            return True
+        except Exception as e:
+            logger.warning("TAM: run_cron_job_now %s failed: %s", job_id, e)
+            return False
+
+    def get_cron_status(self) -> Dict[str, Any]:
+        """Scheduler status for UI: scheduler_enabled, next_wake_at (min of next_run), jobs_count. Never raises."""
+        try:
+            if not self.cron_jobs:
+                return {"scheduler_enabled": True, "next_wake_at": None, "jobs_count": 0}
+            with self._cron_lock:
+                next_wake = None
+                for j in self.cron_jobs:
+                    try:
+                        if not (j.get("params") or {}).get("enabled", True):
+                            continue
+                        nr = j.get("next_run")
+                        if nr is not None and (next_wake is None or nr < next_wake):
+                            next_wake = nr
+                    except Exception:
+                        continue
+            nw = None
+            if next_wake is not None:
+                try:
+                    nw = next_wake.isoformat() if hasattr(next_wake, "isoformat") else str(next_wake)
+                except Exception:
+                    nw = str(next_wake)
+            return {
+                "scheduler_enabled": True,
+                "next_wake_at": nw,
+                "jobs_count": len(self.cron_jobs),
+            }
+        except Exception as e:
+            logger.debug("TAM: get_cron_status failed: %s", e)
+            return {"scheduler_enabled": True, "next_wake_at": None, "jobs_count": 0}
 
     def remove_cron_job(self, job_id: str) -> bool:
-        """Remove a cron job by job_id (memory and DB). Returns True if removed, False if not found."""
-        with self._cron_lock:
-            before = len(self.cron_jobs)
-            self.cron_jobs = [j for j in self.cron_jobs if j.get("job_id") != job_id]
-            removed = len(self.cron_jobs) < before
-        if removed:
-            try:
-                tam_storage.remove_cron_job(job_id)
-            except Exception as e:
-                logger.debug("TAM: Could not remove cron job from DB: %s", e)
-            logger.debug(f"TAM: Removed cron job {job_id}")
-        return removed
+        """Remove a cron job by job_id (memory and DB). Returns True if removed, False if not found. Never raises."""
+        try:
+            with self._cron_lock:
+                before = len(self.cron_jobs)
+                self.cron_jobs = [j for j in self.cron_jobs if j.get("job_id") != job_id]
+                removed = len(self.cron_jobs) < before
+            if removed:
+                try:
+                    tam_storage.remove_cron_job(job_id)
+                except Exception as e:
+                    logger.debug("TAM: Could not remove cron job from DB: %s", e)
+                logger.debug("TAM: Removed cron job %s", job_id)
+            return removed
+        except Exception as e:
+            logger.warning("TAM: remove_cron_job failed: %s", e)
+            return False
 
     def _load_recorded_events(self) -> None:
         """Load recorded events from file (no LLM; from record_date tool). Removes past events on load so the list does not grow indefinitely."""
@@ -712,25 +874,87 @@ class TAM:
 
     _RECURRING_CANCEL_HINT = "\n(To cancel this recurring reminder, say 'list my recurring reminders' and ask to remove it.)"
 
+    def _run_missed_cron_jobs_after_load(self, loaded_jobs: List[Dict[str, Any]]) -> None:
+        """After loading cron jobs from DB, run once any job that would have been due while Core was down (restart catch-up). At most one run per job. Never raises."""
+        if not loaded_jobs:
+            return
+        now = datetime.now()
+        for job in loaded_jobs:
+            try:
+                if not (job.get("params") or {}).get("enabled", True):
+                    continue
+                params = job.get("params") or {}
+                tz = params.get("tz")
+                last_run_at = None
+                lra = params.get("last_run_at")
+                if lra:
+                    try:
+                        if isinstance(lra, str):
+                            last_run_at = datetime.fromisoformat(lra.replace("Z", "+00:00"))
+                        elif hasattr(lra, "year"):
+                            last_run_at = lra
+                    except Exception:
+                        pass
+                cron_expr = job.get("cron_expr") or "0 * * * *"
+                prev_run = self._cron_prev_run(cron_expr, now, tz)
+                if prev_run is None:
+                    continue
+                if last_run_at is not None and prev_run <= last_run_at:
+                    continue
+                logger.info("TAM: Catch-up run for cron job %s (missed while Core was down)", job.get("job_id"))
+                self._run_one_cron_job(job)
+                # Advance next_run so it does not fire again in the next scheduler tick
+                with self._cron_lock:
+                    try:
+                        now2 = self._cron_now(tz)
+                        job["next_run"] = self._cron_next_run(cron_expr, now2, tz)
+                    except Exception:
+                        job["next_run"] = self._cron_now(tz) + timedelta(minutes=1)
+            except Exception as e:
+                logger.warning("TAM: Catch-up for job %s failed: %s", job.get("job_id"), e)
+
     def _load_cron_jobs_from_db(self) -> None:
-        """Load persisted cron jobs and re-schedule them (survives Core restart)."""
+        """Load persisted cron jobs and re-schedule them (survives Core restart). Runs missed jobs once on restart (catch-up). Uses params (message, tz, enabled, channel_key) for delivery."""
         try:
             rows = tam_storage.load_cron_jobs()
-            for row in rows:
-                msg = (row.get("params") or {}).get("message", "")
-                # Append cancel hint so user knows they can list and remove (same as newly scheduled cron)
-                task = (lambda m: lambda: asyncio.run(self.send_reminder_to_latest_channel(m + self._RECURRING_CANCEL_HINT)))(msg)
-                self.schedule_cron_task(
+        except Exception as e:
+            logger.warning("TAM: Could not load cron jobs from DB: %s", e)
+            return
+        loaded_jobs: List[Dict[str, Any]] = []
+        for row in rows:
+            try:
+                job_id = row.get("job_id")
+                cron_expr = row.get("cron_expr")
+                if not job_id or not cron_expr:
+                    continue
+                params = dict(row.get("params") or {})
+                msg = params.get("message", "")
+                task = (
+                    lambda m, p: lambda: asyncio.run(
+                        self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
+                    )
+                )(msg, params)
+                jid = self.schedule_cron_task(
                     task,
-                    row["cron_expr"],
-                    job_id=row["job_id"],
-                    params=row.get("params") or {},
+                    cron_expr,
+                    job_id=job_id,
+                    params=params,
                     skip_persist=True,
                 )
-            if rows:
-                logger.debug("TAM: Loaded %d cron job(s) from DB", len(rows))
+                if jid:
+                    with self._cron_lock:
+                        job = next((j for j in self.cron_jobs if j.get("job_id") == jid), None)
+                        if job:
+                            loaded_jobs.append(job)
+            except Exception as e:
+                logger.warning("TAM: Skip loading cron job %s: %s", row.get("job_id"), e)
+        if rows:
+            logger.debug("TAM: Loaded %d cron job(s) from DB", len(rows))
+        # Restart catch-up: run any job that would have been due while Core was down (at most one run per job)
+        try:
+            self._run_missed_cron_jobs_after_load(loaded_jobs)
         except Exception as e:
-            logger.debug("TAM: Could not load cron jobs from DB: %s", e)
+            logger.warning("TAM: Catch-up after load failed: %s", e)
 
     def _load_one_shot_reminders_from_db(self) -> None:
         """Load persisted one-shot reminders with run_at > now and re-schedule them (survives Core restart). Expired ones are deleted from DB."""
@@ -837,32 +1061,87 @@ class TAM:
         return "Recorded events: " + "; ".join(lines) if lines else ""
 
     def _run_cron_pending(self) -> None:
-        """Run any cron jobs that are due and advance their next_run."""
-        if not CRONITER_AVAILABLE or not self.cron_jobs:
-            return
-        now = datetime.now()
-        with self._cron_lock:
+        """Run any cron jobs that are due; advance next_run; record run history. Never raises (logs and continues)."""
+        try:
+            if not CRONITER_AVAILABLE or not self.cron_jobs:
+                return
             to_run = []
-            for job in self.cron_jobs:
-                if job["next_run"] <= now:
-                    to_run.append(job)
+            with self._cron_lock:
+                for job in self.cron_jobs:
+                    try:
+                        if not (job.get("params") or {}).get("enabled", True):
+                            continue
+                        tz = (job.get("params") or {}).get("tz")
+                        now = self._cron_now(tz)
+                        nr = job.get("next_run")
+                        if nr is None:
+                            to_run.append(job)
+                        else:
+                            try:
+                                if nr <= now:
+                                    to_run.append(job)
+                            except (TypeError, ValueError):
+                                to_run.append(job)
+                    except Exception as e:
+                        logger.debug("TAM: Skip job %s in pending check: %s", job.get("job_id"), e)
+                for job in to_run:
+                    try:
+                        tz = (job.get("params") or {}).get("tz")
+                        now = self._cron_now(tz)
+                        job["next_run"] = self._cron_next_run(job.get("cron_expr", "0 * * * *"), now, tz)
+                    except Exception:
+                        job["next_run"] = self._cron_now(tz) + timedelta(minutes=1)
             for job in to_run:
-                try:
-                    it = croniter(job["cron_expr"], now)
-                    job["next_run"] = it.get_next(datetime)
-                except Exception:
-                    job["next_run"] = now + timedelta(minutes=1)
-        for job in to_run:
-            try:
-                asyncio.run(job["task"]())
-            except Exception as e:
-                logger.exception(f"TAM: Cron job {job.get('job_id')} failed: {e}")
+                self._run_one_cron_job(job)
+        except Exception as e:
+            logger.exception("TAM: _run_cron_pending failed (scheduler continues): %s", e)
 
-    def run_scheduler(self):
+    def _run_one_cron_job(self, job: Dict[str, Any]) -> None:
+        """Run a single cron job and persist run state. Never raises."""
+        jid = job.get("job_id") or "unknown"
+        task = job.get("task")
+        started_at = time.perf_counter()
+        try:
+            if task:
+                asyncio.run(task())
+            status, err = "ok", None
+        except Exception as e:
+            logger.exception("TAM: Cron job %s failed: %s", jid, e)
+            status, err = "error", str(e)[:500]
+        duration_ms = int((time.perf_counter() - started_at) * 1000)
+        try:
+            tam_storage.update_cron_job_state(
+                jid,
+                last_run_at=datetime.now(),
+                last_status=status,
+                last_error=err,
+                last_duration_ms=duration_ms,
+            )
+        except Exception as ex:
+            logger.debug("TAM: Could not persist cron run state: %s", ex)
+        params = job.get("params") or {}
+        params["last_run_at"] = datetime.now().isoformat()
+        params["last_status"] = status
+        params["last_error"] = err
+        params["last_duration_ms"] = duration_ms
+        job["params"] = params
+
+    def run_scheduler(self) -> None:
+        """Main scheduler loop. Never exits; all exceptions are caught so Core does not crash."""
         while True:
-            self.scheduler.run_pending()
-            self._run_cron_pending()
-            time.sleep(10)
+            try:
+                self.scheduler.run_pending()
+            except Exception as e:
+                logger.exception("TAM: scheduler.run_pending failed: %s", e)
+            try:
+                self._run_cron_pending()
+            except Exception as e:
+                logger.exception("TAM: _run_cron_pending failed: %s", e)
+            try:
+                time.sleep(10)
+            except Exception as e:
+                logger.debug("TAM: sleep interrupted: %s", e)
+                time.sleep(10)
 
     def run(self):
         self.thread = threading.Thread(target=self.run_scheduler)

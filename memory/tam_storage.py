@@ -81,6 +81,61 @@ def remove_cron_job(job_id: str) -> bool:
             pass
 
 
+def update_cron_job(
+    job_id: str,
+    cron_expr: Optional[str] = None,
+    params_update: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Update a cron job: merge params_update into params; optionally set cron_expr. Returns True on success."""
+    session = _get_session()
+    try:
+        row = session.query(TamCronJobModel).filter(TamCronJobModel.job_id == job_id).first()
+        if not row:
+            return False
+        params = {}
+        if row.params:
+            try:
+                params = json.loads(row.params)
+            except Exception:
+                pass
+        if params_update:
+            params.update(params_update)
+        if cron_expr is not None:
+            row.cron_expr = cron_expr
+        row.params = json.dumps(params)
+        session.commit()
+        return True
+    except Exception as e:
+        logger.warning("TAM storage: update_cron_job failed: %s", e)
+        session.rollback()
+        return False
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+def update_cron_job_state(
+    job_id: str,
+    last_run_at: Optional[datetime] = None,
+    last_status: Optional[str] = None,
+    last_error: Optional[str] = None,
+    last_duration_ms: Optional[int] = None,
+) -> bool:
+    """Update run-history state for a cron job (stored in params). Returns True on success."""
+    state: Dict[str, Any] = {}
+    if last_run_at is not None:
+        state["last_run_at"] = last_run_at.isoformat() if hasattr(last_run_at, "isoformat") else str(last_run_at)
+    if last_status is not None:
+        state["last_status"] = last_status
+    if last_error is not None:
+        state["last_error"] = last_error
+    if last_duration_ms is not None:
+        state["last_duration_ms"] = last_duration_ms
+    return update_cron_job(job_id, params_update=state) if state else True
+
+
 def cleanup_expired_one_shot_reminders(before: Optional[datetime] = None) -> int:
     """Delete one-shot reminders with run_at < before (default: now). Returns number deleted. Call on load so expired reminders don't accumulate."""
     session = _get_session()

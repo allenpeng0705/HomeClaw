@@ -112,35 +112,65 @@ class Channel(BaseChannel):
                 action = ''
                 images = []
 
-                if msgtype == 'm.image':
-                    # Download image from mxc URL and send to Core as TEXTWITHIMAGE
-                    mxc_url = content.get('url') or content.get('info', {}).get('url')
-                    if mxc_url:
-                        try:
-                            if mxc_url.startswith('mxc://'):
-                                server_media = mxc_url[6:]
-                                if '/' in server_media:
-                                    server, media_id = server_media.split('/', 1)
-                                    base = self._home_srv.replace('https://', '').replace('http://', '').rstrip('/')
-                                    download_url = f"https://{base}/_matrix/media/r0/download/{server}/{media_id}"
-                                    async with httpx.AsyncClient() as client:
-                                        r = await client.get(download_url, timeout=30.0)
-                                        if r.status_code == 200:
-                                            suffix = content.get('info', {}).get('mimetype', 'image/png').split('/')[-1] or 'png'
-                                            with tempfile.NamedTemporaryFile(delete=False, suffix='.' + suffix) as f:
-                                                f.write(r.content)
-                                                images.append(f.name)
-                                else:
-                                    logger.warning("Invalid mxc URL: %s", mxc_url)
-                            else:
-                                logger.warning("Not an mxc URL: %s", mxc_url)
-                        except Exception as e:
-                            logger.exception(e)
+                videos = []
+                audios = []
+                files_list = []
+                mxc_url = content.get('url') or content.get('info', {}).get('url')
+
+                if msgtype == 'm.image' and mxc_url:
+                    try:
+                        if mxc_url.startswith('mxc://'):
+                            server_media = mxc_url[6:]
+                            if '/' in server_media:
+                                server, media_id = server_media.split('/', 1)
+                                base = self._home_srv.replace('https://', '').replace('http://', '').rstrip('/')
+                                download_url = f"https://{base}/_matrix/media/r0/download/{server}/{media_id}"
+                                async with httpx.AsyncClient() as client:
+                                    r = await client.get(download_url, timeout=30.0)
+                                    if r.status_code == 200:
+                                        suffix = (content.get('info', {}).get('mimetype') or 'image/png').split('/')[-1] or 'png'
+                                        with tempfile.NamedTemporaryFile(delete=False, suffix='.' + suffix) as f:
+                                            f.write(r.content)
+                                            images.append(f.name)
+                    except Exception as e:
+                        logger.debug("Matrix image download: %s", e)
                     text = text or 'Image'
+                    action = 'respond'
+                elif msgtype in ('m.video', 'm.audio', 'm.file') and mxc_url:
+                    try:
+                        if mxc_url.startswith('mxc://'):
+                            server_media = mxc_url[6:]
+                            if '/' in server_media:
+                                server, media_id = server_media.split('/', 1)
+                                base = self._home_srv.replace('https://', '').replace('http://', '').rstrip('/')
+                                download_url = f"https://{base}/_matrix/media/r0/download/{server}/{media_id}"
+                                async with httpx.AsyncClient() as client:
+                                    r = await client.get(download_url, timeout=60.0)
+                                    if r.status_code == 200:
+                                        mimetype = content.get('info', {}).get('mimetype') or 'application/octet-stream'
+                                        suffix = mimetype.split('/')[-1] or 'bin'
+                                        if msgtype == 'm.video':
+                                            suffix = 'mp4' if 'video' in mimetype else suffix
+                                        elif msgtype == 'm.audio':
+                                            suffix = 'm4a' if 'mpeg' not in mimetype else 'mp3'
+                                        with tempfile.NamedTemporaryFile(delete=False, suffix='.' + suffix) as f:
+                                            f.write(r.content)
+                                            path = f.name
+                                        if msgtype == 'm.video':
+                                            videos.append(path)
+                                            text = text or 'Video'
+                                        elif msgtype == 'm.audio':
+                                            audios.append(path)
+                                            text = text or 'Audio'
+                                        else:
+                                            files_list.append(path)
+                                            text = text or 'File'
+                    except Exception as e:
+                        logger.debug("Matrix media download: %s", e)
                     action = 'respond'
                 else:
                     if isinstance(text, str):
-                        if text.startswith('+') or text.startswith('+'):
+                        if text.startswith('+') or text.startswith('＋'):
                             action = 'store'
                             text = text[1:]
                         elif text.startswith('?') or text.startswith('？'):
@@ -148,6 +178,17 @@ class Channel(BaseChannel):
                             text = text[1:]
                         else:
                             action = 'respond'
+
+                if not text:
+                    text = ''
+                if videos:
+                    contentType = ContentType.VIDEO.value
+                elif audios:
+                    contentType = ContentType.AUDIO.value
+                elif images:
+                    contentType = ContentType.TEXTWITHIMAGE.value
+                else:
+                    contentType = ContentType.TEXT.value
 
                 request = PromptRequest(
                     request_id=msg_id,
@@ -157,14 +198,15 @@ class Channel(BaseChannel):
                     user_name=sender,
                     app_id=im_name,
                     user_id=sender,
-                    contentType=ContentType.TEXTWITHIMAGE.value if images else ContentType.TEXT.value,
+                    contentType=contentType,
                     text=text,
                     action=action,
                     host=self.metadata.host,
                     port=self.metadata.port,
                     images=images,
-                    videos=[],
-                    audios=[],
+                    videos=videos,
+                    audios=audios,
+                    files=files_list if files_list else None,
                     timestamp=datetime.now().timestamp()
                 )
 
@@ -182,27 +224,37 @@ class Channel(BaseChannel):
         while True:
             try:
                 response: AsyncResponse = await self.message_queue.get()
-                logger.debug(f"Got response: {response} from message queue")
-                """Handle the response from the core"""
-                request_id = response.request_id
-                response_data = response.response_data
-                room_id = response.request_metadata['matrix_room_id']
-                if 'text' in response_data:
-                    text = response_data['text']
-                    logger.debug(f"sending text: {text} to room {room_id}")   
-                    try:
-                        await self.bot.api.send_text_message(room_id, text)
-                    except asyncio.TimeoutError:
-                        logger.error(f"Timeout sending message to room {room_id}")
-                    except Exception as e:
-                        logger.error(f"Error sending message: {str(e)}")
-                    
-                if 'image' in response_data:
-                    image_path = response_data['image']
-                    await self.bot.api.send_image_message(room_id=room_id, image_filepath=image_path)
-                if 'video' in response_data:
-                    video_path = response_data['video']
-                    await self.bot.api.send_video_message(room_id=room_id, video_filepath=video_path)   
+                logger.debug(f"Got response from message queue")
+                response_data = getattr(response, "response_data", None) or {}
+                request_meta = getattr(response, "request_metadata", None) or {}
+                room_id = request_meta.get("matrix_room_id")
+                if not room_id:
+                    logger.debug("Matrix: no room_id in response")
+                    self.message_queue.task_done()
+                    continue
+                if "text" in response_data:
+                    text = response_data.get("text")
+                    if isinstance(text, str) and text:
+                        try:
+                            await self.bot.api.send_text_message(room_id, text)
+                        except asyncio.TimeoutError:
+                            logger.error("Timeout sending message to room %s", room_id)
+                        except Exception as e:
+                            logger.error("Error sending message: %s", e)
+                if "image" in response_data:
+                    image_path = response_data.get("image")
+                    if isinstance(image_path, str) and os.path.isfile(image_path):
+                        try:
+                            await self.bot.api.send_image_message(room_id=room_id, image_filepath=image_path)
+                        except Exception as e:
+                            logger.error("Error sending image: %s", e)
+                if "video" in response_data:
+                    video_path = response_data.get("video")
+                    if isinstance(video_path, str) and os.path.isfile(video_path):
+                        try:
+                            await self.bot.api.send_video_message(room_id=room_id, video_filepath=video_path)
+                        except Exception as e:
+                            logger.error("Error sending video: %s", e)
                 self.message_queue.task_done()
             except asyncio.TimeoutError:
                 continue

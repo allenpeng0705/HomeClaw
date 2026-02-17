@@ -60,6 +60,32 @@ class Channel(BaseChannel):
         self.chats = {}
 
 
+    def _download_media_to_path_or_data_url(self, client: NewClient, message: MessageEv, subdir: str, default_ext: str) -> str | None:
+        """Download media from message to channel docs folder or return data URL. Returns path or data URL, or None on failure. Never raises."""
+        try:
+            root = Path(__file__).resolve().parent.parent.parent
+            docs_dir = root / "channels" / "whatsapp" / "docs"
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            out_path = docs_dir / f"{subdir}_{message.Info.ID}_{datetime.now().strftime('%Y%m%d%H%M%S')}{default_ext}"
+            result = None
+            if hasattr(client, "download_media") and callable(getattr(client, "download_media")):
+                result = client.download_media(message)
+            elif hasattr(message, "download_media") and callable(getattr(message, "download_media")):
+                result = message.download_media()
+            if not result:
+                return None
+            if isinstance(result, bytes):
+                out_path.write_bytes(result)
+                return str(out_path.resolve())
+            if isinstance(result, str) and os.path.isfile(result):
+                import shutil
+                shutil.copy2(result, out_path)
+                return str(out_path.resolve())
+            return None
+        except Exception as e:
+            logger.debug("WhatsApp media download: %s", e)
+            return None
+
     def handle_message(self, client: NewClient, message: MessageEv):
         try:
             sender = message.Info.MessageSource.Sender.User
@@ -67,74 +93,104 @@ class Channel(BaseChannel):
             chat = message.Info.MessageSource.Chat
             self.chats[msg_id] = chat
 
-            im_name = 'whatsapp'
-            sender_str = 'whatsapp:' + sender
-            content = ''
-            text = ''
-            action = 'respond'
+            im_name = "whatsapp"
+            sender_str = "whatsapp:" + sender
+            text = ""
+            action = "respond"
             images = []
+            videos = []
+            audios = []
+            files = []
 
-            # Image message: message.Message.imageMessage
-            if message.Message.HasField('imageMessage'):
+            # Image
+            if message.Message.HasField("imageMessage"):
                 im_msg = message.Message.imageMessage
-                content = getattr(im_msg, 'caption', '') or 'Image'
-                text = content
+                text = getattr(im_msg, "caption", None) or "Image"
                 try:
-                    # Neonize may expose download_media or similar; try to get image bytes/path
-                    if hasattr(client, 'download_media') and callable(getattr(client, 'download_media')):
+                    if hasattr(client, "download_media") and callable(getattr(client, "download_media")):
                         result = client.download_media(message)
-                        if result:
-                            if isinstance(result, bytes):
-                                b64 = base64.b64encode(result).decode('ascii')
-                                images.append(f"data:image/jpeg;base64,{b64}")
-                            elif isinstance(result, str) and os.path.isfile(result):
-                                with open(result, 'rb') as f:
-                                    b64 = base64.b64encode(f.read()).decode('ascii')
-                                images.append(f"data:image/jpeg;base64,{b64}")
-                    elif hasattr(message, 'download_media') and callable(getattr(message, 'download_media')):
-                        result = message.download_media()
-                        if result:
-                            if isinstance(result, bytes):
-                                b64 = base64.b64encode(result).decode('ascii')
-                                images.append(f"data:image/jpeg;base64,{b64}")
-                            elif isinstance(result, str) and os.path.isfile(result):
-                                with open(result, 'rb') as f:
-                                    b64 = base64.b64encode(f.read()).decode('ascii')
-                                images.append(f"data:image/jpeg;base64,{b64}")
+                    else:
+                        result = message.download_media() if hasattr(message, "download_media") and callable(getattr(message, "download_media")) else None
+                    if result:
+                        if isinstance(result, bytes):
+                            images.append(f"data:image/jpeg;base64,{base64.b64encode(result).decode('ascii')}")
+                        elif isinstance(result, str) and os.path.isfile(result):
+                            with open(result, "rb") as f:
+                                images.append(f"data:image/jpeg;base64,{base64.b64encode(f.read()).decode('ascii')}")
                 except Exception as e:
                     logger.debug("WhatsApp image download: %s", e)
                 if not text:
-                    text = 'Image'
+                    text = "Image"
+            # Video
+            elif message.Message.HasField("videoMessage"):
+                text = getattr(message.Message.videoMessage, "caption", None) or "Video"
+                path = self._download_media_to_path_or_data_url(client, message, "video", ".mp4")
+                if path:
+                    videos = [path]
+                if not text:
+                    text = "Video"
+            # Audio / voice
+            elif message.Message.HasField("audioMessage") or message.Message.HasField("documentMessage"):
+                is_audio = message.Message.HasField("audioMessage")
+                if is_audio:
+                    text = "Audio"
+                    path = self._download_media_to_path_or_data_url(client, message, "audio", ".m4a")
+                    if path:
+                        audios = [path]
+                else:
+                    doc = message.Message.documentMessage
+                    text = getattr(doc, "caption", None) or getattr(doc, "fileName", None) or "Document"
+                    path = self._download_media_to_path_or_data_url(client, message, "doc", ".bin")
+                    if path:
+                        files = [path]
+                    if not text:
+                        text = "Document"
             else:
-                content = message.Message.conversation or (message.Message.extendedTextMessage.text if message.Message.HasField('extendedTextMessage') else '')
-                content = content or ''
-                logger.debug(f"whatsapp Received message from {sender_str}: {content}")
-                if content.startswith('+') or content.startswith('+'):
-                    action = 'store'
-                    text = content[1:]
-                elif content.startswith('?') or content.startswith('？'):
-                    action = 'retrieve'
-                    text = content[1:]
+                content = message.Message.conversation or (message.Message.extendedTextMessage.text if message.Message.HasField("extendedTextMessage") else "")
+                content = (content or "").strip()
+                logger.debug(f"whatsapp Received message from {sender_str}: {content[:64]}")
+                if content.startswith("+") or content.startswith("＋"):
+                    action = "store"
+                    text = content[1:].strip()
+                elif content.startswith("?") or content.startswith("？"):
+                    action = "retrieve"
+                    text = content[1:].strip()
                 else:
                     text = content
+
+            if not text:
+                text = "(no text)"
+
+            # Determine contentType
+            if videos:
+                contentType = ContentType.VIDEO.value
+            elif audios:
+                contentType = ContentType.AUDIO.value
+            elif images:
+                contentType = ContentType.TEXTWITHIMAGE.value
+            elif files:
+                contentType = ContentType.TEXT.value
+            else:
+                contentType = ContentType.TEXT.value
 
             request = PromptRequest(
                 request_id=msg_id,
                 channel_name=self.metadata.name,
-                request_metadata={'sender': sender_str, 'msg_id': msg_id, 'channel': 'whatsapp'},
+                request_metadata={"sender": sender_str, "msg_id": msg_id, "channel": "whatsapp"},
                 channelType=ChannelType.IM.value,
                 user_name=sender_str,
                 app_id=im_name,
                 user_id=sender_str,
-                contentType=ContentType.TEXTWITHIMAGE.value if images else ContentType.TEXT.value,
+                contentType=contentType,
                 text=text,
                 action=action,
                 host=self.metadata.host,
                 port=self.metadata.port,
-                images=images,
-                videos=[],
-                audios=[],
-                timestamp=datetime.now().timestamp()
+                images=images or [],
+                videos=videos or [],
+                audios=audios or [],
+                files=files if files else None,
+                timestamp=datetime.now().timestamp(),
             )
             self.syncTransferTocore(request=request)
 
@@ -152,20 +208,23 @@ class Channel(BaseChannel):
                 logger.debug(f"Got response: {response} from message queue")
                 """Handle the response from the core"""
                 request_id = response.request_id
-                response_data = response.response_data
-                to = response.request_metadata['sender']
-                msg_id = response.request_metadata['msg_id']
-                if 'text' in response_data:
-                    text = response_data['text']
-                    logger.debug(f"sending text: {text} to {to}") 
-                    chat = self.chats.pop(msg_id)  
-                    try:
-                        client.send_message(chat, text)
-                    except asyncio.TimeoutError:
-                        logger.error(f"Timeout sending message to whatsapp user {to}")
-                    except Exception as e:
-                        logger.error(f"Error sending message: {str(e)}")
-                    
+                response_data = getattr(response, "response_data", None) or {}
+                request_meta = getattr(response, "request_metadata", None) or {}
+                to = request_meta.get("sender") or ""
+                msg_id = request_meta.get("msg_id") or ""
+                chat = self.chats.pop(msg_id, None) if msg_id else None
+                if "text" in response_data and chat:
+                    text = response_data.get("text") or ""
+                    if isinstance(text, str) and text:
+                        logger.debug(f"sending text to {to}")
+                        try:
+                            client.send_message(chat, text)
+                        except asyncio.TimeoutError:
+                            logger.error(f"Timeout sending message to whatsapp user {to}")
+                        except Exception as e:
+                            logger.error(f"Error sending message: {str(e)}")
+                elif not chat:
+                    logger.debug("WhatsApp: no chat for msg_id=%s", msg_id)
 
                 self.message_queue.task_done()
             except asyncio.TimeoutError:

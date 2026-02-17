@@ -124,7 +124,12 @@ async def handle_event(request: Request):
     message_id = message.get("message_id", "")
     content_str = message.get("content", "{}")
     text = extract_message_text(content_str)
-    if not text or not chat_id:
+    if not chat_id:
+        return JSONResponse(status_code=200, content={})
+    has_media = bool(
+        message.get("images") or message.get("videos") or message.get("audios") or message.get("files")
+    )
+    if not text and not has_media:
         return JSONResponse(status_code=200, content={})
     sender_id_obj = sender.get("sender_id") or sender
     sender_id = sender_id_obj.get("user_id") if isinstance(sender_id_obj, dict) else str(sender_id_obj or "")
@@ -134,10 +139,19 @@ async def handle_event(request: Request):
     user_id = f"feishu_{sender_id}" if sender_id else "feishu_unknown"
     payload = {
         "user_id": user_id,
-        "text": text,
+        "text": text or "(no text)",
         "channel_name": "feishu",
         "user_name": user_name,
     }
+    # Optional: attachment data URLs (if event includes message.resources or bridge provides images/videos/audios/files)
+    if message.get("images"):
+        payload["images"] = message["images"]
+    if message.get("videos"):
+        payload["videos"] = message["videos"]
+    if message.get("audios"):
+        payload["audios"] = message["audios"]
+    if message.get("files"):
+        payload["files"] = message["files"]
     try:
         async with httpx.AsyncClient() as client:
             r = await client.post(INBOUND_URL, json=payload, timeout=120.0)

@@ -43,7 +43,13 @@ class HomeClawDingTalkHandler(ChatbotHandler):
 
         text_list = incoming_message.get_text_list() if incoming_message else []
         text = " ".join(text_list).strip() if text_list else ""
-        if not text:
+        # Optional: attachment data URLs if bridge/SDK provides them (e.g. from callback_message.data)
+        raw = callback_message.data if isinstance(callback_message.data, dict) else {}
+        images = raw.get("images") or getattr(incoming_message, "images", None) or []
+        videos = raw.get("videos") or getattr(incoming_message, "videos", None) or []
+        audios = raw.get("audios") or getattr(incoming_message, "audios", None) or []
+        files = raw.get("files") or getattr(incoming_message, "files", None) or []
+        if not text and not (images or videos or audios or files):
             return AckMessage.STATUS_OK, "ok"
 
         user_id = "dingtalk_{}".format(
@@ -52,10 +58,18 @@ class HomeClawDingTalkHandler(ChatbotHandler):
         user_name = incoming_message.sender_nick or user_id
         payload = {
             "user_id": user_id,
-            "text": text,
+            "text": text or "(no text)",
             "channel_name": "dingtalk",
             "user_name": user_name,
         }
+        if images:
+            payload["images"] = images
+        if videos:
+            payload["videos"] = videos
+        if audios:
+            payload["audios"] = audios
+        if files:
+            payload["files"] = files
         try:
             async with httpx.AsyncClient() as client:
                 r = await client.post(INBOUND_URL, json=payload, timeout=120.0)
