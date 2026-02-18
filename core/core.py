@@ -1,7 +1,7 @@
 import asyncio
 import base64
 import copy
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import importlib
 import json
 import logging
@@ -24,9 +24,9 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="huggingface_hu
 import chromadb
 import chromadb.config
 import aiohttp
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
-from typing import Optional, Dict, List, Tuple, Union
+from typing import Any, Optional, Dict, List, Tuple, Union
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi import FastAPI, Request, Response
 from loguru import logger
@@ -43,10 +43,10 @@ from jinja2 import Template
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.orchestrator import Orchestrator
 from base.PluginManager import PluginManager
-from base.util import Util
+from base.util import Util, redact_params_for_log
 from base.base import (
     LLM, EmbeddingRequest, Intent, IntentType, RegisterChannelRequest, PromptRequest, AsyncResponse, User, InboundRequest,
-    ExternalPluginRegisterRequest, PluginLLMGenerateRequest,
+    ExternalPluginRegisterRequest, PluginLLMGenerateRequest, PluginResult,
 )
 from base.BaseChannel import BaseChannel
 from base.BasePlugin import BasePlugin
@@ -60,7 +60,15 @@ from memory.chat.chat import ChatHistory
 from memory.base import MemoryBase, VectorStoreBase, EmbeddingBase, LLMBase
 from base.prompt_manager import get_prompt_manager
 from memory.prompts import RESPONSE_TEMPLATE, MEMORY_CHECK_PROMPT
-from base.workspace import get_workspace_dir, load_workspace, build_workspace_system_prefix, load_agent_memory_file, clear_agent_memory_file
+from base.workspace import (
+    get_workspace_dir,
+    load_workspace,
+    build_workspace_system_prefix,
+    load_agent_memory_file,
+    clear_agent_memory_file,
+    load_daily_memory_for_dates,
+    clear_daily_memory_for_dates,
+)
 from base.skills import get_skills_dir, load_skills, build_skills_system_block
 from base.tools import ToolContext, get_tool_registry, ROUTING_RESPONSE_ALREADY_SENT
 from base import last_channel as last_channel_store
@@ -86,6 +94,40 @@ def _truncate_for_log(s: str, max_len: int = 2000) -> str:
     if not s or len(s) <= max_len:
         return s or ""
     return s[:max_len] + "\n... (truncated)"
+
+
+def _infer_route_to_plugin_fallback(query: str) -> Optional[Dict[str, Any]]:
+    """
+    When the LLM returns no tool call (e.g. model doesn't support tools or replied "No"), infer route_to_plugin
+    from clear user intent so the action still runs. Returns dict with plugin_id, capability_id, parameters or None.
+    """
+    if not query or not isinstance(query, str):
+        return None
+    q = query.strip().lower()
+    # "take a photo on test-node-1", "photo on X" -> node_camera_snap
+    if "photo" in q or "snap" in q:
+        node_id = None
+        for m in re.finditer(r"(?:on\s+)([a-zA-Z0-9_-]+)", query, re.IGNORECASE):
+            node_id = m.group(1)
+        if not node_id:
+            m = re.search(r"([a-zA-Z0-9]+-node-[a-zA-Z0-9]+)", query, re.IGNORECASE)
+            node_id = m.group(1) if m else None
+        if node_id:
+            return {"plugin_id": "homeclaw-browser", "capability_id": "node_camera_snap", "parameters": {"node_id": node_id}}
+    # "record video on X", "record a video on X"
+    if ("record" in q and "video" in q) or ("video" in q and "record" in q):
+        node_id = None
+        for m in re.finditer(r"(?:on\s+)([a-zA-Z0-9_-]+)", query, re.IGNORECASE):
+            node_id = m.group(1)
+        if not node_id:
+            m = re.search(r"([a-zA-Z0-9]+-node-[a-zA-Z0-9]+)", query, re.IGNORECASE)
+            node_id = m.group(1) if m else None
+        if node_id:
+            return {"plugin_id": "homeclaw-browser", "capability_id": "node_camera_clip", "parameters": {"node_id": node_id}}
+    # "list nodes", "what nodes are connected"
+    if ("list" in q and "node" in q) or ("node" in q and ("connect" in q or "list" in q or "what" in q)):
+        return {"plugin_id": "homeclaw-browser", "capability_id": "node_list", "parameters": {}}
+    return None
 
 
 def _parse_raw_tool_calls_from_content(content: str):
@@ -177,6 +219,7 @@ class Core(CoreInterface):
             self.response_queue_task = None
             self.memory_queue_task = None
             self._system_plugin_processes: List[asyncio.subprocess.Process] = []
+            self._pending_plugin_calls: Dict[str, Dict[str, Any]] = {}  # session_key -> {plugin_id, capability_id, params, missing, ...}
             #self.active_plugin = None
             logger.debug("Before initialize orchestrator")
             self.orchestratorInst = Orchestrator(self)
@@ -370,6 +413,21 @@ class Core(CoreInterface):
     def start_hot_reload(self):
         self.plugin_manager.start_hot_reload()
 
+    def _pending_plugin_call_key(self, app_id: str, user_id: str, session_id: str) -> str:
+        return f"{app_id or ''}:{user_id or ''}:{session_id or ''}"
+
+    def get_pending_plugin_call(self, app_id: str, user_id: str, session_id: str) -> Optional[Dict[str, Any]]:
+        key = self._pending_plugin_call_key(app_id, user_id, session_id)
+        return self._pending_plugin_calls.get(key)
+
+    def set_pending_plugin_call(self, app_id: str, user_id: str, session_id: str, data: Dict[str, Any]) -> None:
+        key = self._pending_plugin_call_key(app_id, user_id, session_id)
+        self._pending_plugin_calls[key] = data
+
+    def clear_pending_plugin_call(self, app_id: str, user_id: str, session_id: str) -> None:
+        key = self._pending_plugin_call_key(app_id, user_id, session_id)
+        self._pending_plugin_calls.pop(key, None)
+
     def _discover_system_plugins(self) -> List[Dict]:
         """Discover plugins in system_plugins/ that have register.js and a server (server.js or package.json start). Returns list of {id, cwd, start_argv, register_argv}."""
         root = Util().root_path()
@@ -432,7 +490,9 @@ class Core(CoreInterface):
         return False
 
     async def _run_system_plugins_startup(self) -> None:
-        """Start each discovered system plugin (server process) then run register. Waits for Core to be ready first."""
+        """Start each discovered system plugin (server process) then run register. Waits for Core to be ready first.
+        Called via asyncio.create_task() so it runs in the background and does not block Core or the HTTP server.
+        Each plugin runs in a separate OS process (node server.js)."""
         meta = Util().get_core_metadata()
         allowlist = getattr(meta, "system_plugins", None) or []
         candidates = self._discover_system_plugins()
@@ -471,7 +531,7 @@ class Core(CoreInterface):
                 self._system_plugin_processes.append(proc)
                 _component_log("system_plugins", f"started {item['id']} (pid={proc.pid})")
             except Exception as e:
-                logger.warning("system_plugins: failed to start %s: %s", item["id"], e)
+                logger.warning("system_plugins: failed to start {}: {}", item["id"], e)
         await asyncio.sleep(2)
         for item in to_start:
             env = {**base_env}
@@ -489,9 +549,9 @@ class Core(CoreInterface):
                 if reg.returncode == 0:
                     _component_log("system_plugins", f"registered {item['id']}")
                 else:
-                    logger.debug("system_plugins: register %s stderr: %s", item["id"], (stderr or b"").decode(errors="replace")[:500])
+                    logger.debug("system_plugins: register {} stderr: {}", item["id"], (stderr or b"").decode(errors="replace")[:500])
             except Exception as e:
-                logger.debug("system_plugins: register %s failed: %s", item["id"], e)
+                logger.debug("system_plugins: register {} failed: {}", item["id"], e)
 
     # try to reduce the misunderstanding. All the input tests in EmbeddingBase should be
     # in a list[str]. If you just want to embedding one string, ok, put into one list first.
@@ -596,6 +656,37 @@ class Core(CoreInterface):
             chroma_client=chroma_client,
         )
 
+    def _create_agent_memory_vector_store(self):
+        """Create vector store for AGENT_MEMORY + daily memory when use_agent_memory_search. Never raises; on failure sets agent_memory_vector_store to None."""
+        meta = Util().get_core_metadata()
+        if not getattr(meta, "use_agent_memory_search", True):
+            return
+        try:
+            from memory.vector_store_factory import create_vector_store
+            vdb = getattr(meta, "vectorDB", None)
+            if vdb is None:
+                logger.warning("Agent memory vector store: vectorDB not configured; skipping.")
+                return
+            backend = getattr(vdb, "backend", "chroma") or "chroma"
+            config = {
+                "backend": backend,
+                "Chroma": vars(getattr(vdb, "Chroma", None) or {}),
+                "Qdrant": vars(getattr(vdb, "Qdrant", None) or {}),
+                "Milvus": vars(getattr(vdb, "Milvus", None) or {}),
+                "Pinecone": vars(getattr(vdb, "Pinecone", None) or {}),
+                "Weaviate": vars(getattr(vdb, "Weaviate", None) or {}),
+            }
+            chroma_client = getattr(self, "chromra_memory_client", None) if backend == "chroma" else None
+            self.agent_memory_vector_store = create_vector_store(
+                backend=backend,
+                config=config,
+                collection_name=getattr(meta, "agent_memory_vector_collection", "homeclaw_agent_memory") or "homeclaw_agent_memory",
+                chroma_client=chroma_client,
+            )
+        except Exception as e:
+            logger.warning("Agent memory vector store not created: {}", e, exc_info=False)
+            self.agent_memory_vector_store = None
+
     def _create_knowledge_base(self):
         """Create user knowledge base. Backend follows knowledge_base.backend (auto = memory_backend): cognee or chroma (built-in RAG). Never raises."""
         try:
@@ -645,9 +736,9 @@ class Core(CoreInterface):
                     "score_is_distance": True,  # Chroma returns distance; we normalize to similarity in search()
                 },
             )
-            logger.debug("Knowledge base initialized (built-in RAG, collection=%s)", kb_cfg.get("collection_name") or "homeclaw_kb")
+            logger.debug("Knowledge base initialized (built-in RAG, collection={})", kb_cfg.get("collection_name") or "homeclaw_kb")
         except Exception as e:
-            logger.warning("Knowledge base not initialized: %s", e)
+            logger.warning("Knowledge base not initialized: {}", e)
             self.knowledge_base = None
 
     def _create_knowledge_base_cognee(self, meta, kb_cfg):
@@ -660,24 +751,36 @@ class Core(CoreInterface):
                 resolved = Util().main_llm()
                 if resolved:
                     _path, _model_id, mtype, host, port = resolved
-                    model = _path if mtype == "litellm" else (_model_id or "local")
+                    if mtype == "litellm":
+                        model = _path
+                        provider = "openai"
+                    else:
+                        model_id = (_model_id or "local").strip() or "local"
+                        model = f"openai/{model_id}"
+                        provider = "openai"
                     cognee_config.setdefault("llm", {})
                     cognee_config["llm"].update({
-                        "provider": (cognee_config["llm"].get("provider") or "custom").strip() or "custom",
+                        "provider": (cognee_config["llm"].get("provider") or provider).strip() or provider,
                         "endpoint": f"http://{host}:{port}/v1",
-                        "model": (cognee_config["llm"].get("model") or model or "local").strip() or "local",
+                        "model": (cognee_config["llm"].get("model") or model).strip() or model,
                         "api_key": (getattr(meta, "main_llm_api_key", "") or "").strip() or "local",
                     })
             if not (cognee_config.get("embedding") or {}).get("endpoint"):
                 resolved = Util().embedding_llm()
                 if resolved:
                     _path, _model_id, mtype, host, port = resolved
-                    model = _path if mtype == "litellm" else (_model_id or "local")
+                    if mtype == "litellm":
+                        model = _path
+                        provider = "openai"
+                    else:
+                        model_id = (_model_id or "local").strip() or "local"
+                        model = f"openai/{model_id}"
+                        provider = "openai"
                     cognee_config.setdefault("embedding", {})
                     cognee_config["embedding"].update({
-                        "provider": (cognee_config["embedding"].get("provider") or "custom").strip() or "custom",
+                        "provider": (cognee_config["embedding"].get("provider") or provider).strip() or provider,
                         "endpoint": f"http://{host}:{port}/v1",
-                        "model": (cognee_config["embedding"].get("model") or model or "local").strip() or "local",
+                        "model": (cognee_config["embedding"].get("model") or model).strip() or model,
                         "api_key": (getattr(meta, "main_llm_api_key", "") or "").strip() or "local",
                     })
             self.knowledge_base = CogneeKnowledgeBase(
@@ -699,6 +802,7 @@ class Core(CoreInterface):
         meta = Util().get_core_metadata()
         self._create_skills_vector_store()
         self._create_plugins_vector_store()
+        self._create_agent_memory_vector_store()
         self.knowledge_base = None
         self._create_knowledge_base()
         memory_backend = (getattr(meta, "memory_backend", None) or "cognee").strip().lower()
@@ -715,22 +819,34 @@ class Core(CoreInterface):
                     resolved = Util().main_llm()
                     if resolved:
                         _path, _model_id, mtype, host, port = resolved
-                        model = _path if mtype == "litellm" else (_model_id or "local")
+                        # LiteLLM (used by Cognee) requires model with provider prefix, e.g. openai/model_name; local = OpenAI-compatible
+                        if mtype == "litellm":
+                            model = _path
+                            provider = (llm_cfg.get("provider") or "openai").strip() or "openai"
+                        else:
+                            model_id = (_model_id or "local").strip() or "local"
+                            model = f"openai/{model_id}"
+                            provider = "openai"
                         cognee_config["llm"] = {
                             **llm_cfg,
-                            "provider": (llm_cfg.get("provider") or "custom").strip() or "custom",
+                            "provider": (llm_cfg.get("provider") or provider).strip() or provider,
                             "endpoint": f"http://{host}:{port}/v1",
-                            "model": (llm_cfg.get("model") or model or "local").strip() or "local",
+                            "model": (llm_cfg.get("model") or model).strip() or model,
                         }
                         cognee_config["llm"]["api_key"] = (getattr(meta, "main_llm_api_key", "") or "").strip() or "local"
                     else:
                         host = getattr(meta, "main_llm_host", "127.0.0.1") or "127.0.0.1"
                         port = getattr(meta, "main_llm_port", 5088) or 5088
+                        main_llm_ref = (getattr(meta, "main_llm", "") or "").strip()
+                        model_id = main_llm_ref.split("/")[-1] if "/" in main_llm_ref else (main_llm_ref or "local")
+                        if not model_id:
+                            model_id = "local"
+                        model = f"openai/{model_id}"
                         cognee_config["llm"] = {
                             **llm_cfg,
-                            "provider": (llm_cfg.get("provider") or "custom").strip() or "custom",
+                            "provider": (llm_cfg.get("provider") or "openai").strip() or "openai",
                             "endpoint": f"http://{host}:{port}/v1",
-                            "model": (llm_cfg.get("model") or getattr(meta, "main_llm", "") or "local").strip() or "local",
+                            "model": (llm_cfg.get("model") or model).strip() or model,
                         }
                         cognee_config["llm"]["api_key"] = (getattr(meta, "main_llm_api_key", "") or "").strip() or "local"
                 emb_cfg = cognee_config.get("embedding") or {}
@@ -740,31 +856,42 @@ class Core(CoreInterface):
                     resolved = Util().embedding_llm()
                     if resolved:
                         _path, _model_id, mtype, host, port = resolved
-                        model = _path if mtype == "litellm" else (_model_id or "local")
+                        if mtype == "litellm":
+                            model = _path
+                            provider = (emb_cfg.get("provider") or "openai").strip() or "openai"
+                        else:
+                            model_id = (_model_id or "local").strip() or "local"
+                            model = f"openai/{model_id}"
+                            provider = "openai"
                         cognee_config["embedding"] = {
                             **emb_cfg,
-                            "provider": (emb_cfg.get("provider") or "custom").strip() or "custom",
+                            "provider": (emb_cfg.get("provider") or provider).strip() or provider,
                             "endpoint": f"http://{host}:{port}/v1",
-                            "model": (emb_cfg.get("model") or model or "local").strip() or "local",
+                            "model": (emb_cfg.get("model") or model).strip() or model,
                         }
                         cognee_config["embedding"]["api_key"] = (getattr(meta, "main_llm_api_key", "") or "").strip() or "local"
                     else:
                         host = getattr(meta, "embedding_host", "127.0.0.1") or "127.0.0.1"
                         port = getattr(meta, "embedding_port", 5066) or 5066
+                        emb_ref = (getattr(meta, "embedding_llm", "") or "").strip()
+                        model_id = emb_ref.split("/")[-1] if "/" in emb_ref else (emb_ref or "local")
+                        if not model_id:
+                            model_id = "local"
+                        model = f"openai/{model_id}"
                         cognee_config["embedding"] = {
                             **emb_cfg,
-                            "provider": (emb_cfg.get("provider") or "custom").strip() or "custom",
+                            "provider": (emb_cfg.get("provider") or "openai").strip() or "openai",
                             "endpoint": f"http://{host}:{port}/v1",
-                            "model": (emb_cfg.get("model") or getattr(meta, "embedding_llm", "") or "local").strip() or "local",
+                            "model": (emb_cfg.get("model") or model).strip() or model,
                         }
                         cognee_config["embedding"]["api_key"] = (getattr(meta, "main_llm_api_key", "") or "").strip() or "local"
                 self.mem_instance = CogneeMemory(config=cognee_config if cognee_config else None)
                 logger.debug("Memory backend: Cognee")
             except ImportError as e:
-                logger.warning("Cognee backend requested but cognee not installed: %s. Using chroma.", e)
+                logger.warning("Cognee backend requested but cognee not installed: {}. Using chroma.", e)
                 memory_backend = "chroma"
             except Exception as e:
-                logger.warning("Cognee backend failed: %s. Using chroma.", e)
+                logger.warning("Cognee backend failed: {}. Using chroma.", e)
                 memory_backend = "chroma"
 
         if memory_backend != "cognee":
@@ -782,7 +909,7 @@ class Core(CoreInterface):
                             neo4j_password=getattr(gdb.Neo4j, "password", "") or "",
                         )
                 except Exception as e:
-                    logger.debug("Graph store not initialized: %s", e)
+                    logger.debug("Graph store not initialized: {}", e)
             if not getattr(self, "mem_instance", None):
                 self.mem_instance = Memory(
                     embedding_model=self.embedder,
@@ -883,7 +1010,7 @@ class Core(CoreInterface):
                                 )
                                 await self.response_queue.put(async_resp)
                     except Exception as notify_e:
-                        logger.debug("notify_unknown_request failed: %s", notify_e)
+                        logger.debug("notify_unknown_request failed: {}", notify_e)
                     return Response(content="Permission denied", status_code=401)
 
                 if request is not None:
@@ -986,12 +1113,40 @@ class Core(CoreInterface):
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"error": str(e), "text": ""})
 
+        @self.app.post("/api/upload", dependencies=[Depends(_verify_inbound_auth)])
+        async def api_upload(files: List[UploadFile] = File(..., description="Image or file(s) to save for the model")):
+            """
+            Upload file(s) (e.g. images from WebChat). Saves to database/uploads/ and returns absolute paths.
+            Client can then send these paths in payload.images (or files) so the model can read them without large data URLs over WebSocket.
+            """
+            root = Path(Util().root_path())
+            upload_dir = root / "database" / "uploads"
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            paths = []
+            try:
+                for f in files:
+                    if not f.filename:
+                        continue
+                    ext = Path(f.filename).suffix or ".bin"
+                    if ext.lower() not in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"):
+                        ext = ".jpg"
+                    name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
+                    path = upload_dir / name
+                    content = await f.read()
+                    path.write_bytes(content)
+                    paths.append(str(path.resolve()))
+                return JSONResponse(content={"paths": paths})
+            except Exception as e:
+                logger.exception("Upload failed: {}", e)
+                return JSONResponse(status_code=500, content={"detail": str(e), "paths": []})
+
         @self.app.post("/memory/reset")
         @self.app.get("/memory/reset")
         async def memory_reset():
             """
             Empty the memory store (for testing). Uses the configured memory backend's reset().
             If use_agent_memory_file is true, also clears AGENT_MEMORY.md.
+            If use_daily_memory is true, also clears yesterday's and today's daily memory files.
             No auth required by default; protect in production if needed.
             """
             mem = getattr(self, "mem_instance", None)
@@ -999,7 +1154,7 @@ class Core(CoreInterface):
                 return JSONResponse(status_code=404, content={"detail": "Memory not enabled or not initialized."})
             try:
                 mem.reset()
-                logger.info("Memory reset completed (backend=%s)", type(mem).__name__)
+                logger.info("Memory reset completed (backend={})", type(mem).__name__)
                 message = "Memory cleared."
                 meta = Util().get_core_metadata()
                 if getattr(meta, "use_agent_memory_file", False):
@@ -1008,6 +1163,15 @@ class Core(CoreInterface):
                     if clear_agent_memory_file(workspace_dir=workspace_dir, agent_memory_path=agent_path if agent_path else None):
                         logger.info("AGENT_MEMORY.md cleared.")
                         message = "Memory and AGENT_MEMORY.md cleared."
+                if getattr(meta, "use_daily_memory", False):
+                    workspace_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "")
+                    daily_dir = getattr(meta, "daily_memory_dir", "") or ""
+                    today = date.today()
+                    yesterday = today - timedelta(days=1)
+                    n = clear_daily_memory_for_dates([yesterday, today], workspace_dir=workspace_dir, daily_memory_dir=daily_dir if daily_dir else None)
+                    if n > 0:
+                        logger.info("Daily memory cleared ({} file(s)).", n)
+                        message = (message + " Daily memory (yesterday/today) cleared.") if message else "Memory and daily memory cleared."
                 return JSONResponse(content={"result": "ok", "message": message})
             except Exception as e:
                 logger.exception(e)
@@ -1027,7 +1191,7 @@ class Core(CoreInterface):
                 out = await kb.reset()
                 if out.startswith("Error:"):
                     return JSONResponse(status_code=500, content={"detail": out, "result": "error"})
-                logger.info("Knowledge base reset: %s", out)
+                logger.info("Knowledge base reset: {}", out)
                 return JSONResponse(content={"result": "ok", "message": out})
             except Exception as e:
                 logger.exception(e)
@@ -1267,6 +1431,11 @@ class Core(CoreInterface):
                         continue
                     try:
                         data = json.loads(raw)
+                        # Log media counts for vision debugging (no payload content)
+                        _ni = len(data.get("images") or [])
+                        _nf = len(data.get("files") or [])
+                        if _ni or _nf:
+                            logger.info("WS inbound: images={} files={} (client must send payload.images or data:image/ in payload.files)", _ni, _nf)
                         req = InboundRequest(
                             user_id=data.get("user_id", ""),
                             text=data.get("text", ""),
@@ -1316,6 +1485,21 @@ class Core(CoreInterface):
         videos_list = list(request.videos) if getattr(request, "videos", None) else []
         audios_list = list(request.audios) if getattr(request, "audios", None) else []
         files_list = list(request.files) if getattr(request, "files", None) else []
+        # Treat image data URLs in files as images (e.g. webchat sends as "files" when file.type is generic).
+        # Accept "data:image/..." and "data: image/..." (some browsers add a space).
+        # Non-image items stay in files_list and are handled by file-understanding in process_text_message (video/audio → media parts; documents → document_read notice).
+        if files_list:
+            remaining_files = []
+            for f in files_list:
+                if isinstance(f, str):
+                    s = f.strip().lower().replace("data: ", "data:", 1)
+                    if s.startswith("data:image/"):
+                        images_list.append(f.strip())
+                        continue
+                remaining_files.append(f)
+            files_list = remaining_files
+        if images_list:
+            logger.info("Inbound request has {} image(s) (from images + image data URLs moved from files)", len(images_list))
         if videos_list:
             content_type_for_perm = ContentType.VIDEO
         elif audios_list:
@@ -1398,9 +1582,9 @@ class Core(CoreInterface):
                         app_id=app_id,
                     )
             except Exception as sk:
-                logger.debug("Failed to persist last channel session key: %s", sk)
+                logger.debug("Failed to persist last channel session key: {}", sk)
         except Exception as e:
-            logger.warning("Failed to persist last channel: %s", e)
+            logger.warning("Failed to persist last channel: {}", e)
 
     def save_latest_prompt_request_to_file(self, filename: str):
         """Legacy: save to file (e.g. for debugging). Prefer _persist_last_channel which uses DB + atomic file in database/."""
@@ -1476,11 +1660,38 @@ class Core(CoreInterface):
                     pid = getattr(plugin, "plugin_id", "") or (plugin.get("id", "") if isinstance(plugin, dict) else "") or "?"
                     _component_log("plugin", f"orchestrator selected: {pid}")
                     if isinstance(plugin, dict):
-                        result_text = await asyncio.wait_for(
+                        result = await asyncio.wait_for(
                             self.plugin_manager.run_external_plugin(plugin, request),
                             timeout=timeout_sec or 30,
                         ) if timeout_sec > 0 else await self.plugin_manager.run_external_plugin(plugin, request)
-                        await self.send_response_to_request_channel(result_text, request)
+                        if isinstance(result, PluginResult):
+                            result_text = result.error or "Plugin returned an error" if not result.success else (result.text or "(no response)")
+                            metadata = dict(result.metadata or {})
+                        else:
+                            result_text = result if isinstance(result, str) else "(no response)"
+                            metadata = {}
+                        media_data_url = metadata.get("media") if isinstance(metadata.get("media"), str) else None
+                        if media_data_url:
+                            try:
+                                from base.media_io import save_data_url_to_media_folder
+                                meta = Util().get_core_metadata()
+                                ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
+                                media_base = Path(ws_dir) / "media" if ws_dir else None
+                                path, media_kind = save_data_url_to_media_folder(media_data_url, media_base)
+                                if path and media_kind:
+                                    await self.send_response_to_request_channel(
+                                        result_text, request,
+                                        image_path=path if media_kind == "image" else None,
+                                        video_path=path if media_kind == "video" else None,
+                                        audio_path=path if media_kind == "audio" else None,
+                                    )
+                                else:
+                                    await self.send_response_to_request_channel(result_text, request)
+                            except Exception as e:
+                                logger.warning("Orchestrator: save/send media failed: {}", e)
+                                await self.send_response_to_request_channel(result_text, request)
+                        else:
+                            await self.send_response_to_request_channel(result_text, request)
                     else:
                         plugin.user_input = intent.text
                         try:
@@ -1603,7 +1814,7 @@ class Core(CoreInterface):
                 stored = last_channel_store.get_last_channel(key)
                 if stored is None:
                     if key != last_channel_store._DEFAULT_KEY:
-                        logger.warning("send_response_to_channel_by_key: no channel for key=%s", key)
+                        logger.warning("send_response_to_channel_by_key: no channel for key={}", key)
                     return
                 app_id = stored.get("app_id") or ""
                 if app_id == "homeclaw":
@@ -1632,13 +1843,27 @@ class Core(CoreInterface):
                 )
                 await self.response_queue.put(async_resp)
         except Exception as e:
-            logger.warning("send_response_to_channel_by_key failed: %s", e)
+            logger.warning("send_response_to_channel_by_key failed: {}", e)
 
 
-    async def send_response_to_request_channel(self, response: str, request: PromptRequest):
+    async def send_response_to_request_channel(
+        self,
+        response: str,
+        request: PromptRequest,
+        image_path: Optional[str] = None,
+        video_path: Optional[str] = None,
+        audio_path: Optional[str] = None,
+    ):
+        """Send text and optional media (file paths) to the channel. Channels that support image/video/audio send them; others use text only."""
         resp_data = {"text": self._format_outbound_text(response)}
         if request is None:
             return
+        if image_path and isinstance(image_path, str) and os.path.isfile(image_path):
+            resp_data["image"] = image_path
+        if video_path and isinstance(video_path, str) and os.path.isfile(video_path):
+            resp_data["video"] = video_path
+        if audio_path and isinstance(audio_path, str) and os.path.isfile(audio_path):
+            resp_data["audio"] = audio_path
         async_resp: AsyncResponse = AsyncResponse(request_id=request.request_id, request_metadata=request.request_metadata, host=request.host, port=request.port, from_channel=request.channel_name, response_data=resp_data)
         await self.response_queue.put(async_resp)
 
@@ -1718,7 +1943,7 @@ class Core(CoreInterface):
                                 lang = Util().main_llm_language()
                                 prompt = pm.get_content("memory", "memory_check", lang=lang, user_input=human_message)
                             except Exception as e:
-                                logger.debug("Prompt manager fallback for memory_check: %s", e)
+                                logger.debug("Prompt manager fallback for memory_check: {}", e)
                         if not prompt or not prompt.strip():
                             prompt = MEMORY_CHECK_PROMPT.format(user_input=human_message)
                         llm_input = []
@@ -1892,22 +2117,69 @@ class Core(CoreInterface):
             return session_id
         return user_id
 
+    def _resize_image_data_url_if_needed(self, data_url: str, max_dimension: int) -> str:
+        """If max_dimension > 0 and Pillow is available, resize image so max(w,h) <= max_dimension; return data URL. Else return original."""
+        if not data_url or not isinstance(data_url, str) or max_dimension <= 0:
+            return data_url or ""
+        try:
+            from PIL import Image
+            import io
+        except ImportError:
+            return data_url
+        try:
+            idx = data_url.find(";base64,")
+            if idx <= 0:
+                return data_url
+            b64 = data_url[idx + 8:]
+            raw = base64.b64decode(b64)
+            img = Image.open(io.BytesIO(raw)).convert("RGB")
+            w, h = img.size
+            if w <= max_dimension and h <= max_dimension:
+                return data_url
+            if w >= h:
+                new_w, new_h = max_dimension, max(1, int(h * max_dimension / w))
+            else:
+                new_w, new_h = max(1, int(w * max_dimension / h)), max_dimension
+            img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            out_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            return f"data:image/jpeg;base64,{out_b64}"
+        except Exception as e:
+            logger.debug("Image resize skipped: {}", e)
+            return data_url
+
     def _image_item_to_data_url(self, item: str) -> str:
-        """Convert image item (data URL, file path, or raw base64) to a data URL for vision API."""
+        """Convert image item (data URL, file path, or raw base64) to a data URL for vision API. Optionally resizes if completion.image_max_dimension is set."""
         if not item or not isinstance(item, str):
             return ""
         item = item.strip()
-        if item.startswith("data:"):
-            return item
-        if os.path.isfile(item):
+        if item.lower().replace("data: ", "data:", 1).startswith("data:image/"):
+            # Normalize so URL is always "data:image/...;base64,..." (some clients send "data: image/...")
+            data_url = item.replace("data: ", "data:", 1) if item.startswith("data: ") else item
+        elif item.startswith("data:"):
+            data_url = item.replace("data: ", "data:", 1) if item.startswith("data: ") else item
+        elif os.path.isfile(item):
             try:
                 with open(item, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode("ascii")
-                return f"data:image/jpeg;base64,{b64}"
+                data_url = f"data:image/jpeg;base64,{b64}"
             except Exception as e:
-                logger.warning("Failed to read image file %s: %s", item, e)
+                logger.warning("Failed to read image file {}: {}", item, e)
                 return ""
-        return f"data:image/jpeg;base64,{item}"
+        else:
+            # Path-like but file not found: do not treat as base64
+            if ("/" in item or "\\" in item) and not os.path.isfile(item):
+                logger.warning("Image file not found (path not readable): {}", item[:200])
+                return ""
+            data_url = f"data:image/jpeg;base64,{item}"
+        max_dim = 0
+        try:
+            comp = getattr(Util().get_core_metadata(), "completion", None) or {}
+            max_dim = int(comp.get("image_max_dimension") or 0)
+        except (TypeError, ValueError):
+            pass
+        return self._resize_image_data_url_if_needed(data_url, max_dim)
 
     def _audio_item_to_base64_and_format(self, item: str) -> Optional[Tuple[str, str]]:
         """Convert audio item (data URL or file path) to (base64_string, format) for input_audio. Format: wav, mp3, etc."""
@@ -1948,7 +2220,7 @@ class Core(CoreInterface):
                     fmt = "wav"
                 return (b64, fmt)
             except Exception as e:
-                logger.warning("Failed to read audio file %s: %s", item, e)
+                logger.warning("Failed to read audio file {}: {}", item, e)
                 return None
         return None
 
@@ -1982,7 +2254,7 @@ class Core(CoreInterface):
                     fmt = "mp4"
                 return (b64, fmt)
             except Exception as e:
-                logger.warning("Failed to read video file %s: %s", item, e)
+                logger.warning("Failed to read video file {}: {}", item, e)
                 return None
         return None
 
@@ -2026,11 +2298,28 @@ class Core(CoreInterface):
             images_list = list(getattr(request, "images", None) or [])
             audios_list = list(getattr(request, "audios", None) or [])
             videos_list = list(getattr(request, "videos", None) or [])
+            files_raw = getattr(request, "files", None) or []
+            files_raw_count = len(files_raw) if isinstance(files_raw, list) else 0
+            logger.info(
+                "process_text_message: request.images count={} request.files count={} (if 0 images, client/upload or inbound did not pass images)",
+                len(images_list),
+                files_raw_count,
+            )
             supported_media = []
             try:
                 supported_media = Util().main_llm_supported_media() or []
             except Exception:
                 supported_media = []
+            # Fallback: if we have images but supported_media is empty, and main_llm id looks like a vision model, include image anyway
+            if images_list and "image" not in supported_media:
+                main_llm_ref = (getattr(Util().get_core_metadata(), "main_llm", None) or "").strip()
+                raw_id = main_llm_ref.split("/")[-1].strip().lower() if main_llm_ref else ""
+                if raw_id and ("vl" in raw_id or "vision" in raw_id or raw_id == "main_vl_model"):
+                    supported_media = ["image"]
+                    logger.info(
+                        "Vision fallback: main_llm_supported_media was empty but main_llm id looks like vision ({}); including image(s).",
+                        raw_id,
+                    )
             text_only = human_message or ""
 
             # File-understanding: process request.files (detect type, handle image/audio/video/doc). Stable: catch all, merge results, never crash.
@@ -2066,7 +2355,7 @@ class Core(CoreInterface):
                         else:
                             resolved_files.append(f)
                     except Exception as _e:
-                        logger.debug("file_understanding data URL resolve: %s", _e)
+                        logger.debug("file_understanding data URL resolve: {}", _e)
                 else:
                     resolved_files.append(f)
             files_list = resolved_files
@@ -2075,7 +2364,7 @@ class Core(CoreInterface):
                     try:
                         root = Util().root_path()
                     except Exception as root_e:
-                        logger.debug("file_understanding root_path failed: %s", root_e)
+                        logger.debug("file_understanding root_path failed: {}", root_e)
                         root = Path(".").resolve()
                     from base.file_understanding import process_files
                     config_path = Path(str(root)) / "config" / "core.yml"
@@ -2084,7 +2373,7 @@ class Core(CoreInterface):
                         try:
                             data = Util().load_yml_config(str(config_path)) or {}
                         except Exception as cfg_e:
-                            logger.debug("file_understanding config load failed: %s", cfg_e)
+                            logger.debug("file_understanding config load failed: {}", cfg_e)
                     tools_cfg = (data or {}).get("tools") or {}
                     fu_cfg = (data or {}).get("file_understanding") or {}
                     base_dir = str(tools_cfg.get("file_read_base") or ".")
@@ -2099,7 +2388,7 @@ class Core(CoreInterface):
                     try:
                         result = process_files(files_list, supported_media, base_dir, max_chars)
                     except Exception as proc_e:
-                        logger.debug("file_understanding process_files raised: %s", proc_e)
+                        logger.debug("file_understanding process_files raised: {}", proc_e)
                         result = None
                     if result is None:
                         result = type("_Empty", (), {"document_texts": [], "document_paths": [], "images": [], "audios": [], "videos": [], "errors": []})()
@@ -2145,7 +2434,7 @@ class Core(CoreInterface):
                             )
                             text_only = (doc_block + "\n\n" + text_only).strip() if text_only else doc_block
                         except Exception as block_e:
-                            logger.debug("file_understanding doc_block build failed: %s", block_e)
+                            logger.debug("file_understanding doc_block build failed: {}", block_e)
 
                         # When user sent file(s) only (no or negligible text) and KB enabled: add docs to KB if size <= add_to_kb_max_chars; too big = skip
                         user_text_only = (human_message or "").strip()
@@ -2172,27 +2461,61 @@ class Core(CoreInterface):
                                             timeout=60,
                                         )
                                         if err and "Error" in str(err):
-                                            logger.debug("file_understanding add_to_kb: %s", err)
+                                            logger.debug("file_understanding add_to_kb: {}", err)
                                     except asyncio.TimeoutError:
-                                        logger.debug("file_understanding add_to_kb timed out for %s", path)
+                                        logger.debug("file_understanding add_to_kb timed out for {}", path)
                                     except Exception as e:
-                                        logger.debug("file_understanding add_to_kb failed for %s: %s", path, e)
+                                        logger.debug("file_understanding add_to_kb failed for {}: {}", path, e)
                     for err in getattr(result, "errors", None) or []:
-                        logger.debug("file_understanding: %s", err)
+                        logger.debug("file_understanding: {}", err)
                 except Exception as e:
-                    logger.debug("file_understanding failed: %s", e)
+                    logger.debug("file_understanding failed: {}", e)
+            if images_list:
+                main_llm_ref = (getattr(Util().get_core_metadata(), "main_llm", None) or "").strip()
+                will_include = "image" in supported_media
+                logger.info(
+                    "Vision request: images_count={} main_llm={} supported_media={} will_include_images={}",
+                    len(images_list),
+                    main_llm_ref or "(empty)",
+                    supported_media,
+                    will_include,
+                )
             if images_list and "image" not in supported_media:
+                main_llm_ref = (getattr(Util().get_core_metadata(), "main_llm", None) or "").strip()
+                logger.warning(
+                    "Vision input skipped: main_llm does not support images (main_llm={}). "
+                    "Fix: in config/core.yml set main_llm to a local_models entry with mmproj and supported_media: [image], or a cloud_models entry with supported_media: [image]. "
+                    "For local vision: the llama.cpp server must be started with --mmproj (Core does this when it auto-starts the main LLM; if you start llama-server yourself, add --mmproj <path_to_mmproj.gguf>).",
+                    main_llm_ref or "(empty)",
+                )
                 text_only = (text_only + " (Image(s) omitted - model does not support images.)").strip()
+            elif images_list and "image" in supported_media:
+                logger.debug("Including {} image(s) in user message for vision model", len(images_list))
             if (audios_list or videos_list) and "audio" not in supported_media and "video" not in supported_media:
                 text_only = (text_only + " (Audio/video omitted - model does not support media.)").strip()
             # Build content_parts when we have any supported media (image/audio/video) so we add proper params for cloud and local.
             content_parts: List[Dict] = []
             if images_list and "image" in supported_media:
                 content_parts.append({"type": "text", "text": text_only or ""})
-                for img in images_list:
+                for i, img in enumerate(images_list):
                     data_url = self._image_item_to_data_url(img)
                     if data_url:
+                        # Log so we confirm the image URL is passed correctly (no base64 content)
+                        prefix = data_url[:50] if len(data_url) > 50 else data_url
+                        if ";base64," in data_url:
+                            prefix = data_url.split(";base64,")[0] + ";base64,<...>"
+                        logger.debug("Vision image {}: url length={} prefix={}", i + 1, len(data_url), prefix)
                         content_parts.append({"type": "image_url", "image_url": {"url": data_url}})
+                    else:
+                        input_kind = "data_url" if (isinstance(img, str) and img.strip().lower().startswith("data:")) else ("path" if (isinstance(img, str) and len(img) < 2048 and os.path.isfile(img)) else "other")
+                        logger.warning(
+                            "Vision image {} produced empty data URL (input: {}). Check image source (data URL, file path, or base64).",
+                            i + 1,
+                            input_kind,
+                        )
+                num_added = sum(1 for p in content_parts if isinstance(p, dict) and p.get("type") == "image_url")
+                if images_list and num_added == 0:
+                    logger.warning("Vision: had {} image(s) but all produced empty data URL; sending text-only user message", len(images_list))
             if audios_list and "audio" in supported_media:
                 if not content_parts:
                     content_parts.append({"type": "text", "text": text_only or ""})
@@ -2210,8 +2533,17 @@ class Core(CoreInterface):
                         b64_str, fmt = out
                         content_parts.append({"type": "input_video", "input_video": {"data": b64_str, "format": fmt}})
             if content_parts:
+                num_images = sum(1 for p in content_parts if isinstance(p, dict) and p.get("type") == "image_url")
+                if num_images:
+                    logger.info("Sending multimodal user message to LLM ({} image(s), OpenAI image_url format)", num_images)
                 messages.append({"role": "user", "content": content_parts})
             else:
+                if images_list:
+                    logger.warning(
+                        "User message sent as TEXT ONLY (no image). Had images_list={} but content_parts empty. supported_media={}. Check main_llm has mmproj/supported_media in config.",
+                        len(images_list),
+                        supported_media,
+                    )
                 messages.append({"role": "user", "content": text_only})
             use_memory = Util().has_memory()
             if use_memory:
@@ -2304,7 +2636,7 @@ class Core(CoreInterface):
                         )
                         _component_log("skills", f"synced {n} skill(s) to vector store")
                     except Exception as e:
-                        logger.warning("Skills vector sync failed: %s", e)
+                        logger.warning("Skills vector sync failed: {}", e)
 
             # Load plugins (orchestrator/TAM/plugins always enabled)
             self.load_plugins()
@@ -2325,7 +2657,25 @@ class Core(CoreInterface):
                             )
                             _component_log("plugin", f"synced {n} plugin(s) to vector store")
                         except Exception as e:
-                            logger.warning("Plugins vector sync failed: %s", e)
+                            logger.warning("Plugins vector sync failed: {}", e)
+
+            # Sync agent memory (AGENT_MEMORY.md + daily) to vector store when use_agent_memory_search
+            if getattr(core_metadata, "use_agent_memory_search", False):
+                if getattr(self, "agent_memory_vector_store", None) and getattr(self, "embedder", None):
+                    from base.workspace import get_workspace_dir
+                    from base.agent_memory_index import sync_agent_memory_to_vector_store
+                    ws_dir = get_workspace_dir(getattr(core_metadata, "workspace_dir", None) or "config/workspace")
+                    try:
+                        n = await sync_agent_memory_to_vector_store(
+                            workspace_dir=Path(ws_dir),
+                            agent_memory_path=(getattr(core_metadata, "agent_memory_path", None) or "").strip() or None,
+                            daily_memory_dir=(getattr(core_metadata, "daily_memory_dir", None) or "").strip() or None,
+                            vector_store=self.agent_memory_vector_store,
+                            embedder=self.embedder,
+                        )
+                        _component_log("agent_memory", f"synced {n} chunk(s) to vector store")
+                    except Exception as e:
+                        logger.warning("Agent memory vector sync failed: {}", e)
 
             # Result viewer: start report web server on its own port (different from Core). Stops when Core stops.
             try:
@@ -2335,14 +2685,15 @@ class Core(CoreInterface):
                     port = int(cfg.get("port") or 9001)
                     _component_log("result_viewer", f"report server on port {port} (HTTP)")
             except Exception as e:
-                logger.debug("Result viewer server skipped: %s", e)
+                logger.debug("Result viewer server skipped: {}", e)
 
             # Schedule llmManager.run() to run concurrently
             #llm_task = asyncio.create_task(self.llmManager.run())
             logger.debug("Starting LLM manager...")
             self.llmManager.run()
             logger.debug("LLM manager started!")
-            # Optionally start and register system_plugins (e.g. homeclaw-browser) so one command runs Core + plugins
+            # Optionally start and register system_plugins (e.g. homeclaw-browser) so one command runs Core + plugins.
+            # Runs in a background asyncio task; each plugin is a separate OS process. Does not block Core or server.serve().
             if getattr(core_metadata, "system_plugins_auto_start", False):
                 asyncio.create_task(self._run_system_plugins_startup())
             # Start the server
@@ -2609,6 +2960,48 @@ class Core(CoreInterface):
         if not any([user_name, user_id, agent_id, run_id]):
             raise ValueError("One of user_name, user_id, agent_id, run_id must be provided")
         try:
+            # If user is replying to a "missing parameters" question, fill and retry the pending plugin call
+            app_id_val = app_id or "homeclaw"
+            user_id_val = user_id or ""
+            session_id_val = session_id or ""
+            pending = self.get_pending_plugin_call(app_id_val, user_id_val, session_id_val)
+            if pending and (query or "").strip():
+                missing = pending.get("missing") or []
+                params = dict(pending.get("params") or {})
+                if missing and len(missing) == 1:
+                    # Single missing param: use the user's message as the value
+                    name = missing[0]
+                    params[name] = query.strip()
+                    key = name.lower().replace(" ", "_")
+                    if key != name:
+                        params[key] = query.strip()
+                    plugin_id = pending.get("plugin_id") or ""
+                    capability_id = pending.get("capability_id")
+                    plugin_manager = getattr(self, "plugin_manager", None)
+                    plugin = plugin_manager.get_plugin_by_id(plugin_id) if plugin_manager else None
+                    if plugin and isinstance(plugin, dict) and request:
+                        self.clear_pending_plugin_call(app_id_val, user_id_val, session_id_val)
+                        from base.base import PromptRequest, PluginResult
+                        req_copy = request.model_copy(deep=True)
+                        req_copy.request_metadata = dict(getattr(request, "request_metadata", None) or {})
+                        req_copy.request_metadata["capability_id"] = capability_id
+                        req_copy.request_metadata["capability_parameters"] = params
+                        try:
+                            result = await plugin_manager.run_external_plugin(plugin, req_copy)
+                            if result is None:
+                                return "Done."
+                            if isinstance(result, PluginResult):
+                                if not result.success:
+                                    return result.error or result.text or "The action could not be completed."
+                                return result.text or "Done."
+                            return str(result) if result else "Done."
+                        except Exception as e:
+                            logger.debug("Pending plugin retry failed: {}", e)
+                            pending["params"] = params
+                            self.set_pending_plugin_call(app_id_val, user_id_val, session_id_val, pending)
+                    elif not plugin:
+                        self.clear_pending_plugin_call(app_id_val, user_id_val, session_id_val)
+
             use_memory = Util().has_memory()
             llm_input = []
             response = ''
@@ -2622,16 +3015,57 @@ class Core(CoreInterface):
                 if workspace_prefix:
                     system_parts.append(workspace_prefix)
 
-            # AGENT_MEMORY.md (curated long-term memory); see SessionAndDualMemoryDesign.md. Authoritative when conflict with RAG.
-            if getattr(Util().core_metadata, 'use_agent_memory_file', False):
-                ws_dir = get_workspace_dir(getattr(Util().core_metadata, 'workspace_dir', None) or 'config/workspace')
-                agent_path = getattr(Util().core_metadata, 'agent_memory_path', None) or ''
-                agent_content = load_agent_memory_file(workspace_dir=ws_dir, agent_memory_path=agent_path or None)
-                if agent_content:
-                    system_parts.append(
-                        "## Agent memory (curated)\n" + agent_content + "\n\n"
-                        "When both this section and the RAG context below mention the same fact, prefer this curated agent memory as authoritative."
+            # Agent memory: when use_agent_memory_search is true, leverage retrieval only (no bulk inject). Otherwise inject capped AGENT_MEMORY + optional daily block.
+            use_agent_memory_search = getattr(Util().core_metadata, "use_agent_memory_search", True)
+            if use_agent_memory_search:
+                # Retrieval-first: do not inject AGENT_MEMORY or daily content; inject a strong directive to use tools.
+                try:
+                    directive = (
+                        "## Agent memory (recall via tools)\n"
+                        "AGENT_MEMORY.md and daily memory (memory/YYYY-MM-DD.md) are available only via tools. "
+                        "Before answering anything about prior work, decisions, dates, people, preferences, or todos: "
+                        "run agent_memory_search with a relevant query; then use agent_memory_get to pull only the needed lines. "
+                        "If low confidence after search, say you checked. "
+                        "This curated agent memory is authoritative when it conflicts with RAG context below."
                     )
+                    system_parts.append(directive + "\n\n")
+                except Exception as e:
+                    logger.warning("Skipping agent memory directive due to error: {}", e, exc_info=False)
+            else:
+                # Legacy: inject AGENT_MEMORY content (capped) and optionally daily memory.
+                if getattr(Util().core_metadata, 'use_agent_memory_file', False):
+                    try:
+                        ws_dir = get_workspace_dir(getattr(Util().core_metadata, 'workspace_dir', None) or 'config/workspace')
+                        agent_path = getattr(Util().core_metadata, 'agent_memory_path', None) or ''
+                        max_chars = max(0, int(getattr(Util().core_metadata, 'agent_memory_max_chars', 5000) or 0))
+                        agent_content = load_agent_memory_file(
+                            workspace_dir=ws_dir, agent_memory_path=agent_path or None, max_chars=max_chars
+                        )
+                        if agent_content:
+                            system_parts.append(
+                                "## Agent memory (curated)\n" + agent_content + "\n\n"
+                                "When both this section and the RAG context below mention the same fact, prefer this curated agent memory as authoritative.\n\n"
+                            )
+                    except Exception as e:
+                        logger.warning("Skipping AGENT_MEMORY.md injection due to error: {}", e, exc_info=False)
+
+                # Daily memory (memory/YYYY-MM-DD.md): yesterday + today; only when not using retrieval-first.
+                if getattr(Util().core_metadata, 'use_daily_memory', False):
+                    try:
+                        today = date.today()
+                        yesterday = today - timedelta(days=1)
+                        ws_dir = get_workspace_dir(getattr(Util().core_metadata, 'workspace_dir', None) or 'config/workspace')
+                        daily_dir = getattr(Util().core_metadata, 'daily_memory_dir', None) or ''
+                        daily_content = load_daily_memory_for_dates(
+                            [yesterday, today],
+                            workspace_dir=ws_dir,
+                            daily_memory_dir=daily_dir if daily_dir else None,
+                            max_chars=80_000,
+                        )
+                        if daily_content:
+                            system_parts.append("## Recent (daily memory)\n" + daily_content + "\n\n")
+                    except Exception as e:
+                        logger.warning("Skipping daily memory injection due to error: {}", e, exc_info=False)
 
             # Skills (SKILL.md from skills_dir) — optional; see Design.md §3.6
             if getattr(Util().core_metadata, 'use_skills', False):
@@ -2688,7 +3122,7 @@ class Core(CoreInterface):
                     if skills_block:
                         system_parts.append(skills_block)
                 except Exception as e:
-                    logger.warning("Failed to load skills: %s", e)
+                    logger.warning("Failed to load skills: {}", e)
 
             if use_memory:
                 relevant_memories = await self._fetch_relevant_memories(query,
@@ -2729,7 +3163,7 @@ class Core(CoreInterface):
                     except asyncio.TimeoutError:
                         logger.debug("Knowledge base search timed out")
                     except Exception as e:
-                        logger.debug("Knowledge base search failed: %s", e)
+                        logger.debug("Knowledge base search failed: {}", e)
                 # Per-user profile: inject "About the user" when enabled (docs/UserProfileDesign.md)
                 meta = Util().get_core_metadata()
                 profile_cfg = getattr(meta, "profile", None) or {}
@@ -2743,7 +3177,7 @@ class Core(CoreInterface):
                             if profile_text:
                                 system_parts.append("## About the user\n" + profile_text)
                     except Exception as e:
-                        logger.debug("Profile load for prompt failed: %s", e)
+                        logger.debug("Profile load for prompt failed: {}", e)
                 meta = Util().get_core_metadata()
                 if getattr(meta, "use_prompt_manager", False):
                     try:
@@ -2755,7 +3189,7 @@ class Core(CoreInterface):
                         lang = Util().main_llm_language()
                         prompt = pm.get_content("chat", "response", lang=lang, context=context_val)
                     except Exception as e:
-                        logger.debug("Prompt manager fallback for chat/response: %s", e)
+                        logger.debug("Prompt manager fallback for chat/response: {}", e)
                         prompt = None
                 else:
                     prompt = None
@@ -2808,7 +3242,7 @@ class Core(CoreInterface):
                             plugin_list = plugin_list[:plugins_max]
                             _component_log("plugin", f"capped to {plugins_max} plugin(s) after threshold (plugins_max_in_prompt)")
                     except Exception as e:
-                        logger.warning("Plugin vector search failed: %s", e)
+                        logger.warning("Plugin vector search failed: {}", e)
                 if not plugin_list:
                     plugin_list = getattr(self.plugin_manager, "get_plugin_list_for_prompt", lambda: [])()
                     plugins_top = max(1, min(100, int(getattr(Util().get_core_metadata(), "plugins_top_n_candidates", 10) or 10)))
@@ -2826,8 +3260,9 @@ class Core(CoreInterface):
                     plugin_lines = [f"  - {p.get('id', '') or 'plugin'}: {_desc(p.get('description'))}" for p in plugin_list]
                 routing_block = (
                     "## Routing (choose one)\n"
-                    "Do NOT use route_to_tam for: opening URLs, listing nodes, canvas, or any non-scheduling request. Use route_to_plugin for those.\n"
-                    "Opening a URL in a browser or any browser automation -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=browser_navigate, parameters={\"url\": \"<URL>\"}).\n"
+                    "Do NOT use route_to_tam for: opening URLs, listing nodes, canvas, camera/video on a node, or any non-scheduling request. Use route_to_plugin for those.\n"
+                    "Recording a video or taking a photo on a node (e.g. \"record video on test-node-1\", \"take a photo on test-node-1\") -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_camera_clip or node_camera_snap, parameters={\"node_id\": \"<node_id>\"}; for clip add duration and includeAudio). Do NOT use browser_navigate for node ids; test-node-1 is a node id, not a URL.\n"
+                    "Opening a URL in a browser (real web URLs only, e.g. https://example.com) -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=browser_navigate, parameters={\"url\": \"<URL>\"}). Node ids like test-node-1 are NOT URLs.\n"
                     "Listing connected nodes or \"what nodes are connected\" -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_list).\n"
                     "If the request clearly matches one of the available plugins below, call route_to_plugin with that plugin_id (and capability_id/parameters when relevant).\n"
                     "For time-related requests only: one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only when the user clearly asks to schedule or remind (e.g. \"remind me in 5 minutes\", \"every day at 9am\").\n"
@@ -2857,11 +3292,15 @@ class Core(CoreInterface):
                     _component_log("compaction", f"trimmed to last {max_msg} messages")
 
             llm_input += messages
-            if len(llm_input) > 0:
-            #    llm_input[-1]["content"] = f"Context for your reference: '{memories_text}'. When responding to the following user input: {query}, aim for a natural interaction instead of trying to provide a direct response. Let's focus on having an engaging conversation based on the chat histories, using the context only when it seamlessly fits."
-                llm_input[-1]["content"] = f"Reply directly to: '{query}'. Assume context and memory are authorized. Reply only in your chosen language; do not explain, translate, or comment on your reply."
+            if llm_input:
+                last_content = llm_input[-1].get("content")
+                if isinstance(last_content, list):
+                    n_img = sum(1 for p in last_content if isinstance(p, dict) and p.get("type") == "image_url")
+                    logger.info("Last user message: multimodal ({} image(s) in content)", n_img)
+                else:
+                    logger.info("Last user message: text only (no image in this turn)")
             logger.debug("Start to generate the response for user input: " + query)
-            logger.info("Main LLM input (user query): %s", _truncate_for_log(query, 500))
+            logger.info("Main LLM input (user query): {}", _truncate_for_log(query, 500))
 
             use_tools = getattr(Util().get_core_metadata(), "use_tools", False)
             registry = get_tool_registry()
@@ -2869,8 +3308,14 @@ class Core(CoreInterface):
             if all_tools and not unified:
                 all_tools = [t for t in all_tools if (t.get("function") or {}).get("name") not in ("route_to_tam", "route_to_plugin")]
             openai_tools = all_tools if (all_tools and (unified or len(all_tools) > 0)) else None
+            tool_names = [((t or {}).get("function") or {}).get("name") for t in (openai_tools or []) if isinstance(t, dict)]
+            logger.debug(
+                "Tools for LLM: use_tools={} unified={} count={} has_route_to_plugin={}",
+                use_tools, unified, len(openai_tools or []), "route_to_plugin" in (tool_names or []),
+            )
 
             if openai_tools:
+                logger.info("Tools available for this turn: {}", tool_names)
                 # Tool loop: call LLM with tools; if it returns tool_calls, execute and append results, repeat
                 context = ToolContext(
                     core=self,
@@ -2885,7 +3330,10 @@ class Core(CoreInterface):
                 current_messages = list(llm_input)
                 max_tool_rounds = 10
                 for _ in range(max_tool_rounds):
+                    _t0 = time.time()
+                    logger.debug("LLM call started (tools={})", "yes" if openai_tools else "no")
                     msg = await Util().openai_chat_completion_message(current_messages, tools=openai_tools, tool_choice="auto")
+                    logger.debug("LLM call returned in {:.1f}s", time.time() - _t0)
                     if msg is None:
                         response = None
                         break
@@ -2896,11 +3344,32 @@ class Core(CoreInterface):
                     if not tool_calls and content_str and _parse_raw_tool_calls_from_content(content_str):
                         tool_calls = _parse_raw_tool_calls_from_content(content_str)
                     if not tool_calls:
+                        logger.debug(
+                            "LLM returned no tool_calls (content={})",
+                            _truncate_for_log(content_str or "(empty)", 120),
+                        )
                         # If content looks like raw tool_call but we didn't parse it, don't send that to the user
                         if content_str and ("<tool_call>" in content_str or "</tool_call>" in content_str):
                             response = "The assistant tried to use a tool but the response format was not recognized. Please try again."
                         else:
-                            response = content_str
+                            # Fallback: model didn't call a tool (e.g. replied "No"). If user intent is clear, run plugin anyway.
+                            unhelpful = not content_str or len(content_str) < 80 or content_str.strip().lower() in ("no", "i can't", "i cannot", "sorry", "nope")
+                            fallback_route = _infer_route_to_plugin_fallback(query) if unhelpful else None
+                            if fallback_route and registry and any(t.name == "route_to_plugin" for t in (registry.list_tools() or [])):
+                                try:
+                                    _component_log("tools", "fallback route_to_plugin (model did not call tool)")
+                                    result = await registry.execute_async("route_to_plugin", fallback_route, context)
+                                    if result == ROUTING_RESPONSE_ALREADY_SENT:
+                                        return ROUTING_RESPONSE_ALREADY_SENT
+                                    if isinstance(result, str) and result.strip():
+                                        response = result
+                                    else:
+                                        response = content_str or "Done."
+                                except Exception as e:
+                                    logger.debug("Fallback route_to_plugin failed: {}", e)
+                                    response = content_str or "The action could not be completed. Try a model that supports tool calling."
+                            else:
+                                response = content_str
                         break
                     routing_sent = False
                     routing_response_text = None  # when route_to_plugin/route_to_tam return text (sync inbound/ws), use as final response
@@ -2914,6 +3383,15 @@ class Core(CoreInterface):
                             args = json.loads(fn.get("arguments") or "{}")
                         except json.JSONDecodeError:
                             args = {}
+                        args_redacted = redact_params_for_log(args) if isinstance(args, dict) else args
+                        logger.info("Tool selected: name={} parameters={}", name, args_redacted)
+                        if name == "route_to_plugin" and isinstance(args, dict):
+                            logger.info(
+                                "Plugin routing: plugin_id={} capability_id={} parameters={}",
+                                args.get("plugin_id"),
+                                args.get("capability_id"),
+                                args_redacted.get("parameters") if isinstance(args_redacted.get("parameters"), dict) else args_redacted.get("parameters"),
+                            )
                         try:
                             if tool_timeout_sec > 0:
                                 result = await asyncio.wait_for(
@@ -2954,7 +3432,7 @@ class Core(CoreInterface):
 
             if response is None or len(response) == 0:
                 return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
-            logger.info("Main LLM output (final response): %s", _truncate_for_log(response, 2000))
+            logger.info("Main LLM output (final response): {}", _truncate_for_log(response, 2000))
             message: ChatMessage = ChatMessage()
             message.add_user_message(query)
             message.add_ai_message(response)
@@ -2968,7 +3446,7 @@ class Core(CoreInterface):
                     if pruned > 0:
                         _component_log("session", f"pruned {pruned} old turns, kept last {keep_n}")
                 except Exception as e:
-                    logger.debug("Session prune after turn failed: %s", e)
+                    logger.debug("Session prune after turn failed: {}", e)
             #if use_memory:
             #    await self.mem_instance.add(query, user_name=user_name, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata, filters=filters)
 
@@ -3268,6 +3746,102 @@ class Core(CoreInterface):
         try:
             return mem.get(memory_id)
         except Exception:
+            return None
+
+    async def search_agent_memory(
+        self,
+        query: str,
+        max_results: int = 10,
+        min_score: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Search AGENT_MEMORY.md + daily memory (vector store). For agent_memory_search tool. Returns list of {path, start_line, end_line, snippet, score}. Never raises."""
+        store = getattr(self, "agent_memory_vector_store", None)
+        embedder = getattr(self, "embedder", None)
+        if not store or not embedder:
+            return []
+        try:
+            if not (query or "").strip():
+                return []
+            emb = await embedder.embed((query or "").strip())
+            if not emb:
+                return []
+            raw = store.search(query=[emb], limit=max(1, min(max_results, 50)), filters=None)
+        except Exception as e:
+            logger.debug("search_agent_memory failed: {}", e)
+            return []
+        if not isinstance(raw, list):
+            return []
+        out = []
+        for r in raw:
+            try:
+                payload = getattr(r, "payload", None) or {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                dist = getattr(r, "score", None)
+                try:
+                    score = (1.0 - float(dist)) if dist is not None else None
+                except (TypeError, ValueError):
+                    score = None
+                if min_score is not None and score is not None and score < min_score:
+                    continue
+                out.append({
+                    "path": payload.get("path", "") or "",
+                    "start_line": int(payload.get("start_line", 1)) if payload.get("start_line") is not None else 1,
+                    "end_line": int(payload.get("end_line", 1)) if payload.get("end_line") is not None else 1,
+                    "snippet": payload.get("snippet", "") or "",
+                    "score": score,
+                })
+            except Exception:
+                continue
+        return out
+
+    def get_agent_memory_file(
+        self,
+        path: str,
+        from_line: Optional[int] = None,
+        lines: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Read AGENT_MEMORY.md or memory/YYYY-MM-DD.md (by path). For agent_memory_get tool. Returns {path, text, start_line, end_line} or None. Never raises."""
+        try:
+            from base.workspace import get_workspace_dir, get_agent_memory_file_path, get_daily_memory_dir
+            meta = Util().get_core_metadata()
+            ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
+            path = (path or "").strip()
+            if not path:
+                return None
+            fp = None
+            if path == "AGENT_MEMORY.md":
+                fp = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=getattr(meta, "agent_memory_path", None) or None)
+            else:
+                if path.startswith("memory/") and path.endswith(".md"):
+                    try:
+                        date_str = path.replace("memory/", "").replace(".md", "")
+                        d = date.fromisoformat(date_str)
+                        base = get_daily_memory_dir(workspace_dir=ws_dir, daily_memory_dir=(getattr(meta, "daily_memory_dir", None) or "").strip() or None)
+                        fp = base / f"{d.isoformat()}.md"
+                    except Exception:
+                        fp = Path(ws_dir) / path
+                else:
+                    fp = Path(ws_dir) / path
+            if fp is None or not fp.is_file():
+                return None
+            text = fp.read_text(encoding="utf-8")
+            start_line = from_line if from_line is not None else 1
+            line_list = text.splitlines()
+            total_lines = len(line_list)
+            if from_line is not None or lines is not None:
+                start = max(0, (from_line or 1) - 1)
+                n = lines if lines is not None else max(0, total_lines - start)
+                end = min(total_lines, start + n) if n else total_lines
+                line_list = line_list[start:end]
+                start_line = start + 1
+                end_line = start + len(line_list)
+                text = "\n".join(line_list)
+            else:
+                end_line = total_lines if total_lines else 1
+            return {"path": path, "text": text, "start_line": start_line, "end_line": end_line}
+        except Exception as e:
+            logger.debug("get_agent_memory_file failed: {}", e)
             return None
 
     async def analyze_image(self, prompt: str, image_base64: str, mime_type: str = "image/jpeg") -> Optional[str]:

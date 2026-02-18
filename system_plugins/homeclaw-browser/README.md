@@ -14,6 +14,9 @@ Control UI lives in the **control-ui/** folder (like **browser/**, **canvas/**, 
 - **WS /ws** — Proxy: browser ↔ Core `/ws` (handled by **control-ui/ws-proxy.js**). Same behavior as the former homeclaw-control-ui plugin.
 - **Launcher:** Plugin registers **ui.webchat**, **ui.control**, **ui.dashboard**; Core **GET /ui** shows WebChat and Control UI links.
 
+**Images / vision in WebChat**  
+When you attach **images**, the client first uploads them via **POST /api/upload** (plugin proxies to Core). Core saves files under **database/uploads/** and returns their paths. The chat message then sends **payload.images = [path, ...]** so the model receives the image from disk (no huge data URLs over WebSocket). Video/audio/other still go as data URLs in `payload.videos`, `payload.audios`, `payload.files`. For the assistant to describe images, Core must use a **vision-capable main LLM** (e.g. `main_llm: local_models/main_vl_model` with `mmproj` / `supported_media: [image]` in **config/core.yml**). See **docs_design/Multimodal.md** and the "Vision request" / "main_llm_supported_media" logs if the model says it cannot see images.
+
 ---
 
 ## How to use
@@ -49,8 +52,12 @@ Control UI lives in the **control-ui/** folder (like **browser/**, **canvas/**, 
 
 ### Run
 
+**When Core auto-starts the plugin** (`system_plugins_auto_start: true` in **config/core.yml**): you **do not** need to run `cd system_plugins/homeclaw-browser && npm start` (or `node server.js`) or `node register.js` manually. Core starts the plugin and runs `node register.js` for you. Just do the one-time setup below once, then start Core (e.g. `python -m main start`).
+
+**When you run the plugin yourself** (e.g. development or testing with curl without Core):
+
 ```bash
-# From project root or plugin directory
+# One-time setup (from project root or plugin directory)
 cd system_plugins/homeclaw-browser
 npm install
 npx playwright install chromium   # first time only
@@ -80,6 +87,40 @@ Env:
 - **CORE_URL** — Core base URL (default http://127.0.0.1:9000).
 - **PLUGIN_BASE** — Plugin base URL (default http://127.0.0.1:3020).
 - **BROWSER_HEADLESS** — Set to `false` to show the browser window (default headless).
+
+### Process review: why video recording can be slow and why you might see 503
+
+**End-to-end flow** for a request like *“Record a 3 second video with microphone on test-node-1”*:
+
+1. **User → Core** — Message goes to Core (e.g. via WebChat).
+2. **Core → LLM** — Core runs the main LLM to decide which tool to call (can take several seconds).
+3. **LLM → route_to_plugin** — Model calls `route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_camera_clip, parameters={...})`.
+4. **Core → Plugin** — Core sends **HTTP POST** to the plugin’s **/run** endpoint and **waits** for the response (timeout 420s by default; must be longer than the plugin→node timeout so Core doesn’t ReadTimeout first).
+5. **Plugin → Node** — Plugin sends a command over WebSocket to the connected node (the **Nodes** page tab) and **waits** for the node to finish (timeout e.g. 5 min in `nodes/command.js`).
+6. **Node (browser)** — The tab gets the command, calls `getUserMedia` (camera/mic), starts `MediaRecorder`, records for the requested duration, stops, encodes to a blob, converts to a data URL, and sends the result back over the WebSocket.
+7. **Plugin → Core** — Plugin returns a **200** JSON response (or **500** on exception). Only then does Core get the result and send it to the user.
+
+**Why it feels slow**
+
+- **LLM** step can take 5–30+ seconds.
+- **Node recording** step takes at least the recording duration (e.g. 3s) plus device access, encoding, and sending the (large) data URL; on a slow device or with high resolution this can be 30s–2 min.
+- The plugin **does not** respond to Core until the node has finished and the plugin has the result. So the whole chain is one long request.
+
+**Why you might see “plugin returned 503”**
+
+- This plugin’s code **only** returns **200**, **500**, or **404**. It **never** returns **503**.
+- **503** almost always comes from **something in front** of the plugin (or Core):
+  - A **reverse proxy** (e.g. nginx, Caddy) with a short `proxy_read_timeout` (e.g. 60s). If the plugin takes longer than that to respond, the proxy closes the connection and may return **503 Service Unavailable** to Core.
+  - The proxy might also return a custom HTML or text body (e.g. “can we review the process? why it is so slow?”) if that’s how it’s configured for 5xx pages.
+- So: **slow request** (recording + encoding) + **short proxy timeout** → proxy gives up → **503** to Core.
+
+**What to do**
+
+- **No proxy for local use:** Call the plugin directly (Core → `http://127.0.0.1:3020/run`). Then 503 from a proxy won’t happen.
+- **If you use a reverse proxy:** Increase its read timeout to at least the plugin timeout (default **420 seconds**), so long-running video requests don’t get cut off.
+- **Keep the Nodes tab connected** and grant camera/mic so the node can record and return in time; shorten the clip if needed so the total time stays under timeouts.
+
+**Why the node (browser) is slow:** The main delay is **after** the 3s recording: the browser encodes the clip to WebM (often 10–60+ seconds), then converts to base64 and sends a multi‑MB string over the WebSocket. The Nodes page requests **640×480** video to reduce encoding and transfer time. See **docs_design/VideoRecordingSlownessInvestigation.md** for a full breakdown.
 
 ---
 
@@ -141,17 +182,18 @@ The canvas updates whenever the plugin’s **`canvas_update`** capability is cal
 
 Camera and mic are controlled via **node** commands. The **node** (e.g. the Nodes page tab, or a phone/desktop app) must support `camera_snap` and/or `camera_clip`; the plugin only forwards the command and returns the node’s result.
 
-**Test the command path (echo only)**
+**Test with curl**
 
-1. Open **http://127.0.0.1:3020/nodes**, set Node ID (e.g. `test-node-1`), click **Connect as node**.
+1. **You must connect the node first.** Open **http://127.0.0.1:3020/nodes** in a browser, set Node ID to `test-node-1`, click **Connect as node**. Wait until the page shows "Connected as test-node-1". Without this step, the plugin has no node to send the command to.
 2. From another terminal, call the plugin:
    ```bash
    # Camera snap (params: node_id, optional facing, maxWidth)
    curl -X POST http://127.0.0.1:3020/run -H "Content-Type: application/json" -d '{"request_id":"1","plugin_id":"homeclaw-browser","capability_id":"node_camera_snap","capability_parameters":{"node_id":"test-node-1"}}'
+
    # Camera clip with microphone (params: node_id, optional duration, includeAudio)
    curl -X POST http://127.0.0.1:3020/run -H "Content-Type: application/json" -d '{"request_id":"2","plugin_id":"homeclaw-browser","capability_id":"node_camera_clip","capability_parameters":{"node_id":"test-node-1","duration":"3s","includeAudio":true}}'
    ```
-3. With the **default test node** (Nodes page), the node only **echoes** the command: you get a result like `Echo: camera_snap` or `Echo: camera_clip ...` — no real camera/mic is used. This confirms the path (Core → plugin → node → result) works.
+3. The test node uses the **device camera** (and **microphone** for `camera_clip` when `includeAudio: true`) and returns a snapshot or clip in the result (e.g. `media` data URL). Other commands (e.g. `screen`, `notify`) are echoed.
 
 **Test real camera and microphone (browser test node)**
 
@@ -166,7 +208,36 @@ If the Nodes page has been updated to support real camera/mic (see below), use *
 - *“Take a photo on test-node-1”* → `node_camera_snap` (or `node_command` with `camera_snap`).
 - *“Record a 3 second video with microphone on test-node-1”* → `node_camera_clip` with `duration: "3s"`, `includeAudio: true`.
 
-**Note:** Real camera/mic require a node that implements `getUserMedia` (and, for video, `MediaRecorder`). The built-in test node can be extended to do this in the browser; otherwise use a phone or desktop app that implements the node protocol and device APIs.
+**Note:** The **Nodes page** (http://127.0.0.1:3020/nodes) test node supports **real** camera and microphone in the browser: when you connect as a node and the page receives `camera_snap` or `camera_clip`, it uses `getUserMedia` (and `MediaRecorder` for clips). Grant camera/mic when the browser prompts; the snapshot or clip is returned in the result (e.g. `media` data URL). Other commands (e.g. `screen`, `notify`) are still echoed. For production, use a phone or desktop app that implements the node protocol and device APIs.
+
+**Where are the photo and video placed?** When the user asks to take a photo (or record a clip) and the agent uses **node_camera_snap** or **node_camera_clip** from chat: (1) **Core sends the photo/video to the user via the channel** (e.g. WeChat/Matrix image message, or text + attachment where supported). (2) **Core also saves the file** under the workspace media folder: **`<workspace_dir>/media/images/`** for snapshots (e.g. `20250216_143022_abc12.jpg`) and **`<workspace_dir>/media/videos/`** or **`media/audio/`** for clips/audio. So the user sees the photo in the chat and a copy is kept on disk. When you call the plugin with **curl**, the response JSON still includes the data URL in `metadata.media`; Core does not run for curl, so you only get the JSON (decode and save locally if needed).
+
+**Why does the camera/mic permission prompt only show once?** Browsers remember your choice per site (origin). After you Allow or Block for http://127.0.0.1:3020, that setting is stored and the prompt is not shown again. To see the prompt again: in Chrome, click the lock or info icon next to the URL → **Site settings** → **Camera** / **Microphone** → set to **Ask** or **Reset**; or use a private/incognito window (no stored permissions).
+
+**Nothing happens when I curl node_camera_snap?**
+
+- **Connect the node first.** The plugin only forwards commands to nodes that are connected via WebSocket. Open **http://127.0.0.1:3020/nodes**, set Node ID to `test-node-1`, click **Connect as node**, and wait until you see "Connected as test-node-1". If you skip this, the plugin returns `success: false` and `text: "Node 'test-node-1' not connected"`.
+- **See the actual response:** run `curl -v ...` so you see the HTTP response body. If the node is not connected you'll get JSON like `{"success":false,"text":"Node 'test-node-1' not connected",...}`.
+- **Check the plugin is running:** `curl http://127.0.0.1:3020/health` should return `{"status":"ok"}`. If connection refused and you use **auto-start**, ensure Core is running (Core starts the plugin). If you run the plugin yourself, start it with `npm start` or `node server.js` in the homeclaw-browser directory.
+
+**"Error: plugin returned 503"**
+
+- This plugin’s code only returns 200, 500, or 404. **503** usually comes from elsewhere: (1) a **reverse proxy or gateway** in front of the plugin (e.g. nginx, Caddy) when it considers the backend unavailable, (2) the **plugin process** overloaded or restarting so connections are refused, or (3) the request hitting a **different service** that returns 503. Check: `curl -v http://127.0.0.1:3020/health` and `curl -v -X POST http://127.0.0.1:3020/run -H "Content-Type: application/json" -d '{}'` — if you get 503 only sometimes, the plugin may be under load or restarting; restart the plugin and Core and try again.
+- **503 after ~2 minutes (e.g. 120s):** Often a **proxy/gateway read timeout**. The plugin may still be waiting for the node (camera_snap, etc.). Increase the proxy’s read timeout (e.g. to 420s or 300s) or call the plugin directly (no proxy). The plugin sets a 6‑minute socket timeout for `/run` so Node won’t close the request; if you still see 503 at ~2 min, the close is coming from in front of the plugin.
+
+**"Error calling plugin homeclaw-browser: ReadTimeout" or "Command timeout" when recording video or taking a photo**
+
+- **Two timeouts:** (1) **Core → plugin** HTTP timeout (default **420s** in `config.timeout_sec` / register.js — must be *longer* than the plugin→node timeout or Core will ReadTimeout before the plugin responds). (2) **Plugin → node** command timeout (5 min in `nodes/command.js` CMD_TIMEOUT_MS). If you see **ReadTimeout**, Core gave up waiting — re-register with `node register.js` (sends 420s) or set `timeout_sec: 420` in config. If you see **Command timeout**, the plugin gave up waiting for the node — increase `CMD_TIMEOUT_MS` in `nodes/command.js` if needed and restart the plugin.
+- **Camera works but you still get "Command timeout":** The node may have recorded but the browser’s encoding step (`MediaRecorder` onstop) can hang or take very long. The Nodes page now has a **90s encoding timeout**: if encoding doesn’t finish in 90s, the node sends an error (`encoding_timeout`) so the plugin gets a response instead of waiting 5 min. Keep the **Nodes** tab in the foreground, grant camera/mic, and try a shorter clip (e.g. 3s); if you see `encoding_timeout`, try closing other tabs or lowering resolution.
+- **Request took many minutes then failed:** Core waits up to 420s for the plugin. If the node never sends a result (tab closed, recording stuck), the plugin returns at 5 min with "Command timeout" and Core must still be waiting — so Core’s timeout (420s) is set higher than the plugin’s node timeout (5 min). Keep the **Nodes** tab open and connected, grant camera/mic, and try again.
+
+**Model replies "No" or doesn't call the plugin**
+
+- If the main LLM does not support tool/function calling, it may reply with text (e.g. "No") instead of calling `route_to_plugin`. Core has a **fallback**: when the model returns no tool call and the user message clearly matches a node action (e.g. "Take a photo on test-node-1", "record video on test-node-1", "list nodes"), Core will still call the plugin. Use a model that supports tools for best behavior, or rely on this fallback for simple phrases.
+
+**Request seems blocked for minutes, then plugin returns 200 OK but client times out**
+
+- If logs show "LLM call started" long before "LLM call returned in Xs" and then "[plugin] routed" and "HTTP/1.1 200 OK", the delay is in the **main LLM** (e.g. large local model on CPU) deciding to call the plugin, not in the plugin itself. The client (e.g. WebChat) may time out before Core sends the response. Mitigations: use a faster or smaller model, increase the client’s request timeout, or use streaming so the client sees progress.
 
 ---
 
@@ -212,8 +283,8 @@ Nodes may implement these commands (sent via **node_command** or the convenience
 | Command | Typical params | Notes |
 |---------|----------------|--------|
 | **notify** | title, body | System notification (e.g. system.notify on macOS). |
-| **camera_snap** | facing (front/back/both), maxWidth | Returns image; node may return MEDIA path. |
-| **camera_clip** | facing, duration, includeAudio | Short video from camera. |
+| **camera_snap** | facing (front/back/both), maxWidth | Returns image; node may return MEDIA path. Core saves to workspace/media/images and tells the user the path. |
+| **camera_clip** | duration, includeAudio (optional facing) | Short video from camera. Returns video (data URL). Core saves to workspace/media/videos and tells the user the path (e.g. "Video saved to: …/config/workspace/media/videos/YYYYMMDD_HHMMSS_id.webm"). |
 | **screen_record** | fps, duration | Screen recording on the node. |
 | **location_get** | maxAgeMs | Device location (lat/lon/accuracy). |
 

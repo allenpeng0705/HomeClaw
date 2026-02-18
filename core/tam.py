@@ -178,7 +178,7 @@ class TAM:
                 logger.error('TAM: LLM response JSON is not an object')
                 return None
         except (json.JSONDecodeError, TypeError, ValueError) as e:
-            logger.error('TAM: Failed to decode LLM response JSON: %s', e)
+            logger.error('TAM: Failed to decode LLM response JSON: {}', e)
             return None
 
         return response_json
@@ -446,7 +446,7 @@ class TAM:
                 if content and content.strip():
                     return content.strip()
             except Exception as e:
-                logger.debug("TAM prompt manager fallback: %s", e)
+                logger.debug("TAM prompt manager fallback: {}", e)
         return self._create_prompt_fallback(text, chat_history)    
 
     def schedule_job_from_intent(self, data_object: Dict, request: PromptRequest):
@@ -511,7 +511,7 @@ class TAM:
         try:
             await self.send_reminder_to_channel(message, params or {})
         except Exception as e:
-            logger.exception("TAM: send_reminder_to_channel failed: %s", e)
+            logger.exception("TAM: send_reminder_to_channel failed: {}", e)
 
 
     def schedule_repeated_task(self, task, interval_unit, interval, start_time=None):
@@ -571,7 +571,7 @@ class TAM:
         try:
             run_time = datetime.strptime(run_time_str, "%Y-%m-%d %H:%M:%S")
         except ValueError:
-            logger.warning("TAM: invalid run_time_str %s; scheduling in memory only", run_time_str)
+            logger.warning("TAM: invalid run_time_str {}; scheduling in memory only", run_time_str)
             async def task():
                 await self.send_reminder_to_latest_channel(message)
             self.schedule_fixed_task(task, run_time_str)
@@ -628,7 +628,7 @@ class TAM:
             try:
                 return datetime.now(ZoneInfo(tz))
             except Exception as e:
-                logger.debug("TAM: Invalid cron tz %s, using local: %s", tz, e)
+                logger.debug("TAM: Invalid cron tz {}, using local: {}", tz, e)
         return datetime.now()
 
     def _cron_prev_run(self, cron_expr: str, before_dt: datetime, tz: Optional[str] = None, max_iter: int = 1000) -> Optional[datetime]:
@@ -646,7 +646,7 @@ class TAM:
                 prev = n
             return prev
         except Exception as e:
-            logger.debug("TAM: _cron_prev_run failed for %s: %s", cron_expr, e)
+            logger.debug("TAM: _cron_prev_run failed for {}: {}", cron_expr, e)
             return None
 
     def _cron_next_run(self, cron_expr: str, from_dt: datetime, tz: Optional[str] = None) -> datetime:
@@ -680,7 +680,7 @@ class TAM:
             try:
                 next_run = self._cron_next_run(cron_expr, now, params.get("tz"))
             except Exception as e:
-                logger.error("TAM: Invalid cron expression '%s': %s", cron_expr, e)
+                logger.error("TAM: Invalid cron expression '{}': {}", cron_expr, e)
                 return None
             jid = job_id or f"cron_{id(task)}_{datetime.now().timestamp()}"
             with self._cron_lock:
@@ -695,11 +695,11 @@ class TAM:
                 try:
                     tam_storage.save_cron_job(jid, cron_expr, params)
                 except Exception as e:
-                    logger.debug("TAM: Could not persist cron job to DB: %s", e)
-            logger.debug("TAM: Scheduled cron job %s '%s' next at %s", jid, cron_expr, next_run)
+                    logger.debug("TAM: Could not persist cron job to DB: {}", e)
+            logger.debug("TAM: Scheduled cron job {} '{}' next at {}", jid, cron_expr, next_run)
             return jid
         except Exception as e:
-            logger.warning("TAM: schedule_cron_task failed: %s", e)
+            logger.warning("TAM: schedule_cron_task failed: {}", e)
             return None
 
     def update_cron_job(
@@ -735,10 +735,10 @@ class TAM:
                     pupdate["enabled"] = enabled
                 return tam_storage.update_cron_job(job_id, cron_expr=cron_expr, params_update=pupdate if pupdate else params)
             except Exception as e:
-                logger.debug("TAM: update_cron_job persist failed: %s", e)
+                logger.debug("TAM: update_cron_job persist failed: {}", e)
                 return True  # in-memory updated
         except Exception as e:
-            logger.warning("TAM: update_cron_job failed: %s", e)
+            logger.warning("TAM: update_cron_job failed: {}", e)
             return False
 
     def run_cron_job_now(self, job_id: str) -> bool:
@@ -758,7 +758,7 @@ class TAM:
             self._run_one_cron_job(job)
             return True
         except Exception as e:
-            logger.warning("TAM: run_cron_job_now %s failed: %s", job_id, e)
+            logger.warning("TAM: run_cron_job_now {} failed: {}", job_id, e)
             return False
 
     def get_cron_status(self) -> Dict[str, Any]:
@@ -789,7 +789,7 @@ class TAM:
                 "jobs_count": len(self.cron_jobs),
             }
         except Exception as e:
-            logger.debug("TAM: get_cron_status failed: %s", e)
+            logger.debug("TAM: get_cron_status failed: {}", e)
             return {"scheduler_enabled": True, "next_wake_at": None, "jobs_count": 0}
 
     def remove_cron_job(self, job_id: str) -> bool:
@@ -803,11 +803,11 @@ class TAM:
                 try:
                     tam_storage.remove_cron_job(job_id)
                 except Exception as e:
-                    logger.debug("TAM: Could not remove cron job from DB: %s", e)
-                logger.debug("TAM: Removed cron job %s", job_id)
+                    logger.debug("TAM: Could not remove cron job from DB: {}", e)
+                logger.debug("TAM: Removed cron job {}", job_id)
             return removed
         except Exception as e:
-            logger.warning("TAM: remove_cron_job failed: %s", e)
+            logger.warning("TAM: remove_cron_job failed: {}", e)
             return False
 
     def _load_recorded_events(self) -> None:
@@ -824,9 +824,9 @@ class TAM:
             removed = self._cleanup_past_recorded_events()
             if removed > 0:
                 self._save_recorded_events()
-                logger.debug("TAM: Removed %d past recorded event(s) on load", removed)
+                logger.debug("TAM: Removed {} past recorded event(s) on load", removed)
         except Exception as e:
-            logger.debug("TAM: Could not load recorded_events: %s", e)
+            logger.debug("TAM: Could not load recorded_events: {}", e)
             self.recorded_events = []
 
     def _cleanup_past_recorded_events(self, max_age_days_no_date: int = 90) -> int:
@@ -870,7 +870,7 @@ class TAM:
                 encoding="utf-8",
             )
         except Exception as e:
-            logger.warning("TAM: Could not save recorded_events: %s", e)
+            logger.warning("TAM: Could not save recorded_events: {}", e)
 
     _RECURRING_CANCEL_HINT = "\n(To cancel this recurring reminder, say 'list my recurring reminders' and ask to remove it.)"
 
@@ -901,7 +901,7 @@ class TAM:
                     continue
                 if last_run_at is not None and prev_run <= last_run_at:
                     continue
-                logger.info("TAM: Catch-up run for cron job %s (missed while Core was down)", job.get("job_id"))
+                logger.info("TAM: Catch-up run for cron job {} (missed while Core was down)", job.get("job_id"))
                 self._run_one_cron_job(job)
                 # Advance next_run so it does not fire again in the next scheduler tick
                 with self._cron_lock:
@@ -911,14 +911,14 @@ class TAM:
                     except Exception:
                         job["next_run"] = self._cron_now(tz) + timedelta(minutes=1)
             except Exception as e:
-                logger.warning("TAM: Catch-up for job %s failed: %s", job.get("job_id"), e)
+                logger.warning("TAM: Catch-up for job {} failed: {}", job.get("job_id"), e)
 
     def _load_cron_jobs_from_db(self) -> None:
         """Load persisted cron jobs and re-schedule them (survives Core restart). Runs missed jobs once on restart (catch-up). Uses params (message, tz, enabled, channel_key) for delivery."""
         try:
             rows = tam_storage.load_cron_jobs()
         except Exception as e:
-            logger.warning("TAM: Could not load cron jobs from DB: %s", e)
+            logger.warning("TAM: Could not load cron jobs from DB: {}", e)
             return
         loaded_jobs: List[Dict[str, Any]] = []
         for row in rows:
@@ -947,21 +947,21 @@ class TAM:
                         if job:
                             loaded_jobs.append(job)
             except Exception as e:
-                logger.warning("TAM: Skip loading cron job %s: %s", row.get("job_id"), e)
+                logger.warning("TAM: Skip loading cron job {}: {}", row.get("job_id"), e)
         if rows:
-            logger.debug("TAM: Loaded %d cron job(s) from DB", len(rows))
+            logger.debug("TAM: Loaded {} cron job(s) from DB", len(rows))
         # Restart catch-up: run any job that would have been due while Core was down (at most one run per job)
         try:
             self._run_missed_cron_jobs_after_load(loaded_jobs)
         except Exception as e:
-            logger.warning("TAM: Catch-up after load failed: %s", e)
+            logger.warning("TAM: Catch-up after load failed: {}", e)
 
     def _load_one_shot_reminders_from_db(self) -> None:
         """Load persisted one-shot reminders with run_at > now and re-schedule them (survives Core restart). Expired ones are deleted from DB."""
         try:
             deleted = tam_storage.cleanup_expired_one_shot_reminders()
             if deleted:
-                logger.debug("TAM: Cleaned %d expired one-shot reminder(s) from DB", deleted)
+                logger.debug("TAM: Cleaned {} expired one-shot reminder(s) from DB", deleted)
             rows = tam_storage.load_one_shot_reminders(after=datetime.now())
             for row in rows:
                 run_at = row.get("run_at")
@@ -973,9 +973,9 @@ class TAM:
                 task = (lambda reminder_id, message: lambda: asyncio.run(self._run_one_shot_and_remove(reminder_id, message)))(rid, msg)
                 self.schedule_fixed_task(task, run_time_str)
             if rows:
-                logger.debug("TAM: Loaded %d one-shot reminder(s) from DB", len(rows))
+                logger.debug("TAM: Loaded {} one-shot reminder(s) from DB", len(rows))
         except Exception as e:
-            logger.debug("TAM: Could not load one-shot reminders from DB: %s", e)
+            logger.debug("TAM: Could not load one-shot reminders from DB: {}", e)
 
     async def _run_one_shot_and_remove(self, reminder_id: str, message: str) -> None:
         """Send reminder to latest channel and remove from DB (called when one-shot fires)."""
@@ -1006,7 +1006,7 @@ class TAM:
         }
         self.recorded_events.append(entry)
         self._save_recorded_events()
-        logger.debug("TAM: Recorded event %s when=%s", entry["event_name"], entry["when"])
+        logger.debug("TAM: Recorded event {} when={}", entry["event_name"], entry["when"])
 
         result: Dict[str, Any] = {"recorded": True, "event_name": entry["event_name"], "when": entry["when"]}
         reminders_scheduled: List[str] = []
@@ -1015,7 +1015,7 @@ class TAM:
             try:
                 ev_date = datetime.strptime(entry["event_date"], "%Y-%m-%d")
             except ValueError:
-                logger.warning("TAM: Invalid event_date %s; skipping reminder", entry["event_date"])
+                logger.warning("TAM: Invalid event_date {}; skipping reminder", entry["event_date"])
             else:
                 msg = entry["remind_message"] or f"Reminder: {entry['event_name']} is today!"
                 if entry["remind_on"] == "day_before":
@@ -1037,7 +1037,7 @@ class TAM:
         removed = self._cleanup_past_recorded_events()
         if removed > 0:
             self._save_recorded_events()
-            logger.debug("TAM: Removed %d past recorded event(s) on list", removed)
+            logger.debug("TAM: Removed {} past recorded event(s) on list", removed)
         return list(self.recorded_events)
 
     def get_recorded_events_summary(self, limit: int = 10) -> str:
@@ -1083,7 +1083,7 @@ class TAM:
                             except (TypeError, ValueError):
                                 to_run.append(job)
                     except Exception as e:
-                        logger.debug("TAM: Skip job %s in pending check: %s", job.get("job_id"), e)
+                        logger.debug("TAM: Skip job {} in pending check: {}", job.get("job_id"), e)
                 for job in to_run:
                     try:
                         tz = (job.get("params") or {}).get("tz")
@@ -1106,7 +1106,7 @@ class TAM:
                 asyncio.run(task())
             status, err = "ok", None
         except Exception as e:
-            logger.exception("TAM: Cron job %s failed: %s", jid, e)
+            logger.exception("TAM: Cron job {} failed: {}", jid, e)
             status, err = "error", str(e)[:500]
         duration_ms = int((time.perf_counter() - started_at) * 1000)
         try:
@@ -1118,7 +1118,7 @@ class TAM:
                 last_duration_ms=duration_ms,
             )
         except Exception as ex:
-            logger.debug("TAM: Could not persist cron run state: %s", ex)
+            logger.debug("TAM: Could not persist cron run state: {}", ex)
         params = job.get("params") or {}
         params["last_run_at"] = datetime.now().isoformat()
         params["last_status"] = status
@@ -1132,15 +1132,15 @@ class TAM:
             try:
                 self.scheduler.run_pending()
             except Exception as e:
-                logger.exception("TAM: scheduler.run_pending failed: %s", e)
+                logger.exception("TAM: scheduler.run_pending failed: {}", e)
             try:
                 self._run_cron_pending()
             except Exception as e:
-                logger.exception("TAM: _run_cron_pending failed: %s", e)
+                logger.exception("TAM: _run_cron_pending failed: {}", e)
             try:
                 time.sleep(10)
             except Exception as e:
-                logger.debug("TAM: sleep interrupted: %s", e)
+                logger.debug("TAM: sleep interrupted: {}", e)
                 time.sleep(10)
 
     def run(self):

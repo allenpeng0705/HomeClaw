@@ -169,7 +169,7 @@ class Channel(BaseChannel):
                     f.write(raw)
                 paths.append(path)
             except Exception as e:
-                logger.debug("Email image part: %s", e)
+                logger.debug("Email image part: {}", e)
         return paths
 
     # Fetch a number of email based on email address and email id.

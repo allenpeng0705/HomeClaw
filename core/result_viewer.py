@@ -93,9 +93,9 @@ def cleanup_old_results() -> None:
                 except OSError:
                     pass
         if removed:
-            logger.debug("Result viewer: removed %d old result page(s) (retention_days=%d)", removed, days)
+            logger.debug("Result viewer: removed {} old result page(s) (retention_days={})", removed, days)
     except Exception as e:
-        logger.warning("Result viewer cleanup failed: %s", e)
+        logger.warning("Result viewer cleanup failed: {}", e)
 
 
 def save_result_page(title: str, content: str, format: str = "html") -> Tuple[str, Optional[str]]:
@@ -140,7 +140,7 @@ def save_result_page(title: str, content: str, format: str = "html") -> Tuple[st
     try:
         file_path.write_text(html, encoding="utf-8")
     except OSError as e:
-        logger.warning("Result viewer: failed to write %s: %s", file_path, e)
+        logger.warning("Result viewer: failed to write {}: {}", file_path, e)
         return "", None
 
     cleanup_old_results()
@@ -249,10 +249,10 @@ def start_report_server() -> bool:
 
         _report_thread = threading.Thread(target=_run, daemon=True)
         _report_thread.start()
-        logger.debug("Result viewer: report server started on %s:%s", host, port)
+        logger.debug("Result viewer: report server started on {}:{}", host, port)
         return True
     except Exception as e:
-        logger.warning("Result viewer: failed to start report server: %s", e)
+        logger.warning("Result viewer: failed to start report server: {}", e)
         _report_server = None
         _report_thread = None
         return False
@@ -267,6 +267,6 @@ def stop_report_server() -> None:
         from base.util import Util
         Util().stop_uvicorn_server(_report_server)
     except Exception as e:
-        logger.debug("Result viewer: stop report server: %s", e)
+        logger.debug("Result viewer: stop report server: {}", e)
     _report_server = None
     _report_thread = None

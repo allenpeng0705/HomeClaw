@@ -191,6 +191,17 @@ When using **Option B** (`use_default_directly_for`), the listed parameters have
 
 **Key point:** The existing tool loop already supports this. We only need the executor to validate and return a descriptive "ask user" message instead of invoking the plugin when params are incomplete.
 
+### 3.6 Implementation: Ask user and retry on next turn
+
+Core implements a **pending plugin call** flow so the app can ask for missing parameters and retry without relying on the LLM to call the tool again:
+
+1. **Resolver** (`base/plugin_param_resolver.py`) returns a third value `ask_user_data` when params are missing or uncertain: `{"missing": ["node_id"]}` or `{"uncertain": [...]}`.
+2. **route_to_plugin** (`tools/builtin.py`): When validation returns `ask_user_data` with `missing`, Core builds a **user-friendly question** (e.g. "Which node should I use? (e.g. test-node-1)"), stores a **pending plugin call** per session (`plugin_id`, `capability_id`, `params` so far, `missing`), and returns that question as the assistant reply. The user sees the question instead of a raw error.
+3. **Pending storage** (`core/core.py`): `get_pending_plugin_call(app_id, user_id, session_id)` / `set_pending_plugin_call` / `clear_pending_plugin_call` keyed by session so the next message in the same session can retry.
+4. **Next turn** (`answer_from_memory`): At the start of handling a user message, Core checks for a pending plugin call. If there is one and the user's message looks like a value for the **single** missing parameter (e.g. "test-node-1"), Core merges it into params, clears pending, **invokes the plugin** with the merged params, and returns the plugin result. No extra LLM call is required for the retry.
+
+This makes the app robust: when the LLM omits a required param (e.g. `node_id` for "record a video"), the user gets a clear question and can reply with the value; Core then completes the action. Plugins can also return a structured "ask user" response (e.g. `ask_user: true`, `missing_parameters: ["node_id"]`); Core can be extended to handle that the same way (store pending and show the message).
+
 ---
 
 ## 4. Confirmation Flow: When Uncertain, Confirm with User

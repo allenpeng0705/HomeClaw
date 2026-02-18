@@ -23,11 +23,11 @@ def _reply_message(reply_token: str, channel_access_token: str, messages: list) 
         with httpx.Client(timeout=15.0) as client:
             r = client.post(url, headers=headers, json=body)
             if r.status_code != 200:
-                logger.warning("LINE reply failed: %s %s", r.status_code, r.text[:200])
+                logger.warning("LINE reply failed: {} {}", r.status_code, r.text[:200])
                 return False
             return True
     except Exception as e:
-        logger.error("LINE reply: %s", e)
+        logger.error("LINE reply: {}", e)
         return False
 
 
@@ -47,11 +47,11 @@ def _push_message(to: str, channel_access_token: str, messages: list) -> bool:
         with httpx.Client(timeout=15.0) as client:
             r = client.post(url, headers=headers, json=body)
             if r.status_code != 200:
-                logger.warning("LINE push failed: %s %s", r.status_code, r.text[:200])
+                logger.warning("LINE push failed: {} {}", r.status_code, r.text[:200])
                 return False
             return True
     except Exception as e:
-        logger.error("LINE push: %s", e)
+        logger.error("LINE push: {}", e)
         return False
 
 

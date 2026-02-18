@@ -38,7 +38,7 @@ def _get_plugin_config(plugin: Any) -> Dict[str, Any]:
                         if folder_config.get(k) is not None:
                             config[k] = folder_config[k]
                 except Exception as e:
-                    logger.debug("Failed to load plugin config from %s: %s", config_path, e)
+                    logger.debug("Failed to load plugin config from {}: {}", config_path, e)
     return config
 
 
@@ -59,17 +59,19 @@ def resolve_and_validate_plugin_params(
     plugin_config: Dict[str, Any],
     plugin_id: str,
     capability_id: Optional[str],
-) -> Tuple[Dict[str, Any], Optional[str]]:
+) -> Tuple[Dict[str, Any], Optional[str], Optional[Dict[str, Any]]]:
     """
     Resolve parameters: LLM args -> profile (by profile_key) -> config (default_parameters).
     Validate: required params present; confirm_if_uncertain when source is profile/config
     (unless use_defaults_directly or use_default_directly_for).
-    Returns (resolved_params, error_message). If error_message is not None, do not invoke plugin.
+    Returns (resolved_params, error_message, ask_user_data).
+    If error_message is not None, do not invoke plugin.
+    ask_user_data is set when the caller should ask the user and retry: {"missing": [param_names]} or {"uncertain": [...]}.
     """
     schema = _get_capability_params_schema(capability)
     if not schema:
         # No capability params schema - use LLM params as-is
-        return dict(llm_params), None
+        return dict(llm_params), None, None
 
     default_params = plugin_config.get("default_parameters") or {}
     use_defaults_directly = plugin_config.get("use_defaults_directly") is True
@@ -143,12 +145,13 @@ def resolve_and_validate_plugin_params(
             src = sources.get(k, "?")
             have.append(f"  - {k}: {str(v)[:80]} (from {src})")
         have_str = "\n".join(have) if have else "  (none)"
-        return resolved, (
+        err = (
             f'Plugin "{plugin_id}" (capability: {cap_id}) requires parameters that are missing:\n'
             f"  Missing: {', '.join(missing)}\n\n"
             f"Parameters we have:\n{have_str}\n\n"
             "Please ask the user for the missing values."
         )
+        return resolved, err, {"missing": missing}
 
     if uncertain:
         unc_lines = []
@@ -159,11 +162,12 @@ def resolve_and_validate_plugin_params(
             if sources.get(k) == "user_message":
                 have_ok.append(f"  - {k}: {str(v)[:80]} (from user message)")
         have_ok_str = "\n".join(have_ok) if have_ok else "  (none)"
-        return resolved, (
+        err = (
             f'Plugin "{plugin_id}" (capability: {cap_id}) has parameters that need confirmation before use:\n'
             f"{chr(10).join(unc_lines)}\n\n"
             f"Parameters we have (no confirmation needed):\n{have_ok_str}\n\n"
             "Please ask the user to confirm the values above before proceeding."
         )
+        return resolved, err, {"uncertain": uncertain}
 
-    return resolved, None
+    return resolved, None, None

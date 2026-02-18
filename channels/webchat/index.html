@@ -8,23 +8,29 @@
     * { box-sizing: border-box; }
     body { font-family: system-ui, sans-serif; max-width: 600px; margin: 1rem auto; padding: 0 1rem; }
     h1 { font-size: 1.25rem; }
-    #log { border: 1px solid #ccc; min-height: 200px; padding: 0.5rem; margin: 0.5rem 0; overflow-y: auto; font-size: 0.9rem; }
+    .meta { font-size: 0.85rem; color: #666; margin-bottom: 0.5rem; }
+    #log { border: 1px solid #ccc; min-height: 200px; max-height: 50vh; padding: 0.5rem; margin: 0.5rem 0; overflow-y: auto; font-size: 0.9rem; }
     #log .user { color: #06c; }
     #log .bot { color: #080; }
     #log .sys { color: #666; }
-    #input { display: flex; gap: 0.5rem; margin: 0.5rem 0; }
-    #input input { flex: 1; padding: 0.5rem; }
-    #input button { padding: 0.5rem 1rem; cursor: pointer; }
+    #log .error { color: #b71c1c; }
+    .input-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin: 0.5rem 0; }
+    #user_id { width: 120px; padding: 0.5rem; }
+    #msg { flex: 1; min-width: 120px; padding: 0.5rem; }
+    #files { font-size: 0.85rem; }
+    button { padding: 0.5rem 1rem; cursor: pointer; }
     .status { font-size: 0.85rem; color: #666; margin-bottom: 0.5rem; }
   </style>
 </head>
 <body>
   <h1>HomeClaw WebChat</h1>
+  <p class="meta">Chat with HomeClaw. Ensure <code>user_id</code> exists in <code>config/user.yml</code> (e.g. add <code>webchat_local</code>).</p>
   <p class="status" id="status">Loading config…</p>
   <div id="log"></div>
-  <div id="input" style="display:none;">
+  <div id="input" class="input-row" style="display:none;">
+    <input type="text" id="user_id" placeholder="user_id" title="Must exist in config/user.yml">
     <input type="text" id="msg" placeholder="Type a message…" autocomplete="off">
-    <input type="file" id="files" multiple accept="image/*,video/*,audio/*,*/*">
+    <input type="file" id="files" multiple accept="image/*,video/*,audio/*,*/*" title="Attach images, video, audio, or files">
     <button id="send">Send</button>
   </div>
   <script>
@@ -33,6 +39,7 @@
       const statusEl = document.getElementById('status');
       const inputWrap = document.getElementById('input');
       const msgInput = document.getElementById('msg');
+      const userIdInput = document.getElementById('user_id');
       const filesInput = document.getElementById('files');
       const sendBtn = document.getElementById('send');
 
@@ -45,11 +52,12 @@
       }
 
       let ws = null;
-      let userId = 'webchat_local';
+      let config = { ws_url: '', user_id: 'webchat_local' };
 
-      function connect(wsUrl) {
+      function connect() {
+        if (!config.ws_url) return;
         statusEl.textContent = 'Connecting…';
-        ws = new WebSocket(wsUrl);
+        ws = new WebSocket(config.ws_url);
         ws.onopen = function() {
           statusEl.textContent = 'Connected. Send a message.';
           inputWrap.style.display = 'flex';
@@ -65,18 +73,13 @@
         ws.onmessage = function(ev) {
           try {
             const data = JSON.parse(ev.data);
-            if (data.error) addLog('bot', 'Error: ' + data.error);
+            if (data.error) addLog('error', 'Error: ' + data.error);
             else if (data.text) addLog('bot', data.text);
           } catch (e) {
             addLog('bot', ev.data);
           }
         };
       }
-
-      sendBtn.addEventListener('click', send);
-      msgInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') send();
-      });
 
       function mediaKind(type) {
         if (!type) return 'file';
@@ -87,59 +90,112 @@
         return 'file';
       }
 
-      function send() {
+      sendBtn.addEventListener('click', send);
+      msgInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') send();
+      });
+
+      async function send() {
+        const user_id = (userIdInput && userIdInput.value ? userIdInput.value : config.user_id || '').trim();
         const text = (msgInput.value || '').trim();
-        const fileList = filesInput && filesInput.files ? filesInput.files : [];
-        if (!text && fileList.length === 0) return;
+        const fileList = filesInput && filesInput.files ? Array.from(filesInput.files) : [];
+        if (!user_id || (!text && fileList.length === 0)) return;
         if (!ws || ws.readyState !== WebSocket.OPEN) {
           addLog('sys', 'Not connected.');
           return;
         }
-        if (text) addLog('user', text);
-        if (fileList.length) addLog('user', fileList.length + ' file(s)');
+        if (text) addLog('user', 'You: ' + text);
+        if (fileList.length) addLog('user', 'You: ' + fileList.length + ' file(s)');
         msgInput.value = '';
         filesInput.value = '';
 
-        const payload = { user_id: userId, text: text || '(no text)' };
+        const payload = { user_id: user_id, text: text || '(no text)' };
         if (fileList.length === 0) {
           ws.send(JSON.stringify(payload));
           return;
         }
-        const images = [], videos = [], audios = [], files = [];
-        let done = 0;
-        function onAllRead() {
-          if (images.length) payload.images = images;
-          if (videos.length) payload.videos = videos;
-          if (audios.length) payload.audios = audios;
-          if (files.length) payload.files = files;
-          ws.send(JSON.stringify(payload));
+
+        var imageFiles = [];
+        var otherFiles = [];
+        for (var i = 0; i < fileList.length; i++) {
+          var file = fileList[i];
+          var k = mediaKind(file.type);
+          if (k === 'file') {
+            var dataUrl = await new Promise(function(res, rej) {
+              var r = new FileReader();
+              r.onload = function() { res(r.result); };
+              r.onerror = rej;
+              r.readAsDataURL(file);
+            });
+            var s = String(dataUrl).trim().toLowerCase().replace(/^data:\s/, 'data:');
+            if (s.startsWith('data:image/')) k = 'image';
+            else if (s.startsWith('data:video/')) k = 'video';
+            else if (s.startsWith('data:audio/')) k = 'audio';
+          }
+          if (k === 'image') imageFiles.push(file);
+          else otherFiles.push({ file: file, kind: k });
         }
-        for (let i = 0; i < fileList.length; i++) {
-          (function(file) {
-            const r = new FileReader();
-            r.onload = function() {
-              const dataUrl = r.result;
-              const k = mediaKind(file.type);
-              if (k === 'image') images.push(dataUrl);
-              else if (k === 'video') videos.push(dataUrl);
-              else if (k === 'audio') audios.push(dataUrl);
-              else files.push(dataUrl);
-              done++;
-              if (done === fileList.length) onAllRead();
-            };
-            r.readAsDataURL(file);
-          })(fileList[i]);
+
+        if (imageFiles.length > 0) {
+          try {
+            var form = new FormData();
+            imageFiles.forEach(function(f) { form.append('files', f); });
+            var r = await fetch(location.origin + '/api/upload', { method: 'POST', body: form });
+            var data = await r.json().catch(function() { return {}; });
+            if (r.ok && Array.isArray(data.paths) && data.paths.length > 0) {
+              payload.images = data.paths;
+            } else {
+              var urls = await Promise.all(imageFiles.map(function(f) {
+                return new Promise(function(res, rej) {
+                  var reader = new FileReader();
+                  reader.onload = function() { res(reader.result); };
+                  reader.onerror = rej;
+                  reader.readAsDataURL(f);
+                });
+              }));
+              payload.images = urls;
+            }
+          } catch (e) {
+            var urls = await Promise.all(imageFiles.map(function(f) {
+              return new Promise(function(res, rej) {
+                var reader = new FileReader();
+                reader.onload = function() { res(reader.result); };
+                reader.onerror = rej;
+                reader.readAsDataURL(f);
+              });
+            }));
+            payload.images = urls;
+          }
         }
+
+        var videos = [], audios = [], files = [];
+        for (var j = 0; j < otherFiles.length; j++) {
+          var item = otherFiles[j];
+          var dataUrl = await new Promise(function(res, rej) {
+            var reader = new FileReader();
+            reader.onload = function() { res(reader.result); };
+            reader.onerror = rej;
+            reader.readAsDataURL(item.file);
+          });
+          if (item.kind === 'video') videos.push(dataUrl);
+          else if (item.kind === 'audio') audios.push(dataUrl);
+          else files.push(dataUrl);
+        }
+        if (videos.length) payload.videos = videos;
+        if (audios.length) payload.audios = audios;
+        if (files.length) payload.files = files;
+        ws.send(JSON.stringify(payload));
       }
 
       fetch('/config')
         .then(function(r) { return r.json(); })
         .then(function(cfg) {
-          userId = cfg.user_id || userId;
+          config = cfg;
+          if (userIdInput) userIdInput.value = cfg.user_id || 'webchat_local';
           connect(cfg.ws_url);
         })
         .catch(function() {
-          statusEl.textContent = 'Could not load config. Use Core WebSocket /ws with user_id in config/user.yml.';
+          statusEl.textContent = 'Could not load config. Set core_host/core_port or CORE_URL in channels/.env.';
         });
     })();
   </script>

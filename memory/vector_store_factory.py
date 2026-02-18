@@ -70,7 +70,7 @@ def _create_qdrant(cfg: Dict[str, Any], collection_name: str) -> VectorStoreBase
     try:
         from memory.vector_stores.qdrant_store import QdrantStore
     except ImportError as e:
-        logger.error("Qdrant store not available: %s. Install: pip install qdrant-client", e)
+        logger.error("Qdrant store not available: {}. Install: pip install qdrant-client", e)
         raise
     url = (cfg.get("url") or "").strip()
     if not url:
@@ -85,7 +85,7 @@ def _create_milvus(cfg: Dict[str, Any], collection_name: str) -> VectorStoreBase
     try:
         from memory.vector_stores.milvus_store import MilvusStore
     except ImportError as e:
-        logger.error("Milvus store not available: %s. Install: pip install pymilvus", e)
+        logger.error("Milvus store not available: {}. Install: pip install pymilvus", e)
         raise
     uri = (cfg.get("uri") or "").strip()
     if not uri:
@@ -99,7 +99,7 @@ def _create_pinecone(cfg: Dict[str, Any], collection_name: str) -> VectorStoreBa
     try:
         from memory.vector_stores.pinecone_store import PineconeStore
     except ImportError as e:
-        logger.error("Pinecone store not available: %s. Install: pip install pinecone-client", e)
+        logger.error("Pinecone store not available: {}. Install: pip install pinecone-client", e)
         raise
     api_key = (cfg.get("api_key") or "").strip()
     environment = (cfg.get("environment") or "").strip()
@@ -116,7 +116,7 @@ def _create_weaviate(cfg: Dict[str, Any], collection_name: str) -> VectorStoreBa
     try:
         from memory.vector_stores.weaviate_store import WeaviateStore
     except ImportError as e:
-        logger.error("Weaviate store not available: %s. Install: pip install weaviate-client", e)
+        logger.error("Weaviate store not available: {}. Install: pip install weaviate-client", e)
         raise
     url = (cfg.get("url") or "http://localhost:8080").strip()
     api_key = (cfg.get("api_key") or "").strip() or None

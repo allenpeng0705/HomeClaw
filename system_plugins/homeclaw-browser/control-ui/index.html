@@ -14,6 +14,7 @@
     .msg.user { color: #0d47a1; }
     .msg.assistant { color: #1b5e20; }
     .msg.error { color: #b71c1c; }
+    .msg.sys { color: #666; font-size: 0.85rem; }
     .input-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
     #user_id { width: 120px; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
     #text { flex: 1; min-width: 120px; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
@@ -66,18 +67,22 @@
 
     function connect() {
       statusEl.textContent = 'Connecting…';
+      addLog('Connecting to Core…', 'sys');
       ws = new WebSocket(wsUrl);
       ws.onopen = () => {
         statusEl.textContent = 'Connected.';
         sendBtn.disabled = false;
+        addLog('Connected to Core.', 'sys');
       };
       ws.onclose = () => {
         statusEl.textContent = 'Disconnected.';
         sendBtn.disabled = true;
+        addLog('Disconnected. Reconnecting in 3s…', 'sys');
         setTimeout(connect, 3000);
       };
       ws.onerror = () => {
         statusEl.textContent = 'Connection error.';
+        addLog('WebSocket error.', 'sys');
       };
       ws.onmessage = (ev) => {
         try {
@@ -93,10 +98,10 @@
       };
     }
 
-    sendBtn.addEventListener('click', () => {
+    sendBtn.addEventListener('click', async () => {
       const user_id = (userIdEl.value || '').trim();
       const text = (textEl.value || '').trim();
-      const fileList = filesEl && filesEl.files ? filesEl.files : [];
+      const fileList = filesEl && filesEl.files ? Array.from(filesEl.files) : [];
       if (!user_id || (!text && fileList.length === 0)) return;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         addLog('Not connected.', 'error');
@@ -109,37 +114,86 @@
 
       const payload = { user_id, text: text || '(no text)' };
       if (fileList.length === 0) {
+        addLog('Sending message (text only).', 'sys');
         ws.send(JSON.stringify(payload));
         return;
       }
-      const images = [], videos = [], audios = [], files = [];
-      let done = 0;
-      function onAllRead() {
-        if (images.length) payload.images = images;
-        if (videos.length) payload.videos = videos;
-        if (audios.length) payload.audios = audios;
-        if (files.length) payload.files = files;
-        ws.send(JSON.stringify(payload));
-      }
+      const imageFiles = [];
+      const otherFiles = [];
       for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
-        const r = new FileReader();
-        r.onload = () => {
-          const dataUrl = r.result;
-          const k = mediaKind(file.type);
-          if (k === 'image') images.push(dataUrl);
-          else if (k === 'video') videos.push(dataUrl);
-          else if (k === 'audio') audios.push(dataUrl);
-          else files.push(dataUrl);
-          done++;
-          if (done === fileList.length) onAllRead();
-        };
-        r.onerror = () => {
-          done++;
-          if (done === fileList.length) onAllRead();
-        };
-        r.readAsDataURL(file);
+        let k = mediaKind(file.type);
+        if (k === 'file') {
+          const dataUrl = await new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onload = () => res(r.result);
+            r.onerror = rej;
+            r.readAsDataURL(file);
+          });
+          const s = String(dataUrl).trim().toLowerCase().replace(/^data:\s/, 'data:');
+          if (s.startsWith('data:image/')) k = 'image';
+          else if (s.startsWith('data:video/')) k = 'video';
+          else if (s.startsWith('data:audio/')) k = 'audio';
+        }
+        if (k === 'image') imageFiles.push(file);
+        else otherFiles.push({ file, kind: k });
       }
+
+      // Upload images so Core saves them and we send paths (avoids huge data URLs over WebSocket)
+      if (imageFiles.length > 0) {
+        addLog('Uploading ' + imageFiles.length + ' image(s)…', 'sys');
+        try {
+          const form = new FormData();
+          imageFiles.forEach((f) => form.append('files', f));
+          const r = await fetch(location.origin + '/api/upload', { method: 'POST', body: form });
+          const data = await r.json().catch(() => ({}));
+          if (r.ok && Array.isArray(data.paths) && data.paths.length > 0) {
+            payload.images = data.paths;
+            addLog('Upload OK → sending message with ' + data.paths.length + ' image path(s).', 'sys');
+          } else {
+            addLog('Upload returned no paths (status ' + r.status + '), sending as data URL.', 'sys');
+            const urls = await Promise.all(imageFiles.map((f) => new Promise((res, rej) => {
+              const reader = new FileReader();
+              reader.onload = () => res(reader.result);
+              reader.onerror = rej;
+              reader.readAsDataURL(f);
+            })));
+            payload.images = urls;
+          }
+        } catch (e) {
+          addLog('Upload failed: ' + (e.message || e) + ' → sending as data URL.', 'sys');
+          const urls = await Promise.all(imageFiles.map((f) => new Promise((res, rej) => {
+            const reader = new FileReader();
+            reader.onload = () => res(reader.result);
+            reader.onerror = rej;
+            reader.readAsDataURL(f);
+          })));
+          payload.images = urls;
+        }
+      }
+
+      const videos = [], audios = [], files = [];
+      for (const { file, kind } of otherFiles) {
+        const dataUrl = await new Promise((res, rej) => {
+          const reader = new FileReader();
+          reader.onload = () => res(reader.result);
+          reader.onerror = rej;
+          reader.readAsDataURL(file);
+        });
+        if (kind === 'video') videos.push(dataUrl);
+        else if (kind === 'audio') audios.push(dataUrl);
+        else files.push(dataUrl);
+      }
+      if (videos.length) payload.videos = videos;
+      if (audios.length) payload.audios = audios;
+      if (files.length) payload.files = files;
+      const parts = [];
+      if (payload.images && payload.images.length) parts.push(payload.images.length + ' image(s)');
+      if (payload.videos && payload.videos.length) parts.push(payload.videos.length + ' video(s)');
+      if (payload.audios && payload.audios.length) parts.push(payload.audios.length + ' audio(s)');
+      if (payload.files && payload.files.length) parts.push(payload.files.length + ' file(s)');
+      if (parts.length) addLog('Sent: ' + parts.join(', ') + '.', 'sys');
+      ws.send(JSON.stringify(payload));
     });
 
     textEl.addEventListener('keydown', (e) => {

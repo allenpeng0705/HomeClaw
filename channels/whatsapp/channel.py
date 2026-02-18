@@ -83,7 +83,7 @@ class Channel(BaseChannel):
                 return str(out_path.resolve())
             return None
         except Exception as e:
-            logger.debug("WhatsApp media download: %s", e)
+            logger.debug("WhatsApp media download: {}", e)
             return None
 
     def handle_message(self, client: NewClient, message: MessageEv):
@@ -118,7 +118,7 @@ class Channel(BaseChannel):
                             with open(result, "rb") as f:
                                 images.append(f"data:image/jpeg;base64,{base64.b64encode(f.read()).decode('ascii')}")
                 except Exception as e:
-                    logger.debug("WhatsApp image download: %s", e)
+                    logger.debug("WhatsApp image download: {}", e)
                 if not text:
                     text = "Image"
             # Video
@@ -224,7 +224,7 @@ class Channel(BaseChannel):
                         except Exception as e:
                             logger.error(f"Error sending message: {str(e)}")
                 elif not chat:
-                    logger.debug("WhatsApp: no chat for msg_id=%s", msg_id)
+                    logger.debug("WhatsApp: no chat for msg_id={}", msg_id)
 
                 self.message_queue.task_done()
             except asyncio.TimeoutError:

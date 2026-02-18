@@ -48,14 +48,14 @@ class KuzuStore(GraphStoreBase):
             )
         except Exception as e:
             if "already exists" not in str(e).lower():
-                logger.debug("Kuzu create Entity: %s", e)
+                logger.debug("Kuzu create Entity: {}", e)
         try:
             self._conn.execute(
                 "CREATE REL TABLE RELATES_TO(FROM Entity TO Entity, label STRING, properties STRING)"
             )
         except Exception as e:
             if "already exists" not in str(e).lower():
-                logger.debug("Kuzu create RELATES_TO: %s", e)
+                logger.debug("Kuzu create RELATES_TO: {}", e)
 
     def add_node(self, node_id: str, label: str, properties: Optional[Dict[str, Any]] = None) -> None:
         self._ensure_db()
@@ -70,7 +70,7 @@ class KuzuStore(GraphStoreBase):
                 parameters={"id": node_id, "name": name, "type": typ, "memory_id": memory_id},
             )
         except Exception as e:
-            logger.debug("Kuzu add_node: %s", e)
+            logger.debug("Kuzu add_node: {}", e)
 
     def add_edge(self, from_id: str, to_id: str, label: str, properties: Optional[Dict[str, Any]] = None) -> None:
         self._ensure_db()
@@ -83,7 +83,7 @@ class KuzuStore(GraphStoreBase):
                 parameters={"from_id": from_id, "to_id": to_id, "label": label, "props": props_str},
             )
         except Exception as e:
-            logger.debug("Kuzu add_edge: %s", e)
+            logger.debug("Kuzu add_edge: {}", e)
 
     def get_neighbors(self, node_id: str, edge_label: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
         self._ensure_db()
@@ -111,7 +111,7 @@ class KuzuStore(GraphStoreBase):
                 })
             return out
         except Exception as e:
-            logger.debug("Kuzu get_neighbors: %s", e)
+            logger.debug("Kuzu get_neighbors: {}", e)
             return []
 
     def get_nodes_by_memory_id(self, memory_id: str) -> List[str]:
@@ -126,7 +126,7 @@ class KuzuStore(GraphStoreBase):
             rows = result.get_as_df()
             return [str(row.get("e.id")) for _, row in rows.iterrows() if row.get("e.id")]
         except Exception as e:
-            logger.debug("Kuzu get_nodes_by_memory_id: %s", e)
+            logger.debug("Kuzu get_nodes_by_memory_id: {}", e)
             return []
 
     def reset(self) -> None:
@@ -137,6 +137,6 @@ class KuzuStore(GraphStoreBase):
             self._db = None
             self._conn = None
         except Exception as e:
-            logger.debug("Kuzu reset: %s", e)
+            logger.debug("Kuzu reset: {}", e)
         self._db = None
         self._conn = None

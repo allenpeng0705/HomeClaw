@@ -8,10 +8,28 @@ const { sessionKey, getPage } = require('./session');
 const MAX_SNAPSHOT_ELEMENTS = 100;
 const MAX_PAGE_TEXT_CHARS = 50000;
 
+// Single-label hostnames that are valid browser targets; do not treat as node ids.
+const BROWSER_HOST_WHITELIST = new Set(['localhost', 'local']);
+
+function looksLikeNodeId(urlOrHost) {
+  const s = (urlOrHost || '').trim();
+  const host = s.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').split(':')[0];
+  if (!host) return false;
+  if (BROWSER_HOST_WHITELIST.has(host.toLowerCase())) return false;
+  return !host.includes('.') && /^[a-zA-Z0-9][-a-zA-Z0-9]*$/.test(host);
+}
+
 async function navigate(params = {}, userId = '') {
   const url = (params.url || '').trim();
   if (!url) return { success: false, text: '', error: 'url is required' };
+  if (looksLikeNodeId(url)) {
+    return { success: false, text: '', error: `"${url}" looks like a node id, not a URL. For camera/video on a node use node_camera_snap or node_camera_clip with node_id (e.g. capability_id=node_camera_clip, parameters={node_id: "${url}", duration: "3s", includeAudio: true}).` };
+  }
   const u = url.startsWith('http://') || url.startsWith('https://') ? url : 'https://' + url;
+  if (looksLikeNodeId(u)) {
+    const nodeId = (u.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').split(':')[0] || url).trim();
+    return { success: false, text: '', error: `"${url}" looks like a node id (${nodeId}), not a URL. For camera/video on a node use node_camera_snap or node_camera_clip with node_id (e.g. capability_id=node_camera_clip, parameters={node_id: "${nodeId}", duration: "3s", includeAudio: true}).` };
+  }
   const key = sessionKey(params, userId);
   try {
     const page = await getPage(key);

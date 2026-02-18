@@ -122,7 +122,7 @@ class LiteLLMService:
 
                 response = await acompletion(**kwargs)
 
-                logger.debug("Response from LiteLLM: %s", type(response).__name__)
+                logger.debug("Response from LiteLLM: {}", type(response).__name__)
                 if not stream:
                     return JSONResponse(content=_response_to_dict(response))
                 # Async streaming: collect chunks then rebuild (per LiteLLM docs)

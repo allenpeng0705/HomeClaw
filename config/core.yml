@@ -26,6 +26,13 @@ workspace_dir: config/workspace
 # Optional: inject curated long-term memory from a single Markdown file (AGENT_MEMORY.md). See docs_design/SessionAndDualMemoryDesign.md.
 use_agent_memory_file: true
 agent_memory_path: ""   # empty = workspace_dir/AGENT_MEMORY.md; or set path relative to project or absolute
+agent_memory_max_chars: 5000   # max chars to inject; default 5k. 0 = no truncation; see docs_design/MemoryFilesUsage.md
+# When true (recommended): index AGENT_MEMORY.md + daily memory and do NOT inject their content; model uses agent_memory_search + agent_memory_get to pull only relevant parts. Saves context and scales to large files.
+use_agent_memory_search: true
+agent_memory_vector_collection: homeclaw_agent_memory   # Chroma collection for agent memory chunks
+# Optional: inject short-term daily memory (memory/YYYY-MM-DD.md). Load yesterday + today on each request to keep context bounded and avoid filling the context window. Use append_daily_memory tool or write files manually.
+use_daily_memory: true
+daily_memory_dir: ""    # empty = workspace_dir/memory; or e.g. database/daily_memory
 # Session management: pruning, lifecycle, API, dmScope. 
 session:
   dm_scope: main              # main | per-peer | per-channel-peer | per-account-channel-peer
@@ -46,7 +53,7 @@ outbound_markdown_format: whatsapp
 # Max concurrent LLM calls (channel queue + plugin API /api/plugins/llm/generate).
 # Local model: use 1 (default) to avoid overloading one GPU/process.
 # Cloud model: may use 2–10 (or per-provider limit) for parallel channel + plugin API; stay under provider RPM/TPM. See docs_design/PluginLLMAndQueueDesign.md.
-llm_max_concurrent: 1
+llm_max_concurrent: 2
 # Compaction: trim or summarize context when approaching model limit. Reduces token use and avoids overflows.
 compaction:
   enabled: false              # when true, trim/summarize messages before LLM when over limit
@@ -86,7 +93,7 @@ system_plugins_auto_start: true   # set true to start homeclaw-browser etc. with
 system_plugins: [homeclaw-browser]                 # optional allowlist by plugin id (folder name); empty = start all discovered
 system_plugins_env:
   homeclaw-browser:
-    BROWSER_HEADLESS: "false"
+    BROWSER_HEADLESS: false
 # Per-plugin env vars (plugin id = folder name under system_plugins/). Each plugin gets only its own env.
 # system_plugins_env:
 #   homeclaw-browser:
@@ -170,7 +177,7 @@ result_viewer:
 # backend: auto (default) = use same as memory_backend (cognee -> Cognee DB/vector, chroma -> core.yml vectorDB).
 # Set to "cognee" or "chroma" to override (e.g. Cognee memory + built-in RAG for KB).
 knowledge_base:
-  enabled: false
+  enabled: true
   backend: auto          # auto | cognee | chroma
   collection_name: homeclaw_kb   # used only when backend is chroma
   chunk_size: 800
@@ -204,6 +211,18 @@ llama_cpp:
   chat_format: null
   function_calling: true
 
+  embedding:
+    ctx_size: 0      # 0 = use model default (recommended; avoids forcing 8192 on models that support less)
+    threads: 4
+    n_gpu_layers: 20
+  
+  # Optional: overrides for the embedding server only (local embedding model). Merged over the keys above.
+  # Use when the embedding model needs different ctx_size/threads/n_gpu_layers. ctx_size 0 = use model's native n_ctx.
+  # embedding:
+  #   ctx_size: 0      # 0 = use model default (recommended; avoids forcing 8192 on models that support less)
+  #   threads: 8
+  #   n_gpu_layers: 99
+
 # ——— Completion (per-request generation) ———
 # All parameters below are sent with every chat completion call. Omit or comment out to use server default or llama_cpp fallback where noted.
 # Fallbacks: max_tokens → llama_cpp.predict; temperature/top_p/repeat_penalty → llama_cpp.temp / (none) / llama_cpp.repeat_penalty.
@@ -220,6 +239,7 @@ completion:
   # n: 1                    # number of completions (default 1)
   # response_format: null   # optional; e.g. { "type": "json_object" }
   # timeout: null            # optional; Unit: seconds
+  image_max_dimension: 512   # 0 = no resize. Set e.g. 1024 to resize images before sending to vision model (keeps aspect ratio; requires Pillow)
 
 # ——— 2. Local models (llama.cpp server per model; path relative to model_path) ———
 # Optional per model: mmproj (vision), lora (adapter(s)), lora_base (optional base for LoRA).
@@ -233,7 +253,7 @@ completion:
 local_models:
   - id: embedding_text_model
     alias: embedding
-    path: bge-m3-Q5_K_M.gguf
+    path: Qwen3-Embedding-0.6B-Q8_0.gguf  #Qwen3-Embedding-4B-Q4_K_M.gguf,  bge-m3-Q5_K_M.gguf
     host: 127.0.0.1
     port: 5066
     capabilities: [embedding]
@@ -257,30 +277,15 @@ local_models:
   #   capabilities: [Chat]
   # Multi-LoRA (if llama-server supports multiple --lora): use array
   #   lora: [adapters/a1.gguf, adapters/a2.gguf]
-  - id: Qwen3-14B-Q5_K_M
-    alias: Qwen3-14B-Q5_K_M
-    path: Qwen3-14B-Q5_K_M.gguf
+  - id: main_vl_model
+    alias: main_vl_model
+    path: Qwen3VL-4B-Instruct-Q4_K_M.gguf #Qwen3-VL-8B-Instruct-Q4_K_M.gguf, gemma-3-4b-it-Q4_K_M.gguf
+    mmproj: mmproj-Qwen3VL-4B-Instruct-F16.gguf #mmproj-Qwen3-VL-8B-BF16.gguf, mmproj-gemma-3-4b-BF16.gguf
     host: 127.0.0.1
     port: 5023
     capabilities: [Chat]
-  - id: deepseek_r1_qwen_14B_q5_k_m
-    alias: DeepSeek-R1_qwen_14B
-    path: deepseek-r1/deepseek-qwen-14B_q5_k_m/DeepSeek-R1-Distill-Qwen-14B-Q5_K_M.gguf
-    host: 127.0.0.1
-    port: 5015
-    capabilities: [Chat]
-  - id: deepseek_r1_qwen_7B_q5_k_m
-    alias: DeepSeek-R1_qwen_7B
-    path: deepseek-r1/deepseek-qwen-7B_q5_k_m/DeepSeek-R1-Distill-Qwen-7B-Q5_K_M.gguf
-    host: 127.0.0.1
-    port: 5018
-    capabilities: [Chat]
-  - id: qwen25_7B_q5_k_m
-    alias: Qwen25_7B_q5_k_m
-    path: qwen25-7B/Qwen2.5-7B-Instruct-Q5_K_M.gguf
-    host: 127.0.0.1
-    port: 5018
-    capabilities: [Chat]
+    supported_media: [image]
+
 
 # ——— 3. Cloud models (LiteLLM; one service per entry, each host/port) ———
 # Set env var per api_key_name (e.g. OPENAI_API_KEY). Start LiteLLM per model or use one proxy.
@@ -305,25 +310,10 @@ cloud_models:
     api_key_name: OPENAI_API_KEY
     # supported_media: [image, audio, video]   # optional; cloud default is all
     capabilities: [Functioncall, Chat]
-  # OpenAI embedding (use as embedding_llm for memory; same LiteLLM port as chat)
-  - id: OpenAI-Embedding-3-Small
-    alias: OpenAI text-embedding-3-small
-    path: openai/text-embedding-3-small
-    host: 127.0.0.1
-    port: 4001
-    api_key_name: OPENAI_API_KEY
-    capabilities: [embedding]
   # Google Gemini
-  - id: Gemini-1.5-Pro
-    alias: Gemini 1.5 Pro
-    path: gemini/gemini-1.5-pro
-    host: 127.0.0.1
-    port: 4002
-    api_key_name: GEMINI_API_KEY
-    capabilities: [Functioncall, Chat]
-  - id: Gemini-1.5-Flash
-    alias: Gemini 1.5 Flash
-    path: gemini/gemini-1.5-flash
+  - id: Gemini-2.5-Flash
+    alias: Gemini 2.5 Flash
+    path: gemini/gemini-2.5-flash
     host: 127.0.0.1
     port: 4002
     api_key_name: GEMINI_API_KEY
@@ -336,20 +326,7 @@ cloud_models:
     port: 4003
     api_key_name: ANTHROPIC_API_KEY
     capabilities: [Functioncall, Chat]
-  - id: Claude-Opus
-    alias: Claude 3 Opus
-    path: anthropic/claude-3-opus-20240229
-    host: 127.0.0.1
-    port: 4003
-    api_key_name: ANTHROPIC_API_KEY
-    capabilities: [Functioncall, Chat]
   # Ollama (local; no API key)
-  - id: Ollama-llama3
-    alias: Ollama Llama 3
-    path: ollama/llama3.2
-    host: 127.0.0.1
-    port: 4004
-    capabilities: [Chat]
   - id: Ollama-qwen2
     alias: Ollama Qwen2
     path: ollama/qwen2.5:7b
@@ -357,13 +334,6 @@ cloud_models:
     port: 4004
     capabilities: [Chat]
   # DeepSeek
-  - id: DeepSeek-Chat
-    alias: DeepSeek Chat
-    path: deepseek/deepseek-chat
-    host: 127.0.0.1
-    port: 4005
-    api_key_name: DEEPSEEK_API_KEY
-    capabilities: [Chat]
   - id: DeepSeek-Coder
     alias: DeepSeek Coder
     path: deepseek/deepseek-coder
@@ -372,13 +342,6 @@ cloud_models:
     api_key_name: DEEPSEEK_API_KEY
     capabilities: [Chat]
   # Alibaba Qwen (Dashscope)
-  - id: Qwen-Plus
-    alias: Qwen Plus (Dashscope)
-    path: dashscope/qwen-plus
-    host: 127.0.0.1
-    port: 4006
-    api_key_name: DASHSCOPE_API_KEY
-    capabilities: [Chat]
   - id: Qwen-Turbo
     alias: Qwen Turbo (Dashscope)
     path: dashscope/qwen-turbo
@@ -447,7 +410,7 @@ cloud_models:
 #   are omitted and a short note is added so the model does not crash.
 
 # ——— Selected main and embedding model: local_models/<id> or cloud_models/<id> ———
-main_llm: local_models/Qwen3-14B-Q5_K_M
+main_llm: local_models/main_vl_model
 # main_llm_language: list of allowed/preferred response languages (e.g. [zh, en] or [en]).
 #   - First item = primary: used for prompt file loading (e.g. response.en.yml, prompt_en.yml) and default when user language is unknown.
 #   - Full list = allowed response languages: you can add a system-line like "Respond only in one of: {languages}; if the user's language is unknown, use the first."
@@ -459,7 +422,6 @@ main_llm: local_models/Qwen3-14B-Q5_K_M
 main_llm_language: [en, zh]
 
 embedding_llm: local_models/embedding_text_model
-embeddingTokensLen: 8192
 
 # For cloud models: set the env var per api_key_name (e.g. OPENAI_API_KEY, ANTHROPIC_API_KEY,
 # DEEPSEEK_API_KEY, DASHSCOPE_API_KEY, GROQ_API_KEY, MISTRAL_API_KEY, XAI_API_KEY,
@@ -560,11 +522,13 @@ cognee:
     endpoint: ""
     api_key: ""
   # Embedding for Cognee: leave empty to use Core's embedding_llm (embedding_host, embedding_port). Else set provider, model, endpoint, api_key.
+  # tokenizer: local path or HuggingFace model id for token counting (silences "Could not automatically map embedding_text_model to a tokeniser").
   embedding:
     provider: ""
     model: ""
     endpoint: ""
     api_key: ""
+    tokenizer: "/Users/shileipeng/Documents/mygithub/HomeClaw/models/tokenizer/Qwen3_0.6B"
   # Optional: raw Cognee env vars (key: value). Override or add any Cognee env var by name.
   # env:
   #   TELEMETRY_DISABLED: "true"

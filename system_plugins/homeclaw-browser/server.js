@@ -92,7 +92,32 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (method === 'POST' && (url === '/api/upload' || url.startsWith('/api/upload'))) {
+    const coreUploadUrl = CORE_URL + '/api/upload';
+    const parsed = new URL(coreUploadUrl);
+    const headers = { ...req.headers, host: parsed.host };
+    if (CORE_API_KEY) headers['x-api-key'] = CORE_API_KEY;
+    const httpModule = parsed.protocol === 'https:' ? require('https') : require('http');
+    const proxyReq = httpModule.request(
+      coreUploadUrl,
+      { method: 'POST', headers },
+      (proxyRes) => {
+        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+        proxyRes.pipe(res);
+      }
+    );
+    proxyReq.on('error', (e) => {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: String(e.message), paths: [] }));
+    });
+    req.pipe(proxyReq);
+    return;
+  }
+
   if (method === 'POST' && url === '/run') {
+    // Allow long-running node commands (e.g. camera_snap/clip can wait up to CMD_TIMEOUT_MS). Prevent Node/socket timeout from closing the request.
+    const RUN_TIMEOUT_MS = 360000; // 6 min, must be > nodes/command.js CMD_TIMEOUT_MS
+    if (req.socket) req.socket.setTimeout(RUN_TIMEOUT_MS);
     let body = '';
     req.on('data', (chunk) => { body += chunk; });
     req.on('end', async () => {

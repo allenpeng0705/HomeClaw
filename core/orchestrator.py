@@ -69,7 +69,7 @@ class Orchestrator:
                 if content and content.strip():
                     return content.strip()
             except Exception as e:
-                logger.debug("Orchestrator prompt manager fallback: %s", e)
+                logger.debug("Orchestrator prompt manager fallback: {}", e)
         return self._create_prompt_fallback(text, chat_history)
     
     def get_hist_chats(self, request: PromptRequest) -> str:
@@ -275,7 +275,7 @@ Reply with only the JSON object:"""
                 if content and content.strip():
                     return content.strip()
             except Exception as e:
-                logger.debug("Orchestrator combined prompt manager fallback: %s", e)
+                logger.debug("Orchestrator combined prompt manager fallback: {}", e)
         return self._create_combined_intent_and_plugin_fallback(text, chat_history, plugin_infos)
 
     async def translate_to_intent_and_plugin(
@@ -303,7 +303,7 @@ Reply with only the JSON object:"""
             logger.error("Orchestrator combined response is empty")
             return (None, None)
         raw = raw.strip()
-        logger.debug("Orchestrator combined response: %s", raw[:300])
+        logger.debug("Orchestrator combined response: {}", raw[:300])
         obj = self._extract_json_object(raw)
         if obj is None:
             logger.warning("Orchestrator combined: no valid JSON found in response, falling back to intent-only")
@@ -323,9 +323,9 @@ Reply with only the JSON object:"""
             )
             if intent_type == IntentType.TIME:
                 await self.tam.process_intent(intent, request)
-            logger.debug("Orchestrator combined parsed: type=%s plugin_ref=%s", intent_type, plugin_ref)
+            logger.debug("Orchestrator combined parsed: type={} plugin_ref={}", intent_type, plugin_ref)
             return (intent, plugin_ref)
         except Exception as e:
-            logger.warning("Orchestrator combined parse failed: %s, falling back to intent-only", e)
+            logger.warning("Orchestrator combined parse failed: {}, falling back to intent-only", e)
             intent = await self.translate_to_intent(request)
             return (intent, None)

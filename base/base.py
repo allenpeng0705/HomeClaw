@@ -534,7 +534,6 @@ class CoreMetadata:
     port: int
     mode: str
     model_path: str
-    embeddingTokensLen: int
     embedding_llm: str
     embedding_host: str
     embedding_port: int
@@ -564,6 +563,11 @@ class CoreMetadata:
     workspace_dir: str = "config/workspace"  # which workspace dir to load (e.g. config/workspace_day vs config/workspace_night for day/night agents)
     use_agent_memory_file: bool = False  # inject AGENT_MEMORY.md (curated long-term memory); see SessionAndDualMemoryDesign.md
     agent_memory_path: str = ""  # empty = workspace_dir/AGENT_MEMORY.md
+    agent_memory_max_chars: int = 5000  # max chars to inject; default 5k. 0 = no truncation. When > 0, only last N chars; see MemoryFilesUsage.md
+    use_daily_memory: bool = False  # inject memory/YYYY-MM-DD.md for today + yesterday (short-term, bounded context); see SessionAndDualMemoryDesign.md
+    daily_memory_dir: str = ""  # empty = workspace_dir/memory; or path relative to project (e.g. database/daily_memory)
+    use_agent_memory_search: bool = True  # when True (default), retrieval-only: no bulk inject; model uses agent_memory_search + agent_memory_get. Set false for legacy bulk inject.
+    agent_memory_vector_collection: str = "homeclaw_agent_memory"  # Chroma collection for agent memory chunks
     session: Dict[str, Any] = field(default_factory=dict)  # prune_keep_last_n, prune_after_turn, daily_reset_at_hour, idle_minutes, api_enabled
     compaction: Dict[str, Any] = field(default_factory=dict)  # enabled, reserve_tokens, max_messages_before_compact, compact_tool_results
     use_tools: bool = False  # enable tool layer (tool registry, execute tool_calls in chat loop)
@@ -615,6 +619,13 @@ class CoreMetadata:
                 continue
             out[str(plugin_id)] = {str(k): str(v) for k, v in vars_dict.items()}
         return out
+
+    @staticmethod
+    def _parse_agent_memory_max_chars(raw: Any) -> int:
+        """Default 5000 when key missing; 0 = no truncation when explicitly set."""
+        if raw is None:
+            return 5000
+        return max(0, int(raw) if raw != '' else 5000)
 
     @staticmethod
     def from_yaml(yaml_file: str) -> 'CoreMetadata':
@@ -711,7 +722,6 @@ class CoreMetadata:
             port=data['port'],
             mode=data['mode'],
             model_path=data['model_path'],
-            embeddingTokensLen=data['embeddingTokensLen'],
             embedding_llm=data.get('embedding_llm', ''),
             embedding_host=data.get('embedding_host', '127.0.0.1'),
             embedding_port=data.get('embedding_port', 5066),
@@ -740,6 +750,11 @@ class CoreMetadata:
             workspace_dir=data.get('workspace_dir', 'config/workspace'),
             use_agent_memory_file=bool(data.get('use_agent_memory_file', False)),
             agent_memory_path=(data.get('agent_memory_path') or '').strip(),
+            agent_memory_max_chars=max(0, int(data.get('agent_memory_max_chars', 5000) or 0)),
+            use_daily_memory=bool(data.get('use_daily_memory', False)),
+            daily_memory_dir=(data.get('daily_memory_dir') or '').strip(),
+            use_agent_memory_search=bool(data.get('use_agent_memory_search', True)),
+            agent_memory_vector_collection=(data.get('agent_memory_vector_collection') or 'homeclaw_agent_memory').strip(),
             session=data.get('session') if isinstance(data.get('session'), dict) else {},
             compaction=data.get('compaction') if isinstance(data.get('compaction'), dict) else {},
             use_tools=data.get('use_tools', False),
@@ -798,7 +813,6 @@ class CoreMetadata:
                 'main_llm_host': core.main_llm_host,
                 'main_llm_port': core.main_llm_port,
                 'main_llm_language': core.main_llm_language,
-                'embeddingTokensLen': core.embeddingTokensLen,
                 'main_llm': core.main_llm,
                 'silent': core.silent,
                 'use_memory': core.use_memory,

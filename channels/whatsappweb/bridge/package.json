@@ -1,0 +1,16 @@
+{
+  "name": "homeclaw-whatsappweb-bridge",
+  "version": "1.0.0",
+  "description": "Baileys bridge: WhatsApp Web <-> HomeClaw whatsappweb channel",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "install-deps": "npm install"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "pino": "^9.5.0",
+    "axios": "^1.7.0"
+  }
+}

@@ -9,7 +9,7 @@
     "config": {
       "base_url": "http://127.0.0.1:3020",
       "path": "run",
-      "timeout_sec": 30
+      "timeout_sec": 420
     },
     "capabilities": [
       {

@@ -55,7 +55,7 @@ def _sidecar_record_add(user_id: str, source_id: str) -> None:
         finally:
             conn.close()
     except Exception as e:
-        logger.debug("Cognee KB sidecar record add failed: %s", e)
+        logger.debug("Cognee KB sidecar record add failed: {}", e)
 
 
 def _sidecar_record_remove(user_id: str, source_id: str) -> None:
@@ -73,7 +73,7 @@ def _sidecar_record_remove(user_id: str, source_id: str) -> None:
         finally:
             conn.close()
     except Exception as e:
-        logger.debug("Cognee KB sidecar record remove failed: %s", e)
+        logger.debug("Cognee KB sidecar record remove failed: {}", e)
 
 
 def _sidecar_list_old(user_id: str, older_than_ts: float) -> List[str]:
@@ -92,7 +92,7 @@ def _sidecar_list_old(user_id: str, older_than_ts: float) -> List[str]:
         finally:
             conn.close()
     except Exception as e:
-        logger.debug("Cognee KB sidecar list old failed: %s", e)
+        logger.debug("Cognee KB sidecar list old failed: {}", e)
         return []
 
 
@@ -130,7 +130,7 @@ def _sidecar_oldest_n(user_id: str, n: int) -> List[str]:
         finally:
             conn.close()
     except Exception as e:
-        logger.debug("Cognee KB sidecar oldest_n failed: %s", e)
+        logger.debug("Cognee KB sidecar oldest_n failed: {}", e)
         return []
 
 
@@ -150,7 +150,7 @@ def _sidecar_list_sources(user_id: str, limit: int = 500) -> List[Dict[str, Any]
         finally:
             conn.close()
     except Exception as e:
-        logger.debug("Cognee KB sidecar list_sources failed: %s", e)
+        logger.debug("Cognee KB sidecar list_sources failed: {}", e)
         return []
 
 
@@ -167,7 +167,7 @@ def _sidecar_clear_all() -> None:
         finally:
             conn.close()
     except Exception as e:
-        logger.debug("Cognee KB sidecar clear failed: %s", e)
+        logger.debug("Cognee KB sidecar clear failed: {}", e)
 
 
 def _safe(s: str, max_len: int = 100) -> str:
@@ -227,7 +227,7 @@ class CogneeKnowledgeBase:
             logger.warning("Cognee KB list_datasets timed out")
             return []
         except Exception as e:
-            logger.debug("Cognee KB list_datasets failed: %s", e)
+            logger.debug("Cognee KB list_datasets failed: {}", e)
             return []
         out = []
         for d in (datasets_list or []):
@@ -291,7 +291,7 @@ class CogneeKnowledgeBase:
             logger.warning("Cognee KB add/cognify timed out")
             return "Error: knowledge base add timed out."
         except Exception as e:
-            logger.warning("Cognee KB add failed: %s", e)
+            logger.warning("Cognee KB add failed: {}", e)
             return f"Error: knowledge base add failed: {e!s}"
         return f"Added to knowledge base (source_id={source_id}). Use knowledge_base_remove(source_id={source_id!r}) to remove."
 
@@ -316,7 +316,7 @@ class CogneeKnowledgeBase:
             logger.warning("Cognee KB search timed out")
             return []
         except Exception as e:
-            logger.debug("Cognee KB search failed: %s", e)
+            logger.debug("Cognee KB search failed: {}", e)
             return []
         out = []
         for i, r in enumerate(results if isinstance(results, list) else [results]):
@@ -366,7 +366,7 @@ class CogneeKnowledgeBase:
             logger.warning("Cognee KB remove timed out")
             return "Error: remove timed out."
         except Exception as e:
-            logger.warning("Cognee KB remove failed: %s", e)
+            logger.warning("Cognee KB remove failed: {}", e)
             return f"Error: remove failed: {e!s}"
 
     async def cleanup_unused(self, user_id: str, unused_days: Optional[float] = None) -> str:
@@ -411,6 +411,6 @@ class CogneeKnowledgeBase:
             logger.warning("Cognee KB reset timed out")
             return f"Error: reset timed out (deleted {removed} dataset(s) so far)."
         except Exception as e:
-            logger.warning("Cognee KB reset failed: %s", e)
+            logger.warning("Cognee KB reset failed: {}", e)
             return f"Error: reset failed: {e!s}"
         return f"Knowledge base reset: deleted {removed} dataset(s) and cleared sidecar."

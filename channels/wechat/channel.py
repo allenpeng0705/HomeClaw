@@ -76,7 +76,7 @@ class Channel(BaseChannel):
                     images.append(f"data:image/jpeg;base64,{b64}")
                     text = 'User sent an image' if not text else text
             except Exception as e:
-                logger.debug("WeChat image download: %s", e)
+                logger.debug("WeChat image download: {}", e)
             if not text:
                 text = 'Image'
         else:
@@ -146,14 +146,14 @@ class Channel(BaseChannel):
                     try:
                         self.wcf.send_text(text, sender)
                     except Exception as e:
-                        logger.error("WeChat send_text: %s", e)
+                        logger.error("WeChat send_text: {}", e)
             if "image" in response_data:
                 image_path = response_data.get("image")
                 if isinstance(image_path, str) and os.path.isfile(image_path):
                     try:
                         await asyncio.to_thread(self.wcf.send_image, image_path, sender)
                     except Exception as e:
-                        logger.error("WeChat send_image: %s", e)
+                        logger.error("WeChat send_image: {}", e)
             if "video" in response_data:
                 video_path = response_data.get("video")
                 if isinstance(video_path, str) and os.path.isfile(video_path):
@@ -167,7 +167,7 @@ class Channel(BaseChannel):
                     try:
                         await asyncio.to_thread(self.wcf.send_file, file_path, sender)
                     except Exception as e:
-                        logger.error("WeChat send_file: %s", e)
+                        logger.error("WeChat send_file: {}", e)
             if "audio" in response_data:
                 audio_path = response_data.get("audio")
                 if isinstance(audio_path, str) and os.path.isfile(audio_path):
@@ -176,7 +176,7 @@ class Channel(BaseChannel):
                     except Exception as e:
                         logger.error("WeChat send_file (audio): %s", e)
         except Exception as e:
-            logger.exception("WeChat handle_async_response: %s", e)   
+            logger.exception("WeChat handle_async_response: {}", e)   
 
 shutdown_url = ""
 def main():

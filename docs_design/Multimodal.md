@@ -4,6 +4,26 @@ When the main model supports image, audio, or video (see `config/core.yml` **sup
 
 ---
 
+## 0. How all channels handle images and other files (same pattern)
+
+**Yes — all channels should do the same thing:** save media and files to local storage, then pass **paths** to Core (or data URLs when saving isn’t possible).
+
+- **Images** → save to a path Core can read → send `PromptRequest.images = [path, ...]` (or `InboundRequest.images` for /inbound and WebSocket).
+- **Audio / video** → same idea: save → send `audios` / `videos` as paths (or data URLs).
+- **Other files** (documents, arbitrary attachments) → save → send `PromptRequest.files = [path, ...]`. Core runs file-understanding (type detection, media handling, document text extraction).
+
+Core always accepts **either** a **file path** (Core reads and encodes as needed) **or** a **data URL**. Paths are preferred: smaller payloads, no size limits on the wire, and one consistent behavior everywhere.
+
+| Source | Who saves? | How Core gets it |
+|--------|------------|-------------------|
+| **WebChat (browser)** | **Core** saves via **POST /api/upload**. The client uploads the file(s); Core writes under `database/uploads/` and returns paths. The client then sends the chat message with `images` / `files` = those paths. | Paths from /api/upload (plugin proxies to Core). |
+| **Server-side channels** (email, Matrix, WeChat, Telegram, etc.) | The **channel** saves. When the platform delivers an image/audio/video/attachment, the channel writes it to a path Core can read (e.g. under `tools.file_read_base` or `channels/<name>/docs/`). | Channel sets `PromptRequest.images` / `audios` / `videos` / `files` = `[path1, ...]` and sends the request. |
+| **POST /inbound or WebSocket** (e.g. a bot) | Caller saves to a shared dir and sends **paths**, or sends **data URLs** if it can’t write to Core’s filesystem. WebChat uses upload-then-path. | Core accepts paths or data URLs in `images`, `audios`, `videos`, `files`. |
+
+So: **all channels do the same kind of thing** — save to local, then pass paths to Core. WebChat is the only one that can’t write to Core’s disk, so it uses **POST /api/upload** so that Core does the saving and returns paths.
+
+---
+
 ## 1. Channel responsibility: how to support multi-modal
 
 Each channel that can receive image, audio, or video from the platform must:
@@ -170,3 +190,13 @@ These channels already use **PromptRequest** with **images=[]**, **audios=[]**, 
 
 - **Model support**: In `config/core.yml`, set **supported_media** on the main model entry (e.g. `[image]`, `[image, audio, video]`). Local vision models need **mmproj** for image; see **MediaSupportAndProviders.md** and config comments.
 - **Channels**: Each channel that supports multi-modal must **receive** media from the platform, **save** it to a path (or build a data URL), and **compose** the PromptRequest with **text**, **images** / **audios** / **videos**, and **contentType** before sending to Core (see §1 and §5).
+
+---
+
+## 7. WebChat and troubleshooting
+
+- **WebChat** (browser UI over WebSocket `/ws`) sends **images**, **videos**, **audios**, and **files** as data URLs. If the browser does not set `file.type` (e.g. some drag-drop or mobile), the file may be sent in **files** instead of **images**. Core treats any **files** item that is a `data:image/...` URL as an image and adds it to the vision input, so images still reach the model.
+- **“I cannot see images” / “Image(s) omitted”**: Ensure **main_llm** in config points to the vision model (e.g. `local_models/main_vl_model`). That entry must have **mmproj** set (for local) or **supported_media: [image]** so `main_llm_supported_media()` returns `[image]`. Otherwise Core omits image parts and adds a note; the model then sees only text and may reply that it cannot see images.
+- **Confirm mmproj was passed to llama.cpp**: For local vision models the **llama.cpp server must be started with `--mmproj <path>`**. When Core auto-starts the main LLM it resolves the mmproj path from config and adds it to the command. Check logs at startup: you should see **"Vision model: llama.cpp server started with --mmproj …"**. If you see **"mmproj file not found (…), llama.cpp server will start WITHOUT vision"**, the mmproj file is missing at the resolved path (fix path in config or put the .gguf there). If you start **llama-server yourself** (not via Core), you must add `--mmproj /path/to/mmproj.gguf` to the command.
+- **Trace vision in logs**: When you send an image, Core logs **"Vision request: images_count=… main_llm=… supported_media=… will_include_images=…"** and, if including images, **"Sending multimodal user message to LLM (N image(s), OpenAI image_url format)"**. If `will_include_images=False` or `supported_media=[]`, fix config (see above). If `main_llm_supported_media: model entry not found` appears, **main_llm** does not match any **id** in **local_models** or **cloud_models**.
+- **Image resizing**: Many vision models have a practical max resolution. In `config/core.yml` under **completion**, set **image_max_dimension** (e.g. `1024`) to resize images before sending (keeps aspect ratio; requires Pillow). Use `0` to disable. Resizing reduces payload size and can avoid model limits or timeouts.

@@ -2,10 +2,12 @@
 Workspace bootstrap loader (optional).
 Loads IDENTITY.md, AGENTS.md, TOOLS.md from config/workspace/ and injects into system prompt.
 See Design.md §3.6 — workspace bootstrap while keeping RAG.
+Daily memory: memory/YYYY-MM-DD.md (today + yesterday) for bounded short-term context; see SessionAndDualMemoryDesign.md.
 """
 import os
+from datetime import date, timedelta
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 # Project root: parent of base/
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -82,10 +84,15 @@ def get_agent_memory_file_path(workspace_dir: Optional[Path] = None, agent_memor
     return root / AGENT_MEMORY_FILENAME
 
 
-def load_agent_memory_file(workspace_dir: Optional[Path] = None, agent_memory_path: Optional[str] = None) -> str:
+def load_agent_memory_file(
+    workspace_dir: Optional[Path] = None,
+    agent_memory_path: Optional[str] = None,
+    max_chars: int = 0,
+) -> str:
     """
     Load AGENT_MEMORY.md (curated long-term memory). Used with RAG; AGENT_MEMORY is authoritative on conflict.
     If agent_memory_path is set and is a valid path, use it; otherwise workspace_dir/AGENT_MEMORY.md.
+    If max_chars > 0 and content is longer, returns only the last max_chars with an omission note (avoids filling context window).
     Returns file content or empty string.
     """
     root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
@@ -93,9 +100,15 @@ def load_agent_memory_file(workspace_dir: Optional[Path] = None, agent_memory_pa
     if path is None or not path.is_file():
         return ""
     try:
-        return path.read_text(encoding="utf-8").strip()
+        content = path.read_text(encoding="utf-8").strip()
     except Exception:
         return ""
+    if not content:
+        return ""
+    if max_chars > 0 and len(content) > max_chars:
+        note = f"... (earlier content omitted; showing last {max_chars} of {len(content)} chars)\n\n"
+        return note + content[-max_chars:]
+    return content
 
 
 def clear_agent_memory_file(
@@ -117,3 +130,107 @@ def clear_agent_memory_file(
         return True
     except Exception:
         return False
+
+
+# ---- Daily memory (memory/YYYY-MM-DD.md): short-term, load yesterday + today ----
+
+def get_daily_memory_dir(
+    workspace_dir: Optional[Path] = None,
+    daily_memory_dir: Optional[str] = None,
+) -> Path:
+    """Return the directory for daily memory files (memory/YYYY-MM-DD.md). Default: workspace_dir/memory."""
+    root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
+    if daily_memory_dir and daily_memory_dir.strip():
+        p = Path(daily_memory_dir.strip())
+        if not p.is_absolute():
+            p = _PROJECT_ROOT / p
+        return p
+    return root / "memory"
+
+
+def get_daily_memory_path_for_date(
+    d: date,
+    workspace_dir: Optional[Path] = None,
+    daily_memory_dir: Optional[str] = None,
+) -> Path:
+    """Return the Path for memory/YYYY-MM-DD.md for the given date."""
+    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir)
+    return base / f"{d.isoformat()}.md"
+
+
+def load_daily_memory_for_dates(
+    dates: List[date],
+    workspace_dir: Optional[Path] = None,
+    daily_memory_dir: Optional[str] = None,
+    max_chars: int = 0,
+) -> str:
+    """
+    Load and concatenate daily memory files for the given dates (newest last).
+    Returns a single string with optional "## YYYY-MM-DD" headers per file. Used to inject yesterday + today into the prompt.
+    If max_chars > 0 and concatenated content is longer, returns only the last max_chars with an omission note.
+    """
+    if not dates:
+        return ""
+    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir)
+    parts = []
+    for d in sorted(dates):
+        path = base / f"{d.isoformat()}.md"
+        if path.is_file():
+            try:
+                text = path.read_text(encoding="utf-8").strip()
+                if text:
+                    parts.append(f"## {d.isoformat()}\n{text}")
+            except Exception:
+                pass
+    content = "\n\n".join(parts) if parts else ""
+    if not content:
+        return ""
+    if max_chars > 0 and len(content) > max_chars:
+        note = f"... (daily memory truncated; showing last {max_chars} of {len(content)} chars)\n\n"
+        return note + content[-max_chars:]
+    return content
+
+
+def append_daily_memory(
+    content: str,
+    d: Optional[date] = None,
+    workspace_dir: Optional[Path] = None,
+    daily_memory_dir: Optional[str] = None,
+) -> bool:
+    """
+    Append content to the daily memory file for the given date (default: today).
+    Creates the file and parent dir if needed. Returns True on success.
+    """
+    if not content or not content.strip():
+        return False
+    day = d or date.today()
+    path = get_daily_memory_path_for_date(day, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
+        new_content = (existing + "\n\n" + content.strip()).strip() if existing else content.strip()
+        path.write_text(new_content + "\n", encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def clear_daily_memory_for_dates(
+    dates: List[date],
+    workspace_dir: Optional[Path] = None,
+    daily_memory_dir: Optional[str] = None,
+) -> int:
+    """Clear (truncate to empty) daily memory files for the given dates. Returns number of files cleared."""
+    if not dates:
+        return 0
+    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir)
+    cleared = 0
+    for d in dates:
+        path = base / f"{d.isoformat()}.md"
+        if path.is_file():
+            try:
+                path.write_text("", encoding="utf-8")
+                cleared += 1
+            except Exception:
+                pass
+    return cleared

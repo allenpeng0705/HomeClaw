@@ -59,6 +59,23 @@ async function handleRun(body) {
     }
   }
 
+  // When still no capability_id: infer from user_input for node actions (e.g. "take a photo on test-node-1" -> node_camera_snap)
+  if (!capId && userInput) {
+    const nodeIdFromParams = (params.node_id || params.nodeId || '').trim();
+    const nodeIdFromText = userInput.match(/(?:on\s+)([a-zA-Z0-9_-]+)/i)?.[1] || userInput.match(/([a-zA-Z0-9]+-node-[a-zA-Z0-9]+)/i)?.[1];
+    const nodeId = nodeIdFromParams || nodeIdFromText || '';
+    const lower = userInput.toLowerCase();
+    if (nodeId && (lower.includes('photo') || lower.includes('take a photo') || lower.includes('snap'))) {
+      capId = 'node_camera_snap';
+      params = { ...params, node_id: nodeId };
+    } else if (nodeId && (lower.includes('record') && lower.includes('video') || lower.includes('video') && lower.includes('record'))) {
+      capId = 'node_camera_clip';
+      params = { ...params, node_id: nodeId };
+    } else if (lower.includes('node') && (lower.includes('list') || lower.includes('connected') || lower.includes('what nodes'))) {
+      capId = 'node_list';
+    }
+  }
+
   if (capId === 'canvas_update') {
     try {
       const key = canvasStore.sessionKey(params, userId);
@@ -117,13 +134,14 @@ async function handleRun(body) {
     }
     try {
       const result = await nodeCommand.sendCommand(nodeId, command, params.params || params);
+      const metadata = result.media != null ? { media: result.media } : {};
       return {
         request_id: requestId,
         plugin_id: pluginId,
         success: result.success,
         text: result.text || '',
         error: result.error || null,
-        metadata: {},
+        metadata,
       };
     } catch (e) {
       return { request_id: requestId, plugin_id: pluginId, success: false, text: '', error: String(e.message), metadata: {} };
@@ -156,13 +174,14 @@ async function handleRun(body) {
     delete cmdParams.nodeId;
     try {
       const result = await nodeCommand.sendCommand(nodeId, nodeCmd, cmdParams);
+      const metadata = result.media != null ? { media: result.media } : {};
       return {
         request_id: requestId,
         plugin_id: pluginId,
         success: result.success,
         text: result.text || '',
         error: result.error || null,
-        metadata: {},
+        metadata,
       };
     } catch (e) {
       return { request_id: requestId, plugin_id: pluginId, success: false, text: '', error: String(e.message), metadata: {} };

@@ -188,7 +188,7 @@ class Memory(MemoryBase):
             try:
                 await self._extract_and_store_graph(function_result, data)
             except Exception as e:
-                logger.debug("Graph extraction skipped or failed: %s", e)
+                logger.debug("Graph extraction skipped or failed: {}", e)
         return ret
 
     def get(self, memory_id):
@@ -429,9 +429,9 @@ class Memory(MemoryBase):
                             )
                             added += 1
                 except Exception as e:
-                    logger.debug("Graph expansion: %s", e)
+                    logger.debug("Graph expansion: {}", e)
             if added:
-                logger.debug("Graph-aware search added %d related memories", added)
+                logger.debug("Graph-aware search added {} related memories", added)
 
         return result
 
@@ -588,7 +588,7 @@ class Memory(MemoryBase):
             label = (r.get("label") or "RELATES_TO").strip() or "RELATES_TO"
             if from_id and to_id and from_id in seen and to_id in seen:
                 graph.add_edge(from_id, to_id, label)
-        logger.debug("Graph extraction stored for memory_id=%s (%d entities, %d relations)", memory_id, len(entities), len(relations))
+        logger.debug("Graph extraction stored for memory_id={} ({} entities, {} relations)", memory_id, len(entities), len(relations))
 
     def _parse_graph_json(self, response: str) -> Optional[Dict[str, Any]]:
         """Extract JSON object from LLM response (strip markdown code block if present)."""
@@ -667,7 +667,7 @@ class Memory(MemoryBase):
             try:
                 self.graph_store.reset()
             except Exception as e:
-                logger.debug("Graph store reset: %s", e)
+                logger.debug("Graph store reset: {}", e)
         logger.debug("Reset memory store")
 
     def chat(self, query):

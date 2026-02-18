@@ -7,6 +7,7 @@ Dataset scope: (user_id, agent_id) -> dataset name for add/search.
 import asyncio
 import os
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -76,12 +77,29 @@ def apply_cognee_config(config: Dict[str, Any]) -> None:
     if isinstance(emb, dict):
         for key, env_key in (
             ("provider", "EMBEDDING_PROVIDER"), ("model", "EMBEDDING_MODEL"), ("endpoint", "EMBEDDING_ENDPOINT"), ("api_key", "EMBEDDING_API_KEY"),
+            ("max_tokens", "EMBEDDING_MAX_TOKENS"), ("dimensions", "EMBEDDING_DIMENSIONS"),
         ):
             val = emb.get(key)
             if val is not None and str(val).strip() != "":
                 os.environ[env_key] = str(val)
         if "EMBEDDING_API_KEY" not in os.environ and emb.get("endpoint"):
             os.environ["EMBEDDING_API_KEY"] = "local"
+        # Tokenizer for token counting: Cognee maps embedding model to tiktoken; for custom/Ollama/HF models set HUGGINGFACE_TOKENIZER to silence "Could not automatically map embedding_text_model to a tokeniser" and get proper chunking (see docs.cognee.ai embedding providers).
+        # If value looks like a path (starts with . or / or contains \), resolve relative to project root so relative paths work regardless of cwd.
+        for key, env_key in (("tokenizer", "HUGGINGFACE_TOKENIZER"), ("huggingface_tokenizer", "HUGGINGFACE_TOKENIZER")):
+            val = emb.get(key)
+            if val is not None and str(val).strip() != "":
+                s = str(val).strip()
+                if s.startswith(".") or s.startswith("/") or "\\" in s:
+                    try:
+                        from base.util import Util
+                        root = Path(Util().root_path()).resolve()
+                        resolved = (root / s).resolve()
+                        s = str(resolved)
+                    except Exception:
+                        pass
+                os.environ[env_key] = s
+                break
     # Raw env passthrough
     env = config.get("env")
     if isinstance(env, dict):
@@ -131,7 +149,7 @@ class CogneeMemory(MemoryBase):
             await self._cognee.add(data, dataset_name=dataset)
             await self._cognee.cognify(datasets=[dataset])
         except Exception as e:
-            logger.debug("Cognee add/cognify: %s", e)
+            logger.debug("Cognee add/cognify: {}", e)
         return [{"id": memory_id, "event": "add", "data": data}]
 
     async def search(
@@ -149,7 +167,7 @@ class CogneeMemory(MemoryBase):
             results = await self._cognee.search(query, datasets=[dataset], top_k=limit or 10)
         except Exception as e:
             # Empty graph can cause Cognee to log "No nodes found" / EntityNotFoundError; we return [] and continue
-            logger.debug("Cognee search: %s", e)
+            logger.debug("Cognee search: {}", e)
             return []
         out = []
         for i, r in enumerate(results if isinstance(results, list) else [results]):
@@ -203,7 +221,7 @@ class CogneeMemory(MemoryBase):
             import cognee
             asyncio.get_event_loop().run_until_complete(cognee.delete(all=True))
         except Exception as e:
-            logger.debug("Cognee reset: %s", e)
+            logger.debug("Cognee reset: {}", e)
 
     def chat(self, query: str) -> Any:
         raise NotImplementedError("Cognee backend: chat not implemented")

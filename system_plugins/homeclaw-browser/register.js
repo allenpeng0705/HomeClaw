@@ -19,7 +19,7 @@ const payload = {
   config: {
     base_url: PLUGIN_BASE,
     path: 'run',
-    timeout_sec: 30,
+    timeout_sec: 420,  // 7 min: must exceed plugin→node timeout (5 min) so Core doesn't ReadTimeout before plugin responds
   },
   capabilities: [
     {

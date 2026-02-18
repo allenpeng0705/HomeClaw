@@ -80,13 +80,13 @@ class ToolRegistry:
         if not tool.name or not tool.description:
             raise ValueError("Tool name and description are required")
         self._tools[tool.name] = tool
-        logger.debug("Registered tool: %s", tool.name)
+        logger.debug("Registered tool: {}", tool.name)
 
     def unregister(self, name: str) -> bool:
         """Remove a tool by name. Returns True if it was present."""
         if name in self._tools:
             del self._tools[name]
-            logger.debug("Unregistered tool: %s", name)
+            logger.debug("Unregistered tool: {}", name)
             return True
         return False
 
@@ -117,7 +117,7 @@ class ToolRegistry:
             result = await tool.execute_async(arguments, context)
             return result if result is not None else ""
         except Exception as e:
-            logger.exception("Tool %s failed: %s", name, e)
+            logger.exception("Tool {} failed: {}", name, e)
             return f"Error running tool {name}: {e!s}"
 
 

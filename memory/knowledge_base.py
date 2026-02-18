@@ -140,7 +140,7 @@ class KnowledgeBase:
             logger.warning("Knowledge base embed timed out")
             return None
         except Exception as e:
-            logger.warning("Knowledge base embed failed: %s", e)
+            logger.warning("Knowledge base embed failed: {}", e)
             return None
 
     async def add(
@@ -202,7 +202,7 @@ class KnowledgeBase:
             logger.warning("Knowledge base insert timed out")
             return "Error: knowledge base insert timed out. No data was written."
         except Exception as e:
-            logger.warning("Knowledge base insert failed: %s", e)
+            logger.warning("Knowledge base insert failed: {}", e)
             return f"Error: knowledge base insert failed: {e!s}"
         return f"Added {len(chunks)} chunk(s) to knowledge base (source_type={source_type}, source_id={source_id})."
 
@@ -247,7 +247,7 @@ class KnowledgeBase:
             logger.warning("Knowledge base search timed out")
             return []
         except Exception as e:
-            logger.warning("Knowledge base search failed: %s", e)
+            logger.warning("Knowledge base search failed: {}", e)
             return []
         out = []
         now = time.time()
@@ -314,7 +314,7 @@ class KnowledgeBase:
             logger.warning("Knowledge base delete_where timed out")
             return "Error: delete timed out."
         except Exception as e:
-            logger.warning("Knowledge base delete_where failed: %s", e)
+            logger.warning("Knowledge base delete_where failed: {}", e)
             return f"Error: delete failed: {e!s}"
         return f"Removed all knowledge base entries for source_id={source_id}."
 
@@ -340,7 +340,7 @@ class KnowledgeBase:
             else:
                 rows = self.store.get_where(where, limit=limit * 5)
         except (asyncio.TimeoutError, Exception) as e:
-            logger.debug("Knowledge base list_sources get_where failed: %s", e)
+            logger.debug("Knowledge base list_sources get_where failed: {}", e)
             return []
         seen: Dict[str, Dict[str, Any]] = {}
         for _id, meta in (rows or []):
@@ -383,7 +383,7 @@ class KnowledgeBase:
             logger.warning("Knowledge base cleanup get_where timed out")
             return "Error: cleanup timed out."
         except Exception as e:
-            logger.warning("Knowledge base cleanup get_where failed: %s", e)
+            logger.warning("Knowledge base cleanup get_where failed: {}", e)
             return f"Error: cleanup failed: {e!s}"
         source_ids = set()
         for _id, meta in (rows or []):
@@ -448,6 +448,6 @@ class KnowledgeBase:
             logger.warning("Knowledge base reset timed out")
             return f"Error: reset timed out (deleted {total} chunk(s) so far)."
         except Exception as e:
-            logger.warning("Knowledge base reset failed: %s", e)
+            logger.warning("Knowledge base reset failed: {}", e)
             return f"Error: reset failed: {e!s}"
         return f"Knowledge base reset: deleted {total} chunk(s)."

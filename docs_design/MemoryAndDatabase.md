@@ -47,11 +47,13 @@ Under **`cognee:`** in `config/core.yml` you can set relational, vector, graph, 
 | `cognee.graph.url` / `username` / `password` | `GRAPH_DATABASE_URL`, `GRAPH_DATABASE_USERNAME`, `GRAPH_DATABASE_PASSWORD` (neo4j) |
 | `cognee.llm.provider` / `model` / `endpoint` / `api_key` | `LLM_PROVIDER`, `LLM_MODEL`, `LLM_ENDPOINT`, `LLM_API_KEY` |
 | `cognee.embedding.provider` / `model` / `endpoint` / `api_key` | `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_ENDPOINT`, `EMBEDDING_API_KEY` |
+| `cognee.embedding.max_tokens` / `dimensions` | `EMBEDDING_MAX_TOKENS`, `EMBEDDING_DIMENSIONS` |
+| `cognee.embedding.tokenizer` or `huggingface_tokenizer` | `HUGGINGFACE_TOKENIZER` — for custom/Ollama/HF embedding models, set to a HuggingFace model name (e.g. `nomic-ai/nomic-embed-text-v1.5`) so Cognee can token-count; silences "Could not automatically map embedding_text_model to a tokeniser" and improves chunking. See [Embedding Providers](https://docs.cognee.ai/setup-configuration/embedding-providers). |
 | `cognee.env` (key-value dict) | Any Cognee env var by name (passthrough) |
 
 Leave a key empty or omit the `cognee:` section to rely on Cognee’s `.env` or defaults.
 
-**LLM and embedding:** If you leave **`cognee.llm`** and **`cognee.embedding`** endpoint/model empty, we **auto-fill** them from Core’s **main_llm** and **embedding_llm** using the **same resolved host/port** as the chroma-based memory and Core (via `Util().main_llm()` and `Util().embedding_llm()`). The endpoint format is the **OpenAI-compatible base URL** `http://{host}:{port}/v1` (Cognee/LiteLLM then call `/chat/completions` and `/embeddings` on it), matching how we use `http://host:port/v1/chat/completions` and `http://host:port/v1/embeddings` elsewhere. So with default Cognee and empty llm/embedding, Cognee uses your existing LLM and embedding servers — no extra config needed.
+**LLM and embedding:** If you leave **`cognee.llm`** and **`cognee.embedding`** endpoint/model empty, we **auto-fill** them from Core’s **main_llm** and **embedding_llm** using the **same resolved host/port** as the chroma-based memory and Core (via `Util().main_llm()` and `Util().embedding_llm()`). The endpoint format is the **OpenAI-compatible base URL** `http://{host}:{port}/v1`. For **local** models (llama.cpp, etc.) we set **provider** to `openai` and **model** to `openai/<model_id>` (e.g. `openai/main_vl_model`) so Cognee’s LiteLLM layer receives a provider-prefixed model and can route to your local server via the endpoint. So with default Cognee and empty llm/embedding, Cognee uses your existing local (or cloud) LLM and embedding servers — no extra config needed.
 
 ### Option B: Cognee `.env` file
 

@@ -38,7 +38,7 @@ class HomeClawDingTalkHandler(ChatbotHandler):
         try:
             incoming_message = ChatbotMessage.from_dict(callback_message.data)
         except Exception as e:
-            self.logger.warning("DingTalk parse message failed: %s", e)
+            self.logger.warning("DingTalk parse message failed: {}", e)
             return AckMessage.STATUS_BAD_REQUEST, "invalid message"
 
         text_list = incoming_message.get_text_list() if incoming_message else []

@@ -94,14 +94,14 @@ async def sync_plugins_to_vector_store(
                 "description": (p.get("description") or "").strip(),
             })
         except Exception as e:
-            logger.warning("Plugin embed failed for %s: %s", pid, e)
+            logger.warning("Plugin embed failed for {}: {}", pid, e)
     if not ids_list:
         return 0
     try:
         vector_store.insert(vectors=vectors_list, ids=ids_list, payloads=payloads_list)
         return len(ids_list)
     except Exception as e:
-        logger.warning("Plugin vector insert failed: %s", e)
+        logger.warning("Plugin vector insert failed: {}", e)
         return 0
 
 
@@ -123,12 +123,12 @@ async def search_plugins_by_query(
         if not emb:
             return []
     except Exception as e:
-        logger.warning("Plugin search embed failed: %s", e)
+        logger.warning("Plugin search embed failed: {}", e)
         return []
     try:
         results = vector_store.search(query=[emb], limit=limit, filters=None)
     except Exception as e:
-        logger.warning("Plugin vector search failed: %s", e)
+        logger.warning("Plugin vector search failed: {}", e)
         return []
     out: List[Tuple[str, float]] = []
     for r in results:

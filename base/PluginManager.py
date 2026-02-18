@@ -14,7 +14,7 @@ from loguru import logger
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from base.BasePlugin import BasePlugin
 from base.base import PluginRequest, PluginResult, PromptRequest
-from base.util import Util
+from base.util import Util, redact_params_for_log
 from core.coreInterface import CoreInterface
 
 disable_plugins = False
@@ -49,7 +49,8 @@ def _load_plugin_manifest(plugin_folder: str) -> Optional[Dict[str, Any]]:
 
 
 def _normalize_plugin_id(plugin_id: str) -> str:
-    return (plugin_id or "").strip().lower().replace(" ", "_")
+    """Normalize for lookup only: lowercase, spaces and hyphens to underscores. Enables both folder-style (homeclaw-browser) and identifier-style (homeclaw_browser) to resolve to the same plugin. The stored descriptor keeps the original id (e.g. from register.js) for display and prompts."""
+    return (plugin_id or "").strip().lower().replace(" ", "_").replace("-", "_")
 
 
 class PluginManager:
@@ -118,7 +119,7 @@ class PluginManager:
             else:
                 self.api_registered_plugins = []
         except Exception as e:
-            logger.warning("Failed to load external_plugins.json: %s", e)
+            logger.warning("Failed to load external_plugins.json: {}", e)
             self.api_registered_plugins = []
 
     def _save_api_registered_to_file(self) -> None:
@@ -132,7 +133,7 @@ class PluginManager:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(to_save, indent=2), encoding="utf-8")
         except Exception as e:
-            logger.warning("Failed to save external_plugins.json: %s", e)
+            logger.warning("Failed to save external_plugins.json: {}", e)
 
     def register_external_via_api(self, descriptor: Dict[str, Any]) -> str:
         """
@@ -158,7 +159,9 @@ class PluginManager:
             raise ValueError(f"plugin_id {pid} already used by a folder-based plugin")
         descriptor = dict(descriptor)
         descriptor["_source"] = "api"
-        descriptor["id"] = pid
+        # Preserve original id (e.g. homeclaw-browser from folder name / register.js); lookup key is normalized pid
+        if not descriptor.get("id"):
+            descriptor["id"] = descriptor.get("plugin_id") or pid
         # Replace if already api-registered (same plugin_id = update, not duplicate)
         self.api_registered_plugins = [d for d in self.api_registered_plugins if _normalize_plugin_id(d.get("id")) != pid]
         self.api_registered_plugins.append(descriptor)
@@ -166,7 +169,7 @@ class PluginManager:
         self.external_plugins = [d for d in self.external_plugins if _normalize_plugin_id(d.get("id")) != pid]
         self.external_plugins.append(descriptor)
         self._save_api_registered_to_file()
-        logger.info("Registered external plugin via API: %s", pid)
+        logger.info("Registered external plugin via API: {}", pid)
         return pid
 
     def unregister_external_plugin(self, plugin_id: str) -> bool:
@@ -180,7 +183,7 @@ class PluginManager:
             del self.plugin_by_id[pid]
         self.external_plugins = [d for d in self.external_plugins if _normalize_plugin_id(d.get("id")) != pid]
         self._save_api_registered_to_file()
-        logger.info("Unregistered external plugin: %s", pid)
+        logger.info("Unregistered external plugin: {}", pid)
         return True
 
     def unregister_all_external_plugins(self) -> list:
@@ -203,7 +206,7 @@ class PluginManager:
                 resp = await client.get(url)
                 return 200 <= resp.status_code < 300
         except Exception as e:
-            logger.debug("Plugin health check failed for %s: %s", descriptor.get("id"), e)
+            logger.debug("Plugin health check failed for {}: {}", descriptor.get("id"), e)
             return False
 
     def get_plugin_list_for_prompt(self) -> List[Dict[str, str]]:
@@ -246,14 +249,20 @@ class PluginManager:
             out.append({"id": pid, "name": name, "description": desc, "description_long": desc_long})
         return out
 
-    async def run_external_plugin(self, descriptor: Dict[str, Any], request: PromptRequest) -> str:
-        """Run an external plugin (http or subprocess). Returns reply text or raises. See docs/PluginStandard.md."""
+    async def run_external_plugin(self, descriptor: Dict[str, Any], request: PromptRequest) -> "PluginResult":
+        """Run an external plugin (http or subprocess). Returns PluginResult (text + metadata, e.g. metadata.media). See docs/PluginStandard.md."""
         plugin_type = (descriptor.get("type") or "").lower()
         config = descriptor.get("config") or {}
-        timeout = float(config.get("timeout_sec", 30))
+        timeout = float(config.get("timeout_sec", 420))
         plugin_id = (descriptor.get("id") or "").strip().lower().replace(" ", "_")
         cap_id = (request.request_metadata or {}).get("capability_id")
         cap_params = (request.request_metadata or {}).get("capability_parameters")
+        logger.info(
+            "External plugin: plugin_id={} capability_id={} capability_parameters={}",
+            plugin_id,
+            cap_id,
+            redact_params_for_log(cap_params) if cap_params is not None else None,
+        )
         req = PluginRequest(
             request_id=request.request_id,
             plugin_id=plugin_id,
@@ -272,25 +281,36 @@ class PluginManager:
             path = (config.get("path") or "/run").lstrip("/")
             url = f"{base_url}/{path}" if path else base_url
             if not base_url:
-                return f"Error: plugin {plugin_id} type http has no base_url in config."
+                return PluginResult(success=False, error=f"Error: plugin {plugin_id} type http has no base_url in config.")
             try:
                 import httpx
                 async with httpx.AsyncClient(timeout=timeout) as client:
                     resp = await client.post(url, json=req.model_dump())
                     if resp.status_code != 200:
-                        return f"Error: plugin returned {resp.status_code}: {resp.text[:300]}"
+                        body_preview = (resp.text or "").strip()[:300]
+                        msg = f"Error: plugin returned {resp.status_code}: {body_preview}" if body_preview else f"Error: plugin returned {resp.status_code}"
+                        if resp.status_code == 503:
+                            msg += ". Service Unavailable — often a reverse proxy read timeout: the request (e.g. video recording) took longer than the proxy allows (e.g. 60–120s). Fix: call the plugin directly (base_url http://127.0.0.1:3020) or increase the proxy's read timeout to at least 420s. See plugin README."
+                        return PluginResult(success=False, error=msg)
                     data = resp.json()
                     result = PluginResult(**data) if isinstance(data, dict) else PluginResult(success=False, error=str(data))
             except Exception as e:
-                return f"Error calling plugin {plugin_id}: {e!s}"
+                logger.debug("Plugin HTTP call failed: {} {}: {}", plugin_id, url, e)
+                err_detail = f"{type(e).__name__}: {e!s}" if (e and str(e).strip()) else (type(e).__name__ or "Exception")
+                hint = ""
+                if "connect" in err_detail.lower() or "refused" in err_detail.lower() or "connection" in err_detail.lower():
+                    hint = f" Is the plugin running? For {plugin_id} start it (e.g. cd system_plugins/{plugin_id} && npm start) and ensure base_url {config.get('base_url', '')} is reachable."
+                elif "timeout" in err_detail.lower() or "timed out" in err_detail.lower():
+                    hint = f" Long-running media (e.g. video) may need a higher timeout_sec (current {int(timeout)}s). Ensure the node (e.g. Nodes page tab) is connected and recording completes."
+                return PluginResult(success=False, error=f"Error calling plugin {plugin_id}: {err_detail}.{hint}")
             if not result.success:
-                return result.error or "Plugin returned an error"
-            return result.text or "(no response)"
+                return PluginResult(success=result.success, text=result.text or "", error=result.error, metadata=result.metadata or {})
+            return result
         if plugin_type == "subprocess":
             command = config.get("command")
             args = config.get("args") or []
             if not command:
-                return f"Error: plugin {plugin_id} type subprocess has no command in config."
+                return PluginResult(success=False, error=f"Error: plugin {plugin_id} type subprocess has no command in config.")
             cmd_list = [str(command)] + [str(a) for a in args]
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -309,24 +329,24 @@ class PluginManager:
                 if err_str:
                     logger.debug(f"Plugin {plugin_id} stderr: {err_str[:500]}")
                 if not out_str:
-                    return err_str or "(plugin produced no output)"
+                    return PluginResult(success=False, error=err_str or "(plugin produced no output)")
                 try:
                     data = json.loads(out_str)
                     result = PluginResult(**data) if isinstance(data, dict) else PluginResult(success=True, text=out_str)
                 except json.JSONDecodeError:
                     result = PluginResult(success=True, text=out_str)
                 if not result.success:
-                    return result.error or "Plugin returned an error"
-                return result.text or "(no response)"
+                    return PluginResult(success=result.success, text=result.text or "", error=result.error, metadata=result.metadata or {})
+                return result
             except asyncio.TimeoutError:
-                return f"Error: plugin {plugin_id} timed out after {timeout}s"
+                return PluginResult(success=False, error=f"Error: plugin {plugin_id} timed out after {timeout}s")
             except FileNotFoundError:
-                return f"Error: plugin command not found: {command}"
+                return PluginResult(success=False, error=f"Error: plugin command not found: {command}")
             except Exception as e:
-                return f"Error running plugin {plugin_id}: {e!s}"
+                return PluginResult(success=False, error=f"Error running plugin {plugin_id}: {e!s}")
         if plugin_type == "mcp":
-            return "Error: MCP plugins not yet implemented. Use type http or subprocess for now."
-        return f"Error: unknown plugin type {plugin_type}"
+            return PluginResult(success=False, error="Error: MCP plugins not yet implemented. Use type http or subprocess for now.")
+        return PluginResult(success=False, error=f"Error: unknown plugin type {plugin_type}")
 
     def get_capability(self, plugin_or_descriptor: Any, capability_id: str) -> Optional[Dict[str, Any]]:
         """Get capability by id from a plugin (BasePlugin with registration) or external descriptor."""

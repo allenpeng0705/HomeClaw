@@ -10,7 +10,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import aiohttp
 import uvicorn
 import yaml
@@ -35,6 +35,29 @@ if  (os.path.exists(data_root) and core_metadata.reset_memory == True):
     core_metadata.reset_memory = False
     CoreMetadata.to_yaml(core_metadata, os.path.join(root_dir, 'config', 'core.yml'))
     shutil.rmtree(data_root)
+
+# Keys (case-insensitive) whose values are redacted in plugin/tool logs
+_SENSITIVE_PARAM_KEYS = frozenset(k.lower() for k in (
+    "password", "api_key", "api_key_name", "token", "secret", "authorization",
+    "auth", "credentials", "key", "access_token", "refresh_token",
+))
+
+
+def redact_params_for_log(obj: Any) -> Any:
+    """Return a copy of obj safe for logging: dict values for sensitive keys are replaced with '***'."""
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            key_lower = (k or "").lower()
+            if any(s in key_lower for s in _SENSITIVE_PARAM_KEYS) or ("key" in key_lower and "api" in key_lower):
+                out[k] = "***"
+            else:
+                out[k] = redact_params_for_log(v)
+        return out
+    if isinstance(obj, list):
+        return [redact_params_for_log(x) for x in obj]
+    return obj
+
 
 def run_script_silent(script_path):
     with open(os.devnull, 'w') as devnull:
@@ -483,10 +506,21 @@ class Util:
         - Local model: default [] unless the entry has mmproj (vision) then [image], or has supported_media.
         Returns normalized list (lowercase, only image/audio/video). Never raises; returns [] on any error."""
         try:
-            main_llm_name = self.core_metadata.main_llm
+            main_llm_name = (self.core_metadata.main_llm or "").strip()
             if not main_llm_name:
                 return []
             entry, mtype = self._get_model_entry(main_llm_name)
+            if entry is None:
+                local_ids = [m.get("id") for m in (self.core_metadata.local_models or []) if m.get("id")]
+                cloud_ids = [m.get("id") for m in (self.core_metadata.cloud_models or []) if m.get("id")]
+                logger.warning(
+                    "main_llm_supported_media: model entry not found for main_llm={}. "
+                    "Available local_models ids: {}. Available cloud_models ids: {}. "
+                    "Set main_llm to e.g. local_models/<id> (e.g. local_models/main_vl_model).",
+                    main_llm_name,
+                    local_ids or "(none)",
+                    cloud_ids or "(none)",
+                )
             allowed = {"image", "audio", "video"}
 
             def normalize(raw) -> List[str]:
@@ -501,11 +535,14 @@ class Util:
             if entry is not None:
                 explicit = entry.get("supported_media")
                 if explicit is not None:
-                    return normalize(explicit)
+                    out = normalize(explicit)
+                    logger.info("main_llm_supported_media: using entry (supported_media={})", out)
+                    return out
                 if mtype == "litellm":
                     return ["image", "audio", "video"]
                 if mtype == "local":
                     if entry.get("mmproj"):
+                        logger.info("main_llm_supported_media: using entry (mmproj) -> [image]")
                         return ["image"]
                     return []
             if self._effective_main_llm_type() == "litellm":
@@ -861,7 +898,7 @@ class Util:
                         data = {}
                     if resp.status_code != 200:
                         err = data.get("error") or data.get("detail") or resp.reason or str(resp.status_code)
-                        logger.warning("plugin_llm_generate failed: %s", err)
+                        logger.warning("plugin_llm_generate failed: {}", err)
                         return None
                     return (data.get("text") or "").strip() or None
         except Exception as e:
@@ -992,21 +1029,15 @@ class Util:
                 self.save_users(self.users)
                 break 
 
-    def embedding_tokens_len(self):
-        return self.core_metadata.embeddingTokensLen
-    
     async def embedding(self, text):
         """
         Get the embedding for the given text. Uses the configured embedding model:
         - Local: llama.cpp server (OpenAI-compatible) at the model's host/port.
         - Cloud: LiteLLM proxy at the model's host/port, with API key from env if set.
+        RAG splits content before embedding; Cognee handles its own embedding. No summarization here.
         """
         text = text.replace("\n", " ")
         logger.debug(f"LlamaCppEmbedding.embed: text: {text}")
-        embeddingTokenslen = self.embedding_tokens_len()
-        if len(text) > embeddingTokenslen // 2:
-            text = await self.llm_summarize(text, embeddingTokenslen // 2)
-        logger.debug(f"LlamaCppEmbedding.embed: summarizedtext: {text}")
 
         # Resolve host/port (and optional model + api_key) from configured embedding model (local or cloud)
         resolved = self.embedding_llm()

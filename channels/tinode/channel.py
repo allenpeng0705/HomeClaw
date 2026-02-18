@@ -250,7 +250,7 @@ def subscribe(topic, since_seq_id=None):
             get_query = pb.GetQuery(what="data", data=get_opts)
             return pb.ClientMsg(sub=pb.ClientSub(id=tid, topic=topic, get_query=get_query))
         except (AttributeError, TypeError) as e:
-            logger.warning("Tinode: subscribe with get_query not available (%s), subscribing without requesting data", e)
+            logger.warning("Tinode: subscribe with get_query not available ({}), subscribing without requesting data", e)
     return pb.ClientMsg(sub=pb.ClientSub(id=tid, topic=topic))
 
 def leave(topic):
@@ -944,20 +944,20 @@ class Channel(BaseChannel):
                     text = response_data["text"]
                     chat = self.chats.pop(msg_id, None)
                     if chat is None:
-                        logger.warning("Tinode: no topic for msg_id=%s (chats had %s), response not sent to app", msg_id, list(self.chats.keys())[:5])
+                        logger.warning("Tinode: no topic for msg_id={} (chats had {}), response not sent to app", msg_id, list(self.chats.keys())[:5])
                     else:
                         try:
                             client_post(publish(chat, text))
-                            logger.info("Tinode: sent response to topic %s (msg_id=%s)", chat, msg_id)
+                            logger.info("Tinode: sent response to topic {} (msg_id={})", chat, msg_id)
                         except Exception as e:
-                            logger.error("Tinode: error sending to Tinode: %s", e)
+                            logger.error("Tinode: error sending to Tinode: {}", e)
                 else:
                     logger.debug("Tinode: response has no 'text' in response_data")
                 self.message_queue.task_done()
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
-                logger.exception("Tinode: error processing message queue: %s", e)
+                logger.exception("Tinode: error processing message queue: {}", e)
 
 
     def initialize(self):
@@ -983,8 +983,8 @@ class Channel(BaseChannel):
     async def handle_async_response(self, response: AsyncResponse):
         rid = getattr(response, "request_id", "?")
         meta = getattr(response, "request_metadata", None) or {}
-        logger.info("Tinode: received response from Core request_id=%s sender=%s msg_id=%s", rid, meta.get("sender"), meta.get("msg_id"))
-        logger.debug("Put response: %s into message queue", response)
+        logger.info("Tinode: received response from Core request_id={} sender={} msg_id={}", rid, meta.get("sender"), meta.get("msg_id"))
+        logger.debug("Put response: {} into message queue", response)
         await self.message_queue.put(response) 
 
     def stop(self):

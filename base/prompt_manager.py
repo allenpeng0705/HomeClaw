@@ -73,7 +73,7 @@ def _load_yaml(path: Path) -> Optional[Dict[str, Any]]:
             data = yaml.safe_load(f)
         return data if isinstance(data, dict) else None
     except Exception as e:
-        logger.warning("PromptManager: failed to load %s: %s", path, e)
+        logger.warning("PromptManager: failed to load {}: {}", path, e)
         return None
 
 
@@ -86,7 +86,7 @@ def _format_string(template: str, kwargs: Dict[str, Any]) -> str:
     try:
         s = s.format(**kwargs)
     except KeyError as e:
-        logger.debug("PromptManager: placeholder %s not provided, leaving as-is", e)
+        logger.debug("PromptManager: placeholder {} not provided, leaving as-is", e)
         for k, v in kwargs.items():
             s = s.replace("{" + k + "}", str(v))
     return s.replace("\x00", "{").replace("\x01", "}")
@@ -195,7 +195,7 @@ class PromptManager:
             if isinstance(required, list):
                 for k in required:
                     if k not in kwargs:
-                        logger.debug("PromptManager: missing placeholder %s for %s/%s", k, section, name)
+                        logger.debug("PromptManager: missing placeholder {} for {}/{}", k, section, name)
         return _format_string(str(content), kwargs)
 
     def get_messages(

@@ -196,7 +196,7 @@ class Channel(BaseChannel):
                 else:
                     files.append(path)
             except Exception as e:
-                logger.debug("Email attachment write failed %s: %s", filename, e)
+                logger.debug("Email attachment write failed {}: {}", filename, e)
         return images, videos, audios, files
 
     # Fetch a number of email based on email address and email id.
@@ -217,7 +217,7 @@ class Channel(BaseChannel):
         try:
             msg = email.message_from_bytes(data[0][1], policy=default)
         except Exception as e:
-            logger.debug("Email decode failed for id %s: %s", email_id, e)
+            logger.debug("Email decode failed for id {}: {}", email_id, e)
             return "", "", "", "", [], [], [], []
 
         # Decode subject, From address and message id
@@ -230,7 +230,7 @@ class Channel(BaseChannel):
         try:
             images, videos, audios, files = self._extract_attachments_from_message(msg)
         except Exception as e:
-            logger.debug("Email attachment extraction failed: %s", e)
+            logger.debug("Email attachment extraction failed: {}", e)
             images, videos, audios, files = [], [], [], []
         return message_id, from_addr, subject, body, images, videos, audios, files
         

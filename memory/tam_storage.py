@@ -30,7 +30,7 @@ def load_cron_jobs() -> List[Dict[str, Any]]:
             out.append({"job_id": r.job_id, "cron_expr": r.cron_expr, "params": params})
         return out
     except Exception as e:
-        logger.warning("TAM storage: load_cron_jobs failed: %s", e)
+        logger.warning("TAM storage: load_cron_jobs failed: {}", e)
         return []
     finally:
         try:
@@ -53,7 +53,7 @@ def save_cron_job(job_id: str, cron_expr: str, params: Dict[str, Any]) -> bool:
         session.commit()
         return True
     except Exception as e:
-        logger.warning("TAM storage: save_cron_job failed: %s", e)
+        logger.warning("TAM storage: save_cron_job failed: {}", e)
         session.rollback()
         return False
     finally:
@@ -71,7 +71,7 @@ def remove_cron_job(job_id: str) -> bool:
         session.commit()
         return n > 0
     except Exception as e:
-        logger.warning("TAM storage: remove_cron_job failed: %s", e)
+        logger.warning("TAM storage: remove_cron_job failed: {}", e)
         session.rollback()
         return False
     finally:
@@ -106,7 +106,7 @@ def update_cron_job(
         session.commit()
         return True
     except Exception as e:
-        logger.warning("TAM storage: update_cron_job failed: %s", e)
+        logger.warning("TAM storage: update_cron_job failed: {}", e)
         session.rollback()
         return False
     finally:
@@ -145,7 +145,7 @@ def cleanup_expired_one_shot_reminders(before: Optional[datetime] = None) -> int
         session.commit()
         return n
     except Exception as e:
-        logger.warning("TAM storage: cleanup_expired_one_shot_reminders failed: %s", e)
+        logger.warning("TAM storage: cleanup_expired_one_shot_reminders failed: {}", e)
         session.rollback()
         return 0
     finally:
@@ -168,7 +168,7 @@ def load_one_shot_reminders(after: Optional[datetime] = None) -> List[Dict[str, 
             for r in rows
         ]
     except Exception as e:
-        logger.warning("TAM storage: load_one_shot_reminders failed: %s", e)
+        logger.warning("TAM storage: load_one_shot_reminders failed: {}", e)
         return []
     finally:
         try:
@@ -188,7 +188,7 @@ def add_one_shot_reminder(run_at: datetime, message: str) -> Optional[str]:
         session.commit()
         return rid
     except Exception as e:
-        logger.warning("TAM storage: add_one_shot_reminder failed: %s", e)
+        logger.warning("TAM storage: add_one_shot_reminder failed: {}", e)
         session.rollback()
         return None
     finally:
@@ -206,7 +206,7 @@ def delete_one_shot_reminder(reminder_id: str) -> bool:
         session.commit()
         return n > 0
     except Exception as e:
-        logger.warning("TAM storage: delete_one_shot_reminder failed: %s", e)
+        logger.warning("TAM storage: delete_one_shot_reminder failed: {}", e)
         session.rollback()
         return False
     finally:

@@ -55,13 +55,13 @@ def download_line_media(
         with httpx.Client(timeout=30.0) as client:
             r = client.get(url, headers=headers)
             if r.status_code != 200:
-                logger.debug("LINE get content %s: status %s", message_id, r.status_code)
+                logger.debug("LINE get content {}: status {}", message_id, r.status_code)
                 return None
             content = r.content
             content_type = r.headers.get("content-type", "").split(";")[0].strip()
         total = len(content)
         if total > max_bytes:
-            logger.debug("LINE media %s exceeds %s bytes", message_id, max_bytes)
+            logger.debug("LINE media {} exceeds {} bytes", message_id, max_bytes)
             return None
         ext = _content_type_to_ext(content_type)
         root = Path(__file__).resolve().parent.parent.parent
@@ -71,5 +71,5 @@ def download_line_media(
         out_path.write_bytes(content)
         return str(out_path.resolve())
     except Exception as e:
-        logger.debug("LINE download media %s: %s", message_id, e)
+        logger.debug("LINE download media {}: {}", message_id, e)
         return None

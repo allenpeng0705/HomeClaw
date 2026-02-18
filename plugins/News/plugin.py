@@ -73,7 +73,7 @@ class NewsPlugin(SchedulerPlugin):
                 return "No news articles found."
             return "\n\n".join(raw_parts)
         except requests.RequestException as e:
-            logger.error("Failed to fetch news: %s", e)
+            logger.error("Failed to fetch news: {}", e)
             return f"Failed to fetch news: {e}"
 
     async def run(self):

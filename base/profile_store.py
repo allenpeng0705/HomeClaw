@@ -47,7 +47,7 @@ def get_profile(system_user_id: str, base_dir: Optional[str] = None) -> Dict[str
             data = json.load(f)
         return data if isinstance(data, dict) else {}
     except Exception as e:
-        logger.warning("profile_store: failed to read %s: %s", path, e)
+        logger.warning("profile_store: failed to read {}: {}", path, e)
         return {}
 
 
@@ -79,7 +79,7 @@ def update_profile(
             json.dump(current, f, ensure_ascii=False, indent=2)
         tmp.replace(path)
     except Exception as e:
-        logger.warning("profile_store: failed to write %s: %s", path, e)
+        logger.warning("profile_store: failed to write {}: {}", path, e)
         if tmp.exists():
             try:
                 tmp.unlink()

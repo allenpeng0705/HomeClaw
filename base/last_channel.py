@@ -28,7 +28,7 @@ def _atomic_write(path: Path, data: Dict[str, Any]) -> None:
             json.dump(data, f, ensure_ascii=False, default=str)
         tmp.replace(path)
     except Exception as e:
-        logger.warning("last_channel: atomic write failed: %s", e)
+        logger.warning("last_channel: atomic write failed: {}", e)
         if tmp.exists():
             try:
                 tmp.unlink()
@@ -45,7 +45,7 @@ def _atomic_read(path: Path) -> Optional[Dict[str, Any]]:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        logger.warning("last_channel: read failed: %s", e)
+        logger.warning("last_channel: read failed: {}", e)
         return None
 
 
@@ -132,7 +132,7 @@ def get_last_channel(key: str = _DEFAULT_KEY) -> Optional[Dict[str, Any]]:
                 "request_metadata": meta,
             }
     except Exception as e:
-        logger.debug("last_channel: DB get failed: %s", e)
+        logger.debug("last_channel: DB get failed: {}", e)
 
     # File fallback
     data = _atomic_read(_file_path())

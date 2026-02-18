@@ -42,7 +42,7 @@ class Neo4jStore(GraphStoreBase):
                 )
         except Exception as e:
             if "equivalent" not in str(e).lower() and "already exists" not in str(e).lower():
-                logger.debug("Neo4j init_schema: %s", e)
+                logger.debug("Neo4j init_schema: {}", e)
 
     def add_node(self, node_id: str, label: str, properties: Optional[Dict[str, Any]] = None) -> None:
         props = properties or {}
@@ -63,7 +63,7 @@ class Neo4jStore(GraphStoreBase):
                     memory_id=memory_id,
                 )
         except Exception as e:
-            logger.debug("Neo4j add_node: %s", e)
+            logger.debug("Neo4j add_node: {}", e)
 
     def add_edge(self, from_id: str, to_id: str, label: str, properties: Optional[Dict[str, Any]] = None) -> None:
         props_str = json.dumps(properties or {})
@@ -83,7 +83,7 @@ class Neo4jStore(GraphStoreBase):
                     props=props_str,
                 )
         except Exception as e:
-            logger.debug("Neo4j add_edge: %s", e)
+            logger.debug("Neo4j add_edge: {}", e)
 
     def get_neighbors(self, node_id: str, edge_label: Optional[str] = None, limit: int = 50) -> List[Dict[str, Any]]:
         try:
@@ -113,7 +113,7 @@ class Neo4jStore(GraphStoreBase):
                     )
                 return [dict(record) for record in result]
         except Exception as e:
-            logger.debug("Neo4j get_neighbors: %s", e)
+            logger.debug("Neo4j get_neighbors: {}", e)
             return []
 
     def get_nodes_by_memory_id(self, memory_id: str) -> List[str]:
@@ -128,7 +128,7 @@ class Neo4jStore(GraphStoreBase):
                 )
                 return [str(record["id"]) for record in result if record.get("id")]
         except Exception as e:
-            logger.debug("Neo4j get_nodes_by_memory_id: %s", e)
+            logger.debug("Neo4j get_nodes_by_memory_id: {}", e)
             return []
 
     def reset(self) -> None:
@@ -138,7 +138,7 @@ class Neo4jStore(GraphStoreBase):
                     session.run("MATCH (a)-[r:RELATES_TO]->() DELETE r")
                     session.run("MATCH (e:Entity) DELETE e")
         except Exception as e:
-            logger.debug("Neo4j reset: %s", e)
+            logger.debug("Neo4j reset: {}", e)
         if self._driver:
             try:
                 self._driver.close()

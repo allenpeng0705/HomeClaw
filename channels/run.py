@@ -6,7 +6,7 @@ Usage: python -m channels.run <channel_name>
 All channels live under channels/<name>/ and expose channel.py with main().
 Run from repo root so that channels/ and config/ are on the path.
 
-Supported channels: webhook, telegram, discord, slack, whatsapp, matrix, wechat,
+Supported channels: webhook, telegram, discord, slack, whatsapp, whatsappweb, matrix, wechat,
 tinode, line, google_chat, signal, imessage, teams, webchat, zalo, feishu, dingtalk, bluebubbles.
 
 Before calling the channel's main(), sys.argv is set to [argv[0]] so the channel
@@ -29,6 +29,7 @@ CHANNELS = [
     "discord",
     "slack",
     "whatsapp",
+    "whatsappweb",
     "matrix",
     "wechat",
     "tinode",

@@ -27,7 +27,7 @@
   </div>
   <div class="section">
     <h2>Connect as test node</h2>
-    <p class="status">Register a test node so the agent can send commands. Commands will be echoed back with a placeholder result.</p>
+    <p class="status">Register a test node so the agent can send commands. <strong>camera_snap</strong> and <strong>camera_clip</strong> use the device camera (and microphone for clips when includeAudio is true); grant permission when prompted. Other commands are echoed.</p>
     <input type="text" id="nodeId" value="test-node-1" placeholder="Node ID" />
     <button type="button" id="connect">Connect as node</button>
     <button type="button" id="disconnect" disabled>Disconnect</button>
@@ -80,7 +80,7 @@
       nodeWs.onopen = () => {
         nodeWs.send(JSON.stringify({ type: 'register', node_id: nodeId, capabilities: ['canvas', 'screen', 'camera', 'location'] }));
       };
-      nodeWs.onmessage = (ev) => {
+      nodeWs.onmessage = async (ev) => {
         try {
           const msg = JSON.parse(ev.data);
           if (msg.type === 'registered') {
@@ -90,8 +90,69 @@
             loadNodes();
           }
           if (msg.type === 'command') {
-            const result = { type: 'command_result', id: msg.id, payload: { success: true, text: 'Echo: ' + msg.command + (msg.params ? ' ' + JSON.stringify(msg.params) : '') } };
-            nodeWs.send(JSON.stringify(result));
+            const sendResult = (payload) => nodeWs.send(JSON.stringify({ type: 'command_result', id: msg.id, payload }));
+
+            // Constrain video to 640x480 to speed encoding and transfer (default camera res can be 720p+ and very slow)
+            const videoConstraints = { width: { ideal: 640 }, height: { ideal: 480 } };
+            if (msg.command === 'camera_snap') {
+              try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+                const video = document.createElement('video');
+                video.srcObject = stream;
+                video.muted = true;
+                await video.play();
+                await new Promise(r => { video.onloadeddata = r; setTimeout(r, 500); });
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                canvas.getContext('2d').drawImage(video, 0, 0);
+                stream.getTracks().forEach(t => t.stop());
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                sendResult({ success: true, text: 'Snapshot taken.', media: dataUrl });
+              } catch (e) {
+                sendResult({ success: false, error: e.name === 'NotAllowedError' ? 'camera_denied' : String(e.message) });
+              }
+              return;
+            }
+
+            if (msg.command === 'camera_clip') {
+              const params = msg.params || {};
+              const durationMs = (typeof params.duration === 'string' && params.duration.endsWith('s'))
+                ? parseInt(params.duration, 10) * 1000 : 3000;
+              const useAudio = params.includeAudio === true;
+              const ENCODING_TIMEOUT_MS = 90000; // 90s: if onstop doesn't fire (encoding stuck), send error so plugin doesn't wait 5 min
+              try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: useAudio });
+                const recorder = new MediaRecorder(stream);
+                const chunks = [];
+                recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+                recorder.start(200);
+                await new Promise(r => setTimeout(r, Math.min(durationMs, 10000)));
+                recorder.stop();
+                // onstop can take 10–60+ s: browser encodes full clip to WebM; lower resolution (videoConstraints) reduces this
+                await Promise.race([
+                  new Promise(r => { recorder.onstop = r; }),
+                  new Promise((_, rej) => setTimeout(() => rej(new Error('encoding_timeout')), ENCODING_TIMEOUT_MS)),
+                ]);
+                stream.getTracks().forEach(t => t.stop());
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                const fr = new FileReader();
+                fr.onload = () => {
+                  try {
+                    sendResult({ success: true, text: 'Clip recorded.', media: fr.result });
+                  } catch (e) {
+                    sendResult({ success: false, error: 'send_result_failed: ' + (e.message || String(e)) });
+                  }
+                };
+                fr.onerror = () => sendResult({ success: false, error: 'read_as_data_url_failed' });
+                fr.readAsDataURL(blob);
+              } catch (e) {
+                sendResult({ success: false, error: e.name === 'NotAllowedError' ? 'camera_or_mic_denied' : (e.message || String(e)) });
+              }
+              return;
+            }
+
+            sendResult({ success: true, text: 'Echo: ' + msg.command + (msg.params ? ' ' + JSON.stringify(msg.params) : '') });
           }
         } catch (e) {}
       };

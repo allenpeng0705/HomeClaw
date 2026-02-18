@@ -122,7 +122,7 @@ class Channel(BaseChannel):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("Line process_message_queue: %s", e)
+                logger.error("Line process_message_queue: {}", e)
                 try:
                     self.message_queue.task_done()
                 except ValueError:
@@ -141,7 +141,7 @@ class Channel(BaseChannel):
         try:
             await self.message_queue.put(response)
         except Exception as e:
-            logger.error("Line handle_async_response: %s", e)
+            logger.error("Line handle_async_response: {}", e)
 
     def _handle_message_event(self, event: dict, config: dict):
         message = event.get("message", {})
@@ -208,7 +208,7 @@ class Channel(BaseChannel):
         try:
             self.syncTransferTocore(request=req)
         except Exception as e:
-            logger.exception("Line syncTransferTocore: %s", e)
+            logger.exception("Line syncTransferTocore: {}", e)
 
     def _handle_events(self, body: dict, config: dict):
         events = body.get("events") or []
@@ -218,9 +218,9 @@ class Channel(BaseChannel):
                 if ev_type == "message":
                     self._handle_message_event(event, config)
                 elif ev_type in ("follow", "unfollow", "join", "leave"):
-                    logger.debug("Line event %s", ev_type)
+                    logger.debug("Line event {}", ev_type)
             except Exception as e:
-                logger.exception("Line event handler: %s", e)
+                logger.exception("Line event handler: {}", e)
 
 
 @channel_app.get("/")
@@ -239,7 +239,7 @@ async def line_webhook(request: Request):
     try:
         body = json.loads(raw.decode("utf-8"))
     except Exception as e:
-        logger.debug("Line webhook parse: %s", e)
+        logger.debug("Line webhook parse: {}", e)
         return Response(content='{"error":"Invalid JSON"}', status_code=400, media_type="application/json")
     channel = getattr(channel_app, "_line_channel", None)
     if channel and isinstance(channel, Channel):
@@ -248,7 +248,7 @@ async def line_webhook(request: Request):
             try:
                 channel._handle_events(body, config)
             except Exception as e:
-                logger.exception("Line webhook _handle_events: %s", e)
+                logger.exception("Line webhook _handle_events: {}", e)
         threading.Thread(target=run_events, daemon=True).start()
     return Response(content='{"status":"ok"}', status_code=200, media_type="application/json")
 
@@ -257,7 +257,7 @@ def main():
     root = Util().channels_path()
     config_path = Path(root) / "line" / "config.yml"
     if not config_path.exists():
-        logger.error("Line config not found: %s", config_path)
+        logger.error("Line config not found: {}", config_path)
         return
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -270,7 +270,7 @@ def main():
     except KeyboardInterrupt:
         logger.debug("Line channel shutting down")
     except Exception as e:
-        logger.exception("Line channel: %s", e)
+        logger.exception("Line channel: {}", e)
     finally:
         channel.stop()
 

@@ -25,8 +25,10 @@ from typing import Any, Dict, List, Optional
 
 from base.tools import ToolContext, ToolDefinition, ToolRegistry, ROUTING_RESPONSE_ALREADY_SENT
 from base.skills import get_skills_dir
-from base.workspace import get_workspace_dir, get_agent_memory_file_path
-from base.util import Util
+from base.workspace import get_workspace_dir, get_agent_memory_file_path, append_daily_memory
+from base.util import Util, redact_params_for_log
+from base.base import PluginResult
+from base.media_io import save_data_url_to_media_folder
 from loguru import logger
 import time as _time
 
@@ -544,6 +546,93 @@ async def _append_agent_memory_executor(arguments: Dict[str, Any], context: Tool
     except Exception as e:
         logger.exception("append_agent_memory failed")
         return json.dumps({"ok": False, "message": str(e)})
+
+
+async def _append_daily_memory_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Append content to today's daily memory file (memory/YYYY-MM-DD.md). Only works when use_daily_memory is enabled."""
+    content = (arguments.get("content") or "").strip()
+    if not content:
+        return "Error: content is required"
+    try:
+        meta = Util().get_core_metadata()
+        if not getattr(meta, "use_daily_memory", False):
+            return json.dumps({"ok": False, "message": "Daily memory is disabled (use_daily_memory: false). Enable in config/core.yml to use append_daily_memory."})
+        ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
+        daily_dir = getattr(meta, "daily_memory_dir", None) or ""
+        ok = append_daily_memory(content, d=None, workspace_dir=ws_dir, daily_memory_dir=daily_dir if daily_dir else None)
+        if ok:
+            from datetime import date
+            return json.dumps({"ok": True, "message": f"Appended to daily memory ({date.today().isoformat()}.md)"})
+        return json.dumps({"ok": False, "message": "Failed to append to daily memory file."})
+    except Exception as e:
+        logger.exception("append_daily_memory failed")
+        return json.dumps({"ok": False, "message": str(e)})
+
+
+async def _agent_memory_search_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Search AGENT_MEMORY.md and daily memory by semantic similarity. Use before agent_memory_get to pull only relevant parts."""
+    try:
+        meta = Util().get_core_metadata()
+    except Exception:
+        return json.dumps({"results": [], "message": "Config unavailable."})
+    if not getattr(meta, "use_agent_memory_search", False):
+        return json.dumps({"results": [], "message": "Agent memory search is disabled. Set use_agent_memory_search: true in config/core.yml."})
+    core = getattr(context, "core", None)
+    if core is None:
+        return json.dumps({"results": [], "message": "Core not available."})
+    query = (arguments.get("query") or "").strip()
+    if not query:
+        return "Error: query is required"
+    try:
+        max_results = min(max(1, int(arguments.get("max_results", 10))), 50)
+    except (TypeError, ValueError):
+        max_results = 10
+    min_score = arguments.get("min_score")
+    if min_score is not None:
+        try:
+            min_score = float(min_score)
+        except (TypeError, ValueError):
+            min_score = None
+    try:
+        results = await core.search_agent_memory(query=query, max_results=max_results, min_score=min_score)
+    except Exception as e:
+        return json.dumps({"results": [], "message": str(e)})
+    return json.dumps({"results": results}, ensure_ascii=False, indent=0)
+
+
+async def _agent_memory_get_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Read a snippet from AGENT_MEMORY.md or memory/YYYY-MM-DD.md by path and optional line range. Use after agent_memory_search to load only needed lines."""
+    try:
+        meta = Util().get_core_metadata()
+    except Exception:
+        return json.dumps({"path": "", "text": "", "message": "Config unavailable."})
+    if not getattr(meta, "use_agent_memory_search", False):
+        return json.dumps({"path": "", "text": "", "message": "Agent memory get is disabled. Set use_agent_memory_search: true in config/core.yml."})
+    core = getattr(context, "core", None)
+    if core is None:
+        return json.dumps({"path": "", "text": "", "message": "Core not available."})
+    path = (arguments.get("path") or "").strip()
+    if not path:
+        return "Error: path is required (e.g. AGENT_MEMORY.md or memory/2025-02-16.md)"
+    from_line = arguments.get("from_line")
+    if from_line is not None:
+        try:
+            from_line = int(from_line)
+        except (TypeError, ValueError):
+            from_line = None
+    lines = arguments.get("lines")
+    if lines is not None:
+        try:
+            lines = int(lines)
+        except (TypeError, ValueError):
+            lines = None
+    try:
+        out = core.get_agent_memory_file(path=path, from_line=from_line, lines=lines)
+    except Exception as e:
+        return json.dumps({"path": path, "text": "", "message": str(e)})
+    if out is None:
+        return json.dumps({"path": path, "text": "", "message": "File not found or not readable."})
+    return json.dumps(out, ensure_ascii=False, indent=0)
 
 
 def _web_search_error_user_message(provider: str, status_code: Optional[int], body_text: str, fallback: str) -> str:
@@ -1341,10 +1430,21 @@ async def _image_executor(arguments: Dict[str, Any], context: ToolContext) -> st
         else:
             base = _get_file_base_path()
             full = (base / path_arg).resolve()
-            if not str(full).startswith(str(base)):
-                return "Error: path must be under the configured base directory"
+            used_request_image = False
             if not full.is_file():
-                return f"Error: file not found: {path_arg}"
+                # Fallback: model may have hallucinated a path; use image from current request if user just uploaded one
+                req_images = list(getattr(getattr(context, "request", None), "images", None) or [])
+                for candidate in req_images:
+                    if isinstance(candidate, str) and candidate.strip() and os.path.isfile(candidate.strip()):
+                        full = Path(candidate.strip()).resolve()
+                        used_request_image = True
+                        break
+                else:
+                    if not str(full).startswith(str(base)):
+                        return "Error: path must be under the configured base directory"
+                    return f"Error: file not found: {path_arg}"
+            if not used_request_image and not str(full).startswith(str(base)):
+                return "Error: path must be under the configured base directory"
             image_bytes = full.read_bytes()
             suffix = full.suffix.lower()
             if suffix in (".png",):
@@ -1789,7 +1889,7 @@ async def _file_understand_executor(arguments: Dict[str, Any], context: ToolCont
             if not full.is_file():
                 return f"Error: not a file or not found: {path_arg}"
         except (OSError, TypeError, ValueError) as path_e:
-            logger.debug("file_understand path resolution failed: %s", path_e)
+            logger.debug("file_understand path resolution failed: {}", path_e)
             return f"Error: invalid path or file not found: {path_arg}"
         path_str = str(full)
         ftype = detect_file_type(path_str)
@@ -1806,10 +1906,10 @@ async def _file_understand_executor(arguments: Dict[str, Any], context: ToolCont
             return f"type: video\npath: {path_arg}\n\nThis is a video file. The model may support video input; otherwise describe that you detected video at this path."
         return f"type: unknown\npath: {path_arg}\n\nFile type could not be determined. Use file_read(path) for raw content or document_read(path) if it might be a document."
     except ImportError as e:
-        logger.debug("file_understand import failed: %s", e)
+        logger.debug("file_understand import failed: {}", e)
         return f"Error: file_understand is not available: {e!s}"
     except Exception as e:
-        logger.debug("file_understand failed: %s", e)
+        logger.debug("file_understand failed: {}", e)
         return f"Error: {e!s}"
 
 
@@ -1836,7 +1936,7 @@ async def _knowledge_base_search_executor(arguments: Dict[str, Any], context: To
     except asyncio.TimeoutError:
         return "Knowledge base search timed out."
     except Exception as e:
-        logger.debug("knowledge_base_search failed: %s", e)
+        logger.debug("knowledge_base_search failed: {}", e)
         return f"Knowledge base search failed: {e!s}"
 
 
@@ -1870,7 +1970,7 @@ async def _knowledge_base_add_executor(arguments: Dict[str, Any], context: ToolC
     except asyncio.TimeoutError:
         return "Knowledge base add timed out."
     except Exception as e:
-        logger.debug("knowledge_base_add failed: %s", e)
+        logger.debug("knowledge_base_add failed: {}", e)
         return f"Failed to add to knowledge base: {e!s}"
 
 
@@ -1894,7 +1994,7 @@ async def _knowledge_base_remove_executor(arguments: Dict[str, Any], context: To
     except asyncio.TimeoutError:
         return "Knowledge base remove timed out."
     except Exception as e:
-        logger.debug("knowledge_base_remove failed: %s", e)
+        logger.debug("knowledge_base_remove failed: {}", e)
         return f"Failed to remove from knowledge base: {e!s}"
 
 
@@ -1932,7 +2032,7 @@ async def _knowledge_base_list_executor(arguments: Dict[str, Any], context: Tool
     except asyncio.TimeoutError:
         return "Knowledge base list timed out."
     except Exception as e:
-        logger.debug("knowledge_base_list failed: %s", e)
+        logger.debug("knowledge_base_list failed: {}", e)
         return f"Failed to list knowledge base: {e!s}"
 
 
@@ -1952,7 +2052,7 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
             return f"Report is ready. Open: {link}"
         return "Report saved locally. No base_url is configured, so no shareable link was generated. Send the full result content to the user in your reply."
     except Exception as e:
-        logger.debug("save_result_page failed: %s", e)
+        logger.debug("save_result_page failed: {}", e)
         return f"Failed to save result page: {e!s}"
 
 
@@ -2344,7 +2444,7 @@ async def close_browser_session(context: ToolContext) -> None:
         try:
             await browser.close()
         except Exception as e:
-            logger.warning("Error closing browser: %s", e)
+            logger.warning("Error closing browser: {}", e)
         session.pop("browser", None)
         session.pop("page", None)
     pw_cm = session.get("playwright_cm")
@@ -2352,7 +2452,7 @@ async def close_browser_session(context: ToolContext) -> None:
         try:
             await pw_cm.__aexit__(None, None, None)
         except Exception as e:
-            logger.warning("Error closing Playwright: %s", e)
+            logger.warning("Error closing Playwright: {}", e)
         session.pop("playwright_cm", None)
 
 
@@ -2694,6 +2794,19 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
         if caps:
             capability = caps[0]
 
+    # Infer node_id from user message when plugin is homeclaw-browser and capability needs node_id but LLM didn't pass it
+    if plugin_id in ("homeclaw_browser", "homeclaw-browser") and capability_id in ("node_camera_clip", "node_camera_snap"):
+        if not (llm_params.get("node_id") or llm_params.get("nodeId")):
+            user_text = (getattr(request, "text", None) or "") or ""
+            if user_text:
+                m = re.search(r"(?:on\s+)([a-zA-Z0-9_-]+)", user_text, re.IGNORECASE)
+                node_id = m.group(1) if m else None
+                if not node_id:
+                    m = re.search(r"([a-zA-Z0-9]+-node-[a-zA-Z0-9]+)", user_text, re.IGNORECASE)
+                    node_id = m.group(1) if m else None
+                if node_id:
+                    llm_params = {**llm_params, "node_id": node_id}
+
     # Resolve and validate parameters (profile, config, confirm_if_uncertain). See docs/PluginParameterCollection.md
     params = dict(llm_params)
     if capability and (capability.get("parameters") or []):
@@ -2706,17 +2819,64 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
         system_user_id = getattr(context, "system_user_id", None) or getattr(request, "user_id", None)
         profile = get_profile(system_user_id or "") if system_user_id else {}
         plugin_config = _get_plugin_config(plugin)
-        resolved, err = resolve_and_validate_plugin_params(
+        resolved, err, ask_user = resolve_and_validate_plugin_params(
             llm_params, capability, profile, plugin_config,
             plugin_id=plugin_id, capability_id=capability_id,
         )
+        if err and ask_user:
+            # Ask user for missing/uncertain params and store pending so we can retry on next message
+            missing = ask_user.get("missing") or []
+            uncertain = ask_user.get("uncertain") or []
+            app_id = getattr(context, "app_id", None) or ""
+            user_id = getattr(context, "user_id", None) or getattr(request, "user_id", None) or ""
+            session_id = getattr(context, "session_id", None) or ""
+            if missing:
+                hints = {
+                    "node_id": "Which node should I use? (e.g. test-node-1)",
+                    "nodeid": "Which node should I use? (e.g. test-node-1)",
+                    "url": "Which URL should I open?",
+                    "duration": "How long should the recording be? (e.g. 3 seconds)",
+                }
+                parts = []
+                for m in missing:
+                    key = m.lower().replace(" ", "_")
+                    parts.append(hints.get(key, f"Please provide: {m}"))
+                question = " ".join(parts) if len(parts) == 1 else "I need a few details: " + "; ".join(parts)
+                core.set_pending_plugin_call(app_id, user_id, session_id, {
+                    "plugin_id": plugin_id,
+                    "capability_id": capability_id,
+                    "params": dict(llm_params),
+                    "missing": missing,
+                    "uncertain": uncertain,
+                })
+                return question
+            if uncertain:
+                question = "Can you confirm the values above so I can proceed?"
+                core.set_pending_plugin_call(app_id, user_id, session_id, {
+                    "plugin_id": plugin_id,
+                    "capability_id": capability_id,
+                    "params": dict(resolved),
+                    "missing": [],
+                    "uncertain": uncertain,
+                })
+                return question
         if err:
             return err
         params = resolved
 
+    plugin_id_for_log = plugin_id if isinstance(plugin, dict) else (
+        (getattr(plugin, "registration", None) or {}).get("id") or getattr(plugin, "name", None) or "inline"
+    )
+    logger.info(
+        "Plugin invoked: plugin_id={} capability_id={} parameters={}",
+        plugin_id_for_log,
+        capability_id,
+        redact_params_for_log(params),
+    )
     try:
         result_text = None
-        # External plugin (http/subprocess/mcp): descriptor is a dict; run and get result
+        metadata = {}
+        # External plugin (http/subprocess/mcp): descriptor is a dict; run and get PluginResult
         if isinstance(plugin, dict):
             request_meta = dict(getattr(request, "request_metadata", None) or {})
             request_meta["capability_id"] = capability_id
@@ -2724,7 +2884,15 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
             from base.base import PromptRequest
             req_copy = request.model_copy(deep=True)
             req_copy.request_metadata = request_meta
-            result_text = await plugin_manager.run_external_plugin(plugin, req_copy)
+            result = await plugin_manager.run_external_plugin(plugin, req_copy)
+            if isinstance(result, PluginResult):
+                if not result.success:
+                    result_text = result.error or result.text or "Plugin returned an error"
+                else:
+                    result_text = result.text or "(no response)"
+                    metadata = dict(result.metadata or {})
+            else:
+                result_text = result if isinstance(result, str) else "(no response)"
         else:
             # Inline Python plugin (BasePlugin)
             from base.base import PromptRequest
@@ -2755,7 +2923,7 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
             try:
                 await core.send_response_to_request_channel(fallback, request)
             except Exception as send_err:
-                logger.warning("route_to_plugin: failed to send fallback message: %s", send_err)
+                logger.warning("route_to_plugin: failed to send fallback message: {}", send_err)
             # Sync inbound/ws: return text so caller can send it (process_response_queue skips host=inbound port=0).
             if _is_sync_inbound(request):
                 return fallback
@@ -2771,9 +2939,35 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
                 if refined:
                     result_text = refined.strip()
             except Exception as e:
-                logger.warning("Plugin post_process LLM failed: %s", e)
-        # Core applies markdown outbound (config outbound_markdown_format) when sending to channel
-        await core.send_response_to_request_channel(result_text, request)
+                logger.warning("Plugin post_process LLM failed: {}", e)
+        # Save media to folder and send to channel (text + optional image/video/audio path)
+        media_data_url = metadata.get("media") if isinstance(metadata.get("media"), str) else None
+        if media_data_url:
+            try:
+                meta = Util().get_core_metadata()
+                ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
+                media_base = Path(ws_dir) / "media" if ws_dir else None
+                path, media_kind = save_data_url_to_media_folder(media_data_url, media_base)
+                if path and media_kind:
+                    # Tell the user where the file was saved so they can find it
+                    kind_label = "Image" if media_kind == "image" else ("Video" if media_kind == "video" else "Audio")
+                    path_line = f"\n\n{kind_label} saved to: {path}"
+                    text_with_path = (result_text or "").strip() + path_line
+                    await core.send_response_to_request_channel(
+                        text_with_path,
+                        request,
+                        image_path=path if media_kind == "image" else None,
+                        video_path=path if media_kind == "video" else None,
+                        audio_path=path if media_kind == "audio" else None,
+                    )
+                    result_text = text_with_path
+                else:
+                    await core.send_response_to_request_channel(result_text, request)
+            except Exception as e:
+                logger.warning("route_to_plugin: save/send media failed: {}", e)
+                await core.send_response_to_request_channel(result_text, request)
+        else:
+            await core.send_response_to_request_channel(result_text, request)
         # Sync inbound/ws: return text so caller can send it (process_response_queue skips host=inbound port=0).
         if _is_sync_inbound(request):
             return result_text
@@ -2803,13 +2997,13 @@ def register_routing_tools(registry: ToolRegistry, core: Any) -> None:
     registry.register(
         ToolDefinition(
             name="route_to_plugin",
-            description="Route this request to a specific plugin by plugin_id. Use when the user intent clearly matches one of the available plugins. Optionally pass capability_id and parameters for that capability.",
+            description="Route this request to a specific plugin by plugin_id. Use when the user intent clearly matches one of the available plugins. For homeclaw-browser you MUST pass capability_id and parameters (e.g. node_id, url) when the user asks to take a photo, record video, open a URL, or use a node; otherwise the plugin returns an error.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "plugin_id": {"type": "string", "description": "The plugin id (e.g. weather, news). Must match an available plugin."},
-                    "capability_id": {"type": "string", "description": "Optional. The capability to call (e.g. fetch_weather, fetch_latest_news). If omitted, plugin's default run is used."},
-                    "parameters": {"type": "object", "description": "Optional. Key-value parameters for the capability (e.g. city, country)."},
+                    "plugin_id": {"type": "string", "description": "The plugin id (e.g. homeclaw-browser, weather). Must match an available plugin."},
+                    "capability_id": {"type": "string", "description": "The capability to call (e.g. node_camera_snap, node_camera_clip, browser_navigate, node_list). Required for homeclaw-browser when user asks for photo/video/URL/node; optional for plugins with a default run."},
+                    "parameters": {"type": "object", "description": "Key-value parameters for the capability (e.g. node_id for camera/photo/video, url for browser_navigate). Required when capability_id is set."},
                 },
                 "required": ["plugin_id"],
             },
@@ -3231,6 +3425,52 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["content"],
             },
             execute_async=_append_agent_memory_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="append_daily_memory",
+            description="Append a note to today's daily memory file (memory/YYYY-MM-DD.md). Use for short-term notes that help avoid filling the context window; loaded as 'Recent (daily memory)' together with yesterday's file. Only works when use_daily_memory is true in config.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "The text to append (e.g. a brief note about this conversation or today's context)."},
+                },
+                "required": ["content"],
+            },
+            execute_async=_append_daily_memory_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="agent_memory_search",
+            description="Semantically search AGENT_MEMORY.md and daily memory (memory/YYYY-MM-DD.md). Use before agent_memory_get to pull only relevant parts. Returns path, start_line, end_line, snippet, score. Only works when use_agent_memory_search is true in config.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query (e.g. user preferences, past decisions, dates)."},
+                    "max_results": {"type": "integer", "description": "Max results to return (default 10, max 50).", "default": 10},
+                    "min_score": {"type": "number", "description": "Optional minimum similarity score (0-1) to include."},
+                },
+                "required": ["query"],
+            },
+            execute_async=_agent_memory_search_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="agent_memory_get",
+            description="Read a snippet from AGENT_MEMORY.md or memory/YYYY-MM-DD.md by path. Use after agent_memory_search to load only the needed lines. path: e.g. AGENT_MEMORY.md or memory/2025-02-16.md; optional from_line and lines for a range. Only works when use_agent_memory_search is true in config.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path: AGENT_MEMORY.md or memory/YYYY-MM-DD.md."},
+                    "from_line": {"type": "integer", "description": "Optional 1-based start line."},
+                    "lines": {"type": "integer", "description": "Optional number of lines to return."},
+                },
+                "required": ["path"],
+            },
+            execute_async=_agent_memory_get_executor,
         )
     )
     registry.register(

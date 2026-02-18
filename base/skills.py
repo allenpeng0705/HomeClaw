@@ -47,7 +47,7 @@ def _parse_skill_md(content: str) -> Dict[str, Any]:
                 if k not in result:
                     result[k] = v
     except Exception as e:
-        logger.warning("Failed to parse SKILL.md frontmatter: %s", e)
+        logger.warning("Failed to parse SKILL.md frontmatter: {}", e)
     return result
 
 
@@ -86,9 +86,9 @@ def load_skills(skills_dir: Optional[Path] = None, include_body: bool = True) ->
                 parsed.pop("body", None)
             if parsed.get("name") or parsed.get("description") or parsed.get("body"):
                 skills.append(parsed)
-                logger.debug("Loaded skill: %s from %s", parsed.get("name") or item.name, item)
+                logger.debug("Loaded skill: {} from {}", parsed.get("name") or item.name, item)
         except Exception as e:
-            logger.warning("Failed to load skill from %s: %s", skill_file, e)
+            logger.warning("Failed to load skill from {}: {}", skill_file, e)
     return skills
 
 
@@ -112,7 +112,7 @@ def load_skill_by_folder(skills_dir: Path, folder: str, include_body: bool = Fal
             parsed.pop("body", None)
         return parsed
     except Exception as e:
-        logger.warning("Failed to load skill from %s: %s", skill_file, e)
+        logger.warning("Failed to load skill from {}: {}", skill_file, e)
         return None
 
 
@@ -202,7 +202,7 @@ async def sync_skills_to_vector_store(
                 try:
                     vector_store.insert(vectors=vectors_list, ids=ids_list, payloads=payloads_list)
                     total += len(ids_list)
-                    logger.debug("Synced %d test skill(s) from %s", len(ids_list), test_dir)
+                    logger.debug("Synced {} test skill(s) from {}", len(ids_list), test_dir)
                 except Exception as e:
                     logger.warning("Skill (test) vector insert failed: %s", e)
         # Delete test__ ids that are no longer in the test folder (e.g. skill moved to production or removed)
@@ -216,11 +216,11 @@ async def sync_skills_to_vector_store(
                         if folder not in current_test_folders:
                             try:
                                 vector_store.delete(vid)
-                                logger.debug("Removed stale test skill id from store: %s", vid)
+                                logger.debug("Removed stale test skill id from store: {}", vid)
                             except Exception as e:
-                                logger.warning("Failed to delete stale test id %s: %s", vid, e)
+                                logger.warning("Failed to delete stale test id {}: {}", vid, e)
             except Exception as e:
-                logger.warning("Failed to list ids for test cleanup: %s", e)
+                logger.warning("Failed to list ids for test cleanup: {}", e)
 
     skills = load_skills(skills_dir, include_body=True)
     if not skills:
@@ -250,14 +250,14 @@ async def sync_skills_to_vector_store(
             ids_list.append(folder)
             payloads_list.append({"folder": folder, "name": s.get("name") or "", "description": (s.get("description") or "").strip()})
         except Exception as e:
-            logger.warning("Skill embed failed for %s: %s", folder, e)
+            logger.warning("Skill embed failed for {}: {}", folder, e)
     if not ids_list:
         return total
     try:
         vector_store.insert(vectors=vectors_list, ids=ids_list, payloads=payloads_list)
         return total + len(ids_list)
     except Exception as e:
-        logger.warning("Skill vector insert failed: %s", e)
+        logger.warning("Skill vector insert failed: {}", e)
         return total
 
 
@@ -274,17 +274,20 @@ async def search_skills_by_query(
     """
     if not query or not query.strip():
         return []
+    if not vector_store:
+        logger.debug("Skill vector search skipped: no vector store")
+        return []
     try:
         emb = await embedder.embed(query.strip())
         if not emb:
             return []
     except Exception as e:
-        logger.warning("Skill search embed failed: %s", e)
+        logger.warning("Skill search embed failed: {}", e)
         return []
     try:
         results = vector_store.search(query=[emb], limit=limit, filters=None)
     except Exception as e:
-        logger.warning("Skill vector search failed: %s", e)
+        logger.warning("Skill vector search failed: {} ({})", e, type(e).__name__)
         return []
     out: List[Tuple[str, float]] = []
     for r in results:

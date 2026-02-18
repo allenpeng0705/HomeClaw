@@ -133,7 +133,7 @@ class Channel(BaseChannel):
                                             f.write(r.content)
                                             images.append(f.name)
                     except Exception as e:
-                        logger.debug("Matrix image download: %s", e)
+                        logger.debug("Matrix image download: {}", e)
                     text = text or 'Image'
                     action = 'respond'
                 elif msgtype in ('m.video', 'm.audio', 'm.file') and mxc_url:
@@ -166,7 +166,7 @@ class Channel(BaseChannel):
                                             files_list.append(path)
                                             text = text or 'File'
                     except Exception as e:
-                        logger.debug("Matrix media download: %s", e)
+                        logger.debug("Matrix media download: {}", e)
                     action = 'respond'
                 else:
                     if isinstance(text, str):
@@ -238,23 +238,23 @@ class Channel(BaseChannel):
                         try:
                             await self.bot.api.send_text_message(room_id, text)
                         except asyncio.TimeoutError:
-                            logger.error("Timeout sending message to room %s", room_id)
+                            logger.error("Timeout sending message to room {}", room_id)
                         except Exception as e:
-                            logger.error("Error sending message: %s", e)
+                            logger.error("Error sending message: {}", e)
                 if "image" in response_data:
                     image_path = response_data.get("image")
                     if isinstance(image_path, str) and os.path.isfile(image_path):
                         try:
                             await self.bot.api.send_image_message(room_id=room_id, image_filepath=image_path)
                         except Exception as e:
-                            logger.error("Error sending image: %s", e)
+                            logger.error("Error sending image: {}", e)
                 if "video" in response_data:
                     video_path = response_data.get("video")
                     if isinstance(video_path, str) and os.path.isfile(video_path):
                         try:
                             await self.bot.api.send_video_message(room_id=room_id, video_filepath=video_path)
                         except Exception as e:
-                            logger.error("Error sending video: %s", e)
+                            logger.error("Error sending video: {}", e)
                 self.message_queue.task_done()
             except asyncio.TimeoutError:
                 continue

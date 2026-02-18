@@ -68,7 +68,7 @@ def detect_file_type(path: str) -> str:
                 pass
         return FILE_TYPE_UNKNOWN
     except Exception as e:
-        logger.debug("file_understanding detect_file_type failed for %s: %s", path, e)
+        logger.debug("file_understanding detect_file_type failed for {}: {}", path, e)
         return FILE_TYPE_UNKNOWN
 
 
@@ -128,7 +128,7 @@ def extract_document_text(path: str, base_dir: str, max_chars: int = 64000) -> O
             except ImportError:
                 pass
             except Exception as e:
-                logger.debug("file_understanding Unstructured failed for %s: %s", p, e)
+                logger.debug("file_understanding Unstructured failed for {}: {}", p, e)
 
         # 2) PDF with pypdf
         if suffix == ".pdf":
@@ -157,7 +157,7 @@ def extract_document_text(path: str, base_dir: str, max_chars: int = 64000) -> O
                     out += "\n... (truncated)"
                 return out
             except Exception as e:
-                logger.debug("file_understanding pypdf failed for %s: %s", p, e)
+                logger.debug("file_understanding pypdf failed for {}: {}", p, e)
                 return None
 
         # 3) Plain text (txt, md, etc.)
@@ -167,10 +167,10 @@ def extract_document_text(path: str, base_dir: str, max_chars: int = 64000) -> O
                 content = content[:max_chars] + "\n... (truncated)"
             return content
         except Exception as e:
-            logger.debug("file_understanding read_text failed for %s: %s", p, e)
+            logger.debug("file_understanding read_text failed for {}: {}", p, e)
             return None
     except Exception as e:
-        logger.debug("file_understanding extract_document_text failed for %s: %s", path, e)
+        logger.debug("file_understanding extract_document_text failed for {}: {}", path, e)
         return None
 
 
@@ -231,7 +231,7 @@ def process_files(
             else:
                 result.errors.append(f"{path}: unknown file type")
         except Exception as e:
-            logger.debug("file_understanding process_files failed for %s: %s", path, e)
+            logger.debug("file_understanding process_files failed for {}: {}", path, e)
             result.errors.append(f"{path}: {e!s}")
 
     return result

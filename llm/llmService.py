@@ -130,18 +130,22 @@ class LLMServiceManager:
                               ctx_size: str = None, predict: str = None, temp: str = None,
                               threads: str = None, n_gpu_layers: str = None,
                               chat_format: str = None, verbose: str = None, function_calling: bool = True, pooling: bool = False,
-                              mmproj_path: str = None, lora_paths: List[str] = None, lora_base_path: str = None):
+                              mmproj_path: str = None, lora_paths: List[str] = None, lora_base_path: str = None,
+                              opts_override: Dict = None):
         """
         Start llama.cpp server. Parameters not passed are read from config/core.yml under llama_cpp.
+        When opts_override is set (e.g. llama_cpp.embedding), it is merged over base llama_cpp opts.
         For vision models: pass mmproj_path (full path to projector .gguf).
         For LoRA: pass lora_paths (list of full paths; one or more adapters) and optionally lora_base_path.
         """
-        opts = self._llama_cpp_opts()
+        opts = dict(self._llama_cpp_opts())
+        if opts_override:
+            opts.update(opts_override)
 
         def _str(v):
             return str(v) if v is not None else None
 
-        ctx_size = _str(ctx_size) or _str(opts.get("ctx_size")) or "32768"
+        ctx_size = _str(ctx_size) or _str(opts.get("ctx_size")) or ("0" if pooling else "32768")
         predict = _str(predict) or _str(opts.get("predict")) or "8192"
         temp = _str(temp) or _str(opts.get("temp")) or "0.8"
         threads = _str(threads) or _str(opts.get("threads")) or "8"
@@ -179,9 +183,16 @@ class LLMServiceManager:
             "--host", host,
             "--port", str(port),
         ]
-        if mmproj_path and os.path.isfile(mmproj_path):
-            cmd_list.extend(["--mmproj", mmproj_path])
-            logger.debug("Multimodal (vision): mmproj=%s", mmproj_path)
+        if mmproj_path:
+            if os.path.isfile(mmproj_path):
+                cmd_list.extend(["--mmproj", mmproj_path])
+                logger.info("Vision model: llama.cpp server started with --mmproj {}", mmproj_path)
+            else:
+                logger.warning(
+                    "mmproj file not found ({}), llama.cpp server will start WITHOUT vision. "
+                    "Put the mmproj .gguf in the model path or fix the mmproj path in config/core.yml.",
+                    mmproj_path,
+                )
         lora_list = lora_paths if isinstance(lora_paths, list) else ([lora_paths] if lora_paths else [])
         for lp in lora_list:
             if lp and os.path.isfile(lp):
@@ -189,7 +200,7 @@ class LLMServiceManager:
         if lora_list and lora_base_path and os.path.isfile(lora_base_path):
             cmd_list.extend(["--lora-base", lora_base_path])
         if lora_list:
-            logger.debug("LoRA: paths=%s, lora_base=%s", lora_list, lora_base_path)
+            logger.debug("LoRA: paths={}, lora_base={}", lora_list, lora_base_path)
         if verbose not in (False, "false", "False"):
             cmd_list.append("--verbose")
         if not pooling:
@@ -232,16 +243,23 @@ class LLMServiceManager:
                 logger.debug(f"LLM {llm_name} is already running")
                 return
 
-            embedding_token_len = Util().embedding_tokens_len()
             if llm_type == 'local':
                 entry, _ = Util()._get_model_entry(Util().get_core_metadata().embedding_llm)
                 mmproj_path, lora_paths, lora_base_path = (None, [], None)
                 if entry:
                     mmproj_path, lora_paths, lora_base_path = self._resolve_local_extra_paths(entry)
+                llama_cpp = getattr(Util().get_core_metadata(), "llama_cpp", None) or {}
+                embedding_opts = llama_cpp.get("embedding") if isinstance(llama_cpp, dict) else None
+                if not isinstance(embedding_opts, dict):
+                    embedding_opts = {}
+                # ctx_size: use embedding.ctx_size if set, else 0 so llama.cpp uses the model's native n_ctx
+                emb_ctx = embedding_opts.get("ctx_size")
+                ctx_size = str(emb_ctx) if emb_ctx is not None else "0"
                 self.start_llama_cpp_server(
                     llm_name, host, port, embedding_model_path,
-                    ctx_size=str(embedding_token_len), function_calling=False, pooling=True,
+                    ctx_size=ctx_size, function_calling=False, pooling=True,
                     mmproj_path=mmproj_path, lora_paths=lora_paths or None, lora_base_path=lora_base_path,
+                    opts_override=embedding_opts,
                 )
             elif llm_type == 'litellm':
                 pass
