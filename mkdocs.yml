@@ -11,14 +11,6 @@ repo_name: HomeClaw
 docs_dir: docs
 strict: false  # allow links to repo files outside docs/ (docs_design, README, etc.)
 
-# Render Mermaid diagrams (flowchart, sequenceDiagram, etc.) as images instead of raw code
-markdown_extensions:
-  - pymdownx.superfences:
-      custom_fences:
-        - name: mermaid
-          class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_code_format
-
 theme:
   name: material
   palette:
