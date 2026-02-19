@@ -18,6 +18,7 @@ dependencies:
   homeclaw_voice:
     path: packages/homeclaw_voice
   image_picker: ^1.0.7
+  file_picker: ^8.0.0
   flutter_tts: ^4.2.5
   webview_flutter: ^4.10.0
   app_links: ^6.3.2

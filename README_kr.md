@@ -4,7 +4,9 @@
 
 # HomeClaw
 
-**HomeClaw**는 사용자 자신의 하드웨어에서 동작하는 **로컬 우선 AI 어시스턴트**입니다. 각 설치는 하나의 자율 에이전트로, 이메일·Telegram·Discord·WebChat 등 이미 사용 중인 **채널**로 대화하고, **메모리**와 컨텍스트를 유지하며, **플러그인**과 **스킬**로 기능을 확장합니다. **로컬 모델**(llama.cpp, GGUF)만 사용하거나 **클라우드 모델**(OpenAI, Google Gemini, DeepSeek, Anthropic 등)을 섞어 쓸 수 있습니다. HomeClaw는 **사람을 위한**—분산형이고, 원할 때는 비공개이며, 완전히 사용자 제어 하에 있습니다.
+**HomeClaw**는 사용자 자신의 하드웨어에서 동작하는 **로컬 우선 AI 어시스턴트**입니다. 각 설치는 하나의 자율 에이전트로, 이메일·Telegram·Discord·WebChat 등 이미 사용 중인 **채널**로 대화하고, **메모리**(RAG + 에이전트 메모리)와 컨텍스트를 유지하며, **내장·외부 플러그인**과 **스킬**로 기능을 확장합니다. **로컬 모델**(llama.cpp, GGUF)만 사용하거나 **클라우드 모델**(OpenAI, **Google Gemini**, DeepSeek, Anthropic 등)을 섞어 쓸 수 있으며, **멀티모달**(이미지·오디오·비디오)은 로컬·클라우드 모두 지원합니다. **Flutter 동반 앱**(Mac, Windows, iPhone, Android)으로 어디서나 쉽게 사용할 수 있고, **멀티 에이전트**는 HomeClaw 인스턴스를 여러 개 실행하면 됩니다. HomeClaw는 **사람을 위한**—분산형이고, 원할 때는 비공개이며, 완전히 사용자 제어 하에 있습니다.
+
+**하이라이트:** **동반 앱**(Flutter, 전 플랫폼) | **메모리**(RAG + 에이전트 메모리) | **플러그인**(내장 + 외부, **어떤 언어든** Node.js, Go, Java, Python 등) | **OpenClaw 스킬셋** | **멀티 에이전트**(다중 인스턴스) | **클라우드·멀티모달**(Gemini 등, 로컬·클라우드 모두 동작 확인)
 
 **다른 언어 / Other languages:** [English](README.md) | [简体中文](README_zh.md) | [日本語](README_jp.md)
 

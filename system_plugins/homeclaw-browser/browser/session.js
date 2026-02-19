@@ -5,7 +5,8 @@
 
 const { chromium } = require('playwright');
 
-const HEADLESS = process.env.BROWSER_HEADLESS !== 'false';
+// YAML may pass boolean false as "False" (Python str); accept "false", "False", "0", "no" as headed.
+const HEADLESS = !/^(false|0|no)$/i.test(String(process.env.BROWSER_HEADLESS || '').trim());
 const contexts = new Map();
 let browser = null;
 

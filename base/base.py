@@ -317,7 +317,8 @@ class EmailAccount:
 # https://github.com/BerriAI/litellm/blob/57f37f743886a0249f630a6792d49dffc2c5d9b7/model_prices_and_context_window.json#L835            
 class ChatRequest(BaseModel):
     model: str
-    messages: List[Dict[str, Union[str, List[Dict[str, str]]]]] = []
+    # OpenAI-style messages: list of {role, content}; content can be str or list of parts (text, image_url, input_audio, etc.)
+    messages: List[Any] = []
     extra_body: Dict[str, Union[str, int, float, dict, list]] = None
     timeout: Union[float, int, None] = None
     temperature: Union[float, None] = None
@@ -617,7 +618,15 @@ class CoreMetadata:
         for plugin_id, vars_dict in raw.items():
             if not isinstance(vars_dict, dict):
                 continue
-            out[str(plugin_id)] = {str(k): str(v) for k, v in vars_dict.items()}
+            normalized = {}
+            for k, v in vars_dict.items():
+                if v is True:
+                    normalized[str(k)] = "true"
+                elif v is False:
+                    normalized[str(k)] = "false"
+                else:
+                    normalized[str(k)] = str(v)
+            out[str(plugin_id)] = normalized
         return out
 
     @staticmethod
@@ -712,6 +721,19 @@ class CoreMetadata:
         cloud_models = data.get('cloud_models')
         if not isinstance(cloud_models, list):
             cloud_models = []
+        # If main_llm points to a cloud model and that entry has api_key set, use it for main_llm_api_key
+        main_llm_ref = (data.get('main_llm') or '').strip()
+        main_llm_api_key_val = (data.get('main_llm_api_key') or '').strip()
+        main_llm_api_key_name_val = (data.get('main_llm_api_key_name') or '').strip()
+        if main_llm_ref.startswith('cloud_models/'):
+            entry_id = main_llm_ref[len('cloud_models/'):].strip()
+            for m in cloud_models:
+                if (m.get('id') or '').strip() == entry_id:
+                    entry_key = (m.get('api_key') or '').strip() if isinstance(m.get('api_key'), str) else ''
+                    if entry_key:
+                        main_llm_api_key_val = entry_key
+                        main_llm_api_key_name_val = (m.get('api_key_name') or main_llm_api_key_name_val or '').strip()
+                    break
         cognee = data.get('cognee')
         if not isinstance(cognee, dict):
             cognee = {}
@@ -731,8 +753,8 @@ class CoreMetadata:
             main_llm_host=data.get('main_llm_host', '127.0.0.1'),
             main_llm_port=data.get('main_llm_port', 5088),
             main_llm_language=_normalize_main_llm_language(data.get('main_llm_language', 'en')),
-            main_llm_api_key_name=data.get('main_llm_api_key_name') or '',
-            main_llm_api_key=data.get('main_llm_api_key') or '',
+            main_llm_api_key_name=main_llm_api_key_name_val,
+            main_llm_api_key=main_llm_api_key_val,
             silent=data.get('silent', False),
             use_memory=data.get('use_memory', True),
             reset_memory=data.get('reset_memory', False),
@@ -849,7 +871,10 @@ class CoreMetadata:
                 'llama_cpp': core.llama_cpp or {},
                 'completion': getattr(core, 'completion', {}) or {},
                 'local_models': core.local_models or [],
-                'cloud_models': core.cloud_models or [],
+                'cloud_models': [
+                    {k: ("***" if k == "api_key" and v else v) for k, v in (m if isinstance(m, dict) else {}).items()}
+                    for m in (core.cloud_models or [])
+                ],
                 'database': {'backend': core.database.backend, 'url': core.database.url},
                 'vectorDB': {
                     'backend': core.vectorDB.backend,

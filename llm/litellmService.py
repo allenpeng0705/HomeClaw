@@ -55,7 +55,10 @@ class LiteLLMService:
     def _setup_routes(self):
         @self.app.exception_handler(RequestValidationError)
         async def validation_exception_handler(request: Request, exc: RequestValidationError):
-            logger.error(f"Validation error: {exc} for request: {await request.body()}")
+            body = await request.body()
+            # Log errors clearly; truncate body if large (e.g. base64 image) to avoid log flood
+            body_preview = body[:500].decode("utf-8", errors="replace") + ("..." if len(body) > 500 else "") if body else ""
+            logger.error("Validation error: {} | detail: {} | body preview: {}", exc, exc.errors(), body_preview)
             return JSONResponse(
                 status_code=422,
                 content={"detail": exc.errors(), "body": exc.body},

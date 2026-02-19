@@ -16,6 +16,6 @@
 
 3. **Run Core** — `python -m core.core` or `python -m main start`
 
-4. **Run a channel** — e.g. `python -m channels.run webchat` and open http://localhost:8014
+4. **Run a channel** — e.g. `python -m channels.run webchat` and open http://localhost:8014, or use the **Companion app** (Flutter: Mac, Windows, iPhone, Android) from `clients/homeclaw_companion/` to chat and **Manage Core** (edit config from the app).
 
 For full steps, see the main [README](https://github.com/allenpeng0705/HomeClaw/blob/main/README.md) and [HOW_TO_USE.md](https://github.com/allenpeng0705/HomeClaw/blob/main/HOW_TO_USE.md) in the repo.

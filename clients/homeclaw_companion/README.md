@@ -97,6 +97,25 @@ If Core is HTTP (e.g. local `http://192.168.x.x:9000`), Android 9+ blocks cleart
 
 On **macOS/Windows** the scanner may not have a camera; use manual URL entry in Settings.
 
+## App icon (Apple style)
+
+- **Regenerate base icons:** `dart run flutter_launcher_icons` (from `clients/homeclaw_companion`). Source: `assets/icon/app_icon.png`.
+- **iOS:** The system applies the squircle mask automatically. Use a **square** source image (e.g. 1024×1024), fully opaque, with **no rounded corners drawn** in the image. Do a clean build and reinstall if the icon doesn’t update.
+- **macOS:** The system does **not** apply the squircle automatically, so the icon stays square unless you do one of the following:
+
+  **Option A – Bake rounded corners into the project (recommended)**  
+  After `dart run flutter_launcher_icons`, run:
+  ```bash
+  ./scripts/macos_icon_squircle_assets.sh
+  ```
+  Requires ImageMagick: `brew install imagemagick`. This overwrites the macOS icon assets with rounded-corner PNGs so **every build** (Debug and Release) has the Apple-style icon. Then run `flutter run -d macos` or `flutter build macos`.
+
+  **Option B – Apply squircle to the built app only**  
+  1. Install [iconsur](https://github.com/rikumi/iconsur): `brew install iconsur`.
+  2. Build or run the app once (e.g. `flutter build macos` or `flutter run -d macos`).
+  3. Run `./scripts/macos_icon_squircle.sh` (for Release) or `./scripts/macos_icon_squircle.sh Debug` (if you run from IDE). Enter your password when prompted for `iconsur cache`.
+  4. The icon updates only for that built `.app`; rebuilds will use the square icon again unless you run the script again.
+
 ## Troubleshooting
 
 - **Connection refused:** Ensure Core is running and the URL in Settings is correct (no trailing slash).

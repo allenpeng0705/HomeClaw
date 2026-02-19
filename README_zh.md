@@ -4,7 +4,9 @@
 
 # HomeClaw
 
-**HomeClaw** 是一款**本地优先的 AI 助手**，运行在您自己的硬件上。每次安装都是一个自主智能体：通过您已有的渠道（邮件、Telegram、Discord、WebChat 等）与您对话，保持记忆与上下文，并通过**插件**和**技能**扩展能力。您可以完全使用**本地模型**（llama.cpp、GGUF），或混合使用**云端模型**（OpenAI、Google Gemini、DeepSeek、Anthropic 等）。HomeClaw **为人们服务**——去中心化、按需隐私、完全由您掌控。
+**HomeClaw** 是一款**本地优先的 AI 助手**，运行在您自己的硬件上。每次安装都是一个自主智能体：通过您已有的渠道（邮件、Telegram、Discord、WebChat 等）与您对话，保持**记忆**（RAG + 智能体记忆）与上下文，并通过**内置与外部插件**和**技能**扩展能力。您可以完全使用**本地模型**（llama.cpp、GGUF），或混合使用**云端模型**（OpenAI、**Google Gemini**、DeepSeek、Anthropic 等）；**多模态**（图像、音频、视频）在本地与云端均支持。**Flutter 伴侣应用**（Mac、Windows、iPhone、Android）让 HomeClaw 更易用。**多智能体**即运行多个 HomeClaw 实例。HomeClaw **为人们服务**——去中心化、按需隐私、完全由您掌控。
+
+**亮点：** **伴侣应用**（Flutter，全平台）| **记忆**（RAG + 智能体记忆）| **插件**（内置 + 外部，**任意语言**如 Node.js、Go、Java、Python）| **OpenClaw 技能集** | **多智能体**（多实例）| **云端与多模态**（Gemini 等，本地与云端均可用）
 
 **其他语言 / Other languages:** [English](README.md) | [日本語](README_jp.md) | [한국어](README_kr.md)
 

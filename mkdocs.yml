@@ -45,6 +45,7 @@ nav:
   - Install: install.md
   - Run: run.md
   - Getting started: getting-started.md
+  - Companion app: companion-app.md
   - Channels: channels.md
   - Tools: tools.md
   - Plugins: plugins.md

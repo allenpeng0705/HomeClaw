@@ -1116,8 +1116,9 @@ class Core(CoreInterface):
         @self.app.post("/api/upload", dependencies=[Depends(_verify_inbound_auth)])
         async def api_upload(files: List[UploadFile] = File(..., description="Image or file(s) to save for the model")):
             """
-            Upload file(s) (e.g. images from WebChat). Saves to database/uploads/ and returns absolute paths.
-            Client can then send these paths in payload.images (or files) so the model can read them without large data URLs over WebSocket.
+            Upload file(s) (images, videos, or documents). Saves to database/uploads/ and returns absolute paths.
+            Client can then send these paths in payload.images, payload.videos, or payload.files so the model can read them.
+            Documents (e.g. PDF, TXT, DOCX) go in payload.files; Core uses file_understanding (document_read, etc.).
             """
             root = Path(Util().root_path())
             upload_dir = root / "database" / "uploads"
@@ -1128,9 +1129,11 @@ class Core(CoreInterface):
                     if not f.filename:
                         continue
                     ext = Path(f.filename).suffix or ".bin"
-                    allowed = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".mp4", ".webm", ".mov", ".avi")
+                    allowed_media = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".mp4", ".webm", ".mov", ".avi")
+                    allowed_docs = (".pdf", ".txt", ".md", ".doc", ".docx", ".rtf", ".csv", ".xls", ".xlsx", ".odt", ".ods")
+                    allowed = allowed_media + allowed_docs
                     if ext.lower() not in allowed:
-                        ext = ".jpg"
+                        ext = ".bin"
                     name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
                     path = upload_dir / name
                     content = await f.read()
@@ -1142,22 +1145,58 @@ class Core(CoreInterface):
                 return JSONResponse(status_code=500, content={"detail": str(e), "paths": []})
 
         # Config API: manage core.yml and user.yml (same auth as /inbound)
+        # All top-level keys in core.yml that are safe to read/write via API (nested sections merged on PATCH).
         _CONFIG_CORE_WHITELIST = frozenset({
-            "host", "port", "mode", "silent", "use_memory", "main_llm",
-            "auth_enabled", "auth_api_key",
+            "name", "host", "port", "mode", "model_path", "silent", "use_memory", "reset_memory", "memory_backend",
+            "profile", "workspace_dir", "use_workspace_bootstrap", "use_agent_memory_file", "agent_memory_path",
+            "agent_memory_max_chars", "use_agent_memory_search", "agent_memory_vector_collection",
+            "use_daily_memory", "daily_memory_dir", "session", "notify_unknown_request", "outbound_markdown_format",
+            "llm_max_concurrent", "compaction", "use_tools", "use_skills", "skills_dir",
+            "skills_top_n_candidates", "skills_max_in_prompt", "plugins_top_n_candidates", "plugins_max_in_prompt",
+            "plugins_description_max_chars", "skills_use_vector_search", "skills_vector_collection",
+            "skills_max_retrieved", "skills_similarity_threshold", "skills_refresh_on_startup", "skills_test_dir",
+            "skills_incremental_sync", "plugins_use_vector_search", "plugins_vector_collection",
+            "plugins_max_retrieved", "plugins_similarity_threshold", "plugins_refresh_on_startup",
+            "system_plugins_auto_start", "system_plugins", "system_plugins_env", "orchestrator_unified_with_tools",
+            "orchestrator_timeout_seconds", "use_prompt_manager", "prompts_dir", "prompt_default_language",
+            "prompt_cache_ttl_seconds", "auth_enabled", "auth_api_key", "tools", "result_viewer", "knowledge_base",
+            "file_understanding", "llama_cpp", "completion", "local_models", "cloud_models", "main_llm",
+            "embedding_llm", "main_llm_language", "embedding_host", "embedding_port", "main_llm_host", "main_llm_port",
+            "database", "vectorDB", "graphDB", "cognee",
         })
+        _CONFIG_CORE_BOOL_KEYS = frozenset({
+            "silent", "use_memory", "reset_memory", "auth_enabled", "use_tools", "use_skills",
+            "use_workspace_bootstrap", "use_agent_memory_file", "use_agent_memory_search", "use_daily_memory",
+            "use_prompt_manager", "system_plugins_auto_start", "skills_use_vector_search", "skills_refresh_on_startup",
+            "skills_incremental_sync", "plugins_use_vector_search", "plugins_refresh_on_startup",
+            "orchestrator_unified_with_tools",
+        })
+
+        def _deep_merge(target: dict, source: dict) -> None:
+            """Merge source into target in-place. Nested dicts are merged; lists and other values replace."""
+            for k, v in source.items():
+                if k in target and isinstance(target[k], dict) and isinstance(v, dict):
+                    _deep_merge(target[k], v)
+                else:
+                    target[k] = v
+
+        def _redact_config(obj, redact_keys: frozenset = frozenset({"auth_api_key", "api_key"})):
+            """Return a copy of obj with sensitive keys replaced by '***'. Recurses into dicts and lists of dicts."""
+            if isinstance(obj, dict):
+                return {k: ("***" if k in redact_keys else _redact_config(v, redact_keys)) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_redact_config(item, redact_keys) for item in obj]
+            return obj
 
         @self.app.get("/api/config/core", dependencies=[Depends(_verify_inbound_auth)])
         async def api_config_core_get():
-            """Return current core config (safe subset). auth_api_key redacted as '***'."""
+            """Return current core config (whitelisted keys only). auth_api_key and nested api_key redacted as '***'."""
             try:
                 path = Path(Util().config_path()) / "core.yml"
                 if not path.exists():
                     return JSONResponse(status_code=404, content={"detail": "core.yml not found"})
                 data = Util().load_yml_config(str(path)) or {}
-                out = {k: v for k, v in data.items() if k in _CONFIG_CORE_WHITELIST}
-                if "auth_api_key" in out and out["auth_api_key"]:
-                    out["auth_api_key"] = "***"
+                out = {k: _redact_config(v) for k, v in data.items() if k in _CONFIG_CORE_WHITELIST}
                 return JSONResponse(content=out)
             except Exception as e:
                 logger.exception("Config core get failed: {}", e)
@@ -1165,7 +1204,7 @@ class Core(CoreInterface):
 
         @self.app.patch("/api/config/core", dependencies=[Depends(_verify_inbound_auth)])
         async def api_config_core_patch(request: Request):
-            """Update whitelisted keys in core.yml. Only keys in _CONFIG_CORE_WHITELIST are applied."""
+            """Update whitelisted keys in core.yml. Nested dicts are deep-merged; lists and scalars replace."""
             try:
                 body = await request.json()
                 if not isinstance(body, dict):
@@ -1175,15 +1214,18 @@ class Core(CoreInterface):
                     return JSONResponse(status_code=404, content={"detail": "core.yml not found"})
                 data = Util().load_yml_config(str(path)) or {}
                 for k, v in body.items():
-                    if k in _CONFIG_CORE_WHITELIST:
-                        if k == "port":
-                            data[k] = int(v) if v is not None else 9000
-                        elif k in ("auth_enabled", "silent", "use_memory"):
-                            data[k] = bool(v)
-                        elif k == "auth_api_key" and v == "***":
-                            continue  # keep existing key when client sends placeholder
-                        else:
-                            data[k] = v
+                    if k not in _CONFIG_CORE_WHITELIST:
+                        continue
+                    if k == "auth_api_key" and (v == "***" or v is None or v == ""):
+                        continue
+                    if k == "port":
+                        data[k] = int(v) if v is not None else 9000
+                    elif k in _CONFIG_CORE_BOOL_KEYS:
+                        data[k] = bool(v) if v is not None else False
+                    elif isinstance(v, dict) and isinstance(data.get(k), dict):
+                        _deep_merge(data[k], v)
+                    else:
+                        data[k] = v
                 Util().write_config(str(path), data)
                 return JSONResponse(content={"result": "ok"})
             except Exception as e:
@@ -2600,7 +2642,10 @@ class Core(CoreInterface):
                 logger.debug("Including {} image(s) in user message for vision model", len(images_list))
             if (audios_list or videos_list) and "audio" not in supported_media and "video" not in supported_media:
                 text_only = (text_only + " (Audio/video omitted - model does not support media.)").strip()
-            # Build content_parts when we have any supported media (image/audio/video) so we add proper params for cloud and local.
+            # Build content_parts when we have any supported media (image/audio/video).
+            # Images: Core always converts to data URL (path -> read file -> base64 -> data:image/...;base64,...).
+            # Same format is used for both local (llama.cpp) and cloud (Gemini, OpenAI, etc.): inline base64 in the
+            # request body; cloud APIs accept image_url with data URL, local LiteLLM/llama-server accept it too.
             content_parts: List[Dict] = []
             if images_list and "image" in supported_media:
                 content_parts.append({"type": "text", "text": text_only or ""})

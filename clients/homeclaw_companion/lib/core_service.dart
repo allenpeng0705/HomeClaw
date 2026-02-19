@@ -10,6 +10,9 @@ import 'node_service.dart';
 /// HomeClaw Core API client.
 /// Sends messages via POST /inbound and returns the reply text.
 class CoreService {
+  /// Timeout for sending a message (POST /inbound). Tool use (e.g. web search + reply) can take several minutes.
+  static const int sendMessageTimeoutSeconds = 300;
+
   static const String _keyBaseUrl = 'core_base_url';
   static const String _keyApiKey = 'core_api_key';
   static const String _keyExecAllowlist = 'exec_allowlist';
@@ -129,6 +132,17 @@ class CoreService {
     return headers;
   }
 
+  /// Check if Core is reachable. Returns true if we get any HTTP response (200, 401, 404, etc.), false on timeout/connection error.
+  Future<bool> checkConnection() async {
+    try {
+      final url = Uri.parse('$_baseUrl/api/config/core');
+      final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 5));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Upload file(s) to Core POST /api/upload. Returns list of paths Core can read.
   /// Throws on network or API error.
   Future<List<String>> uploadFiles(List<String> filePaths) async {
@@ -142,7 +156,7 @@ class CoreService {
       final name = path.basename(p);
       request.files.add(await http.MultipartFile.fromPath('files', p, filename: name));
     }
-    final streamed = await request.send().timeout(const Duration(seconds: 120));
+    final streamed = await request.send().timeout(Duration(seconds: sendMessageTimeoutSeconds));
     final response = await http.Response.fromStream(streamed);
     if (response.statusCode != 200) {
       throw Exception('Upload failed ${response.statusCode}: ${response.body}');
@@ -181,7 +195,7 @@ class CoreService {
     };
     final response = await http
         .post(url, headers: headers, body: jsonEncode(body))
-        .timeout(const Duration(seconds: 120));
+        .timeout(Duration(seconds: sendMessageTimeoutSeconds));
     if (response.statusCode != 200) {
       final err = response.body;
       throw Exception('Core returned ${response.statusCode}: $err');

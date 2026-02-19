@@ -310,7 +310,10 @@ class Util:
         return None, None
 
     def main_llm(self):
-        main_llm_name = self.core_metadata.main_llm
+        """Return (path_or_model, raw_id, mtype, host, port). Never returns None so callers can always unpack."""
+        main_llm_name = (self.core_metadata.main_llm or "").strip()
+        if not main_llm_name:
+            main_llm_name = (self.llms[0] if self.llms else "local_models/main_vl_model")
         entry, mtype = self._get_model_entry(main_llm_name)
         if entry is not None:
             host = entry.get('host', '127.0.0.1')
@@ -323,14 +326,32 @@ class Util:
             else:
                 _, raw_id = self._parse_model_ref(main_llm_name)
                 return entry.get('path', main_llm_name), raw_id or main_llm_name, 'litellm', host, port
-        # Legacy: no local_models/cloud_models or id not found
+        # Legacy: no local_models/cloud_models or id not found — return safe fallback so callers never get None
         eff_type = self._effective_main_llm_type()
+        host = self.core_metadata.main_llm_host or '127.0.0.1'
+        port = int(self.core_metadata.main_llm_port or 5088)
         if eff_type == "local":
-            for llm_name in self.llms:
+            for llm_name in (self.llms or []):
                 if llm_name == main_llm_name:
-                    return os.path.join(self.models_path(), llm_name), llm_name, eff_type, self.core_metadata.main_llm_host, self.core_metadata.main_llm_port
-            return None
-        return main_llm_name, main_llm_name, eff_type, self.core_metadata.main_llm_host, self.core_metadata.main_llm_port
+                    return os.path.join(self.models_path(), llm_name), llm_name, eff_type, host, port
+            # Local ref not in llms: still return a tuple so request can be attempted (may get connection error)
+            return main_llm_name, main_llm_name, eff_type, host, port
+        return main_llm_name, main_llm_name, eff_type, host, port
+
+    def _llm_request_model_and_headers(self, path_or_model: str, raw_id: str, mtype: str) -> Tuple[str, dict]:
+        """Return (model string for request body, headers dict) for local (llama.cpp) or cloud (LiteLLM)."""
+        # LiteLLM expects provider/model (e.g. gemini/gemini-2.5-flash); local servers expect model id (e.g. main_vl_model).
+        model_for_request = path_or_model if mtype == "litellm" else (raw_id or path_or_model)
+        headers = {"Content-Type": "application/json"}
+        if mtype == "litellm":
+            key = (getattr(self.core_metadata, "main_llm_api_key", "") or "").strip()
+            if key:
+                headers["Authorization"] = "Bearer " + key
+            else:
+                headers["Authorization"] = "Anything"
+        else:
+            headers["Authorization"] = "Anything"
+        return model_for_request, headers
 
     def _resolve_llm(self, llm_name: Optional[str] = None):
         """Return (path, model_id, type, host, port) for llm_name, or for main_llm if llm_name is None/empty. Returns None if llm_name given but not found."""
@@ -807,11 +828,12 @@ class Util:
             resolved = Util()._resolve_llm(llm_name)
             if resolved is None:
                 resolved = Util().main_llm()
-            _, model, type, model_host, model_port = resolved
+            path_or_model, raw_id, mtype, model_host, model_port = resolved
+            model_for_request, headers = Util()._llm_request_model_and_headers(path_or_model, raw_id, mtype)
             data = {}
             if grammar != None and len(grammar) > 0:
                 data = {
-                    "model": model,
+                    "model": model_for_request,
                     "messages": messages,
                     "extra_body": {
                         "grammar": grammar
@@ -819,7 +841,7 @@ class Util:
                 }
             else:
                 data = {
-                    "model": model,
+                    "model": model_for_request,
                     "messages": messages,
                 }
             if tools:
@@ -833,10 +855,6 @@ class Util:
             data.update(data_params)
             if extra_body_params:
                 data.setdefault("extra_body", {}).update(extra_body_params)
-            headers = {
-                'Content-Type': 'application/json',
-                'Authorization': 'Anything'
-            }
             data_json = None
             if self.is_utf8_compatible(data):
                 data_json = json.dumps(data, ensure_ascii=False)
@@ -845,7 +863,9 @@ class Util:
 
             #logger.debug(f"Message Request to LLM: {data_json}")
             chat_completion_api_url = 'http://' + model_host + ':' + str(model_port) + '/v1/chat/completions'
-            async with aiohttp.ClientSession() as session:
+            timeout_sec = 300
+            timeout = aiohttp.ClientTimeout(total=timeout_sec)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(chat_completion_api_url, headers=headers, data=data_json) as resp:
                     resp_json = await resp.text(encoding='utf-8')
                     # Ensure resp_json is a dictionary
@@ -866,6 +886,12 @@ class Util:
                                     return None
                     logger.error("Invalid response structure")
                     return None
+        except asyncio.TimeoutError:
+            logger.warning("LLM chat completion timed out after {}s ({}:{})", timeout_sec, model_host, model_port)
+            return None
+        except asyncio.CancelledError:
+            logger.info("LLM chat completion was cancelled (e.g. client disconnected)")
+            return None
         except Exception as e:
             logger.exception(e)
             return None
@@ -932,8 +958,9 @@ class Util:
         grammar: Optional[str] = None,
     ) -> Optional[dict]:
         try:
-            _, model, type, model_host, model_port = Util().main_llm()
-            data = {"model": model, "messages": messages}
+            path_or_model, raw_id, mtype, model_host, model_port = Util().main_llm()
+            model_for_request, headers = Util()._llm_request_model_and_headers(path_or_model, raw_id, mtype)
+            data = {"model": model_for_request, "messages": messages}
             if grammar:
                 data["extra_body"] = {"grammar": grammar}
             if tools:
@@ -943,10 +970,12 @@ class Util:
             data.update(data_params)
             if extra_body_params:
                 data.setdefault("extra_body", {}).update(extra_body_params)
-            headers = {"Content-Type": "application/json", "Authorization": "Anything"}
             data_json = json.dumps(data, ensure_ascii=False) if self.is_utf8_compatible(data) else json.dumps(data, ensure_ascii=False).encode("utf-8")
             chat_completion_api_url = "http://" + model_host + ":" + str(model_port) + "/v1/chat/completions"
-            async with aiohttp.ClientSession() as session:
+            # Generous timeout for tool-augmented calls (e.g. search + reply). Prevents indefinite wait.
+            timeout_sec = 300
+            timeout = aiohttp.ClientTimeout(total=timeout_sec)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(chat_completion_api_url, headers=headers, data=data_json) as resp:
                     resp_json = await resp.json()
                     if isinstance(resp_json, dict) and "choices" in resp_json and len(resp_json["choices"]) > 0:
@@ -957,6 +986,12 @@ class Util:
                             out["tool_calls"] = msg["tool_calls"]
                         return out
                     return None
+        except asyncio.TimeoutError:
+            logger.warning("LLM chat completion timed out after {}s ({}:{})", timeout_sec, model_host, model_port)
+            return None
+        except asyncio.CancelledError:
+            logger.info("LLM chat completion was cancelled (e.g. client disconnected)")
+            return None
         except Exception as e:
             logger.exception(e)
             return None
@@ -1052,8 +1087,10 @@ class Util:
             api_key = None
             if mtype == "litellm":
                 entry, _ = self._get_model_entry(self.core_metadata.embedding_llm)
-                if entry and entry.get("api_key_name"):
-                    api_key = (os.environ.get(entry["api_key_name"].strip()) or "").strip() or None
+                if entry:
+                    api_key = (entry.get("api_key") or "").strip() if isinstance(entry.get("api_key"), str) else None
+                    if not api_key and entry.get("api_key_name"):
+                        api_key = (os.environ.get(entry["api_key_name"].strip()) or "").strip() or None
 
         embedding_url = "http://" + host + ":" + str(port) + "/v1/embeddings"
         logger.debug(f"Embedding URL: {embedding_url}")

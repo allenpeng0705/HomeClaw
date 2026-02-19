@@ -25,6 +25,20 @@ class HomeclawVoice {
   /// Stream of voice events. Maps contain "partial" and/or "final" (String transcript).
   Stream<Map<String, dynamic>> get voiceEventStream => _eventController.stream;
 
+  /// Available voice-input locales (language codes / names). Empty on Linux (Vosk uses model language).
+  Future<List<String>> getAvailableLocales() async {
+    if (Platform.isLinux) {
+      final modelPath = Platform.environment['VOSK_MODEL'];
+      if (modelPath == null || modelPath.isEmpty) return [];
+      return ['Vosk model language (see VOSK_MODEL)'];
+    }
+    if (!_initialized) {
+      _initialized = await _speech.initialize(onError: (_) {}, onStatus: (_) {});
+    }
+    final list = await _speech.locales();
+    return list.map((l) => l.localeId + (l.name.isNotEmpty ? ' (${l.name})' : '')).toList();
+  }
+
   /// Whether speech recognition is available on this platform.
   Future<bool> get isAvailable async {
     if (Platform.isLinux) {

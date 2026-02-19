@@ -7,7 +7,10 @@ import 'package:path/path.dart' as path;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:homeclaw_voice/homeclaw_voice.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../core_service.dart';
 import 'canvas_screen.dart';
 import 'settings_screen.dart';
@@ -36,10 +39,23 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _lastReply;
   final List<String> _pendingImagePaths = [];
   final List<String> _pendingVideoPaths = [];
+  final List<String> _pendingFilePaths = [];
+  static const String _keyTtsAutoSpeak = 'tts_auto_speak';
+  bool _ttsAutoSpeak = false;
+  static const String _keyVoiceInputLocale = 'voice_input_locale';
+  String? _voiceInputLocale;
+  bool _ttsSpeaking = false;
+  bool? _coreConnected;
+  bool _connectionChecking = false;
+  Timer? _connectionCheckTimer;
 
   @override
   void initState() {
     super.initState();
+    _loadTtsAutoSpeak();
+    _loadVoiceInputLocale();
+    _checkCoreConnection();
+    _connectionCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkCoreConnection());
     if (widget.initialMessage != null && widget.initialMessage!.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _inputController.text = widget.initialMessage!;
@@ -47,41 +63,84 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _checkCoreConnection() async {
+    if (_connectionChecking || !mounted) return;
+    setState(() => _connectionChecking = true);
+    final connected = await widget.coreService.checkConnection();
+    if (mounted) setState(() {
+      _coreConnected = connected;
+      _connectionChecking = false;
+    });
+  }
+
+  Future<void> _loadTtsAutoSpeak() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) setState(() => _ttsAutoSpeak = prefs.getBool(_keyTtsAutoSpeak) ?? false);
+  }
+
+  Future<void> _loadVoiceInputLocale() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) setState(() => _voiceInputLocale = prefs.getString(_keyVoiceInputLocale));
+  }
+
+  Future<void> _setVoiceInputLocale(String? localeId) async {
+    setState(() => _voiceInputLocale = localeId?.isEmpty == true ? null : localeId);
+    final prefs = await SharedPreferences.getInstance();
+    if (localeId == null || localeId.isEmpty) {
+      await prefs.remove(_keyVoiceInputLocale);
+    } else {
+      await prefs.setString(_keyVoiceInputLocale, localeId);
+    }
+  }
+
+  Future<void> _setTtsAutoSpeak(bool value) async {
+    setState(() => _ttsAutoSpeak = value);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyTtsAutoSpeak, value);
+  }
+
   Future<void> _send() async {
     final text = _inputController.text.trim();
-    final hasAttachments = _pendingImagePaths.isNotEmpty || _pendingVideoPaths.isNotEmpty;
+    final hasAttachments = _pendingImagePaths.isNotEmpty || _pendingVideoPaths.isNotEmpty || _pendingFilePaths.isNotEmpty;
     if ((text.isEmpty && !hasAttachments) || _loading) return;
     _inputController.clear();
     final imagesToSend = List<String>.from(_pendingImagePaths);
     final videosToSend = List<String>.from(_pendingVideoPaths);
+    final filesToSend = List<String>.from(_pendingFilePaths);
     setState(() {
       _pendingImagePaths.clear();
       _pendingVideoPaths.clear();
+      _pendingFilePaths.clear();
       _messages.add(MapEntry(text.isEmpty ? '(attachment)' : text, true));
       _loading = true;
     });
     try {
       List<String> imagePaths = [];
       List<String> videoPaths = [];
-      if (imagesToSend.isNotEmpty || videosToSend.isNotEmpty) {
+      List<String> filePaths = [];
+      final allToUpload = [...imagesToSend, ...videosToSend, ...filesToSend];
+      if (allToUpload.isNotEmpty) {
         try {
-          final uploaded = await widget.coreService.uploadFiles([...imagesToSend, ...videosToSend]);
-          final n = imagesToSend.length;
-          imagePaths = uploaded.take(n).toList();
-          videoPaths = uploaded.skip(n).toList();
+          final uploaded = await widget.coreService.uploadFiles(allToUpload);
+          final nI = imagesToSend.length;
+          final nV = videosToSend.length;
+          imagePaths = uploaded.take(nI).toList();
+          videoPaths = uploaded.skip(nI).take(nV).toList();
+          filePaths = uploaded.skip(nI + nV).toList();
         } catch (_) {
           // Same fallback as web chat: if upload fails, send images as data URLs so message still goes through.
           final dataUrls = await _filePathsToImageDataUrls(imagesToSend);
           if (dataUrls.isNotEmpty) {
             imagePaths = dataUrls;
-            // Videos not sent as data URLs on fallback to avoid huge payloads.
           }
+          // Videos and documents not sent on upload failure to avoid huge payloads.
         }
       }
       final reply = await widget.coreService.sendMessage(
-        text.isEmpty ? 'See attached media.' : text,
+        text.isEmpty ? 'See attached.' : text,
         images: imagePaths.isEmpty ? null : imagePaths,
         videos: videoPaths.isEmpty ? null : videoPaths,
+        files: filePaths.isEmpty ? null : filePaths,
       );
       if (mounted) {
         _lastReply = reply;
@@ -91,6 +150,7 @@ class _ChatScreenState extends State<ChatScreen> {
         });
         final preview = reply.isEmpty ? 'No reply' : (reply.length > 80 ? '${reply.substring(0, 80)}…' : reply);
         await _native.showNotification(title: 'HomeClaw', body: preview);
+        if (_ttsAutoSpeak && reply.isNotEmpty) _speakReplyText(reply);
       }
     } catch (e) {
       if (mounted) {
@@ -125,20 +185,39 @@ class _ChatScreenState extends State<ChatScreen> {
     return out;
   }
 
+  /// Stop voice listening and send the current transcript.
+  Future<void> _stopVoiceAndSend() async {
+    if (!_voiceListening) return;
+    await _voice.stopVoiceListening();
+    _voiceSubscription?.cancel();
+    _voiceSubscription = null;
+    final textToSend = _voiceTranscript.trim();
+    setState(() {
+      _voiceListening = false;
+      if (textToSend.isNotEmpty) {
+        _inputController.text = textToSend;
+        _voiceTranscript = '';
+      }
+    });
+    if (textToSend.isNotEmpty) _send();
+  }
+
+  /// Stop voice listening and discard the transcript (do not send).
+  Future<void> _cancelVoiceInput() async {
+    if (!_voiceListening) return;
+    await _voice.stopVoiceListening();
+    _voiceSubscription?.cancel();
+    _voiceSubscription = null;
+    setState(() {
+      _voiceListening = false;
+      _voiceTranscript = '';
+      _inputController.text = '';
+    });
+  }
+
   Future<void> _toggleVoice() async {
     if (_voiceListening) {
-      await _voice.stopVoiceListening();
-      _voiceSubscription?.cancel();
-      _voiceSubscription = null;
-      final textToSend = _voiceTranscript.trim();
-      setState(() {
-        _voiceListening = false;
-        if (textToSend.isNotEmpty) {
-          _inputController.text = textToSend;
-          _voiceTranscript = '';
-        }
-      });
-      if (textToSend.isNotEmpty) _send();
+      await _stopVoiceAndSend();
       return;
     }
     setState(() {
@@ -177,7 +256,7 @@ class _ChatScreenState extends State<ChatScreen> {
       },
     );
     try {
-      await _voice.startVoiceListening();
+      await _voice.startVoiceListening(locale: _voiceInputLocale);
       if (mounted) setState(() => _voiceListening = true);
     } catch (e) {
       if (mounted) {
@@ -186,6 +265,41 @@ class _ChatScreenState extends State<ChatScreen> {
           SnackBar(content: Text('Voice failed: $e. On macOS, allow Microphone in System Settings > Privacy.')),
         );
       }
+    }
+  }
+
+  /// Copy a picked file (e.g. from Photos app) to a persistent temp file so preview and upload work.
+  /// On macOS, the path from image_picker can be short-lived or security-scoped; we try path first, then readAsBytes.
+  /// Returns (path, null) on success, (null, errorMessage) on failure.
+  static Future<({String? path, String? error})> _copyPickedFileToTemp(XFile xFile, {String defaultExt = '.jpg'}) async {
+    final dir = await getTemporaryDirectory();
+    // Ensure subdir exists (macOS sandbox Caches path may not exist on first use).
+    final picksDir = Directory('${dir.path}/homeclaw_picks');
+    await picksDir.create(recursive: true);
+    final ext = path.extension(xFile.name).isEmpty ? defaultExt : path.extension(xFile.name);
+    final dest = File('${picksDir.path}/pick_${DateTime.now().millisecondsSinceEpoch}$ext');
+
+    // 1) Try copy via path (works if path is still valid, e.g. camera or some galleries).
+    final rawPath = xFile.path;
+    if (rawPath != null && rawPath.isNotEmpty) {
+      try {
+        final srcPath = rawPath.startsWith('file://') ? Uri.parse(rawPath).path : rawPath;
+        final src = File(srcPath);
+        if (await src.exists()) {
+          await src.copy(dest.path);
+          if (await dest.exists()) return (path: dest.absolute.path, error: null);
+        }
+      } catch (_) {}
+    }
+
+    // 2) Read bytes from XFile (handles security-scoped / in-memory on macOS).
+    try {
+      final bytes = await xFile.readAsBytes();
+      await dest.writeAsBytes(bytes);
+      if (await dest.exists()) return (path: dest.absolute.path, error: null);
+      return (path: null, error: 'File was written but not found at ${dest.path}');
+    } catch (e) {
+      return (path: null, error: e.toString());
     }
   }
 
@@ -206,13 +320,34 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     if (source == null || !mounted) return;
     try {
-      if (mounted) showDialog(context: context, barrierDismissible: false, builder: (_) => AlertDialog(content: Row(children: [const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)), const SizedBox(width: 16), Expanded(child: Text(source == ImageSource.camera ? 'Opening camera…' : 'Choosing photo…', textAlign: TextAlign.start))]));
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => AlertDialog(
+            content: Row(
+              children: [
+                const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(width: 16),
+                Expanded(child: Text(source == ImageSource.camera ? 'Opening camera…' : 'Choosing photo…', textAlign: TextAlign.start)),
+              ],
+            ),
+          ),
+        );
+      }
       final xFile = await _imagePicker.pickImage(source: source);
       if (mounted) Navigator.of(context).pop();
       if (xFile == null || !mounted) return;
-      final added = await _showMediaPreview(context, type: 'photo', filePath: xFile.path, label: 'Add this photo to your message?');
+      // Copy to app temp so preview/upload work (macOS Photos returns short-lived paths).
+      final result = await _copyPickedFileToTemp(xFile);
+      if (result.path == null || !mounted) {
+        setState(() => _messages.add(MapEntry('Photo error: ${result.error ?? "could not read or copy the image."}', false)));
+        return;
+      }
+      final filePath = result.path!;
+      final added = await _showMediaPreview(context, type: 'photo', filePath: filePath, label: 'Add this photo to your message?');
       if (added && mounted) {
-        setState(() => _pendingImagePaths.add(xFile.path));
+        setState(() => _pendingImagePaths.add(filePath));
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Photo attached. Type a message and Send to include it.')));
       }
     } catch (e) {
@@ -240,13 +375,43 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     if (source == null || !mounted) return;
     try {
-      if (mounted) showDialog(context: context, barrierDismissible: false, builder: (_) => AlertDialog(content: Row(children: [const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)), const SizedBox(width: 16), Expanded(child: Text(source == ImageSource.camera ? 'Recording video…' : 'Choosing video…', textAlign: TextAlign.start))]));
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => AlertDialog(
+            content: Row(
+              children: [
+                const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(width: 16),
+                Expanded(child: Text(source == ImageSource.camera ? 'Recording video…' : 'Choosing video…', textAlign: TextAlign.start)),
+              ],
+            ),
+          ),
+        );
+      }
       final xFile = await _imagePicker.pickVideo(source: source, maxDuration: const Duration(seconds: 30));
       if (mounted) Navigator.of(context).pop();
       if (xFile == null || !mounted) return;
-      final added = await _showMediaPreview(context, type: 'video', filePath: xFile.path, label: 'Add this video to your message?');
+      // Copy to app temp when from gallery so path is stable (macOS Photos short-lived path).
+      String? filePath;
+      if (source == ImageSource.gallery) {
+        final result = await _copyPickedFileToTemp(xFile, defaultExt: '.mp4');
+        filePath = result.path;
+        if (filePath == null || !mounted) {
+          setState(() => _messages.add(MapEntry('Video error: ${result.error ?? "could not read or copy the video."}', false)));
+          return;
+        }
+      } else {
+        filePath = xFile.path;
+      }
+      if (filePath == null || !mounted) {
+        setState(() => _messages.add(MapEntry('Video error: could not read or copy the video.', false)));
+        return;
+      }
+      final added = await _showMediaPreview(context, type: 'video', filePath: filePath, label: 'Add this video to your message?');
       if (added && mounted) {
-        setState(() => _pendingVideoPaths.add(xFile.path));
+        setState(() => _pendingVideoPaths.add(filePath!));
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Video attached. Type a message and Send to include it.')));
       }
     } catch (e) {
@@ -292,20 +457,68 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _attachDocument() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'txt', 'md', 'doc', 'docx', 'rtf', 'csv', 'xls', 'xlsx', 'odt', 'ods'],
+      );
+      if (result == null || result.files.isEmpty || !mounted) return;
+      final paths = result.files.where((f) => f.path != null).map((f) => f.path!).toList();
+      if (paths.isEmpty) return;
+      setState(() => _pendingFilePaths.addAll(paths));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${paths.length} file(s) attached. Type a message and Send to include them.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Attach file error: $e')));
+      }
+    }
+  }
+
   Future<bool> _showMediaPreview(BuildContext context, {required String type, required String filePath, required String label}) async {
     final result = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(type == 'photo' ? 'Preview photo' : 'Preview video'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 220, minWidth: 280, maxWidth: 560, maxHeight: 600),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               if (type == 'photo')
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.file(File(filePath), fit: BoxFit.contain, height: 200, width: double.infinity),
+                SizedBox(
+                  height: 200,
+                  width: 560,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.file(
+                      File(filePath),
+                      fit: BoxFit.contain,
+                      height: 200,
+                      width: 560,
+                      frameBuilder: (_, child, frame, __) {
+                        if (frame == null) {
+                          return Container(
+                            height: 200,
+                            width: 560,
+                            color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+                            child: const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))),
+                          );
+                        }
+                        return child;
+                      },
+                      errorBuilder: (_, __, ___) => Center(
+                        child: Icon(Icons.broken_image_outlined, size: 48, color: Theme.of(ctx).colorScheme.outline),
+                      ),
+                    ),
+                  ),
                 )
               else
                 Row(
@@ -319,6 +532,7 @@ class _ChatScreenState extends State<ChatScreen> {
               Text(label, style: Theme.of(ctx).textTheme.bodyMedium),
             ],
           ),
+        ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Reject')),
@@ -360,6 +574,33 @@ class _ChatScreenState extends State<ChatScreen> {
         rune == 0x2014 || rune == 0x2013 || rune == 0x2026 || rune == 0x2022;
   }
 
+  /// Speak a reply (filtered for TTS). Used for auto-speak and for "Speak last reply".
+  /// Uses the same language as voice input when set (Voice input language in settings).
+  Future<void> _speakReplyText(String raw) async {
+    final text = _textForTts(raw.trim());
+    if (text.isEmpty) return;
+    if (mounted) setState(() => _ttsSpeaking = true);
+    try {
+      if (_voiceInputLocale != null && _voiceInputLocale!.isNotEmpty) {
+        // Voice input locale is e.g. "en_US" or "zh_CN"; TTS often accepts "en-US" / "zh-CN".
+        final ttsLocale = _voiceInputLocale!.replaceAll('_', '-');
+        await _tts.setLanguage(ttsLocale);
+      }
+      await _tts.speak(text);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('TTS: $e')));
+    } finally {
+      if (mounted) setState(() => _ttsSpeaking = false);
+    }
+  }
+
+  Future<void> _stopTts() async {
+    try {
+      await _tts.stop();
+    } catch (_) {}
+    if (mounted) setState(() => _ttsSpeaking = false);
+  }
+
   Future<void> _speakLastReply() async {
     final raw = _lastReply?.trim();
     if (raw == null || raw.isEmpty) {
@@ -375,11 +616,82 @@ class _ChatScreenState extends State<ChatScreen> {
       );
       return;
     }
+    await _speakReplyText(raw);
+  }
+
+  Future<void> _showVoiceAndTtsLanguages() async {
+    List<String> voiceLocales = [];
+    List<String> ttsLanguages = [];
     try {
-      await _tts.speak(text);
+      voiceLocales = List<String>.from(await _voice.getAvailableLocales());
+      final ttsList = await _tts.getLanguages;
+      ttsLanguages = ttsList is List
+          ? List<String>.from((ttsList as List).map((e) => e.toString()))
+          : [];
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('TTS: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not load languages: $e')));
+      }
+      return;
     }
+    if (!mounted) return;
+    final voiceOptions = ['System default', ...voiceLocales];
+    String currentVoiceDisplay = _voiceInputLocale == null
+        ? 'System default'
+        : voiceLocales.firstWhere((s) => s.startsWith(_voiceInputLocale!), orElse: () => _voiceInputLocale!);
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Voice input & TTS languages'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Voice input language', style: Theme.of(ctx).textTheme.titleSmall),
+                const SizedBox(height: 4),
+                DropdownButton<String>(
+                  value: voiceOptions.contains(currentVoiceDisplay) ? currentVoiceDisplay : voiceOptions.first,
+                  isExpanded: true,
+                  items: voiceOptions.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                  onChanged: (s) async {
+                    if (s == null) return;
+                    final localeId = s == 'System default' ? null : (s.contains(' (') ? s.substring(0, s.indexOf(' (')) : s);
+                    await _setVoiceInputLocale(localeId);
+                    currentVoiceDisplay = s;
+                    setDialogState(() {});
+                  },
+                ),
+                const SizedBox(height: 16),
+                Text('Available voice locales (microphone)', style: Theme.of(ctx).textTheme.titleSmall),
+                const SizedBox(height: 4),
+                Text(
+                  voiceLocales.isEmpty ? 'None detected' : voiceLocales.join(', '),
+                  style: Theme.of(ctx).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 16),
+                Text('TTS (speak replies)', style: Theme.of(ctx).textTheme.titleSmall),
+                const SizedBox(height: 4),
+                Text(
+                  ttsLanguages.isEmpty ? 'None detected' : ttsLanguages.join(', '),
+                  style: Theme.of(ctx).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Voice input and TTS (speak replies) both use the language selected above. Set it to the language you speak (e.g. 中文 for Chinese). Add more in system settings if needed.',
+                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: Theme.of(ctx).colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK')),
+          ],
+        ),
+      ),
+    );
   }
 
   /// (category label, example commands). Add these executables in Settings → Exec allowlist first.
@@ -523,6 +835,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    _connectionCheckTimer?.cancel();
     _voiceSubscription?.cancel();
     _voice.dispose();
     _inputController.dispose();
@@ -535,6 +848,47 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         title: const Text('HomeClaw'),
         actions: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+            child: Center(
+              child: Tooltip(
+                message: _connectionChecking
+                    ? 'Checking connection…'
+                    : (_coreConnected == true
+                        ? 'Connected to Core (tap to recheck)'
+                        : (_coreConnected == false
+                            ? 'Not connected to Core. Tap to recheck or open Settings.'
+                            : 'Connection unknown')),
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: InkWell(
+                    onTap: _checkCoreConnection,
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: Center(
+                        child: Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _connectionChecking
+                                ? Theme.of(context).colorScheme.outline
+                                : (_coreConnected == true
+                                    ? Colors.green
+                                    : (_coreConnected == false
+                                        ? Theme.of(context).colorScheme.error
+                                        : Theme.of(context).colorScheme.outline)),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.dashboard_customize),
             tooltip: 'Canvas',
@@ -558,6 +912,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 case 'video':
                   await _recordVideo();
                   break;
+                case 'document':
+                  await _attachDocument();
+                  break;
                 case 'screen':
                   await _recordScreen();
                   break;
@@ -567,14 +924,19 @@ class _ChatScreenState extends State<ChatScreen> {
                 case 'speak':
                   await _speakLastReply();
                   break;
+                case 'stop_tts':
+                  await _stopTts();
+                  break;
               }
             },
             itemBuilder: (context) => [
               const PopupMenuItem(value: 'photo', child: Text('Take photo')),
               const PopupMenuItem(value: 'video', child: Text('Record video')),
+              const PopupMenuItem(value: 'document', child: Text('Attach file')),
               const PopupMenuItem(value: 'screen', child: Text('Record screen')),
               const PopupMenuItem(value: 'run', child: Text('Run command')),
               const PopupMenuItem(value: 'speak', child: Text('Speak last reply')),
+              const PopupMenuItem(value: 'stop_tts', child: Text('Stop speaking')),
             ],
           ),
           IconButton(
@@ -661,7 +1023,12 @@ class _ChatScreenState extends State<ChatScreen> {
                         ),
                       ),
                       TextButton.icon(
-                        onPressed: _toggleVoice,
+                        onPressed: _cancelVoiceInput,
+                        icon: const Icon(Icons.cancel_outlined),
+                        label: const Text('Cancel'),
+                      ),
+                      TextButton.icon(
+                        onPressed: _stopVoiceAndSend,
                         icon: const Icon(Icons.stop_circle),
                         label: const Text('Stop'),
                       ),
@@ -670,26 +1037,174 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
             ),
-          if (_pendingImagePaths.isNotEmpty || _pendingVideoPaths.isNotEmpty)
+          if (_ttsSpeaking)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: Row(
-                children: [
-                  Text(
-                    'Attached: ${_pendingImagePaths.length} image(s), ${_pendingVideoPaths.length} video(s)',
-                    style: Theme.of(context).textTheme.bodySmall,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Material(
+                color: Theme.of(context).colorScheme.secondaryContainer.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.volume_up,
+                        color: Theme.of(context).colorScheme.onSecondaryContainer,
+                        size: 28,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Speaking reply…',
+                          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                color: Theme.of(context).colorScheme.onSecondaryContainer,
+                              ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: _stopTts,
+                        icon: const Icon(Icons.stop_circle),
+                        label: const Text('Stop'),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  TextButton(
-                    onPressed: () => setState(() {
-                      _pendingImagePaths.clear();
-                      _pendingVideoPaths.clear();
-                    }),
-                    child: const Text('Clear'),
+                ),
+              ),
+            ),
+          if (_pendingImagePaths.isNotEmpty || _pendingVideoPaths.isNotEmpty || _pendingFilePaths.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'Attached — add a message below (optional), then Send',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: () => setState(() {
+                          _pendingImagePaths.clear();
+                          _pendingVideoPaths.clear();
+                          _pendingFilePaths.clear();
+                        }),
+                        child: const Text('Clear all'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        ..._pendingImagePaths.map((p) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              SizedBox(
+                                width: 64,
+                                height: 64,
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.file(
+                                    File(p),
+                                    fit: BoxFit.cover,
+                                    width: 64,
+                                    height: 64,
+                                    frameBuilder: (_, child, frame, __) {
+                                      if (frame == null) {
+                                        return Container(
+                                          width: 64,
+                                          height: 64,
+                                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                          child: const Center(child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))),
+                                        );
+                                      }
+                                      return child;
+                                    },
+                                    errorBuilder: (_, __, ___) => Container(
+                                      width: 64,
+                                      height: 64,
+                                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                      child: Icon(Icons.broken_image_outlined, color: Theme.of(context).colorScheme.outline),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                top: -4,
+                                right: -4,
+                                child: Material(
+                                  color: Theme.of(context).colorScheme.errorContainer,
+                                  shape: const CircleBorder(),
+                                  child: InkWell(
+                                    onTap: () => setState(() => _pendingImagePaths.remove(p)),
+                                    customBorder: const CircleBorder(),
+                                    child: const SizedBox(width: 22, height: 22, child: Icon(Icons.close, size: 16)),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        )),
+                        ..._pendingVideoPaths.map((p) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: _AttachmentChip(
+                            icon: Icons.videocam,
+                            label: path.basename(p),
+                            onRemove: () => setState(() => _pendingVideoPaths.remove(p)),
+                          ),
+                        )),
+                        ..._pendingFilePaths.map((p) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: _AttachmentChip(
+                            icon: Icons.insert_drive_file,
+                            label: path.basename(p),
+                            onRemove: () => setState(() => _pendingFilePaths.remove(p)),
+                          ),
+                        )),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+            child: Row(
+              children: [
+                Icon(Icons.volume_up, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                const SizedBox(width: 6),
+                Text('Speak replies', style: Theme.of(context).textTheme.bodySmall),
+                const SizedBox(width: 8),
+                Switch(
+                  value: _ttsAutoSpeak,
+                  onChanged: (value) => _setTtsAutoSpeak(value),
+                ),
+                if (_ttsSpeaking)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8.0),
+                    child: FilledButton.tonalIcon(
+                      onPressed: _stopTts,
+                      icon: const Icon(Icons.stop_circle, size: 20),
+                      label: const Text('Stop speaking'),
+                    ),
+                  ),
+                IconButton(
+                  icon: const Icon(Icons.info_outline, size: 20),
+                  tooltip: 'Voice input & TTS supported languages',
+                  onPressed: _showVoiceAndTtsLanguages,
+                ),
+              ],
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
@@ -706,13 +1221,26 @@ class _ChatScreenState extends State<ChatScreen> {
                 Expanded(
                   child: TextField(
                     controller: _inputController,
-                    decoration: const InputDecoration(
-                      hintText: 'Message',
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      hintText: (_pendingImagePaths.isNotEmpty || _pendingVideoPaths.isNotEmpty || _pendingFilePaths.isNotEmpty)
+                          ? 'Add a message (optional)'
+                          : 'Message',
+                      border: const OutlineInputBorder(),
                     ),
                     onSubmitted: (_) => _send(),
                   ),
                 ),
+                if (_ttsSpeaking) ...[
+                  const SizedBox(width: 4),
+                  IconButton(
+                    onPressed: _stopTts,
+                    icon: const Icon(Icons.stop_circle),
+                    tooltip: 'Stop speaking',
+                    style: IconButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
                 const SizedBox(width: 8),
                 IconButton.filled(
                   onPressed: _loading
@@ -724,6 +1252,61 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Chip showing one attached video or document with remove button.
+class _AttachmentChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onRemove;
+
+  const _AttachmentChip({required this.icon, required this.label, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SizedBox(
+      height: 64,
+      child: Material(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          onTap: null,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.only(left: 10, right: 4, top: 8, bottom: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 28, color: theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 120),
+                  child: Text(
+                    label,
+                    style: theme.textTheme.bodySmall,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 2,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Material(
+                  color: theme.colorScheme.errorContainer,
+                  shape: const CircleBorder(),
+                  child: InkWell(
+                    onTap: onRemove,
+                    customBorder: const CircleBorder(),
+                    child: const SizedBox(width: 22, height: 22, child: Icon(Icons.close, size: 16)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

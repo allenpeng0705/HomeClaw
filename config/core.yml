@@ -288,8 +288,8 @@ local_models:
 
 
 # ——— 3. Cloud models (LiteLLM; one service per entry, each host/port) ———
-# Set env var per api_key_name (e.g. OPENAI_API_KEY). Start LiteLLM per model or use one proxy.
-# See https://github.com/BerriAI/litellm and docs.litellm.ai/docs/providers
+# api_key_name: env var name (e.g. GEMINI_API_KEY); Core uses that env var for the key. Optional api_key: set the key here instead of env (use for convenience only; avoid committing secrets).
+# Start LiteLLM per model or use one proxy. See https://github.com/BerriAI/litellm and docs.litellm.ai/docs/providers
 # Use as main LLM (Chat/Functioncall) or as embedding model (capabilities: [embedding]); main and embedding can mix local + cloud.
 # Optional supported_media per entry: [image], [image, audio], or [image, audio, video]. If omitted, cloud models default to [image, audio, video].
 cloud_models:
@@ -317,7 +317,8 @@ cloud_models:
     host: 127.0.0.1
     port: 4002
     api_key_name: GEMINI_API_KEY
-    capabilities: [Chat]
+    api_key: AIzaSyC4z1L5UDu9-McTM5QChzqdGYAlxkBWfTs
+    capabilities: [Functioncall, Chat]
   # Anthropic Claude
   - id: Claude-Sonnet
     alias: Claude 3.5 Sonnet
@@ -410,7 +411,8 @@ cloud_models:
 #   are omitted and a short note is added so the model does not crash.
 
 # ——— Selected main and embedding model: local_models/<id> or cloud_models/<id> ———
-main_llm: local_models/main_vl_model
+main_llm: cloud_models/Gemini-2.5-Flash
+# main_llm: local_models/main_vl_model
 # main_llm_language: list of allowed/preferred response languages (e.g. [zh, en] or [en]).
 #   - First item = primary: used for prompt file loading (e.g. response.en.yml, prompt_en.yml) and default when user language is unknown.
 #   - Full list = allowed response languages: you can add a system-line like "Respond only in one of: {languages}; if the user's language is unknown, use the first."
@@ -528,7 +530,7 @@ cognee:
     model: ""
     endpoint: ""
     api_key: ""
-    tokenizer: "/Users/shileipeng/Documents/mygithub/HomeClaw/models/tokenizer/Qwen3_0.6B"
+    tokenizer: "../models/tokenizer/Qwen3_0.6B"
   # Optional: raw Cognee env vars (key: value). Override or add any Cognee env var by name.
   # env:
   #   TELEMETRY_DISABLED: "true"

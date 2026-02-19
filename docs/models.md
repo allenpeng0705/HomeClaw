@@ -1,6 +1,6 @@
 # Models
 
-HomeClaw supports **local** LLMs (llama.cpp, GGUF) and **cloud** LLMs (OpenAI, Gemini, DeepSeek, etc. via LiteLLM). You can use one or both; main and embedding model are configured separately.
+HomeClaw supports **local** LLMs (llama.cpp, GGUF) and **cloud** LLMs (OpenAI, **Gemini**, DeepSeek, etc. via LiteLLM). You can use one or both; main and embedding model are configured separately. **Multimodal** (images, audio, video) works with both **local models** (e.g. Qwen2-VL with mmproj) and **cloud** (e.g. **Gemini**, GPT-4o)—tested with both; all work well.
 
 ---
 
@@ -24,4 +24,12 @@ Supported providers include OpenAI, Google Gemini, DeepSeek, Anthropic, Groq, Mi
 
 ## Mix local and cloud
 
-You can use a **local** model for chat and a **cloud** model for embedding (or the other way around). Set **`main_llm`** and **`embedding_llm`** to the appropriate `local_models/<id>` or `cloud_models/<id>`. Switch at runtime via CLI: **`llm set`** (local) or **`llm cloud`** (cloud), or by editing `config/core.yml` and restarting Core.
+You can use a **local** model for chat and a **cloud** model for embedding (or the other way around). Set **`main_llm`** and **`embedding_llm`** to the appropriate `local_models/<id>` or `cloud_models/<id>`. Switch at runtime via CLI: **`llm set`** (local) or **`llm cloud`** (cloud), or by editing `config/core.yml` and restarting Core. You can also switch from the **Companion app** (Manage Core → Main LLM).
+
+---
+
+## Multimodal (images, audio, video)
+
+- **Local:** Use a vision-capable model (e.g. Qwen2-VL, LLaVA) with **mmproj** in `config/core.yml` under `local_models`. Set **`supported_media: [image]`** (or `[image, audio, video]` if the model supports it).
+- **Cloud:** **Gemini**, GPT-4o, and other providers support images (and often audio/video). Set **`main_llm`** to e.g. `cloud_models/Gemini-2.5-Flash` in `config/core.yml`. **Gemini** works well for multimodal; tested with both local and cloud.
+- The Companion app and WebChat can send images and files; Core converts them to the format the model expects (e.g. data URL for vision APIs).

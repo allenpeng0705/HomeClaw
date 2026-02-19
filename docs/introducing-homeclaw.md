@@ -1,14 +1,25 @@
 # Introducing HomeClaw
 
-*Formal intro for the doc site. You can replace this with curated content from `docs_design/IntroducingHomeClaw.md` or write a shorter version.*
+HomeClaw is a **local-first AI assistant** that runs on your machine. One installation is one agent: the same **memory** (RAG + agent memory), tools, and plugins no matter how you connect.
 
 ---
 
-HomeClaw is a local-first AI assistant that runs on your machine. One installation is one agent: the same memory, tools, and plugins no matter how you connect (WebChat, Telegram, email, CLI, etc.).
+## Highlights
+
+- **Companion app** — **Flutter-based** app for **Mac, Windows, iPhone, and Android** (`clients/homeclaw_companion/`): chat, voice, attachments, and **Manage Core** (edit core.yml and user.yml from the app). Makes HomeClaw much easier to use from any device.
+- **Memory** — **RAG** (vector + relational + optional graph) and **agent memory**: AGENT_MEMORY.md (long-term), daily memory (short-term). Cognee (default) or Chroma backend.
+- **Plugins** — **Built-in** (Python in `plugins/`) and **external** (any language: **Node.js**, Go, Java, Python, etc.). The **system plugin** (e.g. homeclaw-browser) is one external plugin written in **Node.js**; you can write plugins in any language and register them with Core. There are many tools and ecosystems you can leverage.
+- **Skills** — Full support for **OpenClaw-style skillset**: workflows in `config/skills/` (SKILL.md); LLM uses tools and optional `run_skill` to accomplish tasks.
+- **Multi-agent** — Run **multiple HomeClaw instances** (different ports/configs); each is one agent. No special orchestration—just run more instances.
+- **Cloud & multimodal** — **Gemini** and other cloud models work well. **Multimodal** (images, audio, video) is supported with both **local models** (e.g. Qwen2-VL with mmproj) and **cloud** (e.g. Gemini, GPT-4o). Tested with both; all work well.
+
+---
+
+## Core ideas
 
 - **Local-first** — Use local LLMs (llama.cpp, GGUF) so data stays at home; cloud (LiteLLM) is optional.
-- **Channels** — Reach your assistant from Telegram, Discord, WeChat, WhatsApp, email, and more.
-- **Memory** — RAG-based, per-user; the assistant can recall across sessions.
-- **Plugins & skills** — Extend with plugins (Weather, News, Mail, custom) and OpenClaw-style skills.
+- **Channels** — Reach your assistant from the **Companion app**, WebChat, Telegram, Discord, WeChat, WhatsApp, email, CLI, and more.
+- **Memory** — RAG-based, per-user; agent memory (AGENT_MEMORY.md, daily memory) for long- and short-term context.
+- **Plugins & skills** — Extend with built-in and external plugins (any language) and OpenClaw-style skills.
 
-For the full intro, see [IntroducingHomeClaw.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/IntroducingHomeClaw.md) in the repo.
+For the full intro and design details, see [IntroducingHomeClaw.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/IntroducingHomeClaw.md) in the repo.

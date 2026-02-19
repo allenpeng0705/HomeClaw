@@ -4,7 +4,16 @@
 
 # HomeClaw
 
-**HomeClaw** is a **local-first AI assistant** that runs on your own hardware. Each installation is an autonomous agent: it talks to you over the channels you already use (email, Telegram, Discord, WebChat, etc.), keeps memory and context, and extends its abilities through **plugins** and **skills**. You can run it entirely on **local models** (llama.cpp, GGUF) or mix in **cloud models** (OpenAI, Google Gemini, DeepSeek, Anthropic, and more) for flexibility. HomeClaw is **for the people**—decentralized, private when you want it, and fully under your control.
+**HomeClaw** is a **local-first AI assistant** that runs on your own hardware. Each installation is an autonomous agent: it talks to you over the channels you already use (email, Telegram, Discord, WebChat, etc.), keeps **memory** (RAG + agent memory) and context, and extends its abilities through **built-in and external plugins** and **skills**. You can run it entirely on **local models** (llama.cpp, GGUF) or mix in **cloud models** (OpenAI, **Google Gemini**, DeepSeek, Anthropic, and more)—**multimodal** (images, audio, video) works with both local and cloud. A **Flutter companion app** (Mac, Windows, iPhone, Android) makes HomeClaw easy to use from any device. **Multi-agent** is simple: run multiple HomeClaw instances. HomeClaw is **for the people**—decentralized, private when you want it, and fully under your control.
+
+**Highlights**
+
+- **Companion app** — Flutter-based app for **Mac, Windows, iPhone, and Android**: chat, voice, attachments, and **Manage Core** (edit core.yml and user.yml) from your phone or desktop. One app, all platforms.
+- **Memory** — **RAG** (vector + relational + optional graph) and **agent memory** (AGENT_MEMORY.md, daily memory). Cognee (default) or in-house Chroma backend.
+- **Plugins** — **Built-in** (Python in `plugins/`) and **external** (any language: Node.js, Go, Java, Python, etc.). The **system plugin** (e.g. **homeclaw-browser**) is one external plugin written in **Node.js**; you can write plugins in any language and register them with Core.
+- **Skills** — Full support for **OpenClaw-style skillset**: workflows in `config/skills/` (SKILL.md); LLM uses tools and optional `run_skill` to accomplish tasks.
+- **Multi-agent** — Run **multiple HomeClaw instances** (e.g. one per user or use case); each instance is one agent with its own memory and config.
+- **Cloud & multimodal** — **Gemini** and other cloud models work well. **Multimodal** (images, audio, video) is supported with both **local models** (e.g. Qwen2-VL with mmproj) and **cloud** (e.g. Gemini, GPT-4o).
 
 **Other languages / 其他语言 / 他の言語 / 다른 언어:** [简体中文](README_zh.md) | [日本語](README_jp.md) | [한국어](README_kr.md)
 
@@ -17,12 +26,13 @@
 1. [What is HomeClaw?](#1-what-is-homeclaw)
 2. [What Can HomeClaw Do?](#2-what-can-homeclaw-do)
 3. [How to Use HomeClaw](#3-how-to-use-homeclaw)
-4. [System plugin: homeclaw-browser](#4-system-plugin-homeclaw-browser)
-5. [Skills and Plugins: Make HomeClaw Work for You](#5-skills-and-plugins-make-homeclaw-work-for-you)
-6. [Plugins: Extend HomeClaw](#6-plugins-extend-homeclaw)
-7. [Skills: Extend HomeClaw with Workflows](#7-skills-extend-homeclaw-with-workflows)
-8. [Acknowledgments](#8-acknowledgments)
-9. [Contributing & License](#9-contributing--license)
+4. [Companion app (Flutter)](#4-companion-app-flutter)
+5. [System plugin: homeclaw-browser](#5-system-plugin-homeclaw-browser)
+6. [Skills and Plugins: Make HomeClaw Work for You](#6-skills-and-plugins-make-homeclaw-work-for-you)
+7. [Plugins: Extend HomeClaw](#7-plugins-extend-homeclaw)
+8. [Skills: Extend HomeClaw with Workflows](#8-skills-extend-homeclaw-with-workflows)
+9. [Acknowledgments](#9-acknowledgments)
+10. [Contributing & License](#10-contributing--license)
 
 ---
 
@@ -198,16 +208,21 @@ sequenceDiagram
 - **LLM layer** — One OpenAI-compatible API used by Core. Filled by **local models** (llama.cpp server, GGUF) and/or **cloud models** (LiteLLM: OpenAI, Google Gemini, DeepSeek, Anthropic, Groq, Mistral, etc.). Main and embedding model can be chosen independently. See `config/core.yml` (`local_models`, `cloud_models`, `main_llm`, `embedding_llm`).
 - **Memory** — **Cognee** (default) or in-house **Chroma** backend: vector + relational + optional graph. Used for RAG and chat history. See `docs_design/MemoryAndDatabase.md`.
 - **Profile** — Per-user JSON store (e.g. `database/profiles/`). Loaded each request and injected as “About the user” in the prompt; used for personalization and plugin parameter resolution. See `docs_design/UserProfileDesign.md`.
-- **Plugins** — Built-in (Python in `plugins/`) and external (HTTP, any language). Core routes user intent to a plugin (e.g. Weather, News, Mail) when the request matches. See [§5 Plugins](#5-plugins-extend-homeclaw).
-- **Skills** — Folders under `config/skills/` with `SKILL.md` (name, description, workflow). The LLM uses tools to accomplish skill workflows; optional `run_skill` runs scripts. See [§6 Skills](#6-skills-extend-homeclaw-with-workflows).
+- **Plugins** — Built-in (Python in `plugins/`) and external (HTTP, any language). Core routes user intent to a plugin (e.g. Weather, News, Mail) when the request matches. See [§7 Plugins](#7-plugins-extend-homeclaw).
+- **Skills** — Folders under `config/skills/` with `SKILL.md` (name, description, workflow). The LLM uses tools to accomplish skill workflows; optional `run_skill` runs scripts. See [§8 Skills](#8-skills-extend-homeclaw-with-workflows).
 
 For a full design reference, see **Design.md**. For tools vs skills vs plugins, see **docs_design/ToolsSkillsPlugins.md**.
 
 ### Major features and recent changes
 
 - **Session management** — Sessions keyed by app/user/channel; pruning, compaction, and `GET /api/sessions` for UIs. Core’s **GET /ui** shows a session list and links to plugin UIs. See **docs_design/SessionAndDualMemoryDesign.md**.
-- **AGENT_MEMORY.md** — Optional long-term memory file in the workspace; configurable path, append tool, and prompt rule. See **config/workspace/AGENT_MEMORY.md**.
-- **System plugins** — Plugins in **system_plugins/** (e.g. **homeclaw-browser**) provide WebChat, browser automation, canvas, and nodes. You can run them with Core in one command via **system_plugins_auto_start** in `config/core.yml`. See **system_plugins/README.md** and [§4 System plugin: homeclaw-browser](#4-system-plugin-homeclaw-browser).
+- **Companion app** — **Flutter-based** app for **Mac, Windows, iPhone, and Android** (`clients/homeclaw_companion/`): chat, voice, attachments, Manage Core (edit core.yml and user.yml). Makes HomeClaw much easier to use from any device. See [§4 Companion app](#4-companion-app-flutter).
+- **Memory** — **RAG** (vector + relational + optional graph) and **agent memory**: AGENT_MEMORY.md (long-term), daily memory (short-term). Cognee (default) or Chroma backend.
+- **Multimodal** — Images, audio, and video with **local models** (e.g. Qwen2-VL with mmproj) and **cloud** (e.g. **Gemini**, GPT-4o). Tested with both; all work well.
+- **Cloud models** — **Gemini** and other providers (OpenAI, DeepSeek, Anthropic, etc.) via LiteLLM. Set `main_llm` to e.g. `cloud_models/Gemini-2.5-Flash` in `config/core.yml`.
+- **System plugins** — Plugins in **system_plugins/** (e.g. **homeclaw-browser**, written in **Node.js**) provide WebChat, browser automation, canvas, and nodes. **External plugins can be written in any language** (Node.js, Go, Java, Python, etc.). Run with Core via **system_plugins_auto_start** in `config/core.yml`. See **system_plugins/README.md** and [§5 System plugin: homeclaw-browser](#5-system-plugin-homeclaw-browser).
+- **Multi-agent** — Run **multiple HomeClaw instances** (different ports/configs); each is one agent. No special orchestration—just run more instances.
+- **OpenClaw skillset** — Full support for skills in `config/skills/` (SKILL.md); same workflow model as OpenClaw.
 - **Plugin/skill selection** — Configurable top-N and max-in-prompt for skills and plugins; optional vector retrieval. See `config/core.yml` (`skills_top_n_candidates`, `plugins_max_in_prompt`, etc.).
 
 ---
@@ -328,7 +343,7 @@ HomeClaw runs on **macOS**, **Windows**, and **Linux**. You need:
    python -m main start
    ```
 
-   **Run Core and all system plugins in one command:** Set `system_plugins_auto_start: true` in `config/core.yml`. Core will then start each plugin in `system_plugins/` (e.g. homeclaw-browser) and register them automatically. See [§4 System plugin: homeclaw-browser](#4-system-plugin-homeclaw-browser) and **system_plugins/README.md**.
+   **Run Core and all system plugins in one command:** Set `system_plugins_auto_start: true` in `config/core.yml`. Core will then start each plugin in `system_plugins/` (e.g. homeclaw-browser) and register them automatically. See [§5 System plugin: homeclaw-browser](#5-system-plugin-homeclaw-browser) and **system_plugins/README.md**.
 
 5. **Run a channel** (in another terminal)
 
@@ -418,9 +433,23 @@ For faster pip installs, you can use a mirror, e.g.:
 
 ---
 
-## 4. System plugin: homeclaw-browser
+## 4. Companion app (Flutter)
 
-The **homeclaw-browser** plugin lives in **system_plugins/homeclaw-browser**. It provides:
+The **HomeClaw Companion** app is a **Flutter-based** client for **Mac, Windows, iPhone, and Android**. It makes HomeClaw much easier to use from any device:
+
+- **Chat** — Send messages, attach images and files; voice input and TTS (speak replies).
+- **Manage Core** — Edit **core.yml** and **user.yml** from the app: server, LLM, memory, session, completion, profile, skills, tools, auth, and users. No need to SSH or edit config files by hand.
+- **One app, all platforms** — Same codebase for desktop and mobile; install from the store or build from source.
+
+**Where to get it:** `clients/homeclaw_companion/` in the repo. Build with Flutter (see `clients/homeclaw_companion/README.md`). Connect to your Core by setting the Core URL and optional API key in the app (e.g. in Settings or on first launch).
+
+You can use the companion app **instead of** or **together with** WebChat, CLI, Telegram, and other channels—all talk to the same Core and memory.
+
+---
+
+## 5. System plugin: homeclaw-browser
+
+The **homeclaw-browser** plugin lives in **system_plugins/homeclaw-browser**. It is **one external plugin**, written in **Node.js**; external plugins can be written in **any language** (Node.js, Go, Java, Python, etc.)—see [§7 Plugins](#7-plugins-extend-homeclaw). It provides:
 
 - **WebChat / Control UI** — Browser UI at **http://127.0.0.1:3020/** (default). WebSocket proxy to Core so you can chat with the agent from the browser.
 - **Browser automation** — The LLM can open URLs, take snapshots, click, type, and fill forms via **route_to_plugin(homeclaw-browser, …)**. Set **tools.browser_enabled: false** in `config/core.yml` so Core does not register its own browser tools; then the agent uses this plugin for all browser actions.
@@ -434,11 +463,13 @@ The **homeclaw-browser** plugin lives in **system_plugins/homeclaw-browser**. It
 3. **Option B — Run manually:** Start Core, then in another terminal run `node server.js` and `node register.js` in `system_plugins/homeclaw-browser`. Set **CORE_URL** (and **CORE_API_KEY** if Core has auth) in the environment if needed.
 4. Open **http://127.0.0.1:9000/ui** to see the launcher (sessions list and links to WebChat, Canvas, Nodes). Open **http://127.0.0.1:3020/** for WebChat.
 
+**External plugins in any language:** homeclaw-browser is one example (Node.js). You can write external plugins in **any language** (Go, Java, Python, etc.)—see [§7 Plugins](#7-plugins-extend-homeclaw). Register with Core via `POST /api/plugins/register`; Core routes to your server like built-in plugins.
+
 See **system_plugins/README.md** and **system_plugins/homeclaw-browser/README.md** for env vars (PORT, BROWSER_HEADLESS), capabilities, and testing.
 
 ---
 
-## 5. Skills and Plugins: Make HomeClaw Work for You
+## 6. Skills and Plugins: Make HomeClaw Work for You
 
 HomeClaw ships with **tools** (file, memory, web search, cron, browser, etc.), **plugins** (e.g. Weather, News, Mail), and **skills** (workflows described in SKILL.md). Together they let you:
 
@@ -451,7 +482,7 @@ You don’t have to “call” plugins or skills by name—just ask naturally. T
 
 ---
 
-## 6. Plugins: Extend HomeClaw
+## 7. Plugins: Extend HomeClaw
 
 **Plugins** are single-feature modules: one plugin = one focused capability (e.g. Weather, News, Mail, custom API).
 
@@ -463,7 +494,7 @@ You don’t have to “call” plugins or skills by name—just ask naturally. T
 
 ### External plugins (any language)
 
-- Run as a separate **HTTP server** (Node.js, Go, Java, Python, etc.) that implements:
+- **External plugins can be written in any language**—Node.js, Go, Java, Python, or whatever you prefer. There are many tools and ecosystems you can leverage. The **system plugin** homeclaw-browser is one example (Node.js). Run your plugin as a separate **HTTP server** that implements:
   - `GET /health` → 2xx
   - `POST /run` (or your path) → body = PluginRequest JSON, response = PluginResult JSON.
 - **Register** with Core: `POST http://<core>:9000/api/plugins/register` with plugin id, name, description, `health_check_url`, `type: "http"`, `config` (base_url, path, timeout_sec), and `capabilities`.
@@ -486,7 +517,7 @@ Plugins can declare parameters (e.g. city, recipient). Core can fill them from *
 
 ---
 
-## 7. Skills: Extend HomeClaw with Workflows
+## 8. Skills: Extend HomeClaw with Workflows
 
 **Skills** are application-style capabilities: each skill is a **folder** under `config/skills/` with a **SKILL.md** (name, description, and optional body that describes how to use tools).
 
@@ -498,7 +529,7 @@ Example: a “social media agent” skill might describe posting to X/Twitter us
 
 ---
 
-## 8. Acknowledgments
+## 9. Acknowledgments
 
 HomeClaw would not exist without two projects that inspired it:
 
@@ -509,7 +540,7 @@ Thank you to everyone who contributed to GPT4People and OpenClaw, and to the ope
 
 ---
 
-## 9. Contributing & License
+## 10. Contributing & License
 
 - **Contributing** — We welcome issues, pull requests, and discussions. See **CONTRIBUTING.md** for guidelines.
 - **License** — This project is licensed under the **Apache License 2.0**. See the **LICENSE** file.

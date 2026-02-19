@@ -11,8 +11,21 @@ const MAX_PAGE_TEXT_CHARS = 50000;
 // Single-label hostnames that are valid browser targets; do not treat as node ids.
 const BROWSER_HOST_WHITELIST = new Set(['localhost', 'local']);
 
+// Normalize URL that may have been JSON-escaped (e.g. "https:\/\/www\.baidu.com" -> "https://www.baidu.com").
+function normalizeUrlString(s) {
+  if (!s || typeof s !== 'string') return s;
+  return s.replace(/\\\//g, '/').replace(/\\\./g, '.');
+}
+
+// If the param looks like a sentence containing a URL, extract the first URL (e.g. "Open browser with https://www.baidu.com" -> "https://www.baidu.com").
+function extractFirstUrl(text) {
+  if (!text || typeof text !== 'string') return null;
+  const m = text.match(/https?:\/\/[^\s"'<>)\]]+/i);
+  return m ? m[0].replace(/[.,;:!?)]+$/, '') : null;
+}
+
 function looksLikeNodeId(urlOrHost) {
-  const s = (urlOrHost || '').trim();
+  const s = normalizeUrlString((urlOrHost || '').trim());
   const host = s.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').split(':')[0];
   if (!host) return false;
   if (BROWSER_HOST_WHITELIST.has(host.toLowerCase())) return false;
@@ -20,12 +33,16 @@ function looksLikeNodeId(urlOrHost) {
 }
 
 async function navigate(params = {}, userId = '') {
-  const url = (params.url || '').trim();
+  let url = normalizeUrlString((params.url || '').trim());
   if (!url) return { success: false, text: '', error: 'url is required' };
+  // If the param is a sentence (e.g. "Open browser with https://www.baidu.com"), extract the URL.
+  const extracted = extractFirstUrl(url);
+  if (extracted && extracted !== url) url = extracted;
   if (looksLikeNodeId(url)) {
     return { success: false, text: '', error: `"${url}" looks like a node id, not a URL. For camera/video on a node use node_camera_snap or node_camera_clip with node_id (e.g. capability_id=node_camera_clip, parameters={node_id: "${url}", duration: "3s", includeAudio: true}).` };
   }
-  const u = url.startsWith('http://') || url.startsWith('https://') ? url : 'https://' + url;
+  let u = url.startsWith('http://') || url.startsWith('https://') ? url : 'https://' + url;
+  u = normalizeUrlString(u);
   if (looksLikeNodeId(u)) {
     const nodeId = (u.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').split(':')[0] || url).trim();
     return { success: false, text: '', error: `"${url}" looks like a node id (${nodeId}), not a URL. For camera/video on a node use node_camera_snap or node_camera_clip with node_id (e.g. capability_id=node_camera_clip, parameters={node_id: "${nodeId}", duration: "3s", includeAudio: true}).` };
