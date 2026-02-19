@@ -12,7 +12,7 @@
    pip install -r requirements.txt
    ```
 
-2. **Configure** — Edit `config/core.yml` (LLM, memory) and `config/user.yml` (who can talk to the assistant).
+2. **Configure** — Edit `config/core.yml` (LLM, memory) and `config/user.yml` (who can talk to the assistant). If using **local models**: copy llama.cpp's binary distribution into `llama.cpp-master/` for your device type (see `llama.cpp-master/README.md`); used for main and embedding local models.
 
 3. **Run Core** — `python -m core.core` or `python -m main start`
 

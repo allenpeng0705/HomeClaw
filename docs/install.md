@@ -21,7 +21,7 @@ For faster installs in China, you can use a mirror (e.g. `-i https://pypi.tuna.t
 HomeClaw supports **cloud** and **local** models (or both together for better capability and cost).
 
 - **Cloud:** Set the API key as an environment variable (e.g. `OPENAI_API_KEY`, `GEMINI_API_KEY`) and add the model to `cloud_models` in `config/core.yml`. No extra install beyond `requirements.txt` (LiteLLM is included).
-- **Local:** To run **local GGUF models**, you need a llama.cpp server. The repo includes `llama.cpp-master/` with platform-specific binaries. Download GGUF model files (e.g. from Hugging Face) into a `models/` folder and configure `local_models` in `config/core.yml`. See [Models](models.md) for paths and ports.
+- **Local:** To run **local GGUF models**, you need a llama.cpp server. **Copy llama.cpp's binary distribution** into `llama.cpp-master/<platform>/` for your device type (e.g. `mac/`, `win_cuda/`, `linux_cpu/` — see `llama.cpp-master/README.md` in the repo); this is used for both main and embedding local models. Download GGUF model files (e.g. from Hugging Face) into a `models/` folder and configure `local_models` in `config/core.yml`. See [Models](models.md) for paths and ports.
 
 ---
 
