@@ -47,8 +47,10 @@ nav:
   - Getting started: getting-started.md
   - Companion app: companion-app.md
   - Channels: channels.md
+  - Companion vs Channels: companion-vs-channels.md
   - Tools: tools.md
   - Plugins: plugins.md
   - Models: models.md
   - Platform: platform.md
+  - Remote access: remote-access.md
   - Help: help.md

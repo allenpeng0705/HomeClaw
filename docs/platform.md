@@ -30,4 +30,13 @@ Chat history, memory, and profile are **keyed by system user id** (from `config/
 
 ## Remote access and auth
 
-If you expose Core on the internet, set **`auth_enabled: true`** and **`auth_api_key`** in `config/core.yml`. Clients must send **`X-API-Key`** or **`Authorization: Bearer <key>`** on `/inbound` and `/ws`. See [RemoteAccess.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/RemoteAccess.md) in the repo. Use Tailscale or SSH for secure access when needed.
+To use the Companion app or WebChat from another network (e.g. phone on cellular, laptop away from home), you need a way to reach Core. Two common options:
+
+- **[Remote access: Tailscale and Cloudflare Tunnel](remote-access.md)** — Step-by-step intro to exposing Core with **Tailscale** (private tailnet or HTTPS) or **Cloudflare Tunnel** (public URL). The app only needs the resulting **Core URL** and optional API key.
+- **Auth:** If Core is exposed to the internet, set **`auth_enabled: true`** and **`auth_api_key`** in `config/core.yml`. Clients must send **`X-API-Key`** or **`Authorization: Bearer <key>`** on `/inbound` and `/ws`. See [RemoteAccess.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/RemoteAccess.md) in the repo for details.
+
+---
+
+## Companion app vs Channels
+
+The **Companion app** (Flutter) is a **direct client** to Core: it calls **POST /inbound** (and config API) from your device. **Channels** (Telegram, Discord, WebChat, email, etc.) are **server-side processes** that bridge an external platform to Core. Same permission (user.yml), same session/memory keying (user_id + channel_name), same processing—the only difference is who sends the request and who receives the reply. See **[Companion app vs Channels](companion-vs-channels.md)** for the full comparison.

@@ -13,7 +13,9 @@
 | [**Channels**](channels.md) | WhatsApp, Telegram, email, WebHook, and how to allow users |
 | [**Tools**](tools.md) | Built-in tools, plugins, and skills |
 | [**Models**](models.md) | Cloud (LiteLLM) and local (llama.cpp); multimodal (Gemini, etc.); both can work together |
-| [**Platform**](platform.md) | Config files, multi-user, memory backend, remote access |
+| [**Platform**](platform.md) | Config files, multi-user, memory backend |
+| [**Remote access**](remote-access.md) | Tailscale and Cloudflare Tunnel to reach Core from anywhere |
+| [**Companion vs Channels**](companion-vs-channels.md) | How the Companion app and channels differ; how Core handles them |
 | [**Help**](help.md) | Doctor, troubleshooting, and repo docs |
 
 ---

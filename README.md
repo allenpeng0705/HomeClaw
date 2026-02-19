@@ -25,8 +25,8 @@
 
 1. [What is HomeClaw?](#1-what-is-homeclaw)
 2. [What Can HomeClaw Do?](#2-what-can-homeclaw-do)
-3. [How to Use HomeClaw](#3-how-to-use-homeclaw)
-4. [Companion app (Flutter)](#4-companion-app-flutter)
+3. [How to Use HomeClaw](#3-how-to-use-homeclaw) — includes [Remote access (Tailscale, Cloudflare Tunnel)](#remote-access-tailscale-cloudflare-tunnel)
+4. [Companion app (Flutter)](#4-companion-app-flutter) — includes [How to use the Companion app](#how-to-use-the-companion-app)
 5. [System plugin: homeclaw-browser](#5-system-plugin-homeclaw-browser)
 6. [Skills and Plugins: Make HomeClaw Work for You](#6-skills-and-plugins-make-homeclaw-work-for-you)
 7. [Plugins: Extend HomeClaw](#7-plugins-extend-homeclaw)
@@ -51,76 +51,46 @@ HomeClaw is built around a few principles:
 
 HomeClaw is organized into a **Core** (one process), **channels** (separate processes or HTTP clients), **LLM layer** (local and/or cloud), **memory** (RAG + chat history), **profile** (per-user learning), and **plugins** + **tools** + **skills**. The diagrams below show all modules and how data flows through the system, including how the LLM (local or cloud) is used and how tools, skills, and plugins are selected.
 
-**Whole system at a glance**
+**Architecture (layer-based)**
 
 ```mermaid
 flowchart TB
-  subgraph Channels["🖥️ Channels"]
+  subgraph Clients["Layer 1 — Clients"]
     direction LR
-    WebChat["WebChat"]
-    Telegram["Telegram"]
-    Discord["Discord"]
-    Email["Email"]
-    Companion["Companion app"]
-    CLI["CLI"]
+    CH["Channels\n(WebChat, Telegram, Discord, Email…)"]
+    APP["Companion app"]
   end
 
-  subgraph Core["⚙️ Core Engine"]
-    direction TB
-    Permission["Permission (user.yml)"]
-    Orch["Orchestrator"]
-    Answer["Answer + Tool loop"]
-    ToolExec["Tool executor"]
-    PluginMgr["Plugin Manager"]
-    Permission --> Orch --> Answer
-    Answer --> ToolExec
-    Answer --> PluginMgr
+  subgraph Core["Layer 2 — Core"]
+    subgraph Memory["Memory system"]
+      RAG["RAG-based\n(vector + relational + graph)"]
+      MD["Markdown-based\n(AGENT_MEMORY.md, daily memory)"]
+    end
+    subgraph Base["Foundation"]
+      T["Tools\n(base of skillset)"]
+    end
+    subgraph Ext["Extensions — in RAG, filtered for target"]
+      S["Skills\n(SKILL.md workflows)"]
+      P["Plugins\n(any language)\nsystem_plugins: Node.js, browser"]
+    end
+    LLM["LLM\n(cloud or local)"]
   end
 
-  subgraph Context["📋 Context for LLM"]
-    direction LR
-    Workspace["Workspace"]
-    Skills["Skills"]
-    MemBlock["RAG + chat history"]
-    ProfileBlock["Profile"]
-    Routing["Plugin routing"]
-  end
+  Clients -->|"connect"| Core
+  Memory --> LLM
+  Base --> S
+  Ext --> LLM
 
-  subgraph LLM["🤖 LLM — Cloud or Local"]
-    direction LR
-    Cloud["Cloud (LiteLLM)"]
-    Local["Local (llama.cpp)"]
-  end
-
-  subgraph Memory["💾 Memory"]
-    direction TB
-    Vector["Vector store"]
-    ChatDB["Chat history"]
-    KB["Knowledge base"]
-  end
-
-  subgraph Extensions["🔌 Tools · Skills · Plugins"]
-    direction LR
-    Tools["Tools"]
-    SkillsExt["Skills"]
-    Plugins["Plugins"]
-  end
-
-  Channels -->|"message"| Core
-  Answer --> Context
-  Context --> LLM
-  LLM -->|"reply"| Answer
-  Answer --> Memory
-  Answer --> Extensions
-  Extensions --> Answer
-
-  style Channels fill:#BBDEFB,stroke:#1565C0,stroke-width:2px
-  style Core fill:#FFE0B2,stroke:#E65100,stroke-width:2px
-  style Context fill:#F8BBD9,stroke:#AD1457,stroke-width:1px
-  style LLM fill:#C8E6C9,stroke:#2E7D32,stroke-width:2px
-  style Memory fill:#E1BEE7,stroke:#6A1B9A,stroke-width:2px
-  style Extensions fill:#B2DFDB,stroke:#00695C,stroke-width:2px
+  style Clients fill:#BBDEFB,stroke:#1565C0,stroke-width:2px
+  style Core fill:#FFF8E1,stroke:#FF8F00,stroke-width:2px
+  style Memory fill:#E1BEE7,stroke:#6A1B9A,stroke-width:1px
+  style Base fill:#C8E6C9,stroke:#2E7D32,stroke-width:1px
+  style Ext fill:#B2DFDB,stroke:#00695C,stroke-width:1px
+  style LLM fill:#FFCCBC,stroke:#D84315,stroke-width:1px
 ```
+
+- **Layer 1:** **Channels** and **Companion app** connect to **Core** (HTTP/WebSocket).
+- **Layer 2 — Core:** **Memory** is RAG-based (vector, relational, optional graph) plus Markdown-based (AGENT_MEMORY.md, daily memory). **Tools** are the base of the skillset. **Skills** and **Plugins** are registered in the RAG system and filtered per request so the LLM sees only relevant ones. **Plugins** extend the system without limit; **external plugins** can be written in any language (Node.js, Go, Java, Python, etc.); **system_plugins** (e.g. `system_plugins/homeclaw-browser`) use Node.js and provide browser-related features. The **LLM** (cloud or local) uses memory + extensions to respond.
 
 **System overview: all modules**
 
@@ -338,7 +308,7 @@ For full behaviour (matching logic, per-user data, direct reply), see **docs_des
 - **Cloud models** — Use LiteLLM in `config/core.yml` under `cloud_models`. Set `api_key_name` (e.g. `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`) and the corresponding environment variable. HomeClaw sends prompts to the provider you choose; their privacy and terms apply.
 - **Local models** — Run GGUF models via llama.cpp server on your machine. Data stays on your hardware; no third-party API. Configure in `config/core.yml` under `local_models`; set `main_llm` and `embedding_llm` to e.g. `local_models/Qwen3-14B-Q5_K_M`.
 - **Use both** — You can use a cloud model for chat and a local model for embedding (or vice versa), or combine them for better capability and cost. Switch at runtime via `llm set` / `llm cloud` in the CLI or by editing `main_llm` / `embedding_llm` in `config/core.yml`.
-- **Remote access** — If you expose Core on the internet (e.g. for WebChat or bots), enable **auth** in `config/core.yml`: `auth_enabled: true` and `auth_api_key: "<secret>"`. Clients must send `X-API-Key` or `Authorization: Bearer <key>` on `/inbound` and `/ws`. See **docs_design/RemoteAccess.md**.
+- **Remote access** — See [Remote access (Tailscale, Cloudflare Tunnel)](#remote-access-tailscale-cloudflare-tunnel) below.
 
 Supported cloud providers (via LiteLLM) include **OpenAI** (GPT-4o, etc.), **Google Gemini**, **DeepSeek**, **Anthropic**, **Groq**, **Mistral**, **xAI**, **Cohere**, **Together AI**, **OpenRouter**, **Perplexity**, and others. See `config/core.yml` and [LiteLLM docs](https://docs.litellm.ai/docs_design/providers).
 
@@ -404,6 +374,26 @@ HomeClaw runs on **macOS**, **Windows**, and **Linux**. You need:
 
    - Send a message in WebChat or the CLI. For tools/skills/plugins, see **docs_design/ToolsAndSkillsTesting.md** and **docs_design/RunAndTestPlugins.md**.
    - Check config and LLM connectivity: `python -m main doctor`.
+
+### Remote access (Tailscale, Cloudflare Tunnel)
+
+To use the **Companion app** or WebChat from another network (e.g. phone on cellular, laptop away from home), expose Core so the client can reach it. Two common options:
+
+**Tailscale (recommended for home + mobile)**
+
+1. Install [Tailscale](https://tailscale.com/download) on the machine that runs Core and on your phone/laptop; log in with the same account.
+2. On the Core host, get the Tailscale IP: `tailscale ip` (e.g. `100.x.x.x`).
+3. In the Companion app **Settings**, set **Core URL** to `http://100.x.x.x:9000` (replace with your IP). Optional: use **Tailscale Serve** for HTTPS: `tailscale serve https / http://127.0.0.1:9000` and set Core URL to the URL Tailscale shows (e.g. `https://your-machine.your-tailnet.ts.net`).
+4. If Core has `auth_enabled: true`, set the same **API key** in the app.
+
+**Cloudflare Tunnel (public URL)**
+
+1. Install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/local/) on the Core host.
+2. Run: `cloudflared tunnel --url http://127.0.0.1:9000` and copy the URL (e.g. `https://xxx.trycloudflare.com`).
+3. Enable Core auth: in `config/core.yml` set `auth_enabled: true` and `auth_api_key: "<long-random-key>"`.
+4. In the Companion app **Settings**, set **Core URL** to the tunnel URL and the **API key** to match.
+
+The app only needs **Core URL** and optional **API key**; no Tailscale or Cloudflare SDK in the app. For more (SSH tunnel, auth details), see the docs: **[Remote access](https://allenpeng0705.github.io/HomeClaw/remote-access/)** and **docs_design/RemoteAccess.md**.
 
 ### Commands (interactive CLI, `python -m main start`)
 
@@ -485,10 +475,22 @@ For faster pip installs, you can use a mirror, e.g.:
 The **HomeClaw Companion** app is a **Flutter-based** client for **Mac, Windows, iPhone, and Android**. It makes HomeClaw much easier to use from any device:
 
 - **Chat** — Send messages, attach images and files; voice input and TTS (speak replies).
-- **Manage Core** — Edit **core.yml** and **user.yml** from the app: server, LLM, memory, session, completion, profile, skills, tools, auth, and users. No need to SSH or edit config files by hand.
+- **Manage Core** — Edit **core.yml** and **user.yml** from the app: server, LLM (cloud/local), memory, session, users, auth, and more. No need to SSH or edit config files by hand.
 - **One app, all platforms** — Same codebase for desktop and mobile; install from the store or build from source.
 
-**Where to get it:** `clients/homeclaw_companion/` in the repo. Build with Flutter (see `clients/homeclaw_companion/README.md`). Connect to your Core by setting the Core URL and optional API key in the app (e.g. in Settings or on first launch).
+### How to use the Companion app
+
+1. **Get the app** — From `clients/homeclaw_companion/` in the repo. Build with Flutter (see `clients/homeclaw_companion/README.md`), or install a pre-built binary if available.
+
+2. **Connect to Core** — Open the app and go to **Settings** (or first-launch setup):
+   - **Core URL**: Set to your Core address. **Same machine:** `http://127.0.0.1:9000`. **Remote (e.g. phone when Core is at home):** use a [Tailscale](#remote-access-tailscale-cloudflare-tunnel) or [Cloudflare Tunnel](#remote-access-tailscale-cloudflare-tunnel) URL (e.g. `http://100.x.x.x:9000` or `https://xxx.trycloudflare.com`).
+   - **API key (optional):** If Core has `auth_enabled: true` in `config/core.yml`, set the same `auth_api_key` here.
+
+3. **Allow your user** — Core only accepts messages from users listed in **config/user.yml**. Add an entry for the identity the app uses (e.g. `user_id: companion` or your name). You can add or edit users from the app via **Manage Core** → Users once connected.
+
+4. **Chat** — Send text, images, or files; use voice input and TTS. All messages go to the same Core and memory as WebChat, Telegram, and other channels.
+
+5. **Manage Core** — From the app, open **Manage Core** (e.g. from Settings) to edit **core.yml** (LLM, memory, tools, auth) and **user.yml** (add/edit/remove users) without touching the server directly.
 
 You can use the companion app **instead of** or **together with** WebChat, CLI, Telegram, and other channels—all talk to the same Core and memory.
 
