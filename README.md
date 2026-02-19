@@ -69,7 +69,7 @@ flowchart TB
     subgraph Base["Foundation"]
       T["Tools (base of skillset)"]
     end
-    subgraph Ext["Extensions (in RAG, filtered)"]
+    subgraph Ext["Extensions"]
       direction LR
       S["Skills (SKILL.md)"]
       P["Plugins (any language); system_plugins: Node.js, browser"]
