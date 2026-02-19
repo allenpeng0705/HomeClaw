@@ -35,10 +35,22 @@ jobs:
           node-version: "20"
 
       - name: Generate diagram images from Mermaid
+        id: diagrams
+        continue-on-error: true
         run: |
           mkdir -p docs/assets
           npx -p @mermaid-js/mermaid-cli mmdc -i docs/diagrams/system-overview.mmd -o docs/assets/system-overview.svg
           npx -p @mermaid-js/mermaid-cli mmdc -i docs/diagrams/data-flow.mmd -o docs/assets/data-flow.svg
+
+      - name: Ensure diagram placeholders exist
+        if: steps.diagrams.outcome == 'failure' || steps.diagrams.outcome == 'cancelled'
+        run: |
+          mkdir -p docs/assets
+          for name in system-overview data-flow; do
+            if [ ! -f "docs/assets/${name}.svg" ]; then
+              echo '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="120" viewBox="0 0 400 120"><rect fill="#f5f5f5" width="400" height="120"/><text x="200" y="55" text-anchor="middle" fill="#666" font-family="sans-serif" font-size="14">Diagram: '"$name"'</text><text x="200" y="75" text-anchor="middle" fill="#999" font-family="sans-serif" font-size="12">See docs/diagrams/'"$name"'.mmd — export from mermaid.live</text></svg>' > "docs/assets/${name}.svg"
+            fi
+          done
 
       - name: Install MkDocs, Material theme, and subpath plugin
         run: pip install mkdocs-material -e .
