@@ -475,8 +475,8 @@ class Core(CoreInterface):
         return out
 
     async def _wait_for_core_ready(self, base_url: str, timeout_sec: float = 60.0, interval_sec: float = 0.5) -> bool:
-        """Poll GET {base_url}/ui until Core responds 200 or timeout. So plugins only register when Core is ready."""
-        url = (base_url.rstrip("/") + "/ui")
+        """Poll GET {base_url}/ready until Core responds 200 or timeout. Uses /ready (lightweight) so DB/plugins don't delay readiness."""
+        url = (base_url.rstrip("/") + "/ready")
         deadline = time.monotonic() + timeout_sec
         while time.monotonic() < deadline:
             try:
@@ -507,8 +507,12 @@ class Core(CoreInterface):
         if getattr(meta, "auth_enabled", False) and getattr(meta, "auth_api_key", ""):
             base_env["CORE_API_KEY"] = getattr(meta, "auth_api_key", "")
         plugin_env_config = getattr(meta, "system_plugins_env", None) or {}
-        # Wait for Core to be ready so registration succeeds (poll GET /ui until 200)
-        ready = await self._wait_for_core_ready(core_url)
+        # Wait for Core to be ready so registration succeeds (poll GET /ready until 200).
+        # Use 127.0.0.1 for the probe when host is 0.0.0.0 so readiness works on Windows (connecting to 0.0.0.0 often fails there).
+        ready_host = "127.0.0.1" if (getattr(meta, "host", None) or "").strip() in ("0.0.0.0", "") else meta.host
+        ready_url = f"http://{ready_host}:{meta.port}"
+        timeout_ready = max(30.0, float(getattr(meta, "system_plugins_ready_timeout", 90) or 90))
+        ready = await self._wait_for_core_ready(ready_url, timeout_sec=timeout_ready)
         if not ready:
             logger.warning("system_plugins: Core did not become ready in time; starting plugins anyway.")
         else:
@@ -961,6 +965,11 @@ class Core(CoreInterface):
             except Exception as e:
                 logger.exception(e)
                 return {"result": str(e)}
+
+        @self.app.get("/ready")
+        async def ready():
+            """Lightweight readiness probe (no DB or plugin work). Used by system_plugins startup."""
+            return {"status": "ok"}
 
         @self.app.get("/shutdown")
         async def shutdown():
