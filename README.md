@@ -51,29 +51,75 @@ HomeClaw is built around a few principles:
 
 HomeClaw is organized into a **Core** (one process), **channels** (separate processes or HTTP clients), **LLM layer** (local and/or cloud), **memory** (RAG + chat history), **profile** (per-user learning), and **plugins** + **tools** + **skills**. The diagrams below show all modules and how data flows through the system, including how the LLM (local or cloud) is used and how tools, skills, and plugins are selected.
 
-**Simple overview**
+**Whole system at a glance**
 
 ```mermaid
-flowchart LR
-  subgraph CH["Channels"]
-    A[WebChat, Telegram, Email...]
+flowchart TB
+  subgraph Channels["🖥️ Channels"]
+    direction LR
+    WebChat["WebChat"]
+    Telegram["Telegram"]
+    Discord["Discord"]
+    Email["Email"]
+    Companion["Companion app"]
+    CLI["CLI"]
   end
-  subgraph CO["Core"]
-    B[Orchestrator · Tools · Plugins]
+
+  subgraph Core["⚙️ Core Engine"]
+    direction TB
+    Permission["Permission (user.yml)"]
+    Orch["Orchestrator"]
+    Answer["Answer + Tool loop"]
+    ToolExec["Tool executor"]
+    PluginMgr["Plugin Manager"]
+    Permission --> Orch --> Answer
+    Answer --> ToolExec
+    Answer --> PluginMgr
   end
-  subgraph LL["LLM"]
-    C[Local / Cloud]
+
+  subgraph Context["📋 Context for LLM"]
+    direction LR
+    Workspace["Workspace"]
+    Skills["Skills"]
+    MemBlock["RAG + chat history"]
+    ProfileBlock["Profile"]
+    Routing["Plugin routing"]
   end
-  subgraph ME["Memory"]
-    D[RAG + Chat]
+
+  subgraph LLM["🤖 LLM — Cloud or Local"]
+    direction LR
+    Cloud["Cloud (LiteLLM)"]
+    Local["Local (llama.cpp)"]
   end
-  CH -->|message| CO
-  CO --> LL
-  ME <--> CO
-  style CH fill:#e3f2fd,stroke:#1976d2
-  style CO fill:#fff3e0,stroke:#ef6c00
-  style LL fill:#e8f5e9,stroke:#388e3c
-  style ME fill:#fce4ec,stroke:#c2185b
+
+  subgraph Memory["💾 Memory"]
+    direction TB
+    Vector["Vector store"]
+    ChatDB["Chat history"]
+    KB["Knowledge base"]
+  end
+
+  subgraph Extensions["🔌 Tools · Skills · Plugins"]
+    direction LR
+    Tools["Tools"]
+    SkillsExt["Skills"]
+    Plugins["Plugins"]
+  end
+
+  Channels -->|"message"| Core
+  Answer --> Context
+  Context --> LLM
+  LLM -->|"reply"| Answer
+  Answer --> Memory
+  Answer --> Extensions
+  Extensions --> Answer
+
+  style Channels fill:#BBDEFB,stroke:#1565C0,stroke-width:2px
+  style Core fill:#FFE0B2,stroke:#E65100,stroke-width:2px
+  style Context fill:#F8BBD9,stroke:#AD1457,stroke-width:1px
+  style LLM fill:#C8E6C9,stroke:#2E7D32,stroke-width:2px
+  style Memory fill:#E1BEE7,stroke:#6A1B9A,stroke-width:2px
+  style Extensions fill:#B2DFDB,stroke:#00695C,stroke-width:2px
 ```
 
 **System overview: all modules**
