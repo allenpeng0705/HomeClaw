@@ -73,7 +73,7 @@ flowchart TB
       S["Skills\n(SKILL.md workflows)"]
       P["Plugins\n(any language)\nsystem_plugins: Node.js, browser"]
     end
-    LLM["LLM\n(cloud or local)"]
+    LLM["Local / Cloud LLM"]
   end
 
   Clients -->|"connect"| Core
@@ -81,12 +81,12 @@ flowchart TB
   Base --> S
   Ext --> LLM
 
-  style Clients fill:#BBDEFB,stroke:#1565C0,stroke-width:2px
-  style Core fill:#FFF8E1,stroke:#FF8F00,stroke-width:2px
-  style Memory fill:#E1BEE7,stroke:#6A1B9A,stroke-width:1px
-  style Base fill:#C8E6C9,stroke:#2E7D32,stroke-width:1px
-  style Ext fill:#B2DFDB,stroke:#00695C,stroke-width:1px
-  style LLM fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px
+  style Clients fill:#263238,stroke:#eceff1,stroke-width:2px,color:#fff
+  style Core fill:#37474f,stroke:#eceff1,stroke-width:2px,color:#fff
+  style Memory fill:#455a64,stroke:#eceff1,stroke-width:1px,color:#fff
+  style Base fill:#546e7a,stroke:#eceff1,stroke-width:1px,color:#fff
+  style Ext fill:#607d8b,stroke:#eceff1,stroke-width:1px,color:#fff
+  style LLM fill:#78909c,stroke:#eceff1,stroke-width:2px,color:#fff
 ```
 
 - **Layer 1:** **Channels** and **Companion app** connect to **Core** (HTTP/WebSocket).
