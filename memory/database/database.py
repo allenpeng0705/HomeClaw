@@ -10,10 +10,11 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 
 from .models import Base
 from loguru import logger
-from base.util import Util
 
 
 def _default_sqlite_uri() -> str:
+    """Lazy import Util to avoid circular import: base.util -> memory.chat -> memory.database -> base.util."""
+    from base.util import Util
     return f'sqlite:///{os.path.join(Util().data_path(), "chats.db")}'
 
 
@@ -24,6 +25,7 @@ def _resolve_database_uri() -> str:
     if env_uri:
         return env_uri
     try:
+        from base.util import Util
         meta = Util().get_core_metadata()
         db = getattr(meta, "database", None)
         if db is None:

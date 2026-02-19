@@ -1,20 +1,28 @@
+import os
+import sys
+from pathlib import Path
+
+# Ensure project root is on path before importing project packages (e.g. memory.chat).
+# Cross-platform (Windows/Mac): Path(__file__).resolve().parent.parent is the repo root.
+# Only insert if not already present so Mac runs (e.g. from project root) are unchanged.
+_root = Path(__file__).resolve().parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
 import asyncio
 import atexit
 import json
 from multiprocessing import Process
-import os
 import re
 import runpy
 import shutil
 import subprocess
-import sys
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 import aiohttp
 import uvicorn
 import yaml
-from pathlib import Path
 from dotenv import dotenv_values
 from loguru import logger
 import watchdog.events
@@ -23,7 +31,6 @@ import torch
 import requests
 
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from memory.chat.message import ChatMessage
 from memory.prompts import MEMORY_SUMMARIZATION_PROMPT
 from base.base import CoreMetadata, User, LLM, EmailAccount
