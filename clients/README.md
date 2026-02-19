@@ -8,7 +8,7 @@ This folder holds **clients** that connect to **HomeClaw Core**: companion apps 
 
 | Client | Description | Status |
 |--------|-------------|--------|
-| **Flutter** | Cross-platform companion app (iOS, Android, macOS, Windows; Linux later). Chat with Core, settings for URL + API key. | Implemented in `homeclaw_companion/`. Run `flutter create .` there once, then `flutter run -d macos|windows|android|ios`. |
+| **Flutter** | Cross-platform companion app (iOS, Android, macOS, Windows, Linux). Chat with Core, settings for URL + API key, Scan QR to connect. | Implemented in `homeclaw_companion/`. Run `flutter run -d macos|windows|linux|android|ios`. |
 | **CLI** | Command-line tool to send messages to Core and print reply. | Implemented in `cli/`. Run `python homeclaw_cli.py chat "message"`. |
 
 ---
@@ -31,7 +31,7 @@ So: every client only needs a **Core URL** (e.g. `http://127.0.0.1:9000`) and op
 - **Local:** Core URL = `http://127.0.0.1:9000` (or your `host:port` from `core.yml`).
 - **Remote:** Expose Core with Tailscale Serve/Funnel, Cloudflare Tunnel, ngrok, or SSH port-forward. Then set Core URL in the client to that base URL (e.g. `https://your-machine.tailnet-name.ts.net` or `https://your-tunnel.trycloudflare.com`). If Core has `auth_enabled: true`, configure the same API key in the client.
 
-See **docs_design/HomeClawCompanionConnectivity.md** for a short comparison of options (Tailscale, Cloudflare Tunnel, SSH).
+See **docs_design/HomeClawCompanionConnectivity.md** for a short comparison of options. For **how iOS, Android, and desktop connect when Core runs remotely** (Tailscale, QR pairing, SSH), see **docs_design/RemoteConnectionIOSAndroidDesktop.md**.
 
 ---
 

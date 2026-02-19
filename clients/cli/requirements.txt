@@ -1,1 +1,2 @@
 httpx>=0.27.0
+qrcode[pil]>=7.0   # optional for pair (QR code); pip install Pillow if needed

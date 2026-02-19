@@ -1128,7 +1128,8 @@ class Core(CoreInterface):
                     if not f.filename:
                         continue
                     ext = Path(f.filename).suffix or ".bin"
-                    if ext.lower() not in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"):
+                    allowed = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".mp4", ".webm", ".mov", ".avi")
+                    if ext.lower() not in allowed:
                         ext = ".jpg"
                     name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}{ext}"
                     path = upload_dir / name
@@ -1139,6 +1140,112 @@ class Core(CoreInterface):
             except Exception as e:
                 logger.exception("Upload failed: {}", e)
                 return JSONResponse(status_code=500, content={"detail": str(e), "paths": []})
+
+        # Config API: manage core.yml and user.yml (same auth as /inbound)
+        _CONFIG_CORE_WHITELIST = frozenset({
+            "host", "port", "mode", "silent", "use_memory", "main_llm",
+            "auth_enabled", "auth_api_key",
+        })
+
+        @self.app.get("/api/config/core", dependencies=[Depends(_verify_inbound_auth)])
+        async def api_config_core_get():
+            """Return current core config (safe subset). auth_api_key redacted as '***'."""
+            try:
+                path = Path(Util().config_path()) / "core.yml"
+                if not path.exists():
+                    return JSONResponse(status_code=404, content={"detail": "core.yml not found"})
+                data = Util().load_yml_config(str(path)) or {}
+                out = {k: v for k, v in data.items() if k in _CONFIG_CORE_WHITELIST}
+                if "auth_api_key" in out and out["auth_api_key"]:
+                    out["auth_api_key"] = "***"
+                return JSONResponse(content=out)
+            except Exception as e:
+                logger.exception("Config core get failed: {}", e)
+                return JSONResponse(status_code=500, content={"detail": str(e)})
+
+        @self.app.patch("/api/config/core", dependencies=[Depends(_verify_inbound_auth)])
+        async def api_config_core_patch(request: Request):
+            """Update whitelisted keys in core.yml. Only keys in _CONFIG_CORE_WHITELIST are applied."""
+            try:
+                body = await request.json()
+                if not isinstance(body, dict):
+                    return JSONResponse(status_code=400, content={"detail": "JSON object required"})
+                path = Path(Util().config_path()) / "core.yml"
+                if not path.exists():
+                    return JSONResponse(status_code=404, content={"detail": "core.yml not found"})
+                data = Util().load_yml_config(str(path)) or {}
+                for k, v in body.items():
+                    if k in _CONFIG_CORE_WHITELIST:
+                        if k == "port":
+                            data[k] = int(v) if v is not None else 9000
+                        elif k in ("auth_enabled", "silent", "use_memory"):
+                            data[k] = bool(v)
+                        elif k == "auth_api_key" and v == "***":
+                            continue  # keep existing key when client sends placeholder
+                        else:
+                            data[k] = v
+                Util().write_config(str(path), data)
+                return JSONResponse(content={"result": "ok"})
+            except Exception as e:
+                logger.exception("Config core patch failed: {}", e)
+                return JSONResponse(status_code=500, content={"detail": str(e)})
+
+        @self.app.get("/api/config/users", dependencies=[Depends(_verify_inbound_auth)])
+        async def api_config_users_get():
+            """Return list of users from user.yml."""
+            try:
+                users = Util().get_users() or []
+                out = [
+                    {
+                        "id": getattr(u, "id", None) or u.name,
+                        "name": u.name,
+                        "email": list(getattr(u, "email", []) or []),
+                        "im": list(getattr(u, "im", []) or []),
+                        "phone": list(getattr(u, "phone", []) or []),
+                        "permissions": list(getattr(u, "permissions", []) or []),
+                    }
+                    for u in users
+                ]
+                return JSONResponse(content={"users": out})
+            except Exception as e:
+                logger.exception("Config users get failed: {}", e)
+                return JSONResponse(status_code=500, content={"detail": str(e)})
+
+        @self.app.post("/api/config/users", dependencies=[Depends(_verify_inbound_auth)])
+        async def api_config_users_post(request: Request):
+            """Add a user to user.yml."""
+            try:
+                body = await request.json()
+                if not isinstance(body, dict) or not body.get("name"):
+                    return JSONResponse(status_code=400, content={"detail": "name required"})
+                name = str(body["name"]).strip()
+                uid = (body.get("id") or name).strip() or name
+                email = list(body.get("email") or []) if isinstance(body.get("email"), list) else []
+                im = list(body.get("im") or []) if isinstance(body.get("im"), list) else []
+                phone = list(body.get("phone") or []) if isinstance(body.get("phone"), list) else []
+                permissions = list(body.get("permissions") or []) if isinstance(body.get("permissions"), list) else []
+                user = User(name=name, id=uid, email=email, im=im, phone=phone, permissions=permissions)
+                Util().add_user(user)
+                return JSONResponse(content={"result": "ok", "name": name})
+            except ValueError as e:
+                return JSONResponse(status_code=400, content={"detail": str(e)})
+            except Exception as e:
+                logger.exception("Config users post failed: {}", e)
+                return JSONResponse(status_code=500, content={"detail": str(e)})
+
+        @self.app.delete("/api/config/users/{user_name}", dependencies=[Depends(_verify_inbound_auth)])
+        async def api_config_users_delete(user_name: str):
+            """Remove a user from user.yml by name."""
+            try:
+                users = Util().get_users() or []
+                for u in users:
+                    if u.name == user_name:
+                        Util().remove_user(u)
+                        return JSONResponse(content={"result": "ok", "name": user_name})
+                return JSONResponse(status_code=404, content={"detail": f"User '{user_name}' not found"})
+            except Exception as e:
+                logger.exception("Config users delete failed: {}", e)
+                return JSONResponse(status_code=500, content={"detail": str(e)})
 
         @self.app.post("/memory/reset")
         @self.app.get("/memory/reset")

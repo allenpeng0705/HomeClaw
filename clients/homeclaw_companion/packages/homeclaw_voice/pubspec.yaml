@@ -1,0 +1,21 @@
+name: homeclaw_voice
+description: Voice input for HomeClaw companion. Wraps speech_to_text for a consistent stream-based API on Android, iOS, macOS, Windows (beta), and Web.
+version: 0.0.1
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  speech_to_text: ^7.0.0
+
+flutter:
+  assets:
+    - assets/vosk_listen.py
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
