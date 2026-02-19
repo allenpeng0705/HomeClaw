@@ -524,9 +524,14 @@ class PluginManager:
     def hot_reload(self):
         if disable_plugins:
             return
+        interval_seconds = 60
         while not self.stop_hot_reload.is_set():
             self.load_plugins()
-            time.sleep(60)  # Adjust the interval as needed
+            # Sleep in short chunks so we notice stop_hot_reload quickly (fixes Ctrl+C on Windows)
+            for _ in range(interval_seconds):
+                if self.stop_hot_reload.is_set():
+                    break
+                time.sleep(1)
 
         logger.debug("Hot reload thread stopped.")
 
