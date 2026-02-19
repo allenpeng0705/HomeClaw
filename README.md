@@ -117,7 +117,7 @@ For a **step-by-step guide** (install, config, local/cloud models, memory, tools
 HomeClaw runs on **macOS**, **Windows**, and **Linux**. You need:
 
 - **Python** 3.10–3.12 (recommended).
-- For **local GGUF models**: a **llama.cpp** server (or use the bundled `llama.cpp-master` and start servers per config).
+- For **local GGUF models**: copy **llama.cpp's binary distribution** into `llama.cpp-master/<platform>/` for your device type (mac/, win_cuda/, linux_cpu/, etc.); used for both main and embedding local models. See `llama.cpp-master/README.md`. Then start servers per config.
 - For **cloud models**: only network access and the right API keys in the environment.
 
 ### Quick start (run, config, test)
@@ -139,7 +139,7 @@ HomeClaw runs on **macOS**, **Windows**, and **Linux**. You need:
 3. **Models**
 
    - **Cloud**: Add entries to `cloud_models` in `config/core.yml` with `api_key_name`; set the env var (e.g. `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`). Set `main_llm` to e.g. `cloud_models/OpenAI-GPT4o` or `cloud_models/Gemini-2.5-Flash`.
-   - **Local**: Download GGUF models (e.g. from Hugging Face) into a `models/` folder; configure `local_models` in `config/core.yml` with path, host, port. Start the llama.cpp server(s) for each model you use. Or use **Ollama**: run Ollama, then use `llm download` and `llm set` in the CLI. Set `main_llm` to e.g. `local_models/main_vl_model_4B`.
+   - **Local**: Copy **llama.cpp's binary distribution** into `llama.cpp-master/` for your device type (see `llama.cpp-master/README.md`); used for both main and embedding local models. Download GGUF models (e.g. from Hugging Face) into a `models/` folder; configure `local_models` in `config/core.yml` with path, host, port. Start the llama.cpp server(s) for each model you use. Or use **Ollama**: run Ollama, then use `llm download` and `llm set` in the CLI. Set `main_llm` to e.g. `local_models/main_vl_model_4B`.
    - **Both**: You can use cloud for one role and local for another (e.g. cloud chat + local embedding), or switch between them; they can work together for better capability and cost.
 
 4. **Run Core**

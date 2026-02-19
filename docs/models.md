@@ -18,7 +18,7 @@ Supported providers include OpenAI, Google Gemini, DeepSeek, Anthropic, Groq, Mi
 
 - Run **GGUF** models via a **llama.cpp** server. Place model files in a `models/` directory (or path set by **`model_path`** in `config/core.yml`).
 - In **`config/core.yml`**, under **`local_models`**, add entries with `id`, `path` (relative to `model_path`), `host`, `port`. Set **`main_llm`** and **`embedding_llm`** to e.g. `local_models/<id>`.
-- Start the llama.cpp server(s) for each model (see `llama.cpp-master/README.md` in the repo). You can use the bundled binaries in `llama.cpp-master/<platform>/`.
+- **Copy llama.cpp's binary distribution** into `llama.cpp-master/<platform>/` for your device type (mac/, win_cuda/, linux_cpu/, etc.; see `llama.cpp-master/README.md` in the repo). Used for both main and embedding local models. Then start the llama.cpp server(s) for each model.
 
 ---
 
