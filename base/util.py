@@ -794,6 +794,17 @@ class Util:
 
         return data_updates, extra_body_updates
 
+    # Extra-body keys that Google Gemini API does not accept (causes 400 "Unknown name")
+    _GEMINI_UNSUPPORTED_EXTRA_KEYS = frozenset({"repeat_penalty"})
+
+    def _filter_extra_body_for_model(self, extra_body_params: dict, model_for_request: Optional[str]) -> dict:
+        """Remove extra_body keys that the target model does not support (e.g. Gemini rejects repeat_penalty)."""
+        if not extra_body_params or not model_for_request:
+            return extra_body_params
+        if "gemini" not in model_for_request.lower():
+            return extra_body_params
+        return {k: v for k, v in extra_body_params.items() if k not in self._GEMINI_UNSUPPORTED_EXTRA_KEYS}
+
     def _get_llm_semaphore(self):
         """Lazy-create a semaphore to limit concurrent LLM calls (channel + plugin API). Config: llm_max_concurrent (default 1). Thread-safe creation."""
         if getattr(self, '_llm_semaphore', None) is None:
@@ -860,6 +871,7 @@ class Util:
                 data["function_call"] = function_call
             data_params, extra_body_params = self._get_completion_params()
             data.update(data_params)
+            extra_body_params = self._filter_extra_body_for_model(extra_body_params, model_for_request)
             if extra_body_params:
                 data.setdefault("extra_body", {}).update(extra_body_params)
             data_json = None
@@ -975,6 +987,7 @@ class Util:
                 data["tool_choice"] = tool_choice
             data_params, extra_body_params = self._get_completion_params()
             data.update(data_params)
+            extra_body_params = self._filter_extra_body_for_model(extra_body_params, model_for_request)
             if extra_body_params:
                 data.setdefault("extra_body", {}).update(extra_body_params)
             data_json = json.dumps(data, ensure_ascii=False) if self.is_utf8_compatible(data) else json.dumps(data, ensure_ascii=False).encode("utf-8")

@@ -22,10 +22,20 @@ Then:
 flutter pub get
 ```
 
+## Windows: NuGet required (flutter_tts)
+
+The **flutter_tts** plugin needs **nuget.exe** to build on Windows. If you see `nuget.exe not found`:
+
+1. **Download nuget.exe:** [https://dist.nuget.org/win-x86-commandline/latest/nuget.exe](https://dist.nuget.org/win-x86-commandline/latest/nuget.exe)
+2. **Put it on your PATH:** e.g. save to `C:\tools` (or any folder) and add that folder to your system **PATH**.
+3. Or run the helper script once (from this directory): `.\scripts\ensure_nuget.ps1` — it downloads nuget.exe into `tools/` and adds it to PATH for the current session.
+
+Then run `flutter run -d windows` again.
+
 ## Run by platform
 
 - **macOS:** `flutter run -d macos`
-- **Windows:** `flutter run -d windows`
+- **Windows:** `flutter run -d windows` (requires nuget.exe on PATH; see above)
 - **Linux:** `flutter run -d linux` (requires Linux dev libraries; see [Flutter Linux](https://docs.flutter.dev/platform-integration/linux))
 - **Android:** `flutter run -d android` (device or emulator)
 - **iOS:** `flutter run -d ios` (device or simulator; requires Xcode on Mac)
@@ -121,4 +131,6 @@ On **macOS/Windows** the scanner may not have a camera; use manual URL entry in 
 - **Connection refused:** Ensure Core is running and the URL in Settings is correct (no trailing slash).
 - **401 / 403:** Enable and set the API key in Settings to match Core’s `auth_api_key`.
 - **Platform build fails:** Run `flutter doctor` and fix any reported issues. Ensure you ran `flutter create .` and `flutter pub get`.
+- **Windows: "nuget.exe not found":** The flutter_tts plugin needs NuGet. See [Windows: NuGet required](#windows-nuget-required-flutter_tts) above.
+- **Windows: MSB3073 / "cmake_install.cmake exited with code 1":** Often fixed by: (1) **Clean build:** run `flutter clean`, then `flutter pub get`, then `flutter run -d windows`. (2) **Windows SDK:** In Visual Studio Installer → Modify → Individual components, ensure a **Windows 10 SDK** (or Windows 11 SDK) is installed; then run `flutter clean` and build again. (3) If it still fails, try building from a **shorter path** (e.g. `C:\hc` instead of a long path) to avoid MAX_PATH issues.
 - **QR scan fails or no camera:** On desktop use manual URL in Settings. On mobile grant camera permission.
