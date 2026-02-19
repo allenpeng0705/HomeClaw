@@ -38,6 +38,18 @@ To list devices: `flutter devices`.
 2. **Scan to connect (mobile):** On the machine where Core runs, run `homeclaw pair` (or `python homeclaw_cli.py pair`). In the app, open **Settings** → **Scan QR to connect** and scan the QR. The app saves the URL and API key and returns to Settings.
 3. **Chat:** Type a message and send; the reply from Core appears below. Use the **mic** button for voice input (on Linux requires Vosk; see below).
 
+## Features (⋯ menu in chat)
+
+| Feature | What it’s for | How to use |
+|--------|----------------|------------|
+| **Take photo** | Attach a photo to your next message so Core can “see” it (vision). | Tap **Take photo**. On **iOS/Android** the camera opens; on **macOS** you pick a photo from the gallery (camera not used). The photo is added as an attachment—type a message if you like, then **Send**. |
+| **Record video** | Attach a short video to your next message (Core can use it like images). | Tap **Record video**. On **iOS/Android** you can record; on **macOS** you **select an existing video** from the gallery. Then **Send** to include it. |
+| **Record screen** | Capture your screen as a short video and attach it to your next message. | Tap **Record screen**. The app records for ~10 seconds, then adds the recording as an attachment. **macOS:** Grant **Screen Recording** in System Settings → Privacy & Security first. **Send** to include it. |
+| **Run command** | Run a shell command on your machine and see the output in chat (desktop only). | **Settings** → **Exec allowlist** → add allowed commands (e.g. `ls`, `pwd`, or a regex like `^/usr/bin/.*`). Then in chat, **⋯** → **Run command**, enter e.g. `ls -la`, tap Run. Result appears as a message. |
+| **Speak last reply** | Hear the last assistant reply read aloud (TTS). | Tap **Speak last reply** after you have a reply. Uses system text-to-speech. |
+
+**Why “Take photo” / “Record video” open the file picker on macOS:** On macOS the in-app camera isn’t used for these actions; you **choose an existing photo or video** from your files instead. On iPhone/Android, Take photo opens the camera and Record video can record a new video.
+
 ## Linux: voice input (Vosk)
 
 On Linux, voice uses [Vosk](https://alphacephei.com/vosk/) (offline). Install deps and a model, then set `VOSK_MODEL`:

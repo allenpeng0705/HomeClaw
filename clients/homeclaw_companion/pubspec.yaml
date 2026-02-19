@@ -35,14 +35,14 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-# Generate app icon from assets/icon/app_icon.png for all platforms (HomeClaw logo).
+# Generate app icon from assets/icon/app_icon.png (paw logo derived from social/HomeClaw_Promo_EN.jpg).
 flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/icon/app_icon.png"
   min_sdk_android: 21
   web:
-    generate: true
+    generate: false
     image_path: "assets/icon/app_icon.png"
     background_color: "#ffffff"
     theme_color: "#000000"

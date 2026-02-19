@@ -190,55 +190,81 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _takePhoto() async {
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
+    final source = await showDialog<ImageSource>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Take photo'),
+        content: const Text('Use camera to take a new photo, or choose an existing image from your device.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(ImageSource.camera), child: const Text('Use camera')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(ImageSource.gallery), child: const Text('Choose from device')),
+        ],
+      ),
+    );
+    if (source == null || !mounted) return;
     try {
-      // Let the popup menu close before opening the picker (avoids dialog behind window on macOS).
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      if (!mounted) return;
-      // On macOS, image_picker camera requires a cameraDelegate; use gallery to pick a photo.
-      final source = Platform.isMacOS ? ImageSource.gallery : ImageSource.camera;
+      if (mounted) showDialog(context: context, barrierDismissible: false, builder: (_) => AlertDialog(content: Row(children: [const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)), const SizedBox(width: 16), Expanded(child: Text(source == ImageSource.camera ? 'Opening camera…' : 'Choosing photo…', textAlign: TextAlign.start))]));
       final xFile = await _imagePicker.pickImage(source: source);
+      if (mounted) Navigator.of(context).pop();
       if (xFile == null || !mounted) return;
-      setState(() {
-        _pendingImagePaths.add(xFile.path);
-      });
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Photo attached. Type a message and Send to include it.')));
+      final added = await _showMediaPreview(context, type: 'photo', filePath: xFile.path, label: 'Add this photo to your message?');
+      if (added && mounted) {
+        setState(() => _pendingImagePaths.add(xFile.path));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Photo attached. Type a message and Send to include it.')));
+      }
     } catch (e) {
-      if (mounted) setState(() => _messages.add(MapEntry('Camera error: $e', false)));
+      if (mounted) {
+        try { Navigator.of(context).pop(); } catch (_) {}
+        setState(() => _messages.add(MapEntry('Photo error: $e', false)));
+      }
     }
   }
 
   Future<void> _recordVideo() async {
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
+    final source = await showDialog<ImageSource>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Record video'),
+        content: const Text('Use camera to record a new video, or choose an existing video from your device.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(ImageSource.camera), child: const Text('Use camera')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(ImageSource.gallery), child: const Text('Choose from device')),
+        ],
+      ),
+    );
+    if (source == null || !mounted) return;
     try {
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      if (!mounted) return;
-      // On macOS, image_picker camera requires a cameraDelegate; use gallery to pick a video.
-      final source = Platform.isMacOS ? ImageSource.gallery : ImageSource.camera;
-      final xFile = await _imagePicker.pickVideo(
-        source: source,
-        maxDuration: const Duration(seconds: 30),
-      );
+      if (mounted) showDialog(context: context, barrierDismissible: false, builder: (_) => AlertDialog(content: Row(children: [const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)), const SizedBox(width: 16), Expanded(child: Text(source == ImageSource.camera ? 'Recording video…' : 'Choosing video…', textAlign: TextAlign.start))]));
+      final xFile = await _imagePicker.pickVideo(source: source, maxDuration: const Duration(seconds: 30));
+      if (mounted) Navigator.of(context).pop();
       if (xFile == null || !mounted) return;
-      setState(() {
-        _pendingVideoPaths.add(xFile.path);
-      });
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Video attached. Type a message and Send to include it.')));
+      final added = await _showMediaPreview(context, type: 'video', filePath: xFile.path, label: 'Add this video to your message?');
+      if (added && mounted) {
+        setState(() => _pendingVideoPaths.add(xFile.path));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Video attached. Type a message and Send to include it.')));
+      }
     } catch (e) {
-      if (mounted) setState(() => _messages.add(MapEntry('Video error: $e', false)));
+      if (mounted) {
+        try { Navigator.of(context).pop(); } catch (_) {}
+        setState(() => _messages.add(MapEntry('Video error: $e', false)));
+      }
     }
   }
 
   Future<void> _recordScreen() async {
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
     try {
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-      if (!mounted) return;
-      final path = await _native.startScreenRecord(durationSec: 10, includeAudio: false);
-      if (!mounted) return;
-      if (path != null && path.isNotEmpty) {
-        setState(() {
-          _pendingVideoPaths.add(path);
-        });
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Screen recording attached. Send to include it.')));
-      } else {
+      if (mounted) showDialog(context: context, barrierDismissible: false, builder: (_) => const AlertDialog(content: Column(mainAxisSize: MainAxisSize.min, children: [SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)), SizedBox(height: 12), Text('Recording screen… (about 10 seconds)')])));
+      final recordPath = await _native.startScreenRecord(durationSec: 10, includeAudio: false);
+      if (mounted) Navigator.of(context).pop();
+      if (recordPath == null || recordPath.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -251,17 +277,101 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           );
         }
+        return;
+      }
+      final added = await _showMediaPreview(context, type: 'video', filePath: recordPath, label: 'Add this screen recording to your message?');
+      if (added && mounted) {
+        setState(() => _pendingVideoPaths.add(recordPath));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Screen recording attached. Send to include it.')));
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Screen record error: $e')));
+      if (mounted) {
+        try { Navigator.of(context).pop(); } catch (_) {}
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Screen record error: $e')));
+      }
     }
   }
 
+  Future<bool> _showMediaPreview(BuildContext context, {required String type, required String filePath, required String label}) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(type == 'photo' ? 'Preview photo' : 'Preview video'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (type == 'photo')
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.file(File(filePath), fit: BoxFit.contain, height: 200, width: double.infinity),
+                )
+              else
+                Row(
+                  children: [
+                    Icon(Icons.videocam, size: 48, color: Theme.of(ctx).colorScheme.primary),
+                    const SizedBox(width: 12),
+                    Expanded(child: Text(path.basename(filePath), style: Theme.of(ctx).textTheme.bodySmall, overflow: TextOverflow.ellipsis)),
+                  ],
+                ),
+              const SizedBox(height: 12),
+              Text(label, style: Theme.of(ctx).textTheme.bodyMedium),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Reject')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Confirm')),
+        ],
+      ),
+    );
+    return result == true;
+  }
+
+  /// For TTS only: strip emoji and punctuation so speech sounds clean. Does not change chat text.
+  static String _textForTts(String text) {
+    final buffer = StringBuffer();
+    for (final rune in text.runes) {
+      if (_isEmojiRune(rune)) continue;
+      if (_isPunctuationRune(rune)) {
+        buffer.write(' ');
+        continue;
+      }
+      buffer.write(String.fromCharCode(rune));
+    }
+    return buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  static bool _isEmojiRune(int rune) {
+    return (rune >= 0x1F300 && rune <= 0x1F9FF) ||
+        (rune >= 0x2600 && rune <= 0x26FF) ||
+        (rune >= 0x2700 && rune <= 0x27BF) ||
+        (rune >= 0x1F600 && rune <= 0x1F64F) ||
+        (rune >= 0x1F1E0 && rune <= 0x1F1FF) ||
+        (rune >= 0x1F900 && rune <= 0x1F9FF);
+  }
+
+  static bool _isPunctuationRune(int rune) {
+    return (rune >= 0x21 && rune <= 0x2F) ||
+        (rune >= 0x3A && rune <= 0x40) ||
+        (rune >= 0x5B && rune <= 0x60) ||
+        (rune >= 0x7B && rune <= 0x7E) ||
+        rune == 0x2014 || rune == 0x2013 || rune == 0x2026 || rune == 0x2022;
+  }
+
   Future<void> _speakLastReply() async {
-    final text = _lastReply?.trim();
-    if (text == null || text.isEmpty) {
+    final raw = _lastReply?.trim();
+    if (raw == null || raw.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No reply to speak')),
+      );
+      return;
+    }
+    final text = _textForTts(raw);
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Nothing to speak after removing emoji and punctuation')),
       );
       return;
     }
@@ -270,6 +380,35 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('TTS: $e')));
     }
+  }
+
+  /// (category label, example commands). Add these executables in Settings → Exec allowlist first.
+  static List<MapEntry<String, List<String>>> _runCommandExamplesByCategory() {
+    if (Platform.isMacOS) {
+      return [
+        const MapEntry('System', ['ls', 'ls -la', 'pwd', 'whoami', 'date', 'say "hello"']),
+        const MapEntry('Files & folders', ['open .', 'open ~/Desktop', 'open ~/Downloads']),
+        const MapEntry('Browser', ['open https://example.com', 'open -a Safari https://example.com']),
+        const MapEntry('Applications', ['open -a Safari', 'open -a Notes', 'open -a "Visual Studio Code"']),
+      ];
+    }
+    if (Platform.isWindows) {
+      return [
+        const MapEntry('System', ['whoami', 'hostname', 'tasklist', 'where', 'cmd /c dir', 'cmd /c echo hello']),
+        const MapEntry('Files & folders', ['explorer .', 'cmd /c start "" "%USERPROFILE%\\Desktop"']),
+        const MapEntry('Browser', ['cmd /c start https://example.com']),
+        const MapEntry('Applications', ['cmd /c start notepad', 'cmd /c start calc']),
+      ];
+    }
+    if (Platform.isLinux) {
+      return [
+        const MapEntry('System', ['ls', 'ls -la', 'pwd', 'whoami', 'date', 'uname -a', 'df -h', 'free -h']),
+        const MapEntry('Files & folders', ['xdg-open .', 'nautilus .', 'cat /etc/os-release']),
+        const MapEntry('Browser', ['xdg-open https://example.com']),
+        const MapEntry('Applications', ['xdg-open .']),
+      ];
+    }
+    return [];
   }
 
   Future<void> _runCommand() async {
@@ -287,19 +426,57 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
     final cmdController = TextEditingController();
+    final exampleCategories = _runCommandExamplesByCategory();
     final cmd = await showDialog<String>(
       context: context,
       builder: (ctx) {
         return AlertDialog(
           title: const Text('Run command'),
-          content: TextField(
-            controller: cmdController,
-            autofocus: true,
-            decoration: const InputDecoration(
-              hintText: 'e.g. ls -la or use regex in Settings',
-              border: OutlineInputBorder(),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ExpansionTile(
+                  title: Text('How to use', style: Theme.of(ctx).textTheme.titleSmall),
+                  initiallyExpanded: true,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        '1. Open Settings → Exec allowlist and add the executable name (e.g. open, ls, cmd) or a regex (e.g. ^/usr/bin/.*).\n'
+                        '2. Here, enter the full command and tap Run. Output appears in chat.\n'
+                        '3. Tap an example below to fill the field; edit if needed, then Run.',
+                        style: Theme.of(ctx).textTheme.bodySmall,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: cmdController,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    hintText: Platform.isWindows ? 'e.g. cmd /c dir' : 'e.g. ls -la, open .',
+                    border: const OutlineInputBorder(),
+                  ),
+                  onSubmitted: (v) => Navigator.of(ctx).pop(v),
+                ),
+                ...exampleCategories.expand((entry) => [
+                  const SizedBox(height: 10),
+                  Text(entry.key, style: Theme.of(ctx).textTheme.labelMedium),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: entry.value.map((ex) => ActionChip(
+                      label: Text(ex, style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
+                      onPressed: () => cmdController.text = ex,
+                    )).toList(),
+                  ),
+                ]),
+              ],
             ),
-            onSubmitted: (v) => Navigator.of(ctx).pop(v),
           ),
           actions: [
             TextButton(
