@@ -57,21 +57,21 @@ HomeClaw is organized into a **Core** (one process), **channels** (separate proc
 flowchart TB
   subgraph Clients["Layer 1 — Clients"]
     direction LR
-    CH["Channels\n(WebChat, Telegram, Discord, Email…)"]
+    CH["Channels (WebChat, Telegram, Discord, Email…)"]
     APP["Companion app"]
   end
 
   subgraph Core["Layer 2 — Core"]
     subgraph Memory["Memory system"]
-      RAG["RAG-based\n(vector + relational + graph)"]
-      MD["Markdown-based\n(AGENT_MEMORY.md, daily memory)"]
+      RAG["RAG-based (vector + relational + graph)"]
+      MD["Markdown-based (AGENT_MEMORY.md, daily memory)"]
     end
     subgraph Base["Foundation"]
-      T["Tools\n(base of skillset)"]
+      T["Tools (base of skillset)"]
     end
     subgraph Ext["Extensions — in RAG, filtered for target"]
-      S["Skills\n(SKILL.md workflows)"]
-      P["Plugins\n(any language)\nsystem_plugins: Node.js, browser"]
+      S["Skills (SKILL.md workflows)"]
+      P["Plugins (any language); system_plugins: Node.js, browser"]
     end
     LLM["Local / Cloud LLM"]
   end
