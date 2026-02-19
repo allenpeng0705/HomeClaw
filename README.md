@@ -4,7 +4,7 @@
 
 # HomeClaw
 
-**HomeClaw** is a **local-first AI assistant** that runs on your own hardware. Each installation is an autonomous agent: it talks to you over the channels you already use (email, Telegram, Discord, WebChat, etc.), keeps **memory** (RAG + agent memory) and context, and extends its abilities through **built-in and external plugins** and **skills**. You can run it entirely on **local models** (llama.cpp, GGUF) or mix in **cloud models** (OpenAI, **Google Gemini**, DeepSeek, Anthropic, and more)—**multimodal** (images, audio, video) works with both local and cloud. A **Flutter companion app** (Mac, Windows, iPhone, Android) makes HomeClaw easy to use from any device. **Multi-agent** is simple: run multiple HomeClaw instances. HomeClaw is **for the people**—decentralized, private when you want it, and fully under your control.
+**HomeClaw** is an **AI assistant** that runs on your own hardware. Each installation is an autonomous agent: it talks to you over the channels you already use (email, Telegram, Discord, WebChat, etc.), keeps **memory** (RAG + agent memory) and context, and extends its abilities through **built-in and external plugins** and **skills**. You can use **cloud models** (OpenAI, **Google Gemini**, DeepSeek, Anthropic, and more via LiteLLM) or **local models** (llama.cpp, GGUF), or **both together** for better capability and cost—**multimodal** (images, audio, video) works with both. A **Flutter companion app** (Mac, Windows, iPhone, Android) makes HomeClaw easy to use from any device. **Multi-agent** is simple: run multiple HomeClaw instances. HomeClaw is **for the people**—decentralized, private when you want it, and fully under your control.
 
 **Highlights**
 
@@ -42,9 +42,9 @@
 
 HomeClaw is built around a few principles:
 
-- **Local-first** — The core runs on your machine. You can use only local LLMs (llama.cpp, GGUF) so that conversations and memory stay on your hardware.
+- **Cloud and local models** — The core runs on your machine. You can use **cloud models** (LiteLLM: OpenAI, Gemini, DeepSeek, etc.) or **local models** (llama.cpp, GGUF), or both; they can work together for better capability and cost. Use local-only to keep data at home, or cloud for scale and features.
 - **Channel-agnostic** — The same Core serves all channels. Whether you talk via WebChat, Telegram, email, or Discord, the AI is one agent with one memory and one set of tools and plugins.
-- **Modular** — The LLM layer, memory, channels, plugins, and tools are separate. You can swap local vs cloud models, enable or disable skills and plugins, and add new channels without changing the core logic.
+- **Modular** — The LLM layer, memory, channels, plugins, and tools are separate. You can choose cloud or local models (or both), enable or disable skills and plugins, and add new channels without changing the core logic.
 - **Extensible** — **Plugins** add focused features (weather, news, email, custom APIs). **Skills** add application-style workflows (e.g. “social media agent”) that the LLM follows using tools. Both are designed so you can tailor HomeClaw to your needs.
 
 ### Modules and structure
@@ -113,9 +113,9 @@ flowchart TB
     Workspace --> SkillsBlock --> MemoryBlock --> ProfileBlock --> RoutingBlock
   end
 
-  subgraph LLM["LLM Layer — local OR cloud"]
-    Local["Local: llama.cpp (GGUF)"]
+  subgraph LLM["LLM Layer — cloud or local"]
     Cloud["Cloud: LiteLLM (OpenAI, Gemini, DeepSeek, etc.)"]
+    Local["Local: llama.cpp (GGUF)"]
   end
 
   subgraph Memory["Memory system"]
@@ -205,7 +205,7 @@ sequenceDiagram
 
 - **Channels** — Email, Matrix, Tinode, WeChat, WhatsApp, Telegram, Discord, Slack, WebChat, webhook, Google Chat, Signal, iMessage, Teams, Zalo, Feishu, DingTalk, BlueBubbles. Each channel connects to Core via HTTP (`/inbound`, `/process`) or WebSocket (`/ws`). See [Channels](#2-what-can-homeclaw-do) and `channels/README.md`.
 - **Core** — Single FastAPI app: permission check (`config/user.yml`), orchestrator (intent TIME vs OTHER; plugin selection), TAM (reminders, cron), tool execution (file, memory, web search, browser, cron, `route_to_plugin`, `run_skill`), plugin invocation, and chat + RAG. Config: `config/core.yml`.
-- **LLM layer** — One OpenAI-compatible API used by Core. Filled by **local models** (llama.cpp server, GGUF) and/or **cloud models** (LiteLLM: OpenAI, Google Gemini, DeepSeek, Anthropic, Groq, Mistral, etc.). Main and embedding model can be chosen independently. See `config/core.yml` (`local_models`, `cloud_models`, `main_llm`, `embedding_llm`).
+- **LLM layer** — One OpenAI-compatible API used by Core. Filled by **cloud models** (LiteLLM: OpenAI, Google Gemini, DeepSeek, Anthropic, Groq, Mistral, etc.) and/or **local models** (llama.cpp server, GGUF). Main and embedding model can be chosen independently; cloud and local can work together for better capability and cost. See `config/core.yml` (`cloud_models`, `local_models`, `main_llm`, `embedding_llm`).
 - **Memory** — **Cognee** (default) or in-house **Chroma** backend: vector + relational + optional graph. Used for RAG and chat history. See `docs_design/MemoryAndDatabase.md`.
 - **Profile** — Per-user JSON store (e.g. `database/profiles/`). Loaded each request and injected as “About the user” in the prompt; used for personalization and plugin parameter resolution. See `docs_design/UserProfileDesign.md`.
 - **Plugins** — Built-in (Python in `plugins/`) and external (HTTP, any language). Core routes user intent to a plugin (e.g. Weather, News, Mail) when the request matches. See [§7 Plugins](#7-plugins-extend-homeclaw).
@@ -218,8 +218,8 @@ For a full design reference, see **Design.md**. For tools vs skills vs plugins, 
 - **Session management** — Sessions keyed by app/user/channel; pruning, compaction, and `GET /api/sessions` for UIs. Core’s **GET /ui** shows a session list and links to plugin UIs. See **docs_design/SessionAndDualMemoryDesign.md**.
 - **Companion app** — **Flutter-based** app for **Mac, Windows, iPhone, and Android** (`clients/homeclaw_companion/`): chat, voice, attachments, Manage Core (edit core.yml and user.yml). Makes HomeClaw much easier to use from any device. See [§4 Companion app](#4-companion-app-flutter).
 - **Memory** — **RAG** (vector + relational + optional graph) and **agent memory**: AGENT_MEMORY.md (long-term), daily memory (short-term). Cognee (default) or Chroma backend.
-- **Multimodal** — Images, audio, and video with **local models** (e.g. Qwen2-VL with mmproj) and **cloud** (e.g. **Gemini**, GPT-4o). Tested with both; all work well.
-- **Cloud models** — **Gemini** and other providers (OpenAI, DeepSeek, Anthropic, etc.) via LiteLLM. Set `main_llm` to e.g. `cloud_models/Gemini-2.5-Flash` in `config/core.yml`.
+- **Cloud and local models** — **Cloud** (Gemini, OpenAI, DeepSeek, Anthropic, etc.) and **local** (llama.cpp, GGUF) via `config/core.yml`. Set `main_llm` to e.g. `cloud_models/Gemini-2.5-Flash` or `local_models/main_vl_model_4B`; both can work together for better capability and cost.
+- **Multimodal** — Images, audio, and video with **cloud** (e.g. **Gemini**, GPT-4o) and **local models** (e.g. Qwen2-VL with mmproj). Tested with both; all work well.
 - **System plugins** — Plugins in **system_plugins/** (e.g. **homeclaw-browser**, written in **Node.js**) provide WebChat, browser automation, canvas, and nodes. **External plugins can be written in any language** (Node.js, Go, Java, Python, etc.). Run with Core via **system_plugins_auto_start** in `config/core.yml`. See **system_plugins/README.md** and [§5 System plugin: homeclaw-browser](#5-system-plugin-homeclaw-browser).
 - **Multi-agent** — Run **multiple HomeClaw instances** (different ports/configs); each is one agent. No special orchestration—just run more instances.
 - **OpenClaw skillset** — Full support for skills in `config/skills/` (SKILL.md); same workflow model as OpenClaw.
@@ -287,11 +287,11 @@ users:
 
 For full behaviour (matching logic, per-user data, direct reply), see **docs_design/MultiUserSupport.md**. For per-user profile (learned facts), see **docs_design/UserProfileDesign.md**.
 
-### Secure and safe: local vs cloud models
+### Secure and safe: cloud and local models
 
-- **Local models** — Run GGUF models via llama.cpp server on your machine. Data stays on your hardware; no third-party API. Configure in `config/core.yml` under `local_models`; set `main_llm` and `embedding_llm` to e.g. `local_models/Qwen3-14B-Q5_K_M`.
 - **Cloud models** — Use LiteLLM in `config/core.yml` under `cloud_models`. Set `api_key_name` (e.g. `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`) and the corresponding environment variable. HomeClaw sends prompts to the provider you choose; their privacy and terms apply.
-- **Mix** — You can use a local model for chat and a cloud model for embedding (or vice versa). Switch at runtime via `llm set` / `llm cloud` in the CLI or by editing `main_llm` / `embedding_llm` in `config/core.yml`.
+- **Local models** — Run GGUF models via llama.cpp server on your machine. Data stays on your hardware; no third-party API. Configure in `config/core.yml` under `local_models`; set `main_llm` and `embedding_llm` to e.g. `local_models/Qwen3-14B-Q5_K_M`.
+- **Use both** — You can use a cloud model for chat and a local model for embedding (or vice versa), or combine them for better capability and cost. Switch at runtime via `llm set` / `llm cloud` in the CLI or by editing `main_llm` / `embedding_llm` in `config/core.yml`.
 - **Remote access** — If you expose Core on the internet (e.g. for WebChat or bots), enable **auth** in `config/core.yml`: `auth_enabled: true` and `auth_api_key: "<secret>"`. Clients must send `X-API-Key` or `Authorization: Bearer <key>` on `/inbound` and `/ws`. See **docs_design/RemoteAccess.md**.
 
 Supported cloud providers (via LiteLLM) include **OpenAI** (GPT-4o, etc.), **Google Gemini**, **DeepSeek**, **Anthropic**, **Groq**, **Mistral**, **xAI**, **Cohere**, **Together AI**, **OpenRouter**, **Perplexity**, and others. See `config/core.yml` and [LiteLLM docs](https://docs.litellm.ai/docs_design/providers).
@@ -328,8 +328,9 @@ HomeClaw runs on **macOS**, **Windows**, and **Linux**. You need:
 
 3. **Models**
 
-   - **Local**: Download GGUF models (e.g. from Hugging Face) into a `models/` folder; configure `local_models` in `config/core.yml` with path, host, port. Start the llama.cpp server(s) for each model you use. Or use **Ollama**: run Ollama, then use `llm download` and `llm set` in the CLI.
-   - **Cloud**: Add entries to `cloud_models` in `config/core.yml` with `api_key_name`; set the env var (e.g. `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`). Set `main_llm` to e.g. `cloud_models/OpenAI-GPT4o`.
+   - **Cloud**: Add entries to `cloud_models` in `config/core.yml` with `api_key_name`; set the env var (e.g. `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`). Set `main_llm` to e.g. `cloud_models/OpenAI-GPT4o` or `cloud_models/Gemini-2.5-Flash`.
+   - **Local**: Download GGUF models (e.g. from Hugging Face) into a `models/` folder; configure `local_models` in `config/core.yml` with path, host, port. Start the llama.cpp server(s) for each model you use. Or use **Ollama**: run Ollama, then use `llm download` and `llm set` in the CLI. Set `main_llm` to e.g. `local_models/main_vl_model_4B`.
+   - **Both**: You can use cloud for one role and local for another (e.g. cloud chat + local embedding), or switch between them; they can work together for better capability and cost.
 
 4. **Run Core**
 
@@ -549,7 +550,7 @@ Thank you to everyone who contributed to GPT4People and OpenClaw, and to the ope
 
 **Next**
 
-- **Local + cloud model mix** — Design how to combine local and cloud models so that work is done efficiently and cost stays low (e.g. use local for simple or high-volume tasks, cloud for complex or low-latency needs; routing and fallback rules).
+- **Cloud and local model mix** — Design how to combine cloud and local models so that work is done efficiently and cost stays low (e.g. use local for simple or high-volume tasks, cloud for complex or low-latency needs; routing and fallback rules).
 
 **Later**
 

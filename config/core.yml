@@ -277,12 +277,30 @@ local_models:
   #   capabilities: [Chat]
   # Multi-LoRA (if llama-server supports multiple --lora): use array
   #   lora: [adapters/a1.gguf, adapters/a2.gguf]
-  - id: main_vl_model
-    alias: main_vl_model
-    path: Qwen3VL-4B-Instruct-Q4_K_M.gguf #Qwen3-VL-8B-Instruct-Q4_K_M.gguf, gemma-3-4b-it-Q4_K_M.gguf
-    mmproj: mmproj-Qwen3VL-4B-Instruct-F16.gguf #mmproj-Qwen3-VL-8B-BF16.gguf, mmproj-gemma-3-4b-BF16.gguf
+  - id: main_vl_model_4B
+    alias: main_vl_model_4B
+    path: Qwen3VL-4B-Instruct-Q4_K_M.gguf 
+    mmproj: mmproj-Qwen3VL-4B-Instruct-F16.gguf
     host: 127.0.0.1
     port: 5023
+    capabilities: [Chat]
+    supported_media: [image]
+
+  - id: main_vl_model_8B
+    alias: main_vl_model_8B
+    path: Qwen3-VL-8B-Instruct-Q4_K_M.gguf
+    mmproj: mmproj-Qwen3-VL-8B-BF16.gguf
+    host: 127.0.0.1
+    port: 5024
+    capabilities: [Chat]
+    supported_media: [image]
+
+  - id: gemma_3_4b_it_4B
+    alias: gemma_3_4b_it_4B
+    path: gemma-3-4b-it-Q4_K_M.gguf
+    mmproj: mmproj-gemma-3-4b-BF16.gguf
+    host: 127.0.0.1
+    port: 5025
     capabilities: [Chat]
     supported_media: [image]
 

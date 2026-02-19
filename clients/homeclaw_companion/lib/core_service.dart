@@ -261,6 +261,21 @@ class CoreService {
     }
   }
 
+  /// PATCH /api/config/users/{name} — update user. Body: name, id, email, im, phone, permissions. Throws on error.
+  Future<void> patchConfigUser(String name, Map<String, dynamic> body) async {
+    final url = Uri.parse('$_baseUrl/api/config/users/${Uri.encodeComponent(name)}');
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      ..._authHeaders(),
+    };
+    final response = await http
+        .patch(url, headers: headers, body: jsonEncode(body))
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception('Update user: ${response.statusCode} ${response.body}');
+    }
+  }
+
   /// DELETE /api/config/users/{name} — remove user. Throws on error.
   Future<void> removeConfigUser(String name) async {
     final url = Uri.parse('$_baseUrl/api/config/users/${Uri.encodeComponent(name)}');

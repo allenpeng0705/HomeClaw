@@ -30,6 +30,9 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
   late TextEditingController _embeddingLlmController;
   late TextEditingController _mainLlmLanguageController;
   late TextEditingController _llmMaxConcurrentController;
+  late TextEditingController _cloudModelApiKeyController;
+  String? _selectedCloudModelId;
+  String? _selectedLocalModelId;
   // Memory
   late TextEditingController _memoryBackendController;
   // Session
@@ -87,6 +90,7 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
     _embeddingLlmController = TextEditingController();
     _mainLlmLanguageController = TextEditingController();
     _llmMaxConcurrentController = TextEditingController();
+    _cloudModelApiKeyController = TextEditingController();
     _memoryBackendController = TextEditingController();
     _sessionDmScopeController = TextEditingController();
     _sessionPruneKeepController = TextEditingController();
@@ -120,6 +124,7 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
     _embeddingLlmController.dispose();
     _mainLlmLanguageController.dispose();
     _llmMaxConcurrentController.dispose();
+    _cloudModelApiKeyController.dispose();
     _memoryBackendController.dispose();
     _sessionDmScopeController.dispose();
     _sessionPruneKeepController.dispose();
@@ -156,6 +161,23 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
     return [];
   }
 
+  List<Map<String, dynamic>> _cloudModelsList() {
+    final list = _core['cloud_models'];
+    if (list == null || list is! List) return [];
+    return list.map((e) => Map<String, dynamic>.from(e is Map ? e : {})).toList();
+  }
+
+  List<Map<String, dynamic>> _localChatModelsList() {
+    final list = _core['local_models'];
+    if (list == null || list is! List) return [];
+    return list.map((e) {
+      final m = Map<String, dynamic>.from(e is Map ? e : {});
+      final caps = m['capabilities'];
+      final hasChat = caps is List && caps.any((c) => c.toString().toLowerCase().contains('chat'));
+      return hasChat ? m : null;
+    }).whereType<Map<String, dynamic>>().toList();
+  }
+
   void _applyCore(Map<String, dynamic> core) {
     _core = core;
     _nameController.text = _str(core['name']);
@@ -163,7 +185,19 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
     _portController.text = core['port']?.toString() ?? '9000';
     _modeController.text = _str(core['mode']).isEmpty ? 'dev' : _str(core['mode']);
     _modelPathController.text = _str(core['model_path']);
-    _mainLlmController.text = _str(core['main_llm']);
+    final mainLlm = _str(core['main_llm']);
+    _mainLlmController.text = mainLlm;
+    if (mainLlm.startsWith('cloud_models/')) {
+      _selectedCloudModelId = mainLlm.substring('cloud_models/'.length);
+      _selectedLocalModelId = null;
+    } else if (mainLlm.startsWith('local_models/')) {
+      _selectedLocalModelId = mainLlm.substring('local_models/'.length);
+      _selectedCloudModelId = null;
+    } else {
+      _selectedCloudModelId = null;
+      _selectedLocalModelId = null;
+    }
+    _cloudModelApiKeyController.clear();
     _embeddingLlmController.text = _str(core['embedding_llm']);
     _mainLlmLanguageController.text = _listStr(core['main_llm_language']).join(', ');
     _llmMaxConcurrentController.text = _int(core['llm_max_concurrent']).toString();
@@ -252,13 +286,19 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
   Map<String, dynamic> _buildPatchBody() {
     final listFromComma = (String s) =>
         s.trim().isEmpty ? <String>[] : s.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    String mainLlm = _mainLlmController.text.trim();
+    if (_selectedCloudModelId != null) {
+      mainLlm = 'cloud_models/$_selectedCloudModelId';
+    } else if (_selectedLocalModelId != null) {
+      mainLlm = 'local_models/$_selectedLocalModelId';
+    }
     final body = <String, dynamic>{
       'name': _nameController.text.trim().isEmpty ? 'core' : _nameController.text.trim(),
       'host': _hostController.text.trim().isEmpty ? '0.0.0.0' : _hostController.text.trim(),
       'port': int.tryParse(_portController.text.trim()) ?? 9000,
       'mode': _modeController.text.trim().isEmpty ? 'dev' : _modeController.text.trim(),
       'model_path': _modelPathController.text.trim(),
-      'main_llm': _mainLlmController.text.trim(),
+      'main_llm': mainLlm,
       'embedding_llm': _embeddingLlmController.text.trim().isEmpty ? null : _embeddingLlmController.text.trim(),
       'main_llm_language': listFromComma(_mainLlmLanguageController.text),
       'llm_max_concurrent': int.tryParse(_llmMaxConcurrentController.text.trim()) ?? 2,
@@ -312,6 +352,17 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
     body.removeWhere((k, v) => v == null);
     final key = _authApiKeyController.text.trim();
     if (key.isNotEmpty) body['auth_api_key'] = key;
+    if (_selectedCloudModelId != null && _cloudModelApiKeyController.text.trim().isNotEmpty) {
+      final cloudList = _cloudModelsList();
+      final patched = cloudList.map((m) {
+        final copy = Map<String, dynamic>.from(m);
+        copy['api_key'] = (m['id'] == _selectedCloudModelId)
+            ? _cloudModelApiKeyController.text.trim()
+            : '***';
+        return copy;
+      }).toList();
+      body['cloud_models'] = patched;
+    }
     return body;
   }
 
@@ -332,8 +383,11 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
   Future<void> _addUser() async {
     final nameController = TextEditingController();
     final idController = TextEditingController();
+    final emailController = TextEditingController();
     final imController = TextEditingController();
-    final result = await showDialog<Map<String, String>>(
+    final phoneController = TextEditingController();
+    final permissionsController = TextEditingController();
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Add user'),
@@ -352,9 +406,33 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
               ),
               const SizedBox(height: 8),
               TextField(
+                controller: emailController,
+                decoration: const InputDecoration(
+                  labelText: 'Email (comma-separated)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
                 controller: imController,
                 decoration: const InputDecoration(
-                  labelText: 'IM (e.g. matrix:@user:domain)',
+                  labelText: 'IM (e.g. matrix:@user:domain, comma-separated)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: phoneController,
+                decoration: const InputDecoration(
+                  labelText: 'Phone (comma-separated)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: permissionsController,
+                decoration: const InputDecoration(
+                  labelText: 'Permissions (comma-separated)',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -367,10 +445,15 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
             onPressed: () {
               final name = nameController.text.trim();
               if (name.isEmpty) return;
+              final listFromComma = (String s) =>
+                  s.trim().isEmpty ? <String>[] : s.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
               Navigator.of(ctx).pop({
                 'name': name,
-                'id': idController.text.trim(),
-                'im': imController.text.trim(),
+                'id': idController.text.trim().isEmpty ? name : idController.text.trim(),
+                'email': listFromComma(emailController.text),
+                'im': listFromComma(imController.text),
+                'phone': listFromComma(phoneController.text),
+                'permissions': listFromComma(permissionsController.text),
               });
             },
             child: const Text('Add'),
@@ -379,18 +462,20 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
       ),
     );
     if (result == null) return;
-    final name = result['name'] ?? '';
-    final id = result['id'] ?? '';
-    final imStr = result['im'] ?? '';
-    final im = imStr.isEmpty ? <String>[] : imStr.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    final name = result['name'] as String? ?? '';
+    final id = (result['id'] as String?)?.trim().isEmpty == true ? name : (result['id'] as String?)?.trim() ?? name;
+    final email = result['email'] is List ? List<String>.from(result['email'] as List) : [];
+    final im = result['im'] is List ? List<String>.from(result['im'] as List) : [];
+    final phone = result['phone'] is List ? List<String>.from(result['phone'] as List) : [];
+    final permissions = result['permissions'] is List ? List<String>.from(result['permissions'] as List) : [];
     try {
       await widget.coreService.addConfigUser({
         'name': name,
-        if (id.isNotEmpty) 'id': id,
+        'id': id,
+        'email': email,
         'im': im,
-        'email': [],
-        'phone': [],
-        'permissions': [],
+        'phone': phone,
+        'permissions': permissions,
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Added user: $name')));
@@ -399,6 +484,107 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Add failed: $e')));
+      }
+    }
+  }
+
+  Future<void> _editUser(Map<String, dynamic> u) async {
+    final name = u['name'] as String? ?? '?';
+    final id = u['id'] as String? ?? name;
+    final emailList = u['email'] as List<dynamic>? ?? [];
+    final imList = u['im'] as List<dynamic>? ?? [];
+    final phoneList = u['phone'] as List<dynamic>? ?? [];
+    final permList = u['permissions'] as List<dynamic>? ?? [];
+    final nameController = TextEditingController(text: name);
+    final idController = TextEditingController(text: id);
+    final emailController = TextEditingController(text: emailList.map((e) => e.toString()).join(', '));
+    final imController = TextEditingController(text: imList.map((e) => e.toString()).join(', '));
+    final phoneController = TextEditingController(text: phoneList.map((e) => e.toString()).join(', '));
+    final permissionsController = TextEditingController(text: permList.map((e) => e.toString()).join(', '));
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit user'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(labelText: 'Name *', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: idController,
+                decoration: const InputDecoration(labelText: 'ID (system user id)', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: emailController,
+                decoration: const InputDecoration(
+                  labelText: 'Email (comma-separated)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: imController,
+                decoration: const InputDecoration(
+                  labelText: 'IM (e.g. matrix:@user:domain, comma-separated)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: phoneController,
+                decoration: const InputDecoration(
+                  labelText: 'Phone (comma-separated)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: permissionsController,
+                decoration: const InputDecoration(
+                  labelText: 'Permissions (comma-separated, e.g. IM, EMAIL, PHONE)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final newName = nameController.text.trim();
+              if (newName.isEmpty) return;
+              final listFromComma = (String s) =>
+                  s.trim().isEmpty ? <String>[] : s.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+              Navigator.of(ctx).pop({
+                'name': newName,
+                'id': idController.text.trim().isEmpty ? newName : idController.text.trim(),
+                'email': listFromComma(emailController.text),
+                'im': listFromComma(imController.text),
+                'phone': listFromComma(phoneController.text),
+                'permissions': listFromComma(permissionsController.text),
+              });
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return;
+    try {
+      await widget.coreService.patchConfigUser(name, result);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Updated: ${result['name']}')));
+        _load();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update failed: $e')));
       }
     }
   }
@@ -494,8 +680,66 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
             _field('Model path', _modelPathController),
           ]),
           _section('LLM', [
-            _field('Main LLM (e.g. cloud_models/Gemini-2.5-Flash)', _mainLlmController),
-            _field('Embedding LLM', _embeddingLlmController),
+            const Text(
+              'Main model: choose one from cloud or local. Both can work together later for better capability and cost.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            const Text('Cloud models', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+            const SizedBox(height: 4),
+            ..._cloudModelsList().map((m) {
+              final id = m['id'] as String? ?? '';
+              final alias = m['alias'] as String? ?? id;
+              return RadioListTile<String>(
+                title: Text(alias),
+                subtitle: id != alias ? Text(id, style: const TextStyle(fontSize: 11, color: Colors.grey)) : null,
+                value: id,
+                groupValue: _selectedCloudModelId,
+                onChanged: (v) => setState(() {
+                  _selectedCloudModelId = v;
+                  _selectedLocalModelId = null;
+                  _mainLlmController.text = v != null ? 'cloud_models/$v' : _mainLlmController.text;
+                }),
+              );
+            }),
+            if (_selectedCloudModelId != null) ...[
+              const SizedBox(height: 4),
+              TextField(
+                controller: _cloudModelApiKeyController,
+                decoration: const InputDecoration(
+                  labelText: 'API key (leave empty to keep current)',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                obscureText: true,
+                autocorrect: false,
+              ),
+            ],
+            const SizedBox(height: 12),
+            const Text('Local models', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+            const SizedBox(height: 4),
+            ..._localChatModelsList().map((m) {
+              final id = m['id'] as String? ?? '';
+              final alias = m['alias'] as String? ?? id;
+              return RadioListTile<String>(
+                title: Text(alias),
+                subtitle: id != alias ? Text(id, style: const TextStyle(fontSize: 11, color: Colors.grey)) : null,
+                value: id,
+                groupValue: _selectedLocalModelId,
+                onChanged: (v) => setState(() {
+                  _selectedLocalModelId = v;
+                  _selectedCloudModelId = null;
+                  _mainLlmController.text = v != null ? 'local_models/$v' : _mainLlmController.text;
+                }),
+              );
+            }),
+            const SizedBox(height: 12),
+            const Text('Embedding model (read-only)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+            const SizedBox(height: 4),
+            ListTile(
+              title: Text(_embeddingLlmController.text.isEmpty ? '—' : _embeddingLlmController.text),
+              dense: true,
+            ),
             _field('Main LLM language (comma-separated)', _mainLlmLanguageController),
             _field('LLM max concurrent', _llmMaxConcurrentController, keyboardType: TextInputType.number),
           ]),
@@ -541,16 +785,7 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
             _field('Temperature', _completionTempController),
             _field('Image max dimension (0 = no resize)', _completionImageMaxDimController, keyboardType: TextInputType.number),
           ]),
-          _section('Profile', [
-            CheckboxListTile(
-              title: const Text('Profile enabled'),
-              value: _profileEnabled,
-              onChanged: (v) => setState(() => _profileEnabled = v ?? true),
-              controlAffinity: ListTileControlAffinity.leading,
-              contentPadding: EdgeInsets.zero,
-            ),
-            _field('Profile dir', _profileDirController),
-          ]),
+          // Profile section hidden (learned by LLM; do not expose in settings)
           _section('Skills & plugins', [
             CheckboxListTile(
               title: const Text('Use skills'),
@@ -668,9 +903,21 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
             return ListTile(
               title: Text(name),
               subtitle: Text('$id${im.isNotEmpty ? ' · $im' : ''}'),
-              trailing: IconButton(
-                icon: const Icon(Icons.remove_circle_outline),
-                onPressed: () => _removeUser(name),
+              onTap: () => _editUser(u),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined),
+                    onPressed: () => _editUser(u),
+                    tooltip: 'Edit user',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.remove_circle_outline),
+                    onPressed: () => _removeUser(name),
+                    tooltip: 'Remove user',
+                  ),
+                ],
               ),
             );
           }),

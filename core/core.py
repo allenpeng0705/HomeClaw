@@ -1180,6 +1180,24 @@ class Core(CoreInterface):
                 else:
                     target[k] = v
 
+        def _merge_models_list(existing: list, incoming: list) -> list:
+            """Merge list of model dicts by 'id'. Preserve order and existing api_key when incoming has '***' or empty."""
+            incoming_by_id = {str(m.get("id")): m for m in (incoming or []) if isinstance(m, dict) and m.get("id")}
+            result = []
+            for m in (existing or []):
+                if not isinstance(m, dict):
+                    result.append(m)
+                    continue
+                copy = dict(m)
+                eid = str(copy.get("id")) if copy.get("id") else None
+                if eid and eid in incoming_by_id:
+                    for key, val in incoming_by_id[eid].items():
+                        if key == "api_key" and (val is None or val == "***" or (isinstance(val, str) and val.strip() == "")):
+                            continue
+                        copy[key] = val
+                result.append(copy)
+            return result
+
         def _redact_config(obj, redact_keys: frozenset = frozenset({"auth_api_key", "api_key"})):
             """Return a copy of obj with sensitive keys replaced by '***'. Recurses into dicts and lists of dicts."""
             if isinstance(obj, dict):
@@ -1222,6 +1240,8 @@ class Core(CoreInterface):
                         data[k] = int(v) if v is not None else 9000
                     elif k in _CONFIG_CORE_BOOL_KEYS:
                         data[k] = bool(v) if v is not None else False
+                    elif k in ("cloud_models", "local_models") and isinstance(v, list) and isinstance(data.get(k), list):
+                        data[k] = _merge_models_list(data[k], v)
                     elif isinstance(v, dict) and isinstance(data.get(k), dict):
                         _deep_merge(data[k], v)
                     else:
@@ -1273,6 +1293,40 @@ class Core(CoreInterface):
                 return JSONResponse(status_code=400, content={"detail": str(e)})
             except Exception as e:
                 logger.exception("Config users post failed: {}", e)
+                return JSONResponse(status_code=500, content={"detail": str(e)})
+
+        @self.app.patch("/api/config/users/{user_name}", dependencies=[Depends(_verify_inbound_auth)])
+        async def api_config_users_patch(user_name: str, request: Request):
+            """Update a user in user.yml by name. Body: name, id, email, im, phone, permissions."""
+            try:
+                body = await request.json()
+                if not isinstance(body, dict):
+                    return JSONResponse(status_code=400, content={"detail": "JSON object required"})
+                users = Util().get_users() or []
+                found = next((u for u in users if u.name == user_name), None)
+                if not found:
+                    return JSONResponse(status_code=404, content={"detail": f"User '{user_name}' not found"})
+                name = (body.get("name") or found.name or "").strip() or found.name
+                uid = (body.get("id") or name).strip() or name
+                def _list(bkey, attr):
+                    if bkey not in body:
+                        return list(getattr(found, attr, []) or [])
+                    v = body[bkey]
+                    return list(v) if isinstance(v, list) else []
+                email = _list("email", "email")
+                im = _list("im", "im")
+                phone = _list("phone", "phone")
+                permissions = _list("permissions", "permissions")
+                updated = User(name=name, id=uid, email=email, im=im, phone=phone, permissions=permissions)
+                idx = users.index(found)
+                users[idx] = updated
+                User.validate_no_overlapping_channel_ids(users)
+                Util().save_users(users)
+                return JSONResponse(content={"result": "ok", "name": name})
+            except ValueError as e:
+                return JSONResponse(status_code=400, content={"detail": str(e)})
+            except Exception as e:
+                logger.exception("Config users patch failed: {}", e)
                 return JSONResponse(status_code=500, content={"detail": str(e)})
 
         @self.app.delete("/api/config/users/{user_name}", dependencies=[Depends(_verify_inbound_auth)])
