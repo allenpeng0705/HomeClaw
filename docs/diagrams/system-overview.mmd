@@ -1,0 +1,67 @@
+flowchart TB
+  subgraph Channels["Channels (separate processes or clients)"]
+    WebChat
+    Telegram
+    Discord
+    Email
+    Webhook
+    CLI["CLI (main.py)"]
+  end
+
+  subgraph Core["Core Engine (port 9000)"]
+    Router["Permission (user.yml)"]
+    Orch["Orchestrator (TIME vs OTHER)"]
+    TAM["TAM (reminders, cron)"]
+    Answer["answer_from_memory"]
+    ToolExec["Tool executor"]
+    PluginMgr["Plugin Manager"]
+    Router --> Orch
+    Orch --> TAM
+    Orch --> PluginMgr
+    Orch --> Answer
+    Answer --> ToolExec
+    Answer --> PluginMgr
+  end
+
+  subgraph Context["Context for LLM (built each request)"]
+    Workspace["Workspace (identity, TOOLS.md)"]
+    SkillsBlock["Skills block (SKILL.md list)"]
+    MemoryBlock["RAG memories + chat history"]
+    ProfileBlock["Profile (About the user)"]
+    RoutingBlock["Routing: plugins list + choose one"]
+    Workspace --> SkillsBlock --> MemoryBlock --> ProfileBlock --> RoutingBlock
+  end
+
+  subgraph LLM["LLM Layer — cloud or local"]
+    Cloud["Cloud: LiteLLM (OpenAI, Gemini, DeepSeek, etc.)"]
+    Local["Local: llama.cpp (GGUF)"]
+  end
+
+  subgraph Memory["Memory system"]
+    VectorStore["Vector store (Cognee/Chroma)"]
+    ChatDB["Chat history (SQLite)"]
+    KB["Knowledge base (optional)"]
+    Embedding["Embedding model (local or cloud)"]
+    Embedding --> VectorStore
+  end
+
+  subgraph Profile["Profile learning"]
+    ProfileStore["Profile store (JSON per user)"]
+  end
+
+  subgraph Extensions["Tools / Skills / Plugins"]
+    ToolReg["Tool registry (file, memory, web, cron, route_to_plugin, run_skill, …)"]
+    SkillsDir["Skills (config/skills/, SKILL.md)"]
+    PluginsDir["Plugins (built-in + external HTTP)"]
+  end
+
+  Channels -->|"user message"| Core
+  Answer --> Context
+  Context --> LLM
+  Answer --> Memory
+  Answer --> Profile
+  Answer --> Extensions
+  ToolExec --> ToolReg
+  ToolExec --> PluginsDir
+  ToolExec --> SkillsDir
+  PluginMgr --> PluginsDir

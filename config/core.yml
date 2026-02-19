@@ -335,7 +335,7 @@ cloud_models:
     host: 127.0.0.1
     port: 4002
     api_key_name: GEMINI_API_KEY
-    api_key: AIzaSyC4z1L5UDu9-McTM5QChzqdGYAlxkBWfTs
+    api_key: 
     capabilities: [Functioncall, Chat]
   # Anthropic Claude
   - id: Claude-Sonnet
@@ -429,8 +429,8 @@ cloud_models:
 #   are omitted and a short note is added so the model does not crash.
 
 # ——— Selected main and embedding model: local_models/<id> or cloud_models/<id> ———
-main_llm: cloud_models/Gemini-2.5-Flash
-# main_llm: local_models/main_vl_model
+# main_llm: cloud_models/Gemini-2.5-Flash
+main_llm: local_models/main_vl_model_4B
 # main_llm_language: list of allowed/preferred response languages (e.g. [zh, en] or [en]).
 #   - First item = primary: used for prompt file loading (e.g. response.en.yml, prompt_en.yml) and default when user language is unknown.
 #   - Full list = allowed response languages: you can add a system-line like "Respond only in one of: {languages}; if the user's language is unknown, use the first."

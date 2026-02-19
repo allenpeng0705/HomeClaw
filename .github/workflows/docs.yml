@@ -29,6 +29,17 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Generate diagram images from Mermaid
+        run: |
+          mkdir -p docs/assets
+          npx -p @mermaid-js/mermaid-cli mmdc -i docs/diagrams/system-overview.mmd -o docs/assets/system-overview.svg
+          npx -p @mermaid-js/mermaid-cli mmdc -i docs/diagrams/data-flow.mmd -o docs/assets/data-flow.svg
+
       - name: Install MkDocs, Material theme, and subpath plugin
         run: pip install mkdocs-material -e .
 
