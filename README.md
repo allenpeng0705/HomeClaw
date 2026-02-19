@@ -86,7 +86,7 @@ flowchart TB
   style Memory fill:#E1BEE7,stroke:#6A1B9A,stroke-width:1px
   style Base fill:#C8E6C9,stroke:#2E7D32,stroke-width:1px
   style Ext fill:#B2DFDB,stroke:#00695C,stroke-width:1px
-  style LLM fill:#FFCCBC,stroke:#D84315,stroke-width:1px
+  style LLM fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px
 ```
 
 - **Layer 1:** **Channels** and **Companion app** connect to **Core** (HTTP/WebSocket).
