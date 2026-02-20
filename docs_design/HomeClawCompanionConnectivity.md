@@ -2,6 +2,8 @@
 
 Companion apps (Flutter, CLI, WebChat, any custom client) connect to **HomeClaw Core** over **HTTP and WebSocket**. Core does not care how the client obtained the URL. This doc summarizes the options so you can use Tailscale, Cloudflare Tunnel, or something else without changing Core or client code.
 
+**How iOS, Android, and desktop connect when remote:** See **RemoteConnectionIOSAndroidDesktop.md** for the full picture (Tailscale, QR pairing, SSH) and what HomeClaw already supports.
+
 ---
 
 ## How clients connect

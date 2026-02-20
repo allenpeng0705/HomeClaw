@@ -17,7 +17,7 @@
 
 **他の言語 / Other languages:** [English](README.md) | [简体中文](README_zh.md) | [한국어](README_kr.md)
 
-**ドキュメント:** [https://allenpeng0705.github.io/HomeClaw/](https://allenpeng0705.github.io/HomeClaw/)
+**ドキュメント:** [https://allenpeng0705.github.io/HomeClaw/](https://allenpeng0705.github.io/HomeClaw/) — インストール・実行・Mix モード・レポート・ツール・プラグインなどのドキュメントは MkDocs でビルドされここで公開されています。GitHub の **`docs/`** フォルダでソースも閲覧できます。
 
 ---
 
@@ -25,14 +25,15 @@
 
 1. [HomeClaw とは？](#1-homeclaw-とは)
 2. [HomeClaw でできること](#2-homeclaw-でできること)
-3. [HomeClaw の使い方](#3-homeclaw-の使い方) — [リモートアクセス（Tailscale、Cloudflare Tunnel）](#リモートアクセスtailscale-cloudflare-tunnel) を含む
-4. [コンパニオンアプリ（Flutter）](#4-コンパニオンアプリflutter)
-5. [システムプラグイン：homeclaw-browser](#5-システムプラグインhomeclaw-browser)
-6. [スキルとプラグイン：HomeClaw を自分用に](#6-スキルとプラグインhomeclaw-を自分用に)
-7. [プラグイン：HomeClaw の拡張](#7-プラグインhomeclaw-の拡張)
-8. [スキル：ワークフローで HomeClaw を拡張](#8-スキルワークフローで-homeclaw-を拡張)
-9. [謝辞](#9-謝辞)
-10. [コントリビューションとライセンス](#10-コントリビューションとライセンス)
+3. [Mix モード：スマートなローカル/クラウドルーティング](#3-mix-モードスマートなローカルクラウドルーティング) — 3 層ルーターと強力な第 3 層
+4. [HomeClaw の使い方](#4-homeclaw-の使い方) — [リモートアクセス（Tailscale、Cloudflare Tunnel）](#リモートアクセスtailscale-cloudflare-tunnel) を含む
+5. [コンパニオンアプリ（Flutter）](#5-コンパニオンアプリflutter)
+6. [システムプラグイン：homeclaw-browser](#6-システムプラグインhomeclaw-browser)
+7. [スキルとプラグイン：HomeClaw を自分用に](#7-スキルとプラグインhomeclaw-を自分用に)
+8. [プラグイン：HomeClaw の拡張](#8-プラグインhomeclaw-の拡張)
+9. [スキル：ワークフローで HomeClaw を拡張](#9-スキルワークフローで-homeclaw-を拡張)
+10. [謝辞](#10-謝辞)
+11. [コントリビューションとライセンス](#11-コントリビューションとライセンス)
 
 ---
 
@@ -106,7 +107,25 @@ flowchart TB
 
 ---
 
-## 3. HomeClaw の使い方
+## 3. Mix モード：スマートなローカル/クラウドルーティング
+
+**Mix モード**では、HomeClaw が**リクエストごと**に**ローカル**か**クラウド**のメインモデルを使うか決めます。**3 層ルーター**がツール・プラグイン注入前に実行され、ユーザーメッセージだけを参照するため、1 ターン全体で同じモデルが使われます—シンプル・プライベートな処理はローカル、検索や重い推論はクラウド。**レポート**（ルート決定とクラウド利用量）は REST API または組み込み **usage_report** ツールで確認できます。
+
+### 3 層の構成
+
+| 層 | 名前 | 役割 |
+|----|------|------|
+| **1** | **ヒューリスティック** | キーワードと長文ルール（YAML）。例：「スクリーンショット」「ロック」→ ローカル；「ウェブ検索」「最新ニュース」→ クラウド。先にマッチした方が有効。 |
+| **2** | **セマンティック** | 埋め込み類似度：ユーザーメッセージを**ローカル/クラウド**の例文と比較。言い換えや意図の把握に適する。 |
+| **3** | **クラシファイアまたはパープレキシティ** | L1・L2 で決まらない場合：**小型ローカルモデル**が「Local か Cloud？」と答える（**classifier**）、または**メインローカルモデル**で数トークン＋**logprobs** を取得—自信が高ければ（平均 logprob が高い）ローカル、低ければクラウドへ（**perplexity**）。 |
+
+**強力な第 3 層**：メインのローカルモデルが強い場合、第 3 層を **perplexity** モードにできます。同じメインモデルが「自信」で投票します。Core が llama.cpp サーバーへ短いプローブ（例：5 トークン、`logprobs=true`）を送り、平均 log 確率を計算。しきい値（例：-0.6）以上なら**ローカル**、未満なら**クラウド**。別のクラシファイアモデルは不要で、メインモデル自身の不確実性で判定します。ローカルが弱い場合は **classifier** モード（小型 0.5B 裁判モデル）を使用してください。
+
+**有効化**：`config/core.yml` で `main_llm_mode: mix`、`main_llm_local`、`main_llm_cloud`、`hybrid_router` を設定。使い方・レポートの見方・全パラメータのチューニングは **[Mix mode and reports](https://allenpeng0705.github.io/HomeClaw/mix-mode-and-reports/)** を参照。
+
+---
+
+## 4. HomeClaw の使い方
 
 **ステップバイステップガイド**（インストール、設定、ローカル/クラウドモデル、メモリ、ツール、ワークスペース、テスト、プラグイン、スキル）は **[HOW_TO_USE_jp.md](HOW_TO_USE_jp.md)**（[English](HOW_TO_USE.md) | [中文](HOW_TO_USE_zh.md) | [한국어](HOW_TO_USE_kr.md) もあり）。
 
@@ -152,7 +171,7 @@ HomeClaw は **macOS**、**Windows**、**Linux** で動作。必要環境：
    python -m main start
    ```
 
-   **Core と全システムプラグインを一括起動**：`config/core.yml` で `system_plugins_auto_start: true` を設定。Core が `system_plugins/`（例：homeclaw-browser）の各プラグインを起動し自動登録。 [§5 システムプラグイン：homeclaw-browser](#5-システムプラグインhomeclaw-browser) と **system_plugins/README.md** 参照。
+   **Core と全システムプラグインを一括起動**：`config/core.yml` で `system_plugins_auto_start: true` を設定。Core が `system_plugins/`（例：homeclaw-browser）の各プラグインを起動し自動登録。 [§6 システムプラグイン：homeclaw-browser](#6-システムプラグインhomeclaw-browser) と **system_plugins/README.md** 参照。
 
 5. **チャネルの起動**（別ターミナル）
 
@@ -196,7 +215,7 @@ HomeClaw は **macOS**、**Windows**、**Linux** で動作。必要環境：
 
 ---
 
-## 4. コンパニオンアプリ（Flutter）
+## 5. コンパニオンアプリ（Flutter）
 
 **コンパニオン**は Flutter 製の **Mac、Windows、iPhone、Android** 用アプリ：チャット、音声、添付、**Manage Core**（アプリから core.yml と user.yml を編集）。[コンパニオンアプリドキュメント](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [ソースからビルド](clients/homeclaw_companion/README.md)
 
@@ -204,31 +223,31 @@ HomeClaw は **macOS**、**Windows**、**Linux** で動作。必要環境：
 
 ---
 
-## 5. システムプラグイン：homeclaw-browser
+## 6. システムプラグイン：homeclaw-browser
 
-**homeclaw-browser**（Node.js）は `system_plugins/homeclaw-browser` にあり：WebChat UI は http://127.0.0.1:3020/、ブラウザ自動化（LLM が URL を開く・クリック・入力）、Canvas、Nodes。`config/core.yml` で `system_plugins_auto_start: true` にすると Core と一緒に起動、または `node server.js` と `node register.js` を手動実行。[system_plugins/README.md](system_plugins/README.md) · [homeclaw-browser README](system_plugins/homeclaw-browser/README.md) · [§7 プラグイン](#7-プラグインhomeclaw-の拡張)
+**homeclaw-browser**（Node.js）は `system_plugins/homeclaw-browser` にあり：WebChat UI は http://127.0.0.1:3020/、ブラウザ自動化（LLM が URL を開く・クリック・入力）、Canvas、Nodes。`config/core.yml` で `system_plugins_auto_start: true` にすると Core と一緒に起動、または `node server.js` と `node register.js` を手動実行。[system_plugins/README.md](system_plugins/README.md) · [homeclaw-browser README](system_plugins/homeclaw-browser/README.md) · [§8 プラグイン](#8-プラグインhomeclaw-の拡張)
 
 ---
 
-## 6. スキルとプラグイン：HomeClaw を自分用に
+## 7. スキルとプラグイン：HomeClaw を自分用に
 
 **ツール**（ファイル、メモリ、ウェブ検索、cron、ブラウザ）、**プラグイン**（Weather、News、Mail など）、**スキル**（SKILL.md のワークフロー）でエージェントが回答・記憶・プラグインへのルーティング・ワークフロー実行を行います。自然に質問するだけで、LLM がツール・スキル・プラグインを選択。[ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
 
 ---
 
-## 7. プラグイン：HomeClaw の拡張
+## 8. プラグイン：HomeClaw の拡張
 
 **組み込みプラグイン**（Python）：`plugins/<Name>/` に plugin.yaml、config.yml、plugin.py；Core 起動時に自動検出。**外部プラグイン**（任意の言語）：HTTP サーバー（`GET /health`、`POST /run`）を動かし、`POST /api/plugins/register` で登録；Core は組み込みと同様にルーティング。[PluginStandard.md](docs_design/PluginStandard.md) · [PluginsGuide.md](docs_design/PluginsGuide.md) · [examples/external_plugins/](examples/external_plugins/README.md)
 
 ---
 
-## 8. スキル：ワークフローで HomeClaw を拡張
+## 9. スキル：ワークフローで HomeClaw を拡張
 
 **スキル**は `config/skills/` 下のフォルダで **SKILL.md**（名前、説明、ワークフロー）を含みます。LLM は「利用可能なスキル」を見て、ツール（または **run_skill** でスクリプト）で実行。`config/core.yml` で `use_skills: true` を設定。[SkillsGuide.md](docs_design/SkillsGuide.md) · [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
 
 ---
 
-## 9. 謝辞
+## 10. 謝辞
 
 HomeClaw は次の 2 つのプロジェクトに触発されました。
 
@@ -239,16 +258,16 @@ GPT4People と OpenClaw に貢献したすべての方、そして llama.cpp、L
 
 ---
 
-## 10. コントリビューションとライセンス
+## 11. コントリビューションとライセンス
 
 - **コントリビューション** — issue、プルリクエスト、議論を歓迎。**CONTRIBUTING.md** を参照。
 - **ライセンス** — 本プロジェクトは **Apache License 2.0**。**LICENSE** ファイルを参照。
 
 ### ロードマップ（概要）
 
-**次**
+**完了**
 
-- **クラウドとローカルモデルの組み合わせ** — クラウドとローカルを組み合わせ、作業を効率化しコストを抑える設計（例：単純・高負荷はローカル、複雑・低レイテンシはクラウド；ルーティングとフォールバック規則）。
+- **Mix モード** — 3 層ルーター（ヒューリスティック → セマンティック → クラシファイアまたはパープレキシティ）でリクエストごとにローカル/クラウドを選択。レポート（API + **usage_report** ツール）でコストとチューニング。詳細は [Mix mode and reports](https://allenpeng0705.github.io/HomeClaw/mix-mode-and-reports/) を参照。
 
 **今後**
 

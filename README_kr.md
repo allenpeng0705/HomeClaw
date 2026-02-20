@@ -17,7 +17,7 @@
 
 **다른 언어 / Other languages:** [English](README.md) | [简体中文](README_zh.md) | [日本語](README_jp.md)
 
-**문서:** [https://allenpeng0705.github.io/HomeClaw/](https://allenpeng0705.github.io/HomeClaw/)
+**문서:** [https://allenpeng0705.github.io/HomeClaw/](https://allenpeng0705.github.io/HomeClaw/) — 설치·실행·Mix 모드·리포트·도구·플러그인 등 전체 문서는 MkDocs로 빌드되어 여기에서 제공됩니다. GitHub **`docs/`** 폴더에서 소스도 볼 수 있습니다.
 
 ---
 
@@ -25,14 +25,15 @@
 
 1. [HomeClaw란?](#1-homeclaw란)
 2. [HomeClaw로 할 수 있는 것](#2-homeclaw로-할-수-있는-것)
-3. [HomeClaw 사용 방법](#3-homeclaw-사용-방법) — [원격 액세스(Tailscale, Cloudflare Tunnel)](#원격-액세스tailscale-cloudflare-tunnel) 포함
-4. [동반 앱(Flutter)](#4-동반-앱flutter)
-5. [시스템 플러그인: homeclaw-browser](#5-시스템-플러그인-homeclaw-browser)
-6. [스킬과 플러그인: HomeClaw를 나에게 맞추기](#6-스킬과-플러그인-homeclaw를-나에게-맞추기)
-7. [플러그인: HomeClaw 확장](#7-플러그인-homeclaw-확장)
-8. [스킬: 워크플로로 HomeClaw 확장](#8-스킬-워크플로로-homeclaw-확장)
-9. [감사의 말](#9-감사의-말)
-10. [기여 및 라이선스](#10-기여-및-라이선스)
+3. [Mix 모드: 스마트 로컬/클라우드 라우팅](#3-mix-모드-스마트-로컬클라우드-라우팅) — 3계층 라우터와 강력한 제3계층
+4. [HomeClaw 사용 방법](#4-homeclaw-사용-방법) — [원격 액세스(Tailscale, Cloudflare Tunnel)](#원격-액세스tailscale-cloudflare-tunnel) 포함
+5. [동반 앱(Flutter)](#5-동반-앱flutter)
+6. [시스템 플러그인: homeclaw-browser](#6-시스템-플러그인-homeclaw-browser)
+7. [스킬과 플러그인: HomeClaw를 나에게 맞추기](#7-스킬과-플러그인-homeclaw를-나에게-맞추기)
+8. [플러그인: HomeClaw 확장](#8-플러그인-homeclaw-확장)
+9. [스킬: 워크플로로 HomeClaw 확장](#9-스킬-워크플로로-homeclaw-확장)
+10. [감사의 말](#10-감사의-말)
+11. [기여 및 라이선스](#11-기여-및-라이선스)
 
 ---
 
@@ -106,7 +107,25 @@ flowchart TB
 
 ---
 
-## 3. HomeClaw 사용 방법
+## 3. Mix 모드: 스마트 로컬/클라우드 라우팅
+
+**Mix 모드**에서는 HomeClaw가 **요청마다** **로컬** 또는 **클라우드** 메인 모델을 선택합니다. **3계층 라우터**가 도구·플러그인 주입 전에 실행되며 사용자 메시지만 참조하므로, 한 턴 전체에서 동일한 모델이 사용됩니다—간단·비공개 작업은 로컬, 검색·무거운 추론은 클라우드. **리포트**(경로 결정 및 클라우드 사용량)는 REST API 또는 내장 **usage_report** 도구로 확인할 수 있습니다.
+
+### 3계층 구성
+
+| 계층 | 이름 | 역할 |
+|------|------|------|
+| **1** | **휴리스틱** | 키워드 및 긴 입력 규칙(YAML). 예: "스크린샷", "잠금" → 로컬; "웹 검색", "최신 뉴스" → 클라우드. 먼저 매칭된 쪽이 적용. |
+| **2** | **시맨틱** | 임베딩 유사도: 사용자 메시지를 **로컬/클라우드** 예문과 비교. 말바꿈·의도 파악에 적합. |
+| **3** | **분류기 또는 퍼플렉시티** | L1·L2에서 결정되지 않을 때: **소형 로컬 모델**이 "Local vs Cloud?"에 답하는(**classifier**), 또는 **메인 로컬 모델**로 몇 토큰 + **logprobs**를 얻어—신뢰도가 높으면(평균 logprob 높음) 로컬, 낮으면 클라우드(**perplexity**). |
+
+**강력한 제3계층**: 메인 로컬 모델이 강할 때 제3계층을 **perplexity** 모드로 둘 수 있습니다. 같은 메인 모델이 "자신감"으로 투표합니다. Core가 llama.cpp 서버에 짧은 프로브(예: 5토큰, `logprobs=true`)를 보내 평균 로그 확률을 계산합니다. 임계값(예: -0.6) 이상이면 **로컬**, 미만이면 **클라우드**. 별도 분류기 모델 없이 메인 모델 자신의 불확실성으로 판단합니다. 로컬이 약하면 **classifier** 모드(소형 0.5B 판사 모델)를 사용하세요.
+
+**활성화**: `config/core.yml`에서 `main_llm_mode: mix`, `main_llm_local`, `main_llm_cloud`, `hybrid_router` 설정. 사용법·리포트 보기·전체 파라미터 튜닝은 **[Mix mode and reports](https://allenpeng0705.github.io/HomeClaw/mix-mode-and-reports/)** 참조.
+
+---
+
+## 4. HomeClaw 사용 방법
 
 **단계별 가이드**(설치, 설정, 로컬/클라우드 모델, 메모리, 도구, 워크스페이스, 테스트, 플러그인, 스킬)는 **[HOW_TO_USE_kr.md](HOW_TO_USE_kr.md)**([English](HOW_TO_USE.md) | [中文](HOW_TO_USE_zh.md) | [日本語](HOW_TO_USE_jp.md) 참조).
 
@@ -152,7 +171,7 @@ HomeClaw는 **macOS**, **Windows**, **Linux**에서 동작합니다. 필요 사�
    python -m main start
    ```
 
-   **Core와 모든 시스템 플러그인 한 번에 실행**: `config/core.yml`에서 `system_plugins_auto_start: true` 설정. Core가 `system_plugins/`(예: homeclaw-browser)의 각 플러그인을 시작하고 자동 등록. [§5 시스템 플러그인: homeclaw-browser](#5-시스템-플러그인-homeclaw-browser) 및 **system_plugins/README.md** 참조.
+   **Core와 모든 시스템 플러그인 한 번에 실행**: `config/core.yml`에서 `system_plugins_auto_start: true` 설정. Core가 `system_plugins/`(예: homeclaw-browser)의 각 플러그인을 시작하고 자동 등록. [§6 시스템 플러그인: homeclaw-browser](#6-시스템-플러그인-homeclaw-browser) 및 **system_plugins/README.md** 참조.
 
 5. **채널 실행**(다른 터미널)
 
@@ -196,7 +215,7 @@ HomeClaw는 **macOS**, **Windows**, **Linux**에서 동작합니다. 필요 사�
 
 ---
 
-## 4. 동반 앱(Flutter)
+## 5. 동반 앱(Flutter)
 
 **동반 앱**은 Flutter 기반 **Mac, Windows, iPhone, Android** 클라이언트: 채팅, 음성, 첨부, **Manage Core**(앱에서 core.yml, user.yml 편집). [동반 앱 문서](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [소스에서 빌드](clients/homeclaw_companion/README.md)
 
@@ -204,31 +223,31 @@ HomeClaw는 **macOS**, **Windows**, **Linux**에서 동작합니다. 필요 사�
 
 ---
 
-## 5. 시스템 플러그인: homeclaw-browser
+## 6. 시스템 플러그인: homeclaw-browser
 
-**homeclaw-browser**(Node.js)는 `system_plugins/homeclaw-browser`에 있음: WebChat UI는 http://127.0.0.1:3020/, 브라우저 자동화(LLM이 URL 열기·클릭·입력), Canvas, Nodes. `config/core.yml`에서 `system_plugins_auto_start: true`로 설정하면 Core와 함께 시작하거나, `node server.js`와 `node register.js`를 수동 실행. [system_plugins/README.md](system_plugins/README.md) · [homeclaw-browser README](system_plugins/homeclaw-browser/README.md) · [§7 플러그인](#7-플러그인-homeclaw-확장)
+**homeclaw-browser**(Node.js)는 `system_plugins/homeclaw-browser`에 있음: WebChat UI는 http://127.0.0.1:3020/, 브라우저 자동화(LLM이 URL 열기·클릭·입력), Canvas, Nodes. `config/core.yml`에서 `system_plugins_auto_start: true`로 설정하면 Core와 함께 시작하거나, `node server.js`와 `node register.js`를 수동 실행. [system_plugins/README.md](system_plugins/README.md) · [homeclaw-browser README](system_plugins/homeclaw-browser/README.md) · [§8 플러그인](#8-플러그인-homeclaw-확장)
 
 ---
 
-## 6. 스킬과 플러그인: HomeClaw를 나에게 맞추기
+## 7. 스킬과 플러그인: HomeClaw를 나에게 맞추기
 
 **도구**(파일, 메모리, 웹 검색, cron, 브라우저), **플러그인**(Weather, News, Mail 등), **스킬**(SKILL.md의 워크플로)로 에이전트가 답변·기억·플러그인 라우팅·워크플로 실행을 합니다. 자연스럽게 질문하면 LLM이 도구·스킬·플러그인을 선택합니다. [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
 
 ---
 
-## 7. 플러그인: HomeClaw 확장
+## 8. 플러그인: HomeClaw 확장
 
 **내장 플러그인**(Python): `plugins/<Name>/`에 plugin.yaml, config.yml, plugin.py; Core 시작 시 자동 발견. **외부 플러그인**(어떤 언어든): HTTP 서버(`GET /health`, `POST /run`) 실행, `POST /api/plugins/register`로 등록; Core가 내장과 동일하게 라우팅. [PluginStandard.md](docs_design/PluginStandard.md) · [PluginsGuide.md](docs_design/PluginsGuide.md) · [examples/external_plugins/](examples/external_plugins/README.md)
 
 ---
 
-## 8. 스킬: 워크플로로 HomeClaw 확장
+## 9. 스킬: 워크플로로 HomeClaw 확장
 
 **스킬**은 `config/skills/` 아래 폴더로 **SKILL.md**(이름, 설명, 워크플로)를 포함합니다. LLM은 "사용 가능한 스킬"을 보고 도구(또는 **run_skill**로 스크립트)로 실행합니다. `config/core.yml`에서 `use_skills: true` 설정. [SkillsGuide.md](docs_design/SkillsGuide.md) · [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
 
 ---
 
-## 9. 감사의 말
+## 10. 감사의 말
 
 HomeClaw는 다음 두 프로젝트에 영감을 받았습니다.
 
@@ -239,16 +258,16 @@ GPT4People과 OpenClaw에 기여한 모든 분, 그리고 llama.cpp, LiteLLM, Co
 
 ---
 
-## 10. 기여 및 라이선스
+## 11. 기여 및 라이선스
 
 - **기여** — 이슈, 풀 리퀘스트, 논의를 환영합니다. **CONTRIBUTING.md**를 참조하세요.
 - **라이선스** — 이 프로젝트는 **Apache License 2.0**입니다. **LICENSE** 파일을 참조하세요.
 
 ### 로드맵(요약)
 
-**다음**
+**완료**
 
-- **클라우드와 로컬 모델 혼합** — 클라우드와 로컬을 결합해 작업을 효율적으로 하고 비용을 낮추는 설계(예: 단순·고부하는 로컬, 복잡·저지연은 클라우드; 라우팅 및 폴백 규칙).
+- **Mix 모드** — 3계층 라우터(휴리스틱 → 시맨틱 → 분류기 또는 퍼플렉시티)로 요청마다 로컬/클라우드 선택. 리포트(API + **usage_report** 도구)로 비용·튜닝. 자세한 내용은 [Mix mode and reports](https://allenpeng0705.github.io/HomeClaw/mix-mode-and-reports/) 참조.
 
 **이후**
 

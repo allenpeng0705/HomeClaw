@@ -17,7 +17,7 @@
 
 **其他语言 / Other languages:** [English](README.md) | [日本語](README_jp.md) | [한국어](README_kr.md)
 
-**文档:** [https://allenpeng0705.github.io/HomeClaw/](https://allenpeng0705.github.io/HomeClaw/)
+**文档:** [https://allenpeng0705.github.io/HomeClaw/](https://allenpeng0705.github.io/HomeClaw/) — 完整文档（安装、运行、Mix 模式、报告、工具、插件）由 MkDocs 构建并发布于此。您也可以在 GitHub 的 **`docs/`** 目录中浏览源码。
 
 ---
 
@@ -25,14 +25,15 @@
 
 1. [HomeClaw 是什么？](#1-homeclaw-是什么)
 2. [HomeClaw 能做什么？](#2-homeclaw-能做什么)
-3. [如何使用 HomeClaw](#3-如何使用-homeclaw) — 含 [远程访问（Tailscale、Cloudflare Tunnel）](#远程访问tailscale-cloudflare-tunnel)
-4. [伴侣应用（Flutter）](#4-伴侣应用flutter)
-5. [系统插件：homeclaw-browser](#5-系统插件homeclaw-browser)
-6. [技能与插件：让 HomeClaw 为您服务](#6-技能与插件让-homeclaw-为您服务)
-7. [插件：扩展 HomeClaw](#7-插件扩展-homeclaw)
-8. [技能：用工作流扩展 HomeClaw](#8-技能用工作流扩展-homeclaw)
-9. [致谢](#9-致谢)
-10. [贡献与许可](#10-贡献与许可)
+3. [Mix 模式：智能本地/云端路由](#3-mix-模式智能本地云端路由) — 三层路由与强大的第三层
+4. [如何使用 HomeClaw](#4-如何使用-homeclaw) — 含 [远程访问（Tailscale、Cloudflare Tunnel）](#远程访问tailscale-cloudflare-tunnel)
+5. [伴侣应用（Flutter）](#5-伴侣应用flutter)
+6. [系统插件：homeclaw-browser](#6-系统插件homeclaw-browser)
+7. [技能与插件：让 HomeClaw 为您服务](#7-技能与插件让-homeclaw-为您服务)
+8. [插件：扩展 HomeClaw](#8-插件扩展-homeclaw)
+9. [技能：用工作流扩展 HomeClaw](#9-技能用工作流扩展-homeclaw)
+10. [致谢](#10-致谢)
+11. [贡献与许可](#11-贡献与许可)
 
 ---
 
@@ -106,7 +107,25 @@ flowchart TB
 
 ---
 
-## 3. 如何使用 HomeClaw
+## 3. Mix 模式：智能本地/云端路由
+
+**Mix 模式**让 HomeClaw 按**每条请求**选择使用**本地**或**云端**主模型。**三层路由器**在注入工具与插件之前运行，仅根据用户消息决策，因此整轮对话由同一模型完成——简单或私密任务走本地，需要搜索或复杂推理时走云端。可通过 REST API 或内置 **usage_report** 工具查看**报告**（路由决策与云端用量）。
+
+### 三层结构
+
+| 层 | 名称 | 作用 |
+|----|------|------|
+| **1** | **启发式** | 基于关键词与长文本的 YAML 规则。例如：“截图”“锁屏”→ 本地；“搜索网页”“最新新闻”→ 云端。先匹配先生效。 |
+| **2** | **语义** | 嵌入相似度：将用户消息与**本地/云端**示例语句比较。适合同义表达与意图识别，无需列举所有说法。 |
+| **3** | **分类器或困惑度** | 当 L1、L2 未决时：可用**小本地模型**回答“Local 或 Cloud？”（**classifier**），或用**主本地模型**生成少量 token 并取 **logprobs**——置信高（平均 logprob 高）则留本地，否则上云（**perplexity**）。 |
+
+**强大的第三层设计：** 当本地主模型较强时，可将第三层设为 **perplexity** 模式：由同一主模型通过“置信度”参与决策。Core 向您的 llama.cpp 服务发送一次短探测（如 5 个 token 且 `logprobs=true`），计算平均 log 概率；高于阈值（如 -0.6）则走**本地**，否则走**云端**。无需额外分类器模型，主模型自身的不确定性驱动决策。若本地模型较弱，可改用 **classifier** 模式（小型 0.5B 裁判模型）。
+
+**启用方式：** 在 `config/core.yml` 中设置 `main_llm_mode: mix`、`main_llm_local`、`main_llm_cloud` 与 `hybrid_router`。完整说明（如何使用、如何查看报告、如何调节参数）见 **[Mix mode and reports](https://allenpeng0705.github.io/HomeClaw/mix-mode-and-reports/)**。
+
+---
+
+## 4. 如何使用 HomeClaw
 
 **分步指南**（安装、配置、本地/云端模型、记忆、工具、工作区、测试、插件、技能）见 **[HOW_TO_USE_zh.md](HOW_TO_USE_zh.md)**（另有 [English](HOW_TO_USE.md) | [日本語](HOW_TO_USE_jp.md) | [한국어](HOW_TO_USE_kr.md)）。
 
@@ -152,7 +171,7 @@ HomeClaw 支持 **macOS**、**Windows** 与 **Linux**。需要：
    python -m main start
    ```
 
-   **一键运行 Core 与所有系统插件**：在 `config/core.yml` 中设置 `system_plugins_auto_start: true`。Core 将自动启动 `system_plugins/`（如 homeclaw-browser）并注册。见 [§5 系统插件：homeclaw-browser](#5-系统插件homeclaw-browser) 与 **system_plugins/README.md**。
+   **一键运行 Core 与所有系统插件**：在 `config/core.yml` 中设置 `system_plugins_auto_start: true`。Core 将自动启动 `system_plugins/`（如 homeclaw-browser）并注册。见 [§6 系统插件：homeclaw-browser](#6-系统插件homeclaw-browser) 与 **system_plugins/README.md**。
 
 5. **运行渠道**（另开终端）
 
@@ -196,7 +215,7 @@ HomeClaw 支持 **macOS**、**Windows** 与 **Linux**。需要：
 
 ---
 
-## 4. 伴侣应用（Flutter）
+## 5. 伴侣应用（Flutter）
 
 **伴侣应用**是基于 Flutter 的 **Mac、Windows、iPhone、Android** 客户端：聊天、语音、附件，以及**管理 Core**（在应用中编辑 core.yml 和 user.yml）。[伴侣应用文档](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [从源码构建](clients/homeclaw_companion/README.md)
 
@@ -204,31 +223,31 @@ HomeClaw 支持 **macOS**、**Windows** 与 **Linux**。需要：
 
 ---
 
-## 5. 系统插件：homeclaw-browser
+## 6. 系统插件：homeclaw-browser
 
-**homeclaw-browser**（Node.js）位于 `system_plugins/homeclaw-browser`：WebChat UI 在 http://127.0.0.1:3020/，浏览器自动化（LLM 可打开 URL、点击、输入），Canvas 与 Nodes。在 `config/core.yml` 中设置 `system_plugins_auto_start: true` 可与 Core 一起启动，或手动运行 `node server.js` 与 `node register.js`。[system_plugins/README.md](system_plugins/README.md) · [homeclaw-browser README](system_plugins/homeclaw-browser/README.md) · [§7 插件](#7-插件扩展-homeclaw)
+**homeclaw-browser**（Node.js）位于 `system_plugins/homeclaw-browser`：WebChat UI 在 http://127.0.0.1:3020/，浏览器自动化（LLM 可打开 URL、点击、输入），Canvas 与 Nodes。在 `config/core.yml` 中设置 `system_plugins_auto_start: true` 可与 Core 一起启动，或手动运行 `node server.js` 与 `node register.js`。[system_plugins/README.md](system_plugins/README.md) · [homeclaw-browser README](system_plugins/homeclaw-browser/README.md) · [§8 插件](#8-插件扩展-homeclaw)
 
 ---
 
-## 6. 技能与插件：让 HomeClaw 为您服务
+## 7. 技能与插件：让 HomeClaw 为您服务
 
 **工具**（文件、记忆、网页搜索、cron、浏览器）、**插件**（Weather、News、Mail 等）与**技能**（SKILL.md 中的工作流）让智能体回答、记忆、路由到插件并运行工作流。自然提问即可；LLM 会选择工具、技能或插件。[ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
 
 ---
 
-## 7. 插件：扩展 HomeClaw
+## 8. 插件：扩展 HomeClaw
 
 **内置插件**（Python）：`plugins/<Name>/`，含 plugin.yaml、config.yml、plugin.py；Core 启动时自动发现。**外部插件**（任意语言）：运行 HTTP 服务（`GET /health`、`POST /run`），通过 `POST /api/plugins/register` 注册；Core 会像内置插件一样路由到该服务。[PluginStandard.md](docs_design/PluginStandard.md) · [PluginsGuide.md](docs_design/PluginsGuide.md) · [examples/external_plugins/](examples/external_plugins/README.md)
 
 ---
 
-## 8. 技能：用工作流扩展 HomeClaw
+## 9. 技能：用工作流扩展 HomeClaw
 
 **技能**是 `config/skills/` 下的文件夹，内含 **SKILL.md**（名称、描述、工作流）。LLM 会看到「可用技能」并使用工具（或 **run_skill** 运行脚本）完成任务。在 `config/core.yml` 中设置 `use_skills: true`。[SkillsGuide.md](docs_design/SkillsGuide.md) · [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
 
 ---
 
-## 9. 致谢
+## 10. 致谢
 
 HomeClaw 的诞生离不开两个项目的启发：
 
@@ -239,16 +258,18 @@ HomeClaw 的诞生离不开两个项目的启发：
 
 ---
 
-## 10. 贡献与许可
+## 11. 贡献与许可
 
 - **贡献** — 欢迎提交 issue、Pull Request 与讨论。参见 **CONTRIBUTING.md**。
 - **许可** — 本项目采用 **Apache License 2.0**。见 **LICENSE** 文件。
 
 ### 路线图（摘要）
 
-**下一步**
+**已完成**
 
-- **云端与本地模型混合** — 设计如何组合云端与本地模型，使工作更高效、成本更低（如简单或高量任务用本地，复杂或低延迟用云端；路由与回退规则）。
+- **Mix 模式** — 三层路由（启发式 → 语义 → 分类器或困惑度）按请求选择本地或云端。报告（API + `usage_report` 工具）用于成本与调参。见 [Mix mode and reports](https://allenpeng0705.github.io/HomeClaw/mix-mode-and-reports/)。
+
+**下一步**
 
 **后续**
 

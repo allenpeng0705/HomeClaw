@@ -17,7 +17,7 @@
 
 **Other languages / 其他语言 / 他の言語 / 다른 언어:** [简体中文](README_zh.md) | [日本語](README_jp.md) | [한국어](README_kr.md)
 
-**Documentation:** [https://allenpeng0705.github.io/HomeClaw/](https://allenpeng0705.github.io/HomeClaw/)
+**Documentation:** [https://allenpeng0705.github.io/HomeClaw/](https://allenpeng0705.github.io/HomeClaw/) — Full docs (install, run, mix mode, reports, tools, plugins) are built with MkDocs and published there. You can also browse the source in the **`docs/`** folder on GitHub.
 
 ---
 
@@ -25,14 +25,15 @@
 
 1. [What is HomeClaw?](#1-what-is-homeclaw)
 2. [What Can HomeClaw Do?](#2-what-can-homeclaw-do)
-3. [How to Use HomeClaw](#3-how-to-use-homeclaw) — includes [Remote access (Tailscale, Cloudflare Tunnel)](#remote-access-tailscale-cloudflare-tunnel)
-4. [Companion app (Flutter)](#4-companion-app-flutter)
-5. [System plugin: homeclaw-browser](#5-system-plugin-homeclaw-browser)
-6. [Skills and Plugins: Make HomeClaw Work for You](#6-skills-and-plugins-make-homeclaw-work-for-you)
-7. [Plugins: Extend HomeClaw](#7-plugins-extend-homeclaw)
-8. [Skills: Extend HomeClaw with Workflows](#8-skills-extend-homeclaw-with-workflows)
-9. [Acknowledgments](#9-acknowledgments)
-10. [Contributing & License](#10-contributing--license)
+3. [Mix mode: Smart local/cloud routing](#3-mix-mode-smart-localcloud-routing) — 3-layer router and powerful Layer 3
+4. [How to Use HomeClaw](#4-how-to-use-homeclaw) — includes [Remote access (Tailscale, Cloudflare Tunnel)](#remote-access-tailscale-cloudflare-tunnel)
+5. [Companion app (Flutter)](#5-companion-app-flutter)
+6. [System plugin: homeclaw-browser](#6-system-plugin-homeclaw-browser)
+7. [Skills and Plugins: Make HomeClaw Work for You](#7-skills-and-plugins-make-homeclaw-work-for-you)
+8. [Plugins: Extend HomeClaw](#8-plugins-extend-homeclaw)
+9. [Skills: Extend HomeClaw with Workflows](#9-skills-extend-homeclaw-with-workflows)
+10. [Acknowledgments](#10-acknowledgments)
+11. [Contributing & License](#11-contributing--license)
 
 ---
 
@@ -108,7 +109,25 @@ Use **cloud** (LiteLLM: OpenAI, Gemini, DeepSeek, etc.) or **local** (llama.cpp,
 
 ---
 
-## 3. How to Use HomeClaw
+## 3. Mix mode: Smart local/cloud routing
+
+**Mix mode** lets HomeClaw choose **per request** whether to use your **local** or **cloud** main model. A **3-layer router** runs before tools and plugins, using only the user message, so you get one model for the whole turn—local for simple or private tasks, cloud when you need search or heavy reasoning. You see **reports** (router decisions and cloud usage) via REST API or the built-in **usage_report** tool.
+
+### Three layers
+
+| Layer | Name | What it does |
+|-------|------|----------------|
+| **1** | **Heuristic** | Fast keyword and long-input rules (YAML). Example: “screenshot”, “锁屏” → local; “search the web”, “最新新闻” → cloud. First match wins. |
+| **2** | **Semantic** | Embedding similarity: compare the user message to example **local** vs **cloud** utterances. Good for paraphrases and intent without listing every phrase. |
+| **3** | **Classifier or Perplexity** | When L1 and L2 don’t decide: either a **small local model** answers “Local or Cloud?” (**classifier**), or the **main local model** is probed with a few tokens and **logprobs**—if it’s confident (high avg logprob), stay local; otherwise escalate to cloud (**perplexity**). |
+
+**Powerful Layer 3 design:** With a strong local model, you can set Layer 3 to **perplexity** mode: the same model that might answer is asked to “vote” by confidence. Core sends a tiny probe (e.g. 5 tokens with `logprobs=true` to your llama.cpp server), computes the average log probability, and routes **local** if above a threshold (e.g. -0.6) or **cloud** if below. No extra classifier model needed; the main model’s own uncertainty drives the decision. For weak local models, use **classifier** mode (small 0.5B judge) instead.
+
+**Enable:** Set `main_llm_mode: mix`, `main_llm_local`, `main_llm_cloud`, and `hybrid_router` in `config/core.yml`. Full guide (how to use, how to see reports, how to tune every parameter): **[Mix mode and reports](https://allenpeng0705.github.io/HomeClaw/mix-mode-and-reports/)**.
+
+---
+
+## 4. How to Use HomeClaw
 
 For a **step-by-step guide** (install, config, local/cloud models, memory, tools, workspace, testing, plugins, skills), see **[HOW_TO_USE.md](HOW_TO_USE.md)** (also [中文](HOW_TO_USE_zh.md) | [日本語](HOW_TO_USE_jp.md) | [한국어](HOW_TO_USE_kr.md)).
 
@@ -154,7 +173,7 @@ HomeClaw runs on **macOS**, **Windows**, and **Linux**. You need:
    python -m main start
    ```
 
-   **Run Core and all system plugins in one command:** Set `system_plugins_auto_start: true` in `config/core.yml`. Core will then start each plugin in `system_plugins/` (e.g. homeclaw-browser) and register them automatically. See [§5 System plugin: homeclaw-browser](#5-system-plugin-homeclaw-browser) and **system_plugins/README.md**.
+   **Run Core and all system plugins in one command:** Set `system_plugins_auto_start: true` in `config/core.yml`. Core will then start each plugin in `system_plugins/` (e.g. homeclaw-browser) and register them automatically. See [§6 System plugin: homeclaw-browser](#6-system-plugin-homeclaw-browser) and **system_plugins/README.md**.
 
 5. **Run a channel** (in another terminal)
 
@@ -198,7 +217,7 @@ The app only needs **Core URL** and optional **API key**; no Tailscale or Cloudf
 
 ---
 
-## 4. Companion app (Flutter)
+## 5. Companion app (Flutter)
 
 **Companion** is a Flutter app for **Mac, Windows, iPhone, and Android**: chat, voice, attachments, and **Manage Core** (edit core.yml and user.yml from the app). [Companion app doc](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [Build from source](clients/homeclaw_companion/README.md)
 
@@ -206,13 +225,13 @@ The app only needs **Core URL** and optional **API key**; no Tailscale or Cloudf
 
 ---
 
-## 5. System plugin: homeclaw-browser
+## 6. System plugin: homeclaw-browser
 
-**homeclaw-browser** (Node.js) in `system_plugins/homeclaw-browser`: WebChat UI at http://127.0.0.1:3020/, browser automation (LLM can open URLs, click, type), Canvas, and Nodes. Set `system_plugins_auto_start: true` in `config/core.yml` to start with Core, or run `node server.js` and `node register.js` manually. [system_plugins/README.md](system_plugins/README.md) · [homeclaw-browser README](system_plugins/homeclaw-browser/README.md) · [§7 Plugins](#7-plugins-extend-homeclaw)
+**homeclaw-browser** (Node.js) in `system_plugins/homeclaw-browser`: WebChat UI at http://127.0.0.1:3020/, browser automation (LLM can open URLs, click, type), Canvas, and Nodes. Set `system_plugins_auto_start: true` in `config/core.yml` to start with Core, or run `node server.js` and `node register.js` manually. [system_plugins/README.md](system_plugins/README.md) · [homeclaw-browser README](system_plugins/homeclaw-browser/README.md) · [§8 Plugins](#8-plugins-extend-homeclaw)
 
 ---
 
-## 6. Skills and Plugins: Make HomeClaw Work for You
+## 7. Skills and Plugins: Make HomeClaw Work for You
 
 **Tools** (file, memory, web search, cron, browser), **plugins** (Weather, News, Mail, etc.), and **skills** (workflows in SKILL.md) let the agent answer, remember, route to plugins, and run workflows. Just ask naturally; the LLM chooses tools, skills, or plugins. [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
 
@@ -221,13 +240,13 @@ The app only needs **Core URL** and optional **API key**; no Tailscale or Cloudf
 
 ---
 
-## 7. Plugins: Extend HomeClaw
+## 8. Plugins: Extend HomeClaw
 
 **Built-in plugins** (Python): `plugins/<Name>/` with plugin.yaml, config.yml, plugin.py; Core discovers them at startup. **External plugins** (any language): run an HTTP server (`GET /health`, `POST /run`), register with `POST /api/plugins/register`; Core routes to it like built-in. [PluginStandard.md](docs_design/PluginStandard.md) · [PluginsGuide.md](docs_design/PluginsGuide.md) · [examples/external_plugins/](examples/external_plugins/README.md)
 
 ---
 
-## 8. Skills: Extend HomeClaw with Workflows
+## 9. Skills: Extend HomeClaw with Workflows
 
 **Skills** are folders under `config/skills/` with **SKILL.md** (name, description, workflow). The LLM sees "Available skills" and uses tools (or **run_skill** for scripts) to accomplish them. Set `use_skills: true` in `config/core.yml`. [SkillsGuide.md](docs_design/SkillsGuide.md) · [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
 
@@ -236,7 +255,7 @@ The app only needs **Core URL** and optional **API key**; no Tailscale or Cloudf
 
 ---
 
-## 9. Acknowledgments
+## 10. Acknowledgments
 
 HomeClaw would not exist without two projects that inspired it:
 
@@ -247,16 +266,18 @@ Thank you to everyone who contributed to GPT4People and OpenClaw, and to the ope
 
 ---
 
-## 10. Contributing & License
+## 11. Contributing & License
 
 - **Contributing** — We welcome issues, pull requests, and discussions. See **CONTRIBUTING.md** for guidelines.
 - **License** — This project is licensed under the **Apache License 2.0**. See the **LICENSE** file.
 
 ### Roadmap (summary)
 
-**Next**
+**Done**
 
-- **Cloud and local model mix** — Design how to combine cloud and local models so that work is done efficiently and cost stays low (e.g. use local for simple or high-volume tasks, cloud for complex or low-latency needs; routing and fallback rules).
+- **Mix mode** — 3-layer router (heuristic → semantic → classifier or perplexity) chooses local vs cloud per request. Reports (API + `usage_report` tool) for cost and tuning. See [Mix mode and reports](https://allenpeng0705.github.io/HomeClaw/mix-mode-and-reports/).
+
+**Next**
 
 **Later**
 
