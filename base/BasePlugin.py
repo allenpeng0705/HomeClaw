@@ -31,8 +31,9 @@ class BasePlugin:
         self.registration = None  # Set by PluginManager from plugin.yaml (unified registration with capabilities)  
 
     def initialize(self):
-        logger.debug(f"Initializing plugin: {self.config['description']}")
-        self.set_description(self.config['description'])
+        description = (self.config or {}).get('description') or ''
+        logger.debug(f"Initializing plugin: {description or self.__class__.__name__}")
+        self.set_description(description)
         # Stable id: from config 'id' or slug from description or class name
         raw_id = (self.config.get('id') or '').strip() if self.config else ''
         if raw_id:
