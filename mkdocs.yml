@@ -46,6 +46,7 @@ nav:
   - Run: run.md
   - Getting started: getting-started.md
   - Companion app: companion-app.md
+  - Companion app (macOS permissions): companion-app-macos-permissions.md
   - Channels: channels.md
   - Companion vs Channels: companion-vs-channels.md
   - Tools: tools.md

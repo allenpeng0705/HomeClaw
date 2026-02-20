@@ -19,3 +19,5 @@ The **HomeClaw Companion** app is a **Flutter-based** client for **Mac, Windows,
 - **Connect:** Set the Core URL and optional API key in the app (e.g. in Settings or on first launch). The app talks to your Core over HTTP (e.g. `http://127.0.0.1:9000` or your server URL).
 
 You can use the companion app **instead of** or **together with** WebChat, CLI, Telegram, and other channels—all talk to the same Core and memory.
+
+**macOS users:** For permissions (network, and future voice/notifications/screen), see [Companion app (macOS permissions)](companion-app-macos-permissions.md).

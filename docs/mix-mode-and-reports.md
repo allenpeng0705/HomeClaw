@@ -107,6 +107,7 @@ All mix-mode and router parameters live under **`config/core.yml`** → `main_ll
 | **main_llm_local** | Top-level | Local model ref (e.g. `local_models/main_4B`) used when route is local. | Must match an entry in `local_models`. |
 | **main_llm_cloud** | Top-level | Cloud model ref used when route is cloud. | Must match an entry in `cloud_models`. |
 | **default_route** | `hybrid_router` | Route when **no** layer selects (e.g. ambiguous or low score). | `local` = save cost; `cloud` = safer for unknown. |
+| **show_route_in_response** | `hybrid_router` | When `true`, prepend `[Local] ` or `[Cloud] ` to each reply (for testing). | Default `false`. Turn on to verify routing in the UI without checking logs. |
 | **heuristic.enabled** | `hybrid_router.heuristic` | Turn Layer 1 (keyword/long-input) on/off. | Off if you rely only on semantic + Layer 3. |
 | **heuristic.threshold** | `hybrid_router.heuristic` | Min score to accept a heuristic match (keyword match gives 1.0). | Usually keep 0.5; rarely need to change. |
 | **heuristic.rules_path** | `hybrid_router.heuristic` | Path to YAML with keywords and long_input_* rules. | Point to your `heuristic_rules.yml` (or generate via scripts). |

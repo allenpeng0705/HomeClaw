@@ -446,6 +446,8 @@ main_llm_local: local_models/main_vl_model_4B
 main_llm_cloud: cloud_models/Gemini-2.5-Flash
 hybrid_router:
   default_route: local
+  # For testing: when true, prepend "[Local] " or "[Cloud] " to each reply so you can see which model answered.
+  show_route_in_response: false
   heuristic:
     enabled: true
     threshold: 0.5
