@@ -304,6 +304,14 @@ local_models:
     capabilities: [Chat]
     supported_media: [image]
 
+  # Optional: Layer 3 classifier for mix mode (hybrid_router.slm.model). Small model (e.g. Qwen3-0.5B) on a separate port; Core starts it when main_llm_mode: mix and slm.enabled.
+  - id: classifier_0_6b
+    alias: classifier
+    path: Qwen3-0.6B-Q5_K_M.gguf
+    host: 127.0.0.1
+    port: 5089
+    capabilities: [Chat]
+
 
 # ——— 3. Cloud models (LiteLLM; one service per entry, each host/port) ———
 # api_key_name: env var name (e.g. GEMINI_API_KEY); Core uses that env var for the key. Optional api_key: set the key here instead of env (use for convenience only; avoid committing secrets).
@@ -335,7 +343,7 @@ cloud_models:
     host: 127.0.0.1
     port: 4002
     api_key_name: GEMINI_API_KEY
-    api_key: 
+    api_key: AIzaSyAiVfvoYghkQtOch0BGA71PSDV9pqTC0p0
     capabilities: [Functioncall, Chat]
   # Anthropic Claude
   - id: Claude-Sonnet
@@ -429,8 +437,37 @@ cloud_models:
 #   are omitted and a short note is added so the model does not crash.
 
 # ——— Selected main and embedding model: local_models/<id> or cloud_models/<id> ———
-# main_llm: cloud_models/Gemini-2.5-Flash
-main_llm: local_models/main_vl_model_4B
+#main_llm: cloud_models/Gemini-2.5-Flash
+# main_llm: local_models/main_vl_model_4B
+# Optional: main_llm_mode: "local" | "cloud" | "mix". Omit or leave unset = derive from main_llm (cloud_models/ → cloud, else local).
+# When "mix": 3-layer router picks per-request between main_llm_local and main_llm_cloud. Set both and hybrid_router (see docs_design/HybridRouterImplementationPlan.md).
+main_llm_mode: mix
+main_llm_local: local_models/main_vl_model_4B
+main_llm_cloud: cloud_models/Gemini-2.5-Flash
+hybrid_router:
+  default_route: local
+  heuristic:
+    enabled: true
+    threshold: 0.5
+    rules_path: config/hybrid/heuristic_rules.yml
+  semantic:
+    enabled: true
+    threshold: 0.6
+    routes_path: config/hybrid/semantic_routes.yml
+  # Layer 3: classifier (small model) or perplexity (main model confidence probe).
+  # - mode: classifier = small model answers "Local or Cloud?" (uses model above).
+  # - mode: perplexity = main local model generates a few tokens with logprobs; average logprob
+  #   vs perplexity_threshold decides: stay local (confident) or escalate to cloud (uncertain).
+  # perplexity_max_tokens: how many tokens to generate for the probe (default 5). More = more signal, slower.
+  # perplexity_threshold: avg logprob above this → local, below → cloud. Higher (e.g. -0.4) = stricter local; lower (e.g. -0.8) = more stays local. Default -0.6.
+  slm:
+    enabled: true
+    threshold: 0.5
+    model: local_models/classifier_0_6b
+    mode: classifier
+    # Uncomment when mode: perplexity:
+    # perplexity_max_tokens: 5
+    # perplexity_threshold: -0.6
 # main_llm_language: list of allowed/preferred response languages (e.g. [zh, en] or [en]).
 #   - First item = primary: used for prompt file loading (e.g. response.en.yml, prompt_en.yml) and default when user language is unknown.
 #   - Full list = allowed response languages: you can add a system-line like "Respond only in one of: {languages}; if the user's language is unknown, use the first."

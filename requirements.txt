@@ -43,6 +43,9 @@ cognee   # default memory backend
 kuzu>=0.4.0   # optional graph for memory_backend=chroma
 # neo4j>=5.0.0   # optional: graph for memory_backend=chroma (uncomment if using Neo4j)
 
+# Hybrid router Layer 2: semantic routing (mix mode). Uses existing embedding via custom encoder.
+semantic-router
+
 # Optional (uncomment if needed):
 # document_read tool: PDF, PPT, Word, MD, HTML, XML, JSON, etc. (one powerful tool)
 unstructured[all-docs]

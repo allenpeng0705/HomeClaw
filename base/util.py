@@ -345,6 +345,37 @@ class Util:
             return main_llm_name, main_llm_name, eff_type, host, port
         return main_llm_name, main_llm_name, eff_type, host, port
 
+    def main_llm_for_route(self, route: Optional[str] = None) -> Tuple[str, str, str, str, int]:
+        """Return (path_or_model, raw_id, mtype, host, port) for the main LLM to use for this request.
+        When main_llm_mode is not 'mix', ignores route and returns same as main_llm() (unchanged behavior).
+        When main_llm_mode == 'mix' and route in ('local', 'cloud'), returns the tuple for main_llm_local or main_llm_cloud.
+        When main_llm_mode == 'mix' and route is None or invalid, uses hybrid_router.default_route (default 'local') then resolves."""
+        mode = (getattr(self.core_metadata, "main_llm_mode", None) or "").strip().lower()
+        if mode != "mix":
+            return self.main_llm()
+        ref = None
+        if route in ("local", "cloud"):
+            ref = (self.core_metadata.main_llm_local or "").strip() if route == "local" else (self.core_metadata.main_llm_cloud or "").strip()
+        if not ref:
+            hr = getattr(self.core_metadata, "hybrid_router", None) or {}
+            default = (hr.get("default_route") or "local").strip().lower()
+            ref = (self.core_metadata.main_llm_local or "").strip() if default == "local" else (self.core_metadata.main_llm_cloud or "").strip()
+        if not ref:
+            return self.main_llm()
+        main_llm_name = ref
+        entry, mtype = self._get_model_entry(main_llm_name)
+        if entry is not None:
+            host = entry.get('host', '127.0.0.1')
+            port = int(entry.get('port', 5088))
+            if mtype == 'local':
+                path = os.path.normpath(entry.get('path', ''))
+                full_path = os.path.join(self.models_path(), path)
+                _, raw_id = self._parse_model_ref(main_llm_name)
+                return full_path, raw_id or main_llm_name, 'local', host, port
+            _, raw_id = self._parse_model_ref(main_llm_name)
+            return entry.get('path', main_llm_name), raw_id or main_llm_name, 'litellm', host, port
+        return self.main_llm()
+
     def _llm_request_model_and_headers(self, path_or_model: str, raw_id: str, mtype: str) -> Tuple[str, dict]:
         """Return (model string for request body, headers dict) for local (llama.cpp) or cloud (LiteLLM)."""
         # LiteLLM expects provider/model (e.g. gemini/gemini-2.5-flash); local servers expect model id (e.g. main_vl_model).
@@ -847,6 +878,12 @@ class Util:
             if resolved is None:
                 resolved = Util().main_llm()
             path_or_model, raw_id, mtype, model_host, model_port = resolved
+            if mtype == "litellm":
+                try:
+                    from hybrid_router.metrics import log_cloud_usage
+                    log_cloud_usage()
+                except Exception:
+                    pass
             model_for_request, headers = Util()._llm_request_model_and_headers(path_or_model, raw_id, mtype)
             data = {}
             if grammar != None and len(grammar) > 0:
@@ -956,17 +993,19 @@ class Util:
         tools: Optional[List[Dict]] = None,
         tool_choice: str = "auto",
         grammar: Optional[str] = None,
+        llm_name: Optional[str] = None,
     ) -> Optional[dict]:
         """
         Same as openai_chat_completion but returns the full assistant message dict for tool loop.
         Returns: {"role": "assistant", "content": str or None, "tool_calls": [...] or None}.
         Caller can append to messages and, if tool_calls present, execute tools and call again.
         Uses same llm_max_concurrent semaphore as openai_chat_completion.
+        When llm_name is set (e.g. mix-mode route ref), uses that model for this call.
         """
         sem = self._get_llm_semaphore()
         async with sem:
             return await self._openai_chat_completion_message_impl(
-                messages, tools=tools, tool_choice=tool_choice, grammar=grammar,
+                messages, tools=tools, tool_choice=tool_choice, grammar=grammar, llm_name=llm_name,
             )
 
     async def _openai_chat_completion_message_impl(
@@ -975,9 +1014,22 @@ class Util:
         tools: Optional[List[Dict]] = None,
         tool_choice: str = "auto",
         grammar: Optional[str] = None,
+        llm_name: Optional[str] = None,
     ) -> Optional[dict]:
         try:
-            path_or_model, raw_id, mtype, model_host, model_port = Util().main_llm()
+            if llm_name and str(llm_name).strip():
+                resolved = self._resolve_llm(llm_name.strip())
+            else:
+                resolved = None
+            if resolved is None:
+                resolved = Util().main_llm()
+            path_or_model, raw_id, mtype, model_host, model_port = resolved
+            if mtype == "litellm":
+                try:
+                    from hybrid_router.metrics import log_cloud_usage
+                    log_cloud_usage()
+                except Exception:
+                    pass
             model_for_request, headers = Util()._llm_request_model_and_headers(path_or_model, raw_id, mtype)
             data = {"model": model_for_request, "messages": messages}
             if grammar:

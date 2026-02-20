@@ -308,7 +308,50 @@ class LLMServiceManager:
             self.run_litellm_service()
             self.llms.append(llm_name)
             logger.debug(f"Running Main LLM Server {llm_name} on {host}:{port}")
-            
+
+    def run_classifier_llm(self):
+        """When main_llm_mode == 'mix' and hybrid_router.slm.enabled, start the classifier model on its port (same mechanism as main LLM)."""
+        meta = Util().get_core_metadata()
+        mode = (getattr(meta, "main_llm_mode", None) or "").strip().lower()
+        if mode != "mix":
+            return
+        hr = getattr(meta, "hybrid_router", None) or {}
+        if not isinstance(hr, dict):
+            return
+        slm = hr.get("slm")
+        if not isinstance(slm, dict) or not slm.get("enabled"):
+            return
+        model_ref = (slm.get("model") or "").strip()
+        if not model_ref:
+            return
+        entry, mtype = Util()._get_model_entry(model_ref)
+        if entry is None or mtype != "local":
+            logger.debug("Classifier LLM: model ref {} not found or not local, skipping.", model_ref)
+            return
+        _, raw_id = Util()._parse_model_ref(model_ref)
+        name = raw_id or model_ref
+        if name in self.llms:
+            logger.debug("Classifier LLM {} is already running", name)
+            return
+        host = entry.get("host", "127.0.0.1")
+        port = int(entry.get("port", 5089))
+        path_rel = (entry.get("path") or "").strip()
+        if not path_rel:
+            logger.warning("Classifier LLM entry has no path, skipping.")
+            return
+        models_base = Util().models_path()
+        full_path = os.path.join(models_base, os.path.normpath(path_rel))
+        if not os.path.isfile(full_path):
+            logger.warning("Classifier model file not found: {}, skipping start. Put the GGUF in the models folder.", full_path)
+            return
+        mmproj_path, lora_paths, lora_base_path = self._resolve_local_extra_paths(entry)
+        self.start_llama_cpp_server(
+            name, host, port, path_rel, pooling=False,
+            mmproj_path=mmproj_path, lora_paths=lora_paths or None, lora_base_path=lora_base_path,
+        )
+        self.llms.append(name)
+        logger.debug("Running classifier LLM {} on {}:{}", name, host, port)
+
     '''       
     async def start_llama_cpp_python(self, host, port, model_path, 
                                      chat_format='chatml-function-calling', 
@@ -514,6 +557,7 @@ class LLMServiceManager:
         try:
             self.run_embedding_llm()
             self.run_main_llm()
+            self.run_classifier_llm()
         except Exception as e:
             logger.exception(f"Unexpected error in run: {e}")
 

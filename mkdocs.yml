@@ -51,6 +51,8 @@ nav:
   - Tools: tools.md
   - Plugins: plugins.md
   - Models: models.md
+  - Mix mode and reports: mix-mode-and-reports.md
+  - Hybrid router scripts: hybrid-router-scripts.md
   - Platform: platform.md
   - Remote access: remote-access.md
   - Help: help.md

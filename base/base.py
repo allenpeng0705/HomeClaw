@@ -608,6 +608,11 @@ class CoreMetadata:
     notify_unknown_request: bool = False
     # Outbound text format: Core converts assistant reply (Markdown) before sending to channels. "whatsapp" (default) = *bold* _italic_ ~strikethrough~ (works for most IMs); "plain" = strip Markdown; "none" = no conversion.
     outbound_markdown_format: str = "whatsapp"
+    # Mix mode (3-layer router): "local" | "cloud" | "mix". Empty or missing = derive from main_llm (cloud_models/ → cloud, else local). When "mix", main_llm_local and main_llm_cloud are used per request by the router.
+    main_llm_mode: str = ""
+    main_llm_local: str = ""   # e.g. local_models/main_vl_model_4B; required when main_llm_mode == "mix"
+    main_llm_cloud: str = ""  # e.g. cloud_models/Gemini-2.5-Flash; required when main_llm_mode == "mix"
+    hybrid_router: Dict[str, Any] = field(default_factory=dict)  # default_route, heuristic, semantic, slm (enabled, threshold, paths/model)
 
     @staticmethod
     def _normalize_system_plugins_env(raw: Any) -> Dict[str, Dict[str, str]]:
@@ -734,6 +739,16 @@ class CoreMetadata:
                         main_llm_api_key_val = entry_key
                         main_llm_api_key_name_val = (m.get('api_key_name') or main_llm_api_key_name_val or '').strip()
                     break
+        # main_llm_mode: "local" | "cloud" | "mix". Default: derive from main_llm so existing configs stay valid.
+        main_llm_mode_raw = (data.get('main_llm_mode') or '').strip().lower()
+        if main_llm_mode_raw in ('local', 'cloud', 'mix'):
+            main_llm_mode_val = main_llm_mode_raw
+        else:
+            main_llm_mode_val = 'cloud' if main_llm_ref.startswith('cloud_models/') else 'local'
+        main_llm_local_val = (data.get('main_llm_local') or '').strip()
+        main_llm_cloud_val = (data.get('main_llm_cloud') or '').strip()
+        hybrid_router_raw = data.get('hybrid_router')
+        hybrid_router_val = hybrid_router_raw if isinstance(hybrid_router_raw, dict) else {}
         cognee = data.get('cognee')
         if not isinstance(cognee, dict):
             cognee = {}
@@ -812,6 +827,10 @@ class CoreMetadata:
             system_plugins_env=CoreMetadata._normalize_system_plugins_env(data.get('system_plugins_env')),
             notify_unknown_request=bool(data.get('notify_unknown_request', False)),
             outbound_markdown_format=(data.get('outbound_markdown_format') or 'whatsapp').strip().lower() or 'whatsapp',
+            main_llm_mode=main_llm_mode_val,
+            main_llm_local=main_llm_local_val,
+            main_llm_cloud=main_llm_cloud_val,
+            hybrid_router=hybrid_router_val,
         )
 
     # @staticmethod
@@ -899,6 +918,15 @@ class CoreMetadata:
                 core_dict['main_llm_api_key_name'] = core.main_llm_api_key_name
             if (core.main_llm_api_key or '').strip():
                 core_dict['main_llm_api_key'] = core.main_llm_api_key
+            # Mix mode and hybrid router (optional; omit when not used so existing configs stay clean)
+            if getattr(core, 'main_llm_mode', None) and str(core.main_llm_mode).strip().lower() == 'mix':
+                core_dict['main_llm_mode'] = 'mix'
+                if (getattr(core, 'main_llm_local', None) or '').strip():
+                    core_dict['main_llm_local'] = (core.main_llm_local or '').strip()
+                if (getattr(core, 'main_llm_cloud', None) or '').strip():
+                    core_dict['main_llm_cloud'] = (core.main_llm_cloud or '').strip()
+                if getattr(core, 'hybrid_router', None) and isinstance(core.hybrid_router, dict) and core.hybrid_router:
+                    core_dict['hybrid_router'] = core.hybrid_router
             yaml.safe_dump(core_dict, file, default_flow_style=False)
 
  

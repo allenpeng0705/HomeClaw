@@ -11,6 +11,7 @@ HomeClaw Core runs on your machine (e.g. home PC or server). To use the **Compan
 | **Tailscale (tailnet)** | Only devices on your Tailscale network | Home + your devices (phone, laptop); private, no public exposure |
 | **Tailscale Funnel** | Anyone with the URL (public HTTPS) | Webhooks, bots; use with strong auth |
 | **Cloudflare Tunnel** | Anyone with the tunnel URL (public HTTPS) | Simple public URL; use with Core `auth_enabled` |
+| **Pinggy** | Anyone with the Pinggy URL (public HTTPS) | Similar to ngrok/Cloudflare; zero-config tunnel. See `docs_design/StrongLocalModelAndPerplexityRouting.md` §6 in the repo. |
 | **SSH tunnel** | You, from the machine where the tunnel runs | Developers; desktop → Core over SSH |
 
 The **Companion app** and other clients only need a **Core URL** and optional **API key**. They do not include Tailscale or Cloudflare SDKs—you choose how to expose Core, then set that URL in the app.

@@ -1563,6 +1563,22 @@ class Core(CoreInterface):
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"detail": str(e)})
 
+        @self.app.get("/api/reports/usage", dependencies=[Depends(_verify_inbound_auth)])
+        async def api_reports_usage(format: str = "json"):
+            """
+            Usage report: router stats (mix mode) + cloud usage. Query ?format=json (default) or ?format=csv.
+            JSON: full report dict. CSV: section, key, value rows for dashboards/billing.
+            """
+            try:
+                from hybrid_router.metrics import generate_usage_report
+                out = generate_usage_report(format=format.strip().lower() or "json")
+                if format.strip().lower() == "csv":
+                    return Response(content=out, media_type="text/csv")
+                return JSONResponse(content=out)
+            except Exception as e:
+                logger.exception(e)
+                return JSONResponse(status_code=500, content={"detail": str(e)})
+
         @self.app.get("/ui")
         async def ui_launcher():
             """Launcher page: Sessions list (from Core) and plugin UIs (WebChat, Control UI, Dashboard, TUI)."""
@@ -3217,6 +3233,140 @@ class Core(CoreInterface):
                     elif not plugin:
                         self.clear_pending_plugin_call(app_id_val, user_id_val, session_id_val)
 
+            # Hybrid router (mix mode): run before injecting tools, skills, plugins. Router uses only user message (query).
+            effective_llm_name = None
+            main_llm_mode = (getattr(Util().core_metadata, "main_llm_mode", None) or "").strip().lower()
+            if main_llm_mode == "mix":
+                _router_t0 = time.perf_counter()
+                hr = getattr(Util().core_metadata, "hybrid_router", None) or {}
+                default_route = (hr.get("default_route") or "local").strip().lower()
+                if default_route not in ("local", "cloud"):
+                    default_route = "local"
+                route = None
+                route_layer = "default_route"
+                route_score = 0.0
+                # Layer 1: heuristic (keywords, long-input)
+                heuristic_cfg = hr.get("heuristic") if isinstance(hr.get("heuristic"), dict) else {}
+                h_enabled = bool(heuristic_cfg.get("enabled", False))
+                h_threshold = float(heuristic_cfg.get("threshold") or 0)
+                if h_enabled and h_threshold > 0:
+                    from hybrid_router.heuristic import load_heuristic_rules, run_heuristic_layer
+                    root_dir = Path(__file__).resolve().parent.parent
+                    rules_path = (heuristic_cfg.get("rules_path") or "").strip()
+                    rules_data = load_heuristic_rules(rules_path, root_dir=root_dir) if rules_path else None
+                    score, selection = run_heuristic_layer(query or "", rules_data, enabled=h_enabled, threshold=h_threshold)
+                    if selection and score >= h_threshold:
+                        route = selection
+                        route_layer = "heuristic"
+                        route_score = score
+                # Layer 2: semantic (aurelio-labs/semantic-router + existing embedding)
+                if route is None:
+                    semantic_cfg = hr.get("semantic") if isinstance(hr.get("semantic"), dict) else {}
+                    s_enabled = bool(semantic_cfg.get("enabled", False))
+                    s_threshold = float(semantic_cfg.get("threshold") or 0)
+                    if s_enabled and s_threshold > 0:
+                        try:
+                            from hybrid_router.semantic import (
+                                build_semantic_router,
+                                run_semantic_layer_async,
+                                load_semantic_routes,
+                            )
+                            root_dir = Path(__file__).resolve().parent.parent
+                            routes_path = (semantic_cfg.get("routes_path") or "").strip()
+                            loc, cloud = load_semantic_routes(
+                                routes_path=routes_path or None,
+                                root_dir=root_dir,
+                            )
+                            router = build_semantic_router(
+                                local_utterances=loc,
+                                cloud_utterances=cloud,
+                                routes_path=routes_path or None,
+                                root_dir=root_dir,
+                                use_cache=True,
+                            )
+                            score, selection = await run_semantic_layer_async(
+                                query or "", router, threshold=s_threshold
+                            )
+                            if selection and score >= s_threshold:
+                                route = selection
+                                route_layer = "semantic"
+                                route_score = score
+                        except Exception as e:
+                            logger.debug("Semantic router Layer 2 failed: {}", e)
+                # Layer 3: classifier (small model) or perplexity (main local model confidence probe)
+                if route is None:
+                    slm_cfg = hr.get("slm") if isinstance(hr.get("slm"), dict) else {}
+                    slm_enabled = bool(slm_cfg.get("enabled", False))
+                    slm_mode = (slm_cfg.get("mode") or "classifier").strip().lower()
+                    slm_threshold = float(slm_cfg.get("threshold") or 0)
+                    slm_model_ref = (slm_cfg.get("model") or "").strip()
+                    if slm_enabled:
+                        try:
+                            if slm_mode == "perplexity":
+                                # Probe main local model with logprobs; avg logprob >= perplexity_threshold → local
+                                main_local_ref = (getattr(Util().core_metadata, "main_llm_local", None) or "").strip()
+                                if main_local_ref:
+                                    from hybrid_router.perplexity import (
+                                        run_perplexity_probe_async,
+                                        resolve_local_model_ref,
+                                    )
+                                    host, port, raw_id = resolve_local_model_ref(main_local_ref)
+                                    if host is not None and port is not None and raw_id:
+                                        probe_max = int(slm_cfg.get("perplexity_max_tokens") or 5)
+                                        probe_threshold = float(slm_cfg.get("perplexity_threshold") or -0.6)
+                                        score, selection = await run_perplexity_probe_async(
+                                            query or "",
+                                            host,
+                                            port,
+                                            raw_id,
+                                            max_tokens=probe_max,
+                                            threshold=probe_threshold,
+                                            timeout_sec=5.0,
+                                        )
+                                        if selection:
+                                            route = selection
+                                            route_layer = "perplexity"
+                                            route_score = score
+                            else:
+                                # Classifier: small model with judge prompt
+                                if slm_model_ref:
+                                    from hybrid_router.slm import run_slm_layer_async, resolve_slm_model_ref
+                                    host, port, _path_rel, raw_id = resolve_slm_model_ref(slm_model_ref)
+                                    if host is not None and port is not None and raw_id:
+                                        score, selection = await run_slm_layer_async(
+                                            query or "", host, port, raw_id, threshold=slm_threshold
+                                        )
+                                        if selection and (slm_threshold <= 0 or score >= slm_threshold):
+                                            route = selection
+                                            route_layer = "classifier"
+                                            route_score = score
+                        except Exception as e:
+                            logger.debug("Layer 3 (slm) failed: {}", e)
+                if route is None:
+                    route = default_route
+                if route == "local":
+                    effective_llm_name = (getattr(Util().core_metadata, "main_llm_local", None) or "").strip()
+                else:
+                    effective_llm_name = (getattr(Util().core_metadata, "main_llm_cloud", None) or "").strip()
+                if not effective_llm_name:
+                    effective_llm_name = None
+                # Per-request log and aggregated counts (mix mode only)
+                try:
+                    from hybrid_router.metrics import log_router_decision
+                    latency_ms = (time.perf_counter() - _router_t0) * 1000
+                    req_id = getattr(request, "request_id", None) if request else None
+                    log_router_decision(
+                        route=route,
+                        layer=route_layer,
+                        score=route_score,
+                        reason="",
+                        request_id=req_id,
+                        session_id=session_id,
+                        latency_ms=latency_ms,
+                    )
+                except Exception as e:
+                    logger.debug("Router metrics log failed: {}", e)
+
             use_memory = Util().has_memory()
             llm_input = []
             response = ''
@@ -3547,7 +3697,9 @@ class Core(CoreInterface):
                 for _ in range(max_tool_rounds):
                     _t0 = time.time()
                     logger.debug("LLM call started (tools={})", "yes" if openai_tools else "no")
-                    msg = await Util().openai_chat_completion_message(current_messages, tools=openai_tools, tool_choice="auto")
+                    msg = await Util().openai_chat_completion_message(
+                        current_messages, tools=openai_tools, tool_choice="auto", llm_name=effective_llm_name
+                    )
                     logger.debug("LLM call returned in {:.1f}s", time.time() - _t0)
                     if msg is None:
                         response = None
@@ -3643,7 +3795,9 @@ class Core(CoreInterface):
                     response = (current_messages[-1].get("content") or "").strip() if current_messages else None
                 await close_browser_session(context)
             else:
-                response = await self.openai_chat_completion(messages=llm_input)
+                response = await self.openai_chat_completion(
+                    messages=llm_input, llm_name=effective_llm_name
+                )
 
             if response is None or len(response) == 0:
                 return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"

@@ -3012,6 +3012,32 @@ def register_routing_tools(registry: ToolRegistry, core: Any) -> None:
     )
 
 
+async def _usage_report_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Return usage report: router stats (mix mode) + cloud usage. For calculating and reviewing cost."""
+    try:
+        from hybrid_router.metrics import generate_usage_report
+        report = generate_usage_report(format="json")
+        if not isinstance(report, dict):
+            return str(report)
+        lines = [
+            f"Usage report (generated at {report.get('generated_at', '')})",
+            "--- Summary ---",
+            f"Total cloud requests: {report.get('summary', {}).get('total_cloud_requests', 0)}",
+            f"Mix-mode requests: {report.get('summary', {}).get('mix_requests', 0)}",
+            f"  Routed to local: {report.get('summary', {}).get('mix_routed_local', 0)}",
+            f"  Routed to cloud: {report.get('summary', {}).get('mix_routed_cloud', 0)}",
+            "--- Router (by layer) ---",
+        ]
+        by_layer = (report.get("router") or {}).get("by_layer") or {}
+        for layer, count in by_layer.items():
+            lines.append(f"  {layer}: {count}")
+        lines.append("--- Raw (JSON) ---")
+        lines.append(json.dumps(report, indent=2, ensure_ascii=False))
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error generating report: {e}"
+
+
 def _register_browser_tools_if_available(registry: ToolRegistry) -> None:
     """Register browser_* tools only if tools.browser_enabled and Playwright is installed. Otherwise skip so the model uses fetch_url only (no Chromium required)."""
     config = _get_tools_config()
@@ -3191,6 +3217,14 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": [],
             },
             execute_async=_channel_send_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="usage_report",
+            description="Get the current usage report: hybrid router stats (mix mode) and cloud model request counts. Use when the user asks for cost, usage, or how many requests went to cloud vs local. Returns summary and by-layer breakdown.",
+            parameters={"type": "object", "properties": {}, "required": []},
+            execute_async=_usage_report_executor,
         )
     )
     registry.register(
