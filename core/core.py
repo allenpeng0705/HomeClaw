@@ -24,6 +24,7 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="huggingface_hu
 import chromadb
 import chromadb.config
 import aiohttp
+from aiohttp.client_exceptions import ClientConnectorError
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from typing import Any, Optional, Dict, List, Tuple, Union

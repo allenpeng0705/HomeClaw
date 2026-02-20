@@ -26,3 +26,4 @@
 /logs
 /docs/node_modules
 /plugins/PptMaker/__pycache__
+/hybrid_router/__pycache__

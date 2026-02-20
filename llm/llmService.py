@@ -286,14 +286,23 @@ class LLMServiceManager:
         return mmproj_path, lora_paths, lora_base_path
 
     def run_main_llm(self, pooling:bool = False):
-        llm_path,  llm_name, llm_type, host, port = Util().main_llm()
+        meta = Util().get_core_metadata()
+        mode = (getattr(meta, "main_llm_mode", None) or "").strip().lower()
+        local_ref = (getattr(meta, "main_llm_local", None) or "").strip() if mode == "mix" else ""
+        if mode == "mix" and local_ref:
+            llm_path, llm_name, llm_type, host, port = Util().main_llm_for_route("local")
+        else:
+            llm_path, llm_name, llm_type, host, port = Util().main_llm()
 
         if llm_name in self.llms:
             logger.debug(f"LLM {llm_name} is already running")
             return
 
         if llm_type == 'local':
-            entry, _ = Util()._get_model_entry(Util().get_core_metadata().main_llm)
+            main_ref = Util().get_core_metadata().main_llm
+            if mode == "mix" and local_ref:
+                main_ref = local_ref
+            entry, _ = Util()._get_model_entry(main_ref)
             mmproj_path, lora_paths, lora_base_path = (None, [], None)
             if entry:
                 mmproj_path, lora_paths, lora_base_path = self._resolve_local_extra_paths(entry)
@@ -305,7 +314,11 @@ class LLMServiceManager:
             #self.apps.append(self.start_llama_cpp_server(name, host, port, path))
             logger.debug(f"Running Main LLM Server {llm_name} on {host}:{port}")
         elif llm_type == 'litellm':
-            self.run_litellm_service()
+            if mode == "mix" and local_ref:
+                coroutine = self._serve_litellm_on_host_port(host, port, llm_name)
+                self.start_async_coroutine(coroutine)
+            else:
+                self.run_litellm_service()
             self.llms.append(llm_name)
             logger.debug(f"Running Main LLM Server {llm_name} on {host}:{port}")
 
@@ -351,6 +364,31 @@ class LLMServiceManager:
         )
         self.llms.append(name)
         logger.debug("Running classifier LLM {} on {}:{}", name, host, port)
+
+    def run_mix_mode_cloud_llm(self):
+        """When main_llm_mode == 'mix', start the cloud LLM endpoint (e.g. LiteLLM on 4002 for Gemini) so it is reachable when requests are routed to cloud."""
+        meta = Util().get_core_metadata()
+        mode = (getattr(meta, "main_llm_mode", None) or "").strip().lower()
+        if mode != "mix":
+            return
+        cloud_ref = (getattr(meta, "main_llm_cloud", None) or "").strip()
+        if not cloud_ref:
+            return
+        try:
+            _, raw_id, mtype, host, port = Util().main_llm_for_route("cloud")
+            name = raw_id or cloud_ref
+            if name in self.llms:
+                logger.debug("Mix mode cloud LLM %s already running", name)
+                return
+            if mtype != "litellm":
+                logger.debug("Mix mode cloud ref %s is not litellm (type=%s), not starting a server", cloud_ref, mtype)
+                return
+            coroutine = self._serve_litellm_on_host_port(host, port, name)
+            self.start_async_coroutine(coroutine)
+            self.llms.append(name)
+            logger.debug("Running mix-mode cloud LLM %s on %s:%s", name, host, port)
+        except Exception as e:
+            logger.warning("Failed to start mix-mode cloud LLM: %s", e)
 
     '''       
     async def start_llama_cpp_python(self, host, port, model_path, 
@@ -404,24 +442,24 @@ class LLMServiceManager:
        
     async def start_litellm_service(self):
         try:
-            # Initialize the LLM service
-            litellm_service = LiteLLMService()
-            _, model, type, host, port = llm = Util().main_llm()
-            # Run the FastAPI app
-            if host == '127.0.0.1' or host == 'localhost':
-                host = '0.0.0.0'
-            config = uvicorn.Config(litellm_service.app, host=host, port=port, log_level="info")
-            server = Server(config)
-            logger.debug(f"Running litellm on {host}:{port}, model is {model}")
-            try:
-                await server.serve()
-            except asyncio.CancelledError:
-                logger.debug("LLM from liteLLM was cancelled.")
+            _, model, type, host, port = Util().main_llm()
+            await self._serve_litellm_on_host_port(host, port, model)
         except Exception as e:
             logger.error(f"Unexpected error in start_litellm_service: {e}")
 
-        
-        
+    async def _serve_litellm_on_host_port(self, host: str, port: int, name: str = "litellm"):
+        """Run LiteLLM FastAPI app on the given host:port. Used by main-LLM and by mix-mode cloud."""
+        litellm_service = LiteLLMService()
+        if host in ("127.0.0.1", "localhost"):
+            host = "0.0.0.0"
+        config = uvicorn.Config(litellm_service.app, host=host, port=port, log_level="info")
+        server = Server(config)
+        logger.debug("Running LiteLLM on %s:%s (%s)", host, port, name)
+        try:
+            await server.serve()
+        except asyncio.CancelledError:
+            logger.debug("LiteLLM (%s) was cancelled.", name)
+
     def run_litellm_service(self):
         try:
             _, model, type, host, port = Util().main_llm()
@@ -430,7 +468,7 @@ class LLMServiceManager:
                 logger.debug(f"LLM {model} is already running")
                 return None
             
-            coroutine = self.start_litellm_service()
+            coroutine = self._serve_litellm_on_host_port(host, port, model)
             self.start_async_coroutine(coroutine)
             #self.litellm_server_task = asyncio.create_task(self.start_litellm_service())
 
@@ -558,6 +596,7 @@ class LLMServiceManager:
             self.run_embedding_llm()
             self.run_main_llm()
             self.run_classifier_llm()
+            self.run_mix_mode_cloud_llm()
         except Exception as e:
             logger.exception(f"Unexpected error in run: {e}")
 
