@@ -431,7 +431,11 @@ class PluginManager:
                         current_plugins.add(module_path)
                         if (module_path not in self.loaded_plugins or
                                 self.loaded_plugins[module_path] < plugin_mod_time):
-                            module = importlib.import_module(module_path)
+                            try:
+                                module = importlib.import_module(module_path)
+                            except Exception as e:
+                                logger.warning(f"Plugin module failed to import, skipping: {module_path} - {e}")
+                                continue
                             for attr_name, attr in getmembers(module, isclass):
                                 # Filter out any intermediate base classes and only initialize final subclasses of BasePlugin
                                 if issubclass(attr, BasePlugin) and attr is not BasePlugin:
@@ -446,40 +450,40 @@ class PluginManager:
                                     existing_instance = next((instance for instance in self.plugin_instances if isinstance(instance, attr)), None)
                                     if not existing_instance:
                                         logger.debug(f"Loading plugin: {module_path} - {attr_name}")
-                                        # Log the [__init__](cci:1://file:///HomeClaw/base/PluginManager.py:15:4-19:52) method signature of the class
-                                        init_method = attr.__init__
-                                        
-                                        if isfunction(init_method):
-                                            init_signature = signature(init_method)
-                                            logger.debug(f"__init__ signature for {attr_name}: {init_signature}")
-                                        #init_signature = signature(attr.__init__)
-                                            if 'coreInst' in init_signature.parameters:
-                                                plugin_instance = attr(coreInst=self.coreInst)
+                                        try:
+                                            init_method = attr.__init__
+                                            if isfunction(init_method):
+                                                init_signature = signature(init_method)
+                                                logger.debug(f"__init__ signature for {attr_name}: {init_signature}")
+                                                if 'coreInst' in init_signature.parameters:
+                                                    plugin_instance = attr(coreInst=self.coreInst)
 
-                                                if hasattr(plugin_instance, 'initialize'):
-                                                    logger.debug(f"Calling initialize for plugin: {module_path} - {attr_name}")
-                                                    plugin_instance.initialize()
-                                                # Load plugin.yaml (unified registration) and attach to instance
-                                                manifest = _load_plugin_manifest(plugin_folder)
-                                                if manifest and (manifest.get("type") or "inline").lower() == "inline":
-                                                    plugin_instance.registration = manifest
-                                                    for k in ("id", "name", "description", "description_long"):
-                                                        if manifest.get(k) is not None:
-                                                            if not hasattr(plugin_instance, "config") or plugin_instance.config is None:
-                                                                plugin_instance.config = {}
-                                                            plugin_instance.config[k] = manifest[k]
-                                                    if manifest.get("id"):
-                                                        plugin_instance.plugin_id = _normalize_plugin_id(manifest["id"])
-                                                    if manifest.get("description"):
-                                                        plugin_instance.set_description(manifest["description"])
+                                                    if hasattr(plugin_instance, 'initialize'):
+                                                        logger.debug(f"Calling initialize for plugin: {module_path} - {attr_name}")
+                                                        plugin_instance.initialize()
+                                                    # Load plugin.yaml (unified registration) and attach to instance
+                                                    manifest = _load_plugin_manifest(plugin_folder)
+                                                    if manifest and (manifest.get("type") or "inline").lower() == "inline":
+                                                        plugin_instance.registration = manifest
+                                                        for k in ("id", "name", "description", "description_long"):
+                                                            if manifest.get(k) is not None:
+                                                                if not hasattr(plugin_instance, "config") or plugin_instance.config is None:
+                                                                    plugin_instance.config = {}
+                                                                plugin_instance.config[k] = manifest[k]
+                                                        if manifest.get("id"):
+                                                            plugin_instance.plugin_id = _normalize_plugin_id(manifest["id"])
+                                                        if manifest.get("description"):
+                                                            plugin_instance.set_description(manifest["description"])
+                                                    else:
+                                                        plugin_instance.registration = None
+                                                    self.plugin_instances.append(plugin_instance)
+                                                    self.loaded_plugins[module_path] = plugin_mod_time
+                                                    self.register_plugin(plugin_instance)
+                                                    logger.debug(f"Loaded plugin: {module_path} - {attr_name}")
                                                 else:
-                                                    plugin_instance.registration = None
-                                                self.plugin_instances.append(plugin_instance)
-                                                self.loaded_plugins[module_path] = plugin_mod_time
-                                                self.register_plugin(plugin_instance)
-                                                logger.debug(f"Loaded plugin: {module_path} - {attr_name}")
-                                            else:
-                                                logger.warning(f"__init__ method for {attr_name} is not a function or not defined")
+                                                    logger.warning(f"__init__ method for {attr_name} is not a function or not defined")
+                                        except Exception as e:
+                                            logger.warning(f"Plugin failed to load, skipping: {module_path} - {attr_name} - {e}", exc_info=True)
                                     else:
                                         logger.debug(f"Plugin already loaded: {module_path} - {attr_name}")
 
