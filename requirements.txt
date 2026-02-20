@@ -1,5 +1,6 @@
 loguru
 PyYAML
+ruamel.yaml>=0.18.0   # preserve comments when updating core.yml
 python-dotenv
 tqdm
 transformers

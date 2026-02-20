@@ -87,7 +87,7 @@ def run_onboard():
         config["use_tools"] = True
     elif val in ("n", "no"):
         config["use_tools"] = False
-    write_config(core_config_file_path, config)
+    Util().update_yaml_preserving_comments(core_config_file_path, config)
     print("Config saved. Run 'python -m main doctor' to check connectivity, or 'python -m main start' to start.")
 
 
@@ -174,15 +174,13 @@ def get_core_config():
 
 
 def update_core_config(host, port, mode, main_llm, embedding_llm):
-    core_config = read_config(core_config_file_path)
-    core_config.update({
+    Util().update_yaml_preserving_comments(core_config_file_path, {
         'host': host,
         'port': port,
         'mode': mode,
         'main_llm': main_llm,
         'embedding_llm': embedding_llm,
     })
-    write_config(core_config_file_path, core_config)
     return "Configuration updated successfully!"
 
 

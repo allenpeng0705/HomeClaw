@@ -256,8 +256,24 @@ class User:
 
     @staticmethod
     def to_yaml(users: List['User'], yaml_file: str):
+        """Write users to user.yml; preserve comments and other keys (ruamel round-trip)."""
+        users_data = [user.__dict__ for user in users]
+        try:
+            from ruamel.yaml import YAML
+            yaml_rt = YAML()
+            yaml_rt.preserve_quotes = True
+            with open(yaml_file, 'r', encoding='utf-8') as f:
+                data = yaml_rt.load(f)
+            if data is not None:
+                data['users'] = users_data
+                with open(yaml_file, 'w', encoding='utf-8') as f:
+                    yaml_rt.dump(data, f)
+                return
+        except Exception:
+            pass
+        # Fallback: file missing or ruamel not available
         with open(yaml_file, 'w', encoding='utf-8') as file:
-            yaml.safe_dump({'users': [user.__dict__ for user in users]}, file)
+            yaml.safe_dump({'users': users_data}, file, default_flow_style=False, sort_keys=False)
 
     @staticmethod
     def validate_no_overlapping_channel_ids(users: List['User']) -> None:
@@ -841,9 +857,8 @@ class CoreMetadata:
 
     @staticmethod
     def to_yaml(core: 'CoreMetadata', yaml_file: str):
-        with open(yaml_file, 'w', encoding='utf-8') as file:
-            # Manually prepare a dictionary to serialize
-            core_dict = {
+        # Manually prepare a dictionary to serialize (only CoreMetadata fields)
+        core_dict = {
                 'name': core.name,
                 'host': core.host,
                 'port': core.port,
@@ -912,22 +927,46 @@ class CoreMetadata:
                 'endpoints': [
                     vars(ep) for ep in core.endpoints
                 ]
-            }
-            # Only write api key fields when set (cloud main model; key can be set via CLI)
-            if (core.main_llm_api_key_name or '').strip():
-                core_dict['main_llm_api_key_name'] = core.main_llm_api_key_name
-            if (core.main_llm_api_key or '').strip():
-                core_dict['main_llm_api_key'] = core.main_llm_api_key
-            # Mix mode and hybrid router (optional; omit when not used so existing configs stay clean)
-            if getattr(core, 'main_llm_mode', None) and str(core.main_llm_mode).strip().lower() == 'mix':
-                core_dict['main_llm_mode'] = 'mix'
-                if (getattr(core, 'main_llm_local', None) or '').strip():
-                    core_dict['main_llm_local'] = (core.main_llm_local or '').strip()
-                if (getattr(core, 'main_llm_cloud', None) or '').strip():
-                    core_dict['main_llm_cloud'] = (core.main_llm_cloud or '').strip()
-                if getattr(core, 'hybrid_router', None) and isinstance(core.hybrid_router, dict) and core.hybrid_router:
-                    core_dict['hybrid_router'] = core.hybrid_router
-            yaml.safe_dump(core_dict, file, default_flow_style=False)
+        }
+        # Only write api key fields when set (cloud main model; key can be set via CLI)
+        if (core.main_llm_api_key_name or '').strip():
+            core_dict['main_llm_api_key_name'] = core.main_llm_api_key_name
+        if (core.main_llm_api_key or '').strip():
+            core_dict['main_llm_api_key'] = core.main_llm_api_key
+        # Mix mode and hybrid router (optional; omit when not used so existing configs stay clean)
+        if getattr(core, 'main_llm_mode', None) and str(core.main_llm_mode).strip().lower() == 'mix':
+            core_dict['main_llm_mode'] = 'mix'
+            if (getattr(core, 'main_llm_local', None) or '').strip():
+                core_dict['main_llm_local'] = (core.main_llm_local or '').strip()
+            if (getattr(core, 'main_llm_cloud', None) or '').strip():
+                core_dict['main_llm_cloud'] = (core.main_llm_cloud or '').strip()
+            if getattr(core, 'hybrid_router', None) and isinstance(core.hybrid_router, dict) and core.hybrid_router:
+                core_dict['hybrid_router'] = core.hybrid_router
+        # Update only these keys in the file; preserve comments and all other content (ruamel.yaml round-trip)
+        try:
+            from ruamel.yaml import YAML
+            yaml_rt = YAML()
+            yaml_rt.preserve_quotes = True
+            with open(yaml_file, 'r', encoding='utf-8') as f:
+                data = yaml_rt.load(f)
+            if data is not None:
+                for k, v in core_dict.items():
+                    data[k] = v
+                with open(yaml_file, 'w', encoding='utf-8') as f:
+                    yaml_rt.dump(data, f)
+                return
+        except Exception:
+            pass
+        # Fallback: file missing or ruamel not available — write full merged dict (no comment preservation)
+        try:
+            with open(yaml_file, 'r', encoding='utf-8') as f:
+                existing = yaml.safe_load(f) or {}
+        except Exception:
+            existing = {}
+        for k, v in core_dict.items():
+            existing[k] = v
+        with open(yaml_file, 'w', encoding='utf-8') as file:
+            yaml.safe_dump(existing, file, default_flow_style=False, sort_keys=False)
 
  
 class RegisterAgentRequest(BaseModel):

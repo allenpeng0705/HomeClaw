@@ -1101,6 +1101,28 @@ class Util:
         with open(file_path, 'w', encoding='utf-8') as file:
             yaml.safe_dump(config, file, default_flow_style=False, sort_keys=False)
 
+    def update_yaml_preserving_comments(self, file_path: str, updates: dict) -> bool:
+        """Update only the given keys in a YAML file; preserve comments and key order. Returns True if ruamel was used, False if fallback (full overwrite) was used."""
+        try:
+            from ruamel.yaml import YAML
+            yaml_rt = YAML()
+            yaml_rt.preserve_quotes = True
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = yaml_rt.load(f)
+            if data is None:
+                data = {}
+            for k, v in updates.items():
+                data[k] = v
+            with open(file_path, 'w', encoding='utf-8') as f:
+                yaml_rt.dump(data, f)
+            return True
+        except Exception:
+            existing = self.load_yml_config(file_path) or {}
+            for k, v in updates.items():
+                existing[k] = v
+            self.write_config(file_path, existing)
+            return False
+
 
     def get_users(self):
         """

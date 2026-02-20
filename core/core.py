@@ -1255,7 +1255,7 @@ class Core(CoreInterface):
                         _deep_merge(data[k], v)
                     else:
                         data[k] = v
-                Util().write_config(str(path), data)
+                Util().update_yaml_preserving_comments(str(path), data)
                 return JSONResponse(content={"result": "ok"})
             except Exception as e:
                 logger.exception("Config core patch failed: {}", e)

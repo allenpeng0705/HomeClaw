@@ -50,15 +50,13 @@ def get_config():
     return (name, host, port, mode, main_llm, embedding_llm, llm_options)
 
 def update_config(host, port, mode, main_llm, embedding_llm):
-    core_config = read_config(config_file_path)
-    core_config.update({
+    Util().update_yaml_preserving_comments(config_file_path, {
         'host': host,
         'port': port,
         'mode': mode,
         'main_llm': main_llm,
         'embedding_llm': embedding_llm,
     })
-    write_config(config_file_path, core_config)
     return "Configuration updated successfully!"
 
 
