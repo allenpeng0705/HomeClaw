@@ -376,13 +376,23 @@ class Util:
             return entry.get('path', main_llm_name), raw_id or main_llm_name, 'litellm', host, port
         return self.main_llm()
 
-    def _llm_request_model_and_headers(self, path_or_model: str, raw_id: str, mtype: str) -> Tuple[str, dict]:
-        """Return (model string for request body, headers dict) for local (llama.cpp) or cloud (LiteLLM)."""
+    def _llm_request_model_and_headers(self, path_or_model: str, raw_id: str, mtype: str, llm_ref: Optional[str] = None) -> Tuple[str, dict]:
+        """Return (model string for request body, headers dict) for local (llama.cpp) or cloud (LiteLLM).
+        When mtype is litellm, api_key is taken from the cloud model entry (llm_ref, e.g. cloud_models/Gemini-2.5-Flash)
+        so mix mode and per-model keys work; falls back to main_llm_api_key if no ref or entry has no key."""
         # LiteLLM expects provider/model (e.g. gemini/gemini-2.5-flash); local servers expect model id (e.g. main_vl_model).
         model_for_request = path_or_model if mtype == "litellm" else (raw_id or path_or_model)
         headers = {"Content-Type": "application/json"}
         if mtype == "litellm":
-            key = (getattr(self.core_metadata, "main_llm_api_key", "") or "").strip()
+            key = ""
+            if llm_ref and (llm_ref or "").strip():
+                entry, _ = self._get_model_entry((llm_ref or "").strip())
+                if entry:
+                    key = (entry.get("api_key") or "").strip() if isinstance(entry.get("api_key"), str) else ""
+                    if not key and entry.get("api_key_name"):
+                        key = (os.environ.get((entry.get("api_key_name") or "").strip()) or "").strip()
+            if not key:
+                key = (getattr(self.core_metadata, "main_llm_api_key", "") or "").strip()
             if key:
                 headers["Authorization"] = "Bearer " + key
             else:
@@ -878,13 +888,14 @@ class Util:
             if resolved is None:
                 resolved = Util().main_llm()
             path_or_model, raw_id, mtype, model_host, model_port = resolved
+            llm_ref = (llm_name or "").strip() if (llm_name and str(llm_name).strip()) else (Util().get_core_metadata().main_llm or "").strip()
             if mtype == "litellm":
                 try:
                     from hybrid_router.metrics import log_cloud_usage
                     log_cloud_usage()
                 except Exception:
                     pass
-            model_for_request, headers = Util()._llm_request_model_and_headers(path_or_model, raw_id, mtype)
+            model_for_request, headers = Util()._llm_request_model_and_headers(path_or_model, raw_id, mtype, llm_ref=llm_ref)
             data = {}
             if grammar != None and len(grammar) > 0:
                 data = {
@@ -1024,13 +1035,14 @@ class Util:
             if resolved is None:
                 resolved = Util().main_llm()
             path_or_model, raw_id, mtype, model_host, model_port = resolved
+            llm_ref = (llm_name or "").strip() if (llm_name and str(llm_name).strip()) else (Util().get_core_metadata().main_llm or "").strip()
             if mtype == "litellm":
                 try:
                     from hybrid_router.metrics import log_cloud_usage
                     log_cloud_usage()
                 except Exception:
                     pass
-            model_for_request, headers = Util()._llm_request_model_and_headers(path_or_model, raw_id, mtype)
+            model_for_request, headers = Util()._llm_request_model_and_headers(path_or_model, raw_id, mtype, llm_ref=llm_ref)
             data = {"model": model_for_request, "messages": messages}
             if grammar:
                 data["extra_body"] = {"grammar": grammar}
@@ -1118,6 +1130,13 @@ class Util:
             return True
         except Exception:
             existing = self.load_yml_config(file_path) or {}
+            if not existing and os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+                import logging
+                logging.warning(
+                    "update_yaml_preserving_comments: could not load %s; skipping write to avoid removing keys.",
+                    file_path,
+                )
+                return False
             for k, v in updates.items():
                 existing[k] = v
             self.write_config(file_path, existing)

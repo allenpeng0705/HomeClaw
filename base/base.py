@@ -1,6 +1,7 @@
 from datetime import datetime
 from enum import Enum
 import json
+import logging
 import os
 from typing import List, Dict, Optional, Union
 import uuid
@@ -905,10 +906,8 @@ class CoreMetadata:
                 'llama_cpp': core.llama_cpp or {},
                 'completion': getattr(core, 'completion', {}) or {},
                 'local_models': core.local_models or [],
-                'cloud_models': [
-                    {k: ("***" if k == "api_key" and v else v) for k, v in (m if isinstance(m, dict) else {}).items()}
-                    for m in (core.cloud_models or [])
-                ],
+                # Write actual api_key from config (do not redact); redaction is for logs only.
+                'cloud_models': list(core.cloud_models or []),
                 'database': {'backend': core.database.backend, 'url': core.database.url},
                 'vectorDB': {
                     'backend': core.vectorDB.backend,
@@ -942,29 +941,60 @@ class CoreMetadata:
                 core_dict['main_llm_cloud'] = (core.main_llm_cloud or '').strip()
             if getattr(core, 'hybrid_router', None) and isinstance(core.hybrid_router, dict) and core.hybrid_router:
                 core_dict['hybrid_router'] = core.hybrid_router
-        # Update only these keys in the file; preserve comments and all other content (ruamel.yaml round-trip)
+        def _restore_api_keys_from_original(merged_data: dict, original: dict) -> None:
+            """Never write redacted api_key to config; restore from original file when merged value is *** or missing."""
+            orig_cloud = (original.get('cloud_models') or []) if isinstance(original.get('cloud_models'), list) else []
+            merged_cloud = merged_data.get('cloud_models')
+            if not isinstance(merged_cloud, list) or not orig_cloud:
+                return
+            by_id = {(m.get('id') or '').strip(): m for m in orig_cloud if isinstance(m, dict) and (m.get('id') or '').strip()}
+            for i, entry in enumerate(merged_cloud):
+                if not isinstance(entry, dict):
+                    continue
+                eid = (entry.get('id') or '').strip()
+                orig_entry = by_id.get(eid) if eid else None
+                if not orig_entry:
+                    continue
+                orig_key = (orig_entry.get('api_key') or '').strip() if isinstance(orig_entry.get('api_key'), str) else None
+                if not orig_key:
+                    continue
+                current = entry.get('api_key')
+                if current is None or (isinstance(current, str) and (current.strip() == '' or current.strip() == '***')):
+                    entry['api_key'] = orig_key
+
+        # core.yml must never be overwritten with only CoreMetadata keys — always load full file, merge, then write.
         try:
             from ruamel.yaml import YAML
             yaml_rt = YAML()
             yaml_rt.preserve_quotes = True
             with open(yaml_file, 'r', encoding='utf-8') as f:
                 data = yaml_rt.load(f)
-            if data is not None:
-                for k, v in core_dict.items():
-                    data[k] = v
-                with open(yaml_file, 'w', encoding='utf-8') as f:
-                    yaml_rt.dump(data, f)
-                return
+            if data is None:
+                data = {}
+            original_snapshot = {k: v for k, v in data.items()}  # shallow copy for api_key restore
+            for k, v in core_dict.items():
+                data[k] = v
+            _restore_api_keys_from_original(data, original_snapshot)
+            with open(yaml_file, 'w', encoding='utf-8') as f:
+                yaml_rt.dump(data, f)
+            return
         except Exception:
             pass
-        # Fallback: file missing or ruamel not available — write full merged dict (no comment preservation)
+        # Fallback: ruamel failed — merge into existing; never overwrite a non-empty file with only core_dict
         try:
             with open(yaml_file, 'r', encoding='utf-8') as f:
                 existing = yaml.safe_load(f) or {}
         except Exception:
             existing = {}
+        if not existing and os.path.exists(yaml_file) and os.path.getsize(yaml_file) > 0:
+            logging.warning(
+                "core.yml: could not load existing file (parse error?); skipping write to avoid removing keys. Fix the file or install ruamel.yaml."
+            )
+            return
+        original_snapshot = {k: v for k, v in existing.items()}
         for k, v in core_dict.items():
             existing[k] = v
+        _restore_api_keys_from_original(existing, original_snapshot)
         with open(yaml_file, 'w', encoding='utf-8') as file:
             yaml.safe_dump(existing, file, default_flow_style=False, sort_keys=False)
 
