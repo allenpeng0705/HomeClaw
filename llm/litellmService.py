@@ -65,8 +65,17 @@ class LiteLLMService:
             ) 
     
 
+        def _api_key_from_request(http_request: Request, body_api_key: Any) -> str | None:
+            """Use api_key from body if set; else from Authorization: Bearer <key> (Core sends key in header)."""
+            if body_api_key is not None and isinstance(body_api_key, str) and body_api_key.strip():
+                return body_api_key.strip()
+            auth = (http_request.headers.get("Authorization") or "").strip()
+            if auth.startswith("Bearer "):
+                return auth[7:].strip() or None
+            return None
+
         @self.app.post("/v1/chat/completions")
-        async def chat_completion(request: ChatRequest):
+        async def chat_completion(http_request: Request, request: ChatRequest):
             try:
                 model = request.model
                 messages = request.messages
@@ -118,8 +127,9 @@ class LiteLLMService:
                     kwargs["extra_body"] = request.extra_body
                 if request.base_url is not None:
                     kwargs["api_base"] = request.base_url
-                if request.api_key is not None:
-                    kwargs["api_key"] = request.api_key
+                api_key = _api_key_from_request(http_request, request.api_key)
+                if api_key is not None:
+                    kwargs["api_key"] = api_key
                 if request.api_version is not None:
                     kwargs["api_version"] = request.api_version
 
@@ -140,7 +150,7 @@ class LiteLLMService:
 
 
         @self.app.post("/v1/embeddings")
-        async def embedding(request: EmbeddingRequest):
+        async def embedding(http_request: Request, request: EmbeddingRequest):
             try:
                 kwargs = {
                     "model": request.model,
@@ -155,8 +165,9 @@ class LiteLLMService:
                     kwargs["api_base"] = request.api_base
                 if request.api_version is not None:
                     kwargs["api_version"] = request.api_version
-                if request.api_key is not None:
-                    kwargs["api_key"] = request.api_key
+                api_key = _api_key_from_request(http_request, request.api_key)
+                if api_key is not None:
+                    kwargs["api_key"] = api_key
                 if request.api_type is not None:
                     kwargs["api_type"] = request.api_type
 
@@ -169,7 +180,7 @@ class LiteLLMService:
             
             
         @self.app.post("/v1/image_generation")
-        async def image_generation(request: ImageGenerationRequest):
+        async def image_generation(http_request: Request, request: ImageGenerationRequest):
             try:
                 kwargs = {
                     "prompt": request.prompt,
@@ -190,8 +201,9 @@ class LiteLLMService:
                     kwargs["api_base"] = request.api_base
                 if request.api_version is not None:
                     kwargs["api_version"] = request.api_version
-                if request.api_key is not None:
-                    kwargs["api_key"] = request.api_key
+                api_key = _api_key_from_request(http_request, request.api_key)
+                if api_key is not None:
+                    kwargs["api_key"] = api_key
 
                 response: ImageResponse = await aimage_generation(**kwargs)
                 return JSONResponse(content=_response_to_dict(response))
