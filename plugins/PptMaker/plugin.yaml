@@ -21,7 +21,7 @@ capabilities:
       - name: slides
         type: string
         required: true
-        description: JSON array of slide objects. Each has "title" (string) and "bullets" (array of strings). Example: [{"title":"Overview","bullets":["Point 1","Point 2"]}].
+        description: 'JSON array of slide objects. Each has "title" (string) and "bullets" (array of strings). Example: [{"title":"Overview","bullets":["Point 1","Point 2"]}].'
       - name: output_filename
         type: string
         required: false
@@ -41,7 +41,7 @@ capabilities:
       - name: outline
         type: string
         required: true
-        description: Markdown-style outline. Lines starting with ## start a new slide (title = rest of line). Lines starting with - or * are bullets under the current slide. Example: "## Intro\n- Point 1\n- Point 2\n## Next\n- A\n- B".
+        description: 'Markdown-style outline. Lines starting with ## start a new slide (title = rest of line). Lines starting with - or * are bullets under the current slide. Example: "## Intro\n- Point 1\n- Point 2\n## Next\n- A\n- B".'
       - name: output_filename
         type: string
         required: false
@@ -65,7 +65,7 @@ capabilities:
       - name: document_contents
         type: string
         required: false
-        description: JSON array of objects with "title" (or "name") and "content" (text). Use when you already have the document text (e.g. from file_read). Example: [{"title":"Report","content":"## Section 1\n- Point A"}].
+        description: 'JSON array of objects with "title" (or "name") and "content" (text). Use when you already have the document text (e.g. from file_read). Example: [{"title":"Report","content":"## Section 1\n- Point A"}].'
       - name: main_title
         type: string
         required: false

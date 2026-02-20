@@ -50,6 +50,8 @@ semantic-router
 
 # Optional (uncomment if needed):
 # document_read tool: PDF, PPT, Word, MD, HTML, XML, JSON, etc. (one powerful tool)
+# numba>=0.59 required for Python 3.12 (unstructured[all-docs] pulls numba)
+numba>=0.59.0
 unstructured[all-docs]
 # web_search: provider=duckduckgo (no key) or fallback when other providers fail
 duckduckgo-search
