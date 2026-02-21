@@ -31,12 +31,12 @@ Optional frontmatter: `homepage`, `user-invocable`, `disable-model-invocation`, 
 4. Set **use_skills: true** and **skills_dir: config/skills** in `config/core.yml`.
 5. Restart or send a new message; the model will see "Available skills" in its context.
 
-## Bundled skills (Phase C – OpenClaw parity)
+## Bundled skills
 
 - **desktop-ui** — macOS-only desktop UI automation (peekaboo). Use **run_skill**(skill_name="desktop-ui", script="run.py", args=[...]). On Windows/Linux, run.py returns a clear "not available on this platform" message; Core does not crash.
 - **ip-cameras** — RTSP/ONVIF IP cameras (camsnap + ffmpeg). Use **run_skill**(skill_name="ip-cameras", script="run.py", args=[...]). If camsnap or ffmpeg is missing, run.py returns a clear error; Core does not crash.
 
-You can copy skill folders from [ClawHub](https://clawhub.biz/) or other skill registries into this directory to reuse them. HomeClaw has equivalent tools for exec, browser, cron, sessions_*, memory, file, web; most community skills that don't rely on canvas/nodes/gateway are usable. See **Design.md §3.6**.
+You can add skill folders from other registries or create your own. HomeClaw has equivalent tools for exec, browser, cron, sessions_*, memory, file, web; most skills that use those tools are usable. See **Design.md §3.6**.
 
 ## Skill compatibility
 
