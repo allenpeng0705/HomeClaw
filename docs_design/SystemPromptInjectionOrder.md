@@ -4,6 +4,15 @@ This document describes the **canonical order** of system prompt sections in `an
 
 ---
 
+## 0. Tools vs skills (and what “no tool_calls” means)
+
+- **Tools** are the callable actions the model can use: `run_skill`, `file_read`, `time`, `route_to_plugin`, `memory_search`, etc. They are registered in the tool registry and appear in the “tools” list sent to the LLM.
+- **Skills** are not a separate layer. A skill is invoked **via the `run_skill` tool**: the model calls `run_skill(skill_name="nano-banana-pro-1.0.1", script="generate_image.py", args=[...])`. So “run a skill” = “call the run_skill tool with that skill’s folder and script.”
+- **“No tool_calls”** means the model returned a **text reply without calling any tool** — no run_skill, no file_read, no route_to_plugin, etc. So it’s “no tools and no skills” in one: the model chose to answer with text only.
+- **Force-include** only affects **which skills are listed** in the system prompt (and optionally adds an instruction or auto_invoke). It does not add new tools; `run_skill` is already a tool. The model is still expected to call `run_skill` when the user asks for something that matches a skill. When the model doesn’t call it (returns text like “no image tool”), **auto_invoke** can run `run_skill` as a fallback — but we only do that when the model’s reply looks unhelpful (see §2), so we don’t run it when the user asked “how?” and the model gave a helpful explanation.
+
+---
+
 ## 1. Canonical system prompt order
 
 The system message is built as `"\n".join(system_parts)`. Sections are appended in this order:
@@ -42,6 +51,8 @@ So **identity and context** come first (workspace, memory, skills, RAG, KB, prof
 - If the rule has `instruction`, that text is collected and later appended to `system_parts` in one place (see §3).
 
 So **selection** (which skills/plugins appear) is contextual; **instruction** placement is global (one block at the end, for all matched rules).
+
+**auto_invoke (optional):** When the model returns **no tool_calls**, Core can run a tool (e.g. run_skill) from the rule so the skill runs anyway. We only run it when the model's reply looks **unhelpful** (short or contains "no tool" / "not available") so we don't run it when the user asked "how?" and the model gave a helpful explanation. Use `{{query}}` in arguments to substitute the user message.
 
 ---
 

@@ -3424,6 +3424,7 @@ class Core(CoreInterface):
             response = ''
             system_parts = []
             force_include_instructions = []  # collected from skills_force_include_rules and plugins_force_include_rules; appended at end of system so model sees it last
+            force_include_auto_invoke = []  # when model returns no tool_calls, run these (e.g. run_skill) so the skill runs anyway; each item: {"tool": str, "arguments": dict}
 
             # Workspace bootstrap (identity / agents / tools) — optional; see Comparison.md §7.4
             if getattr(Util().core_metadata, 'use_workspace_bootstrap', True):
@@ -3564,6 +3565,17 @@ class Core(CoreInterface):
                             instr = rule.get("instruction") if isinstance(rule, dict) else None
                             if instr and isinstance(instr, str) and instr.strip():
                                 matched_instructions.append(instr.strip())
+                            auto_invoke = rule.get("auto_invoke") if isinstance(rule, dict) else None
+                            if isinstance(auto_invoke, dict) and auto_invoke.get("tool") and isinstance(auto_invoke.get("arguments"), dict):
+                                args = dict(auto_invoke["arguments"])
+                                # Substitute {{query}} in string values and in args list if present
+                                user_q = (query or "").strip()
+                                for k, v in list(args.items()):
+                                    if isinstance(v, str) and "{{query}}" in v:
+                                        args[k] = v.replace("{{query}}", user_q)
+                                    elif isinstance(v, list):
+                                        args[k] = [s.replace("{{query}}", user_q) if isinstance(s, str) else s for s in v]
+                                force_include_auto_invoke.append({"tool": str(auto_invoke["tool"]).strip(), "arguments": args})
                         skills_max = max(0, int(getattr(meta_skills, "skills_max_in_prompt", 5) or 5))
                         if skills_max > 0 and len(skills_list) > skills_max:
                             skills_list = skills_list[:skills_max]
@@ -3888,24 +3900,53 @@ class Core(CoreInterface):
                         if content_str and ("<tool_call>" in content_str or "</tool_call>" in content_str):
                             response = "The assistant tried to use a tool but the response format was not recognized. Please try again."
                         else:
-                            # Fallback: model didn't call a tool (e.g. replied "No"). If user intent is clear, run plugin anyway.
-                            unhelpful = not content_str or len(content_str) < 80 or content_str.strip().lower() in ("no", "i can't", "i cannot", "sorry", "nope")
-                            fallback_route = _infer_route_to_plugin_fallback(query) if unhelpful else None
-                            if fallback_route and registry and any(t.name == "route_to_plugin" for t in (registry.list_tools() or [])):
-                                try:
-                                    _component_log("tools", "fallback route_to_plugin (model did not call tool)")
-                                    result = await registry.execute_async("route_to_plugin", fallback_route, context)
-                                    if result == ROUTING_RESPONSE_ALREADY_SENT:
-                                        return ROUTING_RESPONSE_ALREADY_SENT
-                                    if isinstance(result, str) and result.strip():
-                                        response = result
-                                    else:
-                                        response = content_str or "Done."
-                                except Exception as e:
-                                    logger.debug("Fallback route_to_plugin failed: {}", e)
-                                    response = content_str or "The action could not be completed. Try a model that supports tool calling."
+                            # Fallback: model didn't call a tool. Try force-include auto_invoke only when the reply looks unhelpful (e.g. "no tool available"), so we don't run when the user asked "how?" and the model gave a helpful explanation.
+                            content_lower = (content_str or "").strip().lower()
+                            unhelpful_for_auto_invoke = (
+                                not content_str or len(content_str) < 100
+                                or any(phrase in content_lower for phrase in ("no tool", "don't have", "doesn't have", "not have", "not available", "no image tool", "no such tool", "can't generate", "cannot generate", "i'm sorry", "i cannot"))
+                            )
+                            if force_include_auto_invoke and registry and unhelpful_for_auto_invoke:
+                                ran = False
+                                for inv in force_include_auto_invoke:
+                                    tname = inv.get("tool") or ""
+                                    targs = inv.get("arguments") or {}
+                                    if not tname or not isinstance(targs, dict):
+                                        continue
+                                    if not any(t.name == tname for t in (registry.list_tools() or [])):
+                                        continue
+                                    try:
+                                        _component_log("tools", f"fallback auto_invoke {tname} (model did not call tool)")
+                                        result = await registry.execute_async(tname, targs, context)
+                                        if result == ROUTING_RESPONSE_ALREADY_SENT:
+                                            return ROUTING_RESPONSE_ALREADY_SENT
+                                        if isinstance(result, str) and result.strip():
+                                            response = result
+                                            ran = True
+                                        break
+                                    except Exception as e:
+                                        logger.debug("Fallback auto_invoke {} failed: {}", tname, e)
+                                if not ran:
+                                    response = content_str
                             else:
-                                response = content_str
+                                # Fallback: model didn't call a tool (e.g. replied "No"). If user intent is clear, run plugin anyway.
+                                unhelpful = not content_str or len(content_str) < 80 or content_str.strip().lower() in ("no", "i can't", "i cannot", "sorry", "nope")
+                                fallback_route = _infer_route_to_plugin_fallback(query) if unhelpful else None
+                                if fallback_route and registry and any(t.name == "route_to_plugin" for t in (registry.list_tools() or [])):
+                                    try:
+                                        _component_log("tools", "fallback route_to_plugin (model did not call tool)")
+                                        result = await registry.execute_async("route_to_plugin", fallback_route, context)
+                                        if result == ROUTING_RESPONSE_ALREADY_SENT:
+                                            return ROUTING_RESPONSE_ALREADY_SENT
+                                        if isinstance(result, str) and result.strip():
+                                            response = result
+                                        else:
+                                            response = content_str or "Done."
+                                    except Exception as e:
+                                        logger.debug("Fallback route_to_plugin failed: {}", e)
+                                        response = content_str or "The action could not be completed. Try a model that supports tool calling."
+                                else:
+                                    response = content_str
                         break
                     routing_sent = False
                     routing_response_text = None  # when route_to_plugin/route_to_tam return text (sync inbound/ws), use as final response

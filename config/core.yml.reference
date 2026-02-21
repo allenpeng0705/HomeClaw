@@ -95,6 +95,7 @@ plugins_vector_collection: homeclaw_plugins
 plugins_max_retrieved: 10
 plugins_similarity_threshold: 0.0
 plugins_refresh_on_startup: true
+# skills_force_include_rules: each rule can have optional auto_invoke: { tool: "run_skill", arguments: { skill_name, script, args } }. Use {{query}} in args to substitute the user message. When the model returns no tool_calls, Core runs auto_invoke so the skill runs anyway.
 # Optional: when user query matches a regex, ensure these plugin ids are in the routing block and optionally append an instruction. List of { pattern: str, plugins: [str], instruction?: str }. No per-plugin code in Core.
 # Example: when user says "open a browser" or "navigate to", force-include homeclaw-browser and add an instruction to use route_to_plugin.
 # plugins_force_include_rules:
@@ -142,7 +143,7 @@ tools:
   file_read_base: "."
   # Max characters returned by file_read when the tool does not pass max_chars (default 32000). Increase for long PDFs/documents (e.g. 128000).
   file_read_max_chars: 128000
-  run_skill_allowlist: ["run.sh", "main.py", "run.bat"]   # run_skill: if set, only these script names under skill/scripts/. .sh on Windows runs via bash/WSL if available.
+  run_skill_allowlist: ["run.sh", "main.py", "run.bat", "generate_image.py", "run.py", "search.py"]   # run_skill: if set, only these script names. Use [] to allow all scripts under any skill's scripts/. .sh on Windows runs via bash/WSL if available.
   run_skill_timeout: 60   # Unit: seconds
   web:                  # web_search: free (no key) duckduckgo | free tier google_cse (100/day), bing (1000/mo) | tavily, brave, serpapi. Browser: web_search_browser (Google/Bing/Baidu, no key, needs Playwright).
     search:

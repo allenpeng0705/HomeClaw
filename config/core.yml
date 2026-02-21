@@ -87,6 +87,12 @@ skills_force_include_rules:
   - pattern: "generate\\s+(an?\\s+)?image|create\\s+(an?\\s+)?image|draw\\s+(a\\s+)?(picture|image)"
     folders: [nano-banana-pro-1.0.1]
     instruction: "The user asked to generate or create an image. You MUST call the run_skill tool first (do not reply with text). Use skill_name='nano-banana-pro-1.0.1', script='generate_image.py', args=['--prompt', '<user image description>', '--filename', 'generated.png']. Do not say that no image tool is available."
+    auto_invoke:
+      tool: run_skill
+      arguments:
+        skill_name: nano-banana-pro-1.0.1
+        script: generate_image.py
+        args: ["--prompt", "{{query}}", "--filename", "generated.png"]
   - pattern: "summarize\\s+(this\\s+)?(url|link|page|article)"
     folders: [summarize-1.0.0]
     instruction: "The user asked to summarize a URL or page. Use run_skill with skill_name='summarize-1.0.0' and the URL in args, or use the skill's instructions."
@@ -140,7 +146,7 @@ tools:
   file_read_base: "/Users/shileipeng/Documents/homeclaw"
   # Max characters returned by file_read when the tool does not pass max_chars (default 32000). Increase for long PDFs/documents (e.g. 128000).
   file_read_max_chars: 128000
-  run_skill_allowlist: ["run.sh", "main.py", "run.bat"]   # run_skill: if set, only these script names under skill/scripts/. .sh on Windows runs via bash/WSL if available.
+  run_skill_allowlist: []   # run_skill: if set, only these script names under skill/scripts/. Use [] to allow all scripts from skills. .sh on Windows runs via bash/WSL if available.
   run_skill_timeout: 60   # Unit: seconds
   web:                  # web_search: free (no key) duckduckgo | free tier google_cse (100/day), bing (1000/mo) | tavily, brave, serpapi. Browser: web_search_browser (Google/Bing/Baidu, no key, needs Playwright).
     search:
