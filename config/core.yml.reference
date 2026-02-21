@@ -82,12 +82,26 @@ skills_refresh_on_startup: true
 # Optional test folder: full sync every time (id = test__<folder>). Production skills_dir can be incremental (only new).
 skills_test_dir: ""
 skills_incremental_sync: false
+# Optional: when user query matches a regex, ensure these skill folders are in the prompt and optionally append an instruction. List of { pattern: str, folders: [str], instruction?: str }. No per-skill code in Core.
+# Example (uncomment and set folders/instruction per skill):
+# skills_force_include_rules:
+#   - pattern: "generate\\s+(an?\\s+)?image|create\\s+(an?\\s+)?image|draw\\s+(a\\s+)?(picture|image)"
+#     folders: [nano-banana-pro-1.0.1]
+#     instruction: "The user asked to generate or create an image. You MUST call run_skill with skill_name='nano-banana-pro-1.0.1', script='generate_image.py', args=['--prompt', '<user image description>', '--filename', 'generated.png']. Do not respond that no image tool is available."
+skills_force_include_rules: []
 # Vector retrieval for plugins (separate collection): same design as skills. RAG finds relevant plugins; only those go into prompt.
 plugins_use_vector_search: false
 plugins_vector_collection: homeclaw_plugins
 plugins_max_retrieved: 10
 plugins_similarity_threshold: 0.0
 plugins_refresh_on_startup: true
+# Optional: when user query matches a regex, ensure these plugin ids are in the routing block and optionally append an instruction. List of { pattern: str, plugins: [str], instruction?: str }. No per-plugin code in Core.
+# Example: when user says "open a browser" or "navigate to", force-include homeclaw-browser and add an instruction to use route_to_plugin.
+# plugins_force_include_rules:
+#   - pattern: "open\\s+(the\\s+)?browser|navigate\\s+to|go\\s+to\\s+https?://"
+#     plugins: [homeclaw-browser]
+#     instruction: "The user asked to open a URL or use the browser. Use route_to_plugin(plugin_id='homeclaw-browser', capability_id='browser_navigate', parameters={\"url\": \"<URL>\"})."
+plugins_force_include_rules: []
 # System plugins (system_plugins/): when true, Core starts each plugin (e.g. node server.js) and runs register (e.g. node register.js) so one command runs Core + all system plugins. See system_plugins/README.md.
 system_plugins_auto_start: true   # set true to start homeclaw-browser etc. with Core
 system_plugins: [homeclaw-browser]                 # optional allowlist by plugin id (folder name); empty = start all discovered

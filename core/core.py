@@ -3423,6 +3423,7 @@ class Core(CoreInterface):
             llm_input = []
             response = ''
             system_parts = []
+            force_include_instructions = []  # collected from skills_force_include_rules and plugins_force_include_rules; appended at end of system so model sees it last
 
             # Workspace bootstrap (identity / agents / tools) — optional; see Comparison.md §7.4
             if getattr(Util().core_metadata, 'use_workspace_bootstrap', True):
@@ -3535,12 +3536,44 @@ class Core(CoreInterface):
                             _component_log("skills", f"capped to {skills_max} skill(s) in prompt (skills_max_in_prompt)")
                         if skills_list:
                             _component_log("skills", f"loaded {len(skills_list)} skill(s) from {skills_path}")
+                    # Config-driven force-include: when user query matches a rule pattern, ensure those skill folders are in the prompt and optionally append an instruction
+                    matched_instructions = []
+                    if skills_list:
+                        from base.skills import load_skill_by_folder
+                        q = (query or "").strip().lower()
+                        folders_present = {s.get("folder") for s in skills_list}
+                        for rule in (getattr(meta_skills, "skills_force_include_rules", None) or []):
+                            pattern = rule.get("pattern") if isinstance(rule, dict) else None
+                            folders = rule.get("folders") if isinstance(rule, dict) else None
+                            if not pattern or not folders or not isinstance(folders, (list, tuple)):
+                                continue
+                            try:
+                                if not re.search(pattern, q):
+                                    continue
+                            except re.error:
+                                continue
+                            for folder in folders:
+                                folder = str(folder).strip()
+                                if not folder or folder in folders_present:
+                                    continue
+                                skill_dict = load_skill_by_folder(skills_path, folder, include_body=False)
+                                if skill_dict:
+                                    skills_list = [skill_dict] + [s for s in skills_list if s.get("folder") != folder]
+                                    folders_present.add(folder)
+                                    _component_log("skills", f"included {folder} for force-include rule")
+                            instr = rule.get("instruction") if isinstance(rule, dict) else None
+                            if instr and isinstance(instr, str) and instr.strip():
+                                matched_instructions.append(instr.strip())
+                        skills_max = max(0, int(getattr(meta_skills, "skills_max_in_prompt", 5) or 5))
+                        if skills_max > 0 and len(skills_list) > skills_max:
+                            skills_list = skills_list[:skills_max]
                     if skills_list:
                         selected_names = [s.get("folder") or s.get("name") or "?" for s in skills_list]
                         _component_log("skills", f"selected: {', '.join(selected_names)}")
                     skills_block = build_skills_system_block(skills_list, include_body=False)
                     if skills_block:
                         system_parts.append(skills_block)
+                    force_include_instructions.extend(matched_instructions)
                 except Exception as e:
                     logger.warning("Failed to load skills: {}", e)
 
@@ -3671,6 +3704,43 @@ class Core(CoreInterface):
                     plugins_max = max(0, int(getattr(Util().get_core_metadata(), "plugins_max_in_prompt", 5) or 5))
                     if plugins_max > 0 and len(plugin_list) > plugins_max:
                         plugin_list = plugin_list[:plugins_max]
+                # Config-driven force-include: when user query matches a rule pattern, ensure those plugins are in the list and optionally collect an instruction
+                plugin_force_instructions = []
+                if plugin_list is not None:
+                    q = (query or "").strip().lower()
+                    ids_present = {str(p.get("id") or "").strip().lower().replace(" ", "_") for p in plugin_list}
+                    for rule in (getattr(meta_plugins, "plugins_force_include_rules", None) or []):
+                        pattern = rule.get("pattern") if isinstance(rule, dict) else None
+                        plugins_in_rule = rule.get("plugins") if isinstance(rule, dict) else None
+                        if not pattern or not plugins_in_rule or not isinstance(plugins_in_rule, (list, tuple)):
+                            continue
+                        try:
+                            if not re.search(pattern, q):
+                                continue
+                        except re.error:
+                            continue
+                        desc_max_rag = max(0, int(getattr(meta_plugins, "plugins_description_max_chars", 0) or 0))
+                        for pid in plugins_in_rule:
+                            pid = str(pid).strip().lower().replace(" ", "_")
+                            if not pid or pid in ids_present:
+                                continue
+                            plug = self.plugin_manager.get_plugin_by_id(pid)
+                            if plug is None:
+                                continue
+                            if isinstance(plug, dict):
+                                desc_raw = (plug.get("description") or "").strip()
+                            else:
+                                desc_raw = (getattr(plug, "get_description", lambda: "")() or "").strip()
+                            desc = desc_raw[:desc_max_rag] if desc_max_rag > 0 else desc_raw
+                            plugin_list = [{"id": pid, "description": desc}] + [p for p in plugin_list if (p.get("id") or "").strip().lower().replace(" ", "_") != pid]
+                            ids_present.add(pid)
+                            _component_log("plugin", f"included {pid} for force-include rule")
+                        instr = rule.get("instruction") if isinstance(rule, dict) else None
+                        if instr and isinstance(instr, str) and instr.strip():
+                            plugin_force_instructions.append(instr.strip())
+                    plugins_max = max(0, int(getattr(meta_plugins, "plugins_max_in_prompt", 5) or 5))
+                    if plugins_max > 0 and len(plugin_list) > plugins_max:
+                        plugin_list = plugin_list[:plugins_max]
                 plugin_lines = []
                 if plugin_list:
                     desc_max = max(0, int(getattr(Util().get_core_metadata(), "plugins_description_max_chars", 0) or 0))
@@ -3691,6 +3761,7 @@ class Core(CoreInterface):
                     + ("Available plugins:\n" + "\n".join(plugin_lines) if plugin_lines else "")
                 )
                 system_parts.append(routing_block)
+                force_include_instructions.extend(plugin_force_instructions)
 
             # Optional: surface recorded events (TAM) in context so model knows what's coming up
             if getattr(self, "orchestratorInst", None) and getattr(self.orchestratorInst, "tam", None):
@@ -3699,6 +3770,12 @@ class Core(CoreInterface):
                     summary = tam.get_recorded_events_summary(limit=10)
                     if summary:
                         system_parts.append("## Recorded events (from record_date)\n" + summary)
+
+            # Append force-include instructions last so the model sees them immediately before the conversation (better compliance). Order and tradeoffs: docs_design/SystemPromptInjectionOrder.md
+            if force_include_instructions:
+                _component_log("skills", f"appended {len(force_include_instructions)} force-include instruction(s) at end of system prompt")
+            for instr in force_include_instructions:
+                system_parts.append("\n\n## Instruction for this request\n\n" + instr + "\n\n")
 
             if system_parts:
                 llm_input = [{"role": "system", "content": "\n".join(system_parts)}]
