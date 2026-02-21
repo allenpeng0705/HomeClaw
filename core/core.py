@@ -3779,8 +3779,23 @@ class Core(CoreInterface):
                     )
                     logger.debug("LLM call returned in {:.1f}s", time.time() - _t0)
                     if msg is None:
-                        response = None
-                        break
+                        # Mix fallback: one model failed (timeout/error); retry once with the other route so the task is not blocked.
+                        hr = getattr(Util().get_core_metadata(), "hybrid_router", None) or {}
+                        fallback_ok = bool(hr.get("fallback_on_llm_error", True)) and mix_route_this_request
+                        if fallback_ok and (getattr(Util().get_core_metadata(), "main_llm_local", None) or "").strip() and (getattr(Util().get_core_metadata(), "main_llm_cloud", None) or "").strip():
+                            other_route = "cloud" if mix_route_this_request == "local" else "local"
+                            other_llm = (getattr(Util().get_core_metadata(), "main_llm_cloud", None) or "").strip() if other_route == "cloud" else (getattr(Util().get_core_metadata(), "main_llm_local", None) or "").strip()
+                            if other_llm:
+                                _component_log("mix", f"first model failed, retrying with {other_route} ({other_llm})")
+                                msg = await Util().openai_chat_completion_message(
+                                    current_messages, tools=openai_tools, tool_choice="auto", llm_name=other_llm
+                                )
+                                if msg is not None:
+                                    mix_route_this_request = other_route
+                                    mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_fallback" if mix_route_layer_this_request else "fallback"
+                        if msg is None:
+                            response = None
+                            break
                     current_messages.append(msg)
                     tool_calls = msg.get("tool_calls") if isinstance(msg.get("tool_calls"), list) else None
                     content_str = (msg.get("content") or "").strip()
@@ -3880,8 +3895,20 @@ class Core(CoreInterface):
                 response = await self.openai_chat_completion(
                     messages=llm_input, llm_name=effective_llm_name
                 )
+                # Mix fallback: first model failed; retry once with the other route so the task is not blocked.
+                if (response is None or (isinstance(response, str) and len(response.strip()) == 0)) and mix_route_this_request:
+                    hr = getattr(Util().get_core_metadata(), "hybrid_router", None) or {}
+                    if bool(hr.get("fallback_on_llm_error", True)) and (getattr(Util().get_core_metadata(), "main_llm_local", None) or "").strip() and (getattr(Util().get_core_metadata(), "main_llm_cloud", None) or "").strip():
+                        other_route = "cloud" if mix_route_this_request == "local" else "local"
+                        other_llm = (getattr(Util().get_core_metadata(), "main_llm_cloud", None) or "").strip() if other_route == "cloud" else (getattr(Util().get_core_metadata(), "main_llm_local", None) or "").strip()
+                        if other_llm:
+                            _component_log("mix", f"first model failed (no-tool path), retrying with {other_route} ({other_llm})")
+                            response = await self.openai_chat_completion(messages=llm_input, llm_name=other_llm)
+                            if response and isinstance(response, str) and response.strip():
+                                mix_route_this_request = other_route
+                                mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_fallback" if mix_route_layer_this_request else "fallback"
 
-            if response is None or len(response) == 0:
+            if response is None or (isinstance(response, str) and len(response.strip()) == 0):
                 return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
             if mix_route_this_request and mix_show_route_label:
                 layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""

@@ -77,6 +77,8 @@ Each mix-mode turn logs one line (JSON) with the routing decision:
 
 Use this to debug why a given message went local or cloud.
 
+**Failure and fallback:** If the chosen model fails (timeout, connection error, bad response), Core does **not** block the whole task by default. When `hybrid_router.fallback_on_llm_error` is `true` (default), Core retries **once** with the other route (e.g. local failed → try cloud; cloud failed → try local). If the fallback also fails, the user sees "Sorry, something went wrong...". Set `fallback_on_llm_error: false` to disable automatic retry and fail immediately when the chosen model fails.
+
 ### 2. REST API (aggregate report)
 
 - **Endpoint:** `GET /api/reports/usage`
@@ -114,6 +116,7 @@ All mix-mode and router parameters live under **`config/core.yml`** → `main_ll
 | **main_llm_cloud** | Top-level | Cloud model ref used when route is cloud. | Must match an entry in `cloud_models`. |
 | **default_route** | `hybrid_router` | Route when **no** layer selects (e.g. ambiguous or low score). | `local` = save cost; `cloud` = safer for unknown. |
 | **show_route_in_response** | `hybrid_router` | When `true`, prepend route and **layer** to each reply, e.g. `[Local · heuristic]` or `[Cloud · semantic]` (for testing). | Default `false`. Turn on to see which layer chose the route in the UI without checking logs. |
+| **fallback_on_llm_error** | `hybrid_router` | When `true` (default): if the chosen model fails (timeout/error), retry **once** with the other route so one model failing does not block the task. | Set to `false` to fail fast (no automatic switch to the other model). |
 | **heuristic.enabled** | `hybrid_router.heuristic` | Turn Layer 1 (keyword/long-input) on/off. | Off if you rely only on semantic + Layer 3. |
 | **heuristic.threshold** | `hybrid_router.heuristic` | Min score to accept a heuristic match (keyword match gives 1.0). | Usually keep 0.5; rarely need to change. |
 | **heuristic.rules_path** | `hybrid_router.heuristic` | Path to YAML with keywords and long_input_* rules. | Point to your `heuristic_rules.yml` (or generate via scripts). |
