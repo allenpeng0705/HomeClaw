@@ -490,15 +490,19 @@ class Core(CoreInterface):
         """Poll GET {base_url}/ready until Core responds 200 or timeout. Uses /ready (lightweight) so DB/plugins don't delay readiness."""
         url = (base_url.rstrip("/") + "/ready")
         deadline = time.monotonic() + timeout_sec
+        last_err = None
         while time.monotonic() < deadline:
             try:
                 async with httpx.AsyncClient(timeout=2.0) as client:
                     r = await client.get(url)
                     if r.status_code == 200:
                         return True
-            except Exception:
-                pass
+                    last_err = f"status {r.status_code}"
+            except Exception as e:
+                last_err = e
             await asyncio.sleep(interval_sec)
+        if last_err is not None:
+            logger.debug("system_plugins: last ready probe failed: {}", last_err)
         return False
 
     async def _run_system_plugins_startup(self) -> None:
@@ -519,6 +523,8 @@ class Core(CoreInterface):
         if getattr(meta, "auth_enabled", False) and getattr(meta, "auth_api_key", ""):
             base_env["CORE_API_KEY"] = getattr(meta, "auth_api_key", "")
         plugin_env_config = getattr(meta, "system_plugins_env", None) or {}
+        # Give the HTTP server a moment to bind (avoids "Core did not become ready" on Windows where the task can poll before server.serve() is listening).
+        await asyncio.sleep(2)
         # Wait for Core to be ready so registration succeeds (poll GET /ready until 200).
         # Use 127.0.0.1 for the probe when host is 0.0.0.0 so readiness works on Windows (connecting to 0.0.0.0 often fails there).
         ready_host = "127.0.0.1" if (getattr(meta, "host", None) or "").strip() in ("0.0.0.0", "") else meta.host
@@ -548,7 +554,8 @@ class Core(CoreInterface):
                 _component_log("system_plugins", f"started {item['id']} (pid={proc.pid})")
             except Exception as e:
                 logger.warning("system_plugins: failed to start {}: {}", item["id"], e)
-        await asyncio.sleep(2)
+        delay = max(0.5, float(getattr(meta, "system_plugins_start_delay", 2) or 2))
+        await asyncio.sleep(delay)
         for item in to_start:
             env = {**base_env}
             for k, v in plugin_env_config.get(item["id"], {}).items():
@@ -808,7 +815,7 @@ class Core(CoreInterface):
             )
             logger.debug("Knowledge base initialized (Cognee backend)")
         except Exception as e:
-            logger.warning("Knowledge base (Cognee) not initialized: %s", e)
+            logger.exception("Knowledge base (Cognee) not initialized: {}", e)
             self.knowledge_base = None
 
     def initialize(self):
@@ -1410,7 +1417,13 @@ class Core(CoreInterface):
             """
             kb = getattr(self, "knowledge_base", None)
             if kb is None:
-                return JSONResponse(status_code=404, content={"detail": "Knowledge base not enabled or not initialized."})
+                meta = Util().get_core_metadata()
+                kb_cfg = getattr(meta, "knowledge_base", None) or {}
+                enabled = kb_cfg.get("enabled") if isinstance(kb_cfg, dict) else getattr(kb_cfg, "enabled", False)
+                hint = ""
+                if enabled:
+                    hint = " Knowledge base is enabled but failed to initialize at startup. Check Core startup logs for 'Knowledge base (Cognee) not initialized' (full traceback is logged). Common causes: (1) pip install cognee not run; (2) main_llm or embedding_llm not set in config so Cognee has no LLM/embedding endpoint; (3) Cognee DB/vector/graph (cognee section) not reachable or misconfigured."
+                return JSONResponse(status_code=404, content={"detail": "Knowledge base not enabled or not initialized." + hint})
             try:
                 out = await kb.reset()
                 if out.startswith("Error:"):
@@ -2856,12 +2869,37 @@ class Core(CoreInterface):
         """Run the core using uvicorn"""
         try:
             logger.debug("core is running!")
+            # Periodic wakeup so the event loop can process signals (e.g. Ctrl+C). Required on Windows;
+            # harmless on macOS/Linux. Shorter interval (0.2s) improves responsiveness on Windows.
+            _loop = asyncio.get_running_loop()
+            _wakeup_interval = 0.2
+            def _wakeup():
+                _loop.call_later(_wakeup_interval, _wakeup)
+            _loop.call_later(_wakeup_interval, _wakeup)
             core_metadata: CoreMetadata = Util().get_core_metadata()
             logger.debug(f"Running core on {core_metadata.host}:{core_metadata.port}")
             config = uvicorn.Config(self.app, host=core_metadata.host, port=core_metadata.port, log_level="critical")
             self.server = Server(config=config)
             self.initialize()
             self.start_email_channel()
+
+            # Embedding server must run first: we embed skills, plugins, and agent_memory so we can filter them by query (vector search). Start LLM manager (embedding + main LLM) before any sync.
+            logger.debug("Starting LLM manager...")
+            self.llmManager.run()
+            logger.debug("LLM manager started!")
+            # When embedding is local, wait for the embedding server to be ready before syncs that use it
+            need_embedder = (
+                getattr(core_metadata, "skills_use_vector_search", False)
+                or getattr(core_metadata, "plugins_use_vector_search", False)
+                or getattr(core_metadata, "use_agent_memory_search", False)
+            )
+            if need_embedder and getattr(self, "embedder", None) and Util()._effective_embedding_llm_type() == "local":
+                try:
+                    ready = await asyncio.to_thread(Util().check_embedding_model_server_health, 90)
+                    if not ready:
+                        logger.warning("Embedding server did not become ready in time; skills/plugins/agent_memory sync may fail.")
+                except Exception as e:
+                    logger.warning("Embedding server health check failed: {}; sync may fail.", e)
 
             # Sync skills to vector store when skills_use_vector_search and skills_refresh_on_startup
             if getattr(core_metadata, "skills_use_vector_search", False) and getattr(core_metadata, "skills_refresh_on_startup", True):
@@ -2930,11 +2968,7 @@ class Core(CoreInterface):
             except Exception as e:
                 logger.debug("Result viewer server skipped: {}", e)
 
-            # Schedule llmManager.run() to run concurrently
-            #llm_task = asyncio.create_task(self.llmManager.run())
-            logger.debug("Starting LLM manager...")
-            self.llmManager.run()
-            logger.debug("LLM manager started!")
+            # LLM manager (embedding + main LLM) was started earlier, before skills/plugins/agent_memory sync.
             # Optionally start and register system_plugins (e.g. homeclaw-browser) so one command runs Core + plugins.
             # Runs in a background asyncio task; each plugin is a separate OS process. Does not block Core or server.serve().
             if getattr(core_metadata, "system_plugins_auto_start", False):
@@ -3501,6 +3535,9 @@ class Core(CoreInterface):
                             _component_log("skills", f"capped to {skills_max} skill(s) in prompt (skills_max_in_prompt)")
                         if skills_list:
                             _component_log("skills", f"loaded {len(skills_list)} skill(s) from {skills_path}")
+                    if skills_list:
+                        selected_names = [s.get("folder") or s.get("name") or "?" for s in skills_list]
+                        _component_log("skills", f"selected: {', '.join(selected_names)}")
                     skills_block = build_skills_system_block(skills_list, include_body=False)
                     if skills_block:
                         system_parts.append(skills_block)
@@ -3649,7 +3686,7 @@ class Core(CoreInterface):
                     "Listing connected nodes or \"what nodes are connected\" -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_list).\n"
                     "If the request clearly matches one of the available plugins below, call route_to_plugin with that plugin_id (and capability_id/parameters when relevant).\n"
                     "For time-related requests only: one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only when the user clearly asks to schedule or remind (e.g. \"remind me in 5 minutes\", \"every day at 9am\").\n"
-                    "For script-based workflows (see Available skills above), use run_skill(skill_name, script, ...).\n"
+                    "For script-based workflows use run_skill(skill_name, script, ...). For instruction-only skills (no scripts/) use run_skill(skill_name) with no script and follow the skill's instructions.\n"
                     "Otherwise respond or use other tools.\n"
                     + ("Available plugins:\n" + "\n".join(plugin_lines) if plugin_lines else "")
                 )
@@ -4341,43 +4378,92 @@ class Core(CoreInterface):
             return None
 
     def exit_gracefully(self, signum, frame):
-        try:
-            #logger.debug("CTRL+C received, shutting down...")
-            # shut down the chromadb server
-            # self.shutdown_chroma_server()  # Shut down ChromaDB server
-            # End the main thread
-            self.stop()
-            sys.exit(0)
-            #logger.debug("CTRL+C Done...")
-        except Exception as e:
-            logger.exception(e)
+        if getattr(self, "_shutdown_started", False):
+            # Second Ctrl+C: force exit so user is not blocked by slow plugin cleanup
+            os._exit(1)
+        self._shutdown_started = True
+        logger.info("Shutting down (press Ctrl+C again to force exit)...")
+        def run_stop():
+            try:
+                self.stop()
+            except Exception as e:
+                logger.exception(e)
+        stop_thread = threading.Thread(target=run_stop, daemon=True)
+        stop_thread.start()
+        stop_thread.join(timeout=10)
+        if stop_thread.is_alive():
+            logger.warning("Shutdown taking longer than 10s; forcing exit.")
+        os._exit(0 if not stop_thread.is_alive() else 1)
 
     def __enter__(self):
-        #if threading.current_thread() == threading.main_thread():
+        global _core_instance_for_ctrl_c
+        _core_instance_for_ctrl_c = self
         try:
-            #logger.debug("channel initializing..., register the ctrl+c signal handler")
             signal.signal(signal.SIGINT, self.exit_gracefully)
             signal.signal(signal.SIGTERM, self.exit_gracefully)
-        except Exception as e:
-            # It's a good practice to at least log the exception
-            # logger.error(f"Error setting signal handlers: {e}")
+        except Exception:
             pass
-
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+                PHANDLER = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_ulong)
+                _win_console_ctrl_handler._handler = PHANDLER(_win_console_ctrl_handler)
+                if kernel32.SetConsoleCtrlHandler(_win_console_ctrl_handler._handler, True):
+                    pass  # registered
+                else:
+                    _win_console_ctrl_handler._handler = None
+            except Exception:
+                pass
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        pass
+        global _core_instance_for_ctrl_c
+        _core_instance_for_ctrl_c = None
+        if sys.platform == "win32":
+            try:
+                handler = getattr(_win_console_ctrl_handler, "_handler", None)
+                if handler is not None:
+                    import ctypes
+                    ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, False)
+            except Exception:
+                pass
+        return None
 
 def main():
+    loop = None
+    core = None
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         with Core() as core:
             loop.run_until_complete(core.run())
+    except KeyboardInterrupt:
+        if core is not None:
+            try:
+                core.stop()
+            except Exception:
+                pass
+        sys.exit(0)
     except Exception as e:
         logger.exception(e)
     finally:
-        loop.close()
+        if loop is not None:
+            loop.close()
+
+# Set by Core.__enter__ so Windows console Ctrl handler can trigger shutdown when Python SIGINT is not delivered.
+_core_instance_for_ctrl_c = None
+
+
+def _win_console_ctrl_handler(event):
+    """Windows-only: handle Ctrl+C so shutdown works when Python signal is not delivered."""
+    if event == 0:  # CTRL_C_EVENT
+        core = globals().get("_core_instance_for_ctrl_c")
+        if core is not None:
+            core.exit_gracefully(signal.SIGINT, None)
+        return True
+    return False
+
 
 if __name__ == "__main__":
     main()

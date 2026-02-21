@@ -1549,7 +1549,7 @@ async def _exec_executor(arguments: Dict[str, Any], context: ToolContext) -> str
 
 
 async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Run a script from a loaded skill's scripts/ folder. Skill name = folder name under skills_dir; script = filename or path relative to scripts/. Optional args as list of strings. Sandboxed: only scripts under <skill>/scripts/; optional allowlist in config tools.run_skill_allowlist."""
+    """Run a script from a loaded skill's scripts/ folder. Supports Python (.py), Node.js (.js, .mjs, .cjs), shell (.sh). Skill name = folder name under skills_dir; script = filename or path relative to scripts/. Optional args as list of strings. Sandboxed: only scripts under <skill>/scripts/; optional allowlist in config. Skills without scripts/ are instruction-only: omit script and use the skill's instructions in your response."""
     try:
         from base.util import Util
     except ImportError:
@@ -1559,24 +1559,28 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
     args_input = arguments.get("args")
     if not skill_name:
         return "Error: skill_name (or skill) is required"
-    if not script_arg:
-        return "Error: script (or script_name) is required"
-    # Resolve skills_dir from core config
+    # Resolve skills_dir from core config (Path for cross-platform Mac/Win/Linux)
     meta = Util().get_core_metadata()
     skills_dir_str = getattr(meta, "skills_dir", None) or "config/skills"
     root = Path(Util().root_path())
     skills_base = get_skills_dir(skills_dir_str, root=root)
     skill_folder = (skills_base / skill_name).resolve()
-    scripts_dir = (skill_folder / "scripts").resolve()
     if not skill_folder.is_dir():
         return f"Error: skill folder not found: {skill_name} (under {skills_base})"
+    scripts_dir = (skill_folder / "scripts").resolve()
     if not scripts_dir.is_dir():
-        return f"Error: skill has no scripts/ folder: {skill_name}"
-    # Script path: must be under scripts_dir (no ..)
-    script_path = (scripts_dir / script_arg).resolve()
+        if not script_arg:
+            return f"This skill ({skill_name}) is instruction-only and has no scripts to run. Use the skill's instructions from the Available skills section to guide your response (e.g. write the LinkedIn post following the skill's guidelines)."
+        return f"Error: skill has no scripts/ folder: {skill_name}. Use the skill's instructions in your response instead of run_skill."
+    if not script_arg:
+        return "Error: script (or script_name) is required for this skill; it has a scripts/ folder."
+    # Normalize script path for cross-platform: accept both / and \ in script_arg
+    script_parts = Path(script_arg).parts
+    if not script_parts or any(p == ".." for p in script_parts):
+        return "Error: script path must be under the skill's scripts/ directory"
+    script_path = (scripts_dir.joinpath(*script_parts)).resolve()
     try:
-        script_path = script_path.resolve().relative_to(scripts_dir)
-        script_path = (scripts_dir / script_path).resolve()
+        script_path.resolve().relative_to(scripts_dir)
     except ValueError:
         return "Error: script path must be under the skill's scripts/ directory"
     if not script_path.is_file():
@@ -1596,6 +1600,18 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
         if script_path.suffix.lower() in (".py", ".pyw"):
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,
+                str(script_path),
+                *args_list,
+                cwd=str(skill_folder),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        elif script_path.suffix.lower() in (".js", ".mjs", ".cjs"):
+            node_path = shutil.which("node")
+            if not node_path:
+                return "Error: Node.js script requires 'node' in PATH. Install Node.js (https://nodejs.org) or use a Python/shell script."
+            proc = await asyncio.create_subprocess_exec(
+                node_path,
                 str(script_path),
                 *args_list,
                 cwd=str(skill_folder),
@@ -3230,17 +3246,17 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="run_skill",
-            description="Run a script from a loaded skill's scripts/ folder. Use when a skill (from Available skills) has a scripts/ directory and you need to execute one of its scripts. skill_name = skill folder name (e.g. from load_skills); script = filename or path relative to scripts/ (e.g. run.sh or main.py). Optional args = list of strings passed to the script. Sandboxed under the skill folder; optional allowlist in config.",
+            description="Run a script from a skill's scripts/ folder, or confirm an instruction-only skill. Use when a skill has a scripts/ directory: pass skill_name and script (e.g. run.sh, main.py, index.js; path works with / or \\) and optional args. Supports Python (.py), Node.js (.js, .mjs, .cjs), and shell (.sh). For skills without scripts/: call with skill_name only. skill_name = skill folder name under skills_dir.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "skill_name": {"type": "string", "description": "Skill folder name (e.g. example, weather-help)."},
+                    "skill_name": {"type": "string", "description": "Skill folder name (e.g. linkedin-writer-1.0.0, weather-help)."},
                     "skill": {"type": "string", "description": "Alias for skill_name."},
-                    "script": {"type": "string", "description": "Script filename or path relative to the skill's scripts/ folder (e.g. run.sh, main.py)."},
+                    "script": {"type": "string", "description": "Script filename or path relative to the skill's scripts/ folder (e.g. run.sh, main.py, index.js). Omit for instruction-only skills."},
                     "script_name": {"type": "string", "description": "Alias for script."},
                     "args": {"type": "array", "items": {"type": "string"}, "description": "Optional list of arguments to pass to the script."},
                 },
-                "required": ["skill_name", "script"],
+                "required": ["skill_name"],
             },
             execute_async=_run_skill_executor,
         )

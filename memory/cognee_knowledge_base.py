@@ -7,6 +7,15 @@ We keep a small sidecar DB (added_at per source) so we can run age-based cleanup
 Cognee growing without bound. cleanup_unused removes sources older than unused_ttl_days.
 """
 
+# Cognee uses starlette.status.HTTP_422_UNPROCESSABLE_CONTENT; Starlette only has HTTP_422_UNPROCESSABLE_ENTITY.
+# Patch so Cognee import succeeds with current Starlette.
+try:
+    import starlette.status as _starlette_status
+    if not hasattr(_starlette_status, "HTTP_422_UNPROCESSABLE_CONTENT") and hasattr(_starlette_status, "HTTP_422_UNPROCESSABLE_ENTITY"):
+        _starlette_status.HTTP_422_UNPROCESSABLE_CONTENT = _starlette_status.HTTP_422_UNPROCESSABLE_ENTITY
+except Exception:
+    pass
+
 import asyncio
 import hashlib
 import os
