@@ -445,6 +445,8 @@ main_llm_cloud: cloud_models/Gemini-2.5-Flash
 hybrid_router:
   default_route: local
   show_route_in_response: true
+  # When true (default): if the chosen model fails (timeout/error), retry once with the other route so one model failing does not block the task.
+  fallback_on_llm_error: true
   heuristic:
     enabled: true
     threshold: 0.5
