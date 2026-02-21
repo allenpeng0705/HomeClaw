@@ -68,7 +68,7 @@ skills_dir: config/skills
 # Cap skills/plugins in prompt: take top N candidates, apply threshold, then up to M in prompt. See docs_design/SessionAndDualMemoryDesign.md.
 # Flow: retrieve/load top skills_top_n_candidates (e.g. 10), drop below skills_similarity_threshold, then take up to skills_max_in_prompt (e.g. 5). If only 1, 1 is fine.
 skills_top_n_candidates: 10
-skills_max_in_prompt: 5
+skills_max_in_prompt: 10
 plugins_top_n_candidates: 10
 plugins_max_in_prompt: 5
 # Max chars per plugin description in the routing block. 0 = no truncation (default). With RAG (plugins_use_vector_search) or plugins_max_in_prompt we already limit how many plugins appear; this only caps per-description length. Use 0 for full descriptions; set 512 or 300 only to shrink prompt or cap one very long description.
@@ -100,6 +100,11 @@ skills_force_include_rules:
   - pattern: "summarize\\s+(this\\s+)?(url|link|page|article)"
     folders: [summarize-1.0.0]
     instruction: "The user asked to summarize a URL or page. Use run_skill with skill_name='summarize-1.0.0' and the URL in args, or use the skill's instructions."
+  # Weather: so the skill is always in the prompt when the user asks about weather (RAG may not rank it in top 5)
+  - patterns:
+      - "weather|forecast|temperature|what'?s the weather|how'?s the weather|weather in|天气"
+    folders: [weather-1.0.0]
+    instruction: "The user asked about weather or forecast. Use the weather skill (weather-1.0.0) instructions: wttr.in for quick text/PNG, or open-meteo for JSON. No API key required."
 # Vector retrieval for plugins (separate collection): same design as skills. RAG finds relevant plugins; only those go into prompt.
 plugins_use_vector_search: false
 plugins_vector_collection: homeclaw_plugins

@@ -2,6 +2,8 @@
 name: weather
 description: Get current weather and forecasts (no API key required).
 homepage: https://wttr.in/:help
+# Keywords for RAG: help vector search match weather queries (re-sync skills after edit)
+keywords: "weather forecast temperature rain wttr.in 天气 气温 预报"
 ---
 
 # Weather

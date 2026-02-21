@@ -143,9 +143,9 @@ def build_skills_system_block(skills: List[Dict[str, Any]], include_body: bool =
 
 def build_skill_refined_text(skill: Dict[str, Any], body_max_chars: int = 0) -> str:
     """
-    Build the text to embed for a skill (name + description, optionally body, optional keywords).
-    Used for vector storage and similarity search. Include keywords so RAG matches queries in
-    multiple languages (e.g. "image generate create" + "图片 生成 创建" in SKILL.md frontmatter).
+    Build the text to embed for a skill. Used as the single index vector for RAG.
+    Index only the best content for matching: name + description + keywords (not all content).
+    body_max_chars=0 (default): do not include body; body is in the prompt when skill is selected.
     """
     name = (skill.get("name") or "").strip()
     desc = (skill.get("description") or "").strip()
@@ -170,12 +170,13 @@ async def sync_skills_to_vector_store(
     skills_dir: Path,
     vector_store: Any,
     embedder: Any,
-    refined_body_max_chars: int = 500,
+    refined_body_max_chars: int = 0,
     skills_test_dir: Optional[Path] = None,
     incremental: bool = False,
 ) -> int:
     """
     Resync skills to the vector store.
+    refined_body_max_chars: 0 = do not store body (recommended; body is in prompt when skill is selected). >0 = store first N chars of body.
     - If skills_test_dir is set: full sync of that dir (all folders embedded and upserted with id = test__<folder>).
     - skills_dir: if incremental is True, only process folders not already in the store (get(folder) is None);
       else process all and upsert.
