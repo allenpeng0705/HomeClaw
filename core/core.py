@@ -815,7 +815,7 @@ class Core(CoreInterface):
             )
             logger.debug("Knowledge base initialized (Cognee backend)")
         except Exception as e:
-            logger.warning("Knowledge base (Cognee) not initialized: %s", e)
+            logger.exception("Knowledge base (Cognee) not initialized: {}", e)
             self.knowledge_base = None
 
     def initialize(self):
@@ -1417,7 +1417,13 @@ class Core(CoreInterface):
             """
             kb = getattr(self, "knowledge_base", None)
             if kb is None:
-                return JSONResponse(status_code=404, content={"detail": "Knowledge base not enabled or not initialized."})
+                meta = Util().get_core_metadata()
+                kb_cfg = getattr(meta, "knowledge_base", None) or {}
+                enabled = kb_cfg.get("enabled") if isinstance(kb_cfg, dict) else getattr(kb_cfg, "enabled", False)
+                hint = ""
+                if enabled:
+                    hint = " Knowledge base is enabled but failed to initialize at startup. Check Core startup logs for 'Knowledge base (Cognee) not initialized' (full traceback is logged). Common causes: (1) pip install cognee not run; (2) main_llm or embedding_llm not set in config so Cognee has no LLM/embedding endpoint; (3) Cognee DB/vector/graph (cognee section) not reachable or misconfigured."
+                return JSONResponse(status_code=404, content={"detail": "Knowledge base not enabled or not initialized." + hint})
             try:
                 out = await kb.reset()
                 if out.startswith("Error:"):
@@ -2877,6 +2883,24 @@ class Core(CoreInterface):
             self.initialize()
             self.start_email_channel()
 
+            # Embedding server must run first: we embed skills, plugins, and agent_memory so we can filter them by query (vector search). Start LLM manager (embedding + main LLM) before any sync.
+            logger.debug("Starting LLM manager...")
+            self.llmManager.run()
+            logger.debug("LLM manager started!")
+            # When embedding is local, wait for the embedding server to be ready before syncs that use it
+            need_embedder = (
+                getattr(core_metadata, "skills_use_vector_search", False)
+                or getattr(core_metadata, "plugins_use_vector_search", False)
+                or getattr(core_metadata, "use_agent_memory_search", False)
+            )
+            if need_embedder and getattr(self, "embedder", None) and Util()._effective_embedding_llm_type() == "local":
+                try:
+                    ready = await asyncio.to_thread(Util().check_embedding_model_server_health, 90)
+                    if not ready:
+                        logger.warning("Embedding server did not become ready in time; skills/plugins/agent_memory sync may fail.")
+                except Exception as e:
+                    logger.warning("Embedding server health check failed: {}; sync may fail.", e)
+
             # Sync skills to vector store when skills_use_vector_search and skills_refresh_on_startup
             if getattr(core_metadata, "skills_use_vector_search", False) and getattr(core_metadata, "skills_refresh_on_startup", True):
                 if getattr(self, "skills_vector_store", None) and getattr(self, "embedder", None):
@@ -2944,11 +2968,7 @@ class Core(CoreInterface):
             except Exception as e:
                 logger.debug("Result viewer server skipped: {}", e)
 
-            # Schedule llmManager.run() to run concurrently
-            #llm_task = asyncio.create_task(self.llmManager.run())
-            logger.debug("Starting LLM manager...")
-            self.llmManager.run()
-            logger.debug("LLM manager started!")
+            # LLM manager (embedding + main LLM) was started earlier, before skills/plugins/agent_memory sync.
             # Optionally start and register system_plugins (e.g. homeclaw-browser) so one command runs Core + plugins.
             # Runs in a background asyncio task; each plugin is a separate OS process. Does not block Core or server.serve().
             if getattr(core_metadata, "system_plugins_auto_start", False):
