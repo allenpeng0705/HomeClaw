@@ -3515,6 +3515,9 @@ class Core(CoreInterface):
                             _component_log("skills", f"capped to {skills_max} skill(s) in prompt (skills_max_in_prompt)")
                         if skills_list:
                             _component_log("skills", f"loaded {len(skills_list)} skill(s) from {skills_path}")
+                    if skills_list:
+                        selected_names = [s.get("folder") or s.get("name") or "?" for s in skills_list]
+                        _component_log("skills", f"selected: {', '.join(selected_names)}")
                     skills_block = build_skills_system_block(skills_list, include_body=False)
                     if skills_block:
                         system_parts.append(skills_block)
@@ -4331,29 +4334,54 @@ class Core(CoreInterface):
         if getattr(self, "_shutdown_started", False):
             # Second Ctrl+C: force exit so user is not blocked by slow plugin cleanup
             os._exit(1)
-        try:
-            self._shutdown_started = True
-            self.stop()
-            sys.exit(0)
-        except Exception as e:
-            logger.exception(e)
-            os._exit(1)
+        self._shutdown_started = True
+        logger.info("Shutting down (press Ctrl+C again to force exit)...")
+        def run_stop():
+            try:
+                self.stop()
+            except Exception as e:
+                logger.exception(e)
+        stop_thread = threading.Thread(target=run_stop, daemon=True)
+        stop_thread.start()
+        stop_thread.join(timeout=10)
+        if stop_thread.is_alive():
+            logger.warning("Shutdown taking longer than 10s; forcing exit.")
+        os._exit(0 if not stop_thread.is_alive() else 1)
 
     def __enter__(self):
-        #if threading.current_thread() == threading.main_thread():
+        global _core_instance_for_ctrl_c
+        _core_instance_for_ctrl_c = self
         try:
-            #logger.debug("channel initializing..., register the ctrl+c signal handler")
             signal.signal(signal.SIGINT, self.exit_gracefully)
             signal.signal(signal.SIGTERM, self.exit_gracefully)
-        except Exception as e:
-            # It's a good practice to at least log the exception
-            # logger.error(f"Error setting signal handlers: {e}")
+        except Exception:
             pass
-
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+                PHANDLER = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_ulong)
+                _win_console_ctrl_handler._handler = PHANDLER(_win_console_ctrl_handler)
+                if kernel32.SetConsoleCtrlHandler(_win_console_ctrl_handler._handler, True):
+                    pass  # registered
+                else:
+                    _win_console_ctrl_handler._handler = None
+            except Exception:
+                pass
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        pass
+        global _core_instance_for_ctrl_c
+        _core_instance_for_ctrl_c = None
+        if sys.platform == "win32":
+            try:
+                handler = getattr(_win_console_ctrl_handler, "_handler", None)
+                if handler is not None:
+                    import ctypes
+                    ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, False)
+            except Exception:
+                pass
+        return None
 
 def main():
     loop = None
@@ -4375,6 +4403,20 @@ def main():
     finally:
         if loop is not None:
             loop.close()
+
+# Set by Core.__enter__ so Windows console Ctrl handler can trigger shutdown when Python SIGINT is not delivered.
+_core_instance_for_ctrl_c = None
+
+
+def _win_console_ctrl_handler(event):
+    """Windows-only: handle Ctrl+C so shutdown works when Python signal is not delivered."""
+    if event == 0:  # CTRL_C_EVENT
+        core = globals().get("_core_instance_for_ctrl_c")
+        if core is not None:
+            core.exit_gracefully(signal.SIGINT, None)
+        return True
+    return False
+
 
 if __name__ == "__main__":
     main()
