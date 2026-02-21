@@ -4328,16 +4328,16 @@ class Core(CoreInterface):
             return None
 
     def exit_gracefully(self, signum, frame):
+        if getattr(self, "_shutdown_started", False):
+            # Second Ctrl+C: force exit so user is not blocked by slow plugin cleanup
+            os._exit(1)
         try:
-            #logger.debug("CTRL+C received, shutting down...")
-            # shut down the chromadb server
-            # self.shutdown_chroma_server()  # Shut down ChromaDB server
-            # End the main thread
+            self._shutdown_started = True
             self.stop()
             sys.exit(0)
-            #logger.debug("CTRL+C Done...")
         except Exception as e:
             logger.exception(e)
+            os._exit(1)
 
     def __enter__(self):
         #if threading.current_thread() == threading.main_thread():

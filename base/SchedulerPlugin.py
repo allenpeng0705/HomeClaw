@@ -128,9 +128,8 @@ class SchedulerPlugin(BasePlugin):
         self.scheduled_jobs.append(job)
 
     def run_scheduler(self):
-        while not self.stop_event.is_set():
+        while not self.stop_event.wait(timeout=1):
             self.scheduler.run_pending()
-            time.sleep(10)
 
     def schedule_tasks_from_config(self):
         job = None
@@ -168,6 +167,6 @@ class SchedulerPlugin(BasePlugin):
         self.stop_event.set()
         #for job in self.scheduled_jobs:
         #    job.cancel()
-        if self.thread.is_alive():
-            self.thread.join()
+        if self.thread is not None and self.thread.is_alive():
+            self.thread.join(timeout=3)
         logger.debug("SchedulerPlugin cleanup done!")
