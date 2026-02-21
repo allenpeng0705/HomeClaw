@@ -490,15 +490,19 @@ class Core(CoreInterface):
         """Poll GET {base_url}/ready until Core responds 200 or timeout. Uses /ready (lightweight) so DB/plugins don't delay readiness."""
         url = (base_url.rstrip("/") + "/ready")
         deadline = time.monotonic() + timeout_sec
+        last_err = None
         while time.monotonic() < deadline:
             try:
                 async with httpx.AsyncClient(timeout=2.0) as client:
                     r = await client.get(url)
                     if r.status_code == 200:
                         return True
-            except Exception:
-                pass
+                    last_err = f"status {r.status_code}"
+            except Exception as e:
+                last_err = e
             await asyncio.sleep(interval_sec)
+        if last_err is not None:
+            logger.debug("system_plugins: last ready probe failed: {}", last_err)
         return False
 
     async def _run_system_plugins_startup(self) -> None:
@@ -519,6 +523,8 @@ class Core(CoreInterface):
         if getattr(meta, "auth_enabled", False) and getattr(meta, "auth_api_key", ""):
             base_env["CORE_API_KEY"] = getattr(meta, "auth_api_key", "")
         plugin_env_config = getattr(meta, "system_plugins_env", None) or {}
+        # Give the HTTP server a moment to bind (avoids "Core did not become ready" on Windows where the task can poll before server.serve() is listening).
+        await asyncio.sleep(2)
         # Wait for Core to be ready so registration succeeds (poll GET /ready until 200).
         # Use 127.0.0.1 for the probe when host is 0.0.0.0 so readiness works on Windows (connecting to 0.0.0.0 often fails there).
         ready_host = "127.0.0.1" if (getattr(meta, "host", None) or "").strip() in ("0.0.0.0", "") else meta.host
@@ -548,7 +554,8 @@ class Core(CoreInterface):
                 _component_log("system_plugins", f"started {item['id']} (pid={proc.pid})")
             except Exception as e:
                 logger.warning("system_plugins: failed to start {}: {}", item["id"], e)
-        await asyncio.sleep(2)
+        delay = max(0.5, float(getattr(meta, "system_plugins_start_delay", 2) or 2))
+        await asyncio.sleep(delay)
         for item in to_start:
             env = {**base_env}
             for k, v in plugin_env_config.get(item["id"], {}).items():
@@ -2857,11 +2864,12 @@ class Core(CoreInterface):
         try:
             logger.debug("core is running!")
             # Periodic wakeup so the event loop can process signals (e.g. Ctrl+C). Required on Windows;
-            # harmless on macOS/Linux and keeps shutdown behavior consistent across platforms.
+            # harmless on macOS/Linux. Shorter interval (0.2s) improves responsiveness on Windows.
             _loop = asyncio.get_running_loop()
+            _wakeup_interval = 0.2
             def _wakeup():
-                _loop.call_later(0.5, _wakeup)
-            _loop.call_later(0.5, _wakeup)
+                _loop.call_later(_wakeup_interval, _wakeup)
+            _loop.call_later(_wakeup_interval, _wakeup)
             core_metadata: CoreMetadata = Util().get_core_metadata()
             logger.debug(f"Running core on {core_metadata.host}:{core_metadata.port}")
             config = uvicorn.Config(self.app, host=core_metadata.host, port=core_metadata.port, log_level="critical")

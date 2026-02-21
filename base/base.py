@@ -621,6 +621,7 @@ class CoreMetadata:
     system_plugins_auto_start: bool = False
     system_plugins: List[str] = field(default_factory=list)  # optional allowlist; empty = start all discovered system plugins
     system_plugins_env: Dict[str, Dict[str, str]] = field(default_factory=dict)  # per-plugin env: plugin_id -> { VAR: "value" }; e.g. homeclaw-browser: { BROWSER_HEADLESS: "false" }
+    system_plugins_start_delay: float = 2.0  # seconds to wait after starting plugin processes before running register; increase on slow Windows if register fails
     # When true, on permission denied (unknown user) notify owner via last-used channel so they can add to user.yml. See docs_design/OutboundMarkdownAndUnknownRequest.md.
     notify_unknown_request: bool = False
     # Outbound text format: Core converts assistant reply (Markdown) before sending to channels. "whatsapp" (default) = *bold* _italic_ ~strikethrough~ (works for most IMs); "plain" = strip Markdown; "none" = no conversion.
@@ -862,6 +863,7 @@ class CoreMetadata:
             system_plugins_auto_start=bool(data.get('system_plugins_auto_start', False)),
             system_plugins=list(data.get('system_plugins') or []) if isinstance(data.get('system_plugins'), list) else [],
             system_plugins_env=CoreMetadata._normalize_system_plugins_env(data.get('system_plugins_env')),
+            system_plugins_start_delay=max(0.5, float(data.get('system_plugins_start_delay', 2) or 2)),
             notify_unknown_request=bool(data.get('notify_unknown_request', False)),
             outbound_markdown_format=(data.get('outbound_markdown_format') or 'whatsapp').strip().lower() or 'whatsapp',
             main_llm_mode=main_llm_mode_val,

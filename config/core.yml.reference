@@ -94,6 +94,7 @@ system_plugins: [homeclaw-browser]                 # optional allowlist by plugi
 system_plugins_env:
   homeclaw-browser:
     BROWSER_HEADLESS: false
+# system_plugins_start_delay: 2   # seconds to wait after starting plugin processes before register (default 2). Use 1 on fast machines (e.g. macOS); increase if register fails on slow Windows.
 # Per-plugin env vars (plugin id = folder name under system_plugins/). Each plugin gets only its own env.
 # system_plugins_env:
 #   homeclaw-browser:
