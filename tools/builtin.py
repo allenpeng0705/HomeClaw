@@ -1549,7 +1549,7 @@ async def _exec_executor(arguments: Dict[str, Any], context: ToolContext) -> str
 
 
 async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Run a script from a loaded skill's scripts/ folder. Skill name = folder name under skills_dir; script = filename or path relative to scripts/. Optional args as list of strings. Sandboxed: only scripts under <skill>/scripts/; optional allowlist in config tools.run_skill_allowlist. Skills without scripts/ are instruction-only: omit script and use the skill's instructions in your response."""
+    """Run a script from a loaded skill's scripts/ folder. Supports Python (.py), Node.js (.js, .mjs, .cjs), shell (.sh). Skill name = folder name under skills_dir; script = filename or path relative to scripts/. Optional args as list of strings. Sandboxed: only scripts under <skill>/scripts/; optional allowlist in config. Skills without scripts/ are instruction-only: omit script and use the skill's instructions in your response."""
     try:
         from base.util import Util
     except ImportError:
@@ -1600,6 +1600,18 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
         if script_path.suffix.lower() in (".py", ".pyw"):
             proc = await asyncio.create_subprocess_exec(
                 sys.executable,
+                str(script_path),
+                *args_list,
+                cwd=str(skill_folder),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        elif script_path.suffix.lower() in (".js", ".mjs", ".cjs"):
+            node_path = shutil.which("node")
+            if not node_path:
+                return "Error: Node.js script requires 'node' in PATH. Install Node.js (https://nodejs.org) or use a Python/shell script."
+            proc = await asyncio.create_subprocess_exec(
+                node_path,
                 str(script_path),
                 *args_list,
                 cwd=str(skill_folder),
@@ -3234,13 +3246,13 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="run_skill",
-            description="Run a script from a skill's scripts/ folder, or confirm an instruction-only skill. Use when a skill has a scripts/ directory: pass skill_name and script (e.g. run.sh, main.py; path works with / or \\) and optional args. For skills without scripts/ (e.g. LinkedIn Writer): call with skill_name only — you will be told to use the skill's instructions in your response. skill_name = skill folder name under skills_dir.",
+            description="Run a script from a skill's scripts/ folder, or confirm an instruction-only skill. Use when a skill has a scripts/ directory: pass skill_name and script (e.g. run.sh, main.py, index.js; path works with / or \\) and optional args. Supports Python (.py), Node.js (.js, .mjs, .cjs), and shell (.sh). For skills without scripts/: call with skill_name only. skill_name = skill folder name under skills_dir.",
             parameters={
                 "type": "object",
                 "properties": {
                     "skill_name": {"type": "string", "description": "Skill folder name (e.g. linkedin-writer-1.0.0, weather-help)."},
                     "skill": {"type": "string", "description": "Alias for skill_name."},
-                    "script": {"type": "string", "description": "Script filename or path relative to the skill's scripts/ folder (e.g. run.sh, main.py). Omit for instruction-only skills."},
+                    "script": {"type": "string", "description": "Script filename or path relative to the skill's scripts/ folder (e.g. run.sh, main.py, index.js). Omit for instruction-only skills."},
                     "script_name": {"type": "string", "description": "Alias for script."},
                     "args": {"type": "array", "items": {"type": "string"}, "description": "Optional list of arguments to pass to the script."},
                 },
