@@ -436,10 +436,8 @@ cloud_models:
 #   are omitted and a short note is added so the model does not crash.
 
 # ——— Selected main and embedding model: local_models/<id> or cloud_models/<id> ———
-#main_llm: cloud_models/Gemini-2.5-Flash
-main_llm: local_models/main_vl_model_4B
-# Optional: main_llm_mode: "local" | "cloud" | "mix". Omit or leave unset = derive from main_llm (cloud_models/ → cloud, else local).
-# When "mix": 3-layer router picks per-request between main_llm_local and main_llm_cloud. Set both and hybrid_router (see docs_design/HybridRouterImplementationPlan.md).
+# main_llm: optional when main_llm_mode is set. When mode is "local" we use main_llm_local; when "cloud" we use main_llm_cloud; when "mix" we use both per request. Set main_llm only if you omit main_llm_mode (legacy: derive mode from main_llm).
+#main_llm: local_models/main_vl_model_4B
 main_llm_mode: mix
 main_llm_local: local_models/main_vl_model_4B
 main_llm_cloud: cloud_models/Gemini-2.5-Flash

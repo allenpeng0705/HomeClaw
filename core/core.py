@@ -3712,7 +3712,10 @@ class Core(CoreInterface):
                                 block = (
                                     "\n\n## File tools base path\n"
                                     "For file_read, file_write, document_read, folder_list, file_find: "
-                                    "paths are relative to the configured base. Use relative paths only (e.g. path=\".\" for the base, path=\"subdir\" for a subfolder; pattern \"*.jpg\" for file_find). "
+                                    "paths are relative to the configured base. Use relative paths only (e.g. path=\".\" for the base, path=\"subdir\" for a subfolder). "
+                                    "To find files by type: call file_find with pattern only (e.g. pattern=\"*.docx\" for Word, pattern=\"*.pdf\" for PDF, pattern=\"*.jpg\" for images). "
+                                    "Report only paths returned by file_find or folder_list; do not invent or guess paths. "
+                                    "To read Word/PDF content use document_read(path=<relative path from tool result>). "
                                     f"Current file_read_base: {base_str}"
                                 )
                                 llm_input[0]["content"] = (llm_input[0].get("content") or "") + block

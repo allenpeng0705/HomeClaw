@@ -764,6 +764,26 @@ class CoreMetadata:
             main_llm_mode_val = 'cloud' if main_llm_ref.startswith('cloud_models/') else 'local'
         main_llm_local_val = (data.get('main_llm_local') or '').strip()
         main_llm_cloud_val = (data.get('main_llm_cloud') or '').strip()
+        # When mode is set, derive main_llm from main_llm_local/main_llm_cloud so main_llm can be omitted in config.
+        if main_llm_mode_val == 'local' and main_llm_local_val:
+            main_llm_ref = main_llm_local_val
+        elif main_llm_mode_val == 'cloud' and main_llm_cloud_val:
+            main_llm_ref = main_llm_cloud_val
+        elif main_llm_mode_val == 'mix':
+            hr_default = ((data.get('hybrid_router') or {}).get('default_route') or 'local').strip().lower()
+            main_llm_ref = main_llm_local_val if hr_default == 'local' else main_llm_cloud_val
+            if not main_llm_ref:
+                main_llm_ref = main_llm_local_val or main_llm_cloud_val or (data.get('main_llm') or '').strip()
+        # If we derived a cloud ref (e.g. main_llm omitted but main_llm_mode: cloud), pull api_key from that entry.
+        if main_llm_ref.startswith('cloud_models/'):
+            entry_id = main_llm_ref[len('cloud_models/'):].strip()
+            for m in cloud_models:
+                if (m.get('id') or '').strip() == entry_id:
+                    entry_key = (m.get('api_key') or '').strip() if isinstance(m.get('api_key'), str) else ''
+                    if entry_key:
+                        main_llm_api_key_val = entry_key
+                        main_llm_api_key_name_val = (m.get('api_key_name') or main_llm_api_key_name_val or '').strip()
+                    break
         hybrid_router_raw = data.get('hybrid_router')
         hybrid_router_val = hybrid_router_raw if isinstance(hybrid_router_raw, dict) else {}
         cognee = data.get('cognee')
@@ -781,7 +801,7 @@ class CoreMetadata:
             embedding_port=data.get('embedding_port', 5066),
             embedding_llm_type=data.get('embedding_llm_type', 'local'),
             main_llm_type=data.get('main_llm_type', 'local'),
-            main_llm=data.get('main_llm', ''),
+            main_llm=main_llm_ref,
             main_llm_host=data.get('main_llm_host', '127.0.0.1'),
             main_llm_port=data.get('main_llm_port', 5088),
             main_llm_language=_normalize_main_llm_language(data.get('main_llm_language', 'en')),

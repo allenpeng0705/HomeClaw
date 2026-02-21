@@ -276,9 +276,28 @@ class Util:
             return "cloud", ref[len("cloud_models/"):].strip()
         return None, ref
 
+    def _effective_main_llm_ref(self) -> str:
+        """Effective main LLM ref from mode: local -> main_llm_local, cloud -> main_llm_cloud, mix -> default_route's ref; else main_llm. Simplifies config: no need to set main_llm when main_llm_mode is set."""
+        mode = (getattr(self.core_metadata, "main_llm_mode", None) or "").strip().lower()
+        if mode == "local":
+            ref = (getattr(self.core_metadata, "main_llm_local", None) or "").strip()
+            if ref:
+                return ref
+        if mode == "cloud":
+            ref = (getattr(self.core_metadata, "main_llm_cloud", None) or "").strip()
+            if ref:
+                return ref
+        if mode == "mix":
+            hr = getattr(self.core_metadata, "hybrid_router", None) or {}
+            default = (hr.get("default_route") or "local").strip().lower()
+            ref = (getattr(self.core_metadata, "main_llm_local", None) or "").strip() if default == "local" else (getattr(self.core_metadata, "main_llm_cloud", None) or "").strip()
+            if ref:
+                return ref
+        return (self.core_metadata.main_llm or "").strip()
+
     def _effective_main_llm_type(self) -> str:
-        """Derive main LLM type from main_llm ref: cloud_models/ -> litellm, else local. Fallback to core_metadata for legacy."""
-        list_key, _ = self._parse_model_ref(self.core_metadata.main_llm)
+        """Derive main LLM type from effective main ref: cloud_models/ -> litellm, else local. Fallback to core_metadata for legacy."""
+        list_key, _ = self._parse_model_ref(self._effective_main_llm_ref())
         if list_key == "cloud":
             return "litellm"
         if list_key == "local":
@@ -317,8 +336,8 @@ class Util:
         return None, None
 
     def main_llm(self):
-        """Return (path_or_model, raw_id, mtype, host, port). Never returns None so callers can always unpack."""
-        main_llm_name = (self.core_metadata.main_llm or "").strip()
+        """Return (path_or_model, raw_id, mtype, host, port). Never returns None so callers can always unpack. Uses main_llm_local/main_llm_cloud when main_llm_mode is set (no need for main_llm in config)."""
+        main_llm_name = self._effective_main_llm_ref()
         if not main_llm_name:
             main_llm_name = (self.llms[0] if self.llms else "local_models/main_vl_model")
         entry, mtype = self._get_model_entry(main_llm_name)
@@ -496,8 +515,9 @@ class Util:
         
             
     def main_llm_size(self):
-        _, raw = self._parse_model_ref(self.core_metadata.main_llm)
-        name = (raw or self.core_metadata.main_llm).lower()  
+        eff_ref = self._effective_main_llm_ref()
+        _, raw = self._parse_model_ref(eff_ref)
+        name = (raw or eff_ref).lower()  
         # Regular expression to find the model size (e.g., "14b")
         model_size_pattern = re.compile(r'(\d+)b')
         
@@ -575,7 +595,7 @@ class Util:
         - Local model: default [] unless the entry has mmproj (vision) then [image], or has supported_media.
         Returns normalized list (lowercase, only image/audio/video). Never raises; returns [] on any error."""
         try:
-            main_llm_name = (self.core_metadata.main_llm or "").strip()
+            main_llm_name = self._effective_main_llm_ref()
             if not main_llm_name:
                 return []
             entry, mtype = self._get_model_entry(main_llm_name)

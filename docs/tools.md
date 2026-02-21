@@ -29,8 +29,9 @@ tools:
 ```
 
 - **You do not need to give the full path every time.** The model is told the current `file_read_base` and must use **relative paths** (e.g. `"."` for the base, `"subdir"` for a subfolder).
-- **To list or find files:** Ask naturally, e.g. “列出 /Users/.../homeclaw 下所有 jpg 文件” or “find all jpg files in the homeclaw directory”. Core injects the actual base path into the system prompt so the model should call `file_find` with `pattern: "*.jpg"` and `path: "."` (relative to the base), not an absolute path.
-- **If you see “path must be under the configured base directory”:** The model tried a path outside the base. Ensure `tools.file_read_base` in `core.yml` is the directory you want (e.g. `/Users/shileipeng/Documents/homeclaw`), and that the model uses relative paths; after the change, restart Core so the new base is injected.
+- **To list or find files:** Ask naturally, e.g. “列出 homeclaw 下所有 jpg 文件” or “find all Word documents in the homeclaw directory”. Core injects the base path and instructs the model to call **file_find** with the right **pattern** (e.g. `*.jpg`, `*.docx`, `*.pdf`) and `path: "."`. The model must report only paths returned by the tool—not invent paths.
+- **Word and PDF:** To find Word docs the model should call `file_find(pattern="*.docx", path=".")` (or `*.doc` for older Word). To find PDFs use `pattern="*.pdf"`. To read the content of a found file use **document_read(path=…)** with the relative path from the tool result.
+- **If you see “path must be under the configured base directory” or invented paths (e.g. wrong usernames/folders):** The model tried a path outside the base. Ensure `tools.file_read_base` in `core.yml` is the directory you want (e.g. `/Users/shileipeng/Documents/homeclaw`), and that the model uses relative paths; after the change, restart Core so the new base is injected.
 
 ---
 
