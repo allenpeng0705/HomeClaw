@@ -124,7 +124,7 @@ tools:
   exec_allowlist: []   # e.g. [ "date", "whoami", "echo", "pwd", "ls", "cat" ] on Unix; [ "date", "whoami", "echo", "dir", "type", "cd" ] on Windows
   exec_timeout: 30   # Unit: seconds
   # file_read, file_write, etc.: paths UNDER this base only. "." = current working directory (cross-platform). Or use absolute path (e.g. /Users/you/Docs or C:\Users\you\Docs).
-  file_read_base: "."
+  file_read_base: "/Users/shileipeng/Documents/homeclaw"
   # Max characters returned by file_read when the tool does not pass max_chars (default 32000). Increase for long PDFs/documents (e.g. 128000).
   file_read_max_chars: 128000
   run_skill_allowlist: ["run.sh", "main.py", "run.bat"]   # run_skill: if set, only these script names under skill/scripts/. .sh on Windows runs via bash/WSL if available.

@@ -19,6 +19,21 @@ Config (allowlists, timeouts, API keys) is under **`tools:`** in `config/core.ym
 
 ---
 
+## File tools and base path
+
+File tools (`file_read`, `file_write`, `document_read`, `folder_list`, `file_find`) only access paths **under** a configured base directory. Set it in `config/core.yml`:
+
+```yaml
+tools:
+  file_read_base: "/Users/you/Documents/homeclaw"   # or "." for current working directory
+```
+
+- **You do not need to give the full path every time.** The model is told the current `file_read_base` and must use **relative paths** (e.g. `"."` for the base, `"subdir"` for a subfolder).
+- **To list or find files:** Ask naturally, e.g. “列出 /Users/.../homeclaw 下所有 jpg 文件” or “find all jpg files in the homeclaw directory”. Core injects the actual base path into the system prompt so the model should call `file_find` with `pattern: "*.jpg"` and `path: "."` (relative to the base), not an absolute path.
+- **If you see “path must be under the configured base directory”:** The model tried a path outside the base. Ensure `tools.file_read_base` in `core.yml` is the directory you want (e.g. `/Users/shileipeng/Documents/homeclaw`), and that the model uses relative paths; after the change, restart Core so the new base is injected.
+
+---
+
 ## Plugins
 
 **Plugins** add single-feature capabilities (weather, news, email). The LLM routes to them via **`route_to_plugin(plugin_id)`**.

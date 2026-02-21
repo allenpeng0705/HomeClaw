@@ -97,6 +97,17 @@ def _truncate_for_log(s: str, max_len: int = 2000) -> str:
     return s[:max_len] + "\n... (truncated)"
 
 
+def _strip_leading_route_label(s: str) -> str:
+    """Remove leading [Local], [Cloud], or [Local · ...] / [Cloud · ...] so we don't duplicate labels."""
+    if not s or not isinstance(s, str):
+        return s or ""
+    t = s.strip()
+    # Match [Local], [Cloud], or [Local · heuristic], [Cloud · semantic], etc.
+    if re.match(r"^\[(?:Local|Cloud)(?:\s*·\s*[^\]]*)?\]\s*", t):
+        return re.sub(r"^\[(?:Local|Cloud)(?:\s*·\s*[^\]]*)?\]\s*", "", t, count=1).strip()
+    return s
+
+
 def _infer_route_to_plugin_fallback(query: str) -> Optional[Dict[str, Any]]:
     """
     When the LLM returns no tool call (e.g. model doesn't support tools or replied "No"), infer route_to_plugin
@@ -3688,6 +3699,25 @@ class Core(CoreInterface):
 
             if openai_tools:
                 logger.info("Tools available for this turn: {}", tool_names)
+                # Inject actual file_read_base into system prompt so the model uses correct paths (avoids hallucinated bases)
+                _file_tool_names = {"file_read", "file_write", "document_read", "folder_list", "file_find"}
+                if tool_names and _file_tool_names.intersection(set(tool_names)):
+                    try:
+                        config_path = Path(Util().root_path()) / "config" / "core.yml"
+                        if config_path.exists():
+                            data = Util().load_yml_config(str(config_path)) or {}
+                            tools_cfg = data.get("tools") or {}
+                            base_str = (tools_cfg.get("file_read_base") or ".").strip()
+                            if base_str and llm_input and llm_input[0].get("role") == "system":
+                                block = (
+                                    "\n\n## File tools base path\n"
+                                    "For file_read, file_write, document_read, folder_list, file_find: "
+                                    "paths are relative to the configured base. Use relative paths only (e.g. path=\".\" for the base, path=\"subdir\" for a subfolder; pattern \"*.jpg\" for file_find). "
+                                    f"Current file_read_base: {base_str}"
+                                )
+                                llm_input[0]["content"] = (llm_input[0].get("content") or "") + block
+                    except Exception as e:
+                        logger.debug("Inject file_read_base into system prompt failed: {}", e)
                 # Tool loop: call LLM with tools; if it returns tool_calls, execute and append results, repeat
                 context = ToolContext(
                     core=self,
@@ -3801,7 +3831,7 @@ class Core(CoreInterface):
                         if mix_route_this_request and mix_show_route_label and isinstance(out, str) and out is not ROUTING_RESPONSE_ALREADY_SENT:
                             layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
                             label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
-                            out = label + (out or "")
+                            out = label + (_strip_leading_route_label(out or "") or "")
                         return out
                 else:
                     response = (current_messages[-1].get("content") or "").strip() if current_messages else None
@@ -3816,7 +3846,7 @@ class Core(CoreInterface):
             if mix_route_this_request and mix_show_route_label:
                 layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
                 label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
-                response = label + (response or "")
+                response = label + (_strip_leading_route_label(response or "") or "")
             logger.info("Main LLM output (final response): {}", _truncate_for_log(response, 2000))
             message: ChatMessage = ChatMessage()
             message.add_user_message(query)
