@@ -891,7 +891,7 @@ class CoreMetadata:
                 'skills_test_dir': getattr(core, 'skills_test_dir', '') or '',
                 'skills_incremental_sync': getattr(core, 'skills_incremental_sync', False),
                 'orchestrator_timeout_seconds': getattr(core, 'orchestrator_timeout_seconds', 30),
-                'tool_timeout_seconds': getattr(core, 'tool_timeout_seconds', 120),
+                # tool_timeout_seconds is written under data["tools"] below, not as top-level
                 'orchestrator_unified_with_tools': getattr(core, 'orchestrator_unified_with_tools', True),
                 'notify_unknown_request': getattr(core, 'notify_unknown_request', False),
                 'outbound_markdown_format': getattr(core, 'outbound_markdown_format', 'whatsapp') or 'whatsapp',
@@ -941,6 +941,66 @@ class CoreMetadata:
                 core_dict['main_llm_cloud'] = (core.main_llm_cloud or '').strip()
             if getattr(core, 'hybrid_router', None) and isinstance(core.hybrid_router, dict) and core.hybrid_router:
                 core_dict['hybrid_router'] = core.hybrid_router
+
+        def _deep_merge_into_existing(existing_node, updates):
+            """Merge updates into existing_node in place. Keeps existing_node (and ruamel comments) when both are dicts."""
+            if not isinstance(existing_node, dict) or not isinstance(updates, dict):
+                return
+            for k, v in updates.items():
+                if k not in existing_node:
+                    existing_node[k] = v
+                elif isinstance(v, dict) and isinstance(existing_node.get(k), dict):
+                    _deep_merge_into_existing(existing_node[k], v)
+                else:
+                    existing_node[k] = v
+
+        def _merge_core_dict_into_data(data: dict, core_dict: dict) -> None:
+            """Update data with core_dict values; deep-merge nested dicts so ruamel comments in data are preserved."""
+            for k, v in core_dict.items():
+                if k in data and isinstance(data.get(k), dict) and isinstance(v, dict):
+                    _deep_merge_into_existing(data[k], v)
+                else:
+                    data[k] = v
+
+        def _reorder_core_yml_keys(data: dict) -> None:
+            """Move main_llm, endpoints to logical positions so they don't always end up at EOF. tool_timeout_seconds lives under tools:, not top-level."""
+            keys = list(data.keys())
+            to_place = [k for k in ("main_llm", "endpoints") if k in data]
+            if not to_place:
+                return
+            # Start with keys in current order, minus the ones we want to move
+            new_order = [k for k in keys if k not in to_place]
+            def insert_after(anchor: str, key: str) -> bool:
+                if key not in data or key not in to_place:
+                    return False
+                try:
+                    i = new_order.index(anchor) + 1
+                    new_order.insert(i, key)
+                    return True
+                except ValueError:
+                    return False
+            # Place main_llm after main_llm_port (or main_llm_cloud); then endpoints after main_llm
+            if not insert_after("main_llm_port", "main_llm"):
+                insert_after("main_llm_cloud", "main_llm")
+            insert_after("main_llm", "endpoints")
+            # Append any to_place that weren't inserted (anchor missing)
+            for k in to_place:
+                if k not in new_order:
+                    new_order.append(k)
+            # Reorder: build new dict in desired order (preserve type for ruamel)
+            if type(data).__name__ == "CommentedMap":
+                from ruamel.yaml.comments import CommentedMap
+                reordered = CommentedMap()
+                for k in new_order:
+                    if k in data:
+                        reordered[k] = data[k]
+                data.clear()
+                data.update(reordered)
+            else:
+                reordered = {k: data[k] for k in new_order if k in data}
+                data.clear()
+                data.update(reordered)
+
         def _restore_api_keys_from_original(merged_data: dict, original: dict) -> None:
             """Never write redacted api_key to config; restore from original file when merged value is *** or missing."""
             orig_cloud = (original.get('cloud_models') or []) if isinstance(original.get('cloud_models'), list) else []
@@ -972,9 +1032,14 @@ class CoreMetadata:
             if data is None:
                 data = {}
             original_snapshot = {k: v for k, v in data.items()}  # shallow copy for api_key restore
-            for k, v in core_dict.items():
-                data[k] = v
+            _merge_core_dict_into_data(data, core_dict)  # deep-merge nested dicts so comments (e.g. cognee) are preserved
+            # tool_timeout_seconds belongs under tools: (config reads (data.get('tools') or {}).get('tool_timeout_seconds'))
+            if data.get("tools") is not None and isinstance(data["tools"], dict):
+                data["tools"]["tool_timeout_seconds"] = getattr(core, "tool_timeout_seconds", 120)
+            if "tool_timeout_seconds" in data:
+                del data["tool_timeout_seconds"]  # avoid duplicate; only under tools:
             _restore_api_keys_from_original(data, original_snapshot)
+            _reorder_core_yml_keys(data)
             with open(yaml_file, 'w', encoding='utf-8') as f:
                 yaml_rt.dump(data, f)
             return
@@ -992,9 +1057,13 @@ class CoreMetadata:
             )
             return
         original_snapshot = {k: v for k, v in existing.items()}
-        for k, v in core_dict.items():
-            existing[k] = v
+        _merge_core_dict_into_data(existing, core_dict)
+        if existing.get("tools") is not None and isinstance(existing["tools"], dict):
+            existing["tools"]["tool_timeout_seconds"] = getattr(core, "tool_timeout_seconds", 120)
+        if "tool_timeout_seconds" in existing:
+            del existing["tool_timeout_seconds"]  # avoid duplicate; only under tools:
         _restore_api_keys_from_original(existing, original_snapshot)
+        _reorder_core_yml_keys(existing)
         with open(yaml_file, 'w', encoding='utf-8') as file:
             yaml.safe_dump(existing, file, default_flow_style=False, sort_keys=False)
 

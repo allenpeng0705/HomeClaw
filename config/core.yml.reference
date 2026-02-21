@@ -160,6 +160,7 @@ tools:
   browser_headless: false
   # Per-tool execution timeout. Unit: seconds. Prevents a single tool from hanging the system. 0 = no timeout.
   tool_timeout_seconds: 0
+
 # Complex result viewer: save HTML result pages and optionally send a link. One web server for reports (port below); starts/stops with Core. Link = base_url + /result/<id>.html. We do not fetch public IP — you set base_url. Guide: docs/ComplexResultViewerDesign.md § "User guide: making the link work" (Cloudflare tunnel recommended: easy, cheap, stable; or use ngrok / any tunnel).
 result_viewer:
   enabled: true
@@ -437,7 +438,7 @@ cloud_models:
 
 # ——— Selected main and embedding model: local_models/<id> or cloud_models/<id> ———
 #main_llm: cloud_models/Gemini-2.5-Flash
-main_llm: local_models/main_vl_model_4B
+# main_llm: local_models/main_vl_model_4B
 # Optional: main_llm_mode: "local" | "cloud" | "mix". Omit or leave unset = derive from main_llm (cloud_models/ → cloud, else local).
 # When "mix": 3-layer router picks per-request between main_llm_local and main_llm_cloud. Set both and hybrid_router (see docs_design/HybridRouterImplementationPlan.md).
 main_llm_mode: mix
@@ -590,4 +591,4 @@ cognee:
   # env:
   #   TELEMETRY_DISABLED: "true"
   #   VECTOR_STORE_PROVIDER: "qdrant"
-endpoints: []
+  endpoints: []
