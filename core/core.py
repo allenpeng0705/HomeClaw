@@ -2856,6 +2856,12 @@ class Core(CoreInterface):
         """Run the core using uvicorn"""
         try:
             logger.debug("core is running!")
+            # Periodic wakeup so the event loop can process signals (e.g. Ctrl+C). Required on Windows;
+            # harmless on macOS/Linux and keeps shutdown behavior consistent across platforms.
+            _loop = asyncio.get_running_loop()
+            def _wakeup():
+                _loop.call_later(0.5, _wakeup)
+            _loop.call_later(0.5, _wakeup)
             core_metadata: CoreMetadata = Util().get_core_metadata()
             logger.debug(f"Running core on {core_metadata.host}:{core_metadata.port}")
             config = uvicorn.Config(self.app, host=core_metadata.host, port=core_metadata.port, log_level="critical")
@@ -4342,15 +4348,25 @@ class Core(CoreInterface):
         pass
 
 def main():
+    loop = None
+    core = None
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         with Core() as core:
             loop.run_until_complete(core.run())
+    except KeyboardInterrupt:
+        if core is not None:
+            try:
+                core.stop()
+            except Exception:
+                pass
+        sys.exit(0)
     except Exception as e:
         logger.exception(e)
     finally:
-        loop.close()
+        if loop is not None:
+            loop.close()
 
 if __name__ == "__main__":
     main()
