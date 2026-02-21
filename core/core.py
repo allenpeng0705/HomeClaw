@@ -3237,6 +3237,7 @@ class Core(CoreInterface):
             # Hybrid router (mix mode): run before injecting tools, skills, plugins. Router uses only user message (query).
             effective_llm_name = None
             mix_route_this_request = None  # "local" | "cloud" when in mix mode; used for optional response label
+            mix_route_layer_this_request = None  # which layer chose the route: heuristic, semantic, classifier, perplexity, default_route
             mix_show_route_label = False
             main_llm_mode = (getattr(Util().core_metadata, "main_llm_mode", None) or "").strip().lower()
             if main_llm_mode == "mix":
@@ -3348,6 +3349,7 @@ class Core(CoreInterface):
                 if route is None:
                     route = default_route
                 mix_route_this_request = route
+                mix_route_layer_this_request = route_layer
                 mix_show_route_label = bool(hr.get("show_route_in_response", False))
                 if route == "local":
                     effective_llm_name = (getattr(Util().core_metadata, "main_llm_local", None) or "").strip()
@@ -3797,7 +3799,8 @@ class Core(CoreInterface):
                     if routing_sent:
                         out = routing_response_text if routing_response_text is not None else ROUTING_RESPONSE_ALREADY_SENT
                         if mix_route_this_request and mix_show_route_label and isinstance(out, str) and out is not ROUTING_RESPONSE_ALREADY_SENT:
-                            label = "[Local] " if mix_route_this_request == "local" else "[Cloud] "
+                            layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
+                            label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
                             out = label + (out or "")
                         return out
                 else:
@@ -3811,7 +3814,8 @@ class Core(CoreInterface):
             if response is None or len(response) == 0:
                 return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
             if mix_route_this_request and mix_show_route_label:
-                label = "[Local] " if mix_route_this_request == "local" else "[Cloud] "
+                layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
+                label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
                 response = label + (response or "")
             logger.info("Main LLM output (final response): {}", _truncate_for_log(response, 2000))
             message: ChatMessage = ChatMessage()

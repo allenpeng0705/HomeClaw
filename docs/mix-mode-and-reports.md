@@ -51,7 +51,7 @@ If you omit `main_llm_mode`, it is derived from `main_llm` (cloud_models/ → cl
    - Heuristic: `config/hybrid/heuristic_rules.yml` (create or use [scripts](hybrid-router-scripts.md) to generate/merge).
    - Semantic: `config/hybrid/semantic_routes.yml` or `config/hybrid/generated_utterances.yml` (or generate/merge via scripts).
 
-4. **Start Core** (and ensure your local model server and, if using classifier, the Layer 3 model are running). Send a few test messages; check logs for `hybrid_router_decision` to see which layer chose the route.
+4. **Start Core** (and ensure your local model server and, if using classifier, the Layer 3 model are running). Send a few test messages. To see which layer chose the route, use one of the options in the next section.
 
 5. **Optional:** Use the [usage report](#how-to-see-reports) (API or `usage_report` tool) to see router and cloud usage over time.
 
@@ -67,6 +67,12 @@ Each mix-mode turn logs one line (JSON) with the routing decision:
 
 - **Where:** Core log output (e.g. stdout or your log file).
 - **Look for:** `"event": "hybrid_router_decision"` with `route`, `layer`, `score`, `latency_ms`.
+
+**How to see which layer the routing happened (per request):**
+
+1. **In the reply (easiest):** In `config/core.yml` set `hybrid_router.show_route_in_response: true`. Each reply is prefixed with the route and the layer that chose it, e.g. `[Local · heuristic]`, `[Cloud · semantic]`, `[Local · classifier]`, or `[Cloud · default_route]`.
+2. **In Core logs:** At INFO level, each routing decision is logged as a JSON line: `Router decision: {"event": "hybrid_router_decision", "route": "cloud", "layer": "semantic", "score": 0.82, ...}`. The `layer` field is one of: `heuristic`, `semantic`, `classifier`, `perplexity`, `default_route`.
+3. **Aggregated (usage report):** Call the usage report API or use the `usage_report` tool; the response includes `router.by_layer` with counts per layer (e.g. how many requests were routed by heuristic vs semantic vs default_route).
 - **Layers:** `heuristic`, `semantic`, `classifier`, `perplexity`, or `default_route`.
 
 Use this to debug why a given message went local or cloud.
@@ -107,7 +113,7 @@ All mix-mode and router parameters live under **`config/core.yml`** → `main_ll
 | **main_llm_local** | Top-level | Local model ref (e.g. `local_models/main_4B`) used when route is local. | Must match an entry in `local_models`. |
 | **main_llm_cloud** | Top-level | Cloud model ref used when route is cloud. | Must match an entry in `cloud_models`. |
 | **default_route** | `hybrid_router` | Route when **no** layer selects (e.g. ambiguous or low score). | `local` = save cost; `cloud` = safer for unknown. |
-| **show_route_in_response** | `hybrid_router` | When `true`, prepend `[Local] ` or `[Cloud] ` to each reply (for testing). | Default `false`. Turn on to verify routing in the UI without checking logs. |
+| **show_route_in_response** | `hybrid_router` | When `true`, prepend route and **layer** to each reply, e.g. `[Local · heuristic]` or `[Cloud · semantic]` (for testing). | Default `false`. Turn on to see which layer chose the route in the UI without checking logs. |
 | **heuristic.enabled** | `hybrid_router.heuristic` | Turn Layer 1 (keyword/long-input) on/off. | Off if you rely only on semantic + Layer 3. |
 | **heuristic.threshold** | `hybrid_router.heuristic` | Min score to accept a heuristic match (keyword match gives 1.0). | Usually keep 0.5; rarely need to change. |
 | **heuristic.rules_path** | `hybrid_router.heuristic` | Path to YAML with keywords and long_input_* rules. | Point to your `heuristic_rules.yml` (or generate via scripts). |
