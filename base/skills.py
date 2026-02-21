@@ -137,6 +137,7 @@ def build_skills_system_block(skills: List[Dict[str, Any]], include_body: bool =
         if include_body and s.get("body"):
             lines.append("  " + s["body"].replace("\n", "\n  ").strip())
         lines.append("")
+    lines.append("Skills without a scripts/ folder are instruction-only: call run_skill(skill_name=<folder>) with no script, then follow that skill's instructions in your response.")
     return "\n".join(lines).strip() + "\n\n"
 
 
