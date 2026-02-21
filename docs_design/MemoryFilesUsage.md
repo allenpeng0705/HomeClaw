@@ -76,6 +76,31 @@ Daily memory does not need a cap: only two files (yesterday + today) are ever lo
 
 ---
 
+## Why do I see "AGENT_MEMORY size 0" or "synced 0 chunk(s)"?
+
+The **size** is the number of **chunks** indexed into the vector store for agent memory (AGENT_MEMORY.md + daily memory). It is logged at Core startup as `[agent_memory] synced N chunk(s) to vector store`. It is **0** when:
+
+1. **No files to index** — Indexing only includes:
+   - **AGENT_MEMORY.md** at `workspace_dir/AGENT_MEMORY.md` (default: `config/workspace/AGENT_MEMORY.md`). The file must **exist** and have content.
+   - **Daily memory** for yesterday and today: `workspace_dir/memory/YYYY-MM-DD.md` (e.g. `config/workspace/memory/2025-02-21.md`). If those two files don’t exist, they aren’t indexed.
+2. **Indexing runs only at startup** — So if you create or edit AGENT_MEMORY.md or daily files *after* Core has started, the vector store is not updated until you **restart Core** (or use the tools below to re-sync).
+3. **Embedder or vector store not ready** — If the embedding server or Chroma isn’t ready at startup, sync can fail and you get 0 chunks.
+
+**What to do:**
+
+- **Create the file so indexing has something to index:**  
+  Create `config/workspace/AGENT_MEMORY.md` (and optionally `config/workspace/memory/YYYY-MM-DD.md` for today). You can leave them empty or add a line; empty files produce 0 chunks, but the file existing allows the sync to run. Then **restart Core** so startup sync runs again.
+- **Use the tools to populate and re-sync:**  
+  When the model (or you) uses **append_agent_memory** or **append_daily_memory**, the file is created if missing and content is appended. Core can then **re-sync** agent memory so the new content is searchable without a restart (see implementation).
+- **Check config:**  
+  Ensure `use_agent_memory_search: true` and `use_agent_memory_file: true` in `config/core.yml`, and `workspace_dir: config/workspace` (or your chosen path).
+
+**How agent memory and daily memory are used:**
+
+- With **use_agent_memory_search: true** (default), the model does **not** get the full file in the prompt. It is told to use **agent_memory_search** (semantic search over the indexed chunks) and **agent_memory_get** (read by path and line range) to pull only relevant parts when answering questions about prior work, preferences, or facts. So the "size" is the number of searchable chunks; 0 means no chunks were indexed, so search returns nothing until you add content and re-sync or restart.
+
+---
+
 ## Summary
 
 - **AGENT_MEMORY.md** = long-term, one file. When **use_agent_memory_search: true** (default): no content injected; model uses **agent_memory_search** + **agent_memory_get** to pull only relevant parts. When false: last 5k chars injected.

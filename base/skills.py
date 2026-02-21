@@ -143,8 +143,9 @@ def build_skills_system_block(skills: List[Dict[str, Any]], include_body: bool =
 
 def build_skill_refined_text(skill: Dict[str, Any], body_max_chars: int = 0) -> str:
     """
-    Build the text to embed for a skill (name + description, optionally start of body).
-    Used for vector storage and similarity search.
+    Build the text to embed for a skill (name + description, optionally body, optional keywords).
+    Used for vector storage and similarity search. Include keywords so RAG matches queries in
+    multiple languages (e.g. "image generate create" + "图片 生成 创建" in SKILL.md frontmatter).
     """
     name = (skill.get("name") or "").strip()
     desc = (skill.get("description") or "").strip()
@@ -153,6 +154,12 @@ def build_skill_refined_text(skill: Dict[str, Any], body_max_chars: int = 0) -> 
         body = (skill["body"] or "").strip()[:body_max_chars]
         if body:
             parts.append(body)
+    # Optional frontmatter "keywords" (string or list) for better RAG match across languages
+    keywords = skill.get("keywords")
+    if keywords:
+        kw_str = " ".join(keywords) if isinstance(keywords, (list, tuple)) else str(keywords).strip()
+        if kw_str:
+            parts.append(kw_str)
     return "\n".join(parts).strip() or ""
 
 

@@ -851,7 +851,7 @@ class CoreMetadata:
             skills_refresh_on_startup=bool(data.get('skills_refresh_on_startup', True)),
             skills_test_dir=(data.get('skills_test_dir') or '').strip(),
             skills_incremental_sync=bool(data.get('skills_incremental_sync', False)),
-            skills_force_include_rules=[r for r in (data.get('skills_force_include_rules') or []) if isinstance(r, dict) and r.get('pattern') and r.get('folders')],
+            skills_force_include_rules=[r for r in (data.get('skills_force_include_rules') or []) if isinstance(r, dict) and (r.get('pattern') or r.get('patterns')) and r.get('folders')],
             plugins_force_include_rules=[r for r in (data.get('plugins_force_include_rules') or []) if isinstance(r, dict) and r.get('pattern') and r.get('plugins')],
             orchestrator_timeout_seconds=int(data.get('orchestrator_timeout_seconds', 30) or 0),
             tool_timeout_seconds=int((data.get('tools') or {}).get('tool_timeout_seconds', 120) or 0),

@@ -27,6 +27,8 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final List<MapEntry<String, bool>> _messages = [];
+  /// Optional image data URLs per message (same index as _messages; null or empty when no images).
+  final List<List<String>?> _messageImages = [];
   final TextEditingController _inputController = TextEditingController();
   bool _loading = false;
   bool _voiceListening = false;
@@ -107,11 +109,16 @@ class _ChatScreenState extends State<ChatScreen> {
     final imagesToSend = List<String>.from(_pendingImagePaths);
     final videosToSend = List<String>.from(_pendingVideoPaths);
     final filesToSend = List<String>.from(_pendingFilePaths);
+    // Build display URLs for attached images so they show in the user's message bubble
+    final userImageDataUrls = imagesToSend.isNotEmpty
+        ? await _filePathsToImageDataUrls(imagesToSend)
+        : <String>[];
     setState(() {
       _pendingImagePaths.clear();
       _pendingVideoPaths.clear();
       _pendingFilePaths.clear();
       _messages.add(MapEntry(text.isEmpty ? '(attachment)' : text, true));
+      _messageImages.add(userImageDataUrls.isEmpty ? null : userImageDataUrls);
       _loading = true;
     });
     try {
@@ -136,16 +143,22 @@ class _ChatScreenState extends State<ChatScreen> {
           // Videos and documents not sent on upload failure to avoid huge payloads.
         }
       }
-      final reply = await widget.coreService.sendMessage(
+      final result = await widget.coreService.sendMessage(
         text.isEmpty ? 'See attached.' : text,
         images: imagePaths.isEmpty ? null : imagePaths,
         videos: videoPaths.isEmpty ? null : videoPaths,
         files: filePaths.isEmpty ? null : filePaths,
       );
       if (mounted) {
+        final reply = (result['text'] as String?) ?? '';
+        final imageList = result['images'] as List<dynamic>?;
+        final imageDataUrls = imageList != null
+            ? imageList.map((e) => e as String).where((s) => s.startsWith('data:image/')).toList()
+            : <String>[];
         _lastReply = reply;
         setState(() {
           _messages.add(MapEntry(reply.isEmpty ? '(no reply)' : reply, false));
+          _messageImages.add(imageDataUrls.isEmpty ? null : imageDataUrls);
           _loading = false;
         });
         final preview = reply.isEmpty ? 'No reply' : (reply.length > 80 ? '${reply.substring(0, 80)}…' : reply);
@@ -156,6 +169,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) {
         setState(() {
           _messages.add(MapEntry('Error: $e', false));
+          _messageImages.add(null);
           _loading = false;
         });
       }
@@ -341,7 +355,10 @@ class _ChatScreenState extends State<ChatScreen> {
       // Copy to app temp so preview/upload work (macOS Photos returns short-lived paths).
       final result = await _copyPickedFileToTemp(xFile);
       if (result.path == null || !mounted) {
-        setState(() => _messages.add(MapEntry('Photo error: ${result.error ?? "could not read or copy the image."}', false)));
+        setState(() {
+          _messages.add(MapEntry('Photo error: ${result.error ?? "could not read or copy the image."}', false));
+          _messageImages.add(null);
+        });
         return;
       }
       final filePath = result.path!;
@@ -353,7 +370,10 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       if (mounted) {
         try { Navigator.of(context).pop(); } catch (_) {}
-        setState(() => _messages.add(MapEntry('Photo error: $e', false)));
+        setState(() {
+          _messages.add(MapEntry('Photo error: $e', false));
+          _messageImages.add(null);
+        });
       }
     }
   }
@@ -399,14 +419,20 @@ class _ChatScreenState extends State<ChatScreen> {
         final result = await _copyPickedFileToTemp(xFile, defaultExt: '.mp4');
         filePath = result.path;
         if (filePath == null || !mounted) {
-          setState(() => _messages.add(MapEntry('Video error: ${result.error ?? "could not read or copy the video."}', false)));
+          setState(() {
+            _messages.add(MapEntry('Video error: ${result.error ?? "could not read or copy the video."}', false));
+            _messageImages.add(null);
+          });
           return;
         }
       } else {
         filePath = xFile.path;
       }
       if (filePath == null || !mounted) {
-        setState(() => _messages.add(MapEntry('Video error: could not read or copy the video.', false)));
+          setState(() {
+            _messages.add(MapEntry('Video error: could not read or copy the video.', false));
+            _messageImages.add(null);
+          });
         return;
       }
       final added = await _showMediaPreview(context, type: 'video', filePath: filePath, label: 'Add this video to your message?');
@@ -417,7 +443,10 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (e) {
       if (mounted) {
         try { Navigator.of(context).pop(); } catch (_) {}
-        setState(() => _messages.add(MapEntry('Video error: $e', false)));
+        setState(() {
+          _messages.add(MapEntry('Video error: $e', false));
+          _messageImages.add(null);
+        });
       }
     }
   }
@@ -827,9 +856,15 @@ class _ChatScreenState extends State<ChatScreen> {
           ? (result.stderr as String)
           : utf8.decode(result.stderr as List<int>)).trim();
       final line = 'Exit ${result.exitCode}${out.isNotEmpty ? '\n$out' : ''}${err.isNotEmpty ? '\n$err' : ''}';
-      if (mounted) setState(() => _messages.add(MapEntry('Run: $cmd\n$line', false)));
+      if (mounted) setState(() {
+        _messages.add(MapEntry('Run: $cmd\n$line', false));
+        _messageImages.add(null);
+      });
     } catch (e) {
-      if (mounted) setState(() => _messages.add(MapEntry('Run error: $e', false)));
+      if (mounted) setState(() {
+        _messages.add(MapEntry('Run error: $e', false));
+        _messageImages.add(null);
+      });
     }
   }
 
@@ -961,6 +996,7 @@ class _ChatScreenState extends State<ChatScreen> {
               itemBuilder: (context, i) {
                 final entry = _messages[i];
                 final isUser = entry.value;
+                final imageUrls = i < _messageImages.length ? _messageImages[i] : null;
                 return Align(
                   alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
                   child: Container(
@@ -970,9 +1006,37 @@ class _ChatScreenState extends State<ChatScreen> {
                       color: isUser ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: SelectableText(
-                      entry.key,
-                      style: Theme.of(context).textTheme.bodyLarge,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (imageUrls != null && imageUrls.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: imageUrls
+                                  .where((u) => u.startsWith('data:image/'))
+                                  .map((imageDataUrl) => Padding(
+                                        padding: const EdgeInsets.only(bottom: 6),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(8),
+                                          child: Image.memory(
+                                            base64Decode(imageDataUrl.contains(',') ? imageDataUrl.split(',').last : ''),
+                                            fit: BoxFit.contain,
+                                            width: 280,
+                                            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                          ),
+                                        ),
+                                      ))
+                                  .toList(),
+                            ),
+                          ),
+                        SelectableText(
+                          entry.key,
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                      ],
                     ),
                   ),
                 );

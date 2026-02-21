@@ -82,10 +82,10 @@ skills_refresh_on_startup: true
 # Optional test folder: full sync every time (id = test__<folder>). Production skills_dir can be incremental (only new).
 skills_test_dir: ""
 skills_incremental_sync: false
-# Optional: when user query matches a regex, ensure these skill folders are in the prompt and optionally append an instruction. List of { pattern: str, folders: [str], instruction?: str }. No per-skill code in Core.
+# Optional: when user query matches a regex, ensure these skill folders are in the prompt. Use "pattern" (single) or "patterns" (list) for multi-language matching. List of { pattern?: str, patterns?: [str], folders: [str], instruction?: str, auto_invoke?: {...} }. No per-skill code in Core.
 # Example (uncomment and set folders/instruction per skill):
 # skills_force_include_rules:
-#   - pattern: "generate\\s+(an?\\s+)?image|create\\s+(an?\\s+)?image|draw\\s+(a\\s+)?(picture|image)"
+#   - patterns: ["generate\\s+(an?|one)?\\s+image|create\\s+...", "创建.*图|生成.*图|画.*图"]
 #     folders: [nano-banana-pro-1.0.1]
 #     instruction: "The user asked to generate or create an image. You MUST call run_skill with skill_name='nano-banana-pro-1.0.1', script='generate_image.py', args=['--prompt', '<user image description>', '--filename', 'generated.png']. Do not respond that no image tool is available."
 skills_force_include_rules: []
@@ -143,7 +143,9 @@ tools:
   file_read_base: "."
   # Max characters returned by file_read when the tool does not pass max_chars (default 32000). Increase for long PDFs/documents (e.g. 128000).
   file_read_max_chars: 128000
-  run_skill_allowlist: ["run.sh", "main.py", "run.bat", "generate_image.py", "run.py", "search.py"]   # run_skill: if set, only these script names. Use [] to allow all scripts under any skill's scripts/. .sh on Windows runs via bash/WSL if available.
+  run_skill_allowlist: ["run.sh", "main.py", "run.bat", "generate_image.py", "run.py", "search.py"]   # run_skill: if set, only these script names. Use [] to allow all.
+  # run_skill_py_in_process: true   # true = run .py scripts in Core's process (same env). false = subprocess.
+  # run_skill_auto_install_missing: { "google": "google-genai pillow" }   # optional: on ModuleNotFoundError, pip install and retry (subprocess only)
   run_skill_timeout: 60   # Unit: seconds
   web:                  # web_search: free (no key) duckduckgo | free tier google_cse (100/day), bing (1000/mo) | tavily, brave, serpapi. Browser: web_search_browser (Google/Bing/Baidu, no key, needs Playwright).
     search:

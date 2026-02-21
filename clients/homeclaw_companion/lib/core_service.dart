@@ -166,11 +166,11 @@ class CoreService {
     return paths?.map((e) => e.toString()).toList() ?? [];
   }
 
-  /// Send a message to Core and return the reply text.
+  /// Send a message to Core and return the reply: { "text": String, "image": String? (data URL) }.
   /// Same payload shape as web chat and Core InboundRequest: text, images, videos, audios, files.
   /// [images], [videos], [audios], [files] are paths (e.g. from upload) or data URLs Core can read.
   /// Throws on network or API error.
-  Future<String> sendMessage(
+  Future<Map<String, dynamic>> sendMessage(
     String text, {
     String userId = 'companion',
     List<String>? images,
@@ -201,7 +201,14 @@ class CoreService {
       throw Exception('Core returned ${response.statusCode}: $err');
     }
     final map = jsonDecode(response.body) as Map<String, dynamic>?;
-    return (map?['text'] as String?) ?? '';
+    final responseImages = map?['images'] as List<dynamic>?;
+    final responseImage = map?['image'];
+    return {
+      'text': (map?['text'] as String?) ?? '',
+      'images': responseImages != null
+          ? responseImages.map((e) => e as String).toList()
+          : (responseImage != null ? [responseImage as String] : null),
+    };
   }
 
   /// GET /api/config/core — current core config (whitelisted keys). Throws on error.

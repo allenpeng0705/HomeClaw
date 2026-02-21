@@ -1,9 +1,13 @@
 ---
 name: nano-banana-pro
 description: Generate/edit images with Nano Banana Pro (Gemini 3 Pro Image). Use for image create/modify requests incl. edits. Supports text-to-image + image-to-image; 1K/2K/4K; use --input-image.
+# Keywords for RAG: help vector search match queries in any language (re-sync skills after edit)
+keywords: "image generate create draw picture 图片 生成 创建 画图 做图 来一张图"
 ---
 
 # Nano Banana Pro Image Generation & Editing
+
+**Response rule:** Only tell the user the image was generated if the run_skill result contains "Image saved:". If the result contains "Error:" or "No image was generated", tell the user that generation failed and quote the error; do not claim success.
 
 Generate new images or edit existing ones using Google's Nano Banana Pro API (Gemini 3 Pro Image).
 
@@ -56,6 +60,16 @@ The script checks for API key in this order:
 
 If neither is available, the script exits with an error message.
 
+## Dependencies (when run by HomeClaw)
+
+HomeClaw runs the script with the Python configured in **tools.run_skill_python_path** (or the same Python as Core if unset). When you run the skill, the log line `run_skill: executing Python script with: <path>` shows which Python is used. Install in that environment:
+
+```bash
+pip install -r config/skills/nano-banana-pro-1.0.1/scripts/requirements.txt
+```
+
+Or: `pip install google-genai pillow`. Required: **google-genai** (provides `from google import genai`), **pillow** (for image I/O). If you see `ImportError: cannot import name 'genai' from 'google'`, the wrong package is installed—use **google-genai**, not **google-generativeai**. Alternatively, set **tools.run_skill_python_path** in core.yml to a Python (e.g. a venv) where you already ran `pip install google-genai pillow`.
+
 ## Preflight + Common Failures (fast fixes)
 
 - Preflight:
@@ -64,6 +78,7 @@ If neither is available, the script exits with an error message.
   - If editing: `test -f \"path/to/input.png\"`
 
 - Common failures:
+  - `ImportError: cannot import name 'genai' from 'google'` → install in the env that runs HomeClaw: `pip install google-genai pillow` (use **google-genai**, not google-generativeai).
   - `Error: No API key provided.` → set `GEMINI_API_KEY` or pass `--api-key`
   - `Error loading input image:` → wrong path / unreadable file; verify `--input-image` points to a real image
   - “quota/permission/403” style API errors → wrong key, no access, or quota exceeded; try a different key/account
