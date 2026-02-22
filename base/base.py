@@ -62,11 +62,11 @@ class PromptRequest(BaseModel):
 
 class InboundRequest(BaseModel):
     """Minimal payload for POST /inbound so any bot can talk to the Core without building a full channel."""
-    user_id: str  # e.g. telegram chat_id, discord user id, email
-    text: str
+    user_id: str = "companion"  # e.g. telegram chat_id, discord user id; default for companion/apps that don't send it
+    text: str  # required; use "See attached." etc. when sending only media
     channel_name: Optional[str] = "webhook"
     user_name: Optional[str] = None  # display name; defaults to user_id if omitted
-    app_id: Optional[str] = "homeclaw"
+    app_id: Optional[str] = None  # agent id for memory/scoping; Core uses "homeclaw" when omitted
     action: Optional[str] = "respond"
     # Companion/assistant disambiguation: when client sends conversation_type=companion or session_id=companion, Core routes to companion plugin only (see docs_design/CompanionFeatureDesign.md).
     session_id: Optional[str] = None
@@ -595,10 +595,8 @@ class CoreMetadata:
     use_tools: bool = False  # enable tool layer (tool registry, execute tool_calls in chat loop)
     use_skills: bool = False  # inject skills (SKILL.md from skills_dir) into system prompt; see Design.md §3.6
     skills_dir: str = "config/skills"  # directory to scan for skill folders (each with SKILL.md)
-    skills_top_n_candidates: int = 10  # retrieve/load this many skills first; then threshold; then cap by skills_max_in_prompt
-    skills_max_in_prompt: int = 5  # max skills in prompt after threshold (top 10 → threshold → up to 5)
-    plugins_top_n_candidates: int = 10  # same for plugins
-    plugins_max_in_prompt: int = 5  # max plugins in prompt after threshold (top 10 → threshold → up to 5)
+    skills_max_in_prompt: int = 5  # when skills_use_vector_search=true, cap RAG results to this many in prompt; when false (include all) this is not used
+    plugins_max_in_prompt: int = 5  # when plugins_use_vector_search=true, cap RAG results to this many; when false (include all) this is not used
     plugins_description_max_chars: int = 0  # max chars per plugin description in routing block; 0 = no truncation. With RAG or plugins_max_in_prompt we already cap how many plugins appear; this only limits per-item length. Use 0 (default) for full descriptions; set 512 or 300 only if you need to shrink prompt or cap one very long description.
     # Vector retrieval for skills (separate collection from memory); see docs/ToolsSkillsPlugins.md §8
     skills_use_vector_search: bool = False  # when True, retrieve skills by similarity to user query instead of injecting all/first N
@@ -846,9 +844,7 @@ class CoreMetadata:
             use_tools=data.get('use_tools', False),
             use_skills=data.get('use_skills', False),
             skills_dir=data.get('skills_dir', 'config/skills'),
-            skills_top_n_candidates=max(1, min(100, int(data.get('skills_top_n_candidates', 10) or 10))),
             skills_max_in_prompt=max(0, int(data.get('skills_max_in_prompt', 5) or 5)),
-            plugins_top_n_candidates=max(1, min(100, int(data.get('plugins_top_n_candidates', 10) or 10))),
             plugins_max_in_prompt=max(0, int(data.get('plugins_max_in_prompt', 5) or 5)),
             plugins_description_max_chars=max(0, int(data.get('plugins_description_max_chars', 0) or 0)),
             skills_use_vector_search=bool(data.get('skills_use_vector_search', False)),

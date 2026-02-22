@@ -1,67 +1,76 @@
 ---
 name: baidu-search
-description: Search the web using Baidu AI Search Engine (BDSE). Use for live information, documentation, or research topics.
+description: Search the web and get an AI-summarized answer using Baidu 智能搜索生成 (Qianfan AI Search). Use for live information, documentation, or research. Requires API key (env or config).
+trigger:
+  patterns: ["search\\s+(the\\s+)?(web|baidu|百度)|百度搜索|search\\s+for|look\\s+up\\s+(on\\s+)?(the\\s+)?web"]
+  instruction: "The user asked to search the web or use Baidu. Call run_skill(skill_name='baidu-search-1.1.0', script='search.py', args=['{\"query\": \"<search terms>\"}']) with a JSON string. Extract the search query from the user message. Do not say you cannot search."
+  auto_invoke:
+    script: search.py
+    args: ["{{query}}"]
 ---
 
-# Baidu Search
+# Baidu AI Search (智能搜索生成)
 
-Search the web via Baidu AI Search API.
+Uses Baidu Qianfan **智能搜索生成** API: search the web and get an AI-written summary plus references.  
+**Skill folder name for run_skill:** `baidu-search-1.1.0`.  
+API reference: [智能搜索生成](https://cloud.baidu.com/doc/qianfan-api/s/Hmbu8m06u).
 
-## Usage
+## API key (required)
 
-```bash
-python3 skills/baidu-search/scripts/search.py '<JSON>'
-```
+Set **one** of:
+- **Environment:** `BAIDU_API_KEY` where Core runs (e.g. `set BAIDU_API_KEY=your-key` or `export BAIDU_API_KEY=your-key`).
+- **Config:** In `config/core.yml` under `tools:` add `baidu_api_key: "your-key"`.
 
-## Request Parameters
+Get a key from [Baidu Qianfan](https://cloud.baidu.com/doc/qianfan-api/s/Hmbu8m06u) (千帆 AI 应用开发者中心).
+
+## Run via run_skill
+
+**run_skill(skill_name=`baidu-search-1.1.0`, script=`search.py`, args=[\"{\\\"query\\\": \\\"your search terms\\\"}\"])**
+
+First argument: **JSON string** with at least `"query"`. Examples:
+- `args: ["{\"query\": \"人工智能\"}"]`
+- `args: ["{\"query\": \"最新新闻\", \"search_recency_filter\": \"week\"}"]`
+- `args: ["{\"query\": \"北京景点\", \"model\": \"ernie-4.5-turbo-32k\", \"enable_deep_search\": true}"]`
+
+## Response
+
+The script returns a JSON object:
+- **summary**: AI-generated answer (text) based on search results.
+- **references**: List of sources (title, url, content snippet, date, type: web/video/image).
+- **usage**: Token usage if returned by the API.
+
+## Request parameters
 
 | Param | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| query | str | yes | - | Search query |
-| edition | str | no | standard | `standard` (full) or `lite` (light) |
-| resource_type_filter | list[obj] | no | web:20, others:0 | Resource types: web (max 50), video (max 10), image (max 30), aladdin (max 5) |
-| search_filter | obj | no | - | Advanced filters (see below) |
-| block_websites | list[str] | no | - | Sites to block, e.g. ["tieba.baidu.com"] |
-| search_recency_filter | str | no | - | Time filter: `week`, `month`, `semiyear`, `year` |
-| safe_search | bool | no | false | Enable strict content filtering |
-
-## SearchFilter
-
-| Param | Type | Description |
-|-------|------|-------------|
-| match.site | list[str] | Limit search to specific sites, e.g. ["baike.baidu.com"] |
-| range.pageTime | obj | Date range for page_time field (see below) |
-
-### Date Range Format
-
-Fixed date: `YYYY-MM-DD`
-Relative time (from current day): `now-1w/d`, `now-1M/d`, `now-1y/d`
-
-| Operator | Meaning |
-|----------|---------|
-| gte | Greater or equal (start) |
-| lte | Less or equal (end) |
+| query | str | yes | - | Search query (user question or keywords). |
+| model | str | no | ernie-4.5-turbo-32k | Qianfan model for summarization. Other options: ernie-4.5-turbo-128k, deepseek-r1, deepseek-v3. |
+| search_source | str | no | baidu_search_v2 | `baidu_search_v1` or `baidu_search_v2` (v2 recommended). |
+| resource_type_filter | list | no | [{"type":"web","top_k":20}] | For v2: web (top_k ≤20), video (top_k ≤20). |
+| search_recency_filter | str | no | year | Time filter: `week`, `month`, `semiyear`, `year`. |
+| search_filter | obj | no | {} | V2 only: e.g. `{"match":{"site":["news.baidu.com"]}}`. |
+| search_mode | str | no | auto | `auto` (decide if search needed), `required`, `disabled`. |
+| enable_deep_search | bool | no | false | If true, more search rounds (up to ~10); more refs, higher cost. |
+| enable_reasoning | bool | no | true | Deep reasoning for DeepSeek-R1 / 文心X1. |
+| instruction | str | no | - | System instruction / style (max 4000 chars). |
+| temperature | float | no | - | Sampling (0, 1]. |
+| top_p | float | no | - | Sampling diversity. |
+| safety_level | str | no | standard | `standard` or `strict`. |
+| max_completion_tokens | int | no | - | Max output tokens. |
 
 ## Examples
 
 ```bash
-# Basic search
-python3 skills/baidu-search/scripts/search.py '{"query":"人工智能"}'
+# Basic: query only
+python search.py '{"query":"北京有哪些景点"}'
 
-# Filter by time and site
-python3 skills/baidu-search/scripts/search.py '{
-  "query":"最新新闻",
-  "search_recency_filter":"week",
-  "search_filter":{"match":{"site":["news.baidu.com"]}}
-}'
+# Recent week + site filter
+python search.py '{"query":"最新新闻","search_recency_filter":"week","search_filter":{"match":{"site":["news.baidu.com"]}}}'
 
-# Resource type filter
-python3 skills/baidu-search/scripts/search.py '{
-  "query":"旅游景点",
-  "resource_type_filter":[{"type":"web","top_k":20},{"type":"video","top_k":5}]
-}'
+# Deep search + custom model
+python search.py '{"query":"人工智能发展趋势","model":"ernie-4.5-turbo-128k","enable_deep_search":true}'
 ```
 
-## Current Status
+## Status
 
-Fully functional.
+Uses 智能搜索生成 (chat/completions) endpoint; returns summary + references.

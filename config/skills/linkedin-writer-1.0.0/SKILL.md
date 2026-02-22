@@ -1,6 +1,9 @@
 ---
 name: LinkedIn Writer
 description: Writes LinkedIn posts that sound like a real person, not a content mill
+trigger:
+  patterns: ["linkedin\\s+post|write\\s+(a\\s+)?linkedin|领英|linkedin\\s+content"]
+  instruction: "The user asked to write a LinkedIn post. Use this skill's formats (story, contrarian, list, lesson, behind-the-scenes) and hook formulas. run_skill not required; follow the skill body to draft the post."
 ---
 
 # LinkedIn Writer

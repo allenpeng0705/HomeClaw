@@ -3,6 +3,9 @@ name: outlook
 description: |
   Microsoft Outlook API integration with managed OAuth. Read, send, and manage emails, folders, calendar events, and contacts via Microsoft Graph. Use this skill when users want to interact with Outlook.
 compatibility: Requires network access and valid Maton API key
+trigger:
+  patterns: ["outlook|microsoft\\s+graph|outlook\\s+email|outlook\\s+calendar|邮件.*outlook"]
+  instruction: "The user asked about Outlook (email, calendar, contacts). Use Microsoft Graph via gateway (MATON_API_KEY). See skill body for base URL and auth; use run_skill or HTTP requests."
 ---
 
 # Outlook

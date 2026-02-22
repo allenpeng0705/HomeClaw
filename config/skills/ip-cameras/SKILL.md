@@ -1,6 +1,9 @@
 ---
 name: ip-cameras
 description: Capture frames or clips from RTSP/ONVIF IP cameras. Uses camsnap CLI (and ffmpeg). Use when the user asks to snapshot or record from a configured network camera. Cross-platform if camsnap and ffmpeg are installed; if not, returns a clear error without crashing.
+trigger:
+  patterns: ["ip\\s+camera|camera\\s+snapshot|rtsp|camsnap|摄像头|监控|snapshot\\s+camera"]
+  instruction: "The user asked about IP cameras (snapshot, clip, RTSP). Use run_skill(skill_name='ip-cameras', script='run.py', args=[discover|snap|clip|doctor, ...]). camsnap and ffmpeg required."
 ---
 
 # IP Cameras (RTSP/ONVIF)

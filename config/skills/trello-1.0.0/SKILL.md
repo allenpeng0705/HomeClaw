@@ -2,6 +2,9 @@
 name: trello
 description: Manage Trello boards, lists, and cards via the Trello REST API.
 homepage: https://developer.atlassian.com/cloud/trello/rest/
+trigger:
+  patterns: ["trello|board|card|list\\s+cards?|create\\s+(a\\s+)?card|看板"]
+  instruction: "The user asked about Trello (boards, lists, cards). Use run_skill or curl with Trello API; ensure TRELLO_API_KEY and TRELLO_TOKEN are set. See skill body for API examples."
 ---
 
 # Trello Skill

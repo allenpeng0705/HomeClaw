@@ -67,50 +67,29 @@ use_tools: true
 # Optional: inject skills (SKILL.md) from skills_dir into system prompt; see Design.md §3.6
 use_skills: true
 skills_dir: config/skills
-# Cap skills/plugins in prompt: take top N candidates, apply threshold, then up to M in prompt. See docs_design/SessionAndDualMemoryDesign.md.
-# Flow: retrieve/load top skills_top_n_candidates (e.g. 10), drop below skills_similarity_threshold, then take up to skills_max_in_prompt (e.g. 5). If only 1, 1 is fine.
-skills_top_n_candidates: 10
-skills_max_in_prompt: 10
-plugins_top_n_candidates: 10
-plugins_max_in_prompt: 5
+# Skills: skills_use_vector_search=false → include ALL skills. true → RAG (skills_max_retrieved → threshold → skills_max_in_prompt). Same for plugins.
+
 # Max chars per plugin description in the routing block. 0 = no truncation (default). With RAG (plugins_use_vector_search) or plugins_max_in_prompt we already limit how many plugins appear; this only caps per-description length. Use 0 for full descriptions; set 512 or 300 only to shrink prompt or cap one very long description.
 plugins_description_max_chars: 0
-# Vector retrieval for skills (separate Chroma collection): retrieve by similarity to user query. See docs/ToolsSkillsPlugins.md §8.
+# When true: inject ALL skills (no RAG, no cap). skills_force_include_rules still apply: matching rules add their instruction and auto_invoke (e.g. weather/search/image).
+# Vector retrieval for skills (separate Chroma collection): when true, retrieve by similarity; when false, include ALL skills (OpenClaw-style). See docs/ToolsSkillsPlugins.md §8.
 skills_use_vector_search: true
 skills_vector_collection: homeclaw_skills
-skills_max_retrieved: 10
+skills_max_retrieved: 10      # when using vector search: max skills to retrieve from RAG (then threshold + skills_max_in_prompt cap)
+skills_max_in_prompt: 5      # when skills_use_vector_search=true: max skills in prompt; ignored when false
 # Min similarity (0..1) to keep a skill; below this, RAG drops it. 0.5 can drop cross-lingual or short queries; 0.3 or 0.0 improves selection (e.g. Chinese "创建图片" vs English skill text). Force-include rules still add skills by pattern.
-skills_similarity_threshold: 0.3
+skills_similarity_threshold: 0.4
 skills_refresh_on_startup: true
 # Optional test folder: full sync every time (id = test__<folder>). Production skills_dir can be incremental (only new).
 skills_test_dir: ""
 skills_incremental_sync: false
-# Optional: when user query matches a regex, ensure these skill folders are in the prompt and optionally append an instruction. No per-skill code in Core; add rules per skill here.
-skills_force_include_rules:
-  # Image generation: match English + Chinese (and other languages via patterns list) so run_skill is always triggered
-  - patterns:
-      - "generate\\s+(an?|one)?\\s+image|create\\s+(an?|one)?\\s+image|make\\s+(an?|one)?\\s+image|draw\\s+(a\\s+)?(picture|image)"
-      - "创建.*图|生成.*图|画.*图|做.*图|给我.*图|来一张图|弄一张图|生成图片|创建图片"
-    folders: [nano-banana-pro-1.0.1]
-    instruction: "The user asked to generate or create an image. You MUST call the run_skill tool first (do not reply with text). Use skill_name='nano-banana-pro-1.0.1', script='generate_image.py', args=['--prompt', '<user image description>', '--filename', 'generated.png']. Do not say that no image tool is available. Do not invent or echo 'Image saved:' or 'HOMECLAW_IMAGE_PATH' — only the run_skill result contains those."
-    auto_invoke:
-      tool: run_skill
-      arguments:
-        skill_name: nano-banana-pro-1.0.1
-        script: generate_image.py
-        args: ["--prompt", "{{query}}", "--filename", "generated.png"]
-  - pattern: "summarize\\s+(this\\s+)?(url|link|page|article)"
-    folders: [summarize-1.0.0]
-    instruction: "The user asked to summarize a URL or page. Use run_skill with skill_name='summarize-1.0.0' and the URL in args, or use the skill's instructions."
-  # Weather: so the skill is always in the prompt when the user asks about weather (RAG may not rank it in top 5)
-  - patterns:
-      - "weather|forecast|temperature|what'?s the weather|how'?s the weather|weather in|天气"
-    folders: [weather-1.0.0]
-    instruction: "The user asked about weather or forecast. Use the weather skill (weather-1.0.0) instructions: wttr.in for quick text/PNG, or open-meteo for JSON. No API key required."
+# Force-include for skills: use "trigger:" in each skill's SKILL.md (see config/skills/README.md). You can omit skills_force_include_rules; add it only if you need config-only overrides (e.g. a skill with no trigger in SKILL.md).
 # Vector retrieval for plugins (separate collection): same design as skills. RAG finds relevant plugins; only those go into prompt.
-plugins_use_vector_search: false
+# plugins_use_vector_search=false → include ALL plugins; true → RAG (plugins_max_retrieved → threshold → plugins_max_in_prompt).
+plugins_use_vector_search: true
 plugins_vector_collection: homeclaw_plugins
-plugins_max_retrieved: 10
+plugins_max_retrieved: 10     # when using vector search: max plugins to retrieve from RAG
+plugins_max_in_prompt: 5      # when plugins_use_vector_search=true: max plugins in prompt; ignored when false
 plugins_similarity_threshold: 0.0
 plugins_refresh_on_startup: true
 # Optional: when user query matches a regex, ensure these plugin ids are in the routing block and optionally append an instruction. List of { pattern: str, plugins: [str], instruction?: str }. No per-plugin code in Core.
@@ -165,6 +144,7 @@ tools:
   file_read_base: "D:/homeclaw"
   # Max characters returned by file_read when the tool does not pass max_chars (default 32000). Increase for long PDFs/documents (e.g. 128000).
   file_read_max_chars: 128000
+  # baidu_api_key: ""       # optional: for baidu-search skill; or set env BAIDU_API_KEY where Core runs
   run_skill_allowlist: []   # run_skill: if set, only these script names under skill/scripts/. Use [] to allow all scripts from skills. .sh on Windows runs via bash/WSL if available.
   run_skill_py_in_process: true   # true = run .py scripts in Core's process (same env). false = subprocess (isolated; see docs_design/RunSkillInProcess.md).
   # run_skill_auto_install_missing: { "google": "google-genai pillow" }   # optional: on ModuleNotFoundError, pip install and retry once (only when using subprocess)
@@ -482,7 +462,7 @@ main_llm_mode: mix
 main_llm_local: local_models/main_vl_model_4B
 main_llm_cloud: cloud_models/Gemini-2.5-Flash
 hybrid_router:
-  default_route: local
+  default_route: cloud
   show_route_in_response: true
   # When true (default): if the chosen model fails (timeout/error), retry once with the other route so one model failing does not block the task.
   fallback_on_llm_error: true
@@ -504,10 +484,10 @@ hybrid_router:
     enabled: true
     threshold: 0.5
     model: local_models/classifier_0_6b
-    mode: classifier
+    mode: perplexity
     # Uncomment when mode: perplexity:
-    # perplexity_max_tokens: 5
-    # perplexity_threshold: -0.6
+    perplexity_max_tokens: 10
+    perplexity_threshold: -0.6
 # main_llm_language: list of allowed/preferred response languages (e.g. [zh, en] or [en]).
 #   - First item = primary: used for prompt file loading (e.g. response.en.yml, prompt_en.yml) and default when user language is unknown.
 #   - Full list = allowed response languages: you can add a system-line like "Respond only in one of: {languages}; if the user's language is unknown, use the first."

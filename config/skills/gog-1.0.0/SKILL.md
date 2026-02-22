@@ -2,6 +2,9 @@
 name: gog
 description: Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Sheets, and Docs.
 homepage: https://gogcli.sh
+trigger:
+  patterns: ["gog|gmail|google\\s+calendar|google\\s+drive|google\\s+sheets|google\\s+docs|gmail\\s+search|gmail\\s+send"]
+  instruction: "The user asked about Gmail, Google Calendar, Drive, Sheets, or Docs. Use gog CLI; ensure OAuth is done (gog auth). run_skill or exec gog with subcommands per skill body."
 ---
 
 # gog

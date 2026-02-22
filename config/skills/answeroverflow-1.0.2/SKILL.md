@@ -1,6 +1,9 @@
 ---
 name: answeroverflow
 description: Search indexed Discord community discussions via Answer Overflow. Find solutions to coding problems, library issues, and community Q&A that only exist in Discord conversations.
+trigger:
+  patterns: ["answer\\s+overflow|discord\\s+search|discord\\s+community|answeroverflow\\.com"]
+  instruction: "The user asked to search Discord/Answer Overflow for community Q&A. Use web_search with site:answeroverflow.com or fetch markdown URLs (/m/...). See skill body for URL format."
 ---
 
 # Answer Overflow Skill

@@ -1,14 +1,31 @@
 ---
 name: weather
-description: Get current weather and forecasts (no API key required).
+description: Get current weather and forecasts (no API key required). Use run_skill with script get_weather.py.
 homepage: https://wttr.in/:help
-# Keywords for RAG: help vector search match weather queries (re-sync skills after edit)
 keywords: "weather forecast temperature rain wttr.in 天气 气温 预报"
+# Optional: when to force-include and auto-invoke (no need to add a rule in core.yml)
+trigger:
+  patterns: ["weather|forecast|temperature|what'?s the weather|how'?s the weather|weather in|天气"]
+  instruction: "The user asked about weather or forecast. Call run_skill(skill_name='weather-1.0.0', script='get_weather.py', args=['<city or place>']) with the location from the message. Do not say you cannot fetch weather."
+  auto_invoke:
+    script: get_weather.py
+    args: ["{{query}}"]
 ---
 
 # Weather
 
-Two free services, no API keys needed.
+Get current weather via wttr.in (no API key). **Skill folder name for run_skill:** `weather-1.0.0`.
+
+## Run via run_skill (recommended)
+
+Call: **run_skill(skill_name=`weather-1.0.0`, script=`get_weather.py`, args=[\"Location\"])**
+
+Examples:
+- `args: ["London"]` → current weather for London
+- `args: ["New York"]` or `args: ["北京"]` → any city name
+- `args: ["--full", "Tokyo"]` → full forecast
+
+No API key or config required.
 
 ## wttr.in (primary)
 

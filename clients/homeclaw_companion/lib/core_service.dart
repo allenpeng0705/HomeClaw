@@ -169,10 +169,13 @@ class CoreService {
   /// Send a message to Core and return the reply: { "text": String, "image": String? (data URL) }.
   /// Same payload shape as web chat and Core InboundRequest: text, images, videos, audios, files.
   /// [images], [videos], [audios], [files] are paths (e.g. from upload) or data URLs Core can read.
+  /// Memory/Cognee is scoped by user_id and app_id (agent). Defaults: user_id='companion', app_id omitted (Core uses 'homeclaw').
+  /// Pass [userId] and/or [appId] to scope memory per user or per agent (e.g. from settings or login).
   /// Throws on network or API error.
   Future<Map<String, dynamic>> sendMessage(
     String text, {
     String userId = 'companion',
+    String? appId,
     List<String>? images,
     List<String>? videos,
     List<String>? audios,
@@ -187,6 +190,7 @@ class CoreService {
       'session_id': 'companion',
       'action': 'respond',
     };
+    if (appId != null && appId.isNotEmpty) body['app_id'] = appId;
     if (images != null && images.isNotEmpty) body['images'] = images;
     if (videos != null && videos.isNotEmpty) body['videos'] = videos;
     if (audios != null && audios.isNotEmpty) body['audios'] = audios;
