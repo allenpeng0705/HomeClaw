@@ -21,7 +21,9 @@
         <a href="index.html">Home</a>
         <a href="docs.html#quickstart">QuickStart</a>
         <a href="docs.html#deploy-cloud">Deploy to cloud</a>
+        <a href="channels-companion.html">Channels &amp; Companion</a>
         <a href="plugins-skills.html">Plugins &amp; skills</a>
+        <a href="core-config.html">Core config</a>
         <a href="docs.html">Docs</a>
         <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
         <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Full docs</a>
@@ -51,6 +53,8 @@
         <li><a href="#memory">6. Memory</a></li>
         <li><a href="#knowledge-base">7. Knowledge base</a></li>
         <li><a href="#profile">8. Profile</a></li>
+        <li><a href="#core-config">Core config (core.yml)</a></li>
+        <li><a href="#model-configs">Model configs (tested)</a></li>
       </ul>
     </nav>
 
@@ -168,14 +172,36 @@ pip install -r requirements.txt</code></pre>
         <h2>3. Channels — remote access</h2>
         <p class="doc-section-summary">WebChat, Telegram, Discord, CLI, etc. — same Core; user.yml allowlist; session and remote access options.</p>
         <p>Channels are how users reach your Core. All use the same Core, memory, and <strong>config/user.yml</strong> allowlist (name, email, im, phone, permissions). Only listed users can talk — your <strong>privacy and access control</strong>.</p>
+
+        <h3>Supported channels</h3>
+        <p>Run Core first, then run one or more channels: <code>python -m channels.run &lt;name&gt;</code>. Set Core connection in <strong>channels/.env</strong> (CORE_URL or core_host, core_port). Add users in <strong>config/user.yml</strong> under <code>im:</code> (e.g. <code>telegram_123</code>, <code>discord_456</code>).</p>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Channel</th><th>Type</th><th>Run</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>CLI</strong></td><td>In-process</td><td><code>python -m main start</code></td></tr>
+            <tr><td><strong>WebChat</strong></td><td>WebSocket</td><td><code>python -m channels.run webchat</code> → http://localhost:8014</td></tr>
+            <tr><td><strong>Telegram, Discord, Slack</strong></td><td>Inbound bot</td><td><code>python -m channels.run telegram</code> (discord, slack); set bot token in channels/.env</td></tr>
+            <tr><td><strong>Email, Matrix, Tinode, WeChat, WhatsApp</strong></td><td>Full</td><td><code>python -m channels.run &lt;name&gt;</code>; see channels/README.md</td></tr>
+            <tr><td><strong>Google Chat, Teams, Feishu, DingTalk</strong></td><td>HTTP / webhook</td><td>Run channel; configure in platform</td></tr>
+            <tr><td><strong>Signal, iMessage, Zalo, BlueBubbles</strong></td><td>Webhook (bridge)</td><td>Run channel; bridge POSTs to channel</td></tr>
+            <tr><td><strong>Webhook</strong></td><td>Relay</td><td>Any bot POSTs to Core /inbound; use when Core is not publicly reachable</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Remote access (channels &amp; clients)</h3>
+        <p>When Core runs at home and you use a channel or the Companion app from another network, expose Core so clients can reach it:</p>
+        <ul>
+          <li><strong>Tailscale</strong> — Install on Core host and on your devices; use Tailscale IP (e.g. <code>http://100.x.x.x:9000</code>) as Core URL. Private; no public port.</li>
+          <li><strong>Cloudflare Tunnel</strong> — Run <code>cloudflared tunnel --url http://127.0.0.1:9000</code>; use the HTTPS URL as Core URL. Enable <code>auth_enabled</code> and <code>auth_api_key</code> in core.yml.</li>
+          <li><strong>Pinggy</strong> — Zero-config tunnel (similar to ngrok); run from Core host, use the HTTPS URL as Core URL; enable <code>auth_enabled</code>.</li>
+          <li><strong>SSH tunnel</strong> — From your laptop: <code>ssh -L 9000:127.0.0.1:9000 user@core-host</code>; set Core URL to <code>http://127.0.0.1:9000</code>. Good for development; not for phone/Companion from cellular.</li>
+          <li><strong>Auth:</strong> <code>auth_enabled: true</code>, <code>auth_api_key</code>; clients send <code>X-API-Key</code> or <code>Authorization: Bearer</code> on /inbound and /ws. For channels on a remote server, set <strong>CORE_API_KEY</strong> in channels/.env.</li>
+        </ul>
+
         <h3>Session management</h3>
         <p>Under <code>session:</code> in core.yml: <strong>dm_scope</strong> (main | per-peer | per-channel-peer | per-account-channel-peer), <strong>identity_links</strong> (same person across channels), <strong>prune_keep_last_n</strong>, <strong>prune_after_turn</strong>, <strong>daily_reset_at_hour</strong>, <strong>idle_minutes</strong>, <strong>api_enabled</strong>. Data is keyed by system user id.</p>
-        <h3>Remote access</h3>
-        <ul>
-          <li><strong>Auth:</strong> <code>auth_enabled: true</code>, <code>auth_api_key</code>; clients send <code>X-API-Key</code> or <code>Authorization: Bearer</code> on /inbound and /ws.</li>
-          <li><strong>Tailscale:</strong> Use Tailscale IP (e.g. 100.x.x.x:9000) from other Tailscale nodes; no public exposure.</li>
-          <li><strong>Tailscale Funnel + auth proxy:</strong> Public HTTPS with a proxy in front for webhooks/bots.</li>
-        </ul>
       </div>
     </section>
 
@@ -186,15 +212,25 @@ pip install -r requirements.txt</code></pre>
       <div class="doc-section-body">
         <h2>4. Companion app</h2>
         <p class="doc-section-summary">Flutter app for Mac, Windows, iPhone, Android: chat, voice, and Manage Core (edit core.yml, user.yml).</p>
-        <p>The <strong>HomeClaw Companion</strong> talks to your Core over HTTP like other channels.</p>
+        <p>The <strong>HomeClaw Companion</strong> talks to your Core over HTTP like other channels. One app for <strong>Mac, Windows, iPhone, and Android</strong>.</p>
+
         <h3>Features</h3>
         <ul>
           <li><strong>Chat</strong> — messages, images, files, history.</li>
           <li><strong>Voice</strong> — input and TTS.</li>
           <li><strong>Manage Core</strong> — edit core.yml and user.yml (server, LLM, memory, session, profile, skills, tools, auth, users) from the app; no SSH.</li>
         </ul>
-        <h3>How to use</h3>
-        <p>Build from <code>clients/homeclaw_companion/</code>. Set <strong>Core URL</strong> (e.g. http://127.0.0.1:9000 or Tailscale URL). Set API key if <code>auth_enabled</code>. Add user in user.yml or via Manage Core → Users. macOS: see docs for permissions.</p>
+
+        <h3>How to use (by platform)</h3>
+        <ul>
+          <li><strong>Where to get it:</strong> Build from <code>clients/homeclaw_companion/</code> (see repo README).</li>
+          <li><strong>Mac / Windows (same machine as Core):</strong> Set <strong>Core URL</strong> to <code>http://127.0.0.1:9000</code>. Add your user in user.yml or via Manage Core → Users.</li>
+          <li><strong>Mac / Windows (same Wi‑Fi):</strong> Set Core URL to your machine’s LAN IP (e.g. <code>http://192.168.1.10:9000</code>).</li>
+          <li><strong>iPhone / Android (away from home):</strong> Expose Core with <strong>Tailscale</strong> or <strong>Cloudflare Tunnel</strong>, then set Core URL to the Tailscale IP (e.g. <code>http://100.x.x.x:9000</code>) or tunnel URL (e.g. <code>https://xxx.trycloudflare.com</code>). If Core has <code>auth_enabled: true</code>, set the same <strong>API key</strong> in the app (Settings).</li>
+        </ul>
+
+        <h3>Companion remote access</h3>
+        <p>The app does not include Tailscale or Cloudflare — you expose Core yourself, then set that URL (and optional API key) in the app. No SDK in the app; only HTTP to Core. Step-by-step for iPhone + Cloudflare Tunnel: <a href="https://allenpeng0705.github.io/HomeClaw/companion-iphone-cloudflare-tunnel/" target="_blank" rel="noopener">Companion on iPhone (Cloudflare Tunnel)</a>. macOS permissions: <a href="companion-app-macos-permissions.html" target="_blank" rel="noopener">Companion app (macOS permissions)</a>.</p>
       </div>
     </section>
 
@@ -262,6 +298,40 @@ pip install -r requirements.txt</code></pre>
       </div>
     </section>
 
+    <section class="doc-section doc-section-no-img" id="core-config">
+      <div class="doc-section-body">
+        <h2>Core config (core.yml)</h2>
+        <p class="doc-section-summary">One file controls server, models (local/cloud and mix routing), memory, knowledge base, skills &amp; plugins, tools, and auth.</p>
+        <p><strong>core.yml</strong> lives in <code>config/core.yml</code>. It defines: <strong>Server</strong> (host, port); <strong>Models</strong> (<code>main_llm_local</code>, <code>main_llm_cloud</code>, <code>embedding_llm</code>, <code>main_llm_mode: mix</code> and <code>hybrid_router</code>); <strong>Memory</strong> (<code>use_memory</code>, <code>memory_backend</code>, agent/daily memory, session); <strong>Knowledge base</strong> (chunking, retrieval); <strong>Routing</strong> (heuristic, semantic, classifier when mix mode); <strong>Skills &amp; plugins</strong>; <strong>Tools</strong>; <strong>Auth</strong> (API key when exposed).</p>
+        <p><a href="core-config.html">Core config on this site</a> (full reference) · <a href="https://allenpeng0705.github.io/HomeClaw/core-config/" target="_blank" rel="noopener">Full docs (GitHub Pages)</a>.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="model-configs">
+      <div class="doc-section-body">
+        <h2>Model configurations (tested)</h2>
+        <p class="doc-section-summary">Example local and cloud model setups we have tested. API keys can be set in the environment or in <code>config/core.yml</code>.</p>
+        <h3>Local (tested)</h3>
+        <ul>
+          <li><strong>Main (chat + vision):</strong> Small 4B model with vision — <code>local_models/main_vl_model_4B</code> (e.g. Qwen3VL-4B-Instruct with mmproj; port 5023). <code>supported_media: [image]</code> for Companion/WebChat images.</li>
+          <li><strong>Embedding:</strong> <code>local_models/embedding_text_model</code> (e.g. Qwen3-Embedding-0.6B; port 5066).</li>
+          <li>Other options: LLaVA 1.5 7B, Qwen3VL-8B, etc. — add under <code>local_models</code> in <code>config/core.yml</code>.</li>
+        </ul>
+        <h3>Cloud (tested)</h3>
+        <ul>
+          <li><strong>Main:</strong> <code>cloud_models/Gemini-2.5-Flash</code> (Gemini 2.5 Flash).</li>
+          <li>Other options: OpenAI GPT-4o, Anthropic Claude, DeepSeek, Groq, Mistral, xAI, OpenRouter, Cohere, Perplexity, Ollama (no key).</li>
+        </ul>
+        <h3>API key</h3>
+        <p>For cloud models, you can set the API key in <strong>either</strong> place:</p>
+        <ul>
+          <li><strong>Environment variable</strong> (recommended): e.g. <code>export GEMINI_API_KEY=...</code> where Core runs.</li>
+          <li><strong>In <code>config/core.yml</code></strong>: under the cloud model entry, set <code>api_key: "your-key"</code> (e.g. for convenience or local testing).</li>
+        </ul>
+        <p><a href="https://allenpeng0705.github.io/HomeClaw/models/" target="_blank" rel="noopener">Full models doc</a> (tested configs, mix mode, multimodal).</p>
+      </div>
+    </section>
+
     <div class="doc-quicklinks">
       <h2>Quick links</h2>
       <ul>
@@ -272,7 +342,7 @@ pip install -r requirements.txt</code></pre>
   </main>
 
   <footer class="site-footer">
-    <p>HomeClaw — your home, your AI. <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> · <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Docs</a></p>
+    <p>HomeClaw — your home, your AI. <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> · <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Docs</a> · Contact: <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a> · WeChat: shileipeng</p>
   </footer>
 </body>
 </html>

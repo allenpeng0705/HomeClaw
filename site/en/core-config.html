@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw core.yml: server, models, memory, knowledge base, routing, skills, tools, auth. Configuration reference.">
+  <title>Core config (core.yml) — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="Main navigation">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">Home</a>
+        <a href="docs.html#quickstart">QuickStart</a>
+        <a href="docs.html#deploy-cloud">Deploy to cloud</a>
+        <a href="channels-companion.html">Channels &amp; Companion</a>
+        <a href="plugins-skills.html">Plugins &amp; skills</a>
+        <a href="core-config.html">Core config</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Full docs</a>
+        <span class="lang-switch">EN | <a href="../zh/core-config.html">中文</a></span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>Core config (core.yml)</h1>
+      <p class="lead"><strong>core.yml</strong> is the main configuration file for HomeClaw Core. It lives in <code>config/core.yml</code> (relative to the project root). This page explains the main sections and what each setting means.</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="On this page">
+      <p class="doc-toc-title">On this page</p>
+      <ul>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#server">1. Server</a></li>
+        <li><a href="#models">2. Models</a></li>
+        <li><a href="#routing">3. Routing (mix mode)</a></li>
+        <li><a href="#memory">4. Memory</a></li>
+        <li><a href="#knowledge-base">5. Knowledge base</a></li>
+        <li><a href="#skills-plugins">6. Skills &amp; plugins</a></li>
+        <li><a href="#tools">7. Tools</a></li>
+        <li><a href="#auth">8. Auth</a></li>
+        <li><a href="#other">9. Other</a></li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="overview">
+      <div class="doc-section-body">
+        <h2>Overview</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Section</th><th>What it controls</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Server</strong></td><td>Where Core listens (host, port).</td></tr>
+            <tr><td><strong>Models</strong></td><td>Which LLM is used for chat and embedding (local and/or cloud); mix-mode routing.</td></tr>
+            <tr><td><strong>Memory</strong></td><td>RAG memory, agent memory files, daily memory, session lifecycle.</td></tr>
+            <tr><td><strong>Knowledge base</strong></td><td>User documents and URLs for RAG; file upload handling.</td></tr>
+            <tr><td><strong>Routing</strong></td><td>Mix mode: how Core chooses local vs cloud per request (heuristic, semantic, classifier).</td></tr>
+            <tr><td><strong>Skills &amp; plugins</strong></td><td>Skills (SKILL.md), plugins (built-in + external), system plugins.</td></tr>
+            <tr><td><strong>Tools</strong></td><td>File read base, web search, browser, run_skill, timeouts.</td></tr>
+            <tr><td><strong>Auth</strong></td><td>API key when Core is exposed (e.g. tunnel, remote app).</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="server">
+      <div class="doc-section-body">
+        <h2>1. Server</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Setting</th><th>Meaning</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>name</code></td><td>Core instance name (e.g. <code>core</code>). Used in logs and plugin registration.</td></tr>
+            <tr><td><code>host</code></td><td>Bind address. <code>0.0.0.0</code> = accept connections from any interface (e.g. LAN, tunnel). <code>127.0.0.1</code> = local only.</td></tr>
+            <tr><td><code>port</code></td><td>HTTP port Core listens on. Default <strong>9000</strong>. Clients use <code>http://&lt;host&gt;:9000</code>.</td></tr>
+            <tr><td><code>mode</code></td><td>Environment hint (e.g. <code>dev</code>, <code>prod</code>). Affects logging.</td></tr>
+            <tr><td><code>model_path</code></td><td>Base path for local model files (GGUF). Default <code>../models/</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="models">
+      <div class="doc-section-body">
+        <h2>2. Models</h2>
+        <p>These settings define <strong>which model</strong> Core uses for chat (main LLM) and for embeddings (memory, knowledge base).</p>
+        <h3>Main and embedding model</h3>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Setting</th><th>Meaning</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>main_llm</code></td><td>Single main model when not using mix mode: <code>local_models/&lt;id&gt;</code> or <code>cloud_models/&lt;id&gt;</code>.</td></tr>
+            <tr><td><code>main_llm_mode</code></td><td><code>local</code> = always use local; <code>cloud</code> = always use cloud; <strong><code>mix</code></strong> = router picks local or cloud per request.</td></tr>
+            <tr><td><code>main_llm_local</code></td><td>When mode is <code>local</code> or <code>mix</code>: which local model (e.g. <code>local_models/main_vl_model_4B</code>).</td></tr>
+            <tr><td><code>main_llm_cloud</code></td><td>When mode is <code>cloud</code> or <code>mix</code>: which cloud model (e.g. <code>cloud_models/Gemini-2.5-Flash</code>).</td></tr>
+            <tr><td><code>embedding_llm</code></td><td>Model used for embeddings (RAG, knowledge base). Can be local or cloud.</td></tr>
+            <tr><td><code>main_llm_language</code></td><td>Preferred response languages (e.g. <code>[en, zh]</code>). First item is primary.</td></tr>
+          </tbody>
+        </table>
+        <h3>local_models</h3>
+        <p>List of <strong>local</strong> models (llama.cpp servers). Each entry: <code>id</code>, <code>path</code> (GGUF), <code>host</code>, <code>port</code>, <code>capabilities</code> (Chat / embedding), optional <code>mmproj</code> (vision), <code>supported_media</code> (e.g. <code>[image]</code>).</p>
+        <h3>cloud_models</h3>
+        <p>List of <strong>cloud</strong> models (LiteLLM). Each entry: <code>id</code>, <code>path</code> (e.g. <code>gemini/gemini-2.5-flash</code>), <code>host</code>, <code>port</code>, <code>api_key_name</code> (env var), optional <code>api_key</code>, <code>supported_media</code>. API key: set via <strong>environment variable</strong> (recommended) or <code>api_key</code> in core.yml.</p>
+        <h3>llama_cpp and completion</h3>
+        <p><code>llama_cpp</code> — Defaults for local servers: <code>ctx_size</code>, <code>predict</code>, <code>temp</code>, <code>threads</code>, <code>n_gpu_layers</code>, etc. <code>completion</code> — Parameters for every chat request: <code>max_tokens</code>, <code>temperature</code>, <code>image_max_dimension</code>.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="routing">
+      <div class="doc-section-body">
+        <h2>3. Routing (mix mode)</h2>
+        <p>When <code>main_llm_mode: mix</code>, Core chooses <strong>local</strong> or <strong>cloud</strong> per user message. These settings control how.</p>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Setting</th><th>Meaning</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>hybrid_router.default_route</code></td><td>Fallback when no rule applies: <code>local</code> or <code>cloud</code>.</td></tr>
+            <tr><td><code>hybrid_router.fallback_on_llm_error</code></td><td>If chosen model fails, retry once with the other route.</td></tr>
+            <tr><td><code>hybrid_router.heuristic</code></td><td>Layer 1: keyword/simple rules (e.g. “translate” → cloud). <code>enabled</code>, <code>threshold</code>, <code>rules_path</code>.</td></tr>
+            <tr><td><code>hybrid_router.semantic</code></td><td>Layer 2: semantic similarity to route. <code>enabled</code>, <code>threshold</code>, <code>routes_path</code>.</td></tr>
+            <tr><td><code>hybrid_router.slm</code></td><td>Layer 3: classifier (small model) or perplexity probe. <code>mode</code> (classifier | perplexity), <code>model</code>, <code>threshold</code>.</td></tr>
+          </tbody>
+        </table>
+        <p>Order: heuristic → semantic → Layer 3 → default_route.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="memory">
+      <div class="doc-section-body">
+        <h2>4. Memory</h2>
+        <p>RAG memory (vector + relational), agent memory files, and session lifecycle.</p>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Setting</th><th>Meaning</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>use_memory</code></td><td>Turn on/off RAG memory (search, store).</td></tr>
+            <tr><td><code>memory_backend</code></td><td><strong>cognee</strong> (default) or <strong>chroma</strong>. Cognee uses its own DB; Chroma uses <code>vectorDB</code> and <code>graphDB</code> in core.yml.</td></tr>
+            <tr><td><code>use_agent_memory_file</code></td><td>Inject long-term context from AGENT_MEMORY.md.</td></tr>
+            <tr><td><code>use_agent_memory_search</code></td><td>If true, index agent memory and use tools instead of injecting full file (recommended for large files).</td></tr>
+            <tr><td><code>use_daily_memory</code></td><td>Inject short-term context from daily files (e.g. memory/YYYY-MM-DD.md).</td></tr>
+            <tr><td><code>session.dm_scope</code></td><td>How to isolate conversations: <code>main</code> (one shared), <code>per-peer</code>, <code>per-channel-peer</code>, <code>per-account-channel-peer</code>.</td></tr>
+            <tr><td><code>session.prune_keep_last_n</code></td><td>Keep at most this many turns per session when pruning.</td></tr>
+            <tr><td><code>session.prune_after_turn</code></td><td>If true, prune after each reply.</td></tr>
+          </tbody>
+        </table>
+        <p>Reset memory: <strong>POST/GET</strong> <code>http://&lt;core&gt;:&lt;port&gt;/memory/reset</code>.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="knowledge-base">
+      <div class="doc-section-body">
+        <h2>5. Knowledge base</h2>
+        <p>User documents and URLs for RAG (separate from chat memory).</p>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Setting</th><th>Meaning</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>knowledge_base.enabled</code></td><td>Turn on/off knowledge base and tools (knowledge_base_add, retrieval).</td></tr>
+            <tr><td><code>knowledge_base.backend</code></td><td><code>auto</code> (same as memory), <code>cognee</code>, or <code>chroma</code>.</td></tr>
+            <tr><td><code>knowledge_base.chunk_size</code>, <code>chunk_overlap</code></td><td>How documents are split for embedding.</td></tr>
+            <tr><td><code>knowledge_base.retrieval_min_score</code></td><td>Min similarity (0–1) for retrieved chunks; null = no filter.</td></tr>
+            <tr><td><code>file_understanding.add_to_kb_max_chars</code></td><td>When user sends only file(s), auto-add to KB only if text length ≤ this; 0 = never.</td></tr>
+          </tbody>
+        </table>
+        <p>Reset KB: <strong>POST/GET</strong> <code>http://&lt;core&gt;:&lt;port&gt;/knowledge_base/reset</code>.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="skills-plugins">
+      <div class="doc-section-body">
+        <h2>6. Skills &amp; plugins</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Setting</th><th>Meaning</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>use_skills</code></td><td>Enable skills (folders under <code>skills_dir</code> with SKILL.md).</td></tr>
+            <tr><td><code>skills_dir</code></td><td>Directory for skill folders (default <code>config/skills</code>).</td></tr>
+            <tr><td><code>skills_use_vector_search</code></td><td>Retrieve skills by similarity to user query.</td></tr>
+            <tr><td><code>skills_force_include_rules</code></td><td>When query matches a pattern, always include listed skill folders.</td></tr>
+            <tr><td><code>use_tools</code></td><td>Enable built-in tools (file_read, web_search, run_skill, etc.).</td></tr>
+            <tr><td><code>plugins_use_vector_search</code></td><td>Retrieve plugins by similarity.</td></tr>
+            <tr><td><code>system_plugins_auto_start</code></td><td>If true, Core starts plugins in system_plugins/ (e.g. homeclaw-browser).</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="tools">
+      <div class="doc-section-body">
+        <h2>7. Tools</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Setting</th><th>Meaning</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>file_read_base</code></td><td>Base directory for file_read, folder_list, document_read.</td></tr>
+            <tr><td><code>run_skill_allowlist</code></td><td>If set, only these script names under skill/scripts/ are allowed; [] = allow all.</td></tr>
+            <tr><td><code>run_skill_timeout</code></td><td>Timeout in seconds for run_skill.</td></tr>
+            <tr><td><code>web.search</code></td><td>Web search provider (duckduckgo, google_cse, bing, tavily, etc.) and API keys.</td></tr>
+            <tr><td><code>browser_enabled</code></td><td>If false, Core does not register browser tools; use plugin (e.g. homeclaw-browser).</td></tr>
+            <tr><td><code>tool_timeout_seconds</code></td><td>Per-tool execution timeout; 0 = no timeout.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="auth">
+      <div class="doc-section-body">
+        <h2>8. Auth</h2>
+        <p>When Core is reachable from the internet (e.g. Cloudflare Tunnel), enable auth so only you can use it.</p>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Setting</th><th>Meaning</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>auth_enabled</code></td><td>If true, POST /inbound and WebSocket /ws require an API key.</td></tr>
+            <tr><td><code>auth_api_key</code></td><td>The secret key. Clients send <strong>X-API-Key</strong> or <strong>Authorization: Bearer &lt;key&gt;</strong>.</td></tr>
+          </tbody>
+        </table>
+        <p>Use a long, random value (e.g. 32+ characters).</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="other">
+      <div class="doc-section-body">
+        <h2>9. Other important settings</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Setting</th><th>Meaning</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>profile.enabled</code></td><td>Per-user profile (name, preferences) stored in JSON.</td></tr>
+            <tr><td><code>workspace_dir</code></td><td>Workspace root (e.g. for AGENT_MEMORY.md).</td></tr>
+            <tr><td><code>database</code></td><td>Relational DB for chat history/sessions: backend (sqlite, mysql, postgresql), url.</td></tr>
+            <tr><td><code>vectorDB</code>, <code>graphDB</code></td><td>Used when memory_backend is chroma.</td></tr>
+            <tr><td><code>cognee</code></td><td>Used when memory_backend is cognee.</td></tr>
+            <tr><td><code>llm_max_concurrent</code></td><td>Max concurrent LLM calls (e.g. 1 for single local GPU; 2–10 for cloud).</td></tr>
+            <tr><td><code>compaction</code></td><td>When context approaches limit: trim or summarize; reserve_tokens for reply.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="summary">
+      <div class="doc-section-body">
+        <h2>Summary</h2>
+        <ul>
+          <li><strong>core.yml</strong> controls server, models (local/cloud, mix routing), memory, knowledge base, skills &amp; plugins, tools, and auth.</li>
+          <li><strong>Models:</strong> Set main_llm_local, main_llm_cloud, embedding_llm; use main_llm_mode: mix and hybrid_router for per-request routing.</li>
+          <li><strong>Memory:</strong> use_memory, memory_backend (cognee/chroma), agent/daily memory files, session scope and pruning.</li>
+          <li><strong>Knowledge base:</strong> knowledge_base.enabled, backend, chunking, file_understanding for auto-add on file upload.</li>
+          <li><strong>Routing:</strong> hybrid_router (default_route, heuristic, semantic, slm) when main_llm_mode: mix.</li>
+          <li><strong>API keys:</strong> For cloud models and some tools, set via environment variable or in core.yml (env recommended for secrets).</li>
+        </ul>
+        <p>For the full file with every key, see <strong>config/core.yml</strong> in the repo. For model examples, see the full docs <a href="https://allenpeng0705.github.io/HomeClaw/models/" target="_blank" rel="noopener">Models</a>.</p>
+      </div>
+    </section>
+
+    <div class="doc-quicklinks">
+      <h2>Quick links</h2>
+      <ul>
+        <li><a href="docs.html">Docs on this site</a></li>
+        <li><a href="docs.html#core-config">Core config section (docs page)</a></li>
+        <li><a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub repository</a></li>
+        <li><a href="https://allenpeng0705.github.io/HomeClaw/core-config/" target="_blank" rel="noopener">Full documentation (core-config)</a></li>
+      </ul>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <p>HomeClaw — your home, your AI. <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> · <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Docs</a> · Contact: <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a> · WeChat: shileipeng</p>
+  </footer>
+</body>
+</html>

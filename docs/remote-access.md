@@ -16,6 +16,8 @@ HomeClaw Core runs on your machine (e.g. home PC or server). To use the **Compan
 
 The **Companion app** and other clients only need a **Core URL** and optional **API key**. They do not include Tailscale or Cloudflare SDKs—you choose how to expose Core, then set that URL in the app.
 
+**Step-by-step: Companion on iPhone via Cloudflare Tunnel** — See [Companion on iPhone via Cloudflare Tunnel](companion-iphone-cloudflare-tunnel.md) for detailed steps (Core + auth, cloudflared, configure app, test on cellular).
+
 ---
 
 ## 1. Tailscale (recommended for home + mobile)

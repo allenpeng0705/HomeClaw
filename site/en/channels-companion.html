@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw channels and Companion app: supported channels, remote access (Tailscale, Cloudflare Tunnel, Pinggy, SSH), Companion on Mac, Windows, iPhone, Android.">
+  <title>Channels &amp; Companion App — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="Main navigation">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">Home</a>
+        <a href="docs.html#quickstart">QuickStart</a>
+        <a href="docs.html#deploy-cloud">Deploy to cloud</a>
+        <a href="channels-companion.html">Channels &amp; Companion</a>
+        <a href="plugins-skills.html">Plugins &amp; skills</a>
+        <a href="core-config.html">Core config</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Full docs</a>
+        <span class="lang-switch">EN | <a href="../zh/channels-companion.html">中文</a></span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>Channels &amp; Companion App</h1>
+      <p class="lead">Talk to HomeClaw from WebChat, Telegram, Discord, the Companion app, and more. All use the same Core and memory. Use remote access when Core is at home and you’re on another network.</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="On this page">
+      <p class="doc-toc-title">On this page</p>
+      <ul>
+        <li><a href="#supported-channels">Supported channels</a></li>
+        <li><a href="#remote-access">Remote access (channels &amp; clients)</a></li>
+        <li><a href="#companion-platforms">Companion app — platforms &amp; use</a></li>
+        <li><a href="#companion-remote">Companion remote access</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="supported-channels">
+      <div class="doc-section-body">
+        <h2>Supported channels</h2>
+        <p>Channels are separate processes that connect to Core. Run Core first, then run one or more channels: <code>python -m channels.run &lt;name&gt;</code>. Set Core connection in <strong>channels/.env</strong> (CORE_URL or core_host, core_port). Add users in <strong>config/user.yml</strong> under <code>im:</code> (e.g. <code>telegram_123</code>, <code>discord_456</code>) so they can talk.</p>
+        <ul class="channel-list">
+          <li><strong>CLI</strong> — In-process: <code>python -m main start</code> (Core + built-in chat).</li>
+          <li><strong>WebChat</strong> — Browser UI over WebSocket: <code>python -m channels.run webchat</code> → http://localhost:8014.</li>
+          <li><strong>Telegram, Discord, Slack</strong> — Inbound bots: <code>python -m channels.run telegram</code> (and discord, slack). Set bot tokens in <code>channels/.env</code>.</li>
+          <li><strong>Email, Matrix, Tinode, WeChat, WhatsApp</strong> — Full channels: <code>python -m channels.run &lt;name&gt;</code>. See <code>channels/README.md</code>.</li>
+          <li><strong>Google Chat, Teams, Feishu, DingTalk</strong> — HTTP/webhook: run the channel, configure in the platform.</li>
+          <li><strong>Webhook</strong> — Any bot can POST to Core <code>/inbound</code>; use as relay when Core is not publicly reachable.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="remote-access">
+      <div class="doc-section-body">
+        <h2>Remote access (channels &amp; clients)</h2>
+        <p>When Core runs at home and you use a channel or the Companion app from another network (e.g. phone on cellular), expose Core so clients can reach it. The app and channels only need a <strong>Core URL</strong> and optional <strong>API key</strong>—they do not include Tailscale or Cloudflare; you choose how to expose Core, then set that URL in the client.</p>
+
+        <h3>Options</h3>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Method</th><th>Who can reach Core</th><th>Best for</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Tailscale (tailnet)</strong></td><td>Only devices on your Tailscale network</td><td>Home + your devices (phone, laptop); private, no public exposure.</td></tr>
+            <tr><td><strong>Tailscale Funnel</strong></td><td>Anyone with the URL (public HTTPS)</td><td>Webhooks, bots; use with strong auth.</td></tr>
+            <tr><td><strong>Cloudflare Tunnel</strong></td><td>Anyone with the tunnel URL (public HTTPS)</td><td>Simple public URL; use with Core <code>auth_enabled</code>.</td></tr>
+            <tr><td><strong>Pinggy</strong></td><td>Anyone with the Pinggy URL (public HTTPS)</td><td>Zero-config tunnel, similar to ngrok/Cloudflare. Run tunnel from Core host; use the HTTPS URL as Core URL.</td></tr>
+            <tr><td><strong>SSH tunnel</strong></td><td>You, from the machine where the tunnel runs</td><td>Developers; forward local port to Core over SSH (e.g. <code>ssh -L 9000:127.0.0.1:9000 user@core-host</code>).</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Tailscale</h3>
+        <p>Install on Core host and on your devices; use Tailscale IP (e.g. <code>http://100.x.x.x:9000</code>) as Core URL. Private; no public port. Optional: <code>tailscale serve https / http://127.0.0.1:9000</code> for HTTPS URL.</p>
+
+        <h3>Cloudflare Tunnel</h3>
+        <p>Run <code>cloudflared tunnel --url http://127.0.0.1:9000</code>; use the HTTPS URL (e.g. <code>https://xxx.trycloudflare.com</code>) as Core URL. Enable <code>auth_enabled</code> and <code>auth_api_key</code> in core.yml.</p>
+
+        <h3>Pinggy</h3>
+        <p>Similar to ngrok: run a tunnel from the Core host (see <a href="https://pinggy.io/" target="_blank" rel="noopener">pinggy.io</a>); you get a public HTTPS URL. Use that URL as Core URL and enable <code>auth_enabled</code> in core.yml.</p>
+
+        <h3>SSH tunnel</h3>
+        <p>From your laptop: <code>ssh -L 9000:127.0.0.1:9000 user@core-host</code>. Then set Core URL to <code>http://127.0.0.1:9000</code> on the laptop; traffic is forwarded to Core over SSH. Good for development; not for phone/Companion from cellular.</p>
+
+        <p>Channels that run on the same machine as Core need no tunnel; for WebChat/Telegram/Discord on a <strong>remote</strong> server, point <code>channels/.env</code> (CORE_URL) to your Core (Tailscale IP or tunnel URL) and set CORE_API_KEY if Core has auth.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="companion-platforms">
+      <div class="doc-section-body">
+        <h2>Companion app — platforms &amp; use</h2>
+        <p>The <strong>HomeClaw Companion</strong> is a Flutter app for <strong>Mac, Windows, iPhone, and Android</strong>. One app: chat, voice, attachments, and <strong>Manage Core</strong> (edit core.yml and user.yml from the app).</p>
+        <ul>
+          <li><strong>Where to get it:</strong> Build from <code>clients/homeclaw_companion/</code> (see repo README).</li>
+          <li><strong>Mac / Windows (same machine as Core):</strong> Set <strong>Core URL</strong> to <code>http://127.0.0.1:9000</code>. Add your user in user.yml or via Manage Core → Users.</li>
+          <li><strong>Mac / Windows (same Wi‑Fi):</strong> Set Core URL to your machine’s LAN IP (e.g. <code>http://192.168.1.10:9000</code>).</li>
+          <li><strong>iPhone / Android (away from home):</strong> Set Core URL to your <strong>Tailscale IP</strong>, <strong>Cloudflare Tunnel URL</strong>, or <strong>Pinggy URL</strong>. If Core has <code>auth_enabled: true</code>, set the same <strong>API key</strong> in the app (Settings).</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="companion-remote">
+      <div class="doc-section-body">
+        <h2>Companion remote access</h2>
+        <p>The app does not include Tailscale, Cloudflare, or Pinggy—you expose Core yourself (Tailscale, Cloudflare Tunnel, Pinggy, or SSH tunnel), then set that URL (and optional API key) in the app. No SDK in the app; only HTTP to Core.</p>
+        <p><strong>Step-by-step: Companion on iPhone via Cloudflare Tunnel</strong> — <a href="https://allenpeng0705.github.io/HomeClaw/companion-iphone-cloudflare-tunnel/" target="_blank" rel="noopener">Companion on iPhone (Cloudflare Tunnel)</a>. <strong>macOS permissions</strong> — <a href="companion-app-macos-permissions.html" target="_blank" rel="noopener">Companion app (macOS permissions)</a>.</p>
+      </div>
+    </section>
+
+    <div class="doc-quicklinks">
+      <h2>Quick links</h2>
+      <ul>
+        <li><a href="docs.html#channels">Channels &amp; Companion (docs page)</a></li>
+        <li><a href="docs.html#deploy-cloud">Deploy to cloud</a></li>
+        <li><a href="https://allenpeng0705.github.io/HomeClaw/remote-access/" target="_blank" rel="noopener">Remote access (full docs)</a></li>
+        <li><a href="https://allenpeng0705.github.io/HomeClaw/companion-app/" target="_blank" rel="noopener">Companion app (full docs)</a></li>
+      </ul>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <p>HomeClaw — your home, your AI. <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> · <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Docs</a> · Contact: <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a> · WeChat: shileipeng</p>
+  </footer>
+</body>
+</html>

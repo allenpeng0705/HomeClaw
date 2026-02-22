@@ -54,8 +54,10 @@ nav:
   - Plugins: plugins.md
   - Writing plugins and skills: writing-plugins-and-skills.md
   - Models: models.md
+  - Core config (core.yml): core-config.md
   - Mix mode and reports: mix-mode-and-reports.md
   - Hybrid router scripts: hybrid-router-scripts.md
   - Platform: platform.md
   - Remote access: remote-access.md
+  - Companion on iPhone (Cloudflare Tunnel): companion-iphone-cloudflare-tunnel.md
   - Help: help.md

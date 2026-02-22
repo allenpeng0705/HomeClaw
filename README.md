@@ -34,6 +34,7 @@
 9. [Skills: Extend HomeClaw with Workflows](#9-skills-extend-homeclaw-with-workflows)
 10. [Acknowledgments](#10-acknowledgments)
 11. [Contributing & License](#11-contributing--license)
+12. [Contact](#12-contact)
 
 ---
 
@@ -287,3 +288,12 @@ Thank you to everyone who contributed to GPT4People and OpenClaw, and to the ope
 - Optional: directory, trust/reputation, and blockchain-based verification for agent-to-agent use cases.
 
 We’re at the beginning of a long journey. Stay tuned and join us as we grow.
+
+---
+
+## 12. Contact
+
+Questions or feedback? Get in touch:
+
+- **Email:** [shilei.peng@qq.com](mailto:shilei.peng@qq.com)
+- **WeChat:** shileipeng

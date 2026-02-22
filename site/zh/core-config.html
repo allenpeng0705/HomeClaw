@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw core.yml：服务端、模型、记忆、知识库、路由、技能、工具、认证。配置说明。">
+  <title>Core 配置（core.yml） — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="主导航">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">首页</a>
+        <a href="docs.html#quickstart">快速开始</a>
+        <a href="docs.html#deploy-cloud">部署到云</a>
+        <a href="channels-companion.html">渠道与伴侣</a>
+        <a href="plugins-skills.html">插件与技能</a>
+        <a href="core-config.html">Core 配置</a>
+        <a href="docs.html">文档</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">完整文档</a>
+        <span class="lang-switch"><a href="../en/core-config.html">EN</a> | 中文</span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>Core 配置（core.yml）</h1>
+      <p class="lead"><strong>core.yml</strong> 是 HomeClaw Core 的主配置文件，位于 <code>config/core.yml</code>（相对于项目根目录）。本页说明各主要区块及配置项含义。</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="本页导航">
+      <p class="doc-toc-title">本页导航</p>
+      <ul>
+        <li><a href="#overview">概览</a></li>
+        <li><a href="#server">1. 服务端</a></li>
+        <li><a href="#models">2. 模型</a></li>
+        <li><a href="#routing">3. 路由（混合模式）</a></li>
+        <li><a href="#memory">4. 记忆</a></li>
+        <li><a href="#knowledge-base">5. 知识库</a></li>
+        <li><a href="#skills-plugins">6. 技能与插件</a></li>
+        <li><a href="#tools">7. 工具</a></li>
+        <li><a href="#auth">8. 认证</a></li>
+        <li><a href="#other">9. 其他</a></li>
+        <li><a href="#summary">小结</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="overview">
+      <div class="doc-section-body">
+        <h2>概览</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th>区块</th><th>作用</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Server（服务端）</strong></td><td>Core 监听地址与端口。</td></tr>
+            <tr><td><strong>Models（模型）</strong></td><td>聊天与嵌入所用 LLM（本地/云端）；混合模式路由。</td></tr>
+            <tr><td><strong>Memory（记忆）</strong></td><td>RAG 记忆、代理记忆文件、每日记忆、会话生命周期。</td></tr>
+            <tr><td><strong>Knowledge base（知识库）</strong></td><td>用户文档与 URL 的 RAG；文件上传处理。</td></tr>
+            <tr><td><strong>Routing（路由）</strong></td><td>混合模式下按请求选择本地/云端（启发式、语义、分类器）。</td></tr>
+            <tr><td><strong>Skills &amp; plugins（技能与插件）</strong></td><td>技能（SKILL.md）、插件（内置+外部）、系统插件。</td></tr>
+            <tr><td><strong>Tools（工具）</strong></td><td>文件读取根目录、网页搜索、浏览器、run_skill、超时等。</td></tr>
+            <tr><td><strong>Auth（认证）</strong></td><td>Core 对外暴露时的 API Key（如隧道、远程应用）。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="server">
+      <div class="doc-section-body">
+        <h2>1. 服务端</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th>配置项</th><th>含义</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>name</code></td><td>Core 实例名（如 <code>core</code>），用于日志与插件注册。</td></tr>
+            <tr><td><code>host</code></td><td>绑定地址。<code>0.0.0.0</code> 表示接受任意网卡连接（如 LAN、隧道）；<code>127.0.0.1</code> 仅本机。</td></tr>
+            <tr><td><code>port</code></td><td>HTTP 监听端口，默认 <strong>9000</strong>。客户端使用 <code>http://&lt;host&gt;:9000</code>。</td></tr>
+            <tr><td><code>mode</code></td><td>环境标识（如 <code>dev</code>、<code>prod</code>），影响日志等。</td></tr>
+            <tr><td><code>model_path</code></td><td>本地模型文件（GGUF）根路径，默认 <code>../models/</code>。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="models">
+      <div class="doc-section-body">
+        <h2>2. 模型</h2>
+        <p>这些配置决定 Core 用于<strong>聊天</strong>（主 LLM）和<strong>嵌入</strong>（记忆、知识库）的模型。</p>
+        <h3>主模型与嵌入模型</h3>
+        <table class="doc-table">
+          <thead>
+            <tr><th>配置项</th><th>含义</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>main_llm</code></td><td>未使用混合模式时的单一主模型：<code>local_models/&lt;id&gt;</code> 或 <code>cloud_models/&lt;id&gt;</code>。</td></tr>
+            <tr><td><code>main_llm_mode</code></td><td><code>local</code> = 始终本地；<code>cloud</code> = 始终云端；<strong><code>mix</code></strong> = 按请求由路由选择本地或云端。</td></tr>
+            <tr><td><code>main_llm_local</code></td><td>当 mode 为 <code>local</code> 或 <code>mix</code> 时使用的本地模型（如 <code>local_models/main_vl_model_4B</code>）。</td></tr>
+            <tr><td><code>main_llm_cloud</code></td><td>当 mode 为 <code>cloud</code> 或 <code>mix</code> 时使用的云端模型（如 <code>cloud_models/Gemini-2.5-Flash</code>）。</td></tr>
+            <tr><td><code>embedding_llm</code></td><td>用于嵌入的模型（RAG、知识库），可为本地或云端。</td></tr>
+            <tr><td><code>main_llm_language</code></td><td>首选回复语言（如 <code>[en, zh]</code>），第一项为主语言。</td></tr>
+          </tbody>
+        </table>
+        <h3>local_models</h3>
+        <p>本地模型列表（llama.cpp 服务）。每项：<code>id</code>、<code>path</code>（GGUF）、<code>host</code>、<code>port</code>、<code>capabilities</code>（Chat/embedding），可选 <code>mmproj</code>（视觉）、<code>supported_media</code>（如 <code>[image]</code>）。</p>
+        <h3>cloud_models</h3>
+        <p>云端模型列表（LiteLLM）。每项：<code>id</code>、<code>path</code>（如 <code>gemini/gemini-2.5-flash</code>）、<code>host</code>、<code>port</code>、<code>api_key_name</code>（环境变量名），可选 <code>api_key</code>、<code>supported_media</code>。API Key 建议用<strong>环境变量</strong>，也可在 core.yml 中写 <code>api_key</code>。</p>
+        <h3>llama_cpp 与 completion</h3>
+        <p><code>llama_cpp</code> — 本地服务默认：<code>ctx_size</code>、<code>predict</code>、<code>temp</code>、<code>threads</code>、<code>n_gpu_layers</code> 等。<code>completion</code> — 每次聊天请求参数：<code>max_tokens</code>、<code>temperature</code>、<code>image_max_dimension</code>。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="routing">
+      <div class="doc-section-body">
+        <h2>3. 路由（混合模式）</h2>
+        <p>当 <code>main_llm_mode: mix</code> 时，Core 按每条用户消息选择<strong>本地</strong>或<strong>云端</strong>。下列配置控制选择方式。</p>
+        <table class="doc-table">
+          <thead>
+            <tr><th>配置项</th><th>含义</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>hybrid_router.default_route</code></td><td>无规则命中时的默认：<code>local</code> 或 <code>cloud</code>。</td></tr>
+            <tr><td><code>hybrid_router.fallback_on_llm_error</code></td><td>所选模型失败时，用另一路由重试一次。</td></tr>
+            <tr><td><code>hybrid_router.heuristic</code></td><td>第一层：关键词/简单规则（如“翻译”→云端）。<code>enabled</code>、<code>threshold</code>、<code>rules_path</code>。</td></tr>
+            <tr><td><code>hybrid_router.semantic</code></td><td>第二层：语义相似度路由。<code>enabled</code>、<code>threshold</code>、<code>routes_path</code>。</td></tr>
+            <tr><td><code>hybrid_router.slm</code></td><td>第三层：分类器（小模型）或困惑度探测。<code>mode</code>（classifier | perplexity）、<code>model</code>、<code>threshold</code>。</td></tr>
+          </tbody>
+        </table>
+        <p>顺序：heuristic → semantic → 第三层 → default_route。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="memory">
+      <div class="doc-section-body">
+        <h2>4. 记忆</h2>
+        <p>RAG 记忆（向量+关系）、代理记忆文件与会话生命周期。</p>
+        <table class="doc-table">
+          <thead>
+            <tr><th>配置项</th><th>含义</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>use_memory</code></td><td>是否启用 RAG 记忆（检索、存储）。</td></tr>
+            <tr><td><code>memory_backend</code></td><td><strong>cognee</strong>（默认）或 <strong>chroma</strong>。Cognee 自管 DB；Chroma 使用 core.yml 中的 vectorDB、graphDB。</td></tr>
+            <tr><td><code>use_agent_memory_file</code></td><td>是否从 AGENT_MEMORY.md 注入长期上下文。</td></tr>
+            <tr><td><code>use_agent_memory_search</code></td><td>为 true 时索引代理记忆并用工具检索，不整文件注入（大文件推荐）。</td></tr>
+            <tr><td><code>use_daily_memory</code></td><td>是否从每日文件（如 memory/YYYY-MM-DD.md）注入短期上下文。</td></tr>
+            <tr><td><code>session.dm_scope</code></td><td>会话隔离方式：<code>main</code>（共享）、<code>per-peer</code>、<code>per-channel-peer</code>、<code>per-account-channel-peer</code>。</td></tr>
+            <tr><td><code>session.prune_keep_last_n</code></td><td>裁剪时每会话保留的最大轮数。</td></tr>
+            <tr><td><code>session.prune_after_turn</code></td><td>为 true 时每轮回复后执行裁剪。</td></tr>
+          </tbody>
+        </table>
+        <p>重置记忆：<strong>POST/GET</strong> <code>http://&lt;core&gt;:&lt;port&gt;/memory/reset</code>。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="knowledge-base">
+      <div class="doc-section-body">
+        <h2>5. 知识库</h2>
+        <p>用户文档与 URL 的 RAG（与聊天记忆分离）。</p>
+        <table class="doc-table">
+          <thead>
+            <tr><th>配置项</th><th>含义</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>knowledge_base.enabled</code></td><td>是否启用知识库及工具（knowledge_base_add、检索）。</td></tr>
+            <tr><td><code>knowledge_base.backend</code></td><td><code>auto</code>（与记忆一致）、<code>cognee</code> 或 <code>chroma</code>。</td></tr>
+            <tr><td><code>knowledge_base.chunk_size</code>、<code>chunk_overlap</code></td><td>文档分块方式（用于嵌入）。</td></tr>
+            <tr><td><code>knowledge_base.retrieval_min_score</code></td><td>检索块最低相似度（0–1）；null 表示不过滤。</td></tr>
+            <tr><td><code>file_understanding.add_to_kb_max_chars</code></td><td>用户仅发送文件时，仅当提取文本长度 ≤ 此值才自动加入知识库；0 表示不自动加入。</td></tr>
+          </tbody>
+        </table>
+        <p>重置知识库：<strong>POST/GET</strong> <code>http://&lt;core&gt;:&lt;port&gt;/knowledge_base/reset</code>。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="skills-plugins">
+      <div class="doc-section-body">
+        <h2>6. 技能与插件</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th>配置项</th><th>含义</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>use_skills</code></td><td>是否启用技能（<code>skills_dir</code> 下含 SKILL.md 的目录）。</td></tr>
+            <tr><td><code>skills_dir</code></td><td>技能目录，默认 <code>config/skills</code>。</td></tr>
+            <tr><td><code>skills_use_vector_search</code></td><td>按与用户查询的相似度检索技能。</td></tr>
+            <tr><td><code>skills_force_include_rules</code></td><td>查询匹配某模式时，强制包含指定技能目录。</td></tr>
+            <tr><td><code>use_tools</code></td><td>是否启用内置工具（file_read、web_search、run_skill 等）。</td></tr>
+            <tr><td><code>plugins_use_vector_search</code></td><td>按相似度检索插件。</td></tr>
+            <tr><td><code>system_plugins_auto_start</code></td><td>为 true 时 Core 启动 system_plugins/ 下插件（如 homeclaw-browser）。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="tools">
+      <div class="doc-section-body">
+        <h2>7. 工具</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th>配置项</th><th>含义</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>file_read_base</code></td><td>file_read、folder_list、document_read 的根目录。</td></tr>
+            <tr><td><code>run_skill_allowlist</code></td><td>若设置，仅允许 skill/scripts/ 下这些脚本名；[] 表示全部允许。</td></tr>
+            <tr><td><code>run_skill_timeout</code></td><td>run_skill 超时（秒）。</td></tr>
+            <tr><td><code>web.search</code></td><td>网页搜索提供商（duckduckgo、google_cse、bing、tavily 等）及 API Key。</td></tr>
+            <tr><td><code>browser_enabled</code></td><td>为 false 时不注册浏览器工具，改用插件（如 homeclaw-browser）。</td></tr>
+            <tr><td><code>tool_timeout_seconds</code></td><td>单工具执行超时；0 表示不限制。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="auth">
+      <div class="doc-section-body">
+        <h2>8. 认证</h2>
+        <p>当 Core 可从公网访问（如 Cloudflare Tunnel）时，建议开启认证，仅你可使用。</p>
+        <table class="doc-table">
+          <thead>
+            <tr><th>配置项</th><th>含义</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>auth_enabled</code></td><td>为 true 时，POST /inbound 与 WebSocket /ws 需提供 API Key。</td></tr>
+            <tr><td><code>auth_api_key</code></td><td>密钥。客户端需在请求中发送 <strong>X-API-Key</strong> 或 <strong>Authorization: Bearer &lt;key&gt;</strong>。</td></tr>
+          </tbody>
+        </table>
+        <p>请使用足够长、随机的值（如 32 位以上）。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="other">
+      <div class="doc-section-body">
+        <h2>9. 其他重要配置</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th>配置项</th><th>含义</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>profile.enabled</code></td><td>是否启用每用户资料（名称、偏好等）存为 JSON。</td></tr>
+            <tr><td><code>workspace_dir</code></td><td>工作区根目录（如 AGENT_MEMORY.md 所在）。</td></tr>
+            <tr><td><code>database</code></td><td>关系型 DB（聊天历史、会话）：backend（sqlite、mysql、postgresql）、url。</td></tr>
+            <tr><td><code>vectorDB</code>、<code>graphDB</code></td><td>当 memory_backend 为 chroma 时使用。</td></tr>
+            <tr><td><code>cognee</code></td><td>当 memory_backend 为 cognee 时使用。</td></tr>
+            <tr><td><code>llm_max_concurrent</code></td><td>最大并发 LLM 调用数（如单卡本地用 1；云端可用 2–10）。</td></tr>
+            <tr><td><code>compaction</code></td><td>上下文接近上限时裁剪或摘要；reserve_tokens 留给回复。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="summary">
+      <div class="doc-section-body">
+        <h2>小结</h2>
+        <ul>
+          <li><strong>core.yml</strong> 控制服务端、模型（本地/云端与混合路由）、记忆、知识库、技能与插件、工具及认证。</li>
+          <li><strong>模型：</strong> 设置 main_llm_local、main_llm_cloud、embedding_llm；用 main_llm_mode: mix 与 hybrid_router 实现按请求路由。</li>
+          <li><strong>记忆：</strong> use_memory、memory_backend（cognee/chroma）、代理/每日记忆文件、会话范围与裁剪。</li>
+          <li><strong>知识库：</strong> knowledge_base.enabled、backend、分块、file_understanding 控制文件上传自动加入。</li>
+          <li><strong>路由：</strong> main_llm_mode: mix 时由 hybrid_router（default_route、heuristic、semantic、slm）决定。</li>
+          <li><strong>API Key：</strong> 云端模型及部分工具可通过环境变量或 core.yml 设置（敏感信息建议用环境变量）。</li>
+        </ul>
+        <p>完整配置项请查看仓库中的 <strong>config/core.yml</strong>。模型示例见完整文档 <a href="https://allenpeng0705.github.io/HomeClaw/models/" target="_blank" rel="noopener">Models</a>。</p>
+      </div>
+    </section>
+
+    <div class="doc-quicklinks">
+      <h2>快速链接</h2>
+      <ul>
+        <li><a href="docs.html">本站文档</a></li>
+        <li><a href="docs.html#core-config">Core 配置小节（文档页）</a></li>
+        <li><a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub 仓库</a></li>
+        <li><a href="https://allenpeng0705.github.io/HomeClaw/core-config/" target="_blank" rel="noopener">完整文档（core-config）</a></li>
+      </ul>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <p>HomeClaw — 你的家庭，你的 AI。<a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> · <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">文档</a> · 联系：<a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a> · 微信：shileipeng</p>
+  </footer>
+</body>
+</html>
