@@ -362,7 +362,7 @@ cloud_models:
     host: 127.0.0.1
     port: 4002
     api_key_name: GEMINI_API_KEY
-    api_key: 
+    api_key: "AIzaSyABrb_ZCt9nPSNwgluWBSqDSGJp-UeHW6w"
     capabilities: [Functioncall, Chat]
   # Anthropic Claude
   - id: Claude-Sonnet

@@ -33,10 +33,11 @@ The text that gets **embedded and stored** is built by **`build_skill_refined_te
 |------|----------------|
 | **name** | Always (if set) |
 | **description** | Always (if set) |
-| **body** | Only if `refined_body_max_chars` > 0 at sync; default is **0** (body not stored). |
 | **keywords** | If present in frontmatter |
+| **trigger** | If present: first 200 chars of `trigger.instruction` + pattern terms (regex symbols stripped so e.g. `weather\|forecast\|天气` → "weather forecast 天气") so user phrases like "how's the weather" match. |
+| **body** | Only if `refined_body_max_chars` > 0 at sync; default is **0** (body not stored). |
 
-Parts are joined with newlines. So with default sync (no body): stored string = `name` + `description` + `keywords`.
+Parts are joined with newlines. So with default sync: stored string = **name** + **description** + **keywords** + **trigger** (instruction snippet + pattern words). That gives RAG enough signal for both semantic match and phrase match (including cross-lingual via keywords and trigger patterns).
 
 The vector store stores: **id** = folder name, **embedding** = vector of that text, **payload** = `{ "folder", "name", "description" }` (metadata only; search is by embedding).
 
@@ -63,11 +64,9 @@ The vector store stores: **id** = folder name, **embedding** = vector of that te
 
 | What | Where | Content |
 |------|--------|--------|
-| **Stored in RAG (one vector per skill)** | Chroma collection `homeclaw_skills` | **name + description + keywords** (body not stored by default) |
+| **Stored in RAG (one vector per skill)** | Chroma collection `homeclaw_skills` | **name** + **description** + **keywords** + **trigger** (instruction + pattern terms); body only if refined_body_max_chars > 0 |
 | **Payload in vector store** | Same | `folder`, `name`, `description` (metadata only; not used for search) |
 | **Query at request time** | Same embedder | User message (e.g. “weather in London”) |
 | **Injected into prompt** | System prompt | Full skill (name, description, body) loaded from SKILL.md for each selected folder |
 
-**Do we need to store body?** No. RAG is for **selection** only. The full body is already in the prompt when the skill is selected. Storing body can dilute the embedding; **name + description + keywords** are enough for matching.
-
-To improve RAG match: set **description** and **keywords** in SKILL.md frontmatter; then **restart Core** to re-sync.
+**Are they enough?** Usually yes. **name** + **description** + **keywords** + **trigger** give semantic and phrase coverage; skills with a `trigger` get their pattern terms embedded so queries like "how's the weather in Beijing" match. For skills without keywords/trigger, add **keywords** or a **trigger** in SKILL.md; optionally set **refined_body_max_chars** > 0 at sync to include a body snippet. **Restart Core** after changing SKILL.md to re-sync.

@@ -254,48 +254,134 @@ The script `scripts/serve_site.py` finds the repo root from the script's directo
 
 ### 3.2 Run the site as a Windows service (auto-restart on reboot)
 
-You have two options: **NSSM** (recommended) or **Task Scheduler**.
+You have two options: **NSSM** (recommended) or **Task Scheduler**. Replace `D:\mygithub\HomeClaw` and `C:\Users\YourName\...` with your actual paths.
+
+---
 
 #### Option A: NSSM (Non-Sucking Service Manager)
 
-1. **Download NSSM:** [nssm.cc](https://nssm.cc/download) — get the Windows build and extract it (e.g. `nssm.exe` in `nssm-2.24\win64\`).
+**Step 1: Download and extract NSSM**
 
-2. **Open an elevated Command Prompt** (Run as administrator). Go to the NSSM folder, then:
+1. Go to [nssm.cc/download](https://nssm.cc/download).
+2. Download the latest release (e.g. **nssm-2.24.zip**).
+3. Extract the ZIP. Use the **win64** folder (e.g. `nssm-2.24\win64\nssm.exe`). Remember this path (e.g. `C:\Tools\nssm-2.24\win64`).
 
+**Step 2: Find your Python path**
+
+1. Open **Command Prompt** or **PowerShell**.
+2. Run: `where python`
+3. Note the first path (e.g. `C:\Users\YourName\AppData\Local\Programs\Python\Python311\python.exe`). If you use a venv, use that `python.exe` path instead.
+
+**Step 3: Install the service with NSSM**
+
+1. **Right-click** the **Start** button → **Terminal (Admin)** or **Command Prompt (Admin)** (or **PowerShell (Admin)**).
+2. Go to the NSSM folder:
+   ```cmd
+   cd C:\Tools\nssm-2.24\win64
+   ```
+   (Use your actual NSSM path.)
+
+3. Run:
    ```cmd
    nssm install HomeClawSite
    ```
+   A window titled **NSSM - Install HomeClawSite service** opens.
 
-   A GUI opens.
+4. **Application** tab (should be open by default):
+   - **Path:** Click **Browse**, go to your Python folder, select **python.exe** (e.g. `C:\Users\YourName\AppData\Local\Programs\Python\Python311\python.exe`). Or type/paste the full path.
+   - **Startup directory:** Click **Browse**, go to your HomeClaw repo root (e.g. `D:\mygithub\HomeClaw`), select that folder and confirm. Or type: `D:\mygithub\HomeClaw`.
+   - **Arguments:** Type: `scripts\serve_site.py`
+     - The site will use port **9999** by default. To use another port, type: `scripts\serve_site.py 3000`
 
-3. **Application tab:**
-   - **Path:** Full path to `python.exe` (e.g. `C:\Users\YourName\AppData\Local\Programs\Python\Python311\python.exe` or `python` if it's on PATH).
-   - **Startup directory:** Full path to your HomeClaw repo (e.g. `D:\mygithub\HomeClaw`).
-   - **Arguments:** `scripts\serve_site.py` (or `scripts/serve_site.py`).
-   - Optional: add `9999` to Arguments to set the port.
+5. **Details** tab (optional):
+   - **Display name:** `HomeClaw Site`
+   - **Description:** e.g. `Serves the HomeClaw static site on port 9999`
 
-4. **Details tab:** Set **Display name** to `HomeClaw Site` and **Description** as you like.
+6. **I/O** tab (optional, for logs):
+   - **Output (stdout):** e.g. `D:\mygithub\HomeClaw\logs\site-stdout.log`
+   - **Error (stderr):** e.g. `D:\mygithub\HomeClaw\logs\site-stderr.log`
+   - Create the `logs` folder first if it doesn’t exist.
 
-5. **I/O tab (optional):** Set **Output** and **Error** to log files (e.g. `D:\mygithub\HomeClaw\logs\site-stdout.log` and `site-stderr.log`) so you can debug.
+7. Click **Install service**. A message says the service was installed. Click **OK** and close the NSSM window.
 
-6. Click **Install service**. Then start it:
+**Step 4: Start the service**
 
-   ```cmd
-   nssm start HomeClawSite
-   ```
+In the same admin Command Prompt (in the NSSM folder):
 
-   Check: open **http://127.0.0.1:9999**. To remove the service later: `nssm remove HomeClawSite confirm`.
+```cmd
+nssm start HomeClawSite
+```
 
-#### Option B: Task Scheduler (run at logon)
+You should see: `HomeClawSite: START: The operation completed successfully.`
 
-1. Open **Task Scheduler** (taskschd.msc).
-2. **Create Basic Task:** Name e.g. "HomeClaw Site", Trigger: **When I log on** (or **When the computer starts** if you use a dedicated user).
-3. **Action:** Start a program.
-   - **Program:** Full path to `python.exe`.
-   - **Arguments:** `scripts\serve_site.py` (or full path: `D:\mygithub\HomeClaw\scripts\serve_site.py`).
-   - **Start in:** Full path to your HomeClaw repo (e.g. `D:\mygithub\HomeClaw`).
-4. Finish; optionally open **Properties** and set **Run whether user is logged on or not** and **Run with highest privileges** if needed.
-5. The task runs at logon (or at startup); the site will be available at http://127.0.0.1:9999.
+**Step 5: Check**
+
+1. Open a browser and go to **http://127.0.0.1:9999**. You should see the HomeClaw site.
+2. Optional: In **Services** (Win+R → `services.msc` → find **HomeClaw Site**), confirm status is **Running** and **Startup type** is **Automatic** so it starts after reboot.
+
+**Useful NSSM commands** (run from the NSSM folder in an admin prompt):
+
+| Command | Description |
+|--------|-------------|
+| `nssm start HomeClawSite` | Start the service |
+| `nssm stop HomeClawSite` | Stop the service |
+| `nssm restart HomeClawSite` | Restart the service |
+| `nssm status HomeClawSite` | Show status |
+| `nssm remove HomeClawSite confirm` | Remove the service (stops and uninstalls) |
+
+---
+
+#### Option B: Task Scheduler (run at logon or at startup)
+
+**Step 1: Find your Python path and repo path**
+
+1. In Command Prompt or PowerShell, run: `where python` — note the full path to `python.exe` (e.g. `C:\Users\YourName\AppData\Local\Programs\Python\Python311\python.exe`).
+2. Note your HomeClaw repo root (e.g. `D:\mygithub\HomeClaw`).
+
+**Step 2: Open Task Scheduler**
+
+1. Press **Win+R**, type **taskschd.msc**, press **Enter**.
+2. Or search **Task Scheduler** in the Start menu and open it.
+
+**Step 3: Create a basic task**
+
+1. In the right panel, click **Create Basic Task...**.
+2. **Name:** e.g. `HomeClaw Site`
+3. **Description (optional):** e.g. `Serves the HomeClaw static site on port 9999`
+4. Click **Next**.
+
+**Step 4: Set the trigger**
+
+1. Choose **When I log on** (task runs when you sign in) or **When the computer starts** (runs at boot; useful if the machine runs without a user logging in).
+2. Click **Next**.
+
+**Step 5: Set the action**
+
+1. Select **Start a program** → **Next**.
+2. **Program/script:** Enter the **full path** to `python.exe` (e.g. `C:\Users\YourName\AppData\Local\Programs\Python\Python311\python.exe`). Or click **Browse** and select it.
+3. **Add arguments (optional):** `scripts\serve_site.py`  
+   (If the task runs before the working directory is set, use the full path: `D:\mygithub\HomeClaw\scripts\serve_site.py`)
+4. **Start in (optional):** Enter the **full path** to your HomeClaw repo root (e.g. `D:\mygithub\HomeClaw`). This is important so the script finds the `site` folder.
+5. Click **Next**.
+
+**Step 6: Finish**
+
+1. Check **Open the Properties dialog...** if you want to change “Run whether user is logged on or not” or “Run with highest privileges”.
+2. Click **Finish**.
+
+**Step 7: Optional — run at startup without logging in**
+
+1. In Task Scheduler, find **HomeClaw Site** in the list, **right-click** → **Properties**.
+2. **General** tab: Check **Run whether user is logged on or not** if the task should run at startup even when no one is logged in. You may be prompted for your password.
+3. **Conditions** tab: Uncheck **Start the task only if the computer is on AC power** if you want it to run on battery (e.g. laptop).
+4. Click **OK**.
+
+**Step 8: Run the task once to test**
+
+1. Right-click **HomeClaw Site** → **Run**.
+2. Open **http://127.0.0.1:9999** in a browser to confirm the site loads.
+
+After reboot (or next logon, depending on the trigger), the task will run again and the site will be available at http://127.0.0.1:9999.
 
 ### 3.3 Cloudflare Tunnel on Windows
 

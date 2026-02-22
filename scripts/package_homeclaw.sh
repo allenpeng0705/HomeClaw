@@ -130,8 +130,8 @@ rsync -a \
   "$REPO_ROOT/config/hybrid" \
   "$OUTPUT_DIR/config/" 2>/dev/null || true
 
-# ---------- llama.cpp for macOS (local GGUF models): package only mac/ ----------
-if [[ "$(uname -s)" == "Darwin" ]] && [[ -d "$REPO_ROOT/llama.cpp-master/mac" ]]; then
+# ---------- llama.cpp (local GGUF models): package mac/ on Darwin (use --with-llama-cpp) ----------
+if [[ $INCLUDE_LLAMA_CPP -eq 1 ]] && [[ "$(uname -s)" == "Darwin" ]] && [[ -d "$REPO_ROOT/llama.cpp-master/mac" ]]; then
   echo "Packaging llama.cpp (mac) for local models..."
   mkdir -p "$OUTPUT_DIR/llama.cpp-master"
   cp -R "$REPO_ROOT/llama.cpp-master/mac" "$OUTPUT_DIR/llama.cpp-master/"
