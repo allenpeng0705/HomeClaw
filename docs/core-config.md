@@ -216,6 +216,18 @@ When Core is reachable from the internet (e.g. Cloudflare Tunnel, Tailscale Funn
 
 Use a long, random value (e.g. 32+ characters). See [Remote access](remote-access.md).
 
+### Public URL and Pinggy (Companion scan-to-connect)
+
+When you want to reach Core from another network (e.g. Companion on your phone), **GET /pinggy** shows a public URL and a **QR code** for the Companion app (Settings → Scan QR to connect). You can supply the URL in either of two ways:
+
+| Setting | Meaning |
+|--------|--------|
+| **`public_url`** | Your public Core URL (e.g. from Cloudflare Tunnel, Tailscale Funnel). When set, **/pinggy** shows this URL and a QR code; no tunnel started by Core. Leave empty if using Pinggy. |
+| **`pinggy.token`** | Your Pinggy token from [pinggy.io](https://pinggy.io). When set, Core starts the Pinggy tunnel and **/pinggy** shows the tunnel URL and QR. Leave empty if using **public_url** or another service. |
+| **`pinggy.open_browser`** | If true, open the browser to **/pinggy** when the Pinggy tunnel is ready (default: true). Only applies when **pinggy.token** is set. |
+
+Use **public_url** when you expose Core yourself (e.g. Cloudflare Tunnel, Tailscale Funnel). Use **pinggy.token** when you want Core to start the Pinggy tunnel. See [Remote access](remote-access.md).
+
 ---
 
 ## 9. Other important settings

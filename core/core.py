@@ -997,8 +997,47 @@ class Core(CoreInterface):
 
         @self.app.get("/pinggy", response_class=HTMLResponse)
         async def pinggy_page():
-            """Page showing Pinggy public URL and QR for Companion scan-to-connect. No auth so user can open before pairing."""
+            """Page showing public URL and QR for Companion scan-to-connect. Uses public_url from core.yml (e.g. Cloudflare) or Pinggy tunnel. No auth so user can open before pairing."""
             global _pinggy_state
+            # If public_url is set in core.yml (e.g. Cloudflare Tunnel, Tailscale Funnel), use it for the page
+            try:
+                core_yml_path = os.path.join(Util().config_path(), "core.yml")
+                if os.path.isfile(core_yml_path):
+                    with open(core_yml_path, "r", encoding="utf-8") as f:
+                        data = yaml.safe_load(f) or {}
+                    configured_public_url = (data.get("public_url") or "").strip()
+                    if configured_public_url:
+                        meta = Util().get_core_metadata()
+                        auth_enabled = bool(getattr(meta, "auth_enabled", False))
+                        auth_api_key = (getattr(meta, "auth_api_key", None) or "").strip()
+                        connect_url_raw = f"homeclaw://connect?url={configured_public_url}"
+                        if auth_enabled and auth_api_key:
+                            connect_url_raw = f"homeclaw://connect?url={configured_public_url}&api_key={auth_api_key}"
+                        qr_base64 = None
+                        try:
+                            import qrcode
+                            import io
+                            qr = qrcode.QRCode(version=1, box_size=6, border=2)
+                            qr.add_data(connect_url_raw)
+                            qr.make(fit=True)
+                            img = qr.make_image(fill_color="black", back_color="white")
+                            buf = io.BytesIO()
+                            img.save(buf, format="PNG")
+                            qr_base64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                        except Exception:
+                            pass
+                        qr_img = f'<img src="data:image/png;base64,{qr_base64}" alt="QR code" style="max-width:280px;height:auto;">' if qr_base64 else ""
+                        html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>HomeClaw — Scan to connect</title></head><body style="font-family:sans-serif;padding:2rem;max-width:480px;">
+                        <h1>Scan to connect</h1>
+                        <p>Scan this QR code with <strong>HomeClaw Companion</strong>: Settings → Scan QR to connect.</p>
+                        {qr_img}
+                        <p><strong>Public URL:</strong> <code style="word-break:break-all;">{html_module.escape(configured_public_url)}</code></p>
+                        <p><strong>Connect URL:</strong> <code style="word-break:break-all;">{html_module.escape(connect_url_raw)}</code></p>
+                        </body></html>"""
+                        return HTMLResponse(content=html)
+            except Exception as e:
+                logger.debug("public_url /pinggy page failed: {}", e)
+            # Else use Pinggy state (tunnel URL)
             err = _pinggy_state.get("error")
             if err:
                 html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>HomeClaw — Pinggy</title></head><body style="font-family:sans-serif;padding:2rem;">
@@ -1008,8 +1047,8 @@ class Core(CoreInterface):
             connect_url = _pinggy_state.get("connect_url")
             qr_base64 = _pinggy_state.get("qr_base64")
             if not public_url and not connect_url:
-                html = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>HomeClaw — Pinggy</title></head><body style="font-family:sans-serif;padding:2rem;">
-                <h1>Pinggy tunnel</h1><p>Not configured (pinggy.token empty in core.yml) or tunnel is still starting…</p></body></html>"""
+                html = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>HomeClaw — Scan to connect</title></head><body style="font-family:sans-serif;padding:2rem;">
+                <h1>Scan to connect</h1><p>Set <strong>public_url</strong> in core.yml (e.g. your Cloudflare Tunnel URL) or set <strong>pinggy.token</strong> to use Pinggy. Then open this page again.</p></body></html>"""
                 return HTMLResponse(content=html)
             if not connect_url:
                 connect_url = public_url or ""

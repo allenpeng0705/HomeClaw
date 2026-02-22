@@ -11,7 +11,8 @@ HomeClaw Core runs on your machine (e.g. home PC or server). To use the **Compan
 | **Tailscale (tailnet)** | Only devices on your Tailscale network | Home + your devices (phone, laptop); private, no public exposure |
 | **Tailscale Funnel** | Anyone with the URL (public HTTPS) | Webhooks, bots; use with strong auth |
 | **Cloudflare Tunnel** | Anyone with the tunnel URL (public HTTPS) | Simple public URL; use with Core `auth_enabled` |
-| **Pinggy** | Anyone with the Pinggy URL (public HTTPS) | Similar to ngrok/Cloudflare; zero-config tunnel. See `docs_design/StrongLocalModelAndPerplexityRouting.md` §6 in the repo. |
+| **Pinggy** | Anyone with the Pinggy URL (public HTTPS) | **Built-in:** set `pinggy.token` in core.yml; Core starts the tunnel and serves **/pinggy** with public URL and QR for Companion scan-to-connect. |
+| **Any public URL** | Anyone with the URL (Cloudflare, Tailscale Funnel, etc.) | Set **`public_url`** in core.yml to your public Core URL; **GET /pinggy** shows that URL and a QR code for Companion. No tunnel started by Core. |
 | **SSH tunnel** | You, from the machine where the tunnel runs | Developers; desktop → Core over SSH |
 
 The **Companion app** and other clients only need a **Core URL** and optional **API key**. They do not include Tailscale or Cloudflare SDKs—you choose how to expose Core, then set that URL in the app.
@@ -80,7 +81,60 @@ Cloudflare Tunnel gives you a public HTTPS URL that forwards to Core, without op
 
 ---
 
-## 3. Auth when exposing Core
+## 3. Public URL (Cloudflare, Tailscale Funnel, or any service)
+
+If you expose Core with **Cloudflare Tunnel**, **Tailscale Funnel**, or any other service and have a **public URL**, you can show that URL and a **QR code** for the Companion app without using Pinggy.
+
+### Setup
+
+1. **Expose Core** with your chosen service (e.g. run `cloudflared tunnel --url http://127.0.0.1:9000` and get a URL like `https://xxx.trycloudflare.com`).
+2. **Configure Core**  
+   - In **`config/core.yml`**, set **`public_url`** to that URL (e.g. `https://xxx.trycloudflare.com`).  
+   - Enable auth when using a public URL: set **`auth_enabled: true`** and **`auth_api_key`** in core.yml.
+3. **Open the scan page**  
+   - Open **http://127.0.0.1:&lt;port&gt;/pinggy** in your browser (e.g. after starting Core with `python -m main start`).  
+   - The page shows the **public URL** and a **QR code** encoding `homeclaw://connect?url=...&api_key=...`.
+
+### In the Companion app
+
+- **Settings** → **Scan QR to connect** → scan the QR code on the /pinggy page.
+
+The **/pinggy** page uses **`public_url`** from core.yml when set; otherwise it uses the Pinggy tunnel URL if **pinggy.token** is set. So you can use either Cloudflare (or any service) with **public_url**, or Pinggy with **pinggy.token**.
+
+---
+
+## 4. Pinggy (built-in tunnel + QR for Companion)
+
+**Pinggy** gives you a public HTTPS URL that forwards to Core, similar to ngrok or Cloudflare Tunnel. HomeClaw has **built-in support**: when you set a Pinggy token in core.yml, Core starts the tunnel at startup and serves a **/pinggy** page with the public URL and a **QR code** so you can connect the Companion app with one scan.
+
+### Setup
+
+1. **Get a Pinggy token**  
+   - Sign up at [pinggy.io](https://pinggy.io) (or [dashboard.pinggy.io](https://dashboard.pinggy.io)) and create a token.
+
+2. **Configure Core**  
+   - In **`config/core.yml`**, find the **`pinggy`** block and set:
+     - **`token`** — Your Pinggy token (e.g. `"your-token-here"`). Leave empty to disable.
+     - **`open_browser`** — `true` (default) to open the browser to the /pinggy page when the tunnel is ready.
+   - Enable auth when using a public URL: set **`auth_enabled: true`** and **`auth_api_key`** in core.yml.
+
+3. **Start Core**  
+   - Run `python -m main start` (or start Core however you usually do).  
+   - Core starts the Pinggy tunnel in the background. When the tunnel is ready, Core opens **http://127.0.0.1:&lt;port&gt;/pinggy** in your browser (if `open_browser: true`).  
+   - The **/pinggy** page shows the **public URL** and a **QR code** encoding the Companion connection link (`homeclaw://connect?url=...&api_key=...`).
+
+### In the Companion app
+
+- **Settings** → **Scan QR to connect** → scan the QR code on the /pinggy page.  
+- The app saves the Core URL and API key and connects through the tunnel. No need to type the URL or key.
+
+If you prefer not to open the browser automatically, set **`pinggy.open_browser: false`** in core.yml; you can still open **http://127.0.0.1:9000/pinggy** (or your Core port) manually to see the QR.
+
+For design details (tunnel lifecycle, optional CLI), see **docs_design/PinggyIntegration.md** in the repo.
+
+---
+
+## 5. Auth when exposing Core
 
 When Core is reachable from the internet (e.g. via Cloudflare Tunnel or Tailscale Funnel):
 
@@ -97,4 +151,6 @@ For more detail (auth headers, Funnel + auth proxy), see [RemoteAccess.md](https
 
 - **Tailscale (tailnet or Serve):** Private or HTTPS access from your devices; no public exposure. Set Core URL in the app to the Tailscale IP or Serve URL.  
 - **Cloudflare Tunnel:** Public HTTPS URL; use with **auth_enabled** and a strong API key. Set Core URL in the app to the tunnel URL and the same API key.  
-- The app only needs **Core URL** and optional **API key**; Tailscale and Cloudflare are ways to expose Core and get that URL.
+- **Public URL:** Set **`public_url`** in core.yml to your public Core URL (e.g. from Cloudflare Tunnel, Tailscale Funnel). **GET /pinggy** shows that URL and a QR code for Companion. Enable **auth_enabled** when using a public URL.  
+- **Pinggy:** Built-in tunnel; set **`pinggy.token`** in core.yml and optionally **`pinggy.open_browser: true`**. Core serves **/pinggy** with public URL and QR; use Companion **Scan QR to connect**. Enable **auth_enabled** when using the public URL.  
+- The app only needs **Core URL** and optional **API key**; Tailscale, Cloudflare, **public_url**, and Pinggy are ways to expose or point to Core and get that URL.

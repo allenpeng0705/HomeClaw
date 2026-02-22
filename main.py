@@ -137,6 +137,36 @@ def read_config(file_path):
         config = yaml.safe_load(file)
     return config
 
+
+def _safe_shutdown_config():
+    """Return (shutdown_url, host, port) for Core shutdown/ready. Never raises; uses defaults on any error."""
+    try:
+        if not os.path.isfile(core_config_file_path):
+            return ("http://127.0.0.1:9000/shutdown", "127.0.0.1", 9000)
+        cfg = read_config(core_config_file_path)
+        port = int(cfg.get("port", 9000) or 9000)
+        host = (cfg.get("host") or "0.0.0.0").strip()
+        shutdown_host = "127.0.0.1" if host == "0.0.0.0" else host
+        return (f"http://{shutdown_host}:{port}/shutdown", shutdown_host, port)
+    except Exception:
+        return ("http://127.0.0.1:9000/shutdown", "127.0.0.1", 9000)
+
+
+def _has_public_connect_config():
+    """True if public_url or pinggy.token is set (so we can show QR/connect). Never raises."""
+    try:
+        if not os.path.isfile(core_config_file_path):
+            return False
+        cfg = read_config(core_config_file_path)
+        if (cfg.get("public_url") or "").strip():
+            return True
+        pinggy_cfg = cfg.get("pinggy") or {}
+        if (pinggy_cfg.get("token") or "").strip():
+            return True
+        return False
+    except Exception:
+        return False
+
 def write_config(file_path, config):
     with open(file_path, 'w', encoding='utf-8') as file:
         yaml.safe_dump(config, file, default_flow_style=False, sort_keys=False)
@@ -300,56 +330,82 @@ def run_core() -> threading.Thread:
     return thread
 
 def start(open_browser=True):
-    """Start Core only. Optionally open the launcher page (/ui) with WebChat and Control UI links. Ctrl+C to stop."""
-    try:
-        core_config = read_config(core_config_file_path)
-        core_port = int(core_config.get("port", 9000))
-        core_host = (core_config.get("host") or "0.0.0.0").strip()
-        shutdown_host = "127.0.0.1" if core_host == "0.0.0.0" else core_host
-    except Exception:
-        core_port = 9000
-        shutdown_host = "127.0.0.1"
-    shutdown_url = f"http://{shutdown_host}:{core_port}/shutdown"
+    """Start Core only. Optionally open the launcher page (/ui) with WebChat and Control UI links. Ctrl+C to stop.
+    All logic is defensive: config/HTTP/browser failures never crash; shutdown is always attempted on exit."""
+    shutdown_url, shutdown_host, core_port = _safe_shutdown_config()
     ui_url = f"http://{shutdown_host}:{core_port}/ui"
+    ready_url = f"http://{shutdown_host}:{core_port}/ready"
 
-    def shutdown_on_signal(signum, frame):
-        print("\nShutting down... (Ctrl+C) 正在关闭...")
+    def _do_shutdown():
         try:
             httpx.get(shutdown_url, timeout=2.0)
         except Exception:
             pass
-        os._exit(0)
 
-    signal.signal(signal.SIGINT, shutdown_on_signal)
-
-    core_thread = run_core()
-    print("Starting HomeClaw Core... (启动 HomeClaw Core...)\n")
-    # Poll /ready for up to 90s so homeclaw-browser and other plugins have time to start; then open launcher
-    ready_url = f"http://{shutdown_host}:{core_port}/ready"
-    max_wait_s = 90
-    poll_interval_s = 3
-    ready = False
-    for elapsed in range(0, max_wait_s, poll_interval_s):
+    def shutdown_on_signal(signum, frame):
         try:
-            r = httpx.get(ready_url, timeout=2.0)
-            if r.status_code == 200:
-                ready = True
-                print(f"Core running at http://{shutdown_host}:{core_port}")
-                print("Use Companion app or channels to chat. Press Ctrl+C to stop.\n")
-                break
+            print("\nShutting down... (Ctrl+C) 正在关闭...")
+            _do_shutdown()
         except Exception:
             pass
-        if elapsed + poll_interval_s < max_wait_s:
-            sleep(poll_interval_s)
-    if not ready:
-        print(f"Core starting (or check http://{shutdown_host}:{core_port}/ready)\n")
-    if open_browser:
         try:
-            webbrowser.open(ui_url)
-            print(f"Opened launcher (WebChat / Control UI): {ui_url}\n")
+            os._exit(0)
         except Exception:
-            print(f"Launcher: {ui_url}\n")
-    core_thread.join()
+            sys.exit(0)
+
+    try:
+        signal.signal(signal.SIGINT, shutdown_on_signal)
+    except Exception:
+        pass
+
+    core_thread = None
+    try:
+        core_thread = run_core()
+        if core_thread is None:
+            logger.error("run_core() returned None")
+            sys.exit(1)
+        print("Starting HomeClaw Core... (启动 HomeClaw Core...)\n")
+        max_wait_s = 90
+        poll_interval_s = 3
+        ready = False
+        for elapsed in range(0, max_wait_s, poll_interval_s):
+            try:
+                r = httpx.get(ready_url, timeout=2.0)
+                if r is not None and r.status_code == 200:
+                    ready = True
+                    print(f"Core running at http://{shutdown_host}:{core_port}")
+                    print("Use Companion app or channels to chat. Press Ctrl+C to stop.\n")
+                    break
+            except Exception:
+                pass
+            if elapsed + poll_interval_s < max_wait_s:
+                try:
+                    sleep(poll_interval_s)
+                except Exception:
+                    pass
+        if not ready:
+            print(f"Core starting (or check {ready_url})\n")
+        if open_browser:
+            try:
+                webbrowser.open(ui_url)
+                print(f"Opened launcher (WebChat / Control UI): {ui_url}\n")
+            except Exception:
+                try:
+                    print(f"Launcher: {ui_url}\n")
+                except Exception:
+                    pass
+        if core_thread is not None:
+            try:
+                core_thread.join()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.exception(e)
+        try:
+            _do_shutdown()
+        except Exception:
+            pass
+        sys.exit(1)
 
 
 if __name__ == "__main__":
@@ -375,16 +431,19 @@ if __name__ == "__main__":
         else:
             start(open_browser=not args.no_open_browser)
     except KeyboardInterrupt:
-        print("\nShutting down... (Ctrl+C) 正在关闭...")
         try:
-            cfg = read_config(core_config_file_path)
-            port = int(cfg.get("port", 9000))
-            host = (cfg.get("host") or "0.0.0.0").strip()
-            shutdown_host = "127.0.0.1" if host == "0.0.0.0" else host
-            httpx.get(f"http://{shutdown_host}:{port}/shutdown", timeout=2.0)
+            print("\nShutting down... (Ctrl+C) 正在关闭...")
+            shutdown_url, _, _ = _safe_shutdown_config()
+            try:
+                httpx.get(shutdown_url, timeout=2.0)
+            except Exception:
+                pass
         except Exception:
             pass
-        sys.exit(0)
+        try:
+            sys.exit(0)
+        except Exception:
+            os._exit(0)
     except Exception as e:
         logger.exception(e)
         sys.exit(1)

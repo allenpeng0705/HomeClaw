@@ -78,7 +78,7 @@
             <tr><td><strong>Tailscale (tailnet)</strong></td><td>Only devices on your Tailscale network</td><td>Home + your devices (phone, laptop); private, no public exposure.</td></tr>
             <tr><td><strong>Tailscale Funnel</strong></td><td>Anyone with the URL (public HTTPS)</td><td>Webhooks, bots; use with strong auth.</td></tr>
             <tr><td><strong>Cloudflare Tunnel</strong></td><td>Anyone with the tunnel URL (public HTTPS)</td><td>Simple public URL; use with Core <code>auth_enabled</code>.</td></tr>
-            <tr><td><strong>Pinggy</strong></td><td>Anyone with the Pinggy URL (public HTTPS)</td><td>Zero-config tunnel, similar to ngrok/Cloudflare. Run tunnel from Core host; use the HTTPS URL as Core URL.</td></tr>
+            <tr><td><strong>Pinggy</strong></td><td>Anyone with the Pinggy URL (public HTTPS)</td><td><strong>Built-in:</strong> set <code>pinggy.token</code> in core.yml; Core starts the tunnel and serves <strong>/pinggy</strong> with public URL and QR for Companion scan-to-connect.</td></tr>
             <tr><td><strong>SSH tunnel</strong></td><td>You, from the machine where the tunnel runs</td><td>Developers; forward local port to Core over SSH (e.g. <code>ssh -L 9000:127.0.0.1:9000 user@core-host</code>).</td></tr>
           </tbody>
         </table>
@@ -89,8 +89,8 @@
         <h3>Cloudflare Tunnel</h3>
         <p>Run <code>cloudflared tunnel --url http://127.0.0.1:9000</code>; use the HTTPS URL (e.g. <code>https://xxx.trycloudflare.com</code>) as Core URL. Enable <code>auth_enabled</code> and <code>auth_api_key</code> in core.yml.</p>
 
-        <h3>Pinggy</h3>
-        <p>Similar to ngrok: run a tunnel from the Core host (see <a href="https://pinggy.io/" target="_blank" rel="noopener">pinggy.io</a>); you get a public HTTPS URL. Use that URL as Core URL and enable <code>auth_enabled</code> in core.yml.</p>
+        <h3>Pinggy (built-in tunnel + QR for Companion)</h3>
+        <p><strong>Built-in support:</strong> Get a token from <a href="https://pinggy.io/" target="_blank" rel="noopener">pinggy.io</a>. In <code>config/core.yml</code>, set <code>pinggy.token</code> to your token and optionally <code>pinggy.open_browser: true</code>. When you start Core (<code>python -m main start</code>), Core starts the Pinggy tunnel and opens <strong>http://127.0.0.1:&lt;port&gt;/pinggy</strong> in your browser. The /pinggy page shows the public URL and a <strong>QR code</strong>. In the Companion app: <strong>Settings → Scan QR to connect</strong> — scan the QR and the app saves the Core URL and API key. Enable <code>auth_enabled</code> and <code>auth_api_key</code> in core.yml when using the public URL.</p>
 
         <h3>SSH tunnel</h3>
         <p>From your laptop: <code>ssh -L 9000:127.0.0.1:9000 user@core-host</code>. Then set Core URL to <code>http://127.0.0.1:9000</code> on the laptop; traffic is forwarded to Core over SSH. Good for development; not for phone/Companion from cellular.</p>

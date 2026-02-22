@@ -176,6 +176,44 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// Show delete confirmation for the message at [index]; on confirm, remove it from the list.
+  void _showDeleteMessageConfirmation(BuildContext context, int index) {
+    if (index < 0 || index >= _messages.length) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete message?'),
+        content: const Text('This message will be removed from the chat. This only affects this device; it does not change Core\'s session.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              setState(() {
+                _messages.removeAt(index);
+                if (index < _messageImages.length) {
+                  _messageImages.removeAt(index);
+                }
+              });
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Message deleted')),
+                );
+              }
+            },
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
   static const Map<String, String> _imageMime = {
     'jpg': 'image/jpeg',
     'jpeg': 'image/jpeg',
@@ -997,46 +1035,49 @@ class _ChatScreenState extends State<ChatScreen> {
                 final entry = _messages[i];
                 final isUser = entry.value;
                 final imageUrls = i < _messageImages.length ? _messageImages[i] : null;
-                return Align(
-                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: isUser ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (imageUrls != null && imageUrls.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: imageUrls
-                                  .where((u) => u.startsWith('data:image/'))
-                                  .map((imageDataUrl) => Padding(
-                                        padding: const EdgeInsets.only(bottom: 6),
-                                        child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(8),
-                                          child: Image.memory(
-                                            base64Decode(imageDataUrl.contains(',') ? imageDataUrl.split(',').last : ''),
-                                            fit: BoxFit.contain,
-                                            width: 280,
-                                            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                return GestureDetector(
+                  onLongPress: () => _showDeleteMessageConfirmation(context, i),
+                  child: Align(
+                    alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isUser ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (imageUrls != null && imageUrls.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: imageUrls
+                                    .where((u) => u.startsWith('data:image/'))
+                                    .map((imageDataUrl) => Padding(
+                                          padding: const EdgeInsets.only(bottom: 6),
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(8),
+                                            child: Image.memory(
+                                              base64Decode(imageDataUrl.contains(',') ? imageDataUrl.split(',').last : ''),
+                                              fit: BoxFit.contain,
+                                              width: 280,
+                                              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                            ),
                                           ),
-                                        ),
-                                      ))
-                                  .toList(),
+                                        ))
+                                    .toList(),
+                              ),
                             ),
+                          SelectableText(
+                            entry.key,
+                            style: Theme.of(context).textTheme.bodyLarge,
                           ),
-                        SelectableText(
-                          entry.key,
-                          style: Theme.of(context).textTheme.bodyLarge,
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 );

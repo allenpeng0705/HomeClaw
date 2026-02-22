@@ -2,6 +2,8 @@
 
 This doc answers: (1) whether we can integrate Pinggy into HomeClaw, (2) config in core.yml, (3) displaying public URL and QR, and (4) whether the Companion app already supports QR scan-to-connect.
 
+**Alternative:** If you use **Cloudflare Tunnel**, **Tailscale Funnel**, or any other service and already have a public URL, set **`public_url`** in core.yml to that URL. **GET /pinggy** will then show that URL and a QR code for Companion scan-to-connect; no Pinggy tunnel is started. See [Remote access](docs/remote-access.md).
+
 ---
 
 ## 1. Is integration possible?
