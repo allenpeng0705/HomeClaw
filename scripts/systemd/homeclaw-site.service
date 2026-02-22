@@ -1,0 +1,24 @@
+# systemd unit: serve the HomeClaw site/ folder (static promo site).
+# Install: copy to /etc/systemd/system/, set REPO_ROOT below, then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable homeclaw-site
+#   sudo systemctl start homeclaw-site
+#
+# Replace /path/to/HomeClaw with the absolute path to your HomeClaw repo.
+
+[Unit]
+Description=HomeClaw static site server (site/)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/HomeClaw
+Environment=PORT=9999
+ExecStart=/path/to/HomeClaw/scripts/serve_site.sh
+Restart=always
+RestartSec=5
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target
