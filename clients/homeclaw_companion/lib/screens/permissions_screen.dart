@@ -188,7 +188,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
                                       color: status.isGranted ? Colors.green : Colors.grey,
                                       size: 24,
                                     ),
-                                  if (status == null || !status.isGranted)
+                                  if (status == null || !status.isGranted) ...[
                                     FilledButton(
                                       onPressed: requesting ? null : () => _requestPermission(item),
                                       child: requesting
@@ -199,6 +199,15 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
                                             )
                                           : const Text('Allow'),
                                     ),
+                                    if (status != null && status.isPermanentlyDenied)
+                                      Padding(
+                                        padding: const EdgeInsets.only(left: 8.0),
+                                        child: TextButton(
+                                          onPressed: () => openAppSettings(),
+                                          child: const Text('Open Settings'),
+                                        ),
+                                      ),
+                                  ],
                                 ],
                               ],
                             ),

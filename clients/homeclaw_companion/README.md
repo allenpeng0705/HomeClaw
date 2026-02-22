@@ -98,12 +98,15 @@ If Core is HTTP (e.g. local `http://192.168.x.x:9000`), Android 9+ blocks cleart
 - **Simulator:** Usually works with default settings.
 - **Real device / release:** Configure signing in Xcode (macOS: enable "Outgoing Connections" in entitlements if needed). For iOS, add any required capabilities (e.g. network).
 
-## QR scan (camera permission)
+## QR scan and permissions (iOS / Android)
 
-**Scan to connect** uses the device camera. After `flutter create .`:
+**Scan to connect** and **Take photo** use the camera; **Notifications** and **voice input** need their own permissions.
 
-- **iOS:** Add camera usage to `ios/Runner/Info.plist`: `<key>NSCameraUsageDescription</key><string>Scan HomeClaw connection QR code</string>`.
-- **Android:** `android/app/src/main/AndroidManifest.xml` usually gets camera permission from the `mobile_scanner` plugin; if the app asks for camera and is denied, grant it in system settings.
+- **iOS:**  
+  - Info.plist already has `NSCameraUsageDescription`, `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`.  
+  - The **permission_handler** plugin requires **GCC_PREPROCESSOR_DEFINITIONS** in `ios/Podfile` for each permission (camera, notifications, microphone, speech). Without them, the system permission dialogs do not appear. The project Podfile includes these. After changing Podfile run `cd ios && pod install`.  
+  - If a permission was previously denied, the dialog won’t show again; use **Settings → Homeclaw Companion** to enable, or tap **Open Settings** on the permissions screen.
+- **Android:** `AndroidManifest.xml` declares camera, microphone, notifications; `permission_handler` and `mobile_scanner` handle prompts. If the app asks and is denied, grant in system settings.
 
 On **macOS/Windows** the scanner may not have a camera; use manual URL entry in Settings.
 
