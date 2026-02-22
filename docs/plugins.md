@@ -2,6 +2,8 @@
 
 Plugins add focused capabilities: weather, news, email, custom APIs, browser automation, and more. One plugin = one feature. **Built-in and external plugins** make HomeClaw **extensible and more powerful**.
 
+**Want to write your own?** See [Writing plugins and skills](writing-plugins-and-skills.md) for a guide to building plugins (built-in and external) and skills, with examples and a future plugin/skill marketplace.
+
 ---
 
 ## Built-in plugins (Python)
@@ -20,4 +22,4 @@ Plugins add focused capabilities: weather, news, email, custom APIs, browser aut
   - `POST /run` (or your path) → body = PluginRequest JSON, response = PluginResult JSON.
 - **Register** with Core: `POST http://<core>:9000/api/plugins/register` with plugin id, name, description, `health_check_url`, `type: "http"`, `config` (base_url, path, timeout_sec), and `capabilities`. After registration, Core routes to your server like built-in plugins.
 
-Examples in `examples/external_plugins/`: **Node.js** (Quote), **Go** (Time), **Java** (Quote), **Python** (Quote, Time). See [PluginsGuide.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/PluginsGuide.md) and [HowToWriteAPlugin.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/HowToWriteAPlugin.md) in the repo.
+**Examples:** Small samples in `examples/external_plugins/` — **Python** (Quote, Time), **Node.js** (Quote), **Go** (Time), **Java** (Quote). Full-featured: **system_plugins/homeclaw-browser** (Node.js — WebChat, browser automation, canvas, nodes) and a **companion plugin** (Python — same contract). See [Writing plugins and skills](writing-plugins-and-skills.md), [PluginsGuide.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/PluginsGuide.md), and [HowToWriteAPlugin.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/HowToWriteAPlugin.md) in the repo.

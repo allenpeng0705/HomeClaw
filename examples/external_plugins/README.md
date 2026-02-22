@@ -2,6 +2,8 @@
 
 These examples show **external plugins** that register with Core via `POST /api/plugins/register` and run as separate HTTP servers. They demonstrate **multiple capabilities**, **multiple parameters**, and **post_process: true** (Core runs LLM on the plugin output before sending to the user).
 
+**Summary:** Small examples in this folder — **Python** (Quote, Time), **Node.js** (Quote), **Go** (Time), **Java** (Quote). Full-featured examples: **system_plugins/homeclaw-browser** (Node.js — WebChat, browser automation, canvas, nodes) and a **companion plugin** (Python — same contract; see repo for location).
+
 ## 1. Quote Plugin
 
 - **Server**: Returns random quotes; dispatches by `capability_id`.
@@ -121,11 +123,15 @@ mvn compile exec:java -Dexec.mainClass="QuotePlugin"
 # In another terminal: ./register.sh
 ```
 
-## 6. HomeClaw Browser (system plugin — Control UI + browser + canvas + nodes)
+## 6. HomeClaw Browser (system plugin — Node.js; Control UI + browser + canvas + nodes)
 
-**Moved to project root:** The HomeClaw Control UI and HomeClaw Browser plugins are now a single **system plugin** at **system_plugins/homeclaw-browser**. The folders `homeclaw-browser` and `homeclaw-control-ui` in this directory are legacy; see [homeclaw-browser-MOVED.md](homeclaw-browser-MOVED.md) and [homeclaw-control-ui-MOVED.md](homeclaw-control-ui-MOVED.md). It provides WebChat (Control UI), browser automation, canvas, and nodes in one server.
+**Location:** **system_plugins/homeclaw-browser** (project root). A **Node.js**-based **system plugin** and a full-featured external plugin example. It provides WebChat (Control UI), browser automation (Playwright), canvas, and nodes in one server. Same contract: GET /health, POST /run; register with Core.
 
 See **[system_plugins/README.md](../../system_plugins/README.md)** and **[system_plugins/homeclaw-browser/README.md](../../system_plugins/homeclaw-browser/README.md)** for run instructions, env vars (CORE_URL, CORE_API_KEY, PORT 3020), and how to test. Launcher: **http://127.0.0.1:9000/ui**; WebChat: **http://127.0.0.1:3020/**.
+
+## 7. Companion plugin (Python)
+
+A **Python**-based companion/utility plugin can serve as another external plugin example. Same contract: HTTP server with GET /health and POST /run; register with Core via POST /api/plugins/register. See the repo or **examples/external_plugins/** for the latest location and run steps.
 
 ## Config
 
