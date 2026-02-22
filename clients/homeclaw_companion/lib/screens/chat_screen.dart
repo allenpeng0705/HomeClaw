@@ -102,10 +102,25 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _send() async {
-    final text = _inputController.text.trim();
+    // When voice is active, use transcript and then stop voice so the stream doesn't repopulate the field.
+    final String text = _voiceListening
+        ? (_voiceTranscript.trim().isNotEmpty ? _voiceTranscript.trim() : _inputController.text.trim())
+        : _inputController.text.trim();
     final hasAttachments = _pendingImagePaths.isNotEmpty || _pendingVideoPaths.isNotEmpty || _pendingFilePaths.isNotEmpty;
     if ((text.isEmpty && !hasAttachments) || _loading) return;
-    _inputController.clear();
+    if (_voiceListening) {
+      // Cancel subscription first so no more "final" events can trigger _send() and cause double send.
+      _voiceSubscription?.cancel();
+      _voiceSubscription = null;
+      await _voice.stopVoiceListening();
+      setState(() {
+        _voiceListening = false;
+        _voiceTranscript = '';
+        _inputController.clear();
+      });
+    } else {
+      _inputController.clear();
+    }
     final imagesToSend = List<String>.from(_pendingImagePaths);
     final videosToSend = List<String>.from(_pendingVideoPaths);
     final filesToSend = List<String>.from(_pendingFilePaths);
@@ -287,9 +302,12 @@ class _ChatScreenState extends State<ChatScreen> {
             _inputController.text = finalText;
             _inputController.selection = TextSelection.collapsed(offset: finalText.length);
           });
-          _send().then((_) {
-            if (mounted) setState(() => _voiceTranscript = '');
-          });
+          // Only auto-send from "final" if we're not already sending (e.g. user didn't just tap Send).
+          if (!_loading) {
+            _send().then((_) {
+              if (mounted) setState(() => _voiceTranscript = '');
+            });
+          }
         } else if (partial != null && partial.isNotEmpty) {
           setState(() {
             _voiceTranscript = partial;
@@ -1035,49 +1053,68 @@ class _ChatScreenState extends State<ChatScreen> {
                 final entry = _messages[i];
                 final isUser = entry.value;
                 final imageUrls = i < _messageImages.length ? _messageImages[i] : null;
-                return GestureDetector(
-                  onLongPress: () => _showDeleteMessageConfirmation(context, i),
-                  child: Align(
-                    alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: isUser ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (imageUrls != null && imageUrls.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: imageUrls
-                                    .where((u) => u.startsWith('data:image/'))
-                                    .map((imageDataUrl) => Padding(
-                                          padding: const EdgeInsets.only(bottom: 6),
-                                          child: ClipRRect(
-                                            borderRadius: BorderRadius.circular(8),
-                                            child: Image.memory(
-                                              base64Decode(imageDataUrl.contains(',') ? imageDataUrl.split(',').last : ''),
-                                              fit: BoxFit.contain,
-                                              width: 280,
-                                              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                            ),
-                                          ),
-                                        ))
-                                    .toList(),
-                              ),
+                return Align(
+                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (isUser) const SizedBox.shrink(),
+                        Flexible(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: isUser ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(12),
                             ),
-                          SelectableText(
-                            entry.key,
-                            style: Theme.of(context).textTheme.bodyLarge,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (imageUrls != null && imageUrls.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: imageUrls
+                                          .where((u) => u.startsWith('data:image/'))
+                                          .map((imageDataUrl) => Padding(
+                                                padding: const EdgeInsets.only(bottom: 6),
+                                                child: ClipRRect(
+                                                  borderRadius: BorderRadius.circular(8),
+                                                  child: Image.memory(
+                                                    base64Decode(imageDataUrl.contains(',') ? imageDataUrl.split(',').last : ''),
+                                                    fit: BoxFit.contain,
+                                                    width: 280,
+                                                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                                  ),
+                                                ),
+                                              ))
+                                          .toList(),
+                                    ),
+                                  ),
+                                SelectableText(
+                                  entry.key,
+                                  style: Theme.of(context).textTheme.bodyLarge,
+                                ),
+                              ],
+                            ),
                           ),
-                        ],
-                      ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 20),
+                          tooltip: 'Delete message',
+                          onPressed: () => _showDeleteMessageConfirmation(context, i),
+                          style: IconButton.styleFrom(
+                            minimumSize: const Size(36, 36),
+                            padding: EdgeInsets.zero,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
+                        if (!isUser) const SizedBox.shrink(),
+                      ],
                     ),
                   ),
                 );

@@ -42,6 +42,36 @@ Then run `flutter run -d windows` again.
 
 To list devices: `flutter devices`.
 
+## Build macOS app for distribution (let users run it directly)
+
+To produce a **standalone macOS app** that users can double-click without Flutter or Xcode:
+
+1. **From the Companion app directory:**
+   ```bash
+   cd clients/homeclaw_companion
+   flutter pub get
+   flutter build macos --release
+   ```
+
+2. **Built app location:**  
+   The app bundle is at:
+   ```text
+   build/macos/Build/Products/Release/homeclaw_companion.app
+   ```
+
+3. **Give it to users:**  
+   - **Option A:** Copy `homeclaw_companion.app` to the user’s Mac (e.g. drag to **Applications** or send via zip). They double-click to open.  
+   - **Option B:** Create a DMG (e.g. with `hdiutil` or a tool like [create-dmg](https://github.com/create-dmg/create-dmg)) and distribute the DMG; users open it and drag the app to Applications.
+
+4. **First launch (unsigned / not notarized):**  
+   If the app is not signed or notarized, macOS may show “**homeclaw_companion cannot be opened because the developer cannot be verified**”. The user can:  
+   - **Right‑click (or Control‑click)** the app → **Open** → **Open** in the dialog, or  
+   - **System Settings → Privacy & Security** → under “Security” allow the app once.  
+   To avoid that for many users, **sign and notarize** the app (Apple Developer account, then `codesign` + `xcrun notarytool`); see [Flutter macOS deployment](https://docs.flutter.dev/deployment/macos) and [Apple notarization](https://developer.apple.com/documentation/security/notarizing_macos_software_before_distribution).
+
+5. **Optional: Apple-style icon on the built app**  
+   See [App icon (Apple style)](#app-icon-apple-style) and run `./scripts/macos_icon_squircle.sh` after building if you use Option B there.
+
 ## App usage
 
 1. **First launch:** Open **Settings** (gear icon), set **Core URL** (e.g. `http://127.0.0.1:9000`). If Core has `auth_enabled: true`, set **API Key**. Tap **Save**.
