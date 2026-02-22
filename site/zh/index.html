@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw：运行在你机器上的 AI 助手。支持 Mac、Windows、Linux。混合模式、插件、技能、渠道。你的数据，你做主。">
+  <title>HomeClaw — 运行在你机器上的 AI 助手</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="主导航">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">首页</a>
+        <a href="docs.html#quickstart">快速开始</a>
+        <a href="docs.html#deploy-cloud">部署到云</a>
+        <a href="docs.html">文档</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">完整文档</a>
+        <span class="lang-switch"><a href="../en/index.html">EN</a> | 中文</span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main>
+    <section class="hero container">
+      <h1>HomeClaw</h1>
+      <p class="tagline">运行在你机器上的 AI 助手。你的数据，你做主。</p>
+      <p class="hero-platform">支持 <strong>Mac、Windows、Linux</strong>（Python 技术栈）。可通过<strong>任意语言编写外部插件</strong>扩展（Node.js、Go、Java 等）。</p>
+      <img src="../assets/homeclaw-promo-zh.png" alt="HomeClaw：混合模式、插件、技能、渠道、伴侣应用、多智能体" class="hero-img" width="720" height="auto">
+      <div class="hero-cta">
+        <a href="https://github.com/allenpeng0705/HomeClaw" class="btn btn-primary" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://allenpeng0705.github.io/HomeClaw/" class="btn btn-secondary" target="_blank" rel="noopener">文档站</a>
+        <a href="docs.html" class="btn btn-secondary">本站文档</a>
+      </div>
+    </section>
+
+    <section class="section container quickstart-section">
+      <h2>快速开始</h2>
+      <p class="lead">在 <strong>Mac</strong>、<strong>Windows</strong> 或 <strong>Linux</strong> 上几步运行 HomeClaw。需要 <strong>Python 3</strong> 和 <strong>git</strong>。</p>
+      <ol class="quickstart-steps">
+        <li><strong>克隆并安装</strong> — <code>git clone https://github.com/allenpeng0705/HomeClaw.git</code>，<code>cd HomeClaw</code>，然后 <code>pip install -r requirements.txt</code>。</li>
+        <li><strong>配置（可选）</strong> — 编辑 <code>config/core.yml</code>（LLM、记忆）和 <code>config/user.yml</code>（允许谁对话）。<strong>云端</strong>模型需设置环境变量中的 API Key；<strong>本地</strong>模型见仓库中的 <code>llama.cpp-master/README.md</code>。</li>
+        <li><strong>启动 Core</strong> — <code>python -m main start</code>。会启动 Core 与内置 CLI，可在同一终端中聊天。</li>
+        <li><strong>聊天</strong> — 在该终端使用 CLI，或运行渠道（如 <code>python -m channels.run webchat</code> 后打开 http://localhost:8014），或打开<strong>伴侣应用</strong>并将 Core URL 设为 <code>http://127.0.0.1:9000</code>。</li>
+      </ol>
+      <p><strong>Windows：</strong>步骤相同；若出现编译错误，请安装 <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">Visual C++ 生成工具</a>（见完整文档）。运行 <code>python -m main doctor</code> 可检查配置与 LLM 连通性。</p>
+      <p><a href="docs.html#quickstart" class="btn btn-secondary">本站完整快速开始</a> · <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">入门（完整文档）</a></p>
+    </section>
+
+    <section class="section container">
+      <h2>为什么选 HomeClaw</h2>
+      <p class="lead">HomeClaw 是本地优先的 AI 助手：一次安装即一个智能体，无论通过何种方式连接，记忆、工具和插件都一致。支持 <strong>Mac、Windows、Linux</strong>（Python），并可用<strong>任意语言编写外部插件</strong>扩展。以下按影响程度排序。</p>
+
+      <div class="feature-section">
+        <div class="feature-section-inner">
+          <img src="../assets/section-mix-mode.png" alt="混合模式：每轮本地或云端" class="feature-section-img" width="280" height="160" onerror="this.style.display='none'">
+          <div class="feature-section-body">
+            <h3>1. 混合模式 — 省成本</h3>
+            <p>云端 API 强大但贵；本地模型免费但有时不够用。HomeClaw 的<strong>混合模式</strong>解决这个问题：对每条用户消息，路由器只做一次选择——本地或云端——整轮对话使用同一模型。简单或私密任务走本地；复杂或不确定的走云端。每轮一个模型、自动路由，还有<strong>用量报告</strong>（在聊天或通过 API），方便查看云端用量并调整规则。默认倾向本地即可控成本，需要时再用云端。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature-section">
+        <div class="feature-section-inner">
+          <img src="../assets/section-plugins-skills.png" alt="插件与技能扩展能力" class="feature-section-img" width="280" height="160" onerror="this.style.display='none'">
+          <div class="feature-section-body">
+            <h3>2. 插件与技能 — 扩展能力</h3>
+            <p><strong>插件</strong>一次增加一种能力。内置插件（Python）在 <code>plugins/</code>；外部插件可用<strong>任意语言</strong>（Node.js、Go、Java、Python）编写，以 HTTP 服务运行。向 Core 注册后，LLM 会路由到对应插件。例如：天气、新闻、邮件、浏览器自动化。</p>
+            <p><strong>技能</strong>让你复用 OpenClaw 风格工作流：<code>config/skills/</code> 下带 SKILL.md 的文件夹。可复用 OpenClaw 技能集——将技能文件夹复制到 HomeClaw 的 <code>config/skills/</code> 即可使用，无需重写。LLM 使用工具和可选的 <code>run_skill</code> 完成任务。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature-section">
+        <div class="feature-section-inner">
+          <img src="../assets/section-channels.png" alt="渠道：远程访问" class="feature-section-img" width="280" height="160" onerror="this.style.display='none'">
+          <div class="feature-section-body">
+            <h3>3. 渠道 — 远程访问</h3>
+            <p>随时随地连接你的助手。HomeClaw 支持<strong>渠道</strong>：WebChat、Telegram、Discord、微信、WhatsApp、邮件、CLI 等。都连接同一 Core 与记忆。通过隧道（如 Cloudflare）或暴露 Core，即可从手机或其它网络聊天。一个智能体，多种连接方式。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature-section">
+        <div class="feature-section-inner">
+          <img src="../assets/section-companion.png" alt="HomeClaw 伴侣应用" class="feature-section-img" width="280" height="160" onerror="this.style.display='none'">
+          <div class="feature-section-body">
+            <h3>4. 伴侣应用</h3>
+            <p><strong>HomeClaw 伴侣应用</strong>是基于 Flutter 的客户端，支持 Mac、Windows、iPhone、Android。聊天、语音、附件，以及<strong>管理 Core</strong>：在应用内编辑 core.yml 和 user.yml，无需 SSH。可单独使用或与 WebChat、CLI、Telegram 等渠道一起使用，均连接同一 Core 与记忆。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature-section">
+        <div class="feature-section-inner">
+          <img src="../assets/section-multi-agent.png" alt="多智能体：多实例多智能体" class="feature-section-img" width="280" height="160" onerror="this.style.display='none'">
+          <div class="feature-section-body">
+            <h3>5. 多智能体</h3>
+            <p>一个 HomeClaw 实例即一个智能体。需要更多智能体时，多起几个实例——不同端口、可选不同配置。无需中心编排。将伴侣应用或任意渠道指向对应端口即可。角色分离、隔离或扩展：多跑几个进程即可。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature-section">
+        <div class="feature-section-inner">
+          <img src="../assets/section-memory.png" alt="记忆：RAG 与智能体记忆" class="feature-section-img" width="280" height="160" onerror="this.style.display='none'">
+          <div class="feature-section-body">
+            <h3>6. 记忆</h3>
+            <p>HomeClaw 使用<strong>RAG 风格记忆</strong>（向量 + 关系型）与<strong>基于 Markdown 文件的记忆</strong>（如 AGENT_MEMORY.md、每日记忆文件），助手可记住并召回过往上下文。所有记忆按用户隔离。后端：Cognee（默认）或 Chroma。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature-section">
+        <div class="feature-section-inner">
+          <img src="../assets/section-knowledge-base.png" alt="知识库：文档与 RAG" class="feature-section-img" width="280" height="160" onerror="this.style.display='none'">
+          <div class="feature-section-body">
+            <h3>7. 知识库</h3>
+            <p>每用户<strong>知识库</strong>：摄入文档、URL 和手动内容用于 RAG。提供 <code>knowledge_base_add</code> 等工具与检索；用户发送文件时可选择自动加入。与记忆共用后端（Cognee/Chroma）。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature-section">
+        <div class="feature-section-inner">
+          <img src="../assets/section-profile.png" alt="个人资料：每用户事实" class="feature-section-img" width="280" height="160" onerror="this.style.display='none'">
+          <div class="feature-section-body">
+            <h3>8. 个人资料</h3>
+            <p>每用户<strong>个人资料</strong>：学习到的事实（姓名、生日、偏好、家庭等）按用户存为 JSON 文件。助手可通过工具读写资料以实现个性化。在 <code>config/core.yml</code> 中设置 <code>profile.enabled: true</code> 启用。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section container">
+      <h2>快速链接</h2>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <h3>GitHub</h3>
+          <p>源码、Issues、发布。</p>
+          <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">仓库 →</a>
+        </div>
+        <div class="feature-card">
+          <h3>完整文档</h3>
+          <p>安装、配置、插件、混合模式、渠道等。</p>
+          <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">文档站 →</a>
+        </div>
+        <div class="feature-card">
+          <h3>本站文档</h3>
+          <p>精选介绍与入门，适合网站阅读。</p>
+          <a href="docs.html">在此阅读 →</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>HomeClaw — 你的家，你的 AI。<a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> · <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">文档</a></p>
+  </footer>
+</body>
+</html>

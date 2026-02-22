@@ -14,7 +14,9 @@
 
 2. **Configure** — Edit `config/core.yml` (LLM, memory) and `config/user.yml` (who can talk to the assistant). If using **local models**: copy llama.cpp's binary distribution into `llama.cpp-master/` for your device type (see `llama.cpp-master/README.md`); used for main and embedding local models.
 
-3. **Run Core** — `python -m core.core` or `python -m main start`
+3. **Run Core** — `python -m main start` (recommended: starts Core and built-in CLI) or `python core/core.py` (Core only). Both run the same Core server.
+
+   **Verify core is up:** In another terminal, run `curl -s http://127.0.0.1:9000/ready` — you should get a 200 response (and a short body). Core listens on the port set in `config/core.yml` (default 9000).
 
 4. **Run a channel** — e.g. `python -m channels.run webchat` and open http://localhost:8014, or use the **Companion app** (Flutter: Mac, Windows, iPhone, Android) from `clients/homeclaw_companion/` to chat and **Manage Core** (edit config from the app).
 

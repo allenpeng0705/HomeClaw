@@ -379,7 +379,9 @@ class Channel(BaseChannel):
             logger.debug(e)
         
 
-def run_core() ->threading.Thread:
+def run_core() -> threading.Thread:
+    """Start the same Core as core/core.py (core.main) in a background thread.
+    So `python -m main start` and `python core/core.py` both run the same Core server."""
     thread = threading.Thread(target=core.main, daemon=True)
     thread.start()
     return thread
@@ -400,6 +402,27 @@ def start():
     password = homeclaw_account.email_pass
     print(f"Your HomeClaw account(你的HomeClaw账号): {email}\n Password(密码): {password}\n")
     '''
+    # Resolve core URL for graceful shutdown on Ctrl+C
+    try:
+        core_config = read_config(core_config_file_path)
+        core_port = int(core_config.get("port", 9000))
+        core_host = (core_config.get("host") or "0.0.0.0").strip()
+        shutdown_host = "127.0.0.1" if core_host == "0.0.0.0" else core_host
+    except Exception:
+        core_port = 9000
+        shutdown_host = "127.0.0.1"
+    shutdown_url = f"http://{shutdown_host}:{core_port}/shutdown"
+
+    def shutdown_on_signal(signum, frame):
+        print("\nShutting down... (Ctrl+C) 正在关闭...")
+        try:
+            httpx.get(shutdown_url, timeout=2.0)
+        except Exception:
+            pass
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, shutdown_on_signal)
+
     llm_thread = run_core() 
     # Running start_core in a background thread
     print("Starting HomeClaw..., please wait... (启动HomeClaw..., 请稍等...)\n")
