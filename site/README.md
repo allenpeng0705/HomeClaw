@@ -38,20 +38,32 @@ Promo images are copied from `docs/assets/`. If you add new ones there, copy the
 From the **repository root** (HomeClaw):
 
 ```bash
-# Option 1: Python
-python3 -m http.server 8080 --directory site
+# Option 1: Python script (works on Windows and Linux)
+python scripts/serve_site.py
+# Or: python scripts/serve_site.py 3000
 
-# Option 2: npx serve (if you have Node)
-npx serve site -p 8080
+# Option 2: Python module (Linux/macOS)
+python3 -m http.server 9999 --directory site
+
+# Option 3: npx serve (if you have Node)
+npx serve site -p 9999
 ```
+
+On **Windows**, use `python scripts\serve_site.py` (or the same script from PowerShell).
 
 Then open:
 
-- **http://localhost:8080** — redirects to en/ or zh/ by browser language
-- **http://localhost:8080/en/** — English home
-- **http://localhost:8080/zh/** — 中文首页
-- **http://localhost:8080/en/docs.html** — Curated docs (EN)
-- **http://localhost:8080/zh/docs.html** — 本站文档 (中文)
+- **http://localhost:9999** — redirects to en/ or zh/ by browser language
+- **http://localhost:9999/en/** — English home
+- **http://localhost:9999/zh/** — 中文首页
+- **http://localhost:9999/en/docs.html** — Curated docs (EN)
+- **http://localhost:9999/zh/docs.html** — 本站文档 (中文)
+
+## Run as a service and publish with Cloudflare Tunnel
+
+To run the site as a **systemd service** on your machine (auto-restart on reboot) and publish it with **Cloudflare Tunnel** (public HTTPS URL without opening ports), see **[docs/site-service-and-cloudflare-tunnel.md](../docs/site-service-and-cloudflare-tunnel.md)**.
+
+---
 
 ## Deploy to Cloudflare Pages
 
