@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw：如何编写插件与技能。内置与外置插件、SKILL.md、示例与未来插件/技能站。">
+  <title>编写插件与技能 — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="主导航">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">首页</a>
+        <a href="docs.html#quickstart">快速开始</a>
+        <a href="docs.html#deploy-cloud">部署到云</a>
+        <a href="plugins-skills.html">插件与技能</a>
+        <a href="docs.html">文档</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">完整文档</a>
+        <span class="lang-switch"><a href="../en/plugins-skills.html">EN</a> | 中文</span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>编写插件与技能</h1>
+      <p class="lead">插件与技能是扩展 HomeClaw 的主要方式。本页介绍如何编写两者以及示例位置。我们计划在未来提供<strong>插件与技能的发现、上传与下载网站</strong>。</p>
+      <p><strong>插件</strong>提供单一功能（天气、邮件、自定义 API）；<strong>技能</strong>描述助手按指令使用工具（或脚本）完成的任务工作流。两者对扩展 HomeClaw 都很重要。</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="本页导航">
+      <p class="doc-toc-title">本页导航</p>
+      <ul>
+        <li><a href="#why">为何扩展</a></li>
+        <li><a href="#plugins">如何编写插件</a></li>
+        <li><a href="#examples">示例：外部插件</a></li>
+        <li><a href="#skills">如何编写技能</a></li>
+        <li><a href="#summary">小结</a></li>
+        <li><a href="#future">未来：插件与技能站</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="why">
+      <div class="doc-section-body">
+        <h2>为何用插件与技能扩展？</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th></th><th>插件</th><th>技能</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>是什么</strong></td><td>单一功能模块（天气、新闻、邮件、浏览器自动化）。</td><td>任务工作流：LLM 按技能说明使用<strong>工具</strong>或<strong>run_skill</strong> 脚本。</td></tr>
+            <tr><td><strong>实现</strong></td><td>代码：内置（Python）或外部（任意语言、HTTP 服务）。</td><td>一个<strong>文件夹</strong>，内含 <strong>SKILL.md</strong>（名称、描述、工作流）及可选 <strong>scripts/</strong>。</td></tr>
+            <tr><td><strong>何时用</strong></td><td>需要独立逻辑或 API 的新能力。</td><td>可复用的「如何做 X」，依赖现有工具或小脚本。</td></tr>
+          </tbody>
+        </table>
+        <p>两者都重要：插件带来新能力；技能带来可复用工作流，并与<strong>OpenClaw 风格技能集</strong>兼容（将技能文件夹复制到 <code>config/skills/</code> 即可使用）。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="plugins">
+      <div class="doc-section-body">
+        <h2>如何编写插件</h2>
+        <h3>两种方式：内置（Python）与外置（任意语言）</h3>
+        <table class="doc-table">
+          <thead>
+            <tr><th>类型</th><th>语言</th><th>运行位置</th><th>适用场景</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>内置</strong></td><td>仅 Python</td><td>与 Core 同进程</td><td>快速集成、Python 库（Weather、News、Mail）。</td></tr>
+            <tr><td><strong>外部</strong></td><td>任意（Node.js、Go、Java、Python 等）</td><td>独立 HTTP 服务</td><td>已有服务、不同语言或独立部署。</td></tr>
+          </tbody>
+        </table>
+        <h3>内置插件（Python）</h3>
+        <ul>
+          <li><strong>位置：</strong><code>plugins/&lt;YourPlugin&gt;/</code>，含 <strong>plugin.yaml</strong>（id、name、description、type: inline、capabilities）、<strong>config.yml</strong>（运行时配置）、<strong>plugin.py</strong>（继承 <code>BasePlugin</code> 的类）。Core 启动时自动发现。</li>
+          <li>当用户意图匹配时，LLM 通过 <code>route_to_plugin(plugin_id)</code> 路由到该插件。</li>
+        </ul>
+        <h3>外部插件（任意语言）</h3>
+        <ul>
+          <li>将插件作为<strong>HTTP 服务</strong>运行：<strong>GET /health</strong> 返回 2xx；<strong>POST /run</strong> — 请求体为 PluginRequest JSON，响应为 PluginResult JSON。</li>
+          <li>向 Core <strong>注册</strong>：<code>POST http://&lt;core&gt;:9000/api/plugins/register</code>，提交 plugin id、name、description、<code>health_check_url</code>、<code>type: "http"</code> 及 <code>capabilities</code>。注册后 Core 会像内置插件一样路由到你的服务。</li>
+        </ul>
+        <p>仓库中的详细参考：<a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/HowToWriteAPlugin.md" target="_blank" rel="noopener">HowToWriteAPlugin.md</a>、<a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/PluginStandard.md" target="_blank" rel="noopener">PluginStandard.md</a>、<a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/PluginRegistration.md" target="_blank" rel="noopener">PluginRegistration.md</a>、<a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/PluginsGuide.md" target="_blank" rel="noopener">PluginsGuide.md</a>。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="examples">
+      <div class="doc-section-body">
+        <h2>示例：外部插件</h2>
+        <h3>小示例：<code>examples/external_plugins/</code></h3>
+        <p>多种语言的示例（同一契约：GET /health、POST /run，向 Core 注册）：</p>
+        <table class="doc-table">
+          <thead>
+            <tr><th>示例</th><th>语言</th><th>端口</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Quote</td><td>Python</td><td>3101</td><td>随机名言；get_quote_by_topic。post_process: true。</td></tr>
+            <tr><td>Time</td><td>Python</td><td>3102</td><td>当前时间、时区列表。post_process: true。</td></tr>
+            <tr><td>Quote</td><td>Node.js</td><td>3111</td><td>同上 Quote 契约，Node.js。</td></tr>
+            <tr><td>Time</td><td>Go</td><td>3112</td><td>同上 Time 契约，Go（标准库）。</td></tr>
+            <tr><td>Quote</td><td>Java</td><td>3113</td><td>同上 Quote 契约，Java（JDK 11+）。</td></tr>
+          </tbody>
+        </table>
+        <h3>完整示例</h3>
+        <table class="doc-table">
+          <thead>
+            <tr><th>示例</th><th>语言</th><th>位置</th><th>说明</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>HomeClaw Browser</td><td>Node.js</td><td><code>system_plugins/homeclaw-browser</code></td><td><strong>系统插件：</strong>WebChat（Control UI）、浏览器自动化（Playwright）、canvas、nodes。同一契约；向 Core 注册。端口 3020。见 <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/system_plugins/README.md" target="_blank" rel="noopener">system_plugins/README.md</a> 与 <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/system_plugins/homeclaw-browser/README.md" target="_blank" rel="noopener">homeclaw-browser/README.md</a>。</td></tr>
+            <tr><td>Companion 插件</td><td>Python</td><td>见仓库</td><td>基于 Python 的 companion/工具插件也是外部插件示例（同一契约）。见 <code>examples/external_plugins/</code> 或仓库获取最新位置与运行步骤。</td></tr>
+          </tbody>
+        </table>
+        <p>每个小示例：启动插件服务，然后通过提供的 <code>register</code> 脚本或模块向 Core 注册。运行命令与契约（GET /health、POST /run、注册 payload）见 <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/examples/external_plugins/README.md" target="_blank" rel="noopener">examples/external_plugins/README.md</a>。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="skills">
+      <div class="doc-section-body">
+        <h2>如何编写技能</h2>
+        <ul>
+          <li><strong>位置：</strong>在 <code>config/skills/</code> 下（或 <code>config/core.yml</code> 中 <code>skills_dir</code> 指定的路径）创建文件夹。</li>
+          <li><strong>必需：</strong><strong>SKILL.md</strong>，含<strong>名称</strong>、<strong>描述</strong>（何时使用）、<strong>工作流</strong>（步骤说明；LLM 使用工具执行）。</li>
+          <li><strong>可选：</strong><strong>scripts/</strong> — LLM 可通过 <code>run_skill</code> 运行的脚本（如 Python、Node.js、shell）。</li>
+        </ul>
+        <p>在 <code>config/core.yml</code> 中启用：<code>use_skills: true</code>、<code>skills_dir: config/skills</code>。重启 Core 后，助手会看到「可用技能」并可选择执行。<strong>OpenClaw 技能</strong>格式相同；将技能文件夹复制到 <code>config/skills/</code> 即可使用。</p>
+        <p>仓库中的详细参考：<a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/SkillsGuide.md" target="_blank" rel="noopener">SkillsGuide.md</a>、<a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/ToolsSkillsPlugins.md" target="_blank" rel="noopener">ToolsSkillsPlugins.md</a>。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="summary">
+      <div class="doc-section-body">
+        <h2>小结</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th>目标</th><th>从哪里开始</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>编写内置插件</td><td><code>plugins/&lt;Name&gt;/</code>，含 plugin.yaml、config.yml、plugin.py；<a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/HowToWriteAPlugin.md" target="_blank" rel="noopener">HowToWriteAPlugin.md</a>。</td></tr>
+            <tr><td>编写外部插件</td><td>HTTP 服务（GET /health、POST /run）；向 Core 注册；参考 <code>examples/external_plugins/</code> 与 HowToWriteAPlugin.md。</td></tr>
+            <tr><td>编写技能</td><td>在 <code>config/skills/</code> 下建文件夹，内含 SKILL.md（及可选 scripts/）；<a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/SkillsGuide.md" target="_blank" rel="noopener">SkillsGuide.md</a>。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="future">
+      <div class="doc-section-body">
+        <h2>未来：插件与技能站</h2>
+        <p>我们计划提供<strong>发现、上传与下载</strong> HomeClaw 插件与技能的网站。届时你可以与社区分享自己的插件与技能，并一键安装他人的。敬请关注。</p>
+      </div>
+    </section>
+
+    <div class="doc-quicklinks">
+      <h2>快速链接</h2>
+      <ul>
+        <li><a href="docs.html">本站文档</a></li>
+        <li><a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub 仓库</a></li>
+        <li><a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">完整文档</a></li>
+      </ul>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <p>HomeClaw — 你的家，你的 AI。<a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> · <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">文档</a></p>
+  </footer>
+</body>
+</html>

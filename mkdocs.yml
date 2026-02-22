@@ -52,6 +52,7 @@ nav:
   - Companion vs Channels: companion-vs-channels.md
   - Tools: tools.md
   - Plugins: plugins.md
+  - Writing plugins and skills: writing-plugins-and-skills.md
   - Models: models.md
   - Mix mode and reports: mix-mode-and-reports.md
   - Hybrid router scripts: hybrid-router-scripts.md

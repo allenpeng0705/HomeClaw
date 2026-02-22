@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw: how to write plugins and skills. Built-in and external plugins, SKILL.md, examples, future marketplace.">
+  <title>Writing plugins and skills — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="Main navigation">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">Home</a>
+        <a href="docs.html#quickstart">QuickStart</a>
+        <a href="docs.html#deploy-cloud">Deploy to cloud</a>
+        <a href="plugins-skills.html">Plugins &amp; skills</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Full docs</a>
+        <span class="lang-switch">EN | <a href="../zh/plugins-skills.html">中文</a></span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>Writing plugins and skills</h1>
+      <p class="lead">Plugins and skills are the main ways to extend HomeClaw. This page explains how to write both and where to find examples. In the future we plan a <strong>website to discover, upload, and download</strong> plugins and skills for HomeClaw.</p>
+      <p><strong>Plugins</strong> add focused features (weather, email, custom APIs); <strong>skills</strong> describe task workflows the assistant follows using tools (or scripts). Both are important for extending HomeClaw’s ability.</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="On this page">
+      <p class="doc-toc-title">On this page</p>
+      <ul>
+        <li><a href="#why">Why extend</a></li>
+        <li><a href="#plugins">How to write a plugin</a></li>
+        <li><a href="#examples">Examples: external plugins</a></li>
+        <li><a href="#skills">How to write a skill</a></li>
+        <li><a href="#summary">Summary</a></li>
+        <li><a href="#future">Future: marketplace</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="why">
+      <div class="doc-section-body">
+        <h2>Why extend with plugins and skills?</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th></th><th>Plugins</th><th>Skills</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>What</strong></td><td>Single-feature modules (weather, news, email, browser automation).</td><td>Task workflows: the LLM uses <strong>tools</strong> (or <strong>run_skill</strong> scripts) according to a skill’s instructions.</td></tr>
+            <tr><td><strong>Implementation</strong></td><td>Code: built-in (Python) or external (any language, HTTP server).</td><td>A <strong>folder</strong> with <strong>SKILL.md</strong> (name, description, workflow) and optional <strong>scripts/</strong>.</td></tr>
+            <tr><td><strong>When to use</strong></td><td>New capability that needs its own logic or API.</td><td>Reusable “how to do X” that uses existing tools or small scripts.</td></tr>
+          </tbody>
+        </table>
+        <p>Both are important: plugins give you new capabilities; skills give you reusable workflows and compatibility with <strong>OpenClaw-style skillsets</strong> (copy skill folders into <code>config/skills/</code> and they work).</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="plugins">
+      <div class="doc-section-body">
+        <h2>How to write a plugin</h2>
+        <h3>Two ways: built-in (Python) vs external (any language)</h3>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Type</th><th>Language</th><th>Where it runs</th><th>Best for</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>Built-in</strong></td><td>Python only</td><td>In-process with Core</td><td>Fast integration, Python libs (Weather, News, Mail).</td></tr>
+            <tr><td><strong>External</strong></td><td>Any (Node.js, Go, Java, Python, etc.)</td><td>Separate HTTP server</td><td>Existing service, different language, or independent deployment.</td></tr>
+          </tbody>
+        </table>
+        <h3>Built-in plugin (Python)</h3>
+        <ul>
+          <li><strong>Location:</strong> <code>plugins/&lt;YourPlugin&gt;/</code> with <strong>plugin.yaml</strong> (id, name, description, type: inline, capabilities), <strong>config.yml</strong> (runtime config), <strong>plugin.py</strong> (class extending <code>BasePlugin</code>). Core discovers it at startup.</li>
+          <li>The LLM routes to the plugin via <code>route_to_plugin(plugin_id)</code> when the user intent matches.</li>
+        </ul>
+        <h3>External plugin (any language)</h3>
+        <ul>
+          <li>Run your plugin as an <strong>HTTP server</strong>: <strong>GET /health</strong> → return 2xx; <strong>POST /run</strong> — body = PluginRequest JSON, response = PluginResult JSON.</li>
+          <li><strong>Register</strong> with Core: <code>POST http://&lt;core&gt;:9000/api/plugins/register</code> with plugin id, name, description, <code>health_check_url</code>, <code>type: "http"</code>, and <code>capabilities</code>. After registration, Core routes to your server like built-in plugins.</li>
+        </ul>
+        <p>Detailed references in the repo: <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/HowToWriteAPlugin.md" target="_blank" rel="noopener">HowToWriteAPlugin.md</a>, <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/PluginStandard.md" target="_blank" rel="noopener">PluginStandard.md</a>, <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/PluginRegistration.md" target="_blank" rel="noopener">PluginRegistration.md</a>, <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/PluginsGuide.md" target="_blank" rel="noopener">PluginsGuide.md</a>.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="examples">
+      <div class="doc-section-body">
+        <h2>Examples: external plugins</h2>
+        <h3>Small examples: <code>examples/external_plugins/</code></h3>
+        <p>Working samples in multiple languages (same contract: GET /health, POST /run, register with Core):</p>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Example</th><th>Language</th><th>Port</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Quote</td><td>Python</td><td>3101</td><td>Random quote; get_quote_by_topic. post_process: true.</td></tr>
+            <tr><td>Time</td><td>Python</td><td>3102</td><td>Current time, list timezones. post_process: true.</td></tr>
+            <tr><td>Quote</td><td>Node.js</td><td>3111</td><td>Same quote contract, Node.js.</td></tr>
+            <tr><td>Time</td><td>Go</td><td>3112</td><td>Same time contract, Go (stdlib).</td></tr>
+            <tr><td>Quote</td><td>Java</td><td>3113</td><td>Same quote contract, Java (JDK 11+).</td></tr>
+          </tbody>
+        </table>
+        <h3>Full-featured examples</h3>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Example</th><th>Language</th><th>Location</th><th>Description</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>HomeClaw Browser</td><td>Node.js</td><td><code>system_plugins/homeclaw-browser</code></td><td><strong>System plugin:</strong> WebChat (Control UI), browser automation (Playwright), canvas, nodes. Same contract; register with Core. Port 3020. See <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/system_plugins/README.md" target="_blank" rel="noopener">system_plugins/README.md</a> and <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/system_plugins/homeclaw-browser/README.md" target="_blank" rel="noopener">homeclaw-browser/README.md</a>.</td></tr>
+            <tr><td>Companion plugin</td><td>Python</td><td>See repo</td><td>A Python-based companion/utility plugin is another external plugin example (same contract). See <code>examples/external_plugins/</code> or the repo for the latest location and run steps.</td></tr>
+          </tbody>
+        </table>
+        <p>Each small example: run the plugin server, then register with Core via the provided <code>register</code> script or module. See <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/examples/external_plugins/README.md" target="_blank" rel="noopener">examples/external_plugins/README.md</a> for run commands and the contract (GET /health, POST /run, registration payload).</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="skills">
+      <div class="doc-section-body">
+        <h2>How to write a skill</h2>
+        <ul>
+          <li><strong>Location:</strong> A folder under <code>config/skills/</code> (or the path set by <code>skills_dir</code> in <code>config/core.yml</code>).</li>
+          <li><strong>Required:</strong> <strong>SKILL.md</strong> with <strong>Name</strong>, <strong>Description</strong> (when to use), and <strong>Workflow</strong> (step-by-step; the LLM uses tools to follow them).</li>
+          <li><strong>Optional:</strong> <strong>scripts/</strong> — scripts the LLM can run via <code>run_skill</code> (e.g. Python, Node.js, shell).</li>
+        </ul>
+        <p>Enable in <code>config/core.yml</code>: <code>use_skills: true</code>, <code>skills_dir: config/skills</code>. Restart Core. The assistant sees “Available skills” and can choose and run them. <strong>OpenClaw skills</strong> use the same format; copy skill folders into <code>config/skills/</code> and they work.</p>
+        <p>Detailed reference in the repo: <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/SkillsGuide.md" target="_blank" rel="noopener">SkillsGuide.md</a>, <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/ToolsSkillsPlugins.md" target="_blank" rel="noopener">ToolsSkillsPlugins.md</a>.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="summary">
+      <div class="doc-section-body">
+        <h2>Summary</h2>
+        <table class="doc-table">
+          <thead>
+            <tr><th>Goal</th><th>Where to start</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Write a built-in plugin</td><td><code>plugins/&lt;Name&gt;/</code> with plugin.yaml, config.yml, plugin.py; <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/HowToWriteAPlugin.md" target="_blank" rel="noopener">HowToWriteAPlugin.md</a>.</td></tr>
+            <tr><td>Write an external plugin</td><td>HTTP server (GET /health, POST /run); register with Core; see <code>examples/external_plugins/</code> and HowToWriteAPlugin.md.</td></tr>
+            <tr><td>Write a skill</td><td>Folder under <code>config/skills/</code> with SKILL.md (and optional scripts/); <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/SkillsGuide.md" target="_blank" rel="noopener">SkillsGuide.md</a>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="future">
+      <div class="doc-section-body">
+        <h2>Future: plugin and skill marketplace</h2>
+        <p>We plan to offer a <strong>website to discover, upload, and download</strong> plugins and skills for HomeClaw. You will be able to share your plugins and skills with the community and install others’ with a few clicks. Stay tuned for updates.</p>
+      </div>
+    </section>
+
+    <div class="doc-quicklinks">
+      <h2>Quick links</h2>
+      <ul>
+        <li><a href="docs.html">Docs on this site</a></li>
+        <li><a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub repository</a></li>
+        <li><a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Full documentation</a></li>
+      </ul>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <p>HomeClaw — your home, your AI. <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> · <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Docs</a></p>
+  </footer>
+</body>
+</html>
