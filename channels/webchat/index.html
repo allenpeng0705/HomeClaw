@@ -28,6 +28,10 @@
   <p class="status" id="status">Loading config…</p>
   <div id="log"></div>
   <div id="input" class="input-row" style="display:none;">
+    <select id="conversation_type" title="Assistant = main chat; Companion = companion thread (session_id=companion)">
+      <option value="assistant">Assistant</option>
+      <option value="companion">Companion</option>
+    </select>
     <input type="text" id="user_id" placeholder="user_id" title="Must exist in config/user.yml">
     <input type="text" id="msg" placeholder="Type a message…" autocomplete="off">
     <input type="file" id="files" multiple accept="image/*,video/*,audio/*,*/*" title="Attach images, video, audio, or files">
@@ -109,7 +113,12 @@
         msgInput.value = '';
         filesInput.value = '';
 
-        const payload = { user_id: user_id, text: text || '(no text)' };
+        const conversationType = (document.getElementById('conversation_type') && document.getElementById('conversation_type').value) || 'assistant';
+      const payload = { user_id: user_id, text: text || '(no text)' };
+      if (conversationType === 'companion') {
+        payload.session_id = 'companion';
+        payload.conversation_type = 'companion';
+      }
         if (fileList.length === 0) {
           ws.send(JSON.stringify(payload));
           return;

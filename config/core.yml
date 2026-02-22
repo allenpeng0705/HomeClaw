@@ -622,3 +622,11 @@ cognee:
   #   TELEMETRY_DISABLED: "true"
   #   VECTOR_STORE_PROVIDER: "qdrant"
 endpoints: []
+# Companion feature: external plugin. Core only routes (enabled, plugin_id, session_id_value, keyword).
+# All companion settings (name, character, language, etc.) live in the plugin config; no defaults in Core code.
+# keyword is required when enabled: companion routing is disabled until keyword (or name) is set here. Used for message-prefix routing (e.g. "Veda, hi").
+# companion:
+#   enabled: true
+#   plugin_id: companion
+#   session_id_value: companion
+#   keyword: Veda

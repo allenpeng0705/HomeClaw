@@ -183,6 +183,8 @@ class CoreService {
       'user_id': userId,
       'text': text,
       'channel_name': 'companion',
+      'conversation_type': 'companion',
+      'session_id': 'companion',
       'action': 'respond',
     };
     if (images != null && images.isNotEmpty) body['images'] = images;

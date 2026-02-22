@@ -50,6 +50,36 @@ python -m examples.external_plugins.time.register
 
 Then: "What time is it in Tokyo?" → Core routes to time, gets raw time string, **post_process** runs (Core LLM turns it into a friendly sentence), then sends. "List timezones" → capability list_timezones.
 
+## 3. Companion Plugin
+
+- **Server**: Separate conversation thread (companion persona) per user. Chat stored **only in companion store**, not in main user DB. Uses Core's LLM via `POST /api/plugins/llm/generate`. See [docs_design/CompanionFeatureDesign.md](../docs_design/CompanionFeatureDesign.md).
+- **Port**: 3103 (set `COMPANION_PORT` to change)
+- **Capability**: **chat** — one turn with the companion; user message in `user_input`, returns companion reply.
+
+### Run
+
+```bash
+# Terminal 1: Core (if not already running)
+python -m core.core
+
+# Terminal 2: start the companion server
+python -m examples.external_plugins.companion.server
+
+# Terminal 3: register with Core
+python -m examples.external_plugins.companion.register
+```
+
+Enable in `config/core.yml`:
+
+```yaml
+companion:
+  enabled: true
+  plugin_id: companion
+  session_id_value: companion
+```
+
+Then: **Companion app**, **WebChat**, or **homeclaw-browser** control UI send `conversation_type: companion` or `session_id: companion` (or `channel_name: companion`); Core routes those requests to the companion plugin only.
+
 ## 3. Quote Plugin (Node.js)
 
 - **Server**: Same quote contract as (1), implemented in **Node.js** (no framework).

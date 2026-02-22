@@ -1731,6 +1731,8 @@ class Core(CoreInterface):
                             user_name=data.get("user_name"),
                             app_id=data.get("app_id"),
                             action=data.get("action"),
+                            session_id=data.get("session_id"),
+                            conversation_type=data.get("conversation_type"),
                             images=data.get("images"),
                             videos=data.get("videos"),
                             audios=data.get("audios"),
@@ -1815,10 +1817,15 @@ class Core(CoreInterface):
             content_type_for_perm = ContentType.TEXTWITHIMAGE
         else:
             content_type_for_perm = ContentType.TEXT
+        request_metadata = {"user_id": request.user_id, "channel": request.channel_name}
+        if getattr(request, "session_id", None):
+            request_metadata["session_id"] = request.session_id
+        if getattr(request, "conversation_type", None):
+            request_metadata["conversation_type"] = request.conversation_type
         pr = PromptRequest(
             request_id=req_id,
             channel_name=request.channel_name or "webhook",
-            request_metadata={"user_id": request.user_id, "channel": request.channel_name},
+            request_metadata=request_metadata,
             channelType=ChannelType.IM,
             user_name=user_name,
             app_id=request.app_id or "homeclaw",
@@ -1843,6 +1850,51 @@ class Core(CoreInterface):
             pr.system_user_id = user.id or user.name
         self.latestPromptRequest = copy.deepcopy(pr)
         self._persist_last_channel(pr)
+        # Companion routing: when config companion.enabled and request targets companion, invoke companion plugin only (no main flow, no main user DB). See docs_design/CompanionFeatureDesign.md.
+        # keyword is required when companion is enabled (no default in code); routing is disabled until it is set in config.
+        meta = Util().get_core_metadata()
+        companion_cfg = getattr(meta, "companion", None) or {}
+        if companion_cfg.get("enabled"):
+            keyword = (companion_cfg.get("keyword") or companion_cfg.get("name") or "").strip()
+            if not keyword:
+                logger.warning(
+                    "Companion is enabled but companion.keyword (or companion.name) is not set in config. "
+                    "Set it in config/core.yml under companion to enable companion routing."
+                )
+            else:
+                session_id_val = (companion_cfg.get("session_id_value") or "companion").strip().lower()
+                plugin_id = (companion_cfg.get("plugin_id") or "companion").strip().lower().replace(" ", "_")
+                is_companion = (
+                    (getattr(request, "conversation_type", None) or "").strip().lower() == "companion"
+                    or (getattr(request, "session_id", None) or "").strip().lower() == session_id_val
+                    or (request.channel_name or "").strip().lower() == session_id_val
+                )
+                if not is_companion and keyword:
+                    text_stripped = (request.text or "").strip()
+                    kw_lower = keyword.lower()
+                    if text_stripped.lower().startswith(kw_lower + ",") or text_stripped.lower().startswith(kw_lower + " ") or text_stripped.lower().startswith("hey " + kw_lower) or text_stripped.lower().startswith("hi " + kw_lower):
+                        is_companion = True
+                        if text_stripped.lower().startswith(kw_lower + ",") or text_stripped.lower().startswith(kw_lower + " "):
+                            pr.text = text_stripped[len(keyword):].strip().lstrip(",").strip() or pr.text
+                if is_companion:
+                    plug = self.plugin_manager.get_plugin_by_id(plugin_id) if self.plugin_manager else None
+                    if isinstance(plug, dict):
+                        pr_companion = copy.deepcopy(pr)
+                        (pr_companion.request_metadata or {}).update({"capability_id": "chat", "capability_parameters": {}})
+                        try:
+                            result = await self.plugin_manager.run_external_plugin(plug, pr_companion)
+                            if result and getattr(result, "success", False):
+                                out_text = (result.text or "").strip()
+                                img_paths = list(getattr(result, "metadata", None) or {}).get("images") or []
+                                return True, out_text, 200, img_paths if isinstance(img_paths, list) else None
+                            err = getattr(result, "error", None) or "Companion plugin returned no text"
+                            return False, err, 500, None
+                        except Exception as e:
+                            logger.exception(e)
+                            return False, f"Companion error: {e!s}", 500, None
+                    else:
+                        logger.warning("Companion enabled but plugin_id=%s not found or not external; falling back to main flow.", plugin_id)
+        # if companion enabled but keyword not set, routing was skipped (must set companion.keyword in config)
         if not getattr(self, "orchestrator_unified_with_tools", True):
             flag = await self.orchestrator_handler(pr)
             if flag:
