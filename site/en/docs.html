@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw docs: mix mode, plugins, skills, channels, companion app, memory, knowledge base. Configuration and setup.">
+  <title>Docs — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="Main navigation">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">Home</a>
+        <a href="docs.html#quickstart">QuickStart</a>
+        <a href="docs.html#deploy-cloud">Deploy to cloud</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Full docs</a>
+        <span class="lang-switch">EN | <a href="../zh/docs.html">中文</a></span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>HomeClaw docs</h1>
+      <p class="lead">Detailed intro and configuration. For full documentation (install, advanced config), see the <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">documentation site</a>.</p>
+      <p>HomeClaw is an AI assistant that runs on your machine. It works on <strong>Mac, Windows, and Linux</strong> (Python stack) and can be extended with <strong>external plugins in any language</strong> (Node.js, Go, Java, etc.). One installation is one agent: the same memory, tools, plugins, and knowledge base no matter how you connect. Use cloud or local models, or both via <strong>mix mode</strong>. Below are the main features with configuration details.</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="On this page">
+      <p class="doc-toc-title">On this page</p>
+      <ul>
+        <li><a href="#quickstart">QuickStart</a></li>
+        <li><a href="#deploy-cloud">Deploy to cloud</a></li>
+        <li><a href="#mix-mode">1. Mix mode</a></li>
+        <li><a href="#plugins-skills">2. Plugins and skills</a></li>
+        <li><a href="#channels">3. Channels</a></li>
+        <li><a href="#companion">4. Companion app</a></li>
+        <li><a href="#multi-agent">5. Multi-agent</a></li>
+        <li><a href="#memory">6. Memory</a></li>
+        <li><a href="#knowledge-base">7. Knowledge base</a></li>
+        <li><a href="#profile">8. Profile</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="quickstart">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>QuickStart — run HomeClaw on Mac, Windows, or Linux</h2>
+        <p class="doc-section-summary">Clone, install, configure (optional), run Core, then chat via CLI, WebChat, or the Companion app.</p>
+        <p><strong>Prerequisites:</strong> Python 3 (3.9+ recommended), git. On Windows, if you hit C++ build errors, install <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">Visual C++ Build Tools</a> (see full docs).</p>
+
+        <h3>Mac &amp; Linux</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">1. Clone and install</p>
+          <pre class="quickstart-code"><code>git clone https://github.com/allenpeng0705/HomeClaw.git
+cd HomeClaw
+pip install -r requirements.txt</code></pre>
+        </div>
+        <div class="doc-keys">
+          <p class="doc-keys-title">2. Configure (optional)</p>
+          <ul>
+            <li><strong>config/core.yml</strong> — Set <code>main_llm</code>, <code>embedding_llm</code> (e.g. <code>cloud_models/Gemini-2.5-Flash</code>).</li>
+            <li><strong>Cloud models</strong> — Set API key in the environment (e.g. <code>export GEMINI_API_KEY=...</code>).</li>
+            <li><strong>Local models</strong> — Copy llama.cpp <strong>binary distribution</strong> into <code>llama.cpp-master/&lt;platform&gt;/</code> for your device (e.g. <code>mac/</code>, <code>win_cuda/</code>, <code>linux_cpu/</code>; see <code>llama.cpp-master/README.md</code> in the repo).</li>
+            <li><strong>config/user.yml</strong> — Add users (name, email, im, etc.) so they can talk to the assistant.</li>
+          </ul>
+        </div>
+        <div class="doc-keys">
+          <p class="doc-keys-title">3. Run Core</p>
+          <pre class="quickstart-code"><code>python -m main start</code></pre>
+          <p>This starts Core and the built-in CLI; you can chat in the same terminal.</p>
+        </div>
+        <div class="doc-keys">
+          <p class="doc-keys-title">4. Chat</p>
+          <ul>
+            <li><strong>CLI</strong> — Use the interactive chat in the same terminal where you ran <code>python -m main start</code>.</li>
+            <li><strong>WebChat</strong> — In another terminal: <code>python -m channels.run webchat</code>, then open http://localhost:8014.</li>
+            <li><strong>Companion app</strong> — Build or install from <code>clients/homeclaw_companion/</code>; in Settings set <strong>Core URL</strong> to <code>http://127.0.0.1:9000</code> (or your Tailscale/tunnel URL for remote).</li>
+          </ul>
+        </div>
+        <p><strong>Check config and LLM:</strong> <code>python -m main doctor</code>.</p>
+
+        <h3>Windows</h3>
+        <p>Same steps as above. Use <code>py -m main start</code> or <code>python -m main start</code> depending on your Python setup. If you see errors building native extensions, install <a href="https://github.com/bycloudai/InstallVSBuildToolsWindows" target="_blank" rel="noopener">Visual C++ Build Tools</a> (see <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">getting-started</a> in the full docs).</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="deploy-cloud">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Deploy to cloud</h2>
+        <p class="doc-section-summary">Run HomeClaw on a cloud VM (Aliyun ECS, AWS EC2, or others) so it is always on and reachable from anywhere.</p>
+        <p>You can deploy HomeClaw to a <strong>cloud VM</strong> (VPS) so the assistant is always on—Companion app, Telegram, WebChat—without keeping your home machine running. Steps are the same as QuickStart; only the way you create the VM and open the firewall differs by provider.</p>
+        <h3>Steps</h3>
+        <ol>
+          <li><strong>Create a VM</strong> — <strong>Aliyun (阿里云) ECS</strong>, <strong>AWS EC2</strong>, <strong>Tencent Cloud</strong>, <strong>GCP</strong>, <strong>Azure</strong>, or any VPS. Choose <strong>Ubuntu 22.04</strong> (or 20.04).</li>
+          <li><strong>Install and run</strong> — SSH in, then same as QuickStart: clone repo, <code>pip install -r requirements.txt</code>, edit <code>config/core.yml</code> and <code>config/user.yml</code>, set API keys in the environment. If using <strong>local models</strong>, copy llama.cpp binary into <code>llama.cpp-master/&lt;platform&gt;/</code> for the VM (e.g. <code>linux_cpu/</code>; see <code>llama.cpp-master/README.md</code>). Then <code>python -m main start</code>.</li>
+          <li><strong>Secure Core</strong> — In <code>config/core.yml</code> set <code>auth_enabled: true</code> and <code>auth_api_key: "&lt;long-random-key&gt;"</code>. Open only port <strong>9000</strong> (and 22 for SSH) in the firewall, or use <strong>Cloudflare Tunnel</strong> / <strong>Tailscale</strong> and keep 9000 internal.</li>
+          <li><strong>Keep it running</strong> — Use <strong>systemd</strong> (or supervisor) so Core restarts on reboot. See full docs for a sample service file.</li>
+        </ol>
+        <p><strong>Companion app:</strong> Set Core URL to <code>http://&lt;vm-public-ip&gt;:9000</code> (or your tunnel URL) and the same API key.</p>
+        <p><a href="https://allenpeng0705.github.io/HomeClaw/deploy-cloud/" target="_blank" rel="noopener">Full guide: Deploy to cloud</a> (Aliyun ECS, AWS EC2, security, systemd) · <a href="https://allenpeng0705.github.io/HomeClaw/remote-access/" target="_blank" rel="noopener">Remote access</a> (Tailscale, Cloudflare Tunnel)</p>
+      </div>
+    </section>
+
+    <section class="doc-section" id="mix-mode">
+      <div class="doc-section-img-wrap">
+        <img src="../assets/section-mix-mode.png" alt="Mix mode" class="doc-section-img" width="320" height="180" onerror="this.style.display='none'">
+      </div>
+      <div class="doc-section-body">
+        <h2>1. Mix mode — save cost</h2>
+        <p class="doc-section-summary">Router picks local or cloud per message; one model per turn, usage reports, and optional fallback.</p>
+        <p>For each user message, a router picks once: <strong>local</strong> or <strong>cloud</strong>. Simple or private tasks go to your local model; complex or uncertain ones go to the cloud. You get automatic routing and <strong>usage reports</strong> (in chat or via API) to tune rules.</p>
+        <h3>How to configure</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">In <code>config/core.yml</code></p>
+          <ul>
+            <li><strong>main_llm_mode:</strong> <code>local</code> | <code>cloud</code> | <code>mix</code> — use <code>mix</code> to enable routing.</li>
+            <li><strong>main_llm_local</strong> — e.g. <code>local_models/main_vl_model_4B</code>.</li>
+            <li><strong>main_llm_cloud</strong> — e.g. <code>cloud_models/Gemini-2.5-Flash</code>.</li>
+            <li><strong>hybrid_router:</strong> <code>default_route</code> (local/cloud when no layer decides), <code>fallback_on_llm_error</code>, <code>heuristic</code> (enabled, threshold, rules_path), <code>semantic</code> (enabled, threshold, routes_path), <code>slm</code> (optional classifier model).</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section" id="plugins-skills">
+      <div class="doc-section-img-wrap">
+        <img src="../assets/section-plugins-skills.png" alt="Plugins and skills" class="doc-section-img" width="320" height="180" onerror="this.style.display='none'">
+      </div>
+      <div class="doc-section-body">
+        <h2>2. Plugins and skills — extend ability</h2>
+        <p class="doc-section-summary">Built-in and external plugins; OpenClaw-style skills in <code>config/skills/</code> with SKILL.md.</p>
+        <h3>Plugins</h3>
+        <p><strong>Built-in</strong> (Python): <code>plugins/&lt;Name&gt;/</code> with <code>plugin.yaml</code>, <code>config.yml</code>, <code>plugin.py</code>. Included: <strong>Weather</strong>, <strong>News</strong>, <strong>PptMaker</strong>.</p>
+        <p><strong>External</strong> (any language): HTTP server with <code>GET /health</code> and <code>POST /run</code>. Register via <code>POST /api/plugins/register</code>. LLM calls <code>route_to_plugin(plugin_id, capability_id, parameters)</code> when intent matches.</p>
+        <h3>Skills</h3>
+        <p>Folders under <code>config/skills/</code> with <strong>SKILL.md</strong> (name, description, optional workflow body). LLM sees “Available skills” and uses tools or <strong>run_skill</strong> for scripts. Copy OpenClaw/ClawHub skill folders in and they work.</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Config</p>
+          <ul>
+            <li><code>use_skills: true</code>, <code>skills_dir: config/skills</code>; optional <code>skills_use_vector_search</code>, <code>skills_test_dir</code>, <code>run_skill_allowlist</code> under <code>tools</code>.</li>
+            <li>Bundled: <code>example</code>, <code>social-media-agent-1.0.0</code>, <code>linkedin-writer-1.0.0</code>, <code>desktop-ui</code>, <code>ip-cameras</code>.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section" id="channels">
+      <div class="doc-section-img-wrap">
+        <img src="../assets/section-channels.png" alt="Channels" class="doc-section-img" width="320" height="180" onerror="this.style.display='none'">
+      </div>
+      <div class="doc-section-body">
+        <h2>3. Channels — remote access</h2>
+        <p class="doc-section-summary">WebChat, Telegram, Discord, CLI, etc. — same Core; user.yml allowlist; session and remote access options.</p>
+        <p>Channels are how users reach your Core. All use the same Core, memory, and <strong>config/user.yml</strong> allowlist (name, email, im, phone, permissions). Only listed users can talk — your <strong>privacy and access control</strong>.</p>
+        <h3>Session management</h3>
+        <p>Under <code>session:</code> in core.yml: <strong>dm_scope</strong> (main | per-peer | per-channel-peer | per-account-channel-peer), <strong>identity_links</strong> (same person across channels), <strong>prune_keep_last_n</strong>, <strong>prune_after_turn</strong>, <strong>daily_reset_at_hour</strong>, <strong>idle_minutes</strong>, <strong>api_enabled</strong>. Data is keyed by system user id.</p>
+        <h3>Remote access</h3>
+        <ul>
+          <li><strong>Auth:</strong> <code>auth_enabled: true</code>, <code>auth_api_key</code>; clients send <code>X-API-Key</code> or <code>Authorization: Bearer</code> on /inbound and /ws.</li>
+          <li><strong>Tailscale:</strong> Use Tailscale IP (e.g. 100.x.x.x:9000) from other Tailscale nodes; no public exposure.</li>
+          <li><strong>Tailscale Funnel + auth proxy:</strong> Public HTTPS with a proxy in front for webhooks/bots.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section" id="companion">
+      <div class="doc-section-img-wrap">
+        <img src="../assets/section-companion.png" alt="Companion app" class="doc-section-img" width="320" height="180" onerror="this.style.display='none'">
+      </div>
+      <div class="doc-section-body">
+        <h2>4. Companion app</h2>
+        <p class="doc-section-summary">Flutter app for Mac, Windows, iPhone, Android: chat, voice, and Manage Core (edit core.yml, user.yml).</p>
+        <p>The <strong>HomeClaw Companion</strong> talks to your Core over HTTP like other channels.</p>
+        <h3>Features</h3>
+        <ul>
+          <li><strong>Chat</strong> — messages, images, files, history.</li>
+          <li><strong>Voice</strong> — input and TTS.</li>
+          <li><strong>Manage Core</strong> — edit core.yml and user.yml (server, LLM, memory, session, profile, skills, tools, auth, users) from the app; no SSH.</li>
+        </ul>
+        <h3>How to use</h3>
+        <p>Build from <code>clients/homeclaw_companion/</code>. Set <strong>Core URL</strong> (e.g. http://127.0.0.1:9000 or Tailscale URL). Set API key if <code>auth_enabled</code>. Add user in user.yml or via Manage Core → Users. macOS: see docs for permissions.</p>
+      </div>
+    </section>
+
+    <section class="doc-section" id="multi-agent">
+      <div class="doc-section-img-wrap">
+        <img src="../assets/section-multi-agent.png" alt="Multi-agent" class="doc-section-img" width="320" height="180" onerror="this.style.display='none'">
+      </div>
+      <div class="doc-section-body">
+        <h2>5. Multi-agent</h2>
+        <p class="doc-section-summary">One instance = one agent; more instances = more agents (different ports/configs).</p>
+        <p>Run multiple Core instances on different ports (e.g. 9000, 9001). Point the Companion or any channel at the desired URL. Each instance has its own memory, tools, plugins, and knowledge base. No central orchestrator.</p>
+      </div>
+    </section>
+
+    <section class="doc-section" id="memory">
+      <div class="doc-section-img-wrap">
+        <img src="../assets/section-memory.png" alt="Memory" class="doc-section-img" width="320" height="180" onerror="this.style.display='none'">
+      </div>
+      <div class="doc-section-body">
+        <h2>6. Memory</h2>
+        <p class="doc-section-summary">RAG-style memory (vector + relational) plus Markdown file–based memory (AGENT_MEMORY.md, daily files); per user; Cognee or Chroma backend.</p>
+        <p>HomeClaw keeps memory so the assistant can remember and recall past context. Besides vector/relational (Cognee or Chroma), it supports <strong>Markdown file–based memory</strong>: e.g. <code>AGENT_MEMORY.md</code> for long-term agent context and daily memory files (<code>YYYY-MM-DD.md</code>) for bounded short-term context. All memory is scoped by system user id.</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Config</p>
+          <ul>
+            <li><code>use_memory: true</code>, <code>memory_backend: cognee</code> (default) or <code>chroma</code>. File-based: <code>use_agent_memory_file</code>, <code>agent_memory_path</code>, <code>use_daily_memory</code>, <code>daily_memory_dir</code>.</li>
+            <li>Reset: <code>POST</code> or <code>GET http://&lt;core&gt;:&lt;port&gt;/memory/reset</code>.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section" id="knowledge-base">
+      <div class="doc-section-img-wrap">
+        <img src="../assets/section-knowledge-base.png" alt="Knowledge base" class="doc-section-img" width="320" height="180" onerror="this.style.display='none'">
+      </div>
+      <div class="doc-section-body">
+        <h2>7. Knowledge base</h2>
+        <p class="doc-section-summary">Per-user KB: documents, URLs, manual content; RAG tools and optional auto-add on file upload.</p>
+        <p>When <code>knowledge_base.enabled: true</code>, tools like <strong>knowledge_base_add</strong> and retrieval are available. File-understanding can auto-add to KB when the user sends only file(s) under a size limit.</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Config</p>
+          <ul>
+            <li>Under <code>knowledge_base:</code> — <code>enabled</code>, <code>backend</code> (auto | cognee | chroma), <code>chunk_size</code>, <code>chunk_overlap</code>, <code>unused_ttl_days</code>, <code>max_sources_per_user</code>, <code>retrieval_min_score</code>. <code>file_understanding.add_to_kb_max_chars</code> for auto-add.</li>
+            <li>Reset: <code>POST</code> or <code>GET http://&lt;core&gt;:&lt;port&gt;/knowledge_base/reset</code>.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section" id="profile">
+      <div class="doc-section-img-wrap">
+        <img src="../assets/section-profile.png" alt="Profile" class="doc-section-img" width="320" height="180" onerror="this.style.display='none'">
+      </div>
+      <div class="doc-section-body">
+        <h2>8. Profile</h2>
+        <p class="doc-section-summary">Per-user JSON profile (name, birthday, preferences); assistant can read/update via tools.</p>
+        <p>Learned facts are stored in one JSON file per user (keyed by system user id). Useful for personalization.</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Config</p>
+          <ul>
+            <li><code>profile.enabled: true</code>, <code>profile.dir</code> (empty = <code>database/profiles</code>). See <code>docs/UserProfileDesign.md</code>.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <div class="doc-quicklinks">
+      <h2>Quick links</h2>
+      <ul>
+        <li><a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub repository</a></li>
+        <li><a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Full documentation</a> (install, models, plugins, mix mode, channels, memory, KB)</li>
+      </ul>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <p>HomeClaw — your home, your AI. <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> · <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Docs</a></p>
+  </footer>
+</body>
+</html>
