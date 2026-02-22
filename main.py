@@ -385,7 +385,8 @@ def start(open_browser=True):
                     pass
         if not ready:
             print(f"Core starting (or check {ready_url})\n")
-        if open_browser:
+        # Only open browser when public_url or pinggy.token is set (so we don't pop up QR/connect when neither is set)
+        if open_browser and _has_public_connect_config():
             try:
                 webbrowser.open(ui_url)
                 print(f"Opened launcher (WebChat / Control UI): {ui_url}\n")
