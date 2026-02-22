@@ -68,6 +68,9 @@ class InboundRequest(BaseModel):
     user_name: Optional[str] = None  # display name; defaults to user_id if omitted
     app_id: Optional[str] = "homeclaw"
     action: Optional[str] = "respond"
+    # Companion/assistant disambiguation: when client sends conversation_type=companion or session_id=companion, Core routes to companion plugin only (see docs_design/CompanionFeatureDesign.md).
+    session_id: Optional[str] = None
+    conversation_type: Optional[str] = None
     # For multimodal: list of data URLs (data:...;base64,...) or paths Core can read
     images: Optional[List[str]] = None
     videos: Optional[List[str]] = None
@@ -635,6 +638,8 @@ class CoreMetadata:
     main_llm_local: str = ""   # e.g. local_models/main_vl_model_4B; required when main_llm_mode == "mix"
     main_llm_cloud: str = ""  # e.g. cloud_models/Gemini-2.5-Flash; required when main_llm_mode == "mix"
     hybrid_router: Dict[str, Any] = field(default_factory=dict)  # default_route, heuristic, semantic, slm (enabled, threshold, paths/model)
+    # Companion feature: when enabled, requests with conversation_type or session_id or channel_name matching session_id_value are routed to the companion plugin only (external plugin). See docs_design/CompanionFeatureDesign.md.
+    companion: Dict[str, Any] = field(default_factory=dict)  # enabled: bool; plugin_id: str (default "companion"); session_id_value: str (default "companion")
 
     @staticmethod
     def _normalize_system_plugins_env(raw: Any) -> Dict[str, Dict[str, str]]:
@@ -876,6 +881,7 @@ class CoreMetadata:
             main_llm_local=main_llm_local_val,
             main_llm_cloud=main_llm_cloud_val,
             hybrid_router=hybrid_router_val,
+            companion=data.get('companion') if isinstance(data.get('companion'), dict) else {},
         )
 
     # @staticmethod

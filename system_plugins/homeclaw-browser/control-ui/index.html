@@ -30,6 +30,10 @@
   <p class="meta">Chat with HomeClaw. Ensure <code>user_id</code> exists in <code>config/user.yml</code> (e.g. add <code>webchat_user</code>).</p>
   <div id="log"></div>
   <div class="input-row">
+    <select id="conversation_type" title="Assistant = main chat; Companion = companion thread">
+      <option value="assistant">Assistant</option>
+      <option value="companion">Companion</option>
+    </select>
     <input type="text" id="user_id" placeholder="user_id" value="webchat_user" title="Must exist in config/user.yml">
     <input type="text" id="text" placeholder="Type a message..." autocomplete="off">
     <input type="file" id="files" multiple accept="image/*,video/*,audio/*,*/*" title="Attach images, video, audio, or files">
@@ -112,7 +116,12 @@
       textEl.value = '';
       filesEl.value = '';
 
+      const conversationType = (document.getElementById('conversation_type') && document.getElementById('conversation_type').value) || 'assistant';
       const payload = { user_id, text: text || '(no text)' };
+      if (conversationType === 'companion') {
+        payload.session_id = 'companion';
+        payload.conversation_type = 'companion';
+      }
       if (fileList.length === 0) {
         addLog('Sending message (text only).', 'sys');
         ws.send(JSON.stringify(payload));
