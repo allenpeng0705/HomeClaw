@@ -132,12 +132,16 @@ class Util:
         CoreMetadata.to_yaml(self.core_metadata, os.path.join(self.config_path(), 'core.yml'))
 
         log_format = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
-        if self.silent:
-            logger.remove(sys.stdout)
-            logger.add(sys.stdout, format=log_format, level="INFO")
+        log_to_console = getattr(self.core_metadata, 'log_to_console', True)
+        if log_to_console:
+            if self.silent:
+                logger.remove(sys.stdout)
+                logger.add(sys.stdout, format=log_format, level="INFO")
+            else:
+                logger.remove(sys.stdout)
+                logger.add(sys.stdout, format=log_format, level="DEBUG")
         else:
             logger.remove(sys.stdout)
-            logger.add(sys.stdout, format=log_format, level="DEBUG")
 
     def has_memory(self) -> bool:
         return self.core_metadata.use_memory
@@ -248,18 +252,21 @@ class Util:
 
         # remove the stdio logger
         logger.remove()
+        log_to_console = getattr(self.core_metadata, 'log_to_console', True)
         if mode == "production":
             file_name = module_name + '_production.log'
             log_file = os.path.join(log_path, file_name)
             logger.add(log_file, format="{time} {level} {message}", filter=filter_production, level="INFO")
-            logger.add(sys.stdout, format="{time} {level} {message}", filter=filter_production, level="INFO")
+            if log_to_console:
+                logger.add(sys.stdout, format="{time} {level} {message}", filter=filter_production, level="INFO")
         else:
             file_name = module_name + '_debug.log'
             log_file = os.path.join(log_path, file_name)
-            if self.silent:
-                logger.add(sys.stdout, format=log_format, level="INFO")
-            else:
-                logger.add(sys.stdout, format=log_format, level="DEBUG")
+            if log_to_console:
+                if self.silent:
+                    logger.add(sys.stdout, format=log_format, level="INFO")
+                else:
+                    logger.add(sys.stdout, format=log_format, level="DEBUG")
             # The filter is to avoid to record long text into file
             logger.add(log_file, format=log_format, filter=filter_debug, level="DEBUG")
    

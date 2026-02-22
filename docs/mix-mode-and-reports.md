@@ -77,6 +77,32 @@ Each mix-mode turn logs one line (JSON) with the routing decision:
 
 Use this to debug why a given message went local or cloud.
 
+### Why are all requests routed to local?
+
+If **every** (or almost every) request goes to the **local** model in mix mode, one or more of the following is usually true:
+
+1. **`default_route` is `local`**  
+   When no layer (heuristic, semantic, slm) selects a route—or a layer fails—the router uses `hybrid_router.default_route`. If that is `local`, ambiguous or low-confidence requests go local.  
+   **Fix:** Set `default_route: cloud` in `config/core.yml` under `hybrid_router` if you want “when in doubt, use cloud.”
+
+2. **Layer 1 (heuristic) matches “local” first**  
+   Heuristic uses **first match wins**. In the default `heuristic_rules.yml`, there are many **local** rules (screenshot, clipboard, open app, CPU, keyboard, etc.). A query that contains any of those keywords (or similar) will route to local before semantic or slm run.  
+   **Fix:** Add more **cloud** rules for the intents you want on cloud (e.g. “search”, “news”, “translate”, “summarize”, “weather”) and place them so they can match; or temporarily set `heuristic.enabled: false` to rely only on semantic + slm (and default_route).
+
+3. **Layer 2 (semantic) rarely picks cloud**  
+   Semantic compares the user message to `local_utterances` and `cloud_utterances`. If `semantic.threshold` is high (e.g. 0.6–0.7) and your queries are short or generic, similarity may not reach the threshold for either side, so the router falls through to `default_route` (local).  
+   **Fix:** Lower `semantic.threshold` (e.g. 0.5–0.55) so more requests get a semantic decision; or add more cloud example utterances in `semantic_routes.yml` (or `generated_utterances.yml`) that are close to your real queries.
+
+4. **Layer 3 (slm) is off or failing**  
+   If `slm.enabled` is `true` but the classifier model (e.g. `local_models/classifier_0_6b`) is not running or not in `local_models`, Layer 3 throws and the router falls back to `default_route`.  
+   **Fix:** Ensure the Layer 3 model is in `local_models` and its server is up on the configured port; or set `slm.enabled: false` and rely on heuristic + semantic + default_route.
+
+5. **`main_llm_mode` is not actually `mix`**  
+   If `main_llm_mode` is missing or misspelled, Core does not run the hybrid router and uses a single main model (often from `main_llm` or the first available, which may be local).  
+   **Fix:** In `config/core.yml` set `main_llm_mode: mix` and define `main_llm_local`, `main_llm_cloud`, and `hybrid_router`.
+
+**Quick check:** Turn on `hybrid_router.show_route_in_response: true` and look at the prefix on each reply (e.g. `[Local · heuristic]` or `[Cloud · default_route]`). That shows which layer chose the route and confirms whether the router is running and what it decided.
+
 **Failure and fallback:** If the chosen model fails (timeout, connection error, bad response), Core does **not** block the whole task by default. When `hybrid_router.fallback_on_llm_error` is `true` (default), Core retries **once** with the other route (e.g. local failed → try cloud; cloud failed → try local). If the fallback also fails, the user sees "Sorry, something went wrong...". Set `fallback_on_llm_error: false` to disable automatic retry and fail immediately when the chosen model fails.
 
 ### 2. REST API (aggregate report)

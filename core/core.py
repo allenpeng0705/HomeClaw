@@ -1287,7 +1287,7 @@ class Core(CoreInterface):
             "agent_memory_max_chars", "use_agent_memory_search", "agent_memory_vector_collection",
             "use_daily_memory", "daily_memory_dir", "session", "notify_unknown_request", "outbound_markdown_format",
             "llm_max_concurrent", "compaction", "use_tools", "use_skills", "skills_dir",
-            "skills_top_n_candidates", "skills_max_in_prompt", "plugins_top_n_candidates", "plugins_max_in_prompt",
+            "skills_max_in_prompt", "plugins_max_in_prompt",
             "plugins_description_max_chars", "skills_use_vector_search", "skills_vector_collection",
             "skills_max_retrieved", "skills_similarity_threshold", "skills_refresh_on_startup", "skills_test_dir",
             "skills_incremental_sync", "plugins_use_vector_search", "plugins_vector_collection",
@@ -1807,7 +1807,7 @@ class Core(CoreInterface):
                         if _ni or _nf:
                             logger.info("WS inbound: images={} files={} (client must send payload.images or data:image/ in payload.files)", _ni, _nf)
                         req = InboundRequest(
-                            user_id=data.get("user_id", ""),
+                            user_id=(data.get("user_id") or "").strip() or "companion",
                             text=data.get("text", ""),
                             channel_name=data.get("channel_name", "ws"),
                             user_name=data.get("user_name"),
@@ -1904,14 +1904,17 @@ class Core(CoreInterface):
             request_metadata["session_id"] = request.session_id
         if getattr(request, "conversation_type", None):
             request_metadata["conversation_type"] = request.conversation_type
+        # Memory/Cognee scope: user_id and app_id; companion often omits app_id, so default to homeclaw
+        inbound_user_id = (getattr(request, "user_id", None) or "").strip() or "companion"
+        inbound_app_id = getattr(request, "app_id", None) or "homeclaw"
         pr = PromptRequest(
             request_id=req_id,
             channel_name=request.channel_name or "webhook",
             request_metadata=request_metadata,
             channelType=ChannelType.IM,
             user_name=user_name,
-            app_id=request.app_id or "homeclaw",
-            user_id=request.user_id,
+            app_id=inbound_app_id,
+            user_id=inbound_user_id,
             contentType=content_type_for_perm,
             text=request.text,
             action=request.action or "respond",
@@ -3777,9 +3780,15 @@ class Core(CoreInterface):
                     meta_skills = Util().core_metadata
                     skills_path = get_skills_dir(getattr(meta_skills, 'skills_dir', None), root=root)
                     skills_list = []
-                    if getattr(meta_skills, 'skills_use_vector_search', False) and getattr(self, 'skills_vector_store', None) and getattr(self, 'embedder', None):
+                    use_vector_search = bool(getattr(meta_skills, 'skills_use_vector_search', False))
+                    if not use_vector_search:
+                        # skills_use_vector_search=false means include ALL skills (no RAG, no cap)
+                        skills_list = load_skills(skills_path, include_body=False)
+                        if skills_list:
+                            _component_log("skills", f"included all {len(skills_list)} skill(s) (skills_use_vector_search=false)")
+                    if not skills_list and use_vector_search and getattr(self, 'skills_vector_store', None) and getattr(self, 'embedder', None):
                         from base.skills import search_skills_by_query, load_skill_by_folder, TEST_ID_PREFIX
-                        max_retrieved = max(1, min(100, int(getattr(meta_skills, 'skills_top_n_candidates', 10) or 10)))
+                        max_retrieved = max(1, min(100, int(getattr(meta_skills, 'skills_max_retrieved', 10) or 10)))
                         threshold = float(getattr(meta_skills, 'skills_similarity_threshold', 0.0) or 0.0)
                         hits = await search_skills_by_query(
                             self.skills_vector_store, self.embedder, query or "",
@@ -3811,69 +3820,104 @@ class Core(CoreInterface):
                             skills_list = skills_list[:skills_max]
                             _component_log("skills", f"capped to {skills_max} skill(s) after threshold (skills_max_in_prompt)")
                     if not skills_list:
+                        # RAG returned nothing; fallback: load all skills from disk
                         skills_list = load_skills(skills_path, include_body=False)
-                        top_n = max(1, min(100, int(getattr(meta_skills, 'skills_top_n_candidates', 10) or 10)))
-                        if len(skills_list) > top_n:
-                            skills_list = skills_list[:top_n]
-                        skills_max = max(0, int(getattr(meta_skills, 'skills_max_in_prompt', 5) or 5))
-                        if skills_max > 0 and len(skills_list) > skills_max:
-                            skills_list = skills_list[:skills_max]
-                            _component_log("skills", f"capped to {skills_max} skill(s) in prompt (skills_max_in_prompt)")
                         if skills_list:
-                            _component_log("skills", f"loaded {len(skills_list)} skill(s) from {skills_path}")
-                    # Config-driven force-include: when user query matches a rule pattern, ensure those skill folders are in the prompt and optionally append an instruction
+                            _component_log("skills", f"loaded {len(skills_list)} skill(s) from disk (RAG had no hits)")
+                    # Force-include: config rules (core.yml) and skill-driven triggers (SKILL.md trigger:). Query-matched skills get instruction + optional auto_invoke.
                     matched_instructions = []
-                    if skills_list:
-                        from base.skills import load_skill_by_folder
-                        q = (query or "").strip().lower()
-                        folders_present = {s.get("folder") for s in skills_list}
-                        for rule in (getattr(meta_skills, "skills_force_include_rules", None) or []):
-                            # Support single "pattern" (str) or "patterns" (list) for multi-language / general matching
-                            patterns = rule.get("patterns") if isinstance(rule, dict) else None
-                            if patterns is None and isinstance(rule, dict) and rule.get("pattern") is not None:
-                                patterns = [rule.get("pattern")]
-                            pattern = rule.get("pattern") if isinstance(rule, dict) else None
-                            folders = rule.get("folders") if isinstance(rule, dict) else None
-                            if not folders or not isinstance(folders, (list, tuple)):
+                    skills_list = skills_list or []
+                    q = (query or "").strip().lower()
+                    folders_present = {s.get("folder") for s in skills_list}
+                    from base.skills import load_skill_by_folder
+                    for rule in (getattr(meta_skills, "skills_force_include_rules", None) or []):
+                        # Support single "pattern" (str) or "patterns" (list) for multi-language / general matching
+                        patterns = rule.get("patterns") if isinstance(rule, dict) else None
+                        if patterns is None and isinstance(rule, dict) and rule.get("pattern") is not None:
+                            patterns = [rule.get("pattern")]
+                        pattern = rule.get("pattern") if isinstance(rule, dict) else None
+                        folders = rule.get("folders") if isinstance(rule, dict) else None
+                        if not folders or not isinstance(folders, (list, tuple)):
+                            continue
+                        if not patterns and not pattern:
+                            continue
+                        to_try = list(patterns) if patterns else ([pattern] if pattern else [])
+                        matched_rule = False
+                        for pat in to_try:
+                            if not pat or not isinstance(pat, str):
                                 continue
-                            if not patterns and not pattern:
+                            try:
+                                if re.search(pat, q):
+                                    matched_rule = True
+                                    break
+                            except re.error:
                                 continue
-                            to_try = list(patterns) if patterns else ([pattern] if pattern else [])
-                            matched_rule = False
-                            for pat in to_try:
-                                if not pat or not isinstance(pat, str):
-                                    continue
-                                try:
-                                    if re.search(pat, q):
-                                        matched_rule = True
-                                        break
-                                except re.error:
-                                    continue
-                            if not matched_rule:
+                        if not matched_rule:
+                            continue
+                        for folder in folders:
+                            folder = str(folder).strip()
+                            if not folder or folder in folders_present:
                                 continue
-                            for folder in folders:
-                                folder = str(folder).strip()
-                                if not folder or folder in folders_present:
-                                    continue
-                                skill_dict = load_skill_by_folder(skills_path, folder, include_body=False)
-                                if skill_dict:
-                                    skills_list = [skill_dict] + [s for s in skills_list if s.get("folder") != folder]
-                                    folders_present.add(folder)
-                                    _component_log("skills", f"included {folder} for force-include rule")
-                            instr = rule.get("instruction") if isinstance(rule, dict) else None
-                            if instr and isinstance(instr, str) and instr.strip():
-                                matched_instructions.append(instr.strip())
-                            auto_invoke = rule.get("auto_invoke") if isinstance(rule, dict) else None
-                            if isinstance(auto_invoke, dict) and auto_invoke.get("tool") and isinstance(auto_invoke.get("arguments"), dict):
-                                args = dict(auto_invoke["arguments"])
-                                # Substitute {{query}} in string values and in args list if present
-                                user_q = (query or "").strip()
-                                for k, v in list(args.items()):
-                                    if isinstance(v, str) and "{{query}}" in v:
-                                        args[k] = v.replace("{{query}}", user_q)
-                                    elif isinstance(v, list):
-                                        args[k] = [s.replace("{{query}}", user_q) if isinstance(s, str) else s for s in v]
-                                force_include_auto_invoke.append({"tool": str(auto_invoke["tool"]).strip(), "arguments": args})
+                            skill_dict = load_skill_by_folder(skills_path, folder, include_body=False)
+                            if skill_dict:
+                                skills_list = [skill_dict] + [s for s in skills_list if s.get("folder") != folder]
+                                folders_present.add(folder)
+                                _component_log("skills", f"included {folder} for force-include rule")
+                        instr = rule.get("instruction") if isinstance(rule, dict) else None
+                        if instr and isinstance(instr, str) and instr.strip():
+                            matched_instructions.append(instr.strip())
+                        auto_invoke = rule.get("auto_invoke") if isinstance(rule, dict) else None
+                        if isinstance(auto_invoke, dict) and auto_invoke.get("tool") and isinstance(auto_invoke.get("arguments"), dict):
+                            args = dict(auto_invoke["arguments"])
+                            user_q = (query or "").strip()
+                            for k, v in list(args.items()):
+                                if isinstance(v, str) and "{{query}}" in v:
+                                    args[k] = v.replace("{{query}}", user_q)
+                                elif isinstance(v, list):
+                                    args[k] = [s.replace("{{query}}", user_q) if isinstance(s, str) else s for s in v]
+                            force_include_auto_invoke.append({"tool": str(auto_invoke["tool"]).strip(), "arguments": args})
+                    # Skill-driven triggers: declare trigger.patterns + instruction + auto_invoke in each skill's SKILL.md; no need to repeat in core.yml
+                    for skill_dict in load_skills(skills_path, include_body=False):
+                        trigger = skill_dict.get("trigger") if isinstance(skill_dict, dict) else None
+                        if not isinstance(trigger, dict):
+                            continue
+                        patterns = trigger.get("patterns")
+                        if not patterns and trigger.get("pattern"):
+                            patterns = [trigger.get("pattern")]
+                        if not patterns or not isinstance(patterns, (list, tuple)):
+                            continue
+                        matched_trigger = False
+                        for pat in patterns:
+                            if not pat or not isinstance(pat, str):
+                                continue
+                            try:
+                                if re.search(pat, q):
+                                    matched_trigger = True
+                                    break
+                            except re.error:
+                                continue
+                        if not matched_trigger:
+                            continue
+                        folder = (skill_dict.get("folder") or skill_dict.get("name") or "").strip()
+                        if not folder:
+                            continue
+                        if folder not in folders_present:
+                            skills_list = [skill_dict] + [s for s in skills_list if s.get("folder") != folder]
+                            folders_present.add(folder)
+                            _component_log("skills", f"included {folder} for skill trigger")
+                        instr = trigger.get("instruction")
+                        if isinstance(instr, str) and instr.strip():
+                            matched_instructions.append(instr.strip())
+                        auto_invoke = trigger.get("auto_invoke")
+                        if isinstance(auto_invoke, dict) and auto_invoke.get("script"):
+                            user_q = (query or "").strip()
+                            args = list(auto_invoke.get("args") or [])
+                            args = [s.replace("{{query}}", user_q) if isinstance(s, str) else s for s in args]
+                            force_include_auto_invoke.append({
+                                "tool": "run_skill",
+                                "arguments": {"skill_name": folder, "script": str(auto_invoke["script"]).strip(), "args": args},
+                            })
+                    if use_vector_search:
                         skills_max = max(0, int(getattr(meta_skills, "skills_max_in_prompt", 5) or 5))
                         if skills_max > 0 and len(skills_list) > skills_max:
                             skills_list = skills_list[:skills_max]
@@ -3976,9 +4020,15 @@ class Core(CoreInterface):
             if unified and getattr(self, "plugin_manager", None):
                 plugin_list = []
                 meta_plugins = Util().get_core_metadata()
-                if getattr(meta_plugins, "plugins_use_vector_search", False) and getattr(self, "plugins_vector_store", None) and getattr(self, "embedder", None):
+                use_plugin_vector_search = bool(getattr(meta_plugins, "plugins_use_vector_search", False))
+                if not use_plugin_vector_search:
+                    # plugins_use_vector_search=false → include ALL plugins (no RAG, no cap)
+                    plugin_list = getattr(self.plugin_manager, "get_plugin_list_for_prompt", lambda: [])()
+                    if plugin_list:
+                        _component_log("plugin", f"included all {len(plugin_list)} plugin(s) (plugins_use_vector_search=false)")
+                if use_plugin_vector_search and getattr(self, "plugins_vector_store", None) and getattr(self, "embedder", None):
                     from base.plugins_registry import search_plugins_by_query
-                    max_retrieved = max(1, min(100, int(getattr(meta_plugins, "plugins_top_n_candidates", 10) or 10)))
+                    max_retrieved = max(1, min(100, int(getattr(meta_plugins, "plugins_max_retrieved", 10) or 10)))
                     threshold = float(getattr(meta_plugins, "plugins_similarity_threshold", 0.0) or 0.0)
                     try:
                         hits = await search_plugins_by_query(
@@ -4006,11 +4056,11 @@ class Core(CoreInterface):
                             _component_log("plugin", f"capped to {plugins_max} plugin(s) after threshold (plugins_max_in_prompt)")
                     except Exception as e:
                         logger.warning("Plugin vector search failed: {}", e)
-                if not plugin_list:
+                if not plugin_list and use_plugin_vector_search:
+                    # RAG returned nothing; fallback: include all plugins, then cap
                     plugin_list = getattr(self.plugin_manager, "get_plugin_list_for_prompt", lambda: [])()
-                    plugins_top = max(1, min(100, int(getattr(Util().get_core_metadata(), "plugins_top_n_candidates", 10) or 10)))
-                    if len(plugin_list) > plugins_top:
-                        plugin_list = plugin_list[:plugins_top]
+                    if plugin_list:
+                        _component_log("plugin", f"loaded {len(plugin_list)} plugin(s) from registry (RAG had no hits)")
                     plugins_max = max(0, int(getattr(Util().get_core_metadata(), "plugins_max_in_prompt", 5) or 5))
                     if plugins_max > 0 and len(plugin_list) > plugins_max:
                         plugin_list = plugin_list[:plugins_max]
@@ -4048,9 +4098,10 @@ class Core(CoreInterface):
                         instr = rule.get("instruction") if isinstance(rule, dict) else None
                         if instr and isinstance(instr, str) and instr.strip():
                             plugin_force_instructions.append(instr.strip())
-                    plugins_max = max(0, int(getattr(meta_plugins, "plugins_max_in_prompt", 5) or 5))
-                    if plugins_max > 0 and len(plugin_list) > plugins_max:
-                        plugin_list = plugin_list[:plugins_max]
+                    if use_plugin_vector_search:
+                        plugins_max = max(0, int(getattr(meta_plugins, "plugins_max_in_prompt", 5) or 5))
+                        if plugins_max > 0 and len(plugin_list) > plugins_max:
+                            plugin_list = plugin_list[:plugins_max]
                 plugin_lines = []
                 if plugin_list:
                     desc_max = max(0, int(getattr(Util().get_core_metadata(), "plugins_description_max_chars", 0) or 0))

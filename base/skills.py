@@ -7,6 +7,7 @@ prompt so the model knows about them. See Design.md §3.6 and config/skills/READ
 Vector retrieval: sync_skills_to_vector_store() and search_skills_by_query() for persistent
 registration and retrieval by user query (docs/ToolsSkillsPlugins.md §8).
 """
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -144,7 +145,7 @@ def build_skills_system_block(skills: List[Dict[str, Any]], include_body: bool =
 def build_skill_refined_text(skill: Dict[str, Any], body_max_chars: int = 0) -> str:
     """
     Build the text to embed for a skill. Used as the single index vector for RAG.
-    Index only the best content for matching: name + description + keywords (not all content).
+    Embedded: name, description, keywords, trigger (instruction snippet + pattern terms), optionally body.
     body_max_chars=0 (default): do not include body; body is in the prompt when skill is selected.
     """
     name = (skill.get("name") or "").strip()
@@ -160,6 +161,20 @@ def build_skill_refined_text(skill: Dict[str, Any], body_max_chars: int = 0) -> 
         kw_str = " ".join(keywords) if isinstance(keywords, (list, tuple)) else str(keywords).strip()
         if kw_str:
             parts.append(kw_str)
+    # Trigger: include instruction snippet and pattern terms so RAG matches user phrases (e.g. "how's the weather", "天气")
+    trigger = skill.get("trigger") if isinstance(skill.get("trigger"), dict) else None
+    if trigger:
+        instr = (trigger.get("instruction") or "").strip()[:200]
+        if instr:
+            parts.append(instr)
+        patterns = trigger.get("patterns") or ([trigger.get("pattern")] if trigger.get("pattern") else [])
+        for pat in patterns:
+            if not pat or not isinstance(pat, str):
+                continue
+            # Turn regex into searchable words: "weather|forecast|天气" -> "weather forecast 天气"
+            words = re.sub(r"[\\^$.*+?()\[\]{}|]", " ", pat).replace("'", " ").split()
+            if words:
+                parts.append(" ".join(words))
     return "\n".join(parts).strip() or ""
 
 

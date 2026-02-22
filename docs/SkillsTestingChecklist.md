@@ -12,7 +12,7 @@ Use this checklist after adding many new skills to verify config, sync, selectio
 | Skills directory | `skills_dir: config/skills` (or your path) |
 | Vector search (recommended for many skills) | `skills_use_vector_search: true` |
 | Sync on startup | `skills_refresh_on_startup: true` so new skills are registered to the vector store |
-| How many in prompt | `skills_top_n_candidates: 10`, `skills_max_in_prompt: 5` (retrieve top 10, inject up to 5) |
+| How many in prompt | When vector search on: `skills_max_retrieved: 10`, `skills_max_in_prompt: 5`. When off: all skills. |
 | Similarity threshold | `skills_similarity_threshold: 0.3` (or 0.0 to include more; 0.5 can drop cross-lingual matches) |
 | Script allowlist (if skills have scripts/) | Under `tools:`, set `run_skill_allowlist: ["run.sh", "main.py", "index.js", ...]` or leave empty to allow all |
 
@@ -84,9 +84,9 @@ When `skills_use_vector_search: true`:
 
 **Why RAG might not select a skill:** (1) **Threshold too high** — similarity below `skills_similarity_threshold` (e.g. 0.5) is dropped; cross-lingual or short queries often score lower → lower to 0.3 or 0.0 or use force-include. (2) **Skill text too generic** — add `keywords: "..."` in SKILL.md frontmatter (e.g. English + Chinese) so the embedded text matches more queries; restart to re-sync. (3) **Store empty/stale** — restart with `skills_refresh_on_startup: true`; check for embedding errors at startup. (4) **Embedder down** — query isn’t embedded, so search returns nothing.
 
-When vector search is **off**:
+When vector search is **off** (`skills_use_vector_search: false`):
 
-- All skills are loaded from disk; the first `skills_top_n_candidates` (by folder order) are then capped to `skills_max_in_prompt`. Check `[skills] loaded N skill(s) from …` and `[skills] selected: ...`.
+- All skills are loaded from disk (no cap). Check `[skills] included all N skill(s) (skills_use_vector_search=false)` and `[skills] selected: ...`.
 
 ---
 

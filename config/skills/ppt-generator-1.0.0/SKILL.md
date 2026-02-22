@@ -1,6 +1,9 @@
 ---
 name: ppt-generator
 description: 将用户讲稿一键生成乔布斯风极简科技感竖屏HTML演示稿。当用户需要生成PPT、演示文稿、Slides、幻灯片，或要求科技风/极简风/乔布斯风格的演示时触发此技能。输出为单个可直接运行的HTML文件。
+trigger:
+  patterns: ["ppt|slides?|presentation|演示稿|幻灯片|乔布斯|极简.*演示"]
+  instruction: "The user asked to generate a PPT, slides, or 乔布斯-style presentation. Use run_skill(skill_name='ppt-generator-1.0.0', ...) and follow the skill's step-by-step flow (read draft → refine → titles → HTML)."
 ---
 
 # PPT Generator

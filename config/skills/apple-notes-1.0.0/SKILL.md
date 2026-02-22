@@ -2,6 +2,9 @@
 name: apple-notes
 description: Manage Apple Notes via the `memo` CLI on macOS (create, view, edit, delete, search, move, and export notes). Use when a user asks to add a note, list notes, search notes, or manage note folders.
 homepage: https://github.com/antoniorodr/memo
+trigger:
+  patterns: ["apple\\s+notes?|memo\\s+notes?|add\\s+(a\\s+)?note|list\\s+notes?|search\\s+notes?|备忘录|笔记"]
+  instruction: "The user asked about Apple Notes (create, list, search, edit, delete). Use run_skill(skill_name='apple-notes-1.0.0', script=...) with memo CLI args per the skill body. macOS only."
 ---
 
 # Apple Notes CLI

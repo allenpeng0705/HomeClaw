@@ -2,6 +2,9 @@
 name: notion
 description: Notion API for creating and managing pages, databases, and blocks.
 homepage: https://developers.notion.com
+trigger:
+  patterns: ["notion|notion\\s+page|notion\\s+database|notion\\s+api"]
+  instruction: "The user asked about Notion (pages, databases, blocks). Use run_skill or curl with Notion API; ensure NOTION_KEY is set (~/.config/notion/api_key). See skill body for operations."
 ---
 
 # notion

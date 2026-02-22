@@ -1,8 +1,15 @@
 ---
 name: nano-banana-pro
 description: Generate/edit images with Nano Banana Pro (Gemini 3 Pro Image). Use for image create/modify requests incl. edits. Supports text-to-image + image-to-image; 1K/2K/4K; use --input-image.
-# Keywords for RAG: help vector search match queries in any language (re-sync skills after edit)
 keywords: "image generate create draw picture 图片 生成 创建 画图 做图 来一张图"
+trigger:
+  patterns:
+    - "generate\\s+(an?|one)?\\s+image|create\\s+(an?|one)?\\s+image|make\\s+(an?|one)?\\s+image|draw\\s+(a\\s+)?(picture|image)"
+    - "创建.*图|生成.*图|画.*图|做.*图|给我.*图|来一张图|弄一张图|生成图片|创建图片"
+  instruction: "The user asked to generate or create an image. Call run_skill(skill_name='nano-banana-pro-1.0.1', script='generate_image.py', args=['--prompt', '<description>', '--filename', 'generated.png']) first. Do not say no image tool is available; do not invent 'Image saved:' — only the run_skill result contains that."
+  auto_invoke:
+    script: generate_image.py
+    args: ["--prompt", "{{query}}", "--filename", "generated.png"]
 ---
 
 # Nano Banana Pro Image Generation & Editing

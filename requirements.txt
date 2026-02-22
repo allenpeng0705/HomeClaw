@@ -36,9 +36,9 @@ qrcode[pil]
 
 # For Channels
 # Wechat
-wcferry==39.2.3.0
+#wcferry==39.2.3.0
 # whatsapp
-neonize==0.3.10
+#neonize==0.3.10
 # Matrix it'scol
 #simplematrixbotlib==2.12.3
 
@@ -48,6 +48,7 @@ neonize==0.3.10
 # Memory: Cognee is default (memory_backend=cognee). Alternative: chroma + optional graph (kuzu/neo4j).
 cognee   # default memory backend
 kuzu>=0.4.0   # optional graph for memory_backend=chroma
+protego>=0.1
 # neo4j>=5.0.0   # optional: graph for memory_backend=chroma (uncomment if using Neo4j)
 
 # Hybrid router Layer 2: semantic routing (mix mode). Uses existing embedding via custom encoder.

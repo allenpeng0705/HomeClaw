@@ -65,11 +65,8 @@ use_tools: true
 # Optional: inject skills (SKILL.md) from skills_dir into system prompt; see Design.md §3.6
 use_skills: true
 skills_dir: config/skills
-# Cap skills/plugins in prompt: take top N candidates, apply threshold, then up to M in prompt. See docs_design/SessionAndDualMemoryDesign.md.
-# Flow: retrieve/load top skills_top_n_candidates (e.g. 10), drop below skills_similarity_threshold, then take up to skills_max_in_prompt (e.g. 5). If only 1, 1 is fine.
-skills_top_n_candidates: 10
+# Skills/plugins: *_use_vector_search=false → include all; true → RAG (max_retrieved → threshold → max_in_prompt).
 skills_max_in_prompt: 5
-plugins_top_n_candidates: 10
 plugins_max_in_prompt: 5
 # Max chars per plugin description in the routing block. 0 = no truncation (default). With RAG (plugins_use_vector_search) or plugins_max_in_prompt we already limit how many plugins appear; this only caps per-description length. Use 0 for full descriptions; set 512 or 300 only to shrink prompt or cap one very long description.
 plugins_description_max_chars: 0

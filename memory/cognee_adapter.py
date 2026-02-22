@@ -163,6 +163,22 @@ class CogneeMemory(MemoryBase):
         filters: Optional[Dict] = None,
     ) -> List[Dict[str, Any]]:
         dataset = _dataset_name(user_id=user_id, agent_id=agent_id)
+        # Avoid calling Cognee search on a non-existent dataset (prevents DatasetNotFoundError 404 and its error log)
+        if hasattr(self._cognee, "datasets") and hasattr(self._cognee.datasets, "list_datasets"):
+            try:
+                datasets_list = await asyncio.wait_for(
+                    self._cognee.datasets.list_datasets(),
+                    timeout=15,
+                )
+                names = []
+                for d in (datasets_list or []):
+                    n = getattr(d, "name", None) or (d.get("name") if isinstance(d, dict) else None)
+                    if n:
+                        names.append(n)
+                if dataset not in names:
+                    return []
+            except (asyncio.TimeoutError, Exception):
+                pass  # fall back to search (may 404 and log; we catch below)
         try:
             results = await self._cognee.search(query, datasets=[dataset], top_k=limit or 10)
         except Exception as e:

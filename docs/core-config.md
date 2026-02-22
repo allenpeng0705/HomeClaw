@@ -176,7 +176,7 @@ Reset KB via **POST/GET** `http://<core>:<port>/knowledge_base/reset`.
 | **`skills_similarity_threshold`** | Min score to keep a skill in the prompt. |
 | **`skills_force_include_rules`** | When user query matches a pattern, always include listed skill folders (and optional instruction). |
 | **`use_tools`** | Enable built-in tools (file_read, web_search, browser_*, run_skill, etc.). |
-| **`plugins_top_n_candidates`**, **`plugins_max_in_prompt`** | How many plugins appear in the routing block. |
+| **`plugins_max_in_prompt`** | When `plugins_use_vector_search=true`, max plugins in the routing block after RAG; when false (include all), not used. |
 | **`plugins_use_vector_search`** | Retrieve plugins by similarity (like skills). |
 | **`plugins_force_include_rules`** | When query matches, always include listed plugin ids. |
 | **`system_plugins_auto_start`** | If true, Core starts plugins in **system_plugins/** (e.g. homeclaw-browser) and registers them. |
