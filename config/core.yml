@@ -7,8 +7,10 @@ host: 0.0.0.0
 port: 9000
 mode: dev
 model_path: ../models/
-# When false: log [memory], [tools], [skills], [plugin], [TAM], [orchestrator] activity at INFO. When true: suppress those component logs.
+# When false: log [memory], [tools], [skills], [plugin], [TAM], [orchestrator] activity at INFO (verbose). When true: only INFO to console (less noise). On Windows CMD, use true to avoid huge output and "Press Space to continue" blocking.
 silent: false
+# When false: all logs go only to the log file (logs/core_debug.log); nothing to console. Use with e.g. "Get-Content logs\core_debug.log -Wait -Tail 50" or "tail -f logs/core_debug.log" to monitor. When true: logs also go to console.
+log_to_console: false
 use_memory: true
 reset_memory: false
 # memory_backend: cognee (always default) | chroma. Both backends supported. Cognee: configure via cognee: or Cognee .env. Chroma: in-house RAG via core.yml database, vectorDB, graphDB.
@@ -144,7 +146,7 @@ auth_enabled: false
 auth_api_key: ""   # when auth_enabled: true, require X-API-Key header or Authorization: Bearer <key>
 # Optional: public URL for Companion scan-to-connect (e.g. from Cloudflare Tunnel, Tailscale Funnel).
 # When set, GET /pinggy shows this URL and a QR code (homeclaw://connect?url=...&api_key=...). Use when you expose Core via another service; leave empty if using Pinggy.
-public_url: ""
+public_url: "https://homeclaw.gpt4people.online"
 # Pinggy tunnel: when token is set, Core starts a tunnel to this port and serves /pinggy with public URL + QR for Companion. open_browser: true = open browser to /pinggy when tunnel is ready. See docs_design/PinggyIntegration.md.
 pinggy:
   token: ""        # empty = do not start Pinggy; set to your Pinggy token to enable

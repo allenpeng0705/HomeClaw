@@ -568,6 +568,7 @@ class CoreMetadata:
     main_llm_api_key_name: str
     main_llm_api_key: str
     silent: bool
+    log_to_console: bool  # when False, all logs go only to file (no stdout); use with tail to monitor logs
     use_memory: bool
     reset_memory: bool
     memory_backend: str  # cognee (default) | chroma (in-house RAG)
@@ -818,6 +819,7 @@ class CoreMetadata:
             main_llm_api_key_name=main_llm_api_key_name_val,
             main_llm_api_key=main_llm_api_key_val,
             silent=data.get('silent', False),
+            log_to_console=data.get('log_to_console', True),
             use_memory=data.get('use_memory', True),
             reset_memory=data.get('reset_memory', False),
             memory_backend=(data.get('memory_backend') or 'cognee').strip().lower(),
@@ -906,6 +908,7 @@ class CoreMetadata:
                 'main_llm_language': core.main_llm_language,
                 'main_llm': core.main_llm,
                 'silent': core.silent,
+                'log_to_console': getattr(core, 'log_to_console', True),
                 'use_memory': core.use_memory,
                 'reset_memory': core.reset_memory,
                 'memory_backend': getattr(core, 'memory_backend', 'cognee') or 'cognee',
