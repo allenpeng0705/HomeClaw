@@ -28,3 +28,6 @@
 /plugins/PptMaker/__pycache__
 /hybrid_router/__pycache__
 /hybrid_router/__pycache__
+/__pycache__
+/channels/wechat/__pycache__
+/channels/whatsapp/__pycache__

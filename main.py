@@ -21,9 +21,9 @@ from base.BaseChannel import BaseChannel, ChannelMetadata
 from base.base import AsyncResponse, ChannelType, ContentType, PromptRequest
 from base.util import Util
 from core import core
-from channels.wechat import channel as wechat
-from channels.whatsapp import channel as whatsapp
-from channels.matrix import channel as matrix
+# Channel modules (wechat, whatsapp, matrix) are not imported here so that main starts even when
+# a channel has platform-specific deps that fail (e.g. neonize on darwin-arm64). Run channels
+# via: python -m channels.run <name> (e.g. whatsapp, wechat, matrix).
 from base.base import User
 
 try:

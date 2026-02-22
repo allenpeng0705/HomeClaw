@@ -142,6 +142,10 @@ prompt_cache_ttl_seconds: 0   # Unit: seconds. 0 = cache by file mtime; >0 = TTL
 # Optional: require API key for /inbound and /ws when exposing Core on the internet; see docs/RemoteAccess.md
 auth_enabled: false
 auth_api_key: ""   # when auth_enabled: true, require X-API-Key header or Authorization: Bearer <key>
+# Pinggy tunnel: when token is set, Core starts a tunnel to this port and serves /pinggy with public URL + QR for Companion. open_browser: true = open browser to /pinggy when tunnel is ready. See docs_design/PinggyIntegration.md.
+pinggy:
+  token: "Ud3IYFU9Mmt"        # empty = do not start Pinggy; set to your Pinggy token to enable
+  open_browser: true   # when true, open default browser to http://127.0.0.1:<port>/pinggy when tunnel is ready
 # Tool layer config (used when use_tools: true). Cross-platform (Mac/Linux/Windows) where possible.
 # Built-in tools: time, cron_*, sessions_*, session_status; memory_search, memory_get; file_*,
 # folder_list; fetch_url, web_search; browser_*; exec, process_*; image; channel_send; run_skill;

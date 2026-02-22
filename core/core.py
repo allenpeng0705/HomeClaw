@@ -2,6 +2,7 @@ import asyncio
 import base64
 import copy
 from datetime import date, datetime, timedelta
+import html as html_module
 import importlib
 import json
 import logging
@@ -17,6 +18,7 @@ from pathlib import Path
 import threading
 import time
 import uuid
+import webbrowser
 
 # Reduce third-party FutureWarning noise (transformers, huggingface_hub); see docs/ResultViewerAndCommonLogs.md
 warnings.filterwarnings("ignore", category=FutureWarning, module="transformers.utils.generic")
@@ -79,6 +81,9 @@ from core.coreInterface import CoreInterface
 from core.emailChannel import channel
 
 logging.basicConfig(level=logging.CRITICAL)
+
+# Pinggy tunnel state: set by _start_pinggy_and_open_browser when tunnel is ready. Read by GET /pinggy.
+_pinggy_state: Dict[str, Any] = {"public_url": None, "connect_url": None, "qr_base64": None, "error": None}
 
 
 def _component_log(component: str, message: str) -> None:
@@ -989,6 +994,34 @@ class Core(CoreInterface):
         async def ready():
             """Lightweight readiness probe (no DB or plugin work). Used by system_plugins startup."""
             return {"status": "ok"}
+
+        @self.app.get("/pinggy", response_class=HTMLResponse)
+        async def pinggy_page():
+            """Page showing Pinggy public URL and QR for Companion scan-to-connect. No auth so user can open before pairing."""
+            global _pinggy_state
+            err = _pinggy_state.get("error")
+            if err:
+                html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>HomeClaw — Pinggy</title></head><body style="font-family:sans-serif;padding:2rem;">
+                <h1>Pinggy tunnel</h1><p>Error: {html_module.escape(str(err))}</p></body></html>"""
+                return HTMLResponse(content=html)
+            public_url = _pinggy_state.get("public_url")
+            connect_url = _pinggy_state.get("connect_url")
+            qr_base64 = _pinggy_state.get("qr_base64")
+            if not public_url and not connect_url:
+                html = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>HomeClaw — Pinggy</title></head><body style="font-family:sans-serif;padding:2rem;">
+                <h1>Pinggy tunnel</h1><p>Not configured (pinggy.token empty in core.yml) or tunnel is still starting…</p></body></html>"""
+                return HTMLResponse(content=html)
+            if not connect_url:
+                connect_url = public_url or ""
+            qr_img = f'<img src="data:image/png;base64,{qr_base64}" alt="QR code" style="max-width:280px;height:auto;">' if qr_base64 else ""
+            html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>HomeClaw — Scan to connect</title></head><body style="font-family:sans-serif;padding:2rem;max-width:480px;">
+            <h1>Scan to connect</h1>
+            <p>Scan this QR code with <strong>HomeClaw Companion</strong>: Settings → Scan QR to connect.</p>
+            {qr_img}
+            <p><strong>Public URL:</strong> <code style="word-break:break-all;">{html_module.escape(public_url or "")}</code></p>
+            <p><strong>Connect URL:</strong> <code style="word-break:break-all;">{html_module.escape(connect_url)}</code></p>
+            </body></html>"""
+            return HTMLResponse(content=html)
 
         @self.app.get("/shutdown")
         async def shutdown():
@@ -2985,6 +3018,75 @@ class Core(CoreInterface):
             except Exception as e:
                 logger.exception(e)
 
+    async def _start_pinggy_and_open_browser(self):
+        """If pinggy.token is set in core.yml: start tunnel in a daemon thread, set _pinggy_state when ready, optionally open browser to /pinggy."""
+        global _pinggy_state
+        try:
+            core_yml_path = os.path.join(Util().config_path(), "core.yml")
+            if not os.path.isfile(core_yml_path):
+                return
+            with open(core_yml_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            pinggy_cfg = data.get("pinggy") or {}
+            token = (pinggy_cfg.get("token") or "").strip()
+            open_browser = bool(pinggy_cfg.get("open_browser", True))
+            if not token:
+                return
+            meta = Util().get_core_metadata()
+            port = int(getattr(meta, "port", 9000) or 9000)
+            auth_enabled = bool(getattr(meta, "auth_enabled", False))
+            auth_api_key = (getattr(meta, "auth_api_key", None) or "").strip()
+            try:
+                import pinggy
+            except ImportError:
+                _pinggy_state["error"] = "pinggy package not installed (pip install pinggy)"
+                return
+            tunnel = pinggy.start_tunnel(forwardto=f"127.0.0.1:{port}", token=token)
+
+            def run_tunnel():
+                try:
+                    tunnel.start()
+                except Exception as e:
+                    _pinggy_state["error"] = str(e)
+
+            t = threading.Thread(target=run_tunnel, daemon=True)
+            t.start()
+            # Poll until tunnel exposes public URL (up to 30s)
+            for _ in range(30):
+                await asyncio.sleep(1)
+                urls = getattr(tunnel, "urls", None)
+                if urls and len(urls) > 0:
+                    break
+            urls = getattr(tunnel, "urls", None)
+            if not urls or len(urls) == 0:
+                _pinggy_state["error"] = "Pinggy tunnel did not return a public URL in time"
+                return
+            public_url = urls[0] if isinstance(urls[0], str) else str(urls[0])
+            connect_url = f"homeclaw://connect?url={public_url}"
+            if auth_enabled and auth_api_key:
+                connect_url += f"&api_key={auth_api_key}"
+            qr_base64 = None
+            try:
+                import qrcode
+                import io
+                qr = qrcode.QRCode(version=1, box_size=6, border=2)
+                qr.add_data(connect_url)
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white")
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                qr_base64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            except Exception as e:
+                logger.debug("QR code generation skipped: {}", e)
+            _pinggy_state["public_url"] = public_url
+            _pinggy_state["connect_url"] = connect_url
+            _pinggy_state["qr_base64"] = qr_base64
+            _pinggy_state["error"] = None
+            if open_browser:
+                webbrowser.open(f"http://127.0.0.1:{port}/pinggy")
+        except Exception as e:
+            logger.exception(e)
+            _pinggy_state["error"] = str(e)
 
     async def run(self):
         """Run the core using uvicorn"""
@@ -3094,6 +3196,8 @@ class Core(CoreInterface):
             # Runs in a background asyncio task; each plugin is a separate OS process. Does not block Core or server.serve().
             if getattr(core_metadata, "system_plugins_auto_start", False):
                 asyncio.create_task(self._run_system_plugins_startup())
+            # Pinggy: when pinggy.token is set, start tunnel and optionally open browser to /pinggy (public URL + QR for Companion).
+            asyncio.create_task(self._start_pinggy_and_open_browser())
             # Start the server
             #server_task = asyncio.create_task(self.server.serve())
             #await asyncio.gather(llm_task, server_task)

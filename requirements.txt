@@ -29,6 +29,10 @@ python-pptx>=0.6.21
 fsspec[http]>=2023.1.0,<=2024.12.0
 # Full browser (navigate, snapshot, click, type). After pip install: playwright install chromium
 playwright>=1.40.0
+# Pinggy tunnel (remote access): when pinggy.token set in core.yml, Core starts tunnel and serves /pinggy with QR for Companion.
+pinggy
+# QR code for /pinggy page (Companion scan-to-connect)
+qrcode[pil]
 
 # For Channels
 # Wechat
