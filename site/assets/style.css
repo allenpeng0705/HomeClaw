@@ -4,8 +4,8 @@
   --surface: #1a2332;
   --text: #e6edf3;
   --muted: #8b949e;
-  --accent: #58a6ff;
-  --accent-hover: #79b8ff;
+  --accent: #7cc4ff;
+  --accent-hover: #a5d8ff;
   --border: #30363d;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
@@ -152,8 +152,12 @@ body {
 .section h2 { font-size: 1.5rem; margin: 0 0 0.75rem; }
 .section h3 { font-size: 1.1rem; margin: 1rem 0 0.4rem; color: var(--text); }
 .section p { color: var(--muted); margin: 0 0 0.75rem; }
+.section a { color: var(--accent); text-decoration: none; }
+.section a:hover { color: var(--accent-hover); text-decoration: underline; }
 .section ul { color: var(--muted); margin: 0 0 0.75rem; padding-left: 1.25rem; }
 .section .lead { font-size: 1.05rem; margin-bottom: 1rem; }
+.quickstart-section a { color: var(--accent); text-decoration: none; }
+.quickstart-section a:hover { color: var(--accent-hover); text-decoration: underline; }
 .feature-section { margin-bottom: 2rem; }
 .feature-section:last-child { margin-bottom: 0; }
 .feature-section-inner {
@@ -185,6 +189,8 @@ body {
 }
 .feature-card h3 { font-size: 1rem; margin: 0 0 0.5rem; }
 .feature-card p { font-size: 0.9rem; margin: 0; color: var(--muted); }
+.feature-card a { color: var(--accent); text-decoration: none; }
+.feature-card a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 /* Footer */
 .site-footer {
