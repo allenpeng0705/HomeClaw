@@ -73,6 +73,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _clearMemory(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await widget.coreService.postMemoryReset();
+      if (mounted) messenger.showSnackBar(const SnackBar(content: Text('Memory cleared')));
+    } catch (e) {
+      if (mounted) messenger.showSnackBar(SnackBar(content: Text('Clear memory failed: $e')));
+    }
+  }
+
+  Future<void> _clearKnowledgeBase(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await widget.coreService.postKnowledgeBaseReset();
+      if (mounted) messenger.showSnackBar(const SnackBar(content: Text('Knowledge base cleared')));
+    } catch (e) {
+      if (mounted) messenger.showSnackBar(SnackBar(content: Text('Clear knowledge base failed: $e')));
+    }
+  }
+
+  Future<void> _clearAllSkillsPlugins(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await widget.coreService.postTestingClearAll();
+      if (mounted) messenger.showSnackBar(const SnackBar(content: Text('Skills & plugins cleared')));
+    } catch (e) {
+      if (mounted) messenger.showSnackBar(SnackBar(content: Text('Clear all failed: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -173,6 +203,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
               icon: const Icon(Icons.qr_code_scanner),
               label: const Text('Scan QR to connect'),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Testing (clear data for a clean test)',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.tonal(
+                  onPressed: () => _clearMemory(context),
+                  child: const Text('Clear memory'),
+                ),
+                FilledButton.tonal(
+                  onPressed: () => _clearKnowledgeBase(context),
+                  child: const Text('Clear knowledge base'),
+                ),
+                FilledButton.tonal(
+                  onPressed: () => _clearAllSkillsPlugins(context),
+                  child: const Text('Clear all (skills & plugins)'),
+                ),
+              ],
             ),
             const SizedBox(height: 24),
             const Text(

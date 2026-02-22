@@ -1764,7 +1764,17 @@ class Core(CoreInterface):
                     c_name = (c.get("name") or c.get("id") or "Custom") if isinstance(c, dict) else "Custom"
                     if c_url:
                         html_parts.append(f"<li><strong>{name}</strong> — <a href='{c_url}' target='_blank' rel='noopener'>{c_name}</a></li>")
-            html_parts.append("</ul><p class='meta'>Add plugins that declare <code>ui</code> in registration to see them here. See docs_design/PluginUIsAndHomeClawControlUI.md.</p></body></html>")
+            html_parts.append("</ul><p class='meta'>Add plugins that declare <code>ui</code> in registration to see them here. See docs_design/PluginUIsAndHomeClawControlUI.md.</p>")
+            # Testing: clear memory, knowledge base, or skills+plugins (for development)
+            html_parts.append("<h2>Testing</h2><p class='meta'>Clear data for a clean test. Requires no auth when Core auth is off.</p>")
+            html_parts.append("<div style='display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.5rem;'>")
+            html_parts.append("<button type='button' class='test-btn' data-url='/memory/reset' data-label='Clear memory'>Clear memory</button>")
+            html_parts.append("<button type='button' class='test-btn' data-url='/knowledge_base/reset' data-label='Clear knowledge base'>Clear knowledge base</button>")
+            html_parts.append("<button type='button' class='test-btn' data-url='/api/testing/clear-all' data-label='Clear all (skills &amp; plugins)'>Clear all (skills &amp; plugins)</button>")
+            html_parts.append("</div><p id='test-msg' class='meta' style='margin-top:0.5rem;min-height:1.2rem;'></p>")
+            html_parts.append("<style>.test-btn{padding:0.4rem 0.8rem;cursor:pointer;background:#e65100;color:#fff;border:none;border-radius:4px;font-size:0.9rem;}.test-btn:hover{background:#bf360c;}</style>")
+            html_parts.append("<script>document.querySelectorAll('.test-btn').forEach(function(btn){btn.onclick=function(){var url=btn.getAttribute('data-url');var label=btn.getAttribute('data-label');var msg=document.getElementById('test-msg');msg.textContent=label+'...';fetch(url,{method:'POST'}).then(function(r){return r.ok ? r.text().then(function(t){msg.textContent=label+' done.';}) : r.text().then(function(t){msg.textContent=label+' failed: '+t;});}).catch(function(e){msg.textContent=label+' error: '+e.message;});};});</script>")
+            html_parts.append("</body></html>")
             return HTMLResponse(content="".join(html_parts))
 
         @self.app.websocket("/ws")
@@ -3235,8 +3245,18 @@ class Core(CoreInterface):
             # Runs in a background asyncio task; each plugin is a separate OS process. Does not block Core or server.serve().
             if getattr(core_metadata, "system_plugins_auto_start", False):
                 asyncio.create_task(self._run_system_plugins_startup())
-            # Pinggy: when pinggy.token is set, start tunnel and optionally open browser to /pinggy (public URL + QR for Companion).
-            asyncio.create_task(self._start_pinggy_and_open_browser())
+            # Pinggy: only when pinggy.token is set — start tunnel and optionally open browser to /pinggy (public URL + QR). If neither public_url nor token is set, we just run Core and do not pop up QR.
+            try:
+                core_yml_path = os.path.join(Util().config_path(), "core.yml")
+                if os.path.isfile(core_yml_path):
+                    with open(core_yml_path, "r", encoding="utf-8") as f:
+                        data = yaml.safe_load(f) or {}
+                    pinggy_cfg = data.get("pinggy") or {}
+                    token = (pinggy_cfg.get("token") or "").strip()
+                    if token:
+                        asyncio.create_task(self._start_pinggy_and_open_browser())
+            except Exception:
+                pass
             # Start the server
             #server_task = asyncio.create_task(self.server.serve())
             #await asyncio.gather(llm_task, server_task)

@@ -295,4 +295,37 @@ class CoreService {
       throw Exception('Remove user: ${response.statusCode} ${response.body}');
     }
   }
+
+  /// POST /memory/reset — clear RAG memory, AGENT_MEMORY, daily memory. For testing.
+  Future<void> postMemoryReset() async {
+    final url = Uri.parse('$_baseUrl/memory/reset');
+    final response = await http
+        .post(url, headers: _authHeaders())
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception('Memory reset: ${response.statusCode} ${response.body}');
+    }
+  }
+
+  /// POST /knowledge_base/reset — clear knowledge base (all users). For testing.
+  Future<void> postKnowledgeBaseReset() async {
+    final url = Uri.parse('$_baseUrl/knowledge_base/reset');
+    final response = await http
+        .post(url, headers: _authHeaders())
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception('Knowledge base reset: ${response.statusCode} ${response.body}');
+    }
+  }
+
+  /// POST /api/testing/clear-all — unregister external plugins and clear skills vector store. For testing.
+  Future<void> postTestingClearAll() async {
+    final url = Uri.parse('$_baseUrl/api/testing/clear-all');
+    final response = await http
+        .post(url, headers: _authHeaders())
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception('Clear all: ${response.statusCode} ${response.body}');
+    }
+  }
 }
