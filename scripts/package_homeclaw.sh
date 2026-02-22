@@ -11,7 +11,8 @@
 #   Default on macOS: build launcher app (HomeClaw.app) with embedded Python + Node.js + Core + Companion.
 #   Node.js is bundled so system_plugins/homeclaw-browser (WebChat, Control UI) works without user installing Node.
 #
-# Usage: ./scripts/package_homeclaw.sh [--no-companion] [--no-launcher] [--no-node] [--output DIR] [--no-archive]
+# Usage: ./scripts/package_homeclaw.sh [--no-companion] [--no-launcher] [--no-node] [--with-llama-cpp] [--output DIR] [--no-archive]
+#   --with-llama-cpp  Include llama.cpp-master (llama-server binaries for local GGUF models). Optional; increases bundle size.
 
 set -e
 
@@ -24,6 +25,7 @@ OUTPUT_DIR=""
 CREATE_ARCHIVE=1
 BUILD_LAUNCHER=1
 BUNDLE_NODE=1
+INCLUDE_LLAMA_CPP=0
 # Python build-standalone release (astral-sh); use 3.11 for compatibility (version must match release assets)
 PYTHON_STANDALONE_RELEASE="20260211"
 PYTHON_VERSION="3.11.14"
@@ -44,6 +46,10 @@ while [[ $# -gt 0 ]]; do
       BUNDLE_NODE=0
       shift
       ;;
+    --with-llama-cpp)
+      INCLUDE_LLAMA_CPP=1
+      shift
+      ;;
     --output)
       OUTPUT_DIR="$2"
       shift 2
@@ -54,7 +60,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown option: $1" >&2
-      echo "Usage: $0 [--no-companion] [--no-launcher] [--no-node] [--output DIR] [--no-archive]" >&2
+      echo "Usage: $0 [--no-companion] [--no-launcher] [--no-node] [--with-llama-cpp] [--output DIR] [--no-archive]" >&2
       exit 1
       ;;
   esac
@@ -123,6 +129,14 @@ rsync -a \
   "$REPO_ROOT/config/prompts" \
   "$REPO_ROOT/config/hybrid" \
   "$OUTPUT_DIR/config/" 2>/dev/null || true
+
+# ---------- llama.cpp for macOS (local GGUF models): package only mac/ ----------
+if [[ "$(uname -s)" == "Darwin" ]] && [[ -d "$REPO_ROOT/llama.cpp-master/mac" ]]; then
+  echo "Packaging llama.cpp (mac) for local models..."
+  mkdir -p "$OUTPUT_DIR/llama.cpp-master"
+  cp -R "$REPO_ROOT/llama.cpp-master/mac" "$OUTPUT_DIR/llama.cpp-master/"
+  echo "llama.cpp-master/mac/ copied (llama-server for local GGUF)."
+fi
 
 # ---------- Companion app (macOS) ----------
 if [[ $BUILD_COMPANION -eq 1 ]]; then
@@ -259,11 +273,12 @@ if [[ $BUILD_LAUNCHER -eq 1 ]]; then
   mkdir -p "$APP_DIR/Contents/MacOS"
   mkdir -p "$APP_DIR/Contents/Resources"
 
-  # Move Core + config into Resources/core (launcher will run from here)
+  # Move Core + config (and optional llama.cpp-master) into Resources
   mv "$OUTPUT_DIR/main.py" "$OUTPUT_DIR/base" "$OUTPUT_DIR/core" "$OUTPUT_DIR/llm" "$OUTPUT_DIR/memory" \
      "$OUTPUT_DIR/tools" "$OUTPUT_DIR/hybrid_router" "$OUTPUT_DIR/plugins" "$OUTPUT_DIR/channels" \
      "$OUTPUT_DIR/system_plugins" "$OUTPUT_DIR/examples" "$OUTPUT_DIR/ui" "$APP_DIR/Contents/Resources/" 2>/dev/null || true
   mv "$OUTPUT_DIR/config" "$APP_DIR/Contents/Resources/"
+  [[ -d "$OUTPUT_DIR/llama.cpp-master" ]] && mv "$OUTPUT_DIR/llama.cpp-master" "$APP_DIR/Contents/Resources/"
   # Python and companion stay in OUTPUT_DIR for the launcher to reference
   # Launcher script lives in .app; it will use relative path to Resources
   RESOURCES_REL="../Resources"

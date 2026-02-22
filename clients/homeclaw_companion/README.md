@@ -44,7 +44,13 @@ To list devices: `flutter devices`.
 
 ## Build macOS app for distribution (let users run it directly)
 
-To produce a **standalone macOS app** that users can double-click without Flutter or Xcode:
+**One command to build a DMG (from repo root):**
+```bash
+./scripts/build_companion_dmg.sh
+```
+Output: `clients/homeclaw_companion/homeclaw_companion.dmg`. Optional: `--output /path/to/Companion.dmg`.
+
+To produce a **standalone macOS app** manually (or just the .app without DMG):
 
 1. **From the Companion app directory:**
    ```bash

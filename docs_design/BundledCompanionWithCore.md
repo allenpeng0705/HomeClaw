@@ -45,6 +45,7 @@ It is possible to ship a single distributable (e.g. macOS app or installer) that
 | Companion app   | Yes      | Existing Flutter macOS (or Windows) build. |
 | **Node.js**     | Yes      | Embedded so **system_plugins/homeclaw-browser** (WebChat, Control UI, Playwright) works without user installing Node. Launcher sets PATH to bundled `node/bin`; Core starts the plugin with `node server.js`. |
 | **homeclaw-browser** | Yes | **system_plugins/homeclaw-browser** is packaged; `npm install` runs at build time so `node_modules` is in the bundle. Playwright browser binaries are not bundled by default (optional first-run install). |
+| **llama.cpp (mac)**  | Yes (macOS) | On macOS launcher build, **only** `llama.cpp-master/mac/` is packaged (the `llama-server` binary). Core finds it at `Resources/llama.cpp-master/mac/llama-server` so local GGUF models work without user installing llama.cpp. |
 | Model files     | **No**   | User copies GGUF etc. into e.g. `~/HomeClaw/models`; guide in UI or doc. |
 | Plugins/channels| Optional | Ship default set; heavy optional deps can be “install on demand” later. |
 
