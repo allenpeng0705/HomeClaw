@@ -31,3 +31,4 @@
 /__pycache__
 /channels/wechat/__pycache__
 /channels/whatsapp/__pycache__
+/dist

@@ -40,19 +40,61 @@ It is possible to ship a single distributable (e.g. macOS app or installer) that
 | Python runtime  | Yes      | Embedded/relocatable so user doesn’t install Python. |
 | Core code       | Yes      | `main.py`, `core/`, `base/`, `llm/`, `config/` (templates), `system_plugins/`, etc. |
 | `requirements.txt` deps | Yes | Install into a venv or bundle wheels next to the embedded Python. |
-| Config templates| Yes      | Default `core.yml` / `user.yml`; on first run copy to Application Support and set `model_path`, `workspace_dir`. |
+| **core.yml**    | Yes      | **Package the full repo `config/core.yml`** — all comments and all fields. See [Packaged config (core.yml)](#packaged-config-coreyml) below. |
+| user.yml        | Yes      | Default `user.yml` template; on first run copy to Application Support. |
 | Companion app   | Yes      | Existing Flutter macOS (or Windows) build. |
+| **Node.js**     | Yes      | Embedded so **system_plugins/homeclaw-browser** (WebChat, Control UI, Playwright) works without user installing Node. Launcher sets PATH to bundled `node/bin`; Core starts the plugin with `node server.js`. |
+| **homeclaw-browser** | Yes | **system_plugins/homeclaw-browser** is packaged; `npm install` runs at build time so `node_modules` is in the bundle. Playwright browser binaries are not bundled by default (optional first-run install). |
 | Model files     | **No**   | User copies GGUF etc. into e.g. `~/HomeClaw/models`; guide in UI or doc. |
 | Plugins/channels| Optional | Ship default set; heavy optional deps can be “install on demand” later. |
+
+---
+
+## Packaged config (core.yml)
+
+**Package the current `config/core.yml` from the repo as-is** — with every comment and every field. Do not strip comments or omit optional keys.
+
+- **Source file:** `config/core.yml` (repository root).
+- **What to ship:** This entire file. Users (or advanced users) may need to re-configure any number of things (LLM, memory, plugins, auth, ports, etc.); having the full commented reference in one place avoids guesswork and keeps behavior consistent with development.
+- **First-run:** Copy this packaged `core.yml` into the app's config directory (e.g. Application Support). Then overwrite only the minimal keys required for the bundle (e.g. `model_path`, `workspace_dir`) so paths point at the user's HomeClaw folder; leave all other keys and comments unchanged.
+- **Reference copy:** Optionally keep an untouched copy in the bundle (e.g. `Resources/core/config/core.yml.reference`) so users can diff or restore the original. The active config used at runtime is the one in Application Support (or equivalent).
 
 ---
 
 ## First-run experience (models and config)
 
 1. **First launch:** Create `~/HomeClaw/` (or App Support) and subdirs: `models`, `config`, `workspace` (or use Application Support for config/DB).
-2. **Config:** Copy default `core.yml` into that config dir; set e.g. `model_path: ~/HomeClaw/models` and `workspace_dir` to the chosen app-support path.
+2. **Config:** Copy the packaged full `core.yml` (see above) into that config dir; then set only the minimal path keys (e.g. `model_path: ~/HomeClaw/models`, `workspace_dir`) so the rest of the file (comments and all fields) stays intact.
 3. **Models:** Show a short guide: “To use local LLMs, put your model files (e.g. `.gguf`) in: **~/HomeClaw/models**.” Optional: “Open folder” button, “I’ve added models” to continue. Cloud-only users can skip.
 4. **Core start:** Launcher (or Companion) starts Core with that config; Companion connects to `http://127.0.0.1:9000`.
+
+---
+
+## Packaging script
+
+A **shell script** builds either a **single launcher app** (macOS) or a folder-only package:
+
+```bash
+./scripts/package_homeclaw.sh [--no-companion] [--no-launcher] [--no-node] [--output DIR] [--no-archive]
+```
+
+**Default on macOS:** Produces a **single launcher app** that matches the design above:
+
+1. **Embedded Python** — Downloads [python-build-standalone](https://github.com/astral-sh/python-build-standalone) (no user Python install).
+2. **Dependencies** — `pip install -r requirements.txt` into that Python in the bundle.
+3. **Core + full config** — `main.py`, Core code, and **full `config/core.yml`** (all comments and fields) and `user.yml` inside the app.
+4. **Companion app** — Flutter macOS build, inside the bundle.
+5. **HomeClaw.app** — Double-click starts Core (embedded Python) then opens Companion. Models are not included; users put GGUF etc. in `~/HomeClaw/models` (see `PACKAGE_README.txt`).
+
+**Options:**
+
+- **--no-launcher:** Only produce the folder (Core + config + Companion). No embedded Python, no .app launcher; user runs `pip install -r requirements.txt` and `python -m main start` themselves.
+- **--no-node:** Do not bundle Node.js or run `npm install` for homeclaw-browser. The plugin will need Node on PATH at run time (and you must run `npm install` in system_plugins/homeclaw-browser yourself if building a folder).
+- **--no-companion:** Skip Flutter build (launcher or folder will not include Companion).
+- **--output DIR:** Use `DIR` instead of `dist/HomeClaw-package-YYYYMMDD`.
+- **--no-archive:** Do not create the `.tar.gz` tarball.
+
+**Excluded from the package:** `__pycache__`, `database`, `logs`, `models`, `*.gguf`, `.git`, `venv`, `node_modules`, `site`, `docs`, `tests`. See `PACKAGE_README.txt` in the package for models path and usage.
 
 ---
 
