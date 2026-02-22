@@ -13,7 +13,7 @@ You can run HomeClaw on a **cloud VM** (VPS) so it is always on and reachable fr
 | 3. Secure Core | Set `auth_enabled: true` and `auth_api_key` in `config/core.yml`; open only port **9000** (or use a tunnel and keep 9000 internal). |
 | 4. Keep it running | Use **systemd** (or supervisor) so Core restarts on reboot. |
 
-**Cloud vs home:** On a cloud VM you typically use **cloud LLMs** (OpenAI, Gemini, etc.) and set API keys in the environment. You can also run **local models** (llama.cpp) on a GPU instance if the provider offers one.
+**Cloud vs home:** On a cloud VM you typically use **cloud LLMs** (OpenAI, Gemini, etc.) and set API keys in the environment. To run **local models** (llama.cpp), copy llama.cpp's binary distribution into `llama.cpp-master/<platform>/` for the VM (e.g. `linux_cpu/` or a GPU build; see `llama.cpp-master/README.md`).
 
 ---
 
@@ -60,6 +60,7 @@ pip install -r requirements.txt   # or: pip3 install -r requirements.txt
 # Edit config/core.yml: main_llm, embedding_llm (e.g. cloud_models/Gemini-2.5-Flash)
 # Set API key: export GEMINI_API_KEY="your-key"
 # Edit config/user.yml: add users (name, email, im, etc.)
+# If using LOCAL models: copy llama.cpp binary distribution into llama.cpp-master/<platform>/ for the VM (e.g. linux_cpu/ or GPU build; see llama.cpp-master/README.md)
 
 # Enable auth (important when Core is reachable from the internet)
 # In config/core.yml set:

@@ -70,7 +70,9 @@ pip install -r requirements.txt</code></pre>
         <div class="doc-keys">
           <p class="doc-keys-title">2. Configure (optional)</p>
           <ul>
-            <li><strong>config/core.yml</strong> — Set <code>main_llm</code>, <code>embedding_llm</code> (e.g. <code>cloud_models/Gemini-2.5-Flash</code>). For cloud models, set the API key in the environment (e.g. <code>export GEMINI_API_KEY=...</code>). For local models, see <code>llama.cpp-master/README.md</code> in the repo.</li>
+            <li><strong>config/core.yml</strong> — Set <code>main_llm</code>, <code>embedding_llm</code> (e.g. <code>cloud_models/Gemini-2.5-Flash</code>).</li>
+            <li><strong>Cloud models</strong> — Set API key in the environment (e.g. <code>export GEMINI_API_KEY=...</code>).</li>
+            <li><strong>Local models</strong> — Copy llama.cpp <strong>binary distribution</strong> into <code>llama.cpp-master/&lt;platform&gt;/</code> for your device (e.g. <code>mac/</code>, <code>win_cuda/</code>, <code>linux_cpu/</code>; see <code>llama.cpp-master/README.md</code> in the repo).</li>
             <li><strong>config/user.yml</strong> — Add users (name, email, im, etc.) so they can talk to the assistant.</li>
           </ul>
         </div>
@@ -103,7 +105,7 @@ pip install -r requirements.txt</code></pre>
         <h3>Steps</h3>
         <ol>
           <li><strong>Create a VM</strong> — <strong>Aliyun (阿里云) ECS</strong>, <strong>AWS EC2</strong>, <strong>Tencent Cloud</strong>, <strong>GCP</strong>, <strong>Azure</strong>, or any VPS. Choose <strong>Ubuntu 22.04</strong> (or 20.04).</li>
-          <li><strong>Install and run</strong> — SSH in, then same as QuickStart: clone repo, <code>pip install -r requirements.txt</code>, edit <code>config/core.yml</code> and <code>config/user.yml</code>, set API keys in the environment, then <code>python -m main start</code>.</li>
+          <li><strong>Install and run</strong> — SSH in, then same as QuickStart: clone repo, <code>pip install -r requirements.txt</code>, edit <code>config/core.yml</code> and <code>config/user.yml</code>, set API keys in the environment. If using <strong>local models</strong>, copy llama.cpp binary into <code>llama.cpp-master/&lt;platform&gt;/</code> for the VM (e.g. <code>linux_cpu/</code>; see <code>llama.cpp-master/README.md</code>). Then <code>python -m main start</code>.</li>
           <li><strong>Secure Core</strong> — In <code>config/core.yml</code> set <code>auth_enabled: true</code> and <code>auth_api_key: "&lt;long-random-key&gt;"</code>. Open only port <strong>9000</strong> (and 22 for SSH) in the firewall, or use <strong>Cloudflare Tunnel</strong> / <strong>Tailscale</strong> and keep 9000 internal.</li>
           <li><strong>Keep it running</strong> — Use <strong>systemd</strong> (or supervisor) so Core restarts on reboot. See full docs for a sample service file.</li>
         </ol>

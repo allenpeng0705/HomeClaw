@@ -12,7 +12,10 @@
    pip install -r requirements.txt
    ```
 
-2. **Configure** — Edit `config/core.yml` (LLM, memory) and `config/user.yml` (who can talk to the assistant). If using **local models**: copy llama.cpp's binary distribution into `llama.cpp-master/` for your device type (see `llama.cpp-master/README.md`); used for main and embedding local models.
+2. **Configure** — Edit `config/core.yml` (LLM, memory) and `config/user.yml` (who can talk to the assistant).
+
+   - **Local models:** Copy llama.cpp's **binary distribution** into `llama.cpp-master/<platform>/` for your device (e.g. `mac/`, `win_cuda/`, `linux_cpu/` — see `llama.cpp-master/README.md` in the repo). Used for main and embedding local models.
+   - **Cloud models:** Set API keys in the environment (e.g. `export GEMINI_API_KEY=...`).
 
 3. **Run Core** — `python -m main start` (recommended: starts Core and built-in CLI) or `python core/core.py` (Core only). Both run the same Core server.
 

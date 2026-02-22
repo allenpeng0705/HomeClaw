@@ -48,7 +48,7 @@
       <p class="lead">在 <strong>Mac</strong>、<strong>Windows</strong> 或 <strong>Linux</strong> 上几步运行 HomeClaw。需要 <strong>Python 3</strong> 和 <strong>git</strong>。</p>
       <ol class="quickstart-steps">
         <li><strong>克隆并安装</strong> — <code>git clone https://github.com/allenpeng0705/HomeClaw.git</code>，<code>cd HomeClaw</code>，然后 <code>pip install -r requirements.txt</code>。</li>
-        <li><strong>配置（可选）</strong> — 编辑 <code>config/core.yml</code>（LLM、记忆）和 <code>config/user.yml</code>（允许谁对话）。<strong>云端</strong>模型需设置环境变量中的 API Key；<strong>本地</strong>模型见仓库中的 <code>llama.cpp-master/README.md</code>。</li>
+        <li><strong>配置（可选）</strong> — 编辑 <code>config/core.yml</code>（LLM、记忆）和 <code>config/user.yml</code>（允许谁对话）。<strong>云端</strong>模型需设置环境变量中的 API Key；<strong>本地</strong>模型需将 llama.cpp 二进制复制到 <code>llama.cpp-master/&lt;platform&gt;/</code>（见 <code>llama.cpp-master/README.md</code>）。</li>
         <li><strong>启动 Core</strong> — <code>python -m main start</code>。会启动 Core 与内置 CLI，可在同一终端中聊天。</li>
         <li><strong>聊天</strong> — 在该终端使用 CLI，或运行渠道（如 <code>python -m channels.run webchat</code> 后打开 http://localhost:8014），或打开<strong>伴侣应用</strong>并将 Core URL 设为 <code>http://127.0.0.1:9000</code>。</li>
       </ol>

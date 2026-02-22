@@ -70,7 +70,9 @@ pip install -r requirements.txt</code></pre>
         <div class="doc-keys">
           <p class="doc-keys-title">2. 配置（可选）</p>
           <ul>
-            <li><strong>config/core.yml</strong> — 设置 <code>main_llm</code>、<code>embedding_llm</code>（如 <code>cloud_models/Gemini-2.5-Flash</code>）。云端模型需在环境中设置 API Key（如 <code>export GEMINI_API_KEY=...</code>）。本地模型见仓库中的 <code>llama.cpp-master/README.md</code>。</li>
+            <li><strong>config/core.yml</strong> — 设置 <code>main_llm</code>、<code>embedding_llm</code>（如 <code>cloud_models/Gemini-2.5-Flash</code>）。</li>
+            <li><strong>云端模型</strong> — 在环境中设置 API Key（如 <code>export GEMINI_API_KEY=...</code>）。</li>
+            <li><strong>本地模型</strong> — 将 llama.cpp <strong>二进制发行版</strong> 复制到 <code>llama.cpp-master/&lt;platform&gt;/</code>，按设备选择目录（如 <code>mac/</code>、<code>win_cuda/</code>、<code>linux_cpu/</code>；见仓库中 <code>llama.cpp-master/README.md</code>）。</li>
             <li><strong>config/user.yml</strong> — 添加用户（name、email、im 等），使其可与助手对话。</li>
           </ul>
         </div>
@@ -103,7 +105,7 @@ pip install -r requirements.txt</code></pre>
         <h3>步骤</h3>
         <ol>
           <li><strong>创建虚拟机</strong> — <strong>阿里云 ECS</strong>、<strong>AWS EC2</strong>、<strong>腾讯云</strong>、<strong>GCP</strong>、<strong>Azure</strong> 或任意 VPS。选择 <strong>Ubuntu 22.04</strong>（或 20.04）。</li>
-          <li><strong>安装与运行</strong> — SSH 登录后，与快速开始一致：克隆仓库、<code>pip install -r requirements.txt</code>、编辑 <code>config/core.yml</code> 与 <code>config/user.yml</code>、在环境中设置 API Key，然后 <code>python -m main start</code>。</li>
+          <li><strong>安装与运行</strong> — SSH 登录后，与快速开始一致：克隆仓库、<code>pip install -r requirements.txt</code>、编辑 <code>config/core.yml</code> 与 <code>config/user.yml</code>、在环境中设置 API Key。若使用<strong>本地模型</strong>，将 llama.cpp 二进制复制到 <code>llama.cpp-master/&lt;platform&gt;/</code>（如 <code>linux_cpu/</code>；见 <code>llama.cpp-master/README.md</code>）。然后 <code>python -m main start</code>。</li>
           <li><strong>保护 Core</strong> — 在 <code>config/core.yml</code> 中设置 <code>auth_enabled: true</code> 和 <code>auth_api_key: "&lt;长随机密钥&gt;"</code>。防火墙仅开放 <strong>9000</strong>（及 22 用于 SSH），或使用 <strong>Cloudflare Tunnel</strong> / <strong>Tailscale</strong> 将 9000 保留在内网。</li>
           <li><strong>保持运行</strong> — 使用 <strong>systemd</strong>（或 supervisor）使 Core 在重启后自动拉起。完整文档中有示例服务文件。</li>
         </ol>

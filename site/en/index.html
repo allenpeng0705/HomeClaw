@@ -48,7 +48,7 @@
       <p class="lead">Run HomeClaw on <strong>Mac</strong>, <strong>Windows</strong>, or <strong>Linux</strong> in a few steps. You need <strong>Python 3</strong> and <strong>git</strong>.</p>
       <ol class="quickstart-steps">
         <li><strong>Clone and install</strong> — <code>git clone https://github.com/allenpeng0705/HomeClaw.git</code>, <code>cd HomeClaw</code>, then <code>pip install -r requirements.txt</code>.</li>
-        <li><strong>Configure (optional)</strong> — Edit <code>config/core.yml</code> (LLM, memory) and <code>config/user.yml</code> (who can talk). For <strong>cloud</strong> models set API keys in the environment; for <strong>local</strong> models see <code>llama.cpp-master/README.md</code> in the repo.</li>
+        <li><strong>Configure (optional)</strong> — Edit <code>config/core.yml</code> (LLM, memory) and <code>config/user.yml</code> (who can talk). For <strong>cloud</strong> models set API keys in the environment; for <strong>local</strong> models copy llama.cpp binary into <code>llama.cpp-master/&lt;platform&gt;/</code> for your device (see <code>llama.cpp-master/README.md</code>).</li>
         <li><strong>Run Core</strong> — <code>python -m main start</code>. This starts Core and the built-in CLI; you can chat in the same terminal.</li>
         <li><strong>Chat</strong> — Use the CLI in that terminal, or run a channel (e.g. <code>python -m channels.run webchat</code> and open http://localhost:8014), or open the <strong>Companion app</strong> and set Core URL to <code>http://127.0.0.1:9000</code>.</li>
       </ol>
