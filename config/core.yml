@@ -68,7 +68,7 @@ skills_dir: config/skills
 # Cap skills/plugins in prompt: take top N candidates, apply threshold, then up to M in prompt. See docs_design/SessionAndDualMemoryDesign.md.
 # Flow: retrieve/load top skills_top_n_candidates (e.g. 10), drop below skills_similarity_threshold, then take up to skills_max_in_prompt (e.g. 5). If only 1, 1 is fine.
 skills_top_n_candidates: 10
-skills_max_in_prompt: 5
+skills_max_in_prompt: 10
 plugins_top_n_candidates: 10
 plugins_max_in_prompt: 5
 # Max chars per plugin description in the routing block. 0 = no truncation (default). With RAG (plugins_use_vector_search) or plugins_max_in_prompt we already limit how many plugins appear; this only caps per-description length. Use 0 for full descriptions; set 512 or 300 only to shrink prompt or cap one very long description.
@@ -77,17 +77,45 @@ plugins_description_max_chars: 0
 skills_use_vector_search: true
 skills_vector_collection: homeclaw_skills
 skills_max_retrieved: 10
-skills_similarity_threshold: 0.5
+# Min similarity (0..1) to keep a skill; below this, RAG drops it. 0.5 can drop cross-lingual or short queries; 0.3 or 0.0 improves selection (e.g. Chinese "创建图片" vs English skill text). Force-include rules still add skills by pattern.
+skills_similarity_threshold: 0.3
 skills_refresh_on_startup: true
 # Optional test folder: full sync every time (id = test__<folder>). Production skills_dir can be incremental (only new).
 skills_test_dir: ""
 skills_incremental_sync: false
+# Optional: when user query matches a regex, ensure these skill folders are in the prompt and optionally append an instruction. No per-skill code in Core; add rules per skill here.
+skills_force_include_rules:
+  # Image generation: match English + Chinese (and other languages via patterns list) so run_skill is always triggered
+  - patterns:
+      - "generate\\s+(an?|one)?\\s+image|create\\s+(an?|one)?\\s+image|make\\s+(an?|one)?\\s+image|draw\\s+(a\\s+)?(picture|image)"
+      - "创建.*图|生成.*图|画.*图|做.*图|给我.*图|来一张图|弄一张图|生成图片|创建图片"
+    folders: [nano-banana-pro-1.0.1]
+    instruction: "The user asked to generate or create an image. You MUST call the run_skill tool first (do not reply with text). Use skill_name='nano-banana-pro-1.0.1', script='generate_image.py', args=['--prompt', '<user image description>', '--filename', 'generated.png']. Do not say that no image tool is available. Do not invent or echo 'Image saved:' or 'HOMECLAW_IMAGE_PATH' — only the run_skill result contains those."
+    auto_invoke:
+      tool: run_skill
+      arguments:
+        skill_name: nano-banana-pro-1.0.1
+        script: generate_image.py
+        args: ["--prompt", "{{query}}", "--filename", "generated.png"]
+  - pattern: "summarize\\s+(this\\s+)?(url|link|page|article)"
+    folders: [summarize-1.0.0]
+    instruction: "The user asked to summarize a URL or page. Use run_skill with skill_name='summarize-1.0.0' and the URL in args, or use the skill's instructions."
+  # Weather: so the skill is always in the prompt when the user asks about weather (RAG may not rank it in top 5)
+  - patterns:
+      - "weather|forecast|temperature|what'?s the weather|how'?s the weather|weather in|天气"
+    folders: [weather-1.0.0]
+    instruction: "The user asked about weather or forecast. Use the weather skill (weather-1.0.0) instructions: wttr.in for quick text/PNG, or open-meteo for JSON. No API key required."
 # Vector retrieval for plugins (separate collection): same design as skills. RAG finds relevant plugins; only those go into prompt.
 plugins_use_vector_search: false
 plugins_vector_collection: homeclaw_plugins
 plugins_max_retrieved: 10
 plugins_similarity_threshold: 0.0
 plugins_refresh_on_startup: true
+# Optional: when user query matches a regex, ensure these plugin ids are in the routing block and optionally append an instruction. List of { pattern: str, plugins: [str], instruction?: str }. No per-plugin code in Core.
+plugins_force_include_rules:
+  - pattern: "open\\s+(the\\s+)?browser|navigate\\s+to|go\\s+to\\s+https?://"
+    plugins: [homeclaw-browser]
+    instruction: "The user asked to open a URL or use the browser. Use route_to_plugin(plugin_id='homeclaw-browser', capability_id='browser_navigate', parameters={\"url\": \"<URL>\"})."
 # System plugins (system_plugins/): when true, Core starts each plugin (e.g. node server.js) and runs register (e.g. node register.js) so one command runs Core + all system plugins. See system_plugins/README.md.
 system_plugins_auto_start: true   # set true to start homeclaw-browser etc. with Core
 system_plugins: [homeclaw-browser]                 # optional allowlist by plugin id (folder name); empty = start all discovered
@@ -124,10 +152,13 @@ tools:
   exec_allowlist: []   # e.g. [ "date", "whoami", "echo", "pwd", "ls", "cat" ] on Unix; [ "date", "whoami", "echo", "dir", "type", "cd" ] on Windows
   exec_timeout: 30   # Unit: seconds
   # file_read, file_write, etc.: paths UNDER this base only. "." = current working directory (cross-platform). Or use absolute path (e.g. /Users/you/Docs or C:\Users\you\Docs).
-  file_read_base: "/Users/shileipeng/Documents/homeclaw"
+  #file_read_base: "/Users/shileipeng/Documents/homeclaw"
+  file_read_base: "D:/homeclaw"
   # Max characters returned by file_read when the tool does not pass max_chars (default 32000). Increase for long PDFs/documents (e.g. 128000).
   file_read_max_chars: 128000
-  run_skill_allowlist: ["run.sh", "main.py", "run.bat"]   # run_skill: if set, only these script names under skill/scripts/. .sh on Windows runs via bash/WSL if available.
+  run_skill_allowlist: []   # run_skill: if set, only these script names under skill/scripts/. Use [] to allow all scripts from skills. .sh on Windows runs via bash/WSL if available.
+  run_skill_py_in_process: true   # true = run .py scripts in Core's process (same env). false = subprocess (isolated; see docs_design/RunSkillInProcess.md).
+  # run_skill_auto_install_missing: { "google": "google-genai pillow" }   # optional: on ModuleNotFoundError, pip install and retry once (only when using subprocess)
   run_skill_timeout: 60   # Unit: seconds
   web:                  # web_search: free (no key) duckduckgo | free tier google_cse (100/day), bing (1000/mo) | tavily, brave, serpapi. Browser: web_search_browser (Google/Bing/Baidu, no key, needs Playwright).
     search:

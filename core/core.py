@@ -1133,10 +1133,45 @@ class Core(CoreInterface):
             When auth_enabled and auth_api_key are set in config, require X-API-Key or Authorization: Bearer.
             """
             try:
-                ok, text, status = await self._handle_inbound_request(request)
+                ok, text, status, image_paths = await self._handle_inbound_request(request)
                 if not ok:
                     return JSONResponse(status_code=status, content={"error": text, "text": ""})
-                return JSONResponse(content={"text": self._format_outbound_text(text) if text else ""})
+                content = {"text": self._format_outbound_text(text) if text else ""}
+                # Last-resort: if response text contains "Image saved: <path>" but we have no image_paths, parse it
+                if not image_paths and text and ("Image saved:" in text or "HOMECLAW_IMAGE_PATH=" in text):
+                    import re as _re
+                    for pattern in (r"Image saved:\s*(.+)", r"HOMECLAW_IMAGE_PATH=(.+)"):
+                        m = _re.search(pattern, text, _re.IGNORECASE)
+                        if m:
+                            p = m.group(1).strip().split("\n")[0].strip()
+                            if p:
+                                try:
+                                    resolved = Path(p).resolve()
+                                    if resolved.is_file():
+                                        image_paths = [str(resolved)]
+                                        break
+                                except (OSError, RuntimeError):
+                                    pass
+                # Any output that includes images: include as data URLs so companion/remote clients can display
+                if image_paths:
+                    data_urls = []
+                    for image_path in image_paths:
+                        if not isinstance(image_path, str) or not os.path.isfile(image_path):
+                            continue
+                        try:
+                            with open(image_path, "rb") as f:
+                                b64 = __import__("base64").b64encode(f.read()).decode("ascii")
+                            ext = (image_path.lower().split(".")[-1] if "." in image_path else "png") or "png"
+                            mime = "image/png" if ext == "png" else ("image/jpeg" if ext in ("jpg", "jpeg") else "image/" + ext)
+                            if mime == "image/jpg":
+                                mime = "image/jpeg"
+                            data_urls.append(f"data:{mime};base64,{b64}")
+                        except Exception as e:
+                            logger.debug("inbound: could not attach image as data URL: {}", e)
+                    if data_urls:
+                        content["images"] = data_urls
+                        content["image"] = data_urls[0]
+                return JSONResponse(content=content)
             except Exception as e:
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"error": str(e), "text": ""})
@@ -1713,9 +1748,28 @@ class Core(CoreInterface):
                     if not req.user_id or (not req.text and not has_media):
                         await websocket.send_json({"error": "user_id and (text or media) required", "text": ""})
                         continue
-                    ok, text, _ = await self._handle_inbound_request(req)
+                    ok, text, _, image_paths = await self._handle_inbound_request(req)
                     out_text = (self._format_outbound_text(text) if text else "") if ok else ""
-                    await websocket.send_json({"text": out_text, "error": "" if ok else text})
+                    ws_payload = {"text": out_text, "error": "" if ok else text}
+                    if image_paths:
+                        data_urls = []
+                        for image_path in image_paths:
+                            if not isinstance(image_path, str) or not os.path.isfile(image_path):
+                                continue
+                            try:
+                                with open(image_path, "rb") as f:
+                                    b64 = __import__("base64").b64encode(f.read()).decode("ascii")
+                                ext = (image_path.lower().split(".")[-1] if "." in image_path else "png") or "png"
+                                mime = "image/png" if ext == "png" else ("image/jpeg" if ext in ("jpg", "jpeg") else "image/" + ext)
+                                if mime == "image/jpg":
+                                    mime = "image/jpeg"
+                                data_urls.append(f"data:{mime};base64,{b64}")
+                            except Exception as e:
+                                logger.debug("ws: could not attach image: {}", e)
+                        if data_urls:
+                            ws_payload["images"] = data_urls
+                            ws_payload["image"] = data_urls[0]
+                    await websocket.send_json(ws_payload)
             except WebSocketDisconnect:
                 logger.debug("WebSocket client disconnected")
             except Exception as e:
@@ -1729,8 +1783,8 @@ class Core(CoreInterface):
         logger.debug("core initialized and all the endpoints are registered!")
 
 
-    async def _handle_inbound_request(self, request: InboundRequest) -> Tuple[bool, str, int]:
-        """Shared logic for POST /inbound and WebSocket /ws. Returns (success, text_or_error, status_code)."""
+    async def _handle_inbound_request(self, request: InboundRequest) -> Tuple[bool, str, int, Optional[List[str]]]:
+        """Shared logic for POST /inbound and WebSocket /ws. Returns (success, text_or_error, status_code, image_paths_or_none)."""
         from datetime import datetime
         req_id = str(datetime.now().timestamp())
         user_name = request.user_name or request.user_id
@@ -1782,7 +1836,7 @@ class Core(CoreInterface):
         )
         has_permission, user = self.check_permission(pr.user_name, pr.user_id, ChannelType.IM, content_type_for_perm)
         if not has_permission or user is None:
-            return False, "Permission denied", 401
+            return False, "Permission denied", 401, None
         if user and len(user.name) > 0:
             pr.user_name = user.name
         if user:
@@ -1792,13 +1846,20 @@ class Core(CoreInterface):
         if not getattr(self, "orchestrator_unified_with_tools", True):
             flag = await self.orchestrator_handler(pr)
             if flag:
-                return True, "Orchestrator and plugin handled the request", 200
+                return True, "Orchestrator and plugin handled the request", 200, None
         resp_text = await self.process_text_message(pr)
         if resp_text is None:
-            return True, "", 200
+            return True, "", 200, None
         if resp_text == ROUTING_RESPONSE_ALREADY_SENT:
-            return True, "Handled by routing (TAM or plugin).", 200
-        return True, resp_text, 200
+            return True, "Handled by routing (TAM or plugin).", 200, None
+        img_paths = (pr.request_metadata or {}).get("response_image_paths")
+        if not isinstance(img_paths, list):
+            single = (pr.request_metadata or {}).get("response_image_path")
+            img_paths = [single] if single and isinstance(single, str) else None
+        # Fallback: run_skill stores paths on Core by request_id so companion gets image even if request_metadata didn't persist
+        if not img_paths and getattr(self, "_response_image_paths_by_request_id", None):
+            img_paths = self._response_image_paths_by_request_id.pop(pr.request_id, None)
+        return True, resp_text, 200, img_paths
 
     def _persist_last_channel(self, request: PromptRequest) -> None:
         """Persist last channel to DB and atomic file (database/latest_channel.json) for robust send_response_to_latest_channel. Also saves with per-session key for cron delivery_target='session'."""
@@ -2023,6 +2084,14 @@ class Core(CoreInterface):
                         logger.debug("Routing tool already sent response to channel")
                         continue
                     resp_data = {"text": self._format_outbound_text(resp_text)}
+                    # Any skill/tool output that includes images: HOMECLAW_IMAGE_PATH=<path> → send to channel/companion
+                    img_paths = (request.request_metadata or {}).get("response_image_paths")
+                    if not isinstance(img_paths, list):
+                        img_paths = [(request.request_metadata or {}).get("response_image_path")] if (request.request_metadata or {}).get("response_image_path") else []
+                    img_paths = [p for p in img_paths if isinstance(p, str) and os.path.isfile(p)]
+                    if img_paths:
+                        resp_data["images"] = img_paths
+                        resp_data["image"] = img_paths[0]
                     async_resp: AsyncResponse = AsyncResponse(request_id=request.request_id, request_metadata=request.request_metadata, host=request.host, port=request.port, from_channel=request.channel_name, response_data=resp_data)
                     await self.response_queue.put(async_resp)
                 else:
@@ -3423,6 +3492,8 @@ class Core(CoreInterface):
             llm_input = []
             response = ''
             system_parts = []
+            force_include_instructions = []  # collected from skills_force_include_rules and plugins_force_include_rules; appended at end of system so model sees it last
+            force_include_auto_invoke = []  # when model returns no tool_calls, run these (e.g. run_skill) so the skill runs anyway; each item: {"tool": str, "arguments": dict}
 
             # Workspace bootstrap (identity / agents / tools) — optional; see Comparison.md §7.4
             if getattr(Util().core_metadata, 'use_workspace_bootstrap', True):
@@ -3535,12 +3606,69 @@ class Core(CoreInterface):
                             _component_log("skills", f"capped to {skills_max} skill(s) in prompt (skills_max_in_prompt)")
                         if skills_list:
                             _component_log("skills", f"loaded {len(skills_list)} skill(s) from {skills_path}")
+                    # Config-driven force-include: when user query matches a rule pattern, ensure those skill folders are in the prompt and optionally append an instruction
+                    matched_instructions = []
+                    if skills_list:
+                        from base.skills import load_skill_by_folder
+                        q = (query or "").strip().lower()
+                        folders_present = {s.get("folder") for s in skills_list}
+                        for rule in (getattr(meta_skills, "skills_force_include_rules", None) or []):
+                            # Support single "pattern" (str) or "patterns" (list) for multi-language / general matching
+                            patterns = rule.get("patterns") if isinstance(rule, dict) else None
+                            if patterns is None and isinstance(rule, dict) and rule.get("pattern") is not None:
+                                patterns = [rule.get("pattern")]
+                            pattern = rule.get("pattern") if isinstance(rule, dict) else None
+                            folders = rule.get("folders") if isinstance(rule, dict) else None
+                            if not folders or not isinstance(folders, (list, tuple)):
+                                continue
+                            if not patterns and not pattern:
+                                continue
+                            to_try = list(patterns) if patterns else ([pattern] if pattern else [])
+                            matched_rule = False
+                            for pat in to_try:
+                                if not pat or not isinstance(pat, str):
+                                    continue
+                                try:
+                                    if re.search(pat, q):
+                                        matched_rule = True
+                                        break
+                                except re.error:
+                                    continue
+                            if not matched_rule:
+                                continue
+                            for folder in folders:
+                                folder = str(folder).strip()
+                                if not folder or folder in folders_present:
+                                    continue
+                                skill_dict = load_skill_by_folder(skills_path, folder, include_body=False)
+                                if skill_dict:
+                                    skills_list = [skill_dict] + [s for s in skills_list if s.get("folder") != folder]
+                                    folders_present.add(folder)
+                                    _component_log("skills", f"included {folder} for force-include rule")
+                            instr = rule.get("instruction") if isinstance(rule, dict) else None
+                            if instr and isinstance(instr, str) and instr.strip():
+                                matched_instructions.append(instr.strip())
+                            auto_invoke = rule.get("auto_invoke") if isinstance(rule, dict) else None
+                            if isinstance(auto_invoke, dict) and auto_invoke.get("tool") and isinstance(auto_invoke.get("arguments"), dict):
+                                args = dict(auto_invoke["arguments"])
+                                # Substitute {{query}} in string values and in args list if present
+                                user_q = (query or "").strip()
+                                for k, v in list(args.items()):
+                                    if isinstance(v, str) and "{{query}}" in v:
+                                        args[k] = v.replace("{{query}}", user_q)
+                                    elif isinstance(v, list):
+                                        args[k] = [s.replace("{{query}}", user_q) if isinstance(s, str) else s for s in v]
+                                force_include_auto_invoke.append({"tool": str(auto_invoke["tool"]).strip(), "arguments": args})
+                        skills_max = max(0, int(getattr(meta_skills, "skills_max_in_prompt", 5) or 5))
+                        if skills_max > 0 and len(skills_list) > skills_max:
+                            skills_list = skills_list[:skills_max]
                     if skills_list:
                         selected_names = [s.get("folder") or s.get("name") or "?" for s in skills_list]
                         _component_log("skills", f"selected: {', '.join(selected_names)}")
                     skills_block = build_skills_system_block(skills_list, include_body=False)
                     if skills_block:
                         system_parts.append(skills_block)
+                    force_include_instructions.extend(matched_instructions)
                 except Exception as e:
                     logger.warning("Failed to load skills: {}", e)
 
@@ -3671,6 +3799,43 @@ class Core(CoreInterface):
                     plugins_max = max(0, int(getattr(Util().get_core_metadata(), "plugins_max_in_prompt", 5) or 5))
                     if plugins_max > 0 and len(plugin_list) > plugins_max:
                         plugin_list = plugin_list[:plugins_max]
+                # Config-driven force-include: when user query matches a rule pattern, ensure those plugins are in the list and optionally collect an instruction
+                plugin_force_instructions = []
+                if plugin_list is not None:
+                    q = (query or "").strip().lower()
+                    ids_present = {str(p.get("id") or "").strip().lower().replace(" ", "_") for p in plugin_list}
+                    for rule in (getattr(meta_plugins, "plugins_force_include_rules", None) or []):
+                        pattern = rule.get("pattern") if isinstance(rule, dict) else None
+                        plugins_in_rule = rule.get("plugins") if isinstance(rule, dict) else None
+                        if not pattern or not plugins_in_rule or not isinstance(plugins_in_rule, (list, tuple)):
+                            continue
+                        try:
+                            if not re.search(pattern, q):
+                                continue
+                        except re.error:
+                            continue
+                        desc_max_rag = max(0, int(getattr(meta_plugins, "plugins_description_max_chars", 0) or 0))
+                        for pid in plugins_in_rule:
+                            pid = str(pid).strip().lower().replace(" ", "_")
+                            if not pid or pid in ids_present:
+                                continue
+                            plug = self.plugin_manager.get_plugin_by_id(pid)
+                            if plug is None:
+                                continue
+                            if isinstance(plug, dict):
+                                desc_raw = (plug.get("description") or "").strip()
+                            else:
+                                desc_raw = (getattr(plug, "get_description", lambda: "")() or "").strip()
+                            desc = desc_raw[:desc_max_rag] if desc_max_rag > 0 else desc_raw
+                            plugin_list = [{"id": pid, "description": desc}] + [p for p in plugin_list if (p.get("id") or "").strip().lower().replace(" ", "_") != pid]
+                            ids_present.add(pid)
+                            _component_log("plugin", f"included {pid} for force-include rule")
+                        instr = rule.get("instruction") if isinstance(rule, dict) else None
+                        if instr and isinstance(instr, str) and instr.strip():
+                            plugin_force_instructions.append(instr.strip())
+                    plugins_max = max(0, int(getattr(meta_plugins, "plugins_max_in_prompt", 5) or 5))
+                    if plugins_max > 0 and len(plugin_list) > plugins_max:
+                        plugin_list = plugin_list[:plugins_max]
                 plugin_lines = []
                 if plugin_list:
                     desc_max = max(0, int(getattr(Util().get_core_metadata(), "plugins_description_max_chars", 0) or 0))
@@ -3691,6 +3856,7 @@ class Core(CoreInterface):
                     + ("Available plugins:\n" + "\n".join(plugin_lines) if plugin_lines else "")
                 )
                 system_parts.append(routing_block)
+                force_include_instructions.extend(plugin_force_instructions)
 
             # Optional: surface recorded events (TAM) in context so model knows what's coming up
             if getattr(self, "orchestratorInst", None) and getattr(self.orchestratorInst, "tam", None):
@@ -3699,6 +3865,12 @@ class Core(CoreInterface):
                     summary = tam.get_recorded_events_summary(limit=10)
                     if summary:
                         system_parts.append("## Recorded events (from record_date)\n" + summary)
+
+            # Append force-include instructions last so the model sees them immediately before the conversation (better compliance). Order and tradeoffs: docs_design/SystemPromptInjectionOrder.md
+            if force_include_instructions:
+                _component_log("skills", f"appended {len(force_include_instructions)} force-include instruction(s) at end of system prompt")
+            for instr in force_include_instructions:
+                system_parts.append("\n\n## Instruction for this request\n\n" + instr + "\n\n")
 
             if system_parts:
                 llm_input = [{"role": "system", "content": "\n".join(system_parts)}]
@@ -3811,24 +3983,63 @@ class Core(CoreInterface):
                         if content_str and ("<tool_call>" in content_str or "</tool_call>" in content_str):
                             response = "The assistant tried to use a tool but the response format was not recognized. Please try again."
                         else:
-                            # Fallback: model didn't call a tool (e.g. replied "No"). If user intent is clear, run plugin anyway.
-                            unhelpful = not content_str or len(content_str) < 80 or content_str.strip().lower() in ("no", "i can't", "i cannot", "sorry", "nope")
-                            fallback_route = _infer_route_to_plugin_fallback(query) if unhelpful else None
-                            if fallback_route and registry and any(t.name == "route_to_plugin" for t in (registry.list_tools() or [])):
-                                try:
-                                    _component_log("tools", "fallback route_to_plugin (model did not call tool)")
-                                    result = await registry.execute_async("route_to_plugin", fallback_route, context)
-                                    if result == ROUTING_RESPONSE_ALREADY_SENT:
-                                        return ROUTING_RESPONSE_ALREADY_SENT
-                                    if isinstance(result, str) and result.strip():
-                                        response = result
-                                    else:
-                                        response = content_str or "Done."
-                                except Exception as e:
-                                    logger.debug("Fallback route_to_plugin failed: {}", e)
-                                    response = content_str or "The action could not be completed. Try a model that supports tool calling."
+                            # Fallback: model didn't call a tool. When we have force_include_auto_invoke (user query matched a rule, e.g. "create an image"), always run it so the skill runs and we return real output instead of model hallucination (e.g. fake "Image saved"). Otherwise run only when the reply looks unhelpful (e.g. "no tool available").
+                            content_lower = (content_str or "").strip().lower()
+                            unhelpful_for_auto_invoke = (
+                                not content_str or len(content_str) < 100
+                                or any(phrase in content_lower for phrase in (
+                                    "no tool", "don't have", "doesn't have", "not have", "not available", "no image tool", "no such tool",
+                                    "can't generate", "cannot generate", "i'm sorry", "i cannot",
+                                    "stderr:", "modulenotfounderror", "traceback", "no module named",
+                                    "error occurred while generating", "error while generating", "please try again",
+                                ))
+                            )
+                            run_force_include = bool(force_include_auto_invoke and registry)
+                            _component_log("tools", "model returned no tool_calls; unhelpful=%s auto_invoke_count=%s" % (unhelpful_for_auto_invoke, len(force_include_auto_invoke or [])))
+                            # When we have force-include auto_invoke (e.g. image rule), always run it so the skill runs and we return real output instead of model hallucination
+                            if run_force_include:
+                                ran = False
+                                for inv in force_include_auto_invoke:
+                                    tname = inv.get("tool") or ""
+                                    targs = inv.get("arguments") or {}
+                                    if not tname or not isinstance(targs, dict):
+                                        continue
+                                    if not any(t.name == tname for t in (registry.list_tools() or [])):
+                                        continue
+                                    try:
+                                        _component_log("tools", f"fallback auto_invoke {tname} (model did not call tool)")
+                                        if tname == "run_skill":
+                                            _component_log("tools", "executing run_skill (run_skill_py_in_process from config/core.yml tools:)")
+                                        result = await registry.execute_async(tname, targs, context)
+                                        if result == ROUTING_RESPONSE_ALREADY_SENT:
+                                            return ROUTING_RESPONSE_ALREADY_SENT
+                                        if isinstance(result, str) and result.strip():
+                                            response = result
+                                            ran = True
+                                        break
+                                    except Exception as e:
+                                        logger.debug("Fallback auto_invoke {} failed: {}", tname, e)
+                                if not ran:
+                                    response = content_str
                             else:
-                                response = content_str
+                                # Fallback: model didn't call a tool (e.g. replied "No"). If user intent is clear, run plugin anyway.
+                                unhelpful = not content_str or len(content_str) < 80 or content_str.strip().lower() in ("no", "i can't", "i cannot", "sorry", "nope")
+                                fallback_route = _infer_route_to_plugin_fallback(query) if unhelpful else None
+                                if fallback_route and registry and any(t.name == "route_to_plugin" for t in (registry.list_tools() or [])):
+                                    try:
+                                        _component_log("tools", "fallback route_to_plugin (model did not call tool)")
+                                        result = await registry.execute_async("route_to_plugin", fallback_route, context)
+                                        if result == ROUTING_RESPONSE_ALREADY_SENT:
+                                            return ROUTING_RESPONSE_ALREADY_SENT
+                                        if isinstance(result, str) and result.strip():
+                                            response = result
+                                        else:
+                                            response = content_str or "Done."
+                                    except Exception as e:
+                                        logger.debug("Fallback route_to_plugin failed: {}", e)
+                                        response = content_str or "The action could not be completed. Try a model that supports tool calling."
+                                else:
+                                    response = content_str
                         break
                     routing_sent = False
                     routing_response_text = None  # when route_to_plugin/route_to_tam return text (sync inbound/ws), use as final response
@@ -3844,6 +4055,8 @@ class Core(CoreInterface):
                             args = {}
                         args_redacted = redact_params_for_log(args) if isinstance(args, dict) else args
                         logger.info("Tool selected: name={} parameters={}", name, args_redacted)
+                        if name == "run_skill":
+                            _component_log("tools", "executing run_skill (run_skill_py_in_process from config/core.yml tools:)")
                         if name == "route_to_plugin" and isinstance(args, dict):
                             logger.info(
                                 "Plugin routing: plugin_id={} capability_id={} parameters={}",
@@ -4230,6 +4443,33 @@ class Core(CoreInterface):
         except Exception:
             return None
 
+    async def re_sync_agent_memory(self) -> int:
+        """Re-index AGENT_MEMORY.md + daily memory into the vector store. Call after append_agent_memory/append_daily_memory so new content is searchable without restart. Returns number of chunks synced (0 on failure or nothing to index)."""
+        if not getattr(Util().get_core_metadata(), "use_agent_memory_search", False):
+            return 0
+        store = getattr(self, "agent_memory_vector_store", None)
+        embedder = getattr(self, "embedder", None)
+        if not store or not embedder:
+            return 0
+        try:
+            from base.workspace import get_workspace_dir
+            from base.agent_memory_index import sync_agent_memory_to_vector_store
+            meta = Util().get_core_metadata()
+            ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
+            n = await sync_agent_memory_to_vector_store(
+                workspace_dir=Path(ws_dir),
+                agent_memory_path=(getattr(meta, "agent_memory_path", None) or "").strip() or None,
+                daily_memory_dir=(getattr(meta, "daily_memory_dir", None) or "").strip() or None,
+                vector_store=store,
+                embedder=embedder,
+            )
+            if n > 0:
+                _component_log("agent_memory", f"re-synced {n} chunk(s) after append")
+            return n
+        except Exception as e:
+            logger.debug("re_sync_agent_memory failed: {}", e)
+            return 0
+
     async def search_agent_memory(
         self,
         query: str,
@@ -4431,6 +4671,13 @@ class Core(CoreInterface):
         return None
 
 def main():
+    # Print which Python runs Core and whether common skill deps (e.g. google.genai) are importable (before logging is configured)
+    try:
+        import google.genai as _  # noqa: F401
+        _google_ok = "ok"
+    except Exception:
+        _google_ok = "missing"
+    print("Core startup: Python=%s ; google.genai=%s" % (sys.executable, _google_ok), file=sys.stderr, flush=True)
     loop = None
     core = None
     try:

@@ -2,30 +2,34 @@
 name: summarize
 description: Summarize URLs or files with the summarize CLI (web, PDFs, images, audio, YouTube).
 homepage: https://summarize.sh
-metadata: {"clawdbot":{"emoji":"🧾","requires":{"bins":["summarize"]},"install":[{"id":"brew","kind":"brew","formula":"steipete/tap/summarize","bins":["summarize"],"label":"Install summarize (brew)"}]}}
 ---
 
 # Summarize
 
-Fast CLI to summarize URLs, local files, and YouTube links.
+Fast CLI to summarize URLs, local files, and YouTube links. On HomeClaw the model runs this via terminal; ensure the `summarize` binary is on PATH (install per your platform).
 
 ## Quick start
 
 ```bash
-summarize "https://example.com" --model google/gemini-3-flash-preview
-summarize "/path/to/file.pdf" --model google/gemini-3-flash-preview
+summarize "https://example.com" --model <model>
+summarize "/path/to/file.pdf" --model <model>
 summarize "https://youtu.be/dQw4w9WgXcQ" --youtube auto
 ```
 
-## Model + keys
+## Model and API key (use HomeClaw mix mode)
 
-Set the API key for your chosen provider:
-- OpenAI: `OPENAI_API_KEY`
-- Anthropic: `ANTHROPIC_API_KEY`
-- xAI: `XAI_API_KEY`
-- Google: `GEMINI_API_KEY` (aliases: `GOOGLE_GENERATIVE_AI_API_KEY`, `GOOGLE_API_KEY`)
+Use the **same model and API key** as HomeClaw Core so behavior matches your main LLM:
 
-Default model is `google/gemini-3-flash-preview` if none is set.
+- **Config:** `config/core.yml` — `main_llm_local`, `main_llm_cloud`, and each cloud model’s `api_key_name` (e.g. `GEMINI_API_KEY`).
+- **Key:** Set that env var where Core (and the terminal) run, e.g. `GEMINI_API_KEY` or `OPENAI_API_KEY`. No need to set multiple provider keys unless you use multiple cloud models.
+- **Model:** Pass the same LiteLLM-style model id to `summarize --model <id>`, e.g. `google/gemini-2.5-flash` or `openai/gpt-4o`, matching Core’s `main_llm_cloud` / `main_llm_local`.
+
+Example (Core using Gemini 2.5 Flash):
+
+```bash
+# Key already set for Core
+summarize "https://example.com" --model google/gemini-2.5-flash
+```
 
 ## Useful flags
 
@@ -38,11 +42,7 @@ Default model is `google/gemini-3-flash-preview` if none is set.
 
 ## Config
 
-Optional config file: `~/.summarize/config.json`
-
-```json
-{ "model": "openai/gpt-5.2" }
-```
+Optional config file: `~/.summarize/config.json` — set `model` to the same id you use with Core (e.g. `google/gemini-2.5-flash`).
 
 Optional services:
 - `FIRECRAWL_API_KEY` for blocked sites

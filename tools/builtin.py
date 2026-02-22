@@ -73,6 +73,49 @@ async def _start_background_process(executable: str, args: List[str], timeout: i
     asyncio.create_task(_process_reader(proc, job_id, "stderr", proc.stderr))
     return job_id
 
+def _run_py_script_in_process(script_path: Path, args_list: List[str], skill_folder: Path) -> tuple:
+    """Run a .py script in Core's process (same env). Returns (stdout_str, stderr_str). Run from a thread to avoid blocking.
+    Same logic for all Python skills. Script runs in Core's process so a buggy script (e.g. C extension crash, os._exit)
+    could affect Core; use run_skill_py_in_process: false for untrusted skills (subprocess isolates)."""
+    import io
+    old_argv = list(sys.argv)
+    old_cwd = os.getcwd()
+    old_stdout, old_stderr = sys.stdout, sys.stderr
+    old_path = list(sys.path)
+    out_io = io.StringIO()
+    err_io = io.StringIO()
+    try:
+        sys.argv = [str(script_path)] + args_list
+        os.chdir(str(skill_folder))
+        # Match `python script.py`: script's directory is first on sys.path (for all .py skills)
+        sys.path.insert(0, str(script_path.parent))
+        # Pre-import so script's "from google import genai" finds it in sys.modules (same process, but exec() can miss otherwise)
+        try:
+            import google.genai  # noqa: F401
+            import google.genai.types  # noqa: F401
+            from PIL import Image  # noqa: F401
+        except Exception:
+            pass
+        sys.stdout = out_io
+        sys.stderr = err_io
+        with open(script_path, "r", encoding="utf-8", errors="replace") as f:
+            code = compile(f.read(), str(script_path), "exec")
+        globals_dict = {"__name__": "__main__", "__file__": str(script_path), "__builtins__": __builtins__}
+        exec(code, globals_dict)
+    except SystemExit as e:
+        if e.code and e.code != 0:
+            err_io.write(f"Script exited with code {e.code}\n")
+    except BaseException as e:
+        # Catch all (Exception + KeyboardInterrupt etc.) so nothing propagates out of this thread
+        err_io.write(f"{type(e).__name__}: {e}\n")
+    finally:
+        sys.argv = old_argv
+        os.chdir(old_cwd)
+        sys.path[:] = old_path
+        sys.stdout, sys.stderr = old_stdout, old_stderr
+    return out_io.getvalue(), err_io.getvalue()
+
+
 # Optional: load tool config from core config (exec allowlist, file_read base path)
 def _get_tools_config() -> Dict[str, Any]:
     try:
@@ -542,6 +585,16 @@ async def _append_agent_memory_executor(arguments: Dict[str, Any], context: Tool
             f.write("\n\n")
             f.write(content)
             f.write("\n")
+        # Re-sync so agent_memory_search finds the new content without restarting Core
+        core = getattr(context, "core", None)
+        if core and getattr(meta, "use_agent_memory_search", False):
+            try:
+                re_sync = getattr(core, "re_sync_agent_memory", None)
+                if callable(re_sync):
+                    n = await re_sync()
+                    return json.dumps({"ok": True, "message": f"Appended to {path.name}", "path": str(path), "chunks_indexed": n})
+            except Exception:
+                pass
         return json.dumps({"ok": True, "message": f"Appended to {path.name}", "path": str(path)})
     except Exception as e:
         logger.exception("append_agent_memory failed")
@@ -562,6 +615,16 @@ async def _append_daily_memory_executor(arguments: Dict[str, Any], context: Tool
         ok = append_daily_memory(content, d=None, workspace_dir=ws_dir, daily_memory_dir=daily_dir if daily_dir else None)
         if ok:
             from datetime import date
+            # Re-sync so agent_memory_search finds the new content without restarting Core
+            core = getattr(context, "core", None)
+            if core and getattr(meta, "use_agent_memory_search", False):
+                try:
+                    re_sync = getattr(core, "re_sync_agent_memory", None)
+                    if callable(re_sync):
+                        n = await re_sync()
+                        return json.dumps({"ok": True, "message": f"Appended to daily memory ({date.today().isoformat()}.md)", "chunks_indexed": n})
+                except Exception:
+                    pass
             return json.dumps({"ok": True, "message": f"Appended to daily memory ({date.today().isoformat()}.md)"})
         return json.dumps({"ok": False, "message": "Failed to append to daily memory file."})
     except Exception as e:
@@ -1548,6 +1611,48 @@ async def _exec_executor(arguments: Dict[str, Any], context: ToolContext) -> str
         return f"Error: {e!s}"
 
 
+def _attach_run_skill_image_path(script_output: str, context: ToolContext) -> None:
+    """If script printed HOMECLAW_IMAGE_PATH=<path> or 'Image saved: <path>' (any skill/tool output that includes images), set request.request_metadata['response_image_paths'] and Core-level fallback so companion/channels get the image."""
+    if not script_output or not context or not getattr(context, "request", None):
+        return
+    req = context.request
+    meta = getattr(req, "request_metadata", None)
+    if not isinstance(meta, dict):
+        meta = None
+    paths = []
+    def _norm_path(p: str):
+        p = p.strip().split("\n")[0].strip()
+        if not p:
+            return None
+        try:
+            resolved = Path(p).resolve()
+            return str(resolved) if resolved.is_file() else None
+        except (OSError, RuntimeError):
+            return None
+    # Primary: HOMECLAW_IMAGE_PATH=<path>
+    for match in re.finditer(r"HOMECLAW_IMAGE_PATH=(.+)", script_output):
+        path = _norm_path(match.group(1))
+        if path:
+            paths.append(path)
+    # Fallback: "Image saved: <path>" (e.g. nano-banana-pro generate_image.py)
+    if not paths:
+        for match in re.finditer(r"Image saved:\s*(.+)", script_output, re.IGNORECASE):
+            path = _norm_path(match.group(1))
+            if path:
+                paths.append(path)
+                break
+    if paths:
+        if meta is not None:
+            meta["response_image_paths"] = paths
+        # Core-level fallback so /inbound can read even if request_metadata doesn't persist
+        core = getattr(context, "core", None)
+        req_id = getattr(req, "request_id", None)
+        if core is not None and req_id:
+            if not hasattr(core, "_response_image_paths_by_request_id"):
+                core._response_image_paths_by_request_id = {}
+            core._response_image_paths_by_request_id[req_id] = paths
+
+
 async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Run a script from a loaded skill's scripts/ folder. Supports Python (.py), Node.js (.js, .mjs, .cjs), shell (.sh). Skill name = folder name under skills_dir; script = filename or path relative to scripts/. Optional args as list of strings. Sandboxed: only scripts under <skill>/scripts/; optional allowlist in config. Skills without scripts/ are instruction-only: omit script and use the skill's instructions in your response."""
     try:
@@ -1594,17 +1699,73 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
     if args_input is not None:
         if isinstance(args_input, list):
             args_list = [str(x) for x in args_input]
+            # LLMs sometimes return one mangled string (e.g. '--prompt", "boat..."," --filename=...'); normalize so argparse gets proper argv
+            if len(args_list) == 1 and '","' in args_list[0]:
+                raw = args_list[0]
+                parts = [p.strip() for p in raw.split('","')]
+                if len(parts) == 2 and parts[0].startswith("--prompt") and ("--filename" in parts[1] or "=" in parts[1]):
+                    # First segment like '--prompt", "boat on ocean at sunset"'; second like ' --filename=generated.png'
+                    first = parts[0]
+                    rest = parts[1].strip().lstrip('"')
+                    if '", "' in first:
+                        a, b = first.split('", "', 1)
+                        args_list = [a.strip(), b.rstrip('"').strip(), rest]
+                    else:
+                        args_list = [first.strip('"'), rest]
+                    # Ensure --filename is separate if it was --filename=value
+                    normalized: List[str] = []
+                    for p in args_list:
+                        if p.startswith("--filename="):
+                            normalized.append("--filename")
+                            normalized.append(p.split("=", 1)[1].strip())
+                        else:
+                            normalized.append(p)
+                    args_list = [x for x in normalized if x]
+                else:
+                    parts = [p.strip().strip('"').strip() for p in parts]
+                    args_list = [p for p in parts if p]
         elif isinstance(args_input, str):
             args_list = [x.strip() for x in args_input.split() if x.strip()]
     try:
         if script_path.suffix.lower() in (".py", ".pyw"):
+            # Default True so .py runs in Core's process (same env) when config key is missing or not loaded
+            in_process = config.get("run_skill_py_in_process", True)
+            if in_process is None:
+                in_process = True
+            logger.info("run_skill: .py script %s ; run_skill_py_in_process=%s", script_path.name, in_process)
+            print("run_skill: .py script %s ; run_skill_py_in_process=%s" % (script_path.name, in_process), file=sys.stderr, flush=True)
+            # Run .py in Core's process (same env, no subprocess) when True
+            if in_process:
+                logger.info("run_skill: executing Python script in-process (Core Python: %s)", sys.executable)
+                loop = asyncio.get_event_loop()
+                out_str, err_str = await asyncio.wait_for(
+                    loop.run_in_executor(None, _run_py_script_in_process, script_path, args_list, skill_folder),
+                    timeout=timeout,
+                )
+                out = (out_str or "").strip()
+                err = (err_str or "").strip()
+                if err:
+                    out = out + "\nstderr:\n" + err if out else "stderr:\n" + err
+                # In-process failed with ModuleNotFoundError => Core's process does not have that package
+                if "ModuleNotFoundError" in err:
+                    out = (out or "") + (
+                        f"\n\n[In-process run: script ran in Core's process. Core's Python is: {sys.executable} "
+                        f"- install there: {sys.executable} -m pip install google-genai pillow]"
+                    )
+                # Convention: script prints HOMECLAW_IMAGE_PATH=<path> so Core/channels can send image to companion/channel
+                _attach_run_skill_image_path(out, context)
+                return out or "(no output)"
+            # Default: subprocess with same Python and env as Core
+            python_exe = sys.executable
+            logger.info("run_skill: executing Python script with: {} (same as Core)", python_exe)
             proc = await asyncio.create_subprocess_exec(
-                sys.executable,
+                python_exe,
                 str(script_path),
                 *args_list,
                 cwd=str(skill_folder),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=os.environ,
             )
         elif script_path.suffix.lower() in (".js", ".mjs", ".cjs"):
             node_path = shutil.which("node")
@@ -1657,6 +1818,41 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
         err = stderr.decode("utf-8", errors="replace").strip()
         if err:
             out = out + "\nstderr:\n" + err if out else "stderr:\n" + err
+        # If .py script failed with ModuleNotFoundError, optionally try auto-install and retry once
+        if script_path.suffix.lower() in (".py", ".pyw") and "ModuleNotFoundError" in err:
+            auto_install = config.get("run_skill_auto_install_missing") or {}
+            if isinstance(auto_install, dict):
+                match = re.search(r"No module named ['\"]([^'\"]+)['\"]", err)
+                module_name = match.group(1) if match else None
+                pip_pkgs = (auto_install.get(module_name) or auto_install.get("google")) if module_name else None
+                if pip_pkgs:
+                    try:
+                        proc_pip = await asyncio.create_subprocess_exec(
+                            sys.executable, "-m", "pip", "install", *pip_pkgs.split(),
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            env=os.environ,
+                        )
+                        await asyncio.wait_for(proc_pip.communicate(), timeout=120)
+                        # Retry script once after install
+                        proc2 = await asyncio.create_subprocess_exec(
+                            sys.executable, str(script_path), *args_list,
+                            cwd=str(skill_folder),
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            env=os.environ,
+                        )
+                        stdout2, stderr2 = await asyncio.wait_for(proc2.communicate(), timeout=timeout)
+                        out = stdout2.decode("utf-8", errors="replace").strip()
+                        err2 = stderr2.decode("utf-8", errors="replace").strip()
+                        if err2:
+                            out = out + "\nstderr:\n" + err2 if out else "stderr:\n" + err2
+                    except Exception as e:
+                        out = (out or "") + f"\n\n[Auto-install retry failed: {e}]"
+            if "ModuleNotFoundError" in (out or ""):
+                out = (out or "") + f"\n\n[Fix] Install in Core's Python: {sys.executable} -m pip install <missing-package>"
+        # Convention: script prints HOMECLAW_IMAGE_PATH=<path> so Core/channels can send image to companion/channel
+        _attach_run_skill_image_path(out, context)
         return out or "(no output)"
     except asyncio.TimeoutError:
         return f"Error: script timed out after {timeout}s"

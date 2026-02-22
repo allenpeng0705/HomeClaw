@@ -18,6 +18,18 @@ import os
 import sys
 from pathlib import Path
 
+# Require google-genai (and PIL) in the same Python that runs this script (e.g. sys.executable when run by HomeClaw).
+try:
+    from google import genai
+    from google.genai import types
+    from PIL import Image as PILImage
+except ModuleNotFoundError as e:
+    print("Error: Missing dependency. Install for the Python that runs this script:", file=sys.stderr)
+    print(f"  This Python: {sys.executable}", file=sys.stderr)
+    print("  Run:", file=sys.stderr)
+    print(f"  {sys.executable} -m pip install google-genai pillow", file=sys.stderr)
+    sys.exit(1)
+
 
 def get_api_key(provided_key: str | None) -> str | None:
     """Get API key from argument first, then environment."""
@@ -66,16 +78,11 @@ def main():
         print("  2. Set GEMINI_API_KEY environment variable", file=sys.stderr)
         sys.exit(1)
 
-    # Import here after checking API key to avoid slow import on error
-    from google import genai
-    from google.genai import types
-    from PIL import Image as PILImage
-
     # Initialise client
     client = genai.Client(api_key=api_key)
 
-    # Set up output path
-    output_path = Path(args.filename)
+    # Set up output path (resolve to absolute so we write and verify the same path)
+    output_path = Path(args.filename).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Load input image if provided
@@ -152,8 +159,21 @@ def main():
                 image_saved = True
 
         if image_saved:
-            full_path = output_path.resolve()
+            full_path = output_path
+            # Only claim success if the file exists and has content (avoid saying "saved" when write failed or path is wrong)
+            if not full_path.is_file():
+                print("Error: Image was not written to disk.", file=sys.stderr)
+                sys.exit(1)
+            try:
+                if full_path.stat().st_size == 0:
+                    print("Error: Image file is empty (write failed).", file=sys.stderr)
+                    sys.exit(1)
+            except OSError as e:
+                print(f"Error: Could not verify saved file: {e}", file=sys.stderr)
+                sys.exit(1)
             print(f"\nImage saved: {full_path}")
+            # Convention: Core and channels use this to send the image to companion/channel
+            print(f"HOMECLAW_IMAGE_PATH={full_path}")
         else:
             print("Error: No image was generated in the response.", file=sys.stderr)
             sys.exit(1)

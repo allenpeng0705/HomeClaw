@@ -1,16 +1,8 @@
 ---
 name: outlook
 description: |
-  Microsoft Outlook API integration with managed OAuth. Read, send, and manage emails, folders, calendar events, and contacts via Microsoft Graph. Use this skill when users want to interact with Outlook. For other third party apps, use the api-gateway skill (https://clawhub.ai/byungkyu/api-gateway).
+  Microsoft Outlook API integration with managed OAuth. Read, send, and manage emails, folders, calendar events, and contacts via Microsoft Graph. Use this skill when users want to interact with Outlook.
 compatibility: Requires network access and valid Maton API key
-metadata:
-  author: maton
-  version: "1.0"
-  clawdbot:
-    emoji: 🧠
-    requires:
-      env:
-        - MATON_API_KEY
 ---
 
 # Outlook

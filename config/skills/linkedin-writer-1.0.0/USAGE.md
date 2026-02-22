@@ -1,6 +1,6 @@
 # How to Use LinkedIn Writer (linkedin-writer-1.0.0) in HomeClaw
 
-**linkedin-writer-1.0.0** is an OpenClaw-style **guidance skill**: it has no `run.py` script. The model uses the skill’s **name and description** (and optionally the full **SKILL.md** body) from the “Available skills” block to write LinkedIn posts when you ask.
+**linkedin-writer-1.0.0** is a **guidance skill**: it has no `run.py` script. The model uses the skill’s **name and description** (and optionally the full **SKILL.md** body) from the “Available skills” block to write LinkedIn posts when you ask.
 
 ---
 

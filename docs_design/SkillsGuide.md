@@ -268,7 +268,7 @@ All skills-related options in **config/core.yml**:
 
 **Tools config** (for run_skill):
 
-- **tools.run_skill_allowlist:** List of script names allowed to run (e.g. `["run.sh", "main.py"]`). Empty or unset = no scripts allowed.
+- **tools.run_skill_allowlist:** List of script names allowed to run (e.g. `["run.sh", "main.py", "generate_image.py"]`). Empty list `[]` or unset = allow any script under a skill's `scripts/` folder; non-empty = only those names.
 - **tools.run_skill_timeout:** Timeout in seconds for running a skill script (default 60).
 
 ---

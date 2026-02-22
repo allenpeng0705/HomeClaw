@@ -604,6 +604,10 @@ class CoreMetadata:
     skills_refresh_on_startup: bool = True  # resync skills_dir → vector DB on Core startup when skills_use_vector_search
     skills_test_dir: str = ""  # optional; if set, full sync every time (id = test__<folder>); for testing skills
     skills_incremental_sync: bool = False  # when true, skills_dir only processes folders not already in vector store (new only)
+    # Optional: when user query matches a regex, ensure these skill folders are in the prompt and optionally append an instruction. List of { pattern: str, folders: [str], instruction?: str }.
+    skills_force_include_rules: List[Dict[str, Any]] = field(default_factory=list)
+    # Optional: when user query matches a regex, ensure these plugin ids are in the routing block and optionally append an instruction. List of { pattern: str, plugins: [str], instruction?: str }.
+    plugins_force_include_rules: List[Dict[str, Any]] = field(default_factory=list)
     orchestrator_timeout_seconds: int = 30  # timeout for intent/plugin call and plugin.run(); 0 = no timeout
     tool_timeout_seconds: int = 120  # per-tool execution timeout; prevents one tool from hanging the system; 0 = no timeout (from config tools.tool_timeout_seconds)
     orchestrator_unified_with_tools: bool = True  # when True (default), main LLM with tools routes TAM/plugin/chat; when False, separate orchestrator_handler runs first (one LLM for intent+plugin)
@@ -847,6 +851,8 @@ class CoreMetadata:
             skills_refresh_on_startup=bool(data.get('skills_refresh_on_startup', True)),
             skills_test_dir=(data.get('skills_test_dir') or '').strip(),
             skills_incremental_sync=bool(data.get('skills_incremental_sync', False)),
+            skills_force_include_rules=[r for r in (data.get('skills_force_include_rules') or []) if isinstance(r, dict) and (r.get('pattern') or r.get('patterns')) and r.get('folders')],
+            plugins_force_include_rules=[r for r in (data.get('plugins_force_include_rules') or []) if isinstance(r, dict) and r.get('pattern') and r.get('plugins')],
             orchestrator_timeout_seconds=int(data.get('orchestrator_timeout_seconds', 30) or 0),
             tool_timeout_seconds=int((data.get('tools') or {}).get('tool_timeout_seconds', 120) or 0),
             orchestrator_unified_with_tools=data.get('orchestrator_unified_with_tools', True),
@@ -912,6 +918,8 @@ class CoreMetadata:
                 'skills_refresh_on_startup': getattr(core, 'skills_refresh_on_startup', True),
                 'skills_test_dir': getattr(core, 'skills_test_dir', '') or '',
                 'skills_incremental_sync': getattr(core, 'skills_incremental_sync', False),
+                'skills_force_include_rules': getattr(core, 'skills_force_include_rules', None) or [],
+                'plugins_force_include_rules': getattr(core, 'plugins_force_include_rules', None) or [],
                 'orchestrator_timeout_seconds': getattr(core, 'orchestrator_timeout_seconds', 30),
                 # tool_timeout_seconds is written under data["tools"] below, not as top-level
                 'orchestrator_unified_with_tools': getattr(core, 'orchestrator_unified_with_tools', True),
