@@ -238,7 +238,7 @@ HomeClaw は **macOS**、**Windows**、**Linux** で動作。必要環境：
 
 ## 8. プラグイン：HomeClaw の拡張
 
-**組み込みプラグイン**（Python）：`plugins/<Name>/` に plugin.yaml、config.yml、plugin.py；Core 起動時に自動検出。**外部プラグイン**（任意の言語）：HTTP サーバー（`GET /health`、`POST /run`）を動かし、`POST /api/plugins/register` で登録；Core は組み込みと同様にルーティング。[PluginStandard.md](docs_design/PluginStandard.md) · [PluginsGuide.md](docs_design/PluginsGuide.md) · [examples/external_plugins/](examples/external_plugins/README.md)
+**組み込みプラグイン**（Python）：`plugins/<Name>/` に plugin.yaml、config.yml、plugin.py；Core 起動時に自動検出。**外部プラグイン**（任意の言語）：HTTP サーバー（`GET /health`、`POST /run`）を動かし、`POST /api/plugins/register` で登録；Core は組み込みと同様にルーティング。[PluginStandard.md](docs_design/PluginStandard.md) · [PluginsGuide.md](docs_design/PluginsGuide.md) · [external_plugins/](external_plugins/README.md)
 
 ---
 

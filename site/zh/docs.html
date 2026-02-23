@@ -148,7 +148,7 @@ pip install -r requirements.txt</code></pre>
         <h2>2. 插件与技能 — 扩展能力</h2>
         <p class="doc-section-summary">内置与外部插件；OpenClaw 风格技能，位于 <code>config/skills/</code>，使用 SKILL.md。</p>
         <h3>插件</h3>
-        <p><strong>内置</strong>（Python）：<code>plugins/&lt;Name&gt;/</code>，含 <code>plugin.yaml</code>、<code>config.yml</code>、<code>plugin.py</code>。已包含：<strong>Weather</strong>、<strong>News</strong>、<strong>PptMaker</strong>。</p>
+        <p><strong>内置</strong>（Python）：<code>plugins/&lt;Name&gt;/</code>，含 <code>plugin.yaml</code>、<code>config.yml</code>、<code>plugin.py</code>。已包含：<strong>Weather</strong>、<strong>News</strong>、<strong>PPT Generator</strong>。</p>
         <p><strong>外部</strong>（任意语言）：HTTP 服务实现 <code>GET /health</code> 和 <code>POST /run</code>。通过 <code>POST /api/plugins/register</code> 注册。LLM 在意图匹配时调用 <code>route_to_plugin(plugin_id, capability_id, parameters)</code>。</p>
         <h3>技能</h3>
         <p><code>config/skills/</code> 下的文件夹，内含 <strong>SKILL.md</strong>（名称、描述、可选工作流正文）。LLM 看到「可用技能」并使用工具或 <strong>run_skill</strong> 执行脚本。可直接复制 OpenClaw/ClawHub 技能文件夹使用。</p>

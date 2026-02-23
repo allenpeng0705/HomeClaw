@@ -21,7 +21,8 @@ import sys
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 from base.tools import ToolContext, ToolDefinition, ToolRegistry, ROUTING_RESPONSE_ALREADY_SENT
 from base.skills import get_skills_dir
@@ -76,7 +77,7 @@ async def _start_background_process(executable: str, args: List[str], timeout: i
 def _run_py_script_in_process(script_path: Path, args_list: List[str], skill_folder: Path) -> tuple:
     """Run a .py script in Core's process (same env). Returns (stdout_str, stderr_str). Run from a thread to avoid blocking.
     Same logic for all Python skills. Script runs in Core's process so a buggy script (e.g. C extension crash, os._exit)
-    could affect Core; use run_skill_py_in_process: false for untrusted skills (subprocess isolates)."""
+    could affect Core; only skills listed in run_skill_py_in_process_skills run in-process; others run in subprocess."""
     import io
     old_argv = list(sys.argv)
     old_cwd = os.getcwd()
@@ -116,7 +117,7 @@ def _run_py_script_in_process(script_path: Path, args_list: List[str], skill_fol
     return out_io.getvalue(), err_io.getvalue()
 
 
-# Optional: load tool config from core config (exec allowlist, file_read base path)
+# Optional: load tool config from core config (exec allowlist, file_read_shared_dir, etc.)
 def _get_tools_config() -> Dict[str, Any]:
     try:
         from base.util import Util
@@ -128,6 +129,17 @@ def _get_tools_config() -> Dict[str, Any]:
     except Exception:
         pass
     return {}
+
+
+def _get_homeclaw_root() -> str:
+    """Effective file/folder root (homeclaw_root from config; empty = workspace_dir). Never raises."""
+    try:
+        from base.util import Util
+        out = Util().get_core_metadata().get_homeclaw_root()
+        return (str(out).strip() if out else "") or "."
+    except Exception:
+        return "."
+
 
 # ---- Session tools ----
 async def _sessions_transcript_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
@@ -209,7 +221,7 @@ async def _time_executor(arguments: Dict[str, Any], context: ToolContext) -> str
 
 
 async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Schedule a reminder (or cron-style task) using a cron expression. Runs at each matching time (e.g. daily at 9am). Optional: tz (e.g. America/New_York), delivery_target 'latest' or 'session' (session = current channel)."""
+    """Schedule a reminder, run_skill, or run_plugin at cron times. task_type: 'message' (default), 'run_skill', or 'run_plugin'. Optional: tz, delivery_target 'latest' or 'session'."""
     core = context.core
     orchestrator = getattr(core, "orchestratorInst", None)
     if orchestrator is None:
@@ -218,27 +230,283 @@ async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContex
     if tam is None or not hasattr(tam, "schedule_cron_task"):
         return "Error: TAM cron scheduling not available"
     cron_expr = (arguments.get("cron_expr") or "").strip()
-    message = (arguments.get("message") or "").strip() or "Scheduled reminder"
     if not cron_expr:
         return "Error: cron_expr is required (e.g. '0 9 * * *' for daily at 9:00). Format: minute hour day month weekday (5 fields, * for every)."
+    task_type = (arguments.get("task_type") or "message").strip().lower()
     tz = (arguments.get("tz") or "").strip() or None
     delivery_target = (arguments.get("delivery_target") or "latest").strip().lower()
-    params: Dict[str, Any] = {"message": message}
+    params: Dict[str, Any] = {}
     if tz:
         params["tz"] = tz
-    if delivery_target == "session" and context.app_id and context.user_id and context.session_id:
-        params["channel_key"] = f"{context.app_id}:{context.user_id}:{context.session_id}"
+    # Companion user (uncombined): one special user "companion"; deliver to key "companion" so any connected Companion app receives
+    companion_user_id = (getattr(context, "system_user_id", None) or context.user_id or "").strip().lower()
+    if delivery_target == "session":
+        if companion_user_id in ("companion", "system"):
+            params["channel_key"] = "companion"
+        elif context.app_id and context.user_id and context.session_id:
+            params["channel_key"] = f"{context.app_id}:{context.user_id}:{context.session_id}"
     hint = "\n(To cancel this recurring reminder, say 'list my recurring reminders' and ask to remove it.)"
 
-    def make_task(msg: str, prms: Dict[str, Any]):
-        async def _task():
-            await tam.send_reminder_to_channel(msg + hint, prms)
-        return _task
+    if task_type == "run_skill":
+        skill_name = (arguments.get("skill_name") or "").strip()
+        script = (arguments.get("script") or "").strip()
+        args_list = arguments.get("args")
+        if isinstance(args_list, str):
+            args_list = [a.strip() for a in args_list.split(",") if a.strip()]
+        elif not isinstance(args_list, list):
+            args_list = []
+        if not skill_name or not script:
+            return "Error: For task_type 'run_skill', skill_name and script are required (e.g. skill_name='weather-1.0.0', script='get_weather.py', args=['Beijing'])."
+        message = (arguments.get("message") or "").strip() or f"run_skill {skill_name} {script}"
+        params["message"] = message
+        params["task_type"] = "run_skill"
+        params["skill_name"] = skill_name
+        params["script"] = script
+        params["args"] = args_list
+        post_process_prompt = (arguments.get("post_process_prompt") or "").strip()
+        if post_process_prompt:
+            params["post_process_prompt"] = post_process_prompt
 
-    job_id = tam.schedule_cron_task(make_task(message, params), cron_expr, params=params)
+        def make_run_skill_task(prms: Dict[str, Any]):
+            async def _task():
+                from base.tools import get_tool_registry, ToolContext
+                registry = get_tool_registry()
+                if not registry:
+                    await tam._send_reminder_to_channel_safe("Error: tool registry not available", prms)
+                    return
+                ctx = ToolContext(core=core)
+                try:
+                    result = await registry.execute_async(
+                        "run_skill",
+                        {"skill_name": prms["skill_name"], "script": prms["script"], "args": prms.get("args") or []},
+                        ctx,
+                    )
+                except Exception as e:
+                    result = f"Error: {e}"
+                text = (result or "(no output)").strip()
+                prompt = (prms.get("post_process_prompt") or "").strip()
+                if prompt and hasattr(core, "openai_chat_completion"):
+                    try:
+                        refined = await core.openai_chat_completion([
+                            {"role": "system", "content": prompt},
+                            {"role": "user", "content": text},
+                        ])
+                        if refined and isinstance(refined, str) and refined.strip():
+                            text = refined.strip()
+                    except Exception:
+                        pass
+                await tam._send_reminder_to_channel_safe(text, prms)
+            return _task
+
+        task = make_run_skill_task(params)
+    elif task_type == "run_plugin":
+        plugin_id = (arguments.get("plugin_id") or "").strip().lower().replace(" ", "_")
+        if not plugin_id:
+            return "Error: For task_type 'run_plugin', plugin_id is required (e.g. news, ppt-generation)."
+        message = (arguments.get("message") or "").strip() or f"run_plugin {plugin_id}"
+        params["message"] = message
+        params["task_type"] = "run_plugin"
+        params["plugin_id"] = plugin_id
+        cap_id = (arguments.get("capability_id") or "").strip().lower().replace(" ", "_") or None
+        if not cap_id and plugin_id == "headlines":
+            cap_id = "fetch_headlines"
+        params["capability_id"] = cap_id
+        llm_params = arguments.get("parameters")
+        plugin_params = llm_params if isinstance(llm_params, dict) else {}
+        # At schedule-creation time: resolve and validate plugin params so we can ask the user now if something is missing.
+        plugin_manager = getattr(core, "plugin_manager", None)
+        if plugin_manager:
+            plugin = plugin_manager.get_plugin_by_id(plugin_id)
+            if not plugin:
+                return f"Error: plugin not found: {plugin_id}. Cannot schedule."
+            capability = plugin_manager.get_capability(plugin, cap_id) if cap_id else None
+            if not capability and not isinstance(plugin, dict):
+                reg = getattr(plugin, "registration", None) or {}
+                caps = reg.get("capabilities") or []
+                if caps:
+                    capability = caps[0]
+            if capability and (capability.get("parameters") or []):
+                from base.plugin_param_resolver import (
+                    _get_plugin_config,
+                    resolve_and_validate_plugin_params,
+                )
+                from base.profile_store import get_profile
+                request = getattr(context, "request", None)
+                system_user_id = getattr(context, "system_user_id", None) or (getattr(request, "user_id", None) if request else None)
+                profile = get_profile(system_user_id or "") if system_user_id else {}
+                plugin_config = _get_plugin_config(plugin)
+                system_context = getattr(core, "get_system_context_for_plugins", lambda *a, **k: {})(system_user_id, request) if callable(getattr(core, "get_system_context_for_plugins", None)) else {}
+                resolved, err, ask_user = resolve_and_validate_plugin_params(
+                    plugin_params, capability, profile, plugin_config,
+                    plugin_id=plugin_id, capability_id=cap_id,
+                    system_context=system_context,
+                )
+                if err and ask_user:
+                    missing = ask_user.get("missing") or []
+                    if missing:
+                        return (
+                            f"To schedule the plugin '{plugin_id}', the following parameters are required: {', '.join(missing)}. "
+                            "Ask the user for these values, then call cron_schedule again with the parameters={\"param_name\": \"value\", ...} filled in."
+                        )
+                    uncertain = ask_user.get("uncertain") or []
+                    if uncertain:
+                        return (
+                            "The plugin has parameters filled from system (datetime/location), profile, or config that are not 100% confident. "
+                            "Ask the user to confirm or provide values (e.g. location, timezone), then call cron_schedule again with parameters={\"param_name\": \"value\", ...}."
+                        )
+                if err:
+                    return err
+                plugin_params = resolved
+        # When scheduling headlines with no parameters, hint to ask for category/source/language so user can refine
+        if plugin_id == "headlines" and (not plugin_params or not any(str(v).strip() for v in (plugin_params or {}).values())):
+            return (
+                "To schedule headlines (e.g. every 8 am), you can optionally set category (e.g. sports, business, technology), "
+                "source (e.g. BBC), page_size (e.g. 5), or language. Ask the user: 'What category would you like? (sports, business, technology, or general)' "
+                "or 'Which source? (e.g. BBC)' — then call cron_schedule again with parameters={\"category\": \"sports\", \"page_size\": 5} etc."
+            )
+        params["parameters"] = plugin_params
+        post_process_prompt = (arguments.get("post_process_prompt") or "").strip()
+        if post_process_prompt:
+            params["post_process_prompt"] = post_process_prompt
+
+        def make_run_plugin_task(prms: Dict[str, Any]):
+            async def _task():
+                from base.tools import get_tool_registry, ToolContext
+                from base.base import PromptRequest, ChannelType, ContentType
+                registry = get_tool_registry()
+                if not registry:
+                    await tam._send_reminder_to_channel_safe("Error: tool registry not available", prms)
+                    return
+                channel_key = prms.get("channel_key") or ""
+                parts = channel_key.split(":") if channel_key else ["", ""]
+                app_id = parts[0] if len(parts) > 0 else ""
+                user_id = parts[1] if len(parts) > 1 else ""
+                if channel_key == "companion":
+                    app_id = app_id or "homeclaw"
+                    user_id = "companion"
+                req = PromptRequest(
+                    request_id=str(uuid.uuid4()),
+                    channel_name="cron",
+                    request_metadata={"capability_id": prms.get("capability_id"), "capability_parameters": prms.get("parameters") or {}},
+                    channelType=ChannelType.IM,
+                    user_name="cron",
+                    app_id=app_id,
+                    user_id=user_id,
+                    contentType=ContentType.TEXT,
+                    text="",
+                    action="respond",
+                    host="cron",
+                    port=0,
+                    images=[],
+                    videos=[],
+                    audios=[],
+                    files=[],
+                    timestamp=_time.time(),
+                )
+                ctx = ToolContext(core=core, request=req, cron_scheduled=True)
+                try:
+                    result = await registry.execute_async(
+                        "route_to_plugin",
+                        {
+                            "plugin_id": prms["plugin_id"],
+                            "capability_id": prms.get("capability_id"),
+                            "parameters": prms.get("parameters") or {},
+                        },
+                        ctx,
+                    )
+                except Exception as e:
+                    result = f"Error: {e}"
+                text = (result or "(no output)").strip()
+                if not isinstance(text, str):
+                    text = str(text)
+                prompt = (prms.get("post_process_prompt") or "").strip()
+                if prompt and hasattr(core, "openai_chat_completion"):
+                    try:
+                        refined = await core.openai_chat_completion([
+                            {"role": "system", "content": prompt},
+                            {"role": "user", "content": text},
+                        ])
+                        if refined and isinstance(refined, str) and refined.strip():
+                            text = refined.strip()
+                    except Exception:
+                        pass
+                await tam._send_reminder_to_channel_safe(text, prms)
+            return _task
+
+        task = make_run_plugin_task(params)
+    elif task_type == "run_tool":
+        tool_name = (arguments.get("tool_name") or "").strip()
+        if not tool_name:
+            return "Error: For task_type 'run_tool', tool_name is required (e.g. web_search). Use this for 'search the latest sports news every 7 am' — use run_tool with tool_name=web_search, tool_arguments={query: 'latest sports news', count: 10}. Do NOT use run_plugin headlines for 'search'."
+        message = (arguments.get("message") or "").strip() or f"run_tool {tool_name}"
+        params["message"] = message
+        params["task_type"] = "run_tool"
+        params["tool_name"] = tool_name
+        tool_args = arguments.get("tool_arguments")
+        params["tool_arguments"] = tool_args if isinstance(tool_args, dict) else {}
+        post_process_prompt = (arguments.get("post_process_prompt") or "").strip()
+        if post_process_prompt:
+            params["post_process_prompt"] = post_process_prompt
+
+        def make_run_tool_task(prms: Dict[str, Any]):
+            async def _task():
+                from base.tools import get_tool_registry, ToolContext
+                registry = get_tool_registry()
+                if not registry:
+                    await tam._send_reminder_to_channel_safe("Error: tool registry not available", prms)
+                    return
+                ctx = ToolContext(core=core)
+                try:
+                    result = await registry.execute_async(
+                        prms["tool_name"],
+                        prms.get("tool_arguments") or {},
+                        ctx,
+                    )
+                except Exception as e:
+                    result = f"Error: {e}"
+                text = (result or "(no output)").strip()
+                if not isinstance(text, str):
+                    text = str(text)
+                prompt = (prms.get("post_process_prompt") or "").strip()
+                if prompt and hasattr(core, "openai_chat_completion"):
+                    try:
+                        refined = await core.openai_chat_completion([
+                            {"role": "system", "content": prompt},
+                            {"role": "user", "content": text},
+                        ])
+                        if refined and isinstance(refined, str) and refined.strip():
+                            text = refined.strip()
+                    except Exception:
+                        pass
+                await tam._send_reminder_to_channel_safe(text, prms)
+            return _task
+
+        task = make_run_tool_task(params)
+    else:
+        message = (arguments.get("message") or "").strip() or "Scheduled reminder"
+        params["message"] = message
+
+        def make_task(msg: str, prms: Dict[str, Any]):
+            async def _task():
+                await tam._send_reminder_to_channel_safe(msg + hint, prms)
+            return _task
+
+        task = make_task(message, params)
+
+    job_id = tam.schedule_cron_task(task, cron_expr, params=params)
     if job_id is None:
         return "Error: Failed to schedule (invalid cron expression or croniter not installed)."
-    out = {"scheduled": True, "job_id": job_id, "cron_expr": cron_expr, "message": message}
+    out = {"scheduled": True, "job_id": job_id, "cron_expr": cron_expr, "message": params.get("message", "Scheduled reminder")}
+    if task_type == "run_skill":
+        out["task_type"] = "run_skill"
+        out["skill_name"] = params.get("skill_name")
+        out["script"] = params.get("script")
+    elif task_type == "run_plugin":
+        out["task_type"] = "run_plugin"
+        out["plugin_id"] = params.get("plugin_id")
+    elif task_type == "run_tool":
+        out["task_type"] = "run_tool"
+        out["tool_name"] = params.get("tool_name")
     if tz:
         out["tz"] = tz
     if delivery_target:
@@ -275,6 +543,16 @@ async def _cron_list_executor(arguments: Dict[str, Any], context: ToolContext) -
             row["delivery_target"] = "latest"
         if p.get("tz"):
             row["tz"] = p.get("tz")
+        if p.get("task_type") == "run_skill":
+            row["task_type"] = "run_skill"
+            row["skill_name"] = p.get("skill_name", "")
+            row["script"] = p.get("script", "")
+        elif p.get("task_type") == "run_plugin":
+            row["task_type"] = "run_plugin"
+            row["plugin_id"] = p.get("plugin_id", "")
+        elif p.get("task_type") == "run_tool":
+            row["task_type"] = "run_tool"
+            row["tool_name"] = p.get("tool_name", "")
         return row
 
     lock = getattr(tam, "_cron_lock", None)
@@ -1483,7 +1761,7 @@ async def _agents_list_executor(arguments: Dict[str, Any], context: ToolContext)
 
 
 async def _image_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Analyze an image with the vision/multimodal model. Provide image as file path (relative to tools.file_read_base) or URL, and an optional prompt."""
+    """Analyze an image with the vision/multimodal model. Provide image as file path (relative to homeclaw_root) or URL, and an optional prompt."""
     import base64
     core = context.core
     path_arg = (arguments.get("path") or arguments.get("image") or "").strip()
@@ -1503,11 +1781,12 @@ async def _image_executor(arguments: Dict[str, Any], context: ToolContext) -> st
                 if ct and ct.startswith("image/"):
                     mime = ct
         else:
-            base = _get_file_base_path()
-            full = (base / path_arg).resolve()
+            r = _resolve_file_path(path_arg, context, for_write=False)
+            if r is None:
+                return _FILE_PATH_INVALID_MSG
+            full, base = r
             used_request_image = False
             if not full.is_file():
-                # Fallback: model may have hallucinated a path; use image from current request if user just uploaded one
                 req_images = list(getattr(getattr(context, "request", None), "images", None) or [])
                 for candidate in req_images:
                     if isinstance(candidate, str) and candidate.strip() and os.path.isfile(candidate.strip()):
@@ -1515,11 +1794,11 @@ async def _image_executor(arguments: Dict[str, Any], context: ToolContext) -> st
                         used_request_image = True
                         break
                 else:
-                    if not str(full).startswith(str(base)):
-                        return "Error: path must be under the configured base directory"
-                    return f"Error: file not found: {path_arg}"
-            if not used_request_image and not str(full).startswith(str(base)):
-                return "Error: path must be under the configured base directory"
+                    if not _path_under(full, base):
+                        return _FILE_ACCESS_DENIED_MSG
+                    return _FILE_NOT_FOUND_MSG
+            if not used_request_image and not _path_under(full, base):
+                return _FILE_ACCESS_DENIED_MSG
             image_bytes = full.read_bytes()
             suffix = full.suffix.lower()
             if suffix in (".png",):
@@ -1646,7 +1925,7 @@ def _attach_run_skill_image_path(script_output: str, context: ToolContext) -> No
         path = _norm_path(match.group(1))
         if path:
             paths.append(path)
-    # Fallback: "Image saved: <path>" (e.g. nano-banana-pro generate_image.py)
+    # Fallback: "Image saved: <path>" (e.g. image-generation generate_image.py)
     if not paths:
         for match in re.finditer(r"Image saved:\s*(.+)", script_output, re.IGNORECASE):
             path = _norm_path(match.group(1))
@@ -1707,6 +1986,13 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
     if allowlist and script_path.name not in allowlist:
         return f"Error: script '{script_path.name}' is not in run_skill_allowlist. Allowed: {allowlist}"
     timeout = int(config.get("run_skill_timeout", 60))
+    # Resolve request output dir (user/companion output folder) when sandbox is active; pass to script via env so skills can save files there.
+    skill_env = dict(os.environ)
+    r_out = _resolve_file_path(FILE_OUTPUT_SUBDIR, context, for_write=True)
+    if r_out:
+        full_out, base_for_validation = r_out
+        if base_for_validation is not None:
+            skill_env["HOMECLAW_OUTPUT_DIR"] = str(full_out)
     args_list: List[str] = []
     if args_input is not None:
         if isinstance(args_input, list):
@@ -1740,12 +2026,11 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
             args_list = [x.strip() for x in args_input.split() if x.strip()]
     try:
         if script_path.suffix.lower() in (".py", ".pyw"):
-            # Default True so .py runs in Core's process (same env) when config key is missing or not loaded
-            in_process = config.get("run_skill_py_in_process", True)
-            if in_process is None:
-                in_process = True
-            logger.info("run_skill: .py script %s ; run_skill_py_in_process=%s", script_path.name, in_process)
-            print("run_skill: .py script %s ; run_skill_py_in_process=%s" % (script_path.name, in_process), file=sys.stderr, flush=True)
+            # Default: subprocess (isolated, never break Core). In-process only when skill folder name is in run_skill_py_in_process_skills.
+            in_process_list = config.get("run_skill_py_in_process_skills")
+            in_process = isinstance(in_process_list, list) and (skill_name in in_process_list)
+            logger.info("run_skill: .py script %s ; in_process=%s (skill=%s)", script_path.name, in_process, skill_name)
+            print("run_skill: .py script %s ; in_process=%s (skill=%s)" % (script_path.name, in_process, skill_name), file=sys.stderr, flush=True)
             # Run .py in Core's process (same env, no subprocess) when True
             if in_process:
                 logger.info("run_skill: executing Python script in-process (Core Python: %s)", sys.executable)
@@ -1762,7 +2047,7 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
                 if "ModuleNotFoundError" in err:
                     out = (out or "") + (
                         f"\n\n[In-process run: script ran in Core's process. Core's Python is: {sys.executable} "
-                        f"- install there: {sys.executable} -m pip install google-genai pillow]"
+                        f"- install missing package there, e.g. pip install requests pillow]"
                     )
                 # Convention: script prints HOMECLAW_IMAGE_PATH=<path> so Core/channels can send image to companion/channel
                 _attach_run_skill_image_path(out, context)
@@ -1777,7 +2062,7 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
                 cwd=str(skill_folder),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=os.environ,
+                env=skill_env,
             )
         elif script_path.suffix.lower() in (".js", ".mjs", ".cjs"):
             node_path = shutil.which("node")
@@ -1790,6 +2075,7 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
                 cwd=str(skill_folder),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=skill_env,
             )
         elif script_path.suffix.lower() in (".sh", ".bash") and platform.system() == "Windows":
             # On Windows, .sh/.bash need a shell: try bash (Git Bash) or wsl
@@ -1802,6 +2088,7 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
                     cwd=str(skill_folder),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
+                    env=skill_env,
                 )
             else:
                 wsl_path = shutil.which("wsl")
@@ -1814,6 +2101,7 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
                         cwd=str(skill_folder),
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
+                        env=skill_env,
                     )
                 else:
                     return "Error: .sh script on Windows requires bash (e.g. Git Bash) or WSL. Install Git for Windows or WSL, or use a .py/.bat script."
@@ -1824,6 +2112,7 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
                 cwd=str(skill_folder),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=skill_env,
             )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         out = stdout.decode("utf-8", errors="replace").strip()
@@ -1843,7 +2132,7 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
                             sys.executable, "-m", "pip", "install", *pip_pkgs.split(),
                             stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.PIPE,
-                            env=os.environ,
+                            env=skill_env,
                         )
                         await asyncio.wait_for(proc_pip.communicate(), timeout=120)
                         # Retry script once after install
@@ -1852,7 +2141,7 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
                             cwd=str(skill_folder),
                             stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.PIPE,
-                            env=os.environ,
+                            env=skill_env,
                         )
                         stdout2, stderr2 = await asyncio.wait_for(proc2.communicate(), timeout=timeout)
                         out = stdout2.decode("utf-8", errors="replace").strip()
@@ -1868,7 +2157,9 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
         return out or "(no output)"
     except asyncio.TimeoutError:
         return f"Error: script timed out after {timeout}s"
-    except Exception as e:
+    except BaseException as e:
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise
         return f"Error: {e!s}"
 
 
@@ -1931,19 +2222,20 @@ async def _process_kill_executor(arguments: Dict[str, Any], context: ToolContext
 
 # ---- File read (cross-platform; restricted to base path) ----
 async def _file_read_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Read content of a file. Path is relative to tools.file_read_base in config (default: current dir). For safety, only reads under that base."""
-    config = _get_tools_config()
-    base_str = config.get("file_read_base") or "."
-    base = Path(base_str).resolve()
+    """Read a file. When homeclaw_root is set: use 'share/...' for shared folder, or a path for your user or companion folder. When not set, absolute paths allowed."""
     path_arg = (arguments.get("path") or "").strip()
     if not path_arg:
-        return "Error: path is required"
+        return "Path is required."
     try:
-        full = (base / path_arg).resolve()
-        if not str(full).startswith(str(base)):
-            return "Error: path must be under the configured base directory"
+        r = _resolve_file_path(path_arg, context, for_write=False)
+        if r is None:
+            return _FILE_PATH_INVALID_MSG
+        full, base = r
+        if not _path_under(full, base):
+            return _FILE_ACCESS_DENIED_MSG
+        config = _get_tools_config()
         if not full.is_file():
-            return f"Error: not a file or not found: {path_arg}"
+            return _FILE_NOT_FOUND_MSG
         content = full.read_text(encoding="utf-8", errors="replace")
         default_max = int(config.get("file_read_max_chars") or 0) or 32_000
         max_chars = int(arguments.get("max_chars", 0)) or default_max
@@ -1951,7 +2243,8 @@ async def _file_read_executor(arguments: Dict[str, Any], context: ToolContext) -
             content = content[:max_chars] + "\n... (truncated; increase max_chars or ask for section-by-section summary)"
         return content
     except Exception as e:
-        return f"Error: {e!s}"
+        logger.debug("file_read failed: %s", e)
+        return _FILE_NOT_FOUND_MSG
 
 
 # Document types supported by Unstructured (one powerful tool for PDF, PPT, Word, MD, HTML, XML, JSON, etc.)
@@ -2025,21 +2318,22 @@ def _document_read_plain_text(full_path: Path, max_chars: int, suffix: str) -> s
 
 
 async def _document_read_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Read document content: PDF, PPT, Word, MD, HTML, XML, JSON, etc. Uses Unstructured when installed (pip install 'unstructured[all-docs]') for best support; falls back to pypdf for PDF and plain text for others."""
+    """Read document content: PDF, PPT, Word, MD, HTML, XML, JSON, etc. Use 'share/...' or path in your user or companion folder. When base not set, absolute paths allowed."""
     config = _get_tools_config()
-    base_str = config.get("file_read_base") or "."
-    base = Path(base_str).resolve()
     path_arg = (arguments.get("path") or "").strip()
     if not path_arg:
-        return "Error: path is required"
+        return "Path is required."
     default_max = int(config.get("file_read_max_chars") or 0) or 64_000
     max_chars = int(arguments.get("max_chars", 0)) or default_max
     try:
-        full = (base / path_arg).resolve()
-        if not str(full).startswith(str(base)):
-            return "Error: path must be under the configured base directory"
+        r = _resolve_file_path(path_arg, context, for_write=False)
+        if r is None:
+            return _FILE_PATH_INVALID_MSG
+        full, base = r
+        if not _path_under(full, base):
+            return _FILE_ACCESS_DENIED_MSG
         if not full.is_file():
-            return f"Error: not a file or not found: {path_arg}"
+            return _FILE_NOT_FOUND_MSG
         suffix = full.suffix.lower()
 
         # 1) Try Unstructured first for supported types (one powerful tool for all)
@@ -2074,7 +2368,8 @@ async def _document_read_executor(arguments: Dict[str, Any], context: ToolContex
         # 4) Plain text fallback (md, html, xml, json, csv, txt, etc.)
         return _document_read_plain_text(full, max_chars, suffix)
     except Exception as e:
-        return f"Error: {e!s}"
+        logger.debug("document_read failed: %s", e)
+        return _FILE_NOT_FOUND_MSG
 
 
 async def _file_understand_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
@@ -2093,7 +2388,6 @@ async def _file_understand_executor(arguments: Dict[str, Any], context: ToolCont
             config = _get_tools_config() or {}
         except Exception:
             config = {}
-        base_str = str(config.get("file_read_base") or ".")
         path_arg = (arguments.get("path") or "").strip()
         if not path_arg:
             return "Error: path is required."
@@ -2105,16 +2399,15 @@ async def _file_understand_executor(arguments: Dict[str, Any], context: ToolCont
             max_chars = int(arguments.get("max_chars") or 0) or default_max
         except (TypeError, ValueError):
             max_chars = default_max
-        try:
-            base = Path(base_str).resolve()
-            full = (base / path_arg).resolve()
-            if not str(full).startswith(str(base)):
-                return "Error: path must be under the configured base directory."
-            if not full.is_file():
-                return f"Error: not a file or not found: {path_arg}"
-        except (OSError, TypeError, ValueError) as path_e:
-            logger.debug("file_understand path resolution failed: {}", path_e)
-            return f"Error: invalid path or file not found: {path_arg}"
+        r = _resolve_file_path(path_arg, context, for_write=False)
+        if r is None:
+            return _FILE_PATH_INVALID_MSG
+        full, base = r
+        if not _path_under(full, base):
+            return _FILE_ACCESS_DENIED_MSG
+        if not full.is_file():
+            return _FILE_NOT_FOUND_MSG
+        base_str = str(full.parent)
         path_str = str(full)
         ftype = detect_file_type(path_str)
         if ftype == FILE_TYPE_DOCUMENT:
@@ -2261,66 +2554,248 @@ async def _knowledge_base_list_executor(arguments: Dict[str, Any], context: Tool
 
 
 async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Save a result page (HTML) and return a message with link if base URL is available."""
+    """Save a result page as HTML or Markdown. format=markdown: returns markdown content + link so reply can show it in chat. format=html: returns link only (open in browser)."""
     try:
-        from core.result_viewer import get_config, save_result_page
-        if not get_config().get("enabled", False):
-            return "Result viewer is disabled. Enable result_viewer in config to save result pages and get shareable links."
+        from core.result_viewer import (
+            get_core_public_url,
+            create_file_access_token,
+            generate_result_html,
+        )
         title = (arguments.get("title") or "").strip() or "Result"
         content = arguments.get("content") or ""
         fmt = (arguments.get("format") or "markdown").strip().lower() or "markdown"
-        file_id, link = save_result_page(title=title, content=content, format=fmt)
-        if not file_id:
-            return "Failed to save the result page (check logs)."
+        if fmt not in ("markdown", "md", "html"):
+            fmt = "markdown"
+        if fmt == "md":
+            fmt = "markdown"
+        scope = _get_file_workspace_subdir(context)
+        file_id = uuid.uuid4().hex[:16]
+        # Markdown → .md (suitable for in-chat display; client can fetch and render). HTML → .html (styled page, open in browser).
+        is_md = fmt == "markdown"
+        ext = ".md" if is_md else ".html"
+        path_arg = f"{FILE_OUTPUT_SUBDIR}/report_{file_id}{ext}"
+        r = _resolve_file_path(path_arg, context, for_write=True)
+        if r is None:
+            return _FILE_PATH_INVALID_MSG
+        full, base = r
+        if not _path_under(full, base):
+            return _FILE_ACCESS_DENIED_MSG
+        try:
+            full.parent.mkdir(parents=True, exist_ok=True)
+            if is_md:
+                # Raw markdown: title as first line, then content. Truncate if over limit (same as HTML path).
+                try:
+                    from base.util import Util
+                    tools_cfg = getattr(Util().get_core_metadata(), "tools", None) or {}
+                    max_kb = int(tools_cfg.get("save_result_page_max_file_size_kb") or 500)
+                    max_bytes = max_kb * 1024
+                except Exception:
+                    max_bytes = 500 * 1024
+                if len(content.encode("utf-8")) > max_bytes:
+                    content = content[: max_bytes // 2] + "\n\n… [content truncated due to size limit]"
+                md_content = f"# {title}\n\n" + content if title else content
+                full.write_text(md_content, encoding="utf-8")
+            else:
+                html = generate_result_html(title=title, content=content, format="html")
+                full.write_text(html, encoding="utf-8")
+        except Exception as e:
+            logger.debug("save_result_page write failed: {}", e)
+            return "Failed to save the result page to your output folder."
+        token = create_file_access_token(scope, path_arg)
+        base_url = get_core_public_url()
+        link = f"{base_url}/files/out?path={quote(path_arg)}&token={token}" if (base_url and token) else None
+
+        if is_md:
+            # Return markdown so the model can include it in the reply → channel/companion/web chat display it in the chat view. Cap length for the reply.
+            max_in_chat = 12000
+            to_show = md_content if len(md_content) <= max_in_chat else md_content[:max_in_chat] + "\n\n… (full report: open link below)"
+            if link:
+                return f"{to_show}\n\n---\nReport saved. Open: {link}"
+            return f"{to_show}\n\n---\nReport saved to your output folder. Set auth_api_key in config for a shareable link."
+
+        # HTML: return only the link (user opens in browser)
         if link:
             return f"Report is ready. Open: {link}"
-        return "Report saved locally. No base_url is configured, so no shareable link was generated. Send the full result content to the user in your reply."
+        return "Report saved to your output folder. Set core_public_url and auth_api_key in config for shareable links."
     except Exception as e:
         logger.debug("save_result_page failed: {}", e)
         return f"Failed to save result page: {e!s}"
 
 
 async def _file_write_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Write content to a file. Path is relative to config tools.file_read_base. For safety, only writes under that base."""
-    config = _get_tools_config()
-    base_str = config.get("file_read_base") or "."
-    base = Path(base_str).resolve()
+    """Write content to a file. Use 'share/...' for shared folder, or path for your user or companion folder. Folders created automatically."""
     path_arg = (arguments.get("path") or "").strip()
     content = arguments.get("content", "")
     if not path_arg:
-        return "Error: path is required"
+        return "Path is required."
     try:
-        full = (base / path_arg).resolve()
-        if not str(full).startswith(str(base)):
-            return "Error: path must be under the configured base directory"
+        r = _resolve_file_path(path_arg, context, for_write=True)
+        if r is None:
+            return _FILE_PATH_INVALID_MSG
+        full, base = r
+        if not _path_under(full, base):
+            return _FILE_ACCESS_DENIED_MSG
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(str(content), encoding="utf-8")
         return json.dumps({"written": True, "path": path_arg})
     except Exception as e:
-        return f"Error: {e!s}"
+        logger.debug("file_write failed: %s", e)
+        return _FILE_NOT_FOUND_MSG
 
 
-def _get_file_base_path() -> Path:
-    config = _get_tools_config()
-    base_str = config.get("file_read_base") or "."
-    return Path(base_str).resolve()
+# Reserved path prefix for user/companion generated files (reports, images, exports). Use path "output/<filename>" so files land in base/{user_id}/output/ or base/companion/output/. See docs_design/FileSandboxDesign.md.
+FILE_OUTPUT_SUBDIR = "output"
+
+# Polite messages for file tools (never crash; user-friendly responses)
+_FILE_ACCESS_DENIED_MSG = (
+    "You don't have permission to access that path. You can only access files under your workspace, "
+    "the shared folder (share/), or the companion folder (companion/)."
+)
+_FILE_NOT_FOUND_MSG = "That file or path wasn't found. Please check the path and try again."
+_FILE_PATH_INVALID_MSG = "I couldn't resolve that path. Please check the path and try again."
+
+
+def _path_under(full: Path, base: Optional[Path]) -> bool:
+    """True if full is under base (or base is None). Cross-platform."""
+    if base is None:
+        return True
+    try:
+        full.resolve().relative_to(base.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _safe_user_dir(user_id: Optional[str]) -> str:
+    """Return a single path segment safe for use as a per-user subdirectory (no slashes, no '..'). Uses user id from user.yml."""
+    if not user_id or not isinstance(user_id, str):
+        return "default"
+    # Keep only alphanumeric, underscore, hyphen; collapse to one segment
+    safe = re.sub(r"[^\w\-]", "_", user_id.strip())
+    return safe[:64] if safe else "default"
+
+
+def _is_companion_context(context: Optional[Any]) -> bool:
+    """True when the request is from the companion app and not tied to a specific user (so use companion folder)."""
+    if context is None:
+        return False
+    req = getattr(context, "request", None)
+    session_id = (getattr(context, "session_id", None) or "").strip().lower()
+    user_id = (getattr(context, "user_id", None) or "").strip().lower()
+    app_id = (getattr(context, "app_id", None) or "").strip().lower()
+    channel_name = ""
+    conversation_type = ""
+    if req is not None:
+        channel_name = (getattr(req, "channel_name", None) or getattr(req, "channelType", None) or "").strip().lower()
+        meta = getattr(req, "request_metadata", None) or {}
+        if isinstance(meta, dict):
+            conversation_type = (meta.get("conversation_type") or meta.get("session_id") or "").strip().lower()
+    return (
+        session_id == "companion"
+        or user_id == "companion"
+        or app_id == "companion"
+        or channel_name == "companion"
+        or conversation_type == "companion"
+    )
+
+
+def _get_file_workspace_subdir(context: Optional[Any]) -> str:
+    """Folder name under homeclaw_root: 'companion' when companion app without user, else user id from user.yml (or 'default')."""
+    if context is None:
+        return "default"
+    system_user_id = (getattr(context, "system_user_id", None) or "").strip()
+    if system_user_id:
+        return _safe_user_dir(system_user_id)
+    if _is_companion_context(context):
+        return "companion"
+    uid = getattr(context, "user_id", None) or getattr(context, "user_name", None)
+    return _safe_user_dir(uid)
+
+
+def _resolve_file_path(
+    path_arg: str,
+    context: Optional[Any],
+    *,
+    for_write: bool = False,
+) -> Optional[Tuple[Path, Optional[Path]]]:
+    """
+    Resolve a file path for file tools. Returns (full_path, base_for_validation) or None on error (caller should return polite message).
+    - When homeclaw_root is SET: base = that path. Paths starting with "share/" go under base/share (all users + companion).
+      Other paths go under base/{user_id} or base/companion (companion app when not tied to a user). Use "output/<filename>" for
+      generated files (see FILE_OUTPUT_SUBDIR and docs_design/FileSandboxDesign.md). Folders created automatically.
+    - When homeclaw_root is NOT SET (empty = workspace_dir): path_arg can be absolute (whole machine). base_for_validation = None.
+    Never raises; returns None on any exception.
+    """
+    try:
+        config = _get_tools_config()
+        base_str = _get_homeclaw_root()
+        path_arg = (path_arg or "").strip()
+        if not path_arg:
+            return (Path("."), None)
+
+        if not base_str or base_str == ".":
+            full = Path(path_arg).resolve()
+            return (full, None)
+
+        base = Path(base_str).resolve()
+        shared_dir = (config.get("file_read_shared_dir") or "share").strip() or "share"
+        normalized = path_arg.replace("\\", "/").strip().lower()
+        shared_dir_lower = shared_dir.lower()
+        shared_prefix = shared_dir_lower + "/"
+
+        if normalized == shared_dir_lower or normalized.startswith(shared_prefix):
+            rest = path_arg[len(shared_dir):].lstrip("/\\").strip() if path_arg.lower().startswith(shared_dir_lower) else path_arg
+            if not rest:
+                rest = "."
+            effective_base = (base / shared_dir).resolve()
+            try:
+                effective_base.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+        else:
+            user_sub = _get_file_workspace_subdir(context)
+            effective_base = (base / user_sub).resolve()
+            rest = path_arg or "."
+            try:
+                effective_base.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+
+        full = (effective_base / rest).resolve()
+        return (full, base)
+    except Exception as e:
+        logger.debug("_resolve_file_path failed: %s", e)
+        return None
+
+
+def _get_file_base_path(context: Optional[Any] = None) -> Path:
+    """Resolved base for file tools (homeclaw_root; when empty = workspace_dir). Prefer _resolve_file_path() for per-request resolution (shared + per-user). Never raises."""
+    try:
+        base_str = _get_homeclaw_root()
+        if not base_str or base_str == ".":
+            return Path(".").resolve()
+        return Path(base_str).resolve()
+    except Exception:
+        return Path(".").resolve()
 
 
 async def _file_edit_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Replace old_string with new_string in a file (once or all). Path relative to tools.file_read_base."""
-    base = _get_file_base_path()
+    """Replace old_string with new_string in a file (once or all). Use 'share/...' or path in your user or companion folder."""
     path_arg = (arguments.get("path") or "").strip()
     old_str = arguments.get("old_string", "")
     new_str = arguments.get("new_string", "")
     replace_all = arguments.get("replace_all") is True
     if not path_arg:
-        return "Error: path is required"
+        return "Path is required."
     try:
-        full = (base / path_arg).resolve()
-        if not str(full).startswith(str(base)):
-            return "Error: path must be under the configured base directory"
+        r = _resolve_file_path(path_arg, context, for_write=False)
+        if r is None:
+            return _FILE_PATH_INVALID_MSG
+        full, base = r
+        if not _path_under(full, base):
+            return _FILE_ACCESS_DENIED_MSG
         if not full.is_file():
-            return f"Error: not a file or not found: {path_arg}"
+            return _FILE_NOT_FOUND_MSG
         content = full.read_text(encoding="utf-8", errors="replace")
         if replace_all:
             if old_str not in content:
@@ -2333,7 +2808,8 @@ async def _file_edit_executor(arguments: Dict[str, Any], context: ToolContext) -
         full.write_text(new_content, encoding="utf-8")
         return json.dumps({"edited": True, "path": path_arg})
     except Exception as e:
-        return f"Error: {e!s}"
+        logger.debug("file_edit failed: %s", e)
+        return _FILE_NOT_FOUND_MSG
 
 
 def _parse_unified_diff_patch(patch_text: str) -> List[Dict[str, Any]]:
@@ -2395,8 +2871,7 @@ def _apply_hunk(content: str, hunk: Dict[str, Any]) -> str:
 
 
 async def _apply_patch_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Apply a unified diff patch to a file. Patch should be a single-file unified diff. Path in patch is relative to tools.file_read_base."""
-    base = _get_file_base_path()
+    """Apply a unified diff patch to a file. Path in patch: use 'share/...' or path in your user or companion folder. When base not set, absolute paths allowed."""
     patch_text = arguments.get("patch", "") or arguments.get("content", "")
     if not patch_text.strip():
         return "Error: patch is required"
@@ -2410,8 +2885,12 @@ async def _apply_patch_executor(arguments: Dict[str, Any], context: ToolContext)
             results.append({"path": None, "error": "missing path in patch"})
             continue
         try:
-            full = (base / path_arg).resolve()
-            if not str(full).startswith(str(base)):
+            r = _resolve_file_path(path_arg, context, for_write=True)
+            if r is None:
+                results.append({"path": path_arg, "error": "invalid path"})
+                continue
+            full, base = r
+            if not _path_under(full, base):
                 results.append({"path": path_arg, "error": "path outside base"})
                 continue
             content = full.read_text(encoding="utf-8", errors="replace") if full.is_file() else ""
@@ -2427,25 +2906,26 @@ async def _apply_patch_executor(arguments: Dict[str, Any], context: ToolContext)
 
 # ---- Folder / file explore (cross-platform) ----
 async def _folder_list_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """List directory contents (files and subdirectories). Path relative to tools.file_read_base. For exploring the filesystem."""
-    config = _get_tools_config()
-    base_str = config.get("file_read_base") or "."
-    base = Path(base_str).resolve()
+    """List directory contents. Use 'share' or 'share/' for shared folder, '.' or path for your user or companion folder. When base not set, absolute path allowed."""
     path_arg = (arguments.get("path") or ".").strip()
     try:
-        full = (base / path_arg).resolve()
-        if not str(full).startswith(str(base)):
-            return "Error: path must be under the configured base directory"
+        r = _resolve_file_path(path_arg, context, for_write=False)
+        if r is None:
+            return _FILE_PATH_INVALID_MSG
+        full, base = r
+        if not _path_under(full, base):
+            return _FILE_ACCESS_DENIED_MSG
         if not full.is_dir():
-            return f"Error: not a directory or not found: {path_arg}"
+            return _FILE_NOT_FOUND_MSG
         max_entries = int(arguments.get("max_entries", 0)) or 500
         entries = []
+        base_for_rel = base if base is not None else full
         for i, p in enumerate(sorted(full.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))):
             if i >= max_entries:
                 entries.append({"name": "...", "type": "(truncated)", "path": ""})
                 break
             try:
-                rel = str(p.relative_to(base))
+                rel = str(p.relative_to(base_for_rel))
             except ValueError:
                 rel = p.name
             entries.append({
@@ -2455,32 +2935,34 @@ async def _folder_list_executor(arguments: Dict[str, Any], context: ToolContext)
             })
         return json.dumps(entries, ensure_ascii=False, indent=0)
     except Exception as e:
-        return f"Error: {e!s}"
+        logger.debug("folder_list failed: %s", e)
+        return _FILE_NOT_FOUND_MSG
 
 
 async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Find files or folders under tools.file_read_base by name pattern (glob). E.g. pattern '*.py' or '*config*'. Returns list of relative paths."""
-    config = _get_tools_config()
-    base_str = config.get("file_read_base") or "."
-    base = Path(base_str).resolve()
+    """Find files by pattern (glob). Search under 'share/', your user folder, or companion folder. When base not set, path can be absolute."""
     path_arg = (arguments.get("path") or ".").strip()
     pattern = (arguments.get("pattern") or arguments.get("name") or "*").strip()
     if not pattern:
         pattern = "*"
-    max_results = int(arguments.get("max_results", 0)) or 200
     try:
-        full = (base / path_arg).resolve()
-        if not str(full).startswith(str(base)):
-            return "Error: path must be under the configured base directory"
-        if not full.is_dir():
-            return f"Error: not a directory or not found: {path_arg}"
+        r = _resolve_file_path(path_arg, context, for_write=False)
+        if r is None:
+            return _FILE_PATH_INVALID_MSG
+        full_dir, base = r
+        if not _path_under(full_dir, base):
+            return _FILE_ACCESS_DENIED_MSG
+        if not full_dir.is_dir():
+            return _FILE_NOT_FOUND_MSG
+        max_results = int(arguments.get("max_results", 0)) or 200
         results = []
-        for i, p in enumerate(full.rglob(pattern)):
+        base_for_rel = base if base is not None else full_dir
+        for i, p in enumerate(full_dir.rglob(pattern)):
             if i >= max_results:
                 results.append({"path": "(truncated)", "type": "", "name": ""})
                 break
             try:
-                rel = str(p.relative_to(base))
+                rel = str(p.relative_to(base_for_rel))
             except ValueError:
                 rel = p.name
             results.append({
@@ -2490,7 +2972,8 @@ async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -
             })
         return json.dumps(results, ensure_ascii=False, indent=0)
     except Exception as e:
-        return f"Error: {e!s}"
+        logger.debug("file_find failed: %s", e)
+        return _FILE_NOT_FOUND_MSG
 
 
 # ---- Browser: fetch URL (lightweight, no JS) and optional full browser (Playwright) ----
@@ -2997,6 +3480,7 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
     request = getattr(context, "request", None)
     if not request:
         return "Error: route_to_plugin requires request context (unified orchestrator mode)."
+    cron_scheduled = getattr(context, "cron_scheduled", False)
     plugin_id = (arguments.get("plugin_id") or "").strip().lower().replace(" ", "_")
     if not plugin_id:
         return "Error: plugin_id is required."
@@ -3031,9 +3515,9 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
                 if node_id:
                     llm_params = {**llm_params, "node_id": node_id}
 
-    # Resolve and validate parameters (profile, config, confirm_if_uncertain). See docs/PluginParameterCollection.md
+    # Resolve and validate parameters (profile, config, confirm_if_uncertain). See docs/PluginParameterCollection.md. Skip when cron_scheduled (no user to ask).
     params = dict(llm_params)
-    if capability and (capability.get("parameters") or []):
+    if not cron_scheduled and capability and (capability.get("parameters") or []):
         from base.plugin_param_resolver import (
             _get_plugin_config,
             resolve_and_validate_plugin_params,
@@ -3043,9 +3527,11 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
         system_user_id = getattr(context, "system_user_id", None) or getattr(request, "user_id", None)
         profile = get_profile(system_user_id or "") if system_user_id else {}
         plugin_config = _get_plugin_config(plugin)
+        system_context = getattr(core, "get_system_context_for_plugins", lambda *a, **k: {})(system_user_id, request) if callable(getattr(core, "get_system_context_for_plugins", None)) else {}
         resolved, err, ask_user = resolve_and_validate_plugin_params(
             llm_params, capability, profile, plugin_config,
             plugin_id=plugin_id, capability_id=capability_id,
+            system_context=system_context,
         )
         if err and ask_user:
             # Ask user for missing/uncertain params and store pending so we can retry on next message
@@ -3118,40 +3604,122 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
             else:
                 result_text = result if isinstance(result, str) else "(no response)"
         else:
-            # Inline Python plugin (BasePlugin)
-            from base.base import PromptRequest
-            plugin.user_input = getattr(request, "text", "") or ""
-            try:
-                plugin.promptRequest = request.model_copy(deep=True)
-            except Exception:
-                plugin.promptRequest = PromptRequest(**request.model_dump())
-            if capability_id and capability:
-                # Call capability method by name (e.g. fetch_weather); merge params into config temporarily
-                method_name = capability.get("id") or capability_id
-                if hasattr(plugin, method_name):
-                    old_config = getattr(plugin, "config", None) or {}
+            # Inline Python plugin (BasePlugin). By default run in subprocess so a buggy plugin never crashes Core.
+            tools_config = _get_tools_config()
+            in_process_list = tools_config.get("run_plugin_in_process_plugins")
+            run_in_process = isinstance(in_process_list, list) and (plugin_id in in_process_list)
+            if run_in_process:
+                # In-process: same as before (for plugins that need Core refs or are trusted)
+                from base.base import PromptRequest
+                try:
+                    plugin.user_input = getattr(request, "text", "") or ""
                     try:
-                        plugin.config = {**old_config, **params}
-                        method = getattr(plugin, method_name)
-                        result_text = await method()
-                    finally:
-                        plugin.config = old_config
-                else:
-                    result_text = f"Error: plugin has no capability {method_name}"
+                        plugin.promptRequest = request.model_copy(deep=True)
+                    except Exception:
+                        plugin.promptRequest = PromptRequest(**request.model_dump())
+                    r_out = _resolve_file_path(FILE_OUTPUT_SUBDIR, context, for_write=True)
+                    if r_out:
+                        full_out, base_for_validation = r_out
+                        if base_for_validation is not None:
+                            plugin.request_output_dir = full_out
+                    if capability_id and capability:
+                        method_name = capability.get("id") or capability_id
+                        if hasattr(plugin, method_name):
+                            old_config = getattr(plugin, "config", None) or {}
+                            try:
+                                plugin.config = {**old_config, **params}
+                                method = getattr(plugin, method_name)
+                                result_text = await method()
+                            finally:
+                                plugin.config = old_config
+                        else:
+                            result_text = f"Error: plugin has no capability {method_name}"
+                    else:
+                        result_text = await plugin.run()
+                except Exception as e:
+                    logger.exception("Inline plugin (in-process) failed: {}", e)
+                    result_text = f"Error: {e!s}"
             else:
-                # No capability: run() returns result; Core sends (plugin does not call Core LLM or send)
-                result_text = await plugin.run()
+                # Subprocess: isolate plugin so it cannot crash Core
+                timeout_sec = int(tools_config.get("run_plugin_timeout", 300) or 300)
+                payload_obj = {
+                    "plugin_id": plugin_id,
+                    "capability_id": capability_id,
+                    "parameters": params,
+                    "request_text": (getattr(request, "text", None) or "").strip(),
+                }
+                r_out = _resolve_file_path(FILE_OUTPUT_SUBDIR, context, for_write=True)
+                if r_out:
+                    full_out, _ = r_out
+                    if full_out is not None:
+                        try:
+                            payload_obj["output_dir"] = str(full_out.resolve())
+                        except Exception:
+                            pass  # do not crash Core on path resolve failure
+                payload = json.dumps(payload_obj, ensure_ascii=False)
+                try:
+                    _proj_root = Path(__file__).resolve().parent.parent
+                    _runner_script = Path(__file__).resolve().parent / "plugin_runner.py"
+                    proc = await asyncio.create_subprocess_exec(
+                        sys.executable,
+                        str(_runner_script),
+                        stdin=asyncio.subprocess.PIPE,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=str(_proj_root),
+                    )
+                    stdout, stderr = await asyncio.wait_for(
+                        proc.communicate(input=payload.encode("utf-8")),
+                        timeout=timeout_sec,
+                    )
+                    out_str = (stdout or b"").decode("utf-8", errors="replace").strip()
+                    try:
+                        sub_result = json.loads(out_str) if out_str else {}
+                    except (json.JSONDecodeError, TypeError):
+                        sub_result = {"success": False, "error": out_str[:500] if out_str else "Plugin runner returned invalid JSON"}
+                    if sub_result.get("success"):
+                        result_text = (sub_result.get("text") or "").strip() or "(no output)"
+                    else:
+                        result_text = sub_result.get("error") or "Plugin subprocess failed"
+                except asyncio.TimeoutError:
+                    result_text = f"Error: plugin timed out after {timeout_sec}s"
+                    try:
+                        if proc is not None:
+                            proc.kill()
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.warning("Plugin subprocess failed: {}", e)
+                    result_text = f"Error: {e!s}"
         if result_text is None:
             # Plugin ran but returned no message; send fallback so user gets feedback (avoid "Handled by routing" with nothing else).
             fallback = "The action was completed."
-            try:
-                await core.send_response_to_request_channel(fallback, request)
-            except Exception as send_err:
-                logger.warning("route_to_plugin: failed to send fallback message: {}", send_err)
-            # Sync inbound/ws: return text so caller can send it (process_response_queue skips host=inbound port=0).
-            if _is_sync_inbound(request):
-                return fallback
-            return ROUTING_RESPONSE_ALREADY_SENT
+            result_text = fallback
+            if not cron_scheduled:
+                try:
+                    await core.send_response_to_request_channel(fallback, request)
+                except Exception as send_err:
+                    logger.warning("route_to_plugin: failed to send fallback message: {}", send_err)
+                if _is_sync_inbound(request):
+                    return fallback
+                return ROUTING_RESPONSE_ALREADY_SENT
+        # If plugin returned JSON with output_rel_path (e.g. ppt-generation saved to user/companion output), append open link (scope is dynamic per request: user id or 'companion')
+        try:
+            parsed = json.loads(result_text.strip()) if isinstance(result_text, str) else None
+            if isinstance(parsed, dict) and parsed.get("success") and parsed.get("output_rel_path"):
+                from urllib.parse import quote
+                from core.result_viewer import get_core_public_url, create_file_access_token
+                scope = _get_file_workspace_subdir(context)  # per-user or companion; same as resolution above
+                path_rel = (parsed.get("output_rel_path") or "").strip()
+                if path_rel and scope:
+                    token = create_file_access_token(scope, path_rel)
+                    base_url = get_core_public_url()
+                    if base_url and token:
+                        link = f"{base_url}/files/out?path={quote(path_rel)}&token={token}"
+                        msg = (parsed.get("message") or "File saved.").strip()
+                        result_text = f"{msg} Open: {link}"
+        except (json.JSONDecodeError, TypeError):
+            pass
         # Post-process with LLM if capability has post_process and post_process_prompt (only prompt + plugin output; no extra info)
         if capability and capability.get("post_process") and capability.get("post_process_prompt"):
             try:
@@ -3166,37 +3734,40 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
                 logger.warning("Plugin post_process LLM failed: {}", e)
         # Save media to folder and send to channel (text + optional image/video/audio path)
         media_data_url = metadata.get("media") if isinstance(metadata.get("media"), str) else None
-        if media_data_url:
+        if media_data_url and not cron_scheduled:
             try:
                 meta = Util().get_core_metadata()
                 ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
                 media_base = Path(ws_dir) / "media" if ws_dir else None
                 path, media_kind = save_data_url_to_media_folder(media_data_url, media_base)
                 if path and media_kind:
-                    # Tell the user where the file was saved so they can find it
                     kind_label = "Image" if media_kind == "image" else ("Video" if media_kind == "video" else "Audio")
                     path_line = f"\n\n{kind_label} saved to: {path}"
-                    text_with_path = (result_text or "").strip() + path_line
+                    result_text = (result_text or "").strip() + path_line
                     await core.send_response_to_request_channel(
-                        text_with_path,
+                        result_text,
                         request,
                         image_path=path if media_kind == "image" else None,
                         video_path=path if media_kind == "video" else None,
                         audio_path=path if media_kind == "audio" else None,
                     )
-                    result_text = text_with_path
                 else:
                     await core.send_response_to_request_channel(result_text, request)
             except Exception as e:
                 logger.warning("route_to_plugin: save/send media failed: {}", e)
                 await core.send_response_to_request_channel(result_text, request)
-        else:
+        elif not cron_scheduled:
             await core.send_response_to_request_channel(result_text, request)
-        # Sync inbound/ws: return text so caller can send it (process_response_queue skips host=inbound port=0).
+        # When cron_scheduled: caller (cron task) will send result_text via TAM. Sync inbound: return text.
+        if cron_scheduled:
+            return result_text
         if _is_sync_inbound(request):
             return result_text
         return ROUTING_RESPONSE_ALREADY_SENT
-    except Exception as e:
+    except BaseException as e:
+        # Never break Core: catch all. Re-raise so process can exit on Ctrl+C / sys.exit
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise
         logger.exception(e)
         return f"Error running plugin: {e!s}"
 
@@ -3482,12 +4053,22 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="cron_schedule",
-            description="Schedule a reminder at cron times. Use cron_expr: 5 fields (minute hour day month weekday), e.g. '0 9 * * *' = daily at 9:00, '0 */2 * * *' = every 2 hours. Optional: tz (e.g. America/New_York), delivery_target 'latest' (default) or 'session' (deliver to this conversation's channel). Time-related scheduling is important.",
+            description="Schedule a reminder, a skill, a plugin, or a tool at cron times. Use cron_expr (5 fields: minute hour day month weekday), e.g. '0 7 * * *' = daily at 7:00. task_type 'message' (default): send a fixed message. task_type 'run_tool': run a tool (e.g. web_search) and send its output — use for 'search the latest sports news every 7 am' with tool_name=web_search, tool_arguments={query: 'latest sports news', count: 10}. Do NOT use run_plugin headlines for 'search'. task_type 'run_skill': run a skill script. task_type 'run_plugin': run a plugin (e.g. headlines for top headlines from News API) — use for 'top 5 headlines every 8 am' or 'headlines about sports every 8 am', not for 'search'. Use post_process_prompt to refine output. Optional: tz, delivery_target.",
             parameters={
                 "type": "object",
                 "properties": {
                     "cron_expr": {"type": "string", "description": "Cron expression (e.g. '0 9 * * *' for daily at 9:00)."},
-                    "message": {"type": "string", "description": "Message to send at each run (reminder content).", "default": "Scheduled reminder"},
+                    "task_type": {"type": "string", "description": "One of: 'message' (fixed message), 'run_tool' (run tool e.g. web_search for 'search news every 7 am'), 'run_skill' (run skill script), 'run_plugin' (run plugin e.g. headlines for 'top headlines every 8 am'). Default 'message'.", "default": "message"},
+                    "message": {"type": "string", "description": "For message: text to send. For run_skill/run_plugin: optional label.", "default": "Scheduled reminder"},
+                    "skill_name": {"type": "string", "description": "Required when task_type is run_skill. Skill folder name (e.g. weather-1.0.0)."},
+                    "script": {"type": "string", "description": "Required when task_type is run_skill. Script name under skill (e.g. get_weather.py)."},
+                    "args": {"type": "array", "items": {"type": "string"}, "description": "When task_type is run_skill: args for the script (e.g. ['Beijing'])."},
+                    "tool_name": {"type": "string", "description": "Required when task_type is run_tool. Tool name (e.g. web_search). Use for 'search the latest sports news every 7 am' with tool_arguments={query: 'latest sports news', count: 10}."},
+                    "tool_arguments": {"type": "object", "description": "When task_type is run_tool: arguments for the tool (e.g. for web_search: {query: 'latest sports news', count: 10})."},
+                    "plugin_id": {"type": "string", "description": "Required when task_type is run_plugin. Plugin id (e.g. headlines for top headlines from News API). Do NOT use for 'search news' — use run_tool web_search instead."},
+                    "capability_id": {"type": "string", "description": "Optional when task_type is run_plugin. Capability to call (e.g. fetch_headlines for headlines)."},
+                    "parameters": {"type": "object", "description": "When task_type is run_plugin: key-value parameters for the capability (e.g. for headlines: category, page_size, sources, language)."},
+                    "post_process_prompt": {"type": "string", "description": "Optional. For run_skill or run_plugin: system prompt for LLM to refine output before sending (e.g. 'Summarize in 2 sentences.')."},
                     "tz": {"type": "string", "description": "Optional timezone (e.g. America/New_York, Europe/London). Server local if omitted."},
                     "delivery_target": {"type": "string", "description": "Where to deliver: 'latest' (default) or 'session' (this channel).", "default": "latest"},
                 },
@@ -3734,7 +4315,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="web_search",
-            description="Search the web. Free (no key): provider=duckduckgo. Free tier: google_cse (100/day), bing (1000/mo), tavily. Paid: brave, serpapi. Use web_search_browser for Google/Bing/Baidu via browser when no API key. Set provider in config; pass search_type for Brave, engine for SerpAPI/google_cse.",
+            description="Search the web (generic). Use for 'search the web', 'search for X', 'search the latest sports news'. For 'search the latest sports news every 7 am' use cron_schedule with task_type=run_tool, tool_name=web_search, tool_arguments={query: 'latest sports news', count: 10} — do NOT use run_plugin headlines. Free (no key): duckduckgo. Free tier: google_cse, bing, tavily. Set provider in config; pass search_type for Brave, engine for SerpAPI.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -3825,7 +4406,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="image",
-            description="Analyze an image with the vision/multimodal model. Provide image as path (relative to tools.file_read_base) or url, and optional prompt (e.g. 'What is in this image?'). Requires a vision-capable LLM.",
+            description="Analyze an image with the vision/multimodal model. Provide image as path (relative to homeclaw_root) or url, and optional prompt (e.g. 'What is in this image?'). Requires a vision-capable LLM.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -3933,7 +4514,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_read",
-            description="Read contents of a file. Path is relative to config tools.file_read_base (default: current directory). For safety, only reads under that base.",
+            description="Read contents of a file. Path is relative to config tools.file_read_base (default: project root). For safety, only reads under that base.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -3948,7 +4529,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="document_read",
-            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. Uses Unstructured when installed (pip install 'unstructured[all-docs]') for one powerful tool; falls back to pypdf for PDF and plain text for others. Path relative to tools.file_read_base. For long files, increase max_chars or ask for section-by-section summary.",
+            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. Uses Unstructured when installed (pip install 'unstructured[all-docs]') for one powerful tool; falls back to pypdf for PDF and plain text for others. Path relative to tools.file_read_base (default: project root). For long files, increase max_chars or ask for section-by-section summary.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -3963,7 +4544,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_understand",
-            description="Classify a file as image, audio, video, or document and return type + path. For documents, returns extracted text (same as document_read). For image/audio/video, returns type and path so you know what the file is; use image_analyze(path) for images if the user asks to describe. Path relative to tools.file_read_base.",
+            description="Classify a file as image, audio, video, or document and return type + path. For documents, returns extracted text (same as document_read). For image/audio/video, returns type and path so you know what the file is; use image_analyze(path) for images if the user asks to describe. Path relative to tools.file_read_base (default: project root).",
             parameters={
                 "type": "object",
                 "properties": {
@@ -3978,7 +4559,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_write",
-            description="Write content to a file. Path is relative to config tools.file_read_base. Only writes under that base.",
+            description="Write content to a file. Path is relative to config tools.file_read_base (default: project root). Only writes under that base.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -4027,7 +4608,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="folder_list",
-            description="List contents of a directory (files and subdirectories). Path is relative to config tools.file_read_base. Use to explore the filesystem.",
+            description="List contents of a directory (files and subdirectories). Path is relative to config tools.file_read_base (default: project root). Use to explore the filesystem.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -4042,7 +4623,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_find",
-            description="Find files or folders by name pattern (glob) under config tools.file_read_base. E.g. pattern '*.py' or '*config*'. Returns list of path, type (file/dir), name.",
+            description="Find files or folders by name pattern (glob) under config tools.file_read_base (default: project root). E.g. pattern '*.py' or '*config*'. Returns list of path, type (file/dir), name.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -4209,17 +4790,17 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
         )
     )
 
-    # Complex result viewer: store full result, reply with link (or full content if no base_url).
+    # Save result as page; returns link. Markdown (.md) for chat display; HTML (.html) for long/complex reports.
     registry.register(
         ToolDefinition(
             name="save_result_page",
-            description="Save the full result as a page and get a shareable link when base_url is set. **Prefer storing directly:** when your response is long or structured (summary, report, analysis), call this tool with the full content and reply with only the link (or full content in chat if no link). Pass the **exact same content** you generated — do not regenerate or shorten. **Format:** Use format=**markdown** only when content is plain markdown or plain text (e.g. '# Title\\n\\nParagraph'). If you generate a full HTML document (with <!DOCTYPE>, <html>, <body>), use format=**html** so the page renders correctly; otherwise the saved page can appear messy. For simple text-only summaries, markdown is preferred. Link is only produced when base_url is set in config; otherwise send the full result in chat.",
+            description="Save the result as a page and get a shareable link. **format=markdown:** Saves as .md. The tool returns the markdown content in its result — **include that content in your reply** so the channel/Companion/web chat can **display it directly in the chat view**; also give the link for opening the full report. **format=html:** Saves as .html; the tool returns only the link — user opens it in a browser. **Rule:** Simple/short → markdown (content shown in chat + link). Complex/long → html (link only). Pass the exact same content you generated. Link is produced when auth_api_key is set in config.",
             parameters={
                 "type": "object",
                 "properties": {
                     "title": {"type": "string", "description": "Title of the result page (e.g. 'Summary', 'Report')."},
-                    "content": {"type": "string", "description": "The full result content — exact same content you generated. Use clean text: avoid raw Unicode escapes or corrupted characters so the page displays correctly."},
-                    "format": {"type": "string", "description": "Content format: 'markdown' for plain text/markdown (e.g. summaries); 'html' when content is HTML (e.g. full document with <!DOCTYPE> or <html>). Using the wrong format causes messy output.", "default": "markdown"},
+                    "content": {"type": "string", "description": "The full result content — exact same content you generated. Use clean text so the page displays correctly."},
+                    "format": {"type": "string", "description": "Use 'markdown' (default) for text/summaries suitable for in-chat display (saves as .md). Use 'html' for long or complex reports, or when content is full HTML (saves as .html).", "default": "markdown"},
                 },
                 "required": ["title", "content"],
             },

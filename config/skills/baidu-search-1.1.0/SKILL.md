@@ -1,9 +1,9 @@
 ---
 name: baidu-search
-description: Search the web and get an AI-summarized answer using Baidu 智能搜索生成 (Qianfan AI Search). Use for live information, documentation, or research. Requires API key (env or config).
+description: Baidu-only: use Baidu Qianfan 智能搜索生成 to search and get an AI-written summary in one call. Use only when the user explicitly asks for Baidu or 百度搜索. For generic web search (Tavily, DuckDuckGo, etc.) use the web_search tool instead, not this skill.
 trigger:
-  patterns: ["search\\s+(the\\s+)?(web|baidu|百度)|百度搜索|search\\s+for|look\\s+up\\s+(on\\s+)?(the\\s+)?web"]
-  instruction: "The user asked to search the web or use Baidu. Call run_skill(skill_name='baidu-search-1.1.0', script='search.py', args=['{\"query\": \"<search terms>\"}']) with a JSON string. Extract the search query from the user message. Do not say you cannot search."
+  patterns: ["百度搜索|百度.*搜|Baidu\\s+search|智能搜索|用百度搜|baidu\\s+搜"]
+  instruction: "The user asked for Baidu search or 百度/智能搜索. Use run_skill(skill_name='baidu-search-1.1.0', script='search.py', args=['{\"query\": \"<search terms>\"}']). For plain 'search the web' or 'search for X' without mentioning Baidu, use the web_search tool instead."
   auto_invoke:
     script: search.py
     args: ["{{query}}"]
@@ -11,17 +11,31 @@ trigger:
 
 # Baidu AI Search (智能搜索生成)
 
-Uses Baidu Qianfan **智能搜索生成** API: search the web and get an AI-written summary plus references.  
+Uses Baidu Qianfan **智能搜索生成** API: search the web and get an **AI-written summary** plus references in one call.  
+**When to use which:** Use **this skill** only when the user asks for **Baidu** or **百度搜索**. For generic "search the web", "search for X", or "look up Y" use the built-in **web_search** tool (Tavily/DuckDuckGo/etc.), not this skill.  
 **Skill folder name for run_skill:** `baidu-search-1.1.0`.  
 API reference: [智能搜索生成](https://cloud.baidu.com/doc/qianfan-api/s/Hmbu8m06u).
 
 ## API key (required)
 
-Set **one** of:
-- **Environment:** `BAIDU_API_KEY` where Core runs (e.g. `set BAIDU_API_KEY=your-key` or `export BAIDU_API_KEY=your-key`).
-- **Config:** In `config/core.yml` under `tools:` add `baidu_api_key: "your-key"`.
+**The key is configured with the skill**, not in core.yml. Set one of:
 
-Get a key from [Baidu Qianfan](https://cloud.baidu.com/doc/qianfan-api/s/Hmbu8m06u) (千帆 AI 应用开发者中心).
+1. **Skill config (recommended):** In this skill's folder edit `config/skills/baidu-search-1.1.0/config.yml` and set:
+   ```yaml
+   api_key: "your-baidu-qianfan-api-key"
+   ```
+2. **Environment:** `BAIDU_API_KEY` where Core runs (overrides skill config if set).
+
+Get a key from [Baidu Qianfan](https://cloud.baidu.com/doc/qianfan-api/s/Hmbu8m06u) (千帆 AI 应用开发者中心). If you see "Authentication error" or code 216003, the key is missing or invalid.
+
+## When to use this skill vs web_search (built-in tool)
+
+| User says | Use | Why |
+|------------|-----|-----|
+| "百度搜索 X", "用百度搜", "Baidu search for X", "智能搜索" | **This skill** (baidu-search-1.1.0) | User explicitly wants Baidu or AI-summarized search in one step. |
+| "search the web for X", "search for X", "look up X", "google X" | **web_search** tool | Generic web search; built-in tool (Tavily/DuckDuckGo/etc.) returns raw results for you to summarize. |
+
+Do not use this skill for generic "search the web" or "search for" — use the **web_search** tool instead.
 
 ## Run via run_skill
 

@@ -928,12 +928,172 @@ class TAM:
                 if not job_id or not cron_expr:
                     continue
                 params = dict(row.get("params") or {})
-                msg = params.get("message", "")
-                task = (
-                    lambda m, p: lambda: asyncio.run(
-                        self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
-                    )
-                )(msg, params)
+                if params.get("task_type") == "run_skill":
+                    skill_name = params.get("skill_name") or ""
+                    script = params.get("script") or ""
+                    args_list = params.get("args") or []
+                    if skill_name and script:
+                        def make_run_skill_task(prms: Dict[str, Any]):
+                            async def _run():
+                                from base.tools import get_tool_registry, ToolContext
+                                registry = get_tool_registry()
+                                if not registry:
+                                    await self._send_reminder_to_channel_safe("Error: tool registry not available", prms)
+                                    return
+                                ctx = ToolContext(core=self.coreInst)
+                                try:
+                                    result = await registry.execute_async(
+                                        "run_skill",
+                                        {"skill_name": prms["skill_name"], "script": prms["script"], "args": prms.get("args") or []},
+                                        ctx,
+                                    )
+                                except Exception as e:
+                                    result = f"Error: {e}"
+                                text = (result or "(no output)").strip()
+                                prompt = (prms.get("post_process_prompt") or "").strip()
+                                if prompt and hasattr(self.coreInst, "openai_chat_completion"):
+                                    try:
+                                        refined = await self.coreInst.openai_chat_completion([
+                                            {"role": "system", "content": prompt},
+                                            {"role": "user", "content": text},
+                                        ])
+                                        if refined and isinstance(refined, str) and refined.strip():
+                                            text = refined.strip()
+                                    except Exception:
+                                        pass
+                                await self._send_reminder_to_channel_safe(text, prms)
+                            return lambda: asyncio.run(_run())
+                        task = make_run_skill_task(params)
+                    else:
+                        task = (
+                            lambda m, p: lambda: asyncio.run(
+                                self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
+                            )
+                        )(params.get("message", ""), params)
+                elif params.get("task_type") == "run_plugin":
+                    plugin_id = params.get("plugin_id") or ""
+                    if plugin_id:
+                        def make_run_plugin_task(prms: Dict[str, Any]):
+                            async def _run():
+                                from base.tools import get_tool_registry, ToolContext
+                                from base.base import PromptRequest, ChannelType, ContentType
+                                import uuid as _uuid
+                                import time as _time
+                                registry = get_tool_registry()
+                                if not registry:
+                                    await self._send_reminder_to_channel_safe("Error: tool registry not available", prms)
+                                    return
+                                channel_key = prms.get("channel_key") or ""
+                                parts = channel_key.split(":") if channel_key else ["", ""]
+                                app_id = parts[0] if len(parts) > 0 else ""
+                                user_id = parts[1] if len(parts) > 1 else ""
+                                if channel_key == "companion":
+                                    app_id = app_id or "homeclaw"
+                                    user_id = "companion"
+                                req = PromptRequest(
+                                    request_id=str(_uuid.uuid4()),
+                                    channel_name="cron",
+                                    request_metadata={"capability_id": prms.get("capability_id"), "capability_parameters": prms.get("parameters") or {}},
+                                    channelType=ChannelType.IM,
+                                    user_name="cron",
+                                    app_id=app_id,
+                                    user_id=user_id,
+                                    contentType=ContentType.TEXT,
+                                    text="",
+                                    action="respond",
+                                    host="cron",
+                                    port=0,
+                                    images=[],
+                                    videos=[],
+                                    audios=[],
+                                    files=[],
+                                    timestamp=_time.time(),
+                                )
+                                ctx = ToolContext(core=self.coreInst, request=req, cron_scheduled=True)
+                                try:
+                                    result = await registry.execute_async(
+                                        "route_to_plugin",
+                                        {
+                                            "plugin_id": prms["plugin_id"],
+                                            "capability_id": prms.get("capability_id"),
+                                            "parameters": prms.get("parameters") or {},
+                                        },
+                                        ctx,
+                                    )
+                                except Exception as e:
+                                    result = f"Error: {e}"
+                                text = (result or "(no output)").strip()
+                                if not isinstance(text, str):
+                                    text = str(text)
+                                prompt = (prms.get("post_process_prompt") or "").strip()
+                                if prompt and hasattr(self.coreInst, "openai_chat_completion"):
+                                    try:
+                                        refined = await self.coreInst.openai_chat_completion([
+                                            {"role": "system", "content": prompt},
+                                            {"role": "user", "content": text},
+                                        ])
+                                        if refined and isinstance(refined, str) and refined.strip():
+                                            text = refined.strip()
+                                    except Exception:
+                                        pass
+                                await self._send_reminder_to_channel_safe(text, prms)
+                            return lambda: asyncio.run(_run())
+                        task = make_run_plugin_task(params)
+                    else:
+                        task = (
+                            lambda m, p: lambda: asyncio.run(
+                                self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
+                            )
+                        )(params.get("message", ""), params)
+                elif params.get("task_type") == "run_tool":
+                    tool_name = params.get("tool_name") or ""
+                    if tool_name:
+                        def make_run_tool_task(prms: Dict[str, Any]):
+                            async def _run():
+                                from base.tools import get_tool_registry, ToolContext
+                                registry = get_tool_registry()
+                                if not registry:
+                                    await self._send_reminder_to_channel_safe("Error: tool registry not available", prms)
+                                    return
+                                ctx = ToolContext(core=self.coreInst, cron_scheduled=True)
+                                try:
+                                    result = await registry.execute_async(
+                                        prms["tool_name"],
+                                        prms.get("tool_arguments") or {},
+                                        ctx,
+                                    )
+                                except Exception as e:
+                                    result = f"Error: {e}"
+                                text = (result or "(no output)").strip()
+                                if not isinstance(text, str):
+                                    text = str(text)
+                                prompt = (prms.get("post_process_prompt") or "").strip()
+                                if prompt and hasattr(self.coreInst, "openai_chat_completion"):
+                                    try:
+                                        refined = await self.coreInst.openai_chat_completion([
+                                            {"role": "system", "content": prompt},
+                                            {"role": "user", "content": text},
+                                        ])
+                                        if refined and isinstance(refined, str) and refined.strip():
+                                            text = refined.strip()
+                                    except Exception:
+                                        pass
+                                await self._send_reminder_to_channel_safe(text, prms)
+                            return lambda: asyncio.run(_run())
+                        task = make_run_tool_task(params)
+                    else:
+                        task = (
+                            lambda m, p: lambda: asyncio.run(
+                                self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
+                            )
+                        )(params.get("message", ""), params)
+                else:
+                    msg = params.get("message", "")
+                    task = (
+                        lambda m, p: lambda: asyncio.run(
+                            self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
+                        )
+                    )(msg, params)
                 jid = self.schedule_cron_task(
                     task,
                     cron_expr,
@@ -1157,7 +1317,7 @@ class TAM:
         # Short timeout so Ctrl+C doesn't block (scheduler loop sleeps 10s)
         if self.thread is not None and self.thread.is_alive():
             self.thread.join(timeout=2.0)
-        logger.debug("SchedulerPlugin cleanup done!")  
+        logger.debug("TAM scheduler cleanup done.")  
 
 
     

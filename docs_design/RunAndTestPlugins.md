@@ -33,7 +33,8 @@ Built-in plugins live under `plugins/<PluginName>/` with `plugin.yaml`, `config.
 Out of the box you typically have:
 
 - **Weather** (`plugins/Weather/`) — current weather by city/district.
-- **News** (`plugins/News/`) — news fetching.
+- **Headlines** (`plugins/Headlines/`) — top headlines from News API; parameters (country, category, sources, number) from user message; language defaults to main model. See [News API Top Headlines](https://newsapi.org/docs/endpoints/top-headlines) and [Sources](https://newsapi.org/docs/endpoints/sources).
+- **News** (`plugins/News/`) — legacy news fetching (prefer Headlines for new use).
 - **Mail** (`plugins/Mail/`) — send email (needs `config/email_account.yml` or similar).
 
 Each has a `plugin.yaml` (id, description, capabilities) and `config.yml` (API keys, defaults). See [PluginsGuide.md](PluginsGuide.md) for the exact structure.
@@ -71,7 +72,7 @@ Each has a `plugin.yaml` (id, description, capabilities) and `config.yml` (API k
 **Example prompts:**
 
 - Weather: “What’s the weather today?”, “Weather in Shanghai”, “Do I need an umbrella?”
-- News: “Latest news”, “Top headlines.”
+- Headlines (extract category, source, count from message; "top 5 from BBC" → page_size=5, sources=bbc-news; "5 headlines" → 5 with defaults + tip; "what sources?" → list_sources): “Top headlines”, “Latest news in Germany”, “10 tech headlines from BBC”, “Headlines in Chinese.”
 - Mail: “Send an email to john@example.com with subject Hello and body Hi there.”
 
 If a plugin needs **config** (e.g. API key, default city), set it in that plugin’s `config.yml`. For parameter collection (e.g. city from profile or config), see [PluginParameterCollection.md](PluginParameterCollection.md).
@@ -88,7 +89,7 @@ External plugins run as **separate HTTP servers**. You **start the server**, the
 - **Run:** `POST /run` (or your configured path) with body = PluginRequest JSON; response = PluginResult JSON (`request_id`, `plugin_id`, `success`, `text`, `error`).
 - **Registration:** `POST http://<core>:9000/api/plugins/register` with plugin id, name, description, `health_check_url`, `type: "http"`, `config` (base_url, path, timeout_sec), and `capabilities`.
 
-Details: [PluginStandard.md](PluginStandard.md) and [examples/external_plugins/README.md](../examples/external_plugins/README.md).
+Details: [PluginStandard.md](PluginStandard.md) and [external_plugins/README.md](../external_plugins/README.md).
 
 ### 4.2 Run and register (by sample)
 
@@ -96,11 +97,11 @@ All commands assume **project root** for Python; Node/Go/Java samples are run fr
 
 | Sample | Language | Port | Run | Register |
 |--------|----------|------|-----|-----------|
-| Quote | Python | 3101 | `python -m examples.external_plugins.quote.server` | `python -m examples.external_plugins.quote.register` |
-| Time | Python | 3102 | `python -m examples.external_plugins.time.server` | `python -m examples.external_plugins.time.register` |
-| Quote | Node.js | 3111 | `cd examples/external_plugins/quote-node && npm install && node server.js` | `node register.js` (from that dir) |
-| Time | Go | 3112 | `cd examples/external_plugins/time-go && go run main.go` | `./register.sh` |
-| Quote | Java | 3113 | `cd examples/external_plugins/quote-java && mvn compile exec:java -Dexec.mainClass="QuotePlugin"` | `./register.sh` |
+| Time | Python | 3102 | `python -m external_plugins.time.server` | `python -m external_plugins.time.register` |
+| Companion | Python | 3103 | `python -m external_plugins.companion.server` | `python -m external_plugins.companion.register` |
+| Quote | Node.js | 3111 | `cd external_plugins/quote-node && npm install && node server.js` | `node register.js` (from that dir) |
+| Time | Go | 3112 | `cd external_plugins/time-go && go run main.go` | `./register.sh` |
+| Quote | Java | 3113 | `cd external_plugins/quote-java && mvn compile exec:java -Dexec.mainClass="QuotePlugin"` | `./register.sh` |
 
 **Typical flow:**
 

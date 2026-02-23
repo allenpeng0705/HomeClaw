@@ -1,0 +1,43 @@
+# Headlines plugin — News API v2 top-headlines. See https://newsapi.org/docs/endpoints/top-headlines and /endpoints/sources
+id: headlines
+base_url: https://newsapi.org/v2/top-headlines
+# Get your key at https://newsapi.org/register (use apiKey or api_key)
+apiKey: "2d9c07650f22468990ce44f53a2d5bb7"
+# Defaults when user does not specify (overridable by capability_parameters from user message)
+default_country: us
+default_category: general
+default_page_size: 10
+# Language: when not provided by user, use main model's first language (main_llm_language from core.yml)
+# News API codes: ar, de, en, es, fr, he, it, nl, no, pt, ru, sv, ud, zh
+# Allowed categories for top-headlines (user can select): business, entertainment, general, health, science, sports, technology
+allowed_categories:
+  - business
+  - entertainment
+  - general
+  - health
+  - science
+  - sports
+  - technology
+# Sources: use comma-separated source ids from https://newsapi.org/docs/endpoints/sources
+# Example: bbc-news, techcrunch, the-verge. Cannot mix sources with country/category in one request.
+# Leave empty to use country + category; if user provides sources, only sources are used.
+default_sources: ""
+# Output format: markdown (Core will classify and send as markdown; channel may render) or plain (plaintext)
+default_output_format: markdown
+description: "Fetches top headlines from News API. User can choose country, category, sources, and number of headlines; language defaults to the main model's first language."
+keywords:
+  - "headlines"
+  - "top headlines"
+  - "news"
+  - "latest news"
+  - "breaking news"
+  - "current events"
+  - "news update"
+  - "top stories"
+  - "world news"
+  - "business news"
+  - "tech news"
+  - "sports news"
+  - "entertainment news"
+  - "science news"
+  - "health news"

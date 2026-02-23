@@ -1,0 +1,13 @@
+id: quotes
+name: Quotes Plugin
+description: Generate motivational quotes from chat history. Use when the user wants a quote or uplifting message.
+description_long: Summarizes recent chat and generates an insightful motivational quote. Scheduling (e.g. daily quote) via cron_schedule with task_type run_plugin and plugin_id quotes.
+type: inline
+config:
+  config_file: config.yml
+capabilities:
+  - id: generate_random_quote
+    name: Generate random quote
+    description: Generates a motivational quote based on recent chat history.
+    parameters: []
+    output_description: A short motivational quote string.

@@ -1,0 +1,8 @@
+# ppt-generation plugin config
+# When invoked via Core (route_to_plugin), output is saved to the user's private output folder
+#   (base/{user_id}/output/ or companion/output/) and Core returns an open link. output_dir below
+#   is used only when the plugin runs without request_output_dir (e.g. standalone).
+# output_dir: directory when not using user output folder (relative to project root or absolute)
+#   Default: config/workspace/presentations
+output_dir: ""   # empty = config/workspace/presentations
+default_language: en

@@ -30,7 +30,7 @@ from aiohttp.client_exceptions import ClientConnectorError
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from typing import Any, Optional, Dict, List, Tuple, Union
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi import FastAPI, Request, Response
 from loguru import logger
 import requests
@@ -76,7 +76,7 @@ from base.workspace import (
 from base.skills import get_skills_dir, load_skills, build_skills_system_block
 from base.tools import ToolContext, get_tool_registry, ROUTING_RESPONSE_ALREADY_SENT
 from base import last_channel as last_channel_store
-from base.markdown_outbound import markdown_to_channel, looks_like_markdown
+from base.markdown_outbound import markdown_to_channel, looks_like_markdown, classify_outbound_format
 from tools.builtin import register_builtin_tools, register_routing_tools, close_browser_session
 from core.coreInterface import CoreInterface
 from core.emailChannel import channel
@@ -999,15 +999,15 @@ class Core(CoreInterface):
 
         @self.app.get("/pinggy", response_class=HTMLResponse)
         async def pinggy_page():
-            """Page showing public URL and QR for Companion scan-to-connect. Uses public_url from core.yml (e.g. Cloudflare) or Pinggy tunnel. No auth so user can open before pairing."""
+            """Page showing public URL and QR for Companion scan-to-connect. Uses core_public_url from core.yml (e.g. Cloudflare) or Pinggy tunnel. No auth so user can open before pairing."""
             global _pinggy_state
-            # If public_url is set in core.yml (e.g. Cloudflare Tunnel, Tailscale Funnel), use it for the page
+            # If core_public_url is set in core.yml (Cloudflare, Pinggy, or any tunnel), use it for the page
             try:
                 core_yml_path = os.path.join(Util().config_path(), "core.yml")
                 if os.path.isfile(core_yml_path):
                     with open(core_yml_path, "r", encoding="utf-8") as f:
                         data = yaml.safe_load(f) or {}
-                    configured_public_url = (data.get("public_url") or "").strip()
+                    configured_public_url = (data.get("core_public_url") or "").strip()
                     if configured_public_url:
                         meta = Util().get_core_metadata()
                         auth_enabled = bool(getattr(meta, "auth_enabled", False))
@@ -1038,7 +1038,7 @@ class Core(CoreInterface):
                         </body></html>"""
                         return HTMLResponse(content=html)
             except Exception as e:
-                logger.debug("public_url /pinggy page failed: {}", e)
+                logger.debug("core_public_url /pinggy page failed: {}", e)
             # Else use Pinggy state (tunnel URL)
             err = _pinggy_state.get("error")
             if err:
@@ -1050,7 +1050,7 @@ class Core(CoreInterface):
             qr_base64 = _pinggy_state.get("qr_base64")
             if not public_url and not connect_url:
                 html = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>HomeClaw — Scan to connect</title></head><body style="font-family:sans-serif;padding:2rem;">
-                <h1>Scan to connect</h1><p>Set <strong>public_url</strong> in core.yml (e.g. your Cloudflare Tunnel URL) or set <strong>pinggy.token</strong> to use Pinggy. Then open this page again.</p></body></html>"""
+                <h1>Scan to connect</h1><p>Set <strong>core_public_url</strong> in core.yml (e.g. your Cloudflare Tunnel URL) or set <strong>pinggy.token</strong> to use Pinggy. Then open this page again.</p></body></html>"""
                 return HTMLResponse(content=html)
             if not connect_url:
                 connect_url = public_url or ""
@@ -1108,7 +1108,7 @@ class Core(CoreInterface):
                                     host=last.get("host") or "",
                                     port=port,
                                     from_channel=ch_name,
-                                    response_data={"text": self._format_outbound_text(msg)},
+                                    response_data={"text": self._format_outbound_text(msg), "format": self._safe_classify_format(msg)},
                                 )
                                 await self.response_queue.put(async_resp)
                     except Exception as notify_e:
@@ -1210,7 +1210,9 @@ class Core(CoreInterface):
                 ok, text, status, image_paths = await self._handle_inbound_request(request)
                 if not ok:
                     return JSONResponse(status_code=status, content={"error": text, "text": ""})
-                content = {"text": self._format_outbound_text(text) if text else ""}
+                out_text, out_fmt = self._outbound_text_and_format(text) if text else ("", "plain")
+                content = {"text": out_text, "format": out_fmt}
+                # Images: send directly as data URLs (companion/channel display inline). File/folder: shown via link (format "link").
                 # Last-resort: if response text contains "Image saved: <path>" but we have no image_paths, parse it
                 if not image_paths and text and ("Image saved:" in text or "HOMECLAW_IMAGE_PATH=" in text):
                     import re as _re
@@ -1249,6 +1251,96 @@ class Core(CoreInterface):
             except Exception as e:
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"error": str(e), "text": ""})
+
+        @self.app.get("/files/out")
+        async def files_out(path: str = "", token: str = ""):
+            """
+            Serve a file or directory from the sandbox. Same URL as Core (core_public_url).
+            Query: path (e.g. output/report_xxx.html or output), token (signed with auth_api_key).
+            For a directory, returns an HTML listing with links to files and subdirs (each link has its own token).
+            """
+            try:
+                from core.result_viewer import verify_file_access_token, create_file_access_token, get_core_public_url
+                from urllib.parse import quote
+                payload = verify_file_access_token(token)
+                if not payload:
+                    return JSONResponse(status_code=403, content={"error": "Invalid or expired link"})
+                scope, rel_path = payload
+                path_arg = (path or "").replace("\\", "/").strip()
+                if not path_arg:
+                    return JSONResponse(status_code=400, content={"error": "Path required"})
+                if path_arg != rel_path:
+                    return JSONResponse(status_code=400, content={"error": "Path mismatch"})
+                try:
+                    meta = Util().get_core_metadata()
+                    base_str = (meta.get_homeclaw_root() or "")
+                    base_str = str(base_str).strip() if base_str else ""
+                except Exception:
+                    base_str = ""
+                if not base_str:
+                    return JSONResponse(status_code=503, content={"error": "File serving not configured (homeclaw_root)"})
+                try:
+                    base = Path(base_str).resolve()
+                    full = (base / scope / path_arg).resolve()
+                except (OSError, RuntimeError, ValueError) as path_err:
+                    logger.debug("files_out path resolve failed: {}", path_err)
+                    return JSONResponse(status_code=503, content={"error": "File serving path invalid"})
+                try:
+                    full.relative_to(base)
+                except ValueError:
+                    return JSONResponse(status_code=403, content={"error": "Path not in sandbox"})
+                if full.is_dir():
+                    base_url = get_core_public_url() or ""
+                    entries = []
+                    try:
+                        children = sorted(full.iterdir(), key=lambda x: (not x.is_dir(), (x.name or "").lower()))
+                    except OSError:
+                        children = []
+                    for p in children:
+                        try:
+                            name = p.name or ""
+                            if not name or name in (".", ".."):
+                                continue
+                        except Exception:
+                            continue
+                        child_rel = f"{path_arg}/{name}".lstrip("/") if path_arg else name
+                        child_token = create_file_access_token(scope, child_rel) if base_url else ""
+                        href = f"{base_url}/files/out?path={quote(child_rel)}&token={child_token}" if child_token else "#"
+                        entries.append((name, "dir" if p.is_dir() else "file", href))
+                    html_parts = [
+                        "<!DOCTYPE html><html><head><meta charset='utf-8'><title>",
+                        _escape_for_html(path_arg or "/"),
+                        "</title><style>body{font-family:system-ui;max-width:800px;margin:2rem auto;padding:0 1rem;}",
+                        "h1{font-size:1.25rem;} ul{list-style:none;padding:0;} li{margin:0.4rem 0;}",
+                        "a{color:#2563eb;} a:hover{text-decoration:underline;} .dir{font-weight:600;}</style></head><body>",
+                        "<h1>",
+                        _escape_for_html(path_arg or "Workspace"),
+                        "</h1><ul>",
+                    ]
+                    for name, kind, href in entries:
+                        cls = " class='dir'" if kind == "dir" else ""
+                        html_parts.append(f"<li{cls}><a href='{_escape_for_html(href)}'>{_escape_for_html(name)}</a></li>")
+                    html_parts.append("</ul></body></html>")
+                    return HTMLResponse(content="".join(html_parts))
+                if not full.is_file():
+                    return JSONResponse(status_code=404, content={"error": "File not found"})
+                media_type = None
+                suf = full.suffix.lower()
+                if suf in (".html", ".htm"):
+                    media_type = "text/html; charset=utf-8"
+                elif suf == ".md":
+                    media_type = "text/markdown; charset=utf-8"
+                elif suf in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+                    media_type = ("image/png" if suf == ".png" else "image/jpeg" if suf in (".jpg", ".jpeg") else "image/gif" if suf == ".gif" else "image/webp")
+                return FileResponse(str(full), media_type=media_type)
+            except Exception as e:
+                logger.debug("files_out failed: {}", e)
+                return JSONResponse(status_code=500, content={"error": "Failed to serve file"})
+
+        def _escape_for_html(s: str) -> str:
+            if not s:
+                return ""
+            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
 
         @self.app.post("/api/upload", dependencies=[Depends(_verify_inbound_auth)])
         async def api_upload(files: List[UploadFile] = File(..., description="Image or file(s) to save for the model")):
@@ -1297,7 +1389,7 @@ class Core(CoreInterface):
             "plugins_max_retrieved", "plugins_similarity_threshold", "plugins_refresh_on_startup",
             "system_plugins_auto_start", "system_plugins", "system_plugins_env", "orchestrator_unified_with_tools",
             "orchestrator_timeout_seconds", "use_prompt_manager", "prompts_dir", "prompt_default_language",
-            "prompt_cache_ttl_seconds", "auth_enabled", "auth_api_key", "tools", "result_viewer", "knowledge_base",
+            "prompt_cache_ttl_seconds", "auth_enabled", "auth_api_key", "core_public_url", "tools", "result_viewer", "knowledge_base",
             "file_understanding", "llama_cpp", "completion", "local_models", "cloud_models", "main_llm",
             "embedding_llm", "main_llm_language", "embedding_host", "embedding_port", "main_llm_host", "main_llm_port",
             "database", "vectorDB", "graphDB", "cognee", "memory_summarization",
@@ -1360,7 +1452,7 @@ class Core(CoreInterface):
 
         @self.app.patch("/api/config/core", dependencies=[Depends(_verify_inbound_auth)])
         async def api_config_core_patch(request: Request):
-            """Update whitelisted keys in core.yml. Nested dicts are deep-merged; lists and scalars replace."""
+            """Update whitelisted keys in core.yml. Nested dicts are deep-merged; lists and scalars replace. Never overwrites if core.yml could not be loaded (avoids corrupting the file)."""
             try:
                 body = await request.json()
                 if not isinstance(body, dict):
@@ -1369,6 +1461,11 @@ class Core(CoreInterface):
                 if not path.exists():
                     return JSONResponse(status_code=404, content={"detail": "core.yml not found"})
                 data = Util().load_yml_config(str(path)) or {}
+                try:
+                    if not data and path.stat().st_size > 0:
+                        return JSONResponse(status_code=400, content={"detail": "core.yml could not be loaded (parse error?). Fix the file manually; do not overwrite."})
+                except OSError:
+                    pass
                 for k, v in body.items():
                     if k not in _CONFIG_CORE_WHITELIST:
                         continue
@@ -1859,8 +1956,14 @@ class Core(CoreInterface):
                         await websocket.send_json({"error": "user_id and (text or media) required", "text": ""})
                         continue
                     ok, text, _, image_paths = await self._handle_inbound_request(req)
-                    out_text = (self._format_outbound_text(text) if text else "") if ok else ""
-                    ws_payload = {"text": out_text, "error": "" if ok else text}
+                    if ok and text:
+                        out_text, out_fmt = self._outbound_text_and_format(text)
+                    else:
+                        out_text, out_fmt = (text or "", "plain")
+                    if not ok:
+                        out_text = ""
+                    ws_payload = {"text": out_text, "format": out_fmt, "error": "" if ok else text}
+                    # Images: send directly to channel/companion (not as link); file/folder use link in text with format "link".
                     if image_paths:
                         data_urls = []
                         for image_path in image_paths:
@@ -1963,14 +2066,17 @@ class Core(CoreInterface):
         if user:
             pr.system_user_id = user.id or user.name
         # Store latest location when client sends it (Companion, WebChat, browser). When app did not combine (system/companion), store under shared key so it can be used for all users.
+        # If location is lat/lng (from mobile), convert to address (country, city, street) for display and plugins.
         try:
             loc_in = request_metadata.get("location") or getattr(request, "location", None)
-            if isinstance(loc_in, str) and loc_in.strip():
-                sid = (inbound_user_id or "").strip().lower()
-                if sid in ("system", "companion"):
-                    self._set_latest_location(getattr(self, "_LATEST_LOCATION_SHARED_KEY", "companion"), loc_in.strip())
-                elif getattr(pr, "system_user_id", None):
-                    self._set_latest_location(pr.system_user_id, loc_in.strip())
+            if loc_in is not None:
+                display_loc, lat_lng_str = self._normalize_location_to_address(loc_in)
+                if display_loc:
+                    sid = (inbound_user_id or "").strip().lower()
+                    if sid in ("system", "companion"):
+                        self._set_latest_location(getattr(self, "_LATEST_LOCATION_SHARED_KEY", "companion"), display_loc, lat_lng_str=lat_lng_str)
+                    elif getattr(pr, "system_user_id", None):
+                        self._set_latest_location(pr.system_user_id, display_loc, lat_lng_str=lat_lng_str)
         except Exception as e:
             logger.debug("Store latest location on inbound: {}", e)
         self.latestPromptRequest = copy.deepcopy(pr)
@@ -2015,7 +2121,22 @@ class Core(CoreInterface):
                             pass
                         # Fall through to main flow (process_text_message)
                     else:
-                        # System or not in user.yml → companion plugin
+                        # System or not in user.yml → companion plugin. Treat as one special user "companion".
+                        pr.system_user_id = "companion"
+                        pr.user_id = "companion"
+                        # Persist last channel under key "companion" so cron/LLM can send to Companion app
+                        try:
+                            last_channel_store.save_last_channel(
+                                request_id=pr.request_id,
+                                host=pr.host,
+                                port=int(pr.port),
+                                channel_name=pr.channel_name,
+                                request_metadata=pr.request_metadata or {},
+                                key="companion",
+                                app_id=getattr(pr, "app_id", None) or "",
+                            )
+                        except Exception as lc_err:
+                            logger.debug("Failed to persist companion last channel: {}", lc_err)
                         plug = self.plugin_manager.get_plugin_by_id(plugin_id) if self.plugin_manager else None
                         if isinstance(plug, dict):
                             pr_companion = copy.deepcopy(pr)
@@ -2110,8 +2231,19 @@ class Core(CoreInterface):
             logger.debug("Latest location path: {}", e)
             return Path("database") / "latest_locations.json"
 
-    def _set_latest_location(self, system_user_id: str, location_str: str) -> None:
-        """Store latest location for this user. Never raises."""
+    def _normalize_location_to_address(self, location_input: Any) -> Tuple[Optional[str], Optional[str]]:
+        """If location is lat/lng (string or dict from Companion/mobile), convert to address. Returns (display_location, lat_lng_str). Never raises."""
+        try:
+            from base.geocode import location_to_address
+            return location_to_address(location_input)
+        except Exception as e:
+            logger.debug("Normalize location failed: {}", e)
+            if isinstance(location_input, str) and location_input.strip():
+                return location_input.strip()[:2000], None
+            return None, None
+
+    def _set_latest_location(self, system_user_id: str, location_str: str, lat_lng_str: Optional[str] = None) -> None:
+        """Store latest location for this user. location_str is the address or display text; lat_lng_str optional 'lat,lng' for plugins that need coords. Never raises."""
         if not system_user_id or not isinstance(location_str, str) or not location_str.strip():
             return
         try:
@@ -2125,10 +2257,13 @@ class Core(CoreInterface):
                     data = {}
             if not isinstance(data, dict):
                 data = {}
-            data[str(system_user_id)] = {
+            entry = {
                 "location": location_str.strip()[:2000],
                 "updated_at": datetime.now().isoformat(),
             }
+            if lat_lng_str and isinstance(lat_lng_str, str) and lat_lng_str.strip():
+                entry["lat_lng"] = lat_lng_str.strip()[:100]
+            data[str(system_user_id)] = entry
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=0, ensure_ascii=False)
         except Exception as e:
@@ -2136,6 +2271,13 @@ class Core(CoreInterface):
 
     def _get_latest_location(self, system_user_id: str) -> Optional[str]:
         """Return latest location for this user or None. Never raises."""
+        entry = self._get_latest_location_entry(system_user_id)
+        if isinstance(entry, dict) and entry.get("location"):
+            return str(entry.get("location", "")).strip() or None
+        return None
+
+    def _get_latest_location_entry(self, system_user_id: str) -> Optional[Dict[str, Any]]:
+        """Return latest location entry {location, updated_at} for this user or None. Never raises."""
         if not system_user_id:
             return None
         try:
@@ -2148,11 +2290,94 @@ class Core(CoreInterface):
                 return None
             entry = data.get(str(system_user_id))
             if isinstance(entry, dict) and entry.get("location"):
-                return str(entry.get("location", "")).strip() or None
+                return entry
             return None
         except Exception as e:
             logger.debug("Get latest location failed: {}", e)
             return None
+
+    def get_system_context_for_plugins(
+        self,
+        system_user_id: Optional[str] = None,
+        request: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Build system context (datetime, timezone, location) for plugin parameter resolution.
+        Used when resolving params so plugins can get current time and user location without the user typing them.
+        Returns dict with: datetime, datetime_iso, timezone, location (optional), location_source, location_confidence.
+        location_confidence is 'high' when from request or recent latest; 'low' when from profile/config/shared so caller may ask user to confirm when scheduling.
+        """
+        out = {}
+        try:
+            now = datetime.now()
+            try:
+                now = now.astimezone()
+            except Exception:
+                pass
+            out["datetime"] = now.strftime("%Y-%m-%d %H:%M")
+            out["datetime_iso"] = now.isoformat()
+            out["timezone"] = getattr(now.tzinfo, "tzname", lambda: None)() or "system local"
+        except Exception:
+            out["datetime"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            out["datetime_iso"] = datetime.now().isoformat()
+            out["timezone"] = "system local"
+
+        user_id = system_user_id or (getattr(request, "user_id", None) if request else None) or ""
+        loc_str = None
+        location_source = None
+        location_confidence = "low"
+        try:
+            meta = getattr(request, "request_metadata", None) if request else {}
+            raw_loc = meta.get("location") if isinstance(meta, dict) else None
+            if raw_loc is not None:
+                display_loc, _ = self._normalize_location_to_address(raw_loc)
+                if display_loc:
+                    loc_str = display_loc
+                    location_source = "request"
+                    location_confidence = "high"
+            if not loc_str and user_id:
+                entry = self._get_latest_location_entry(user_id)
+                if isinstance(entry, dict) and entry.get("location"):
+                    loc_str = str(entry.get("location", "")).strip()
+                    location_source = "latest"
+                    updated = entry.get("updated_at") or ""
+                    if updated:
+                        try:
+                            updated_dt = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+                            now_ref = datetime.now(updated_dt.tzinfo) if getattr(updated_dt, "tzinfo", None) else datetime.now()
+                            if (now_ref - updated_dt) < timedelta(hours=24):
+                                location_confidence = "high"
+                        except Exception:
+                            pass
+            if not loc_str and user_id:
+                profile_cfg = getattr(Util().get_core_metadata(), "profile", None) or {}
+                if isinstance(profile_cfg, dict) and profile_cfg.get("enabled", True):
+                    try:
+                        from base.profile_store import get_profile
+                        profile_base_dir = (profile_cfg.get("dir") or "").strip() or None
+                        profile_data = get_profile(user_id or "", base_dir=profile_base_dir)
+                        if isinstance(profile_data, dict) and profile_data.get("location"):
+                            loc_str = str(profile_data.get("location", "")).strip()
+                            location_source = "profile"
+                    except Exception:
+                        pass
+            if not loc_str:
+                loc_str = (getattr(Util().get_core_metadata(), "default_location", None) or "").strip() or None
+                if loc_str:
+                    location_source = "config"
+            if not loc_str:
+                shared_key = getattr(self, "_LATEST_LOCATION_SHARED_KEY", "companion")
+                entry = self._get_latest_location_entry(shared_key)
+                if isinstance(entry, dict) and entry.get("location"):
+                    loc_str = str(entry.get("location", "")).strip()
+                    location_source = "shared"
+        except Exception as e:
+            logger.debug("System context location: {}", e)
+        if loc_str:
+            out["location"] = loc_str[:500]
+            out["location_source"] = location_source or "unknown"
+            out["location_confidence"] = location_confidence
+        return out
 
     def save_latest_prompt_request_to_file(self, filename: str):
         """Legacy: save to file (e.g. for debugging). Prefer _persist_last_channel which uses DB + atomic file in database/."""
@@ -2307,7 +2532,7 @@ class Core(CoreInterface):
                         host=request.host,
                         port=request.port,
                         from_channel=request.channel_name,
-                        response_data={"text": self._format_outbound_text("Permission denied."), "error": True},
+                        response_data={"text": self._format_outbound_text("Permission denied."), "format": "plain", "error": True},
                     )
                     await self.response_queue.put(err_resp)
                     continue
@@ -2337,7 +2562,7 @@ class Core(CoreInterface):
                     if resp_text == ROUTING_RESPONSE_ALREADY_SENT:
                         logger.debug("Routing tool already sent response to channel")
                         continue
-                    resp_data = {"text": self._format_outbound_text(resp_text)}
+                    resp_data = {"text": self._format_outbound_text(resp_text), "format": self._safe_classify_format(resp_text)}
                     # Any skill/tool output that includes images: HOMECLAW_IMAGE_PATH=<path> → send to channel/companion
                     img_paths = (request.request_metadata or {}).get("response_image_paths")
                     if not isinstance(img_paths, list):
@@ -2375,6 +2600,25 @@ class Core(CoreInterface):
         except Exception:
             return text
 
+    def _safe_classify_format(self, text: str) -> str:
+        """Return classify_outbound_format(text) or 'plain' on any exception. Never raises."""
+        try:
+            return classify_outbound_format(text) if (text is not None and isinstance(text, str)) else "plain"
+        except Exception:
+            return "plain"
+
+    def _outbound_text_and_format(self, text: str) -> tuple[str, str]:
+        """Return (text_to_send, format) for clients that support markdown (Companion, web chat, Control UI). format is 'plain'|'markdown'|'link'. For markdown/link we send raw text; for plain we apply _format_outbound_text. Never raises."""
+        try:
+            if text is None or not isinstance(text, str):
+                return (text if text is not None else "", "plain")
+            fmt = self._safe_classify_format(text)
+            if fmt == "markdown" or fmt == "link":
+                return (text, fmt)
+            return (self._format_outbound_text(text), "plain")
+        except Exception:
+            return (str(text)[:50000] if text is not None else "", "plain")
+
     async def send_response_to_latest_channel(self, response: str):
         """Send to the default (latest) channel. See send_response_to_channel_by_key for per-session delivery."""
         await self.send_response_to_channel_by_key(last_channel_store._DEFAULT_KEY, response)
@@ -2384,7 +2628,7 @@ class Core(CoreInterface):
         try:
             if not key:
                 key = last_channel_store._DEFAULT_KEY
-            resp_data = {"text": self._format_outbound_text(response)}
+            resp_data = {"text": self._format_outbound_text(response), "format": self._safe_classify_format(response)}
             request: Optional[PromptRequest] = self.latestPromptRequest
             if key != last_channel_store._DEFAULT_KEY or request is None:
                 stored = last_channel_store.get_last_channel(key)
@@ -2431,7 +2675,7 @@ class Core(CoreInterface):
         audio_path: Optional[str] = None,
     ):
         """Send text and optional media (file paths) to the channel. Channels that support image/video/audio send them; others use text only."""
-        resp_data = {"text": self._format_outbound_text(response)}
+        resp_data = {"text": self._format_outbound_text(response), "format": self._safe_classify_format(response)}
         if request is None:
             return
         if image_path and isinstance(image_path, str) and os.path.isfile(image_path):
@@ -2985,7 +3229,10 @@ class Core(CoreInterface):
                             logger.debug("file_understanding config load failed: {}", cfg_e)
                     tools_cfg = (data or {}).get("tools") or {}
                     fu_cfg = (data or {}).get("file_understanding") or {}
-                    base_dir = str(tools_cfg.get("file_read_base") or ".")
+                    try:
+                        base_dir = str(Util().get_core_metadata().get_homeclaw_root() or ".")
+                    except Exception:
+                        base_dir = "."
                     try:
                         max_chars = int(tools_cfg.get("file_read_max_chars") or 0) or 64000
                     except (TypeError, ValueError):
@@ -3284,6 +3531,11 @@ class Core(CoreInterface):
             _pinggy_state["connect_url"] = connect_url
             _pinggy_state["qr_base64"] = qr_base64
             _pinggy_state["error"] = None
+            try:
+                from core.result_viewer import set_runtime_public_url
+                set_runtime_public_url(public_url)
+            except Exception:
+                pass
             if open_browser:
                 webbrowser.open(f"http://127.0.0.1:{port}/pinggy")
         except Exception as e:
@@ -3383,22 +3635,16 @@ class Core(CoreInterface):
                     except Exception as e:
                         logger.warning("Agent memory vector sync failed: {}", e)
 
-            # Result viewer: start report web server on its own port (different from Core). Stops when Core stops.
-            try:
-                from core.result_viewer import start_report_server
-                if start_report_server():
-                    cfg = getattr(core_metadata, "result_viewer", None) or {}
-                    port = int(cfg.get("port") or 9001)
-                    _component_log("result_viewer", f"report server on port {port} (HTTP)")
-            except Exception as e:
-                logger.debug("Result viewer server skipped: {}", e)
+            # File serving: sandbox files and folder listings at GET /files/out (core_public_url/files/out?path=...&token=...)
+            if (getattr(core_metadata, "core_public_url", None) or "").strip():
+                _component_log("files", "serving sandbox files at GET /files/out (core_public_url set)")
 
             # LLM manager (embedding + main LLM) was started earlier, before skills/plugins/agent_memory sync.
             # Optionally start and register system_plugins (e.g. homeclaw-browser) so one command runs Core + plugins.
             # Runs in a background asyncio task; each plugin is a separate OS process. Does not block Core or server.serve().
             if getattr(core_metadata, "system_plugins_auto_start", False):
                 asyncio.create_task(self._run_system_plugins_startup())
-            # Pinggy: only when pinggy.token is set — start tunnel and optionally open browser to /pinggy (public URL + QR). If neither public_url nor token is set, we just run Core and do not pop up QR.
+            # Pinggy: only when pinggy.token is set — start tunnel and optionally open browser to /pinggy (public URL + QR). If neither core_public_url nor token is set, we just run Core and do not pop up QR.
             try:
                 core_yml_path = os.path.join(Util().config_path(), "core.yml")
                 if os.path.isfile(core_yml_path):
@@ -3444,13 +3690,6 @@ class Core(CoreInterface):
                 pass
         self._system_plugin_processes = []
         self.stop_chroma_client()
-
-        # Stop result viewer report server (runs on its own port)
-        try:
-            from core.result_viewer import stop_report_server
-            stop_report_server()
-        except Exception:
-            pass
 
         def shutdown():
             try:
@@ -3731,17 +3970,16 @@ class Core(CoreInterface):
                 route = None
                 route_layer = "default_route"
                 route_score = 0.0
-                # Layer 1: heuristic (keywords, long-input)
+                # Layer 1: heuristic (keywords, long-input); no threshold—first match wins when enabled
                 heuristic_cfg = hr.get("heuristic") if isinstance(hr.get("heuristic"), dict) else {}
                 h_enabled = bool(heuristic_cfg.get("enabled", False))
-                h_threshold = float(heuristic_cfg.get("threshold") or 0)
-                if h_enabled and h_threshold > 0:
+                if h_enabled:
                     from hybrid_router.heuristic import load_heuristic_rules, run_heuristic_layer
                     root_dir = Path(__file__).resolve().parent.parent
                     rules_path = (heuristic_cfg.get("rules_path") or "").strip()
                     rules_data = load_heuristic_rules(rules_path, root_dir=root_dir) if rules_path else None
-                    score, selection = run_heuristic_layer(query or "", rules_data, enabled=h_enabled, threshold=h_threshold)
-                    if selection and score >= h_threshold:
+                    score, selection = run_heuristic_layer(query or "", rules_data, enabled=h_enabled)
+                    if selection:
                         route = selection
                         route_layer = "heuristic"
                         route_score = score
@@ -3779,12 +4017,18 @@ class Core(CoreInterface):
                                 route_score = score
                         except Exception as e:
                             logger.debug("Semantic router Layer 2 failed: {}", e)
+                # Optional: long queries use default_route and skip perplexity (avoids local overconfidence on complex prompts)
+                if route is None:
+                    prefer_long = hr.get("prefer_cloud_if_long_chars")
+                    if prefer_long is not None and isinstance(prefer_long, (int, float)) and int(prefer_long) > 0:
+                        if len((query or "")) > int(prefer_long):
+                            route = default_route
+                            route_layer = "default_route"
                 # Layer 3: classifier (small model) or perplexity (main local model confidence probe)
                 if route is None:
                     slm_cfg = hr.get("slm") if isinstance(hr.get("slm"), dict) else {}
                     slm_enabled = bool(slm_cfg.get("enabled", False))
                     slm_mode = (slm_cfg.get("mode") or "classifier").strip().lower()
-                    slm_threshold = float(slm_cfg.get("threshold") or 0)
                     slm_model_ref = (slm_cfg.get("model") or "").strip()
                     if slm_enabled:
                         try:
@@ -3814,15 +4058,15 @@ class Core(CoreInterface):
                                             route_layer = "perplexity"
                                             route_score = score
                             else:
-                                # Classifier: small model with judge prompt
+                                # Classifier: small model returns Local or Cloud; no threshold, we use its answer when valid
                                 if slm_model_ref:
                                     from hybrid_router.slm import run_slm_layer_async, resolve_slm_model_ref
                                     host, port, _path_rel, raw_id = resolve_slm_model_ref(slm_model_ref)
                                     if host is not None and port is not None and raw_id:
                                         score, selection = await run_slm_layer_async(
-                                            query or "", host, port, raw_id, threshold=slm_threshold
+                                            query or "", host, port, raw_id
                                         )
-                                        if selection and (slm_threshold <= 0 or score >= slm_threshold):
+                                        if selection:
                                             route = selection
                                             route_layer = "classifier"
                                             route_score = score
@@ -4544,28 +4788,24 @@ class Core(CoreInterface):
 
             if openai_tools:
                 logger.info("Tools available for this turn: {}", tool_names)
-                # Inject actual file_read_base into system prompt so the model uses correct paths (avoids hallucinated bases)
+                # Inject actual homeclaw_root into system prompt so the model uses correct paths (avoids hallucinated bases)
                 _file_tool_names = {"file_read", "file_write", "document_read", "folder_list", "file_find"}
                 if tool_names and _file_tool_names.intersection(set(tool_names)):
                     try:
-                        config_path = Path(Util().root_path()) / "config" / "core.yml"
-                        if config_path.exists():
-                            data = Util().load_yml_config(str(config_path)) or {}
-                            tools_cfg = data.get("tools") or {}
-                            base_str = (tools_cfg.get("file_read_base") or ".").strip()
-                            if base_str and llm_input and llm_input[0].get("role") == "system":
-                                block = (
-                                    "\n\n## File tools base path\n"
-                                    "For file_read, file_write, document_read, folder_list, file_find: "
-                                    "paths are relative to the configured base. Use relative paths only (e.g. path=\".\" for the base, path=\"subdir\" for a subfolder). "
-                                    "To find files by type: call file_find with pattern only (e.g. pattern=\"*.docx\" for Word, pattern=\"*.pdf\" for PDF, pattern=\"*.jpg\" for images). "
-                                    "Report only paths returned by file_find or folder_list; do not invent or guess paths. "
-                                    "To read Word/PDF content use document_read(path=<relative path from tool result>). "
-                                    f"Current file_read_base: {base_str}"
-                                )
-                                llm_input[0]["content"] = (llm_input[0].get("content") or "") + block
+                        base_str = (Util().get_core_metadata().get_homeclaw_root() or ".").strip()
+                        if base_str and llm_input and llm_input[0].get("role") == "system":
+                            block = (
+                                "\n\n## File tools base path\n"
+                                "For file_read, file_write, document_read, folder_list, file_find: "
+                                "paths are relative to the configured base (homeclaw_root). Use relative paths only (e.g. path=\".\" for the base, path=\"subdir\" for a subfolder). "
+                                "To find files by type: call file_find with pattern only (e.g. pattern=\"*.docx\" for Word, pattern=\"*.pdf\" for PDF, pattern=\"*.jpg\" for images). "
+                                "Report only paths returned by file_find or folder_list; do not invent or guess paths. "
+                                "To read Word/PDF content use document_read(path=<relative path from tool result>). "
+                                f"Current homeclaw_root: {base_str}"
+                            )
+                            llm_input[0]["content"] = (llm_input[0].get("content") or "") + block
                     except Exception as e:
-                        logger.debug("Inject file_read_base into system prompt failed: {}", e)
+                        logger.debug("Inject homeclaw_root into system prompt failed: {}", e)
                 # Tool loop: call LLM with tools; if it returns tool_calls, execute and append results, repeat
                 context = ToolContext(
                     core=self,
@@ -4645,7 +4885,7 @@ class Core(CoreInterface):
                                     try:
                                         _component_log("tools", f"fallback auto_invoke {tname} (model did not call tool)")
                                         if tname == "run_skill":
-                                            _component_log("tools", "executing run_skill (run_skill_py_in_process from config/core.yml tools:)")
+                                            _component_log("tools", "executing run_skill (in_process from run_skill_py_in_process_skills if listed)")
                                         result = await registry.execute_async(tname, targs, context)
                                         if result == ROUTING_RESPONSE_ALREADY_SENT:
                                             return ROUTING_RESPONSE_ALREADY_SENT
@@ -4692,7 +4932,7 @@ class Core(CoreInterface):
                         args_redacted = redact_params_for_log(args) if isinstance(args, dict) else args
                         logger.info("Tool selected: name={} parameters={}", name, args_redacted)
                         if name == "run_skill":
-                            _component_log("tools", "executing run_skill (run_skill_py_in_process from config/core.yml tools:)")
+                            _component_log("tools", "executing run_skill (in_process from run_skill_py_in_process_skills if listed)")
                         if name == "route_to_plugin" and isinstance(args, dict):
                             logger.info(
                                 "Plugin routing: plugin_id={} capability_id={} parameters={}",

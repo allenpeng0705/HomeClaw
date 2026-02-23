@@ -1,0 +1,103 @@
+id: ppt-generation
+name: PPT Generation
+description: Create PowerPoint (.pptx) from structured slides, outline, documents, or a single source (web search results, file content, given text). All parameters (title, subtitle, slides) can be extracted from the source — use create_from_source to pass raw source, or create_from_documents/create_from_outline with content from web_search/file_read. Output is saved to the user's private output folder and a link is returned. For 乔布斯-style single HTML use skill html-slides.
+description_long: Generates .pptx files. Parameters (main_title, subtitle, slides) should be extracted from the source when the user provides or references source material (web search results, other files, or pasted text). Capabilities: create_from_source (single source: plain text or JSON array of {title, content} — plugin extracts title and slides); create_presentation (structured main_title + slides JSON); create_from_outline (markdown ## / -); create_from_documents (file paths or document_contents). Output file is saved to the user's private output folder (base/{user_id}/output/ or companion/output/) and the response includes an open link. For 乔布斯/极简/竖屏/HTML use skill html-slides-1.0.0.
+type: inline
+config:
+  config_file: config.yml
+capabilities:
+  - id: create_from_source
+    name: Create presentation from a single source
+    description: Create a .pptx from one source — plain text (parsed as outline) or JSON array of {title, content} (e.g. web search results). Title and slides are extracted from the source. Use when the user says "make a PPT from this search" or "PPT from this text"; pass the source (web_search result, file content, or pasted text). Output is saved to the user's private output folder and a link is returned.
+    parameters:
+      - name: source
+        type: string
+        required: true
+        description: "Plain text (markdown outline with ## and -) or JSON string of array of objects with title/content (e.g. web search results). Plugin extracts main_title and slides."
+      - name: output_filename
+        type: string
+        required: false
+        description: Output file name (e.g. report.pptx). Default from extracted title and timestamp.
+      - name: language
+        type: string
+        required: false
+        description: Optional; en or zh. Default en.
+    output_description: '{"success": true, "path": "absolute path", "message": "summary", "output_rel_path": "output/filename.pptx"} — Core appends open link.'
+    post_process: true
+    post_process_prompt: Tell the user the presentation was created from their source and where to find it (open link).
+
+  - id: create_presentation
+    name: Create presentation from structured slides
+    description: Create a .pptx with a title slide and content slides. Parameters (main_title, subtitle, slides) can be extracted from source by the LLM — e.g. from web search results, file content, or given text — then pass them here. Or use create_from_source to pass raw source and let the plugin extract.
+    parameters:
+      - name: main_title
+        type: string
+        required: true
+        description: Title for the first slide (e.g. "Q4 Report"). Extract from source when possible.
+      - name: subtitle
+        type: string
+        required: false
+        description: Subtitle or tagline for the title slide. Extract from source when possible.
+      - name: slides
+        type: string
+        required: true
+        description: 'JSON array of slide objects. Each has "title" and "bullets" (array of strings). Extract from source (web search, files, text) when possible.'
+      - name: output_filename
+        type: string
+        required: false
+        description: Output file name (e.g. report.pptx). Default from main_title and timestamp.
+      - name: language
+        type: string
+        required: false
+        description: Optional; en or zh. Default en.
+    output_description: '{"success": true, "path": "absolute path", "message": "summary", "output_rel_path": "output/filename.pptx"} — saved to user private output folder; Core returns link.'
+    post_process: true
+    post_process_prompt: Tell the user the presentation was created and where to find it (path/link). If they asked for a specific topic, confirm the slides included it.
+
+  - id: create_from_outline
+    name: Create presentation from outline
+    description: Create a .pptx from a markdown-style outline. Use when the user pastes or describes an outline, or when you have outline text from a source. Output is saved to the user's private output folder and a link is returned.
+    parameters:
+      - name: outline
+        type: string
+        required: true
+        description: 'Markdown-style outline. ## = slide titles; - or * = bullets. Can be extracted from source (file content, web search summary).'
+      - name: output_filename
+        type: string
+        required: false
+        description: Output file name (e.g. summary.pptx). Default from first title and timestamp.
+      - name: language
+        type: string
+        required: false
+        description: Optional; en or zh. Default en.
+    output_description: '{"success": true, "path": "absolute path", "message": "summary", "output_rel_path": "output/filename.pptx"} — Core returns link.'
+    post_process: true
+    post_process_prompt: Tell the user the presentation was created from their outline and where to find it (path/link).
+
+  - id: create_from_documents
+    name: Create presentation from documents
+    description: Create a .pptx from one or more documents. Provide document_paths (file paths) or document_contents (JSON array of {title, content} — e.g. from file_read or web search). Title and slides are extracted from the content. Output is saved to the user's private output folder and a link is returned.
+    parameters:
+      - name: document_paths
+        type: string
+        required: false
+        description: JSON array of file paths (e.g. ["report.md", "summary.txt"]). Paths are relative to workspace dir or project root. At least one of document_paths or document_contents is required.
+      - name: document_contents
+        type: string
+        required: false
+        description: 'JSON array of objects with "title" (or "name") and "content" (text). Use when you already have the document text (e.g. from file_read). Example: [{"title":"Report","content":"## Section 1\n- Point A"}].'
+      - name: main_title
+        type: string
+        required: false
+        description: Title for the first slide. Default from first document title or first heading.
+      - name: output_filename
+        type: string
+        required: false
+        description: Output file name (e.g. docs_summary.pptx). Default from main_title or first doc name.
+      - name: language
+        type: string
+        required: false
+        description: Optional; en or zh. Default en.
+    output_description: '{"success": true, "path": "absolute path", "message": "summary", "sources": ["file1", "file2"], "output_rel_path": "output/filename.pptx"} — saved to user private output folder; Core returns link.'
+    post_process: true
+    post_process_prompt: Tell the user the presentation was created from the document(s) and where to find it (path/link). Mention how many documents were used.

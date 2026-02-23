@@ -59,14 +59,15 @@ def resolve_and_validate_plugin_params(
     plugin_config: Dict[str, Any],
     plugin_id: str,
     capability_id: Optional[str],
+    system_context: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], Optional[str], Optional[Dict[str, Any]]]:
     """
-    Resolve parameters: LLM args -> profile (by profile_key) -> config (default_parameters).
-    Validate: required params present; confirm_if_uncertain when source is profile/config
-    (unless use_defaults_directly or use_default_directly_for).
+    Resolve parameters: LLM args -> system (datetime/location if system_key) -> profile (by profile_key) -> config (default_parameters).
+    Validate: required params present; confirm_if_uncertain when source is profile/config/system (low confidence).
+    system_context: optional dict from Core.get_system_context_for_plugins() with datetime, timezone, location, location_source, location_confidence.
+    Param schema may include system_key: "datetime" | "timezone" | "location" to fill from system context when user did not provide.
+    When location comes from system and location_confidence is "low", we add to uncertain so caller can ask user (e.g. when creating a schedule).
     Returns (resolved_params, error_message, ask_user_data).
-    If error_message is not None, do not invoke plugin.
-    ask_user_data is set when the caller should ask the user and retry: {"missing": [param_names]} or {"uncertain": [...]}.
     """
     schema = _get_capability_params_schema(capability)
     if not schema:
@@ -81,9 +82,11 @@ def resolve_and_validate_plugin_params(
     use_directly_for = [_normalize_key(p) for p in use_directly_for]
 
     resolved: Dict[str, Any] = {}
-    sources: Dict[str, str] = {}  # param_name -> "user_message" | "profile" | "config"
+    sources: Dict[str, str] = {}  # param_name -> "user_message" | "system" | "profile" | "config"
     missing: List[str] = []
     uncertain: List[Tuple[str, str, str]] = []  # (param_name, value, source)
+
+    sys_ctx = system_context or {}
 
     for p in schema:
         name = (p.get("name") or "").strip()
@@ -94,11 +97,12 @@ def resolve_and_validate_plugin_params(
         profile_key = (p.get("profile_key") or "").strip() or key
         config_key = (p.get("config_key") or "").strip() or key
         confirm_if_uncertain = p.get("confirm_if_uncertain") is True
+        system_key = (p.get("system_key") or "").strip().lower() or None  # "datetime" | "timezone" | "location"
 
         value = None
         source = "user_message"
 
-        # 1. Explicit from LLM
+        # 1. Explicit from LLM / user
         if key in llm_params and llm_params[key] not in (None, ""):
             val = llm_params[key]
             if isinstance(val, str) and val.strip():
@@ -108,14 +112,26 @@ def resolve_and_validate_plugin_params(
                 value = val
                 source = "user_message"
 
-        # 2. Profile
+        # 2. System context (datetime, timezone, location) when param has system_key
+        if value is None and system_key and sys_ctx:
+            if system_key == "datetime" and (sys_ctx.get("datetime") or sys_ctx.get("datetime_iso")):
+                value = sys_ctx.get("datetime") or sys_ctx.get("datetime_iso")
+                source = "system"
+            elif system_key == "timezone" and sys_ctx.get("timezone"):
+                value = sys_ctx.get("timezone")
+                source = "system"
+            elif system_key == "location" and sys_ctx.get("location"):
+                value = sys_ctx.get("location")
+                source = "system"
+
+        # 3. Profile
         if value is None and profile:
             pv = profile.get(profile_key)
             if pv not in (None, "") and (not isinstance(pv, str) or pv.strip()):
                 value = pv.strip() if isinstance(pv, str) else pv
                 source = "profile"
 
-        # 3. Config: default_parameters first, then top-level config (for plugins like Weather)
+        # 4. Config: default_parameters first, then top-level config (for plugins like Weather)
         if value is None:
             cv = default_params.get(config_key) or default_params.get(name)
             if cv is None:
@@ -132,7 +148,12 @@ def resolve_and_validate_plugin_params(
         resolved[key] = value
         sources[key] = source
 
-        if confirm_if_uncertain and source in ("profile", "config"):
+        # Mark uncertain: (a) confirm_if_uncertain and from profile/config, or (b) from system location with low confidence
+        if source == "system" and system_key == "location":
+            loc_conf = (sys_ctx.get("location_confidence") or "low").lower()
+            if loc_conf == "low":
+                uncertain.append((name, str(value)[:100], f"system ({sys_ctx.get('location_source', 'unknown')})"))
+        elif confirm_if_uncertain and source in ("profile", "config"):
             use_directly = use_defaults_directly or (key in use_directly_for or name in use_directly_for)
             if not use_directly:
                 uncertain.append((name, str(value)[:100], source))

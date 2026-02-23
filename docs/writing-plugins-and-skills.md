@@ -46,7 +46,7 @@ Both are important: plugins give you new capabilities; skills give you reusable 
 
 ## Examples: external plugins
 
-### Small examples: `examples/external_plugins/`
+### Small examples: `external_plugins/`
 
 Working samples in multiple languages (same contract: GET /health, POST /run, register with Core):
 
@@ -63,9 +63,9 @@ Working samples in multiple languages (same contract: GET /health, POST /run, re
 | Example | Language | Location | Description |
 |---------|----------|----------|-------------|
 | **HomeClaw Browser** | Node.js | **system_plugins/homeclaw-browser** | **System plugin**: WebChat (Control UI), browser automation (Playwright), canvas, nodes. Same contract; register with Core. Port 3020. See [system_plugins/README.md](https://github.com/allenpeng0705/HomeClaw/blob/main/system_plugins/README.md) and [homeclaw-browser/README.md](https://github.com/allenpeng0705/HomeClaw/blob/main/system_plugins/homeclaw-browser/README.md). |
-| **Companion plugin** | Python | See repo | A Python-based companion/utility plugin is another external plugin example (same contract). See **examples/external_plugins/** or the repo for the latest location and run steps. |
+| **Companion plugin** | Python | See repo | A Python-based companion/utility plugin is another external plugin example (same contract). See **external_plugins/** or the repo for the latest location and run steps. |
 
-Each small example: run the plugin server, then register with Core via the provided `register` script or module. See **[examples/external_plugins/README.md](https://github.com/allenpeng0705/HomeClaw/blob/main/examples/external_plugins/README.md)** for run commands and the **contract** (GET /health, POST /run, registration payload).
+Each small example: run the plugin server, then register with Core via the provided `register` script or module. See **[external_plugins/README.md](https://github.com/allenpeng0705/HomeClaw/blob/main/external_plugins/README.md)** for run commands and the **contract** (GET /health, POST /run, registration payload).
 
 ---
 
@@ -89,7 +89,7 @@ Enable skills in **config/core.yml**: `use_skills: true`, `skills_dir: config/sk
 | Goal | Where to start |
 |------|-----------------|
 | **Write a built-in plugin** | `plugins/<Name>/` with plugin.yaml, config.yml, plugin.py; [HowToWriteAPlugin.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/HowToWriteAPlugin.md). |
-| **Write an external plugin** | HTTP server (GET /health, POST /run); register with Core; see **examples/external_plugins/** and [HowToWriteAPlugin.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/HowToWriteAPlugin.md). |
+| **Write an external plugin** | HTTP server (GET /health, POST /run); register with Core; see **external_plugins/** and [HowToWriteAPlugin.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/HowToWriteAPlugin.md). |
 | **Write a skill** | Folder under `config/skills/` with SKILL.md (and optional scripts/); [SkillsGuide.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/SkillsGuide.md). |
 
 ---

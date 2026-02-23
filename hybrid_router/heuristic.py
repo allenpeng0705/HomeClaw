@@ -66,18 +66,19 @@ def run_heuristic_layer(
     query: str,
     rules_data: Optional[Dict[str, Any]],
     enabled: bool = True,
-    threshold: float = 0.5,
+    threshold: float = 0.5,  # unused; kept for backward compatibility
 ) -> Tuple[float, Optional[str]]:
     """
     Run Layer 1 heuristic on user message only.
     Returns (score, selection). selection is "local" | "cloud" or None.
-    - If not enabled or threshold <= 0: return (0.0, None).
+    - If not enabled: return (0.0, None).
     - If rules_data is None or empty: return (0.0, None).
     - If long_input_chars > 0 and len(query) > long_input_chars: return (1.0, long_input_route).
     - If any rule's keyword (normalized) is a substring of normalized query: return (1.0, rule.route).
     - Otherwise: return (0.0, None).
+    No threshold: first match (long-input or keyword) wins.
     """
-    if not enabled or (threshold is not None and threshold <= 0):
+    if not enabled:
         return (0.0, None)
     if not rules_data or not isinstance(rules_data, dict):
         return (0.0, None)

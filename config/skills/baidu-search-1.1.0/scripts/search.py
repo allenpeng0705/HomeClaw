@@ -16,47 +16,59 @@ from pathlib import Path
 import requests
 
 _API_URL = "https://qianfan.baidubce.com/v2/ai_search/chat/completions"
+_TIMEOUT = 90
 
 
-def _get_api_key():
-    """BAIDU_API_KEY from environment, or from config/core.yml tools.baidu_api_key."""
-    key = (os.getenv("BAIDU_API_KEY") or "bce-v3/ALTAK-xMqTr4gbFSEXU5qFZMcLp/50685eb84cb5306d57405d0bfd265270194587c6").strip()
+def _skill_root() -> Path:
+    """Skill folder (baidu-search-1.1.0) containing config.yml and scripts/."""
+    return Path(__file__).resolve().parent.parent
+
+
+def _get_api_key() -> str:
+    """API key from (1) skill config.yml (api_key), (2) BAIDU_API_KEY env. Key lives with the skill, not in core.yml."""
+    # 1) Environment (allows override without editing skill config)
+    key = (os.getenv("BAIDU_API_KEY") or "").strip()
     if key:
         return key
-    try:
-        script_dir = Path(__file__).resolve().parent
-        root = script_dir.parent.parent.parent.parent
-        core_yml = root / "config" / "core.yml"
-        if core_yml.is_file():
+    # 2) Skill-level config: <skill_dir>/config.yml
+    config_yml = _skill_root() / "config.yml"
+    if config_yml.is_file():
+        try:
             import yaml
-            with open(core_yml, "r", encoding="utf-8") as f:
+            with open(config_yml, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
-            tools = data.get("tools") or {}
-            key = (tools.get("baidu_api_key") or "").strip()
+            key = (data.get("api_key") or "").strip()
             if key:
                 return key
-    except Exception:
-        pass
+        except Exception:
+            pass
     return ""
 
 
 def ai_search(api_key: str, body: dict) -> dict:
     """
     Call Baidu 智能搜索生成 (AI Search). Returns dict with summary and references.
+    Raises on HTTP error or when API returns error code in body.
     """
     headers = {
         "Authorization": "Bearer %s" % api_key,
         "X-Appbuilder-From": "homeclaw",
         "Content-Type": "application/json",
     }
-    resp = requests.post(_API_URL, json=body, headers=headers, timeout=60)
+    resp = requests.post(_API_URL, json=body, headers=headers, timeout=_TIMEOUT)
+    try:
+        data = resp.json() if resp.text else {}
+    except Exception:
+        data = {}
+
+    # API can return 200 or 4xx with error in body (e.g. code 216003 = auth error)
+    code = data.get("code")
+    if code is not None and code != 0:
+        msg = data.get("message") or data.get("error_msg") or "API error"
+        raise RuntimeError("Baidu API error (code %s): %s" % (code, msg))
+
     resp.raise_for_status()
-    data = resp.json()
 
-    if data.get("code"):
-        raise RuntimeError(data.get("message", "API error"))
-
-    # Response: choices[0].message.content (summary), references (list of refs)
     choices = data.get("choices") or []
     message = (choices[0].get("message") or {}) if choices else {}
     content = (message.get("content") or "").strip()
@@ -65,12 +77,19 @@ def ai_search(api_key: str, body: dict) -> dict:
     return {"summary": content, "references": references, "usage": data.get("usage")}
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python search.py '<JSON>'  e.g.  python search.py '{\"query\": \"search terms\"}'")
+def main() -> None:
+    def fail(msg: str) -> None:
+        print(msg, file=sys.stderr)
+        print("Error: " + msg)
         sys.exit(1)
 
-    raw = sys.argv[1].strip()
+    if len(sys.argv) < 2:
+        fail(
+            "Usage: python search.py '<JSON>'  e.g.  python search.py '{\"query\": \"search terms\"}'"
+        )
+        return
+
+    raw = (sys.argv[1] or "").strip()
     try:
         params = json.loads(raw) if raw.startswith("{") else {"query": raw}
     except json.JSONDecodeError:
@@ -78,20 +97,21 @@ def main():
 
     query = (params.get("query") or "").strip()
     if not query:
-        print("Error: pass a JSON string with \"query\" or a plain search query as the first argument.")
-        sys.exit(1)
+        fail(
+            'Pass a JSON string with "query" or a plain search query as the first argument.'
+        )
+        return
 
     api_key = _get_api_key()
     if not api_key:
-        print(
-            "Error: Baidu AI Search requires an API key. Set BAIDU_API_KEY in the environment where Core runs, "
-            "or in config/core.yml under tools: baidu_api_key: \"your-key\". "
+        fail(
+            "Baidu AI Search requires an API key. Set it in this skill's config: "
+            "config/skills/baidu-search-1.1.0/config.yml (api_key: \"your-key\"), "
+            "or set BAIDU_API_KEY in the environment. "
             "Get a key from Baidu Qianfan: https://cloud.baidu.com/doc/qianfan-api/s/Hmbu8m06u"
         )
-        sys.exit(1)
+        return
 
-    # Build request per 智能搜索生成 API (qianfan doc)
-    # When "model" is set = 智能搜索生成 (search + LLM summary); when omitted = 百度搜索 (raw search)
     body = {
         "messages": [{"role": "user", "content": query}],
         "stream": False,
@@ -125,13 +145,25 @@ def main():
             try:
                 err_body = json.dumps(json.loads(e.response.text), ensure_ascii=False)
             except Exception:
-                err_body = e.response.text[:500]
-        print(f"Error: HTTP {e.response.status_code if e.response else '?'}: {err_body or str(e)}")
-        sys.exit(1)
+                err_body = (e.response.text or "")[:500]
+        status = e.response.status_code if e.response else "?"
+        fail("HTTP %s: %s" % (status, err_body or str(e)))
+    except RuntimeError as e:
+        msg = str(e)
+        if "216003" in msg or "Authentication" in msg or "apikey" in msg.lower():
+            fail(
+                msg + " Check that api_key in config/skills/baidu-search-1.1.0/config.yml or BAIDU_API_KEY is set and valid (Baidu Qianfan console)."
+            )
+        fail(msg)
     except Exception as e:
-        print(f"Error: {e}")
-        sys.exit(1)
+        fail(str(e))
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as e:
+        print("Error: %s" % e)
+        sys.exit(1)

@@ -153,12 +153,12 @@ def _safe_shutdown_config():
 
 
 def _has_public_connect_config():
-    """True if public_url or pinggy.token is set (so we can show QR/connect). Never raises."""
+    """True if core_public_url or pinggy.token is set (so we can show QR/connect). Never raises."""
     try:
         if not os.path.isfile(core_config_file_path):
             return False
         cfg = read_config(core_config_file_path)
-        if (cfg.get("public_url") or "").strip():
+        if (cfg.get("core_public_url") or "").strip():
             return True
         pinggy_cfg = cfg.get("pinggy") or {}
         if (pinggy_cfg.get("token") or "").strip():
@@ -385,7 +385,7 @@ def start(open_browser=True):
                     pass
         if not ready:
             print(f"Core starting (or check {ready_url})\n")
-        # Only open browser when public_url or pinggy.token is set (so we don't pop up QR/connect when neither is set)
+        # Only open browser when core_public_url or pinggy.token is set (so we don't pop up QR/connect when neither is set)
         if open_browser and _has_public_connect_config():
             try:
                 webbrowser.open(ui_url)

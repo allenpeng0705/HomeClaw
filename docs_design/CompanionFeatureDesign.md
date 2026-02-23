@@ -15,7 +15,7 @@ This doc describes how a **companion** feature (girlfriend/boyfriend/parent/frie
 
 - **Key:** Conversation is keyed by **sender** (user) and **responder** (companion name).
 - **When combined (picker = a user from user.yml):** All companion chats go into **that user's memory and chat histories**; the channel is **companion**. So storage is the main user DB (memory + chat history), not a separate companion-only store. One unified history per user, with channel distinguishing assistant vs companion.
-- **When not combined (picker = "System"):** Use current behavior (e.g. companion-specific storage or default "companion" user). See §7.
+- **When not combined (picker = "System"):** All companion chats belong to the **one special user "companion"** (see §7, §7a).
 - So: when combined, one thread per (user, companion) in the user's main chat/memory; when System, behavior as today.
 
 ---
@@ -23,7 +23,7 @@ This doc describes how a **companion** feature (girlfriend/boyfriend/parent/frie
 ## 3. Memory (RAG, per user)
 
 - **When combined (picker = user):** Companion uses the **same** user's memory and chat history as the main assistant; RAG and chat are scoped to that user, with channel = companion for companion traffic. So one user, one memory/chat store; channel distinguishes assistant vs companion.
-- **When not combined (picker = System):** Use current behavior (e.g. dedicated companion store or default user scope). See §7.
+- **When not combined (picker = System):** Memory and chat are scoped to the **one special user "companion"** (see §7, §7a).
 - **Scope:** When the companion uses RAG, **search memory for that user only** — pass `user_id` (and optionally channel filter). No mixing across users.
 
 ---
@@ -72,9 +72,17 @@ These clients send **target** or **session** (e.g. `conversation_type=companion`
 
 **When the client is combined with a user (picker = a user from user.yml):** All companion chats go into **that user's memory and chat histories**; the channel is **companion**. So there is no separate companion-only store for that case — the user's main memory and chat history include both assistant and companion traffic, with channel distinguishing them. This gives one unified history per user.
 
-**When the client is not combined (picker = "System"):** Use current behavior: no per-user binding; companion may use a default user (e.g. "companion") or plugin-specific storage as today. So "System" = no combination; data handling remains as before (e.g. separate or default store).
+**When the client is not combined (picker = "System"):** Core treats the Companion app as **one special user** with identity **"companion"** (e.g. `system_user_id = "companion"`). All messages between uncombined Companion and Core belong to this companion user: chat history, memory, workspace, and delivery are scoped to **"companion"**. So "System" = no per-human-user binding; one logical "companion" user for all uncombined Companion traffic.
 
-**Summary:** Combined → user's memory and chat, channel = companion. Not combined (System) → works like now. Companion app, WebChat, and control UI provide a picker (users from user.yml + "System") and request location permission on their platforms.
+**Summary:** Combined → user's memory and chat, channel = companion. Not combined (System) → one special user **"companion"**; all uncombined Companion data and delivery target that identity. Companion app, WebChat, and control UI provide a picker (users from user.yml + "System") and request location permission on their platforms.
+
+---
+
+## 7a. Delivery to Companion app (uncombined)
+
+- **Cron and LLM:** Messages from cron tasks (reminders, run_skill, run_plugin) or from the LLM that target the **companion user** are sent to the Companion app. Core uses the reserved channel key **"companion"** for delivery: `send_response_to_channel_by_key("companion", response)`.
+- **Last channel for "companion":** When any uncombined Companion client sends a request, Core persists that channel under the key **"companion"** (in addition to the default/session keys). So the last Companion client that talked to Core is the delivery target for "companion". Cron/reminders created from the Companion app (System picker) use `channel_key = "companion"` so they deliver back to Companion.
+- **Multi-platform channels:** The Companion app exists on multiple platforms (macOS, iOS, Android, Windows, Linux). Each platform is a **channel** of the companion user. Currently, delivery to "companion" goes to **one** channel (the last one that contacted Core). Any Companion client that is **connected** and has **recently sent** a request will receive messages targeted at the companion user when it is the last companion channel. Future: support broadcasting to **all** connected Companion channels (e.g. store multiple channel descriptors for key "companion" and send to each).
 
 ---
 
@@ -135,4 +143,4 @@ The companion is **dedicated to one user** per conversation. Suggested order of 
    Persist last channel per user (e.g. when the user sends a message, save key `app_id:user_id:session_id` or similar). For proactive messages, call `send_response_to_channel_by_key(key_for_that_user, response)` so the message is **dedicated** to that user.
 
 6. **Config**  
-   All companion settings live on the **plugin side**, not in Core. Core only stores routing: `enabled`, `plugin_id`, `session_id_value`, `keyword` (for message-prefix routing on channels that can't send session_id). Name, character (girlfriend/boyfriend/wife/husband/sister/brother/child/friend/parent), language, response length, and idle-nudge behaviour are **configurable and dedicated** in the plugin: plugin config file (e.g. `examples/external_plugins/companion/config.yml`) for defaults; per-user overrides in the companion store (`database/companion_store/{user_id}_settings.json`) or via the plugin API `GET/POST .../settings/{user_id}`. The plugin merges per-user overrides with plugin config and uses them in the system prompt.
+   All companion settings live on the **plugin side**, not in Core. Core only stores routing: `enabled`, `plugin_id`, `session_id_value`, `keyword` (for message-prefix routing on channels that can't send session_id). Name, character (girlfriend/boyfriend/wife/husband/sister/brother/child/friend/parent), language, response length, and idle-nudge behaviour are **configurable and dedicated** in the plugin: plugin config file (e.g. `external_plugins/companion/config.yml`) for defaults; per-user overrides in the companion store (`database/companion_store/{user_id}_settings.json`) or via the plugin API `GET/POST .../settings/{user_id}`. The plugin merges per-user overrides with plugin config and uses them in the system prompt.

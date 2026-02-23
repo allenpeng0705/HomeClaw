@@ -12,7 +12,7 @@ HomeClaw Core runs on your machine (e.g. home PC or server). To use the **Compan
 | **Tailscale Funnel** | Anyone with the URL (public HTTPS) | Webhooks, bots; use with strong auth |
 | **Cloudflare Tunnel** | Anyone with the tunnel URL (public HTTPS) | Simple public URL; use with Core `auth_enabled` |
 | **Pinggy** | Anyone with the Pinggy URL (public HTTPS) | **Built-in:** set `pinggy.token` in core.yml; Core starts the tunnel and serves **/pinggy** with public URL and QR for Companion scan-to-connect. |
-| **Any public URL** | Anyone with the URL (Cloudflare, Tailscale Funnel, etc.) | Set **`public_url`** in core.yml to your public Core URL; **GET /pinggy** shows that URL and a QR code for Companion. No tunnel started by Core. |
+| **Any public URL** | Anyone with the URL (Cloudflare, Tailscale Funnel, etc.) | Set **`core_public_url`** in core.yml to your public Core URL; **GET /pinggy** shows that URL and a QR code for Companion. No tunnel started by Core. |
 | **SSH tunnel** | You, from the machine where the tunnel runs | Developers; desktop → Core over SSH |
 
 The **Companion app** and other clients only need a **Core URL** and optional **API key**. They do not include Tailscale or Cloudflare SDKs—you choose how to expose Core, then set that URL in the app.
@@ -89,7 +89,7 @@ If you expose Core with **Cloudflare Tunnel**, **Tailscale Funnel**, or any othe
 
 1. **Expose Core** with your chosen service (e.g. run `cloudflared tunnel --url http://127.0.0.1:9000` and get a URL like `https://xxx.trycloudflare.com`).
 2. **Configure Core**  
-   - In **`config/core.yml`**, set **`public_url`** to that URL (e.g. `https://xxx.trycloudflare.com`).  
+   - In **`config/core.yml`**, set **`core_public_url`** to that URL (e.g. `https://xxx.trycloudflare.com`).  
    - Enable auth when using a public URL: set **`auth_enabled: true`** and **`auth_api_key`** in core.yml.
 3. **Open the scan page**  
    - Open **http://127.0.0.1:&lt;port&gt;/pinggy** in your browser (e.g. after starting Core with `python -m main start`).  
@@ -99,7 +99,7 @@ If you expose Core with **Cloudflare Tunnel**, **Tailscale Funnel**, or any othe
 
 - **Settings** → **Scan QR to connect** → scan the QR code on the /pinggy page.
 
-The **/pinggy** page uses **`public_url`** from core.yml when set; otherwise it uses the Pinggy tunnel URL if **pinggy.token** is set. So you can use either Cloudflare (or any service) with **public_url**, or Pinggy with **pinggy.token**.
+The **/pinggy** page uses **`core_public_url`** from core.yml when set; otherwise it uses the Pinggy tunnel URL if **pinggy.token** is set. So you can use either Cloudflare (or any service) with **core_public_url**, or Pinggy with **pinggy.token**.
 
 ---
 
@@ -151,6 +151,6 @@ For more detail (auth headers, Funnel + auth proxy), see [RemoteAccess.md](https
 
 - **Tailscale (tailnet or Serve):** Private or HTTPS access from your devices; no public exposure. Set Core URL in the app to the Tailscale IP or Serve URL.  
 - **Cloudflare Tunnel:** Public HTTPS URL; use with **auth_enabled** and a strong API key. Set Core URL in the app to the tunnel URL and the same API key.  
-- **Public URL:** Set **`public_url`** in core.yml to your public Core URL (e.g. from Cloudflare Tunnel, Tailscale Funnel). **GET /pinggy** shows that URL and a QR code for Companion. Enable **auth_enabled** when using a public URL.  
+- **Public URL:** Set **`core_public_url`** in core.yml to your public Core URL (e.g. from Cloudflare Tunnel, Tailscale Funnel). **GET /pinggy** shows that URL and a QR code for Companion; the same URL is used for file/report links. Enable **auth_enabled** when using a public URL.  
 - **Pinggy:** Built-in tunnel; set **`pinggy.token`** in core.yml and optionally **`pinggy.open_browser: true`**. Core serves **/pinggy** with public URL and QR; use Companion **Scan QR to connect**. Enable **auth_enabled** when using the public URL.  
-- The app only needs **Core URL** and optional **API key**; Tailscale, Cloudflare, **public_url**, and Pinggy are ways to expose or point to Core and get that URL.
+- The app only needs **Core URL** and optional **API key**; Tailscale, Cloudflare, **core_public_url**, and Pinggy are ways to expose or point to Core and get that URL.

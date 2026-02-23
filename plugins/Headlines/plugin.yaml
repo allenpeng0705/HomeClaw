@@ -1,0 +1,61 @@
+id: headlines
+name: Headlines Plugin
+description: Top headlines from News API (curated sources). Use when the user wants top headlines, headlines by category/source, or "headlines every 8 am". Do NOT use for "search the web for news" or "search latest sports news" — use web_search (or cron run_tool web_search) instead.
+description_long: Fetches top headlines from News API (not a web search). Use for "top 5 headlines", "headlines about sports", "headlines from BBC", or scheduled "headlines every 8 am". For "search the latest sports news every 7 am" use cron_schedule with task_type=run_tool, tool_name=web_search, tool_arguments={query: "latest sports news"}.
+type: inline
+config:
+  config_file: config.yml
+capabilities:
+  - id: fetch_headlines
+    name: Fetch top headlines
+    description: Fetches top headlines; parameters (from user message) filter by country, category, sources, keywords, and number of results. Language defaults to main model first language.
+    parameters:
+      - name: country
+        type: string
+        required: false
+        description: "2-letter country code (e.g. us, gb, de). See News API; cannot be used with sources."
+      - name: category
+        type: string
+        required: false
+        description: "One of business, entertainment, general, health, science, sports, technology. Cannot be used with sources."
+      - name: sources
+        type: string
+        required: false
+        description: "Comma-separated source ids (e.g. bbc-news, techcrunch). Get ids from News API /sources. Cannot mix with country/category."
+      - name: page_size
+        type: integer
+        required: false
+        description: "Number of headlines to return (1-100). Default from config or 10."
+      - name: q
+        type: string
+        required: false
+        description: "Keywords or phrase to search in headlines."
+      - name: language
+        type: string
+        required: false
+        description: "2-letter language code (e.g. en, zh). Defaults to main model first language if not set."
+      - name: output_format
+        type: string
+        required: false
+        description: "Output format: markdown (default; Core classifies and channel may render) or plain (plaintext)."
+    output_description: 'List of headline titles and short content/snippets. Core sends as markdown or plain per format; channel may render.'
+    post_process: true
+    post_process_prompt: Select the most relevant headlines; summarize and refine for the user.
+  - id: list_sources
+    name: List available news sources
+    description: "Returns a selection list of news sources (e.g. BBC, TechCrunch) for the given country/category/language. Use when the user asks 'where can I get news?', 'what sources are available?', or 'give me a selection list'."
+    parameters:
+      - name: country
+        type: string
+        required: false
+        description: "Filter sources by 2-letter country code (e.g. us, gb)."
+      - name: category
+        type: string
+        required: false
+        description: "Filter sources by category (business, entertainment, general, health, science, sports, technology)."
+      - name: language
+        type: string
+        required: false
+        description: "Filter sources by language code (e.g. en, zh). Defaults to main model language."
+    output_description: 'List of source names and ids the user can choose from.'
+    post_process: false

@@ -191,12 +191,12 @@ config:
 
 **Examples in this repo**
 
-- **Python**: `examples/external_plugins/quote/server.py`, `examples/external_plugins/time/server.py` (FastAPI; POST /run, GET /health).
-- **Node.js**: `examples/external_plugins/quote-node/server.js` (plain Node.js http; POST /run, GET /health).
-- **Go**: `examples/external_plugins/time-go/main.go` (stdlib HTTP; POST /run, GET /health).
-- **Java**: `examples/external_plugins/quote-java/` (com.sun.net.httpserver; POST /run, GET /health).
+- **Python**: `external_plugins/time/server.py`, `external_plugins/companion/server.py` (FastAPI; POST /run, GET /health).
+- **Node.js**: `external_plugins/quote-node/server.js` (plain Node.js http; POST /run, GET /health).
+- **Go**: `external_plugins/time-go/main.go` (stdlib HTTP; POST /run, GET /health).
+- **Java**: `external_plugins/quote-java/` (com.sun.net.httpserver; POST /run, GET /health).
 
-See **examples/external_plugins/README.md** for run and register instructions.
+See **external_plugins/README.md** for run and register instructions.
 
 ### 3.3 Type: subprocess
 
@@ -329,6 +329,6 @@ This gives you “do anything possible” inside the plugin while keeping the Co
 - **Registration schema and capabilities**: **docs_design/PluginRegistration.md**
 - **Plugins user guide and parameter collection**: **docs_design/PluginsGuide.md**
 - **Run and test plugins**: **docs_design/RunAndTestPlugins.md**
-- **External plugin examples**: **examples/external_plugins/** (Python, Node.js, Go, Java) and **examples/external_plugins/README.md**
+- **External plugin examples**: **external_plugins/** (Python, Node.js, Go, Java) and **external_plugins/README.md**
 - **Built-in example**: **plugins/Weather/** (plugin.yaml, config.yml, plugin.py)
 - **Base classes**: **base/BasePlugin.py**, **base/PluginManager.py**, **base/base.py** (PluginRequest, PluginResult)

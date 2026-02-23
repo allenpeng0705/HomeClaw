@@ -1,0 +1,6 @@
+# Dependencies for generate_image.py when run via python (not uv).
+# Install: pip install -r requirements.txt
+# REST only (no vendor SDKs). Supports Gemini, Baidu Qianfan 通用图像生成, Stable Diffusion (e.g. A1111).
+requests>=2.28.0
+pillow>=10.0.0
+pyyaml>=6.0

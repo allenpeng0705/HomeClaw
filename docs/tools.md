@@ -21,14 +21,27 @@ Config (allowlists, timeouts, API keys) is under **`tools:`** in `config/core.ym
 
 ## File tools and base path
 
-File tools (`file_read`, `file_write`, `document_read`, `folder_list`, `file_find`) only access paths **under** a configured base directory. Set it in `config/core.yml`:
+File tools (`file_read`, `file_write`, `document_read`, `folder_list`, `file_find`, `file_understand`) use one of two modes:
+
+**When `file_read_base` is set** (recommended for multi-user):
+
+- **One base folder** (e.g. `D:/homeclaw`). Under it:
+  - **Share folder:** Paths starting with `share/` (config `file_read_shared_dir`, default `share`) are accessible by **all users and the companion app**.
+  - **Per-user folders:** Named by user **id** from `config/user.yml`. Each user only sees their own folder; created automatically.
+  - **Companion folder:** When the companion app is not tied to a user, it uses the **companion** folder so it can access `share/` and `companion/`.
+- Paths are always under the base. Use `share/readme.txt` for shared files, or `mydoc.txt` in your user or companion folder.
+- **Output folder:** For generated files (reports, images, exports), use path **`output/<filename>`**. This goes to the user’s or companion’s private `output` subfolder (`base/{user_id}/output/` or `base/companion/output/`). See [FileSandboxDesign.md](../docs_design/FileSandboxDesign.md).
+- **Reports and file links:** Use the **save_result_page** tool to generate HTML reports; Core saves to the user’s output folder and returns a **link** (e.g. `http://127.0.0.1:9000/files/out?path=output/report_xxx.html&token=...`). The user can open the link to view or download. Set **auth_api_key** in config so links are signed. For other formats (PPT, PDF), write to **output/** with **file_write**; see [FileSandboxDesign.md § How to use](../docs_design/FileSandboxDesign.md) for link and folder usage.
+
+**When `file_read_base` is not set:**
+
+- **Absolute paths are allowed** (whole machine). Use an absolute path to read/write anywhere. No per-user or shared structure.
 
 ```yaml
 tools:
-  file_read_base: "/Users/you/Documents/homeclaw"   # or "." for current working directory
+  file_read_base: "D:/homeclaw"   # when set: share + per-user + companion under it; when unset: absolute paths allowed
+  file_read_shared_dir: "share"   # optional; default "share"
 ```
-
-- **You do not need to give the full path every time.** The model is told the current `file_read_base` and must use **relative paths** (e.g. `"."` for the base, `"subdir"` for a subfolder).
 - **To list or find files:** Ask naturally, e.g. “列出 homeclaw 下所有 jpg 文件” or “find all Word documents in the homeclaw directory”. Core injects the base path and instructs the model to call **file_find** with the right **pattern** (e.g. `*.jpg`, `*.docx`, `*.pdf`) and `path: "."`. The model must report only paths returned by the tool—not invent paths.
 - **Word and PDF:** To find Word docs the model should call `file_find(pattern="*.docx", path=".")` (or `*.doc` for older Word). To find PDFs use `pattern="*.pdf"`. To read the content of a found file use **document_read(path=…)** with the relative path from the tool result.
 - **If you see “path must be under the configured base directory” or invented paths (e.g. wrong usernames/folders):** The model tried a path outside the base. Ensure `tools.file_read_base` in `core.yml` is the directory you want (e.g. `/Users/shileipeng/Documents/homeclaw`), and that the model uses relative paths; after the change, restart Core so the new base is injected.

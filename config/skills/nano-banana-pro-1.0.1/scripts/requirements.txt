@@ -1,4 +1,0 @@
-# Dependencies for generate_image.py when run via python (not uv).
-# Install in the same env that runs HomeClaw: pip install -r requirements.txt
-google-genai>=1.0.0
-pillow>=10.0.0

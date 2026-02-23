@@ -28,6 +28,34 @@ This doc describes two optional features: **(1) outbound Markdown conversion** s
 
 ---
 
+### 1.1 Three outbound formats (Core decides per response)
+
+Core classifies each outbound response and sends a **`format`** field alongside **`text`** so clients can display correctly:
+
+| **format** | **Meaning** | **Use** |
+|------------|-------------|--------|
+| **plain** | Ordinary text; no Markdown. | Show as plain text. |
+| **markdown** | Content is Markdown; clients that support it (Companion app, web chat, Control UI) should **render** it in the chat view. | Display as rendered Markdown (headings, lists, code, links). |
+| **link** | Short message with a file, folder, or report link (e.g. *"Report is ready. Open: &lt;url&gt;"* or `/files/out`). | Show the text and make the URL clickable. |
+
+**File/folder vs image:**
+
+- **File or folder:** Responses that contain a file or folder reference (e.g. report link, `/files/out?...`) are classified as **link** when the message is short and contains an http(s) URL. The client shows the text and makes the link clickable.
+- **Image (exception):** When the response includes an **image**, Core sends it **directly** to the channel/Companion in the payload (`images` / `image` as data URLs or paths), not as a link. The client displays the image inline.
+
+**Stability:** All outbound helpers (`classify_outbound_format`, `_outbound_text_and_format`, `_safe_classify_format`) are written to **never raise**; on any exception they return a safe default (e.g. `"plain"` or `(text, "plain")`) so Core never crashes.
+
+**Where `format` appears:** WebSocket `/ws` and POST `/inbound` responses include `"format": "plain"|"markdown"|"link"`. The same field is set in `response_data` when Core pushes to the channel queue (channels can ignore it or use it).
+
+**Behavior:**
+
+- For **WebSocket** and **POST /inbound** (Companion, web chat, Control UI): when Core classifies as **markdown** or **link**, it sends **raw** `text` (no conversion); when **plain**, it may still convert using `outbound_markdown_format` for consistency. So markdown-capable clients receive raw Markdown when `format === "markdown"` and render it.
+- For **channel queue** (e.g. Telegram, Discord): Core continues to send converted text when the reply looks like Markdown (per `outbound_markdown_format`); `format` is still set so a channel could optionally request raw text in the future.
+
+**Classification** (in **base/markdown_outbound.py**): `classify_outbound_format(text)` — short message (≤600 chars) with an http(s) URL and no Markdown → **link** (file/folder/report links); text that looks like Markdown → **markdown**; else **plain**. Never raises. Core uses `_safe_classify_format(text)` so format is always set safely.
+
+---
+
 ## 2. Unknown-request notification (no separate pairing)
 
 **What we already have:** **user.yml** is the allowlist. Each user has `im`, `email`, `phone` (channel identities). If the request’s `user_id` is not in any user’s list for that channel type, Core **denies** (401). So “pairing” in the sense of “who can access” is already done via user.yml.

@@ -1,0 +1,7 @@
+# Baidu AI Search (智能搜索生成) — skill-level config.
+# Get an API key from https://cloud.baidu.com/doc/qianfan-api/s/Hmbu8m06u
+
+# API key (required). Set here so the key stays with the skill. Do not commit real keys if the repo is shared.
+api_key: ""
+
+# BAIDU_API_KEY in the environment overrides api_key above (e.g. for CI or different deploy envs).

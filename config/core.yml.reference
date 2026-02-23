@@ -82,8 +82,8 @@ skills_incremental_sync: false
 # Example (uncomment and set folders/instruction per skill):
 # skills_force_include_rules:
 #   - patterns: ["generate\\s+(an?|one)?\\s+image|create\\s+...", "创建.*图|生成.*图|画.*图"]
-#     folders: [nano-banana-pro-1.0.1]
-#     instruction: "The user asked to generate or create an image. You MUST call run_skill with skill_name='nano-banana-pro-1.0.1', script='generate_image.py', args=['--prompt', '<user image description>', '--filename', 'generated.png']. Do not respond that no image tool is available."
+#     folders: [image-generation-1.0.0]
+#     instruction: "The user asked to generate or create an image. You MUST call run_skill with skill_name='image-generation-1.0.0', script='generate_image.py', args=['--prompt', '<user image description>', '--filename', 'generated.png']. Do not respond that no image tool is available."
 skills_force_include_rules: []
 # Vector retrieval for plugins (separate collection): same design as skills. RAG finds relevant plugins; only those go into prompt.
 plugins_use_vector_search: false

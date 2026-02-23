@@ -100,7 +100,9 @@ So request-level location is primarily from Companion, WebChat, and homeclaw-bro
 
 When we have a resolved location (from any source), add one line to the system context block, e.g. "User location: New York, US" or "Current location: Beijing (from device)." So the model can use it for weather or "what time is it here?" without the user repeating it every time.
 
-**Where latest location is persisted:** Under the Core database directory: `{project_root}/database/latest_locations.json` (or the path from `config/core.yml` → `database.path` if set). File format: `{ "user_id": { "location": "...", "updated_at": "ISO8601" }, ... }`. When the Companion app does **not** combine to any user (picker = "System"), the app may still send location; Core stores it under the shared key `"companion"` so that **all users** can use it as a fallback when they have no per-user or profile location.
+**Where latest location is persisted:** Under the Core database directory: `{project_root}/database/latest_locations.json` (or the path from `config/core.yml` → `database.path` if set). File format: `{ "user_id": { "location": "...", "updated_at": "ISO8601", "lat_lng": "lat,lng" (optional) }, ... }`. When the Companion app does **not** combine to any user (picker = "System"), the app may still send location; Core stores it under the shared key `"companion"` so that **all users** can use it as a fallback when they have no per-user or profile location.
+
+**Lat/lng from Companion/mobile:** When the client sends location as coordinates (e.g. `"39.9042,116.4074"` or `{"lat": 39.9, "lng": 116.4}`), Core converts them to a human-readable address (country, city, street) via **reverse geocoding** (OpenStreetMap Nominatim, no API key). The stored `location` is then the address string for display and for plugins (e.g. weather). The raw `lat_lng` is also stored in the entry for plugins that need coordinates. Implementation: `base/geocode.py` (`location_to_address`, `reverse_geocode`); Core calls `_normalize_location_to_address` when storing and when reading location from request.
 
 #### 3.2.1 Per-user latest location and Companion/app user picker
 

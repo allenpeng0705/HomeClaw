@@ -34,7 +34,7 @@ The model can call **run_skill(skill_name, script, args)**. Use the folder name 
 | Skill folder | Name | Script | What it does | How to test in chat |
 |--------------|------|--------|--------------|---------------------|
 | **baidu-search-1.1.0** | baidu-search | search.py | Baidu AI Search (BDSE). | “用百度搜索 [query]” or “Search Baidu for [topic].” (Requires BAIDU_API_KEY.) |
-| **nano-banana-pro-1.0.1** | nano-banana-pro | generate_image.py | Image generation/editing with Gemini 3 Pro Image. | “Generate an image of [description]” or “Edit this image: [path] to add [change].” (API key may be required.) |
+| **image-generation-1.0.0** | image-generation | generate_image.py | Image generation/editing with Gemini 3 Pro Image. | “Generate an image of [description]” or “Edit this image: [path] to add [change].” (API key may be required.) |
 | **desktop-ui** | desktop-ui | run.py | macOS desktop automation (peekaboo): list windows, click, type, screenshot. | “List my open apps” or “Take a screenshot of the desktop.” (macOS + peekaboo only.) |
 | **ip-cameras** | ip-cameras | run.py | RTSP/ONVIF camera snap/clip via camsnap. | “Snapshot from my kitchen camera” or “Record 5 seconds from camera X.” (Requires camsnap + ffmpeg + config.) |
 
@@ -63,7 +63,7 @@ The model can call **run_skill(skill_name, script, args)**. Use the folder name 
 - **gog:** `gog` CLI + OAuth.
 - **openai-whisper:** `whisper` CLI.
 - **baidu-search:** BAIDU_API_KEY + `run_skill(..., script="search.py", args=[...])`.
-- **nano-banana-pro:** API key if required; `run_skill(..., script="generate_image.py", args=[...])`.
+- **image-generation:** API key if required; `run_skill(..., script="generate_image.py", args=[...])`.
 - **desktop-ui:** peekaboo (macOS).
 - **ip-cameras:** camsnap, ffmpeg, camera config.
 

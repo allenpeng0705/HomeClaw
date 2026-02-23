@@ -7,7 +7,7 @@ This document describes the **canonical order** of system prompt sections in `an
 ## 0. Tools vs skills (and what “no tool_calls” means)
 
 - **Tools** are the callable actions the model can use: `run_skill`, `file_read`, `time`, `route_to_plugin`, `memory_search`, etc. They are registered in the tool registry and appear in the “tools” list sent to the LLM.
-- **Skills** are not a separate layer. A skill is invoked **via the `run_skill` tool**: the model calls `run_skill(skill_name="nano-banana-pro-1.0.1", script="generate_image.py", args=[...])`. So “run a skill” = “call the run_skill tool with that skill’s folder and script.”
+- **Skills** are not a separate layer. A skill is invoked **via the `run_skill` tool**: the model calls `run_skill(skill_name="image-generation-1.0.0", script="generate_image.py", args=[...])`. So “run a skill” = “call the run_skill tool with that skill’s folder and script.”
 - **“No tool_calls”** means the model returned a **text reply without calling any tool** — no run_skill, no file_read, no route_to_plugin, etc. So it’s “no tools and no skills” in one: the model chose to answer with text only.
 - **Force-include** only affects **which skills are listed** in the system prompt (and optionally adds an instruction or auto_invoke). It does not add new tools; `run_skill` is already a tool. The model is still expected to call `run_skill` when the user asks for something that matches a skill. When the model doesn’t call it (returns text like “no image tool”), **auto_invoke** can run `run_skill` as a fallback — but we only do that when the model’s reply looks unhelpful (see §2), so we don’t run it when the user asked “how?” and the model gave a helpful explanation.
 

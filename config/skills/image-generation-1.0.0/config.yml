@@ -1,0 +1,29 @@
+# Image generation skill — backend selection and per-backend settings.
+# Provider order when provider is "auto": Gemini (if key set) → Baidu (if key set) → Stable Diffusion (if base_url set).
+
+# Provider: "auto" | "gemini" | "baidu" | "stable_diffusion"
+# - auto: use first available (GEMINI_API_KEY → gemini, else BAIDU_API_KEY → baidu, else stable_diffusion config)
+# - gemini / baidu / stable_diffusion: force that backend (must have credentials/config)
+provider: "auto"
+
+# --- Gemini (Google) ---
+# API key: set here or via GEMINI_API_KEY / GOOGLE_API_KEY env (env overrides).
+gemini:
+  api_key: ""
+  model: "gemini-2.0-flash-exp"
+
+# --- Baidu (Qianfan 通用图像生成) ---
+# Single API Key: set here or via BAIDU_API_KEY env. Doc: https://cloud.baidu.com/doc/qianfan-api/s/8m7u6un8a
+baidu:
+  api_key: ""
+  model: "qwen-image"
+  size: "1024x1024"
+
+# --- Stable Diffusion (local service, e.g. Automatic1111) ---
+# base_url: e.g. http://127.0.0.1:7860 (or set STABLE_DIFFUSION_URL env)
+stable_diffusion:
+  base_url: "http://127.0.0.1:7860"
+  steps: 28
+  width: 512
+  height: 512
+  # Optional: sampler_name, cfg_scale, etc. (see A1111 /sdapi/v1/txt2img)

@@ -68,9 +68,10 @@ All of these scope data by **system user id** (from user.yml `id` or `name`) and
 | **Memory (RAG)** | Keyed by `(system_user_id, agent_id)` | Each user has their own memory sandbox; add/search use system user id. |
 | **Knowledge base** | `system_user_id` | Each user has their own KB sandbox; builtin tools use context’s system user id. |
 | **User profile** | `system_user_id` | One JSON file per user under `database/profiles/` (or `profile.dir`); see docs/UserProfileDesign.md. |
+| **File workspace** | `tools.file_read_base` set | When set: one base folder; under it **share** (paths `share/...` for all users and companion), **per-user** folders (user id from user.yml), and **companion** folder (when companion app is not tied to a user). When not set, absolute paths allowed. |
 | **Tool context** | `ToolContext` has `app_id`, `user_id` (storage id), `system_user_id`, `user_name`, `session_id`, `run_id`, `request`. | Tools use these for per-user storage. |
 
-So: **chat, sessions, runs, memory, and KB are all per-user.** Multi-user is supported for storage and for the **direct reply** to a message (see below).
+So: **chat, sessions, runs, memory, and KB are all per-user.** File tools can be per-user by setting `tools.file_read_per_user: true` in `config/core.yml`. Multi-user is supported for storage and for the **direct reply** to a message (see below).
 
 ---
 

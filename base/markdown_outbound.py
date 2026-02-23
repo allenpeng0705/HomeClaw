@@ -161,3 +161,34 @@ def markdown_to_channel(text: str, format: str = "plain") -> str:
         return markdown_to_plain(text)
     except Exception:
         return text
+
+
+# Pattern for "link" format: message is short and contains an http(s) URL (e.g. "Report ready. Open: https://...")
+_HTTP_URL = re.compile(r"https?://[^\s]+")
+
+
+def classify_outbound_format(text: str) -> str:
+    """
+    Classify how the outbound response should be sent so clients can display correctly.
+    Returns one of: "plain" | "markdown" | "link".
+    - "plain": ordinary text; no markdown rendering.
+    - "markdown": content is Markdown; clients that support it (Companion, web chat, Control UI) should render it.
+    - "link": short message with a file/folder/report link (e.g. "Report is ready. Open: <url>" or /files/out); client shows text and makes link clickable.
+    File or folder references are shown via link. Images are sent directly by Core in the payload (images array), not via this classifier.
+    Never raises; on any failure returns "plain".
+    """
+    try:
+        if not text or not isinstance(text, str):
+            return "plain"
+        s = text.strip()
+        if not s:
+            return "plain"
+        # Markdown first: if it looks like markdown, client should render it (including messages that contain URLs).
+        if looks_like_markdown(s):
+            return "markdown"
+        # Link: short message with an http(s) URL (file, folder, or report link e.g. /files/out). No markdown.
+        if len(s) <= 600 and _HTTP_URL.search(s):
+            return "link"
+        return "plain"
+    except Exception:
+        return "plain"

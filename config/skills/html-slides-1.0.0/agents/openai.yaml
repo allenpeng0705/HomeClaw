@@ -1,0 +1,4 @@
+interface:
+  display_name: "HTML Slides"
+  short_description: "将讲稿生成乔布斯风极简竖屏单页HTML演示（保存到 output 并返回链接）"
+  default_prompt: "请根据我的讲稿生成乔布斯风竖屏HTML演示"

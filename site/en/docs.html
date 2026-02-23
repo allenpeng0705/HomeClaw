@@ -148,7 +148,7 @@ pip install -r requirements.txt</code></pre>
         <h2>2. Plugins and skills — extend ability</h2>
         <p class="doc-section-summary">Built-in and external plugins; OpenClaw-style skills in <code>config/skills/</code> with SKILL.md.</p>
         <h3>Plugins</h3>
-        <p><strong>Built-in</strong> (Python): <code>plugins/&lt;Name&gt;/</code> with <code>plugin.yaml</code>, <code>config.yml</code>, <code>plugin.py</code>. Included: <strong>Weather</strong>, <strong>News</strong>, <strong>PptMaker</strong>.</p>
+        <p><strong>Built-in</strong> (Python): <code>plugins/&lt;Name&gt;/</code> with <code>plugin.yaml</code>, <code>config.yml</code>, <code>plugin.py</code>. Included: <strong>Weather</strong>, <strong>News</strong>, <strong>PPT Generator</strong>.</p>
         <p><strong>External</strong> (any language): HTTP server with <code>GET /health</code> and <code>POST /run</code>. Register via <code>POST /api/plugins/register</code>. LLM calls <code>route_to_plugin(plugin_id, capability_id, parameters)</code> when intent matches.</p>
         <h3>Skills</h3>
         <p>Folders under <code>config/skills/</code> with <strong>SKILL.md</strong> (name, description, optional workflow body). LLM sees “Available skills” and uses tools or <strong>run_skill</strong> for scripts. Copy OpenClaw/ClawHub skill folders in and they work.</p>

@@ -37,6 +37,8 @@ profile:
 use_workspace_bootstrap: true
 # Which workspace dir to load (e.g. config/workspace_day vs config/workspace_night for day/night agents)
 workspace_dir: config/workspace
+# Root for file/folder tools and links (share + per-user + companion). Empty or missing = same as workspace_dir. All links sent to channel/companion point under this (share or user private folder).
+homeclaw_root: "D:/homeclaw"
 # Optional: inject curated long-term memory from a single Markdown file (AGENT_MEMORY.md). See docs_design/SessionAndDualMemoryDesign.md. Format: plain Markdown; recommended one fact per paragraph (see MemoryFilesUsage.md § Format).
 use_agent_memory_file: true
 agent_memory_path: ""   # empty = workspace_dir/AGENT_MEMORY.md; or set path relative to project or absolute
@@ -144,10 +146,9 @@ prompt_default_language: en
 prompt_cache_ttl_seconds: 0   # Unit: seconds. 0 = cache by file mtime; >0 = TTL
 # Optional: require API key for /inbound and /ws when exposing Core on the internet; see docs/RemoteAccess.md
 auth_enabled: false
-auth_api_key: ""   # when auth_enabled: true, require X-API-Key header or Authorization: Bearer <key>
-# Optional: public URL for Companion scan-to-connect (e.g. from Cloudflare Tunnel, Tailscale Funnel).
-# When set, GET /pinggy shows this URL and a QR code (homeclaw://connect?url=...&api_key=...). Use when you expose Core via another service; leave empty if using Pinggy.
-public_url: "https://homeclaw.gpt4people.online"
+auth_api_key: ""   # when auth_enabled: true, require X-API-Key header or Authorization: Bearer <key>. Also used to sign file/report links (GET /files/out) when core_public_url is set.
+# Public URL that reaches this Core instance (e.g. https://homeclaw.example.com via Cloudflare Tunnel). Used for: (1) file/report links core_public_url/files/out?path=...&token=... (2) GET /pinggy scan-to-connect page and QR for Companion. Leave empty for local-only or if using pinggy.token for tunnel.
+core_public_url: "https://homeclaw.gpt4people.online"
 # Pinggy tunnel: when token is set, Core starts a tunnel to this port and serves /pinggy with public URL + QR for Companion. open_browser: true = open browser to /pinggy when tunnel is ready. See docs_design/PinggyIntegration.md.
 pinggy:
   token: ""        # empty = do not start Pinggy; set to your Pinggy token to enable
@@ -161,16 +162,22 @@ tools:
   # exec: allowed command names. Empty or omit = platform default (Unix: ls, cat, pwd; Windows: dir, type, cd). Set explicitly to override.
   exec_allowlist: []   # e.g. [ "date", "whoami", "echo", "pwd", "ls", "cat" ] on Unix; [ "date", "whoami", "echo", "dir", "type", "cd" ] on Windows
   exec_timeout: 30   # Unit: seconds
-  # file_read, file_write, etc.: paths UNDER this base only. "." = current working directory (cross-platform). Or use absolute path (e.g. /Users/you/Docs or C:\Users\you\Docs).
-  #file_read_base: "/Users/shileipeng/Documents/homeclaw"
-  file_read_base: "D:/homeclaw"
+  # homeclaw_root is at root of core.yml (not here). When set: under it (1) share folder (file_read_shared_dir, default "share"); (2) per-user folders; (3) "companion" folder. When homeclaw_root empty = workspace_dir.
+  # Name of shared subfolder under homeclaw_root (all users and companion can use "share/..." paths). Default "share".
+  # file_read_shared_dir: "share"
+  # Reserved subfolder for user/companion generated files (reports, images, exports). Path "output/..." → base/{user_id}/output/ or base/companion/output/. See docs_design/FileSandboxDesign.md.
+  # file_read_output_dir: "output"
   # Max characters returned by file_read when the tool does not pass max_chars (default 32000). Increase for long PDFs/documents (e.g. 128000).
   file_read_max_chars: 128000
-  # baidu_api_key: ""       # optional: for baidu-search skill; or set env BAIDU_API_KEY where Core runs
+  # Max size (KB) for save_result_page generated HTML; default 500. Used when writing report to user output folder.
+  # save_result_page_max_file_size_kb: 500
+  # (Baidu API key is set in the skill: config/skills/baidu-search-1.1.0/config.yml api_key, or env BAIDU_API_KEY)
   run_skill_allowlist: []   # run_skill: if set, only these script names under skill/scripts/. Use [] to allow all scripts from skills. .sh on Windows runs via bash/WSL if available.
-  run_skill_py_in_process: true   # true = run .py scripts in Core's process (same env). false = subprocess (isolated; see docs_design/RunSkillInProcess.md).
+  run_skill_py_in_process_skills: []   # run_skill: .py scripts run in subprocess by default. List skill folder names here (e.g. ["image-generation-1.0.0"]) to run those skills' .py in Core's process.
   # run_skill_auto_install_missing: { "google": "google-genai pillow" }   # optional: on ModuleNotFoundError, pip install and retry once (only when using subprocess)
-  run_skill_timeout: 60   # Unit: seconds
+  run_skill_timeout: 300   # Unit: seconds
+  run_plugin_in_process_plugins: []   # Built-in plugins run in subprocess by default (never crash Core). List plugin_ids here (e.g. ["headlines", "quotes"]) to run those in Core's process when needed.
+  run_plugin_timeout: 300   # Plugin subprocess timeout (seconds)
   web:                  # web_search: free (no key) duckduckgo | free tier google_cse (100/day), bing (1000/mo) | tavily, brave, serpapi. Browser: web_search_browser (Google/Bing/Baidu, no key, needs Playwright).
     search:
       provider: tavily  # duckduckgo (no key) | google_cse (100 free/day) | bing (1000 free/mo) | tavily | brave | serpapi. When tavily: Tavily is used first (key under tavily below).
@@ -202,18 +209,6 @@ tools:
   browser_headless: false
   # Per-tool execution timeout. Unit: seconds. Prevents a single tool from hanging the system. 0 = no timeout. For PDF read + summarize, use 300–600 so document_read and LLM reply can finish.
   tool_timeout_seconds: 0
-# Complex result viewer: save HTML result pages and optionally send a link. One web server for reports (port below); starts/stops with Core. Link = base_url + /result/<id>.html. We do not fetch public IP — you set base_url. Guide: docs/ComplexResultViewerDesign.md § "User guide: making the link work" (Cloudflare tunnel recommended: easy, cheap, stable; or use ngrok / any tunnel).
-result_viewer:
-  enabled: true
-  dir: ""   # empty = database/result_pages
-  port: 9001   # report server (http://localhost:9001). Expose via Cloudflare tunnel or similar; that URL = base_url.
-  bind_host: "0.0.0.0"
-  # URL that reaches the report server (e.g. from cloudflared or ngrok). We append /result/<id>.html. If empty, no link — full response goes to user in chat.
-  base_url: "https://homeclaw.gpt4people.online"
-  retention_days: 7   # auto-remove files older than this; 0 = keep forever
-  max_file_size_kb: 5000
-  max_files: 10000
-
 # Optional: user knowledge base (documents, web search, URLs, manual). See docs/MemoryAndDatabase.md.
 # backend: auto (default) = use same as memory_backend (cognee -> Cognee DB/vector, chroma -> core.yml vectorDB).
 # Set to "cognee" or "chroma" to override (e.g. Cognee memory + built-in RAG for KB).
@@ -384,7 +379,7 @@ cloud_models:
     host: 127.0.0.1
     port: 4002
     api_key_name: GEMINI_API_KEY
-    api_key: "AIzaSyCdkBoxeHK3oEMkD227xy7E-451DW-g3Rw"
+    api_key:
     capabilities: [Functioncall, Chat]
   # Anthropic Claude
   - id: Claude-Sonnet
@@ -402,12 +397,13 @@ cloud_models:
     port: 4004
     capabilities: [Chat]
   # DeepSeek
-  - id: DeepSeek-Coder
-    alias: DeepSeek Coder
-    path: deepseek/deepseek-coder
+  - id: DeepSeek-Chat
+    alias: DeepSeek Chat
+    path: deepseek/deepseek-chat
     host: 127.0.0.1
     port: 4005
     api_key_name: DEEPSEEK_API_KEY
+    api_key:
     capabilities: [Chat]
   # Alibaba Qwen (Dashscope)
   - id: Qwen-Turbo
@@ -483,33 +479,39 @@ cloud_models:
 main_llm_mode: mix
 main_llm_local: local_models/main_vl_model_8B
 main_llm_cloud: cloud_models/Gemini-2.5-Flash
+# --- Mix mode routing thresholds (brief) ---
+# Heuristic (Layer 1): no threshold. When enabled, first match (long-input or keyword rule) wins.
+# Semantic (Layer 2): score = embedding similarity to the chosen route (0..1). Only the best-matching route is considered; if its similarity_score >= threshold, that route is chosen. Higher threshold = need stronger similarity (stricter; more fall-through to next layer). Lower = accept weaker matches.
+# SLM (Layer 3): classifier mode returns a definitive Local or Cloud—no threshold. Perplexity mode uses perplexity_threshold (see below).
+# Perplexity (Layer 3, when slm.mode: perplexity): score = average log-probability of probe tokens (negative, e.g. -0.2 to -2.0). avg_logprob >= perplexity_threshold → local; < threshold → cloud. Higher threshold (e.g. -0.3) = need higher confidence to stay local (more go cloud). Lower (e.g. -0.8) = easier to stay local.
 hybrid_router:
-  default_route: cloud
+  # default_route is used when no layer picks a route: no heuristic/semantic match, and (if prefer_cloud_if_long_chars not hit) Layer 3 returns nothing or is skipped. Also used when prefer_cloud_if_long_chars is set and query is long (then we skip Layer 3 and use default_route).
+  default_route: local
   show_route_in_response: true
-  # When true (default): if the chosen model fails (timeout/error), retry once with the other route so one model failing does not block the task.
+  # If the chosen model (e.g. cloud) fails (timeout/error/empty): retry once with the other route (e.g. local). If both fail, user sees "Sorry, something went wrong...".
   fallback_on_llm_error: true
+  # If set (e.g. 800): when no route from heuristic/semantic and query length > this, use default_route and skip perplexity probe (avoids local model overconfidence on long/complex prompts).
+  prefer_cloud_if_long_chars: 800
   heuristic:
     enabled: true
-    threshold: 0.5
     rules_path: config/hybrid/heuristic_rules.yml
   semantic:
     enabled: true
-    threshold: 0.6
+    threshold: 0.6   # min similarity (0..1) to accept the best route; higher = stricter, more fall-through
     routes_path: config/hybrid/semantic_routes.yml
   # Layer 3: classifier (small model) or perplexity (main model confidence probe).
   # - mode: classifier = small model answers "Local or Cloud?" (uses model above).
   # - mode: perplexity = main local model generates a few tokens with logprobs; average logprob
   #   vs perplexity_threshold decides: stay local (confident) or escalate to cloud (uncertain).
   # perplexity_max_tokens: how many tokens to generate for the probe (default 5). More = more signal, slower.
-  # perplexity_threshold: avg logprob above this → local, below → cloud. Higher (e.g. -0.4) = stricter local; lower (e.g. -0.8) = more stays local. Default -0.6.
+  # perplexity_threshold: see top-of-section comment; unit is log-probability (negative).
   slm:
     enabled: true
-    threshold: 0.5
     model: local_models/classifier_0_6b
     mode: perplexity
     # Uncomment when mode: perplexity:
     perplexity_max_tokens: 10
-    perplexity_threshold: -0.6
+    perplexity_threshold: -0.5   # logprob: avg >= this → local; higher (e.g. -0.3) = more to cloud
 # main_llm_language: list of allowed/preferred response languages (e.g. [zh, en] or [en]).
 #   - First item = primary: used for prompt file loading (e.g. response.en.yml, prompt_en.yml) and default when user language is unknown.
 #   - Full list = allowed response languages: you can add a system-line like "Respond only in one of: {languages}; if the user's language is unknown, use the first."

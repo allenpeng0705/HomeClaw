@@ -586,6 +586,8 @@ class CoreMetadata:
     cloud_models: List[Dict[str, Any]] = field(default_factory=list)    # [{ id, path, host, port, api_key_name?, capabilities? }]
     use_workspace_bootstrap: bool = True  # inject config/workspace (IDENTITY.md, AGENTS.md, TOOLS.md) into system prompt
     workspace_dir: str = "config/workspace"  # which workspace dir to load (e.g. config/workspace_day vs config/workspace_night for day/night agents)
+    # Root for file/folder tools and links (share + per-user + companion). Empty or missing = same as workspace_dir. Required conceptually; when unset we fall back to workspace_dir.
+    homeclaw_root: str = ""
     use_agent_memory_file: bool = False  # inject AGENT_MEMORY.md (curated long-term memory); see SessionAndDualMemoryDesign.md
     agent_memory_path: str = ""  # empty = workspace_dir/AGENT_MEMORY.md
     agent_memory_max_chars: int = 5000  # max chars to inject; default 5k. 0 = no truncation. When > 0, only last N chars; see MemoryFilesUsage.md
@@ -623,11 +625,12 @@ class CoreMetadata:
     prompt_default_language: str = "en"  # fallback when lang not in request/metadata
     prompt_cache_ttl_seconds: float = 0  # 0 = cache by mtime only; >0 = TTL in seconds
     auth_enabled: bool = False  # when True, require API key for /inbound and /ws; see RemoteAccess.md
-    auth_api_key: str = ""  # key to require (X-API-Key header or Authorization: Bearer <key>); empty = auth disabled
+    auth_api_key: str = ""  # key to require (X-API-Key header or Authorization: Bearer <key>); also used to sign file links when core_public_url is set
+    core_public_url: str = ""  # public URL that reaches Core (e.g. https://homeclaw.example.com). Used for file/report links: core_public_url/files/out?path=...&token=...
     llm_max_concurrent: int = 1  # max concurrent LLM calls (channel + plugin API); 1 = serialize, avoid backend overload; see PluginLLMAndQueueDesign.md
     knowledge_base: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, collection_name, chunk_size, unused_ttl_days; see docs/MemoryAndDatabase.md
     profile: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, dir (base path for profiles); see docs/UserProfileDesign.md
-    result_viewer: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, dir, retention_days, base_url; see docs/ComplexResultViewerDesign.md
+    result_viewer: Dict[str, Any] = field(default_factory=dict)  # deprecated; kept for backward compat when loading old config. File serving uses core_public_url + GET /files/out.
     # When true, Core starts and registers all (or allowlisted) plugins in system_plugins/ so one command runs Core + system plugins.
     system_plugins_auto_start: bool = False
     system_plugins: List[str] = field(default_factory=list)  # optional allowlist; empty = start all discovered system plugins
@@ -646,6 +649,33 @@ class CoreMetadata:
     companion: Dict[str, Any] = field(default_factory=dict)  # enabled: bool; plugin_id: str (default "companion"); session_id_value: str (default "companion")
     # RAG memory summarization: periodic summarization + TTL for originals; summaries kept forever. See docs_design/RAGMemorySummarizationDesign.md
     memory_summarization: Dict[str, Any] = field(default_factory=dict)  # enabled, schedule (daily|weekly|next_run), interval_days, keep_original_days, min_age_days, max_memories_per_batch
+
+    @staticmethod
+    def _safe_str_strip(val: Any) -> str:
+        """Return stripped string; non-string or None → ''. Never raises."""
+        try:
+            if val is None or val == "":
+                return ""
+            return str(val).strip()
+        except Exception:
+            return ""
+
+    def get_homeclaw_root(self) -> str:
+        """Effective root for file/folder tools and links. When homeclaw_root is empty or missing, returns workspace_dir (resolved). Never raises."""
+        try:
+            from base.workspace import get_workspace_dir
+            raw = getattr(self, "homeclaw_root", None)
+            root = (str(raw).strip() if raw is not None and raw != "" else "")
+            if root:
+                return root
+            ws = getattr(self, "workspace_dir", None) or "config/workspace"
+            return str(get_workspace_dir(ws if isinstance(ws, str) else "config/workspace"))
+        except Exception:
+            try:
+                from base.workspace import get_workspace_dir
+                return str(get_workspace_dir("config/workspace"))
+            except Exception:
+                return "."
 
     @staticmethod
     def _normalize_system_plugins_env(raw: Any) -> Dict[str, Dict[str, str]]:
@@ -676,9 +706,18 @@ class CoreMetadata:
 
     @staticmethod
     def from_yaml(yaml_file: str) -> 'CoreMetadata':
-        with open(yaml_file, 'r', encoding='utf-8') as file:
-            data = yaml.safe_load(file)
-        
+        """Load CoreMetadata from core.yml. Never modifies the file. On parse error or invalid content, raises with a clear message so callers do not write back partial data."""
+        try:
+            with open(yaml_file, 'r', encoding='utf-8') as file:
+                data = yaml.safe_load(file)
+        except FileNotFoundError:
+            raise RuntimeError(f"config/core.yml not found at {yaml_file}. Create it or fix the path.") from None
+        except Exception as e:
+            raise RuntimeError(f"config/core.yml could not be read or parsed: {e}. Fix the file (do not overwrite with defaults).") from e
+        if not isinstance(data, dict):
+            raise RuntimeError("config/core.yml is empty or invalid (root must be a YAML object). Fix the file before starting Core.")
+        data = data or {}
+
         # Relational database (optional; default sqlite)
         db_cfg = data.get('database') or {}
         database = Database(
@@ -806,7 +845,8 @@ class CoreMetadata:
         if not isinstance(cognee, dict):
             cognee = {}
 
-        return CoreMetadata(
+        try:
+            return CoreMetadata(
             name=data['name'],
             host=data['host'],
             port=data['port'],
@@ -840,6 +880,7 @@ class CoreMetadata:
             cloud_models=cloud_models,
             use_workspace_bootstrap=data.get('use_workspace_bootstrap', True),
             workspace_dir=data.get('workspace_dir', 'config/workspace'),
+            homeclaw_root=CoreMetadata._safe_str_strip(data.get('homeclaw_root')),
             use_agent_memory_file=bool(data.get('use_agent_memory_file', False)),
             agent_memory_path=(data.get('agent_memory_path') or '').strip(),
             agent_memory_max_chars=max(0, int(data.get('agent_memory_max_chars', 5000) or 0)),
@@ -875,6 +916,7 @@ class CoreMetadata:
             prompt_cache_ttl_seconds=float(data.get('prompt_cache_ttl_seconds', 0) or 0),
             auth_enabled=data.get('auth_enabled', False),
             auth_api_key=(data.get('auth_api_key') or '').strip(),
+            core_public_url=(data.get('core_public_url') or '').strip(),
             llm_max_concurrent=max(1, min(32, int(data.get('llm_max_concurrent', 1) or 1))),
             knowledge_base=data.get('knowledge_base') if isinstance(data.get('knowledge_base'), dict) else {},
             profile=data.get('profile') if isinstance(data.get('profile'), dict) else {},
@@ -892,6 +934,8 @@ class CoreMetadata:
             companion=data.get('companion') if isinstance(data.get('companion'), dict) else {},
             memory_summarization=data.get('memory_summarization') if isinstance(data.get('memory_summarization'), dict) else {},
         )
+        except (KeyError, TypeError, ValueError) as e:
+            raise RuntimeError(f"config/core.yml has invalid or missing content: {e}. Fix the file before starting Core.") from e
 
     # @staticmethod
     # def to_yaml(core: 'CoreMetadata', yaml_file: str):
@@ -921,6 +965,7 @@ class CoreMetadata:
                 'default_location': getattr(core, 'default_location', '') or '',
                 'use_workspace_bootstrap': getattr(core, 'use_workspace_bootstrap', True),
                 'workspace_dir': getattr(core, 'workspace_dir', 'config/workspace'),
+                'homeclaw_root': CoreMetadata._safe_str_strip(getattr(core, 'homeclaw_root', None)),
                 'use_tools': getattr(core, 'use_tools', False),
                 'use_skills': getattr(core, 'use_skills', False),
                 'skills_dir': getattr(core, 'skills_dir', 'config/skills'),
@@ -947,6 +992,7 @@ class CoreMetadata:
                 'prompt_cache_ttl_seconds': getattr(core, 'prompt_cache_ttl_seconds', 0),
                 'auth_enabled': getattr(core, 'auth_enabled', False),
                 'auth_api_key': getattr(core, 'auth_api_key', '') or '',
+                'core_public_url': getattr(core, 'core_public_url', '') or '',
                 'llm_max_concurrent': getattr(core, 'llm_max_concurrent', 1),
                 'embedding_llm': core.embedding_llm,
                 'llama_cpp': core.llama_cpp or {},
@@ -1069,49 +1115,71 @@ class CoreMetadata:
                     entry['api_key'] = orig_key
 
         # core.yml must never be overwritten with only CoreMetadata keys — always load full file, merge, then write.
-        try:
-            from ruamel.yaml import YAML
-            yaml_rt = YAML()
-            yaml_rt.preserve_quotes = True
-            with open(yaml_file, 'r', encoding='utf-8') as f:
-                data = yaml_rt.load(f)
-            if data is None:
-                data = {}
-            original_snapshot = {k: v for k, v in data.items()}  # shallow copy for api_key restore
-            _merge_core_dict_into_data(data, core_dict)  # deep-merge nested dicts so comments (e.g. cognee) are preserved
-            # tool_timeout_seconds belongs under tools: (config reads (data.get('tools') or {}).get('tool_timeout_seconds'))
-            if data.get("tools") is not None and isinstance(data["tools"], dict):
-                data["tools"]["tool_timeout_seconds"] = getattr(core, "tool_timeout_seconds", 120)
-            if "tool_timeout_seconds" in data:
-                del data["tool_timeout_seconds"]  # avoid duplicate; only under tools:
-            _restore_api_keys_from_original(data, original_snapshot)
-            _reorder_core_yml_keys(data)
-            with open(yaml_file, 'w', encoding='utf-8') as f:
-                yaml_rt.dump(data, f)
-            return
-        except Exception:
-            pass
-        # Fallback: ruamel failed — merge into existing; never overwrite a non-empty file with only core_dict
-        try:
-            with open(yaml_file, 'r', encoding='utf-8') as f:
-                existing = yaml.safe_load(f) or {}
-        except Exception:
-            existing = {}
-        if not existing and os.path.exists(yaml_file) and os.path.getsize(yaml_file) > 0:
-            logging.warning(
-                "core.yml: could not load existing file (parse error?); skipping write to avoid removing keys. Fix the file or install ruamel.yaml."
-            )
-            return
-        original_snapshot = {k: v for k, v in existing.items()}
-        _merge_core_dict_into_data(existing, core_dict)
-        if existing.get("tools") is not None and isinstance(existing["tools"], dict):
-            existing["tools"]["tool_timeout_seconds"] = getattr(core, "tool_timeout_seconds", 120)
-        if "tool_timeout_seconds" in existing:
-            del existing["tool_timeout_seconds"]  # avoid duplicate; only under tools:
-        _restore_api_keys_from_original(existing, original_snapshot)
-        _reorder_core_yml_keys(existing)
-        with open(yaml_file, 'w', encoding='utf-8') as file:
-            yaml.safe_dump(existing, file, default_flow_style=False, sort_keys=False)
+        # Always write to a .tmp file first, then atomic rename; never truncate or overwrite the live file on failure.
+        # to_yaml must never raise — any exception is caught so Core never crashes and core.yml is never corrupted.
+        def _write_atomic(target_path: str, dump_fn) -> bool:
+            """Write via dump_fn(open(tmp)) then os.replace(tmp, target). Returns True on success. Never raises."""
+            tmp_path = target_path + ".tmp"
+            try:
+                with open(tmp_path, 'w', encoding='utf-8') as f:
+                    dump_fn(f)
+                os.replace(tmp_path, target_path)
+                return True
+            except Exception as e:
+                logging.warning("core.yml: atomic write failed (skipping to avoid corrupting file): %s", e)
+                try:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except Exception:
+                    pass
+                return False
+
+        try:  # outer: never raise; never corrupt core.yml
+            try:
+                from ruamel.yaml import YAML
+                yaml_rt = YAML()
+                yaml_rt.preserve_quotes = True
+                with open(yaml_file, 'r', encoding='utf-8') as f:
+                    data = yaml_rt.load(f)
+                if data is None:
+                    data = {}
+                original_snapshot = {k: v for k, v in data.items()}  # shallow copy for api_key restore
+                _merge_core_dict_into_data(data, core_dict)  # deep-merge nested dicts so comments (e.g. cognee) are preserved
+                if data.get("tools") is not None and isinstance(data["tools"], dict):
+                    data["tools"]["tool_timeout_seconds"] = getattr(core, "tool_timeout_seconds", 120)
+                if "tool_timeout_seconds" in data:
+                    del data["tool_timeout_seconds"]  # avoid duplicate; only under tools:
+                _restore_api_keys_from_original(data, original_snapshot)
+                _reorder_core_yml_keys(data)
+                _write_atomic(yaml_file, lambda f: yaml_rt.dump(data, f))
+                return
+            except Exception as e:
+                logging.debug("CoreMetadata.to_yaml ruamel path failed: %s", e)
+            # Fallback: ruamel failed — merge into existing; never overwrite a non-empty file with only core_dict
+            try:
+                with open(yaml_file, 'r', encoding='utf-8') as f:
+                    existing = yaml.safe_load(f) or {}
+            except Exception as e:
+                logging.debug("CoreMetadata.to_yaml load existing failed: %s", e)
+                existing = {}
+            if not existing and os.path.exists(yaml_file) and os.path.getsize(yaml_file) > 0:
+                logging.warning(
+                    "core.yml: could not load existing file (parse error?); skipping write to avoid removing keys. Fix the file or install ruamel.yaml."
+                )
+            else:
+                original_snapshot = {k: v for k, v in existing.items()}
+                _merge_core_dict_into_data(existing, core_dict)
+                if existing.get("tools") is not None and isinstance(existing["tools"], dict):
+                    existing["tools"]["tool_timeout_seconds"] = getattr(core, "tool_timeout_seconds", 120)
+                if "tool_timeout_seconds" in existing:
+                    del existing["tool_timeout_seconds"]  # avoid duplicate; only under tools:
+                _restore_api_keys_from_original(existing, original_snapshot)
+                _reorder_core_yml_keys(existing)
+                def _dump_safe(f):
+                    yaml.safe_dump(existing, f, default_flow_style=False, sort_keys=False)
+                _write_atomic(yaml_file, _dump_safe)
+        except Exception as e:
+            logging.warning("CoreMetadata.to_yaml failed (core.yml unchanged): %s", e)
 
  
 class RegisterAgentRequest(BaseModel):

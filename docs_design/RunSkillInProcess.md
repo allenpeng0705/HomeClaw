@@ -1,12 +1,12 @@
 # Run-skill in-process vs subprocess
 
-This doc describes how Python skill scripts are run (in-process vs subprocess), that **the same logic applies to all Python skills**, and how we try to avoid breaking Core.
+This doc describes how Python skill scripts are run (in-process vs subprocess), and how **run_skill_py_in_process_skills** selects which run in-process, and how we try to avoid breaking Core.
 
 ---
 
-## 1. Same logic for all Python skills
+## 1. Subprocess by default; in-process only when listed
 
-When **run_skill_py_in_process** is true (config or default):
+When a skill's folder name is in **run_skill_py_in_process_skills** (config list):
 
 - **Every** `.py` / `.pyw` skill script is run the same way: in Core’s process, in a **thread** (so the event loop is not blocked).
 - For all of them we:
@@ -16,7 +16,7 @@ When **run_skill_py_in_process** is true (config or default):
   - Run the script with `exec(code, globals_dict)` and catch exceptions so they don’t kill the thread.
 - Optional **pre-import** (e.g. `google.genai`, PIL) only helps skills that use those packages; other skills are unaffected. No per-skill branching.
 
-So the **same** in-process path is used for all Python skills; only the script file and args differ.
+So: **subprocess for all skills by default**; **in-process only for skills named in run_skill_py_in_process_skills**.
 
 ---
 
@@ -41,13 +41,13 @@ So: in-process is **same env, reliable imports**, but **not isolated**. For untr
 
 ---
 
-## 3. How to “guarantee” Core isn’t broken (as much as possible)
+## 3. Default: subprocess so Core is never broken
 
-- **Use subprocess for untrusted skills:** Set **run_skill_py_in_process: false** in config. Then all `.py` skills run in a **subprocess** (same Python and `env=os.environ`). A bug or crash in the script only affects that subprocess, not Core. Tradeoff: you must ensure that Python has the right packages (same env as Core) or you may hit import errors again.
-- **Use in-process only for trusted skills:** Keep **run_skill_py_in_process: true** only if you trust the skill scripts under `config/skills/` (e.g. your own or reviewed code). Same process = same env, so imports work; risk is that a bad script can affect Core.
-- **Allowlist:** Use **run_skill_allowlist** so only specific script names can run; that limits which skills can run at all.
+- **Default: subprocess:** All `.py` skills run in a **subprocess** unless listed in **run_skill_py_in_process_skills**. A bug, crash, or `os._exit()` in the script only affects that subprocess, not Core. **Core never breaks** from a skill script.
+- **In-process allowlist:** Add a skill's **folder name** (e.g. `image-generation-1.0.0`) to **run_skill_py_in_process_skills** only if you trust that skill and need the same process (e.g. same env for imports). Same process = risk that a bad script can affect Core.
+- **Script allowlist:** Use **run_skill_allowlist** so only specific script names can run; that limits which scripts can run at all.
 
-Summary: **same logic for all Python skills** (in-process or subprocess by one config). **Guarantee Core isn’t broken** by using subprocess for untrusted skills and/or an allowlist; in-process is for trusted skills where you want the same env.
+Summary: **Subprocess by default** = isolated, never break Core. **In-process** = only for skills listed in run_skill_py_in_process_skills; use only for trusted skills.
 
 ---
 

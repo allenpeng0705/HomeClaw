@@ -1133,7 +1133,23 @@ class Util:
             yaml.safe_dump(config, file, default_flow_style=False, sort_keys=False)
 
     def update_yaml_preserving_comments(self, file_path: str, updates: dict) -> bool:
-        """Update only the given keys in a YAML file; preserve comments and key order. Returns True if ruamel was used, False if fallback (full overwrite) was used."""
+        """Update only the given keys in a YAML file; preserve comments and key order. Never corrupts the file: writes to .tmp then atomic replace. Returns True if ruamel was used, False if fallback. Skips write if existing file could not be loaded (parse error)."""
+        def _atomic_write(path: str, dump_fn) -> bool:
+            tmp = path + ".tmp"
+            try:
+                with open(tmp, 'w', encoding='utf-8') as f:
+                    dump_fn(f)
+                os.replace(tmp, path)
+                return True
+            except Exception as e:
+                import logging
+                logging.warning("update_yaml_preserving_comments: atomic write failed (%s unchanged): %s", path, e)
+                try:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+                except Exception:
+                    pass
+                return False
         try:
             from ruamel.yaml import YAML
             yaml_rt = YAML()
@@ -1144,22 +1160,22 @@ class Util:
                 data = {}
             for k, v in updates.items():
                 data[k] = v
-            with open(file_path, 'w', encoding='utf-8') as f:
-                yaml_rt.dump(data, f)
-            return True
+            if _atomic_write(file_path, lambda f: yaml_rt.dump(data, f)):
+                return True
         except Exception:
-            existing = self.load_yml_config(file_path) or {}
-            if not existing and os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-                import logging
-                logging.warning(
-                    "update_yaml_preserving_comments: could not load %s; skipping write to avoid removing keys.",
-                    file_path,
-                )
-                return False
-            for k, v in updates.items():
-                existing[k] = v
-            self.write_config(file_path, existing)
+            pass
+        existing = self.load_yml_config(file_path) or {}
+        if not existing and os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+            import logging
+            logging.warning(
+                "update_yaml_preserving_comments: could not load %s; skipping write to avoid removing keys.",
+                file_path,
+            )
             return False
+        for k, v in updates.items():
+            existing[k] = v
+        _atomic_write(file_path, lambda f: yaml.safe_dump(existing, f, default_flow_style=False, sort_keys=False))
+        return False
 
 
     def get_users(self):

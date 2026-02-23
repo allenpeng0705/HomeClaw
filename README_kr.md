@@ -238,7 +238,7 @@ HomeClaw는 **macOS**, **Windows**, **Linux**에서 동작합니다. 필요 사�
 
 ## 8. 플러그인: HomeClaw 확장
 
-**내장 플러그인**(Python): `plugins/<Name>/`에 plugin.yaml, config.yml, plugin.py; Core 시작 시 자동 발견. **외부 플러그인**(어떤 언어든): HTTP 서버(`GET /health`, `POST /run`) 실행, `POST /api/plugins/register`로 등록; Core가 내장과 동일하게 라우팅. [PluginStandard.md](docs_design/PluginStandard.md) · [PluginsGuide.md](docs_design/PluginsGuide.md) · [examples/external_plugins/](examples/external_plugins/README.md)
+**내장 플러그인**(Python): `plugins/<Name>/`에 plugin.yaml, config.yml, plugin.py; Core 시작 시 자동 발견. **외부 플러그인**(어떤 언어든): HTTP 서버(`GET /health`, `POST /run`) 실행, `POST /api/plugins/register`로 등록; Core가 내장과 동일하게 라우팅. [PluginStandard.md](docs_design/PluginStandard.md) · [PluginsGuide.md](docs_design/PluginsGuide.md) · [external_plugins/](external_plugins/README.md)
 
 ---
 

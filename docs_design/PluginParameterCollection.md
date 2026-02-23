@@ -55,6 +55,14 @@ Before invoking a plugin, Core resolves each parameter in this order:
 4. **Missing** — If required and still no value → do **not** invoke; return "ask user" message.
 5. **Uncertain** — If we have a value from (2) or (3) but the parameter is marked `confirm_if_uncertain: true` (or similar), treat as "needs confirmation" → do **not** invoke; return "confirm with user" message listing the uncertain params and their values.
 
+**System context (datetime and location):** Resolution can also use **system context** when the capability parameter has a `system_key`. This is filled **after** explicit user/LLM args and **before** profile. Supported keys:
+
+- **`system_key: datetime`** — Current date and time (system local), e.g. `2025-02-19 14:30`. Useful for weather, scheduling, or "current conditions" plugins.
+- **`system_key: timezone`** — System timezone label (e.g. `system local` or IANA name when available).
+- **`system_key: location`** — User location from: request (Companion/WebChat), latest stored location, profile, config, or shared fallback. **Confidence:** high when from request or recent latest; low when from profile/config. When confidence is low, the parameter is treated as **uncertain** so the caller (e.g. cron_schedule) will ask the user to confirm or provide it when creating a schedule.
+
+So plugins that need "current time" or "user location" can declare a param with `system_key` and get it auto-filled when the user did not supply it; if the source is not 100% confident (e.g. location from profile), the system will ask the user when appropriate (e.g. when setting up a recurring plugin run).
+
 ### 3.2 Plugin Manifest Extensions (plugin.yaml)
 
 ```yaml
@@ -96,6 +104,17 @@ capabilities:
         profile_key: default_payment
         config_key: payment_method
         description: Payment method (e.g. card, cash).
+      # Optional: use system context when user didn't provide
+      - name: location
+        type: string
+        required: false
+        system_key: location    # Filled from request/profile/config; low confidence triggers "confirm with user"
+        description: City or place for the order (defaults to user location when available).
+      - name: requested_at
+        type: string
+        required: false
+        system_key: datetime    # Current date/time when the plugin is invoked
+        description: When the request was made.
 ```
 
 ### 3.3 Plugin Config (config.yml) — Preset Fallbacks

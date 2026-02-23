@@ -1,6 +1,0 @@
-# PPT Maker plugin config
-# output_dir: directory where generated .pptx files are saved (relative to project root or absolute)
-#   Default: use Core workspace_dir (config/workspace) with subdir "presentations"
-# default_language: en | zh (for any future template strings; slide content comes from user/LLM)
-output_dir: ""   # empty = config/workspace/presentations
-default_language: en

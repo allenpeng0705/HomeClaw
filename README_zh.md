@@ -238,7 +238,7 @@ HomeClaw 支持 **macOS**、**Windows** 与 **Linux**。需要：
 
 ## 8. 插件：扩展 HomeClaw
 
-**内置插件**（Python）：`plugins/<Name>/`，含 plugin.yaml、config.yml、plugin.py；Core 启动时自动发现。**外部插件**（任意语言）：运行 HTTP 服务（`GET /health`、`POST /run`），通过 `POST /api/plugins/register` 注册；Core 会像内置插件一样路由到该服务。[PluginStandard.md](docs_design/PluginStandard.md) · [PluginsGuide.md](docs_design/PluginsGuide.md) · [examples/external_plugins/](examples/external_plugins/README.md)
+**内置插件**（Python）：`plugins/<Name>/`，含 plugin.yaml、config.yml、plugin.py；Core 启动时自动发现。**外部插件**（任意语言）：运行 HTTP 服务（`GET /health`、`POST /run`），通过 `POST /api/plugins/register` 注册；Core 会像内置插件一样路由到该服务。[PluginStandard.md](docs_design/PluginStandard.md) · [PluginsGuide.md](docs_design/PluginsGuide.md) · [external_plugins/](external_plugins/README.md)
 
 ---
 

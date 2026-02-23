@@ -33,3 +33,6 @@
 /channels/whatsapp/__pycache__
 /dist
 /clients/homeclaw_companion/release
+/external_plugins/.run_logs
+/plugins/Headlines/__pycache__
+/examples/external_plugins/companion/__pycache__
