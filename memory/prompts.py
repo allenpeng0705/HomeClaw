@@ -652,3 +652,17 @@ Given text:
 
 Please only return the summarized text, do not add any other information or text in the output. The steps and analysis cannot be included in the output.
 """
+
+# Batch of stored memories → one long-term summary (for RAG memory summarization job)
+MEMORY_BATCH_SUMMARIZE_PROMPT = """Summarize the following set of stored conversation-derived memories into a concise long-term summary.
+
+Guidelines:
+- Preserve important facts, preferences, and decisions.
+- Omit trivial chitchat, one-off questions, and greetings.
+- Output one or more short paragraphs in the same language as the input.
+- Do not add new information or speculate.
+
+Memories (one per line, oldest first):
+{memories_text}
+
+Return only the summary text, no preamble or explanation."""

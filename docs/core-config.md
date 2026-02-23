@@ -119,8 +119,7 @@ These settings control **RAG memory** (vector + relational), **agent memory file
 | Setting | Meaning |
 |--------|--------|
 | **`use_memory`** | Turn on/off RAG memory (search, store). |
-| **`memory_backend`** | **`cognee`** (default) or **`chroma`**. Cognee uses its own DB; Chroma uses **`vectorDB`** and **`graphDB`** in core.yml. |
-| **`reset_memory`** | If true, clear memory on startup (use for testing only). |
+| **`memory_backend`** | **`cognee`** (default) or **`chroma`**. Cognee uses its own DB; Chroma uses **`vectorDB`** and **`graphDB`** in core.yml. To clear memory, use **POST or GET** `http://<core_host>:<core_port>/memory/reset`. |
 
 ### Agent and daily memory (file-based)
 

@@ -10,7 +10,6 @@ model_path: ../models/
 # When false: log [memory], [tools], [skills], [plugin], [TAM], [orchestrator] activity at INFO. When true: suppress those component logs.
 silent: false
 use_memory: true
-reset_memory: false
 # memory_backend: cognee (always default) | chroma. Both backends supported. Cognee: configure via cognee: or Cognee .env. Chroma: in-house RAG via core.yml database, vectorDB, graphDB.
 # To empty memory for testing: POST or GET http://<core_host>:<core_port>/memory/reset (e.g. curl http://127.0.0.1:9000/memory/reset)
 # To empty knowledge base (all users): POST or GET http://<core_host>:<core_port>/knowledge_base/reset

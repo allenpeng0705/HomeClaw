@@ -63,7 +63,6 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
 
   bool _silent = false;
   bool _useMemory = true;
-  bool _resetMemory = false;
   bool _authEnabled = false;
   bool _sessionApiEnabled = true;
   bool _sessionPruneAfterTurn = false;
@@ -204,7 +203,6 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
     _memoryBackendController.text = _str(core['memory_backend']).isEmpty ? 'cognee' : _str(core['memory_backend']);
     _silent = _bool(core['silent']);
     _useMemory = core['use_memory'] != false;
-    _resetMemory = _bool(core['reset_memory']);
     _authEnabled = _bool(core['auth_enabled']);
     _authApiKeyController.text = (core['auth_api_key'] == '***' || core['auth_api_key'] == null) ? '' : _str(core['auth_api_key']);
 
@@ -305,7 +303,6 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
       'memory_backend': _memoryBackendController.text.trim().isEmpty ? 'cognee' : _memoryBackendController.text.trim(),
       'silent': _silent,
       'use_memory': _useMemory,
-      'reset_memory': _resetMemory,
       'auth_enabled': _authEnabled,
       'use_skills': _useSkills,
       'skills_dir': _skillsDirController.text.trim(),
@@ -748,13 +745,6 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
               title: const Text('Use memory'),
               value: _useMemory,
               onChanged: (v) => setState(() => _useMemory = v ?? true),
-              controlAffinity: ListTileControlAffinity.leading,
-              contentPadding: EdgeInsets.zero,
-            ),
-            CheckboxListTile(
-              title: const Text('Reset memory'),
-              value: _resetMemory,
-              onChanged: (v) => setState(() => _resetMemory = v ?? false),
               controlAffinity: ListTileControlAffinity.leading,
               contentPadding: EdgeInsets.zero,
             ),

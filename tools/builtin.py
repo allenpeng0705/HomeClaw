@@ -194,9 +194,18 @@ async def _sessions_send_executor(arguments: Dict[str, Any], context: ToolContex
 
 # ---- Time / system (cross-platform) ----
 async def _time_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Return current date and time in ISO format (UTC). Optional timezone name."""
-    now = datetime.now(timezone.utc)
-    return now.isoformat()
+    """Return current date and time in system local time (ISO format). Use for age calculation, 'what day is it?', or scheduling when you need precise current time."""
+    try:
+        now = datetime.now()
+        try:
+            now = datetime.now().astimezone()
+        except Exception:
+            pass
+        return now.isoformat()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).debug("Time tool failed: %s", e)
+        return datetime.now(timezone.utc).isoformat()
 
 
 async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
@@ -562,7 +571,10 @@ async def _memory_get_executor(arguments: Dict[str, Any], context: ToolContext) 
     except Exception as e:
         return f"Error: {e!s}"
     if mem is None:
-        return json.dumps({"memory": None, "message": "Not found or memory not enabled."})
+        # Cognee backend does not implement get(memory_id); use memory_search results directly (they include the memory text).
+        backend = type(getattr(core, "mem_instance", None)).__name__
+        msg = "Get by id not supported with Cognee backend; use the memory content from memory_search results directly." if backend == "CogneeMemory" else "Not found or memory not enabled."
+        return json.dumps({"memory": None, "message": msg})
     return json.dumps({"memory": mem.get("memory"), "id": mem.get("id"), "metadata": {k: v for k, v in mem.items() if k not in ("memory", "id")}})
 
 
@@ -3462,7 +3474,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="time",
-            description="Get current date and time in ISO format (UTC).",
+            description="Get current date and time (system local, ISO format). Use when you need precise current time for age calculation, 'what day is it?', or scheduling. Returns same timezone as the system context injected in the prompt.",
             parameters={"type": "object", "properties": {}, "required": []},
             execute_async=_time_executor,
         )
@@ -3666,7 +3678,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             parameters={
                 "type": "object",
                 "properties": {
-                    "content": {"type": "string", "description": "The text to append (e.g. a fact, preference, or note)."},
+                    "content": {"type": "string", "description": "Markdown to append. Recommended: one fact per paragraph; optional date prefix (YYYY-MM-DD: ...) or ## headings for grouping."},
                 },
                 "required": ["content"],
             },
@@ -3680,7 +3692,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             parameters={
                 "type": "object",
                 "properties": {
-                    "content": {"type": "string", "description": "The text to append (e.g. a brief note about this conversation or today's context)."},
+                    "content": {"type": "string", "description": "Markdown to append. Recommended: one note per paragraph; optional bullet and label (e.g. '- **Session:** ...') for clarity."},
                 },
                 "required": ["content"],
             },

@@ -258,8 +258,12 @@ class Memory(MemoryBase):
         if run_id:
             filters["run_id"] = run_id
 
-        memories = self.vector_store.list(filters=filters, limit=limit)
-
+        try:
+            memories = self.vector_store.list(filters=filters, limit=limit)
+            items = memories[0] if (memories and len(memories) > 0) else []
+        except Exception as e:
+            logger.debug("Memory get_all: {}", e)
+            return []
         excluded_keys = {
             "user_name",
             "user_id",
@@ -270,34 +274,41 @@ class Memory(MemoryBase):
             "created_at",
             "updated_at",
         }
-        return [
-            {
-                **MemoryItem(
-                    id=mem.id,
-                    memory=mem.payload["data"],
-                    hash=mem.payload.get("hash"),
-                    created_at=mem.payload.get("created_at"),
-                    updated_at=mem.payload.get("updated_at"),
-                ).model_dump(exclude={"score"}),
-                **{
-                    key: mem.payload[key]
-                    for key in ["user_name", "user_id", "agent_id", "run_id"]
-                    if key in mem.payload
-                },
-                **(
-                    {
-                        "metadata": {
-                            k: v
-                            for k, v in mem.payload.items()
-                            if k not in excluded_keys
+        result = []
+        for mem in items:
+            try:
+                payload = getattr(mem, "payload", None) or {}
+                if not isinstance(payload, dict):
+                    continue
+                result.append({
+                    **MemoryItem(
+                        id=str(getattr(mem, "id", "") or ""),
+                        memory=payload.get("data", "") or "",
+                        hash=payload.get("hash"),
+                        created_at=payload.get("created_at"),
+                        updated_at=payload.get("updated_at"),
+                    ).model_dump(exclude={"score"}),
+                    **{
+                        key: payload[key]
+                        for key in ["user_name", "user_id", "agent_id", "run_id"]
+                        if key in payload
+                    },
+                    **(
+                        {
+                            "metadata": {
+                                k: v
+                                for k, v in payload.items()
+                                if k not in excluded_keys
+                            }
                         }
-                    }
-                    if any(k for k in mem.payload if k not in excluded_keys)
-                    else {}
-                ),
-            }
-            for mem in memories[0]
-        ]
+                        if any(k for k in payload if k not in excluded_keys)
+                        else {}
+                    ),
+                })
+            except Exception as e:
+                logger.debug("Memory get_all item: {}", e)
+                continue
+        return result
 
     async def search(
         self, query, user_name=None, user_id=None, agent_id=None, run_id=None, limit=100, filters=None
@@ -500,6 +511,10 @@ class Memory(MemoryBase):
             list: List of changes for the memory.
         """
         return self.db.get_history(memory_id)
+
+    def supports_summarization(self) -> bool:
+        """Chroma memory backend supports list-by-user, add with metadata, and delete by id for summarization."""
+        return True
 
     async def _create_memory_tool(self, data, metadata=None):
         '''

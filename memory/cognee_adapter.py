@@ -3,16 +3,20 @@ Cognee memory adapter: implements MemoryBase using Cognee (add -> cognify -> sea
 Use when memory_backend=cognee. Requires: pip install cognee and Cognee env config (.env)
 or cognee section in core.yml (we convert it to env vars before Cognee loads).
 Dataset scope: (user_id, agent_id) -> dataset name for add/search.
+Summarization: get_all_async / delete_async use datasets list + get_data + delete_data when available.
 """
 import asyncio
 import os
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
 from memory.base import MemoryBase
+
+# Composite id for summarization: "dataset_id:data_id" so delete_async can resolve both
+COGNEE_ID_SEP = ":"
 
 
 def apply_cognee_config(config: Dict[str, Any]) -> None:
@@ -114,6 +118,17 @@ def _dataset_name(user_id: Optional[str] = None, agent_id: Optional[str] = None)
     return f"memory_{u}_{a}".replace(" ", "_")[:128]
 
 
+def _parse_memory_dataset_name(name: str) -> Tuple[str, str]:
+    """Parse 'memory_user_agent' -> (user_id, agent_id). Handles default and underscores in ids."""
+    if not name or not name.startswith("memory_"):
+        return "default", "default"
+    rest = name[7:]  # after "memory_"
+    parts = rest.split("_", 1)  # first _ separates user from agent
+    u = (parts[0] or "default").strip()
+    a = (parts[1] or "default").strip() if len(parts) > 1 else "default"
+    return u or "default", a or "default"
+
+
 class CogneeMemory(MemoryBase):
     """
     Memory backend using Cognee (add -> cognify -> search).
@@ -212,13 +227,113 @@ class CogneeMemory(MemoryBase):
         run_id: Optional[str] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
+        """Sync get_all: returns [] for Cognee; use get_all_async from summarization job."""
         return []
+
+    async def get_all_async(
+        self,
+        user_name: Optional[str] = None,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """List all memory items across memory_* datasets for summarization. Returns id as dataset_id:data_id, memory, created_at, user_id, agent_id. Never raises; returns [] on any failure."""
+        out: List[Dict[str, Any]] = []
+        try:
+            ds = getattr(self._cognee, "datasets", None)
+            if not ds or not hasattr(ds, "list_datasets"):
+                return out
+            try:
+                datasets_list = await asyncio.wait_for(self._cognee.datasets.list_datasets(), timeout=30)
+            except Exception as e:
+                logger.debug("Cognee list_datasets for summarization: {}", e)
+                return out
+            get_data_fn = getattr(ds, "get_data", None) or getattr(ds, "get_dataset_data", None)
+            if not get_data_fn or not callable(get_data_fn):
+                logger.debug("Cognee datasets has no get_data/get_dataset_data; summarization list unavailable")
+                return out
+            for d in datasets_list or []:
+                name = getattr(d, "name", None) or (d.get("name") if isinstance(d, dict) else None)
+                if not name or not name.startswith("memory_"):
+                    continue
+                did = getattr(d, "id", None) or (d.get("id") if isinstance(d, dict) else None)
+                if not did:
+                    continue
+                did = str(did)
+                u_id, a_id = _parse_memory_dataset_name(name)
+                try:
+                    result = get_data_fn(did)
+                    if asyncio.iscoroutine(result):
+                        data_list = await asyncio.wait_for(result, timeout=15)
+                    else:
+                        data_list = result
+                except Exception as e:
+                    logger.debug("Cognee get_data({}) failed: {}", did[:8], e)
+                    continue
+                if not isinstance(data_list, list):
+                    data_list = [data_list] if data_list else []
+                for item in data_list[: limit]:
+                    data_id = getattr(item, "id", None) or (item.get("id") if isinstance(item, dict) else None)
+                    if not data_id:
+                        continue
+                    data_id = str(data_id)
+                    created = getattr(item, "created_at", None) or getattr(item, "createdAt", None) or (item.get("created_at") or item.get("createdAt") if isinstance(item, dict) else None)
+                    if created and hasattr(created, "isoformat"):
+                        created = created.isoformat()
+                    elif created:
+                        created = str(created)
+                    text = getattr(item, "content", None) or getattr(item, "text", None) or getattr(item, "data", None)
+                    if isinstance(item, dict):
+                        text = text or item.get("content") or item.get("text") or item.get("data") or item.get("raw_data")
+                    text = (text or "").strip() if text else ""
+                    meta = getattr(item, "metadata", None) if not isinstance(item, dict) else item.get("metadata")
+                    is_sum = (meta.get("is_summary") if isinstance(meta, dict) else None) or (getattr(meta, "is_summary", None) if meta else None)
+                    out.append({
+                        "id": f"{did}{COGNEE_ID_SEP}{data_id}",
+                        "memory": text,
+                        "created_at": created,
+                        "user_id": u_id,
+                        "agent_id": a_id,
+                        "metadata": {"is_summary": is_sum} if is_sum is not None else {},
+                    })
+                    if len(out) >= limit:
+                        return out
+        except Exception as e:
+            logger.debug("Cognee get_all_async: {}", e)
+        return out
 
     def update(self, memory_id: str, data: Any) -> Dict[str, Any]:
         return {"message": "Cognee backend: update not supported"}
 
     def delete(self, memory_id: str) -> None:
+        """Sync delete: no-op for Cognee; use delete_async from summarization job."""
         pass
+
+    async def delete_async(self, memory_id: str) -> None:
+        """Delete one memory by composite id (dataset_id:data_id)."""
+        if COGNEE_ID_SEP not in memory_id:
+            return
+        parts = memory_id.split(COGNEE_ID_SEP, 1)
+        if len(parts) != 2:
+            return
+        dataset_id, data_id = parts[0].strip(), parts[1].strip()
+        if not dataset_id or not data_id:
+            return
+        ds = getattr(self._cognee, "datasets", None)
+        delete_fn = getattr(ds, "delete_data", None) or getattr(ds, "delete", None)
+        if not delete_fn or not callable(delete_fn):
+            logger.debug("Cognee datasets has no delete_data/delete")
+            return
+        try:
+            if getattr(delete_fn, "__code__", None) and delete_fn.__code__.co_argcount >= 3:
+                result = delete_fn(dataset_id, data_id)
+            else:
+                result = delete_fn(data_id, dataset_id=dataset_id)
+            if asyncio.iscoroutine(result):
+                await asyncio.wait_for(result, timeout=10)
+        except Exception as e:
+            logger.debug("Cognee delete_data({}, {}): {}", dataset_id[:8], data_id[:8], e)
 
     def delete_all(
         self,
@@ -231,6 +346,19 @@ class CogneeMemory(MemoryBase):
 
     def history(self, memory_id: str) -> List[Any]:
         return []
+
+    def supports_summarization(self) -> bool:
+        """Cognee supports summarization when datasets expose list_datasets, get_data, delete_data. Never raises."""
+        try:
+            ds = getattr(self._cognee, "datasets", None)
+            if not ds:
+                return False
+            has_list = hasattr(ds, "list_datasets") and callable(getattr(ds, "list_datasets"))
+            has_get = (hasattr(ds, "get_data") and callable(getattr(ds, "get_data"))) or (hasattr(ds, "get_dataset_data") and callable(getattr(ds, "get_dataset_data")))
+            has_del = (hasattr(ds, "delete_data") and callable(getattr(ds, "delete_data"))) or (hasattr(ds, "delete") and callable(getattr(ds, "delete")))
+            return bool(has_list and has_get and has_del)
+        except Exception:
+            return False
 
     def reset(self) -> None:
         try:

@@ -62,7 +62,7 @@ from memory.chat.message import ChatMessage
 from memory.chat.chat import ChatHistory
 from memory.base import MemoryBase, VectorStoreBase, EmbeddingBase, LLMBase
 from base.prompt_manager import get_prompt_manager
-from memory.prompts import RESPONSE_TEMPLATE, MEMORY_CHECK_PROMPT
+from memory.prompts import RESPONSE_TEMPLATE, MEMORY_CHECK_PROMPT, MEMORY_BATCH_SUMMARIZE_PROMPT
 from base.workspace import (
     get_workspace_dir,
     load_workspace,
@@ -71,6 +71,7 @@ from base.workspace import (
     clear_agent_memory_file,
     load_daily_memory_for_dates,
     clear_daily_memory_for_dates,
+    trim_content_bootstrap,
 )
 from base.skills import get_skills_dir, load_skills, build_skills_system_block
 from base.tools import ToolContext, get_tool_registry, ROUTING_RESPONSE_ALREADY_SENT
@@ -949,6 +950,7 @@ class Core(CoreInterface):
         self.request_queue_task = asyncio.create_task(self.process_request_queue())
         self.response_queue_task = asyncio.create_task(self.process_response_queue())
         self.memory_queue_task = asyncio.create_task(self.process_memory_queue())
+        self.memory_summarization_scheduler_task = asyncio.create_task(self.process_memory_summarization_scheduler())
 
         # Register built-in tools (sessions_transcript, etc.); used when use_tools is True
         register_builtin_tools(get_tool_registry())
@@ -1282,9 +1284,10 @@ class Core(CoreInterface):
         # Config API: manage core.yml and user.yml (same auth as /inbound)
         # All top-level keys in core.yml that are safe to read/write via API (nested sections merged on PATCH).
         _CONFIG_CORE_WHITELIST = frozenset({
-            "name", "host", "port", "mode", "model_path", "silent", "use_memory", "reset_memory", "memory_backend",
+            "name", "host", "port", "mode", "model_path", "silent", "use_memory", "memory_backend", "memory_check_before_add", "default_location",
             "profile", "workspace_dir", "use_workspace_bootstrap", "use_agent_memory_file", "agent_memory_path",
             "agent_memory_max_chars", "use_agent_memory_search", "agent_memory_vector_collection",
+            "agent_memory_bootstrap_max_chars", "agent_memory_bootstrap_max_chars_local",
             "use_daily_memory", "daily_memory_dir", "session", "notify_unknown_request", "outbound_markdown_format",
             "llm_max_concurrent", "compaction", "use_tools", "use_skills", "skills_dir",
             "skills_max_in_prompt", "plugins_max_in_prompt",
@@ -1297,11 +1300,11 @@ class Core(CoreInterface):
             "prompt_cache_ttl_seconds", "auth_enabled", "auth_api_key", "tools", "result_viewer", "knowledge_base",
             "file_understanding", "llama_cpp", "completion", "local_models", "cloud_models", "main_llm",
             "embedding_llm", "main_llm_language", "embedding_host", "embedding_port", "main_llm_host", "main_llm_port",
-            "database", "vectorDB", "graphDB", "cognee",
+            "database", "vectorDB", "graphDB", "cognee", "memory_summarization",
         })
         _CONFIG_CORE_BOOL_KEYS = frozenset({
-            "silent", "use_memory", "reset_memory", "auth_enabled", "use_tools", "use_skills",
-            "use_workspace_bootstrap", "use_agent_memory_file", "use_agent_memory_search", "use_daily_memory",
+            "silent", "use_memory", "auth_enabled", "use_tools", "use_skills",
+            "use_workspace_bootstrap", "use_agent_memory_file", "use_agent_memory_search", "use_daily_memory", "memory_check_before_add",
             "use_prompt_manager", "system_plugins_auto_start", "skills_use_vector_search", "skills_refresh_on_startup",
             "skills_incremental_sync", "plugins_use_vector_search", "plugins_refresh_on_startup",
             "orchestrator_unified_with_tools",
@@ -1478,6 +1481,19 @@ class Core(CoreInterface):
                 logger.exception("Config users delete failed: {}", e)
                 return JSONResponse(status_code=500, content={"detail": str(e)})
 
+        @self.app.post("/memory/summarize")
+        async def memory_summarize():
+            """
+            Run one pass of RAG memory summarization (batch old memories → LLM summary, then TTL delete of originals).
+            Schedule: use cron to call this daily/weekly, or rely on Core's internal next_run scheduler when memory_summarization.enabled and schedule are set.
+            """
+            try:
+                result = await self.run_memory_summarization()
+                return JSONResponse(content=result)
+            except Exception as e:
+                logger.exception(e)
+                return JSONResponse(status_code=500, content={"ok": False, "message": str(e), "summaries_created": 0, "ttl_deleted": 0})
+
         @self.app.post("/memory/reset")
         @self.app.get("/memory/reset")
         async def memory_reset():
@@ -1494,22 +1510,31 @@ class Core(CoreInterface):
                 mem.reset()
                 logger.info("Memory reset completed (backend={})", type(mem).__name__)
                 message = "Memory cleared."
-                meta = Util().get_core_metadata()
-                if getattr(meta, "use_agent_memory_file", False):
-                    workspace_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "")
-                    agent_path = getattr(meta, "agent_memory_path", "") or ""
-                    if clear_agent_memory_file(workspace_dir=workspace_dir, agent_memory_path=agent_path if agent_path else None):
-                        logger.info("AGENT_MEMORY.md cleared.")
-                        message = "Memory and AGENT_MEMORY.md cleared."
-                if getattr(meta, "use_daily_memory", False):
-                    workspace_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "")
-                    daily_dir = getattr(meta, "daily_memory_dir", "") or ""
-                    today = date.today()
-                    yesterday = today - timedelta(days=1)
-                    n = clear_daily_memory_for_dates([yesterday, today], workspace_dir=workspace_dir, daily_memory_dir=daily_dir if daily_dir else None)
-                    if n > 0:
-                        logger.info("Daily memory cleared ({} file(s)).", n)
-                        message = (message + " Daily memory (yesterday/today) cleared.") if message else "Memory and daily memory cleared."
+                try:
+                    meta = Util().get_core_metadata()
+                    if getattr(meta, "use_agent_memory_file", False):
+                        try:
+                            workspace_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "")
+                            agent_path = getattr(meta, "agent_memory_path", "") or ""
+                            if clear_agent_memory_file(workspace_dir=workspace_dir, agent_memory_path=agent_path if agent_path else None):
+                                logger.info("AGENT_MEMORY.md cleared.")
+                                message = "Memory and AGENT_MEMORY.md cleared."
+                        except Exception as e:
+                            logger.debug("clear_agent_memory_file during reset: {}", e)
+                    if getattr(meta, "use_daily_memory", False):
+                        try:
+                            workspace_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "")
+                            daily_dir = getattr(meta, "daily_memory_dir", "") or ""
+                            today = date.today()
+                            yesterday = today - timedelta(days=1)
+                            n = clear_daily_memory_for_dates([yesterday, today], workspace_dir=workspace_dir, daily_memory_dir=daily_dir if daily_dir else None)
+                            if n > 0:
+                                logger.info("Daily memory cleared ({} file(s)).", n)
+                                message = (message + " Daily memory (yesterday/today) cleared.") if message else "Memory and daily memory cleared."
+                        except Exception as e:
+                            logger.debug("clear_daily_memory during reset: {}", e)
+                except Exception as e:
+                    logger.debug("Memory reset agent/daily clear: {}", e)
                 return JSONResponse(content={"result": "ok", "message": message})
             except Exception as e:
                 logger.exception(e)
@@ -1819,6 +1844,7 @@ class Core(CoreInterface):
                             videos=data.get("videos"),
                             audios=data.get("audios"),
                             files=data.get("files"),
+                            location=(data.get("location") or "").strip() or None,
                         )
                     except Exception as e:
                         await websocket.send_json({"error": str(e), "text": ""})
@@ -1904,6 +1930,9 @@ class Core(CoreInterface):
             request_metadata["session_id"] = request.session_id
         if getattr(request, "conversation_type", None):
             request_metadata["conversation_type"] = request.conversation_type
+        loc = getattr(request, "location", None)
+        if isinstance(loc, str) and loc.strip():
+            request_metadata["location"] = loc.strip()[:2000]
         # Memory/Cognee scope: user_id and app_id; companion often omits app_id, so default to homeclaw
         inbound_user_id = (getattr(request, "user_id", None) or "").strip() or "companion"
         inbound_app_id = getattr(request, "app_id", None) or "homeclaw"
@@ -1933,9 +1962,20 @@ class Core(CoreInterface):
             pr.user_name = user.name
         if user:
             pr.system_user_id = user.id or user.name
+        # Store latest location when client sends it (Companion, WebChat, browser). When app did not combine (system/companion), store under shared key so it can be used for all users.
+        try:
+            loc_in = request_metadata.get("location") or getattr(request, "location", None)
+            if isinstance(loc_in, str) and loc_in.strip():
+                sid = (inbound_user_id or "").strip().lower()
+                if sid in ("system", "companion"):
+                    self._set_latest_location(getattr(self, "_LATEST_LOCATION_SHARED_KEY", "companion"), loc_in.strip())
+                elif getattr(pr, "system_user_id", None):
+                    self._set_latest_location(pr.system_user_id, loc_in.strip())
+        except Exception as e:
+            logger.debug("Store latest location on inbound: {}", e)
         self.latestPromptRequest = copy.deepcopy(pr)
         self._persist_last_channel(pr)
-        # Companion routing: when config companion.enabled and request targets companion, invoke companion plugin only (no main flow, no main user DB). See docs_design/CompanionFeatureDesign.md.
+        # Companion routing: when combined with a user (user_id in user.yml, not "system"/"companion") → main flow with channel=companion; else → companion plugin. See docs_design/CompanionFeatureDesign.md.
         # keyword is required when companion is enabled (no default in code); routing is disabled until it is set in config.
         meta = Util().get_core_metadata()
         companion_cfg = getattr(meta, "companion", None) or {}
@@ -1962,23 +2002,37 @@ class Core(CoreInterface):
                         if text_stripped.lower().startswith(kw_lower + ",") or text_stripped.lower().startswith(kw_lower + " "):
                             pr.text = text_stripped[len(keyword):].strip().lstrip(",").strip() or pr.text
                 if is_companion:
-                    plug = self.plugin_manager.get_plugin_by_id(plugin_id) if self.plugin_manager else None
-                    if isinstance(plug, dict):
-                        pr_companion = copy.deepcopy(pr)
-                        (pr_companion.request_metadata or {}).update({"capability_id": "chat", "capability_parameters": {}})
+                    # Combined with user: user_id is in user.yml and not "system"/"companion" → main flow (user's memory/chat, channel=companion)
+                    combined = (
+                        has_permission
+                        and user is not None
+                        and (inbound_user_id.strip().lower() not in ("system", "companion"))
+                    )
+                    if combined:
                         try:
-                            result = await self.plugin_manager.run_external_plugin(plug, pr_companion)
-                            if result and getattr(result, "success", False):
-                                out_text = (result.text or "").strip()
-                                img_paths = list(getattr(result, "metadata", None) or {}).get("images") or []
-                                return True, out_text, 200, img_paths if isinstance(img_paths, list) else None
-                            err = getattr(result, "error", None) or "Companion plugin returned no text"
-                            return False, err, 500, None
-                        except Exception as e:
-                            logger.exception(e)
-                            return False, f"Companion error: {e!s}", 500, None
+                            (pr.request_metadata or {})["channel"] = "companion"
+                        except Exception:
+                            pass
+                        # Fall through to main flow (process_text_message)
                     else:
-                        logger.warning("Companion enabled but plugin_id=%s not found or not external; falling back to main flow.", plugin_id)
+                        # System or not in user.yml → companion plugin
+                        plug = self.plugin_manager.get_plugin_by_id(plugin_id) if self.plugin_manager else None
+                        if isinstance(plug, dict):
+                            pr_companion = copy.deepcopy(pr)
+                            (pr_companion.request_metadata or {}).update({"capability_id": "chat", "capability_parameters": {}})
+                            try:
+                                result = await self.plugin_manager.run_external_plugin(plug, pr_companion)
+                                if result and getattr(result, "success", False):
+                                    out_text = (result.text or "").strip()
+                                    img_paths = list(getattr(result, "metadata", None) or {}).get("images") or []
+                                    return True, out_text, 200, img_paths if isinstance(img_paths, list) else None
+                                err = getattr(result, "error", None) or "Companion plugin returned no text"
+                                return False, err, 500, None
+                            except Exception as e:
+                                logger.exception(e)
+                                return False, f"Companion error: {e!s}", 500, None
+                        else:
+                            logger.warning("Companion enabled but plugin_id=%s not found or not external; falling back to main flow.", plugin_id)
         # if companion enabled but keyword not set, routing was skipped (must set companion.keyword in config)
         if not getattr(self, "orchestrator_unified_with_tools", True):
             flag = await self.orchestrator_handler(pr)
@@ -2036,6 +2090,69 @@ class Core(CoreInterface):
                 logger.debug("Failed to persist last channel session key: {}", sk)
         except Exception as e:
             logger.warning("Failed to persist last channel: {}", e)
+
+    # Shared key for "latest location when Companion app is not combined" — used as fallback for all users (see SystemContextDateTimeAndLocation.md)
+    _LATEST_LOCATION_SHARED_KEY = "companion"
+
+    def _latest_location_path(self) -> Path:
+        """Path to latest_locations.json. Persisted under database dir: {project_root}/database/latest_locations.json (or core database.path if set). Never raises."""
+        try:
+            root = Path(Util().root_path()).resolve()
+            meta = Util().get_core_metadata()
+            db = getattr(meta, "database", None)
+            if getattr(db, "path", None):
+                base = root / str(db.path).strip()
+            else:
+                base = root / "database"
+            base.mkdir(parents=True, exist_ok=True)
+            return base / "latest_locations.json"
+        except Exception as e:
+            logger.debug("Latest location path: {}", e)
+            return Path("database") / "latest_locations.json"
+
+    def _set_latest_location(self, system_user_id: str, location_str: str) -> None:
+        """Store latest location for this user. Never raises."""
+        if not system_user_id or not isinstance(location_str, str) or not location_str.strip():
+            return
+        try:
+            path = self._latest_location_path()
+            data = {}
+            if path.exists():
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    data = {}
+            if not isinstance(data, dict):
+                data = {}
+            data[str(system_user_id)] = {
+                "location": location_str.strip()[:2000],
+                "updated_at": datetime.now().isoformat(),
+            }
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=0, ensure_ascii=False)
+        except Exception as e:
+            logger.debug("Set latest location failed: {}", e)
+
+    def _get_latest_location(self, system_user_id: str) -> Optional[str]:
+        """Return latest location for this user or None. Never raises."""
+        if not system_user_id:
+            return None
+        try:
+            path = self._latest_location_path()
+            if not path.exists():
+                return None
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return None
+            entry = data.get(str(system_user_id))
+            if isinstance(entry, dict) and entry.get("location"):
+                return str(entry.get("location", "")).strip() or None
+            return None
+        except Exception as e:
+            logger.debug("Get latest location failed: {}", e)
+            return None
 
     def save_latest_prompt_request_to_file(self, filename: str):
         """Legacy: save to file (e.g. for debugging). Prefer _persist_last_channel which uses DB + atomic file in database/."""
@@ -2388,9 +2505,10 @@ class Core(CoreInterface):
                     session_id = self.get_session_id(app_id=app_id, user_name=user_name, user_id=user_id, channel_name=channel_name, account_id=account_id)
                     run_id = self.get_run_id(agent_id=app_id, user_name=user_name, user_id=user_id)
 
-                    # Check if the user input should be added to memory, For performance, comment this for now.
-                    if (((main_llm_size <= 14) and (has_gpu == True)) or (main_llm_size <= 8)):
-                        meta = Util().get_core_metadata()
+                    # When memory_check_before_add is True and model is small/local: run one LLM call to decide "should we store?"; else store every message (default).
+                    meta = Util().get_core_metadata()
+                    use_memory_check = getattr(meta, "memory_check_before_add", False)
+                    if use_memory_check and (((main_llm_size <= 14) and (has_gpu == True)) or (main_llm_size <= 8)):
                         prompt = None
                         if getattr(meta, "use_prompt_manager", False):
                             try:
@@ -2423,6 +2541,38 @@ class Core(CoreInterface):
                     logger.exception(f"Error check whether to save to memory: {e}")
                 finally:
                     self.memory_queue.task_done()
+
+    async def process_memory_summarization_scheduler(self):
+        """Background loop: when memory_summarization.enabled, check next_run and run summarization when due (daily/weekly/next_run). Runs at free time."""
+        await asyncio.sleep(60)  # let Core settle before first check
+        while True:
+            try:
+                await asyncio.sleep(3600)  # check every hour
+                meta = Util().get_core_metadata()
+                cfg = getattr(meta, "memory_summarization", None) or {}
+                if not cfg.get("enabled"):
+                    continue
+                state = self._read_memory_summarization_state()
+                next_run_s = state.get("next_run")
+                try:
+                    tz = datetime.now().astimezone().tzinfo
+                    now = datetime.now(tz)
+                except Exception:
+                    now = datetime.utcnow()
+                if next_run_s:
+                    try:
+                        next_run = datetime.fromisoformat(str(next_run_s).replace("Z", "+00:00"))
+                        if next_run.tzinfo is None:
+                            next_run = next_run.replace(tzinfo=now.tzinfo)
+                        if now < next_run:
+                            continue
+                    except Exception:
+                        pass
+                await self.run_memory_summarization()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug("Memory summarization scheduler: {}", e)
 
     async def process_response_queue(self):
         async with httpx.AsyncClient() as client:
@@ -3721,20 +3871,136 @@ class Core(CoreInterface):
                 if workspace_prefix:
                     system_parts.append(workspace_prefix)
 
+            # System context: current date/time (system timezone) + optional location. Never crash; see SystemContextDateTimeAndLocation.md
+            try:
+                now = datetime.now()
+                try:
+                    now = datetime.now().astimezone()
+                except Exception:
+                    pass
+                date_str = now.strftime("%Y-%m-%d")
+                time_str = now.strftime("%H:%M")
+                dow = now.strftime("%A")
+                ctx_line = f"Current date: {date_str}. Day of week: {dow}. Current time: {time_str} (system local)."
+                loc_str = None
+                try:
+                    meta = request.request_metadata if getattr(request, "request_metadata", None) else {}
+                    loc_str = (meta.get("location") or "").strip() if isinstance(meta, dict) else None
+                    if not loc_str and user_id:
+                        loc_str = self._get_latest_location(user_id)
+                    if not loc_str and user_id:
+                        profile_cfg = getattr(Util().get_core_metadata(), "profile", None) or {}
+                        if isinstance(profile_cfg, dict) and profile_cfg.get("enabled", True):
+                            try:
+                                from base.profile_store import get_profile
+                                profile_base_dir = (profile_cfg.get("dir") or "").strip() or None
+                                profile_data = get_profile(user_id or "", base_dir=profile_base_dir)
+                                if isinstance(profile_data, dict) and profile_data.get("location"):
+                                    loc_str = str(profile_data.get("location", "")).strip()
+                            except Exception:
+                                pass
+                    if not loc_str:
+                        loc_str = (getattr(Util().get_core_metadata(), "default_location", None) or "").strip() or None
+                    # When Companion app did not combine to any user, location is stored under shared key; use as fallback for all users
+                    if not loc_str:
+                        shared_key = getattr(self, "_LATEST_LOCATION_SHARED_KEY", "companion")
+                        loc_str = self._get_latest_location(shared_key)
+                    if loc_str:
+                        ctx_line += f" User location: {loc_str[:500]}."
+                except Exception as e:
+                    logger.debug("System context location resolve: {}", e)
+                ctx_line += "\nUse this when answering questions about age, \"what day is it?\", \"how many days until X?\", or when scheduling (remind_me, record_date, cron_schedule). Scheduling execution uses system time."
+                system_parts.append("## System context (date/time and location)\n" + ctx_line + "\n\n")
+            except Exception as e:
+                logger.debug("System context block failed: {}", e)
+                try:
+                    fallback = f"Current date: {date.today().isoformat()}."
+                    system_parts.append("## System context\n" + fallback + "\n\n")
+                except Exception:
+                    pass
+
             # Agent memory: when use_agent_memory_search is true, leverage retrieval only (no bulk inject). Otherwise inject capped AGENT_MEMORY + optional daily block.
-            use_agent_memory_search = getattr(Util().core_metadata, "use_agent_memory_search", True)
+            # When memory_flush_primary is true (default), only the dedicated flush turn writes memory; main prompt does not ask the model to call append_*.
+            try:
+                _compaction_cfg = getattr(Util().get_core_metadata(), "compaction", None) or {}
+                if not isinstance(_compaction_cfg, dict):
+                    _compaction_cfg = {}
+                _memory_flush_primary = bool(_compaction_cfg.get("memory_flush_primary", True))
+            except Exception:
+                _compaction_cfg = {}
+                _memory_flush_primary = True
+            try:
+                use_agent_memory_search = getattr(Util().core_metadata, "use_agent_memory_search", True)
+            except Exception:
+                use_agent_memory_search = True
             if use_agent_memory_search:
                 # Retrieval-first: do not inject AGENT_MEMORY or daily content; inject a strong directive to use tools.
                 try:
                     directive = (
-                        "## Agent memory (recall via tools)\n"
-                        "AGENT_MEMORY.md and daily memory (memory/YYYY-MM-DD.md) are available only via tools. "
-                        "Before answering anything about prior work, decisions, dates, people, preferences, or todos: "
-                        "run agent_memory_search with a relevant query; then use agent_memory_get to pull only the needed lines. "
+                        "## Agent memory (bootstrap + tools)\n"
+                        "A capped bootstrap of AGENT_MEMORY.md and daily memory is included below. "
+                        "For more detail or when answering about prior work, decisions, dates, people, preferences, or todos: "
+                        "run agent_memory_search with a relevant query; then use agent_memory_get to pull the needed lines. "
                         "If low confidence after search, say you checked. "
                         "This curated agent memory is authoritative when it conflicts with RAG context below."
                     )
+                    use_agent_file = getattr(Util().core_metadata, "use_agent_memory_file", False)
+                    use_daily = getattr(Util().core_metadata, "use_daily_memory", False)
+                    if _memory_flush_primary:
+                        directive += " Durable and daily memory are written in a dedicated step; you do not need to call append_agent_memory or append_daily_memory in this conversation."
+                    elif use_agent_file or use_daily:
+                        directive += " When useful, write to memory: "
+                        if use_agent_file:
+                            directive += "use append_agent_memory for lasting facts or preferences the user wants to remember (e.g. 'remember that', 'my preference is'). "
+                        if use_daily:
+                            directive += "Use append_daily_memory for short-term notes (e.g. what was discussed today, session summary)."
                     system_parts.append(directive + "\n\n")
+                    # OpenClaw-style bootstrap: inject a capped chunk of AGENT_MEMORY + daily so memory is always in context (not only when the model calls tools)
+                    if use_agent_file or use_daily:
+                        try:
+                            meta_mem = Util().get_core_metadata()
+                            main_llm_mode = (getattr(meta_mem, "main_llm_mode", None) or "").strip().lower()
+                            main_llm_local = (getattr(meta_mem, "main_llm_local", None) or "").strip()
+                            use_local_cap = (
+                                main_llm_mode == "mix"
+                                and main_llm_local
+                                and effective_llm_name == main_llm_local
+                            )
+                            bootstrap_max = (
+                                max(500, int(getattr(meta_mem, "agent_memory_bootstrap_max_chars_local", 8000) or 8000))
+                                if use_local_cap
+                                else max(500, int(getattr(meta_mem, "agent_memory_bootstrap_max_chars", 20000) or 20000))
+                            )
+                            ws_dir = get_workspace_dir(getattr(meta_mem, "workspace_dir", None) or "config/workspace")
+                            parts_bootstrap = []
+                            if use_agent_file:
+                                agent_raw = load_agent_memory_file(
+                                    workspace_dir=ws_dir,
+                                    agent_memory_path=getattr(meta_mem, "agent_memory_path", None) or None,
+                                    max_chars=0,
+                                )
+                                if agent_raw and agent_raw.strip():
+                                    parts_bootstrap.append("## Agent memory (bootstrap)\n\n" + agent_raw.strip())
+                            if use_daily:
+                                today = date.today()
+                                yesterday = today - timedelta(days=1)
+                                daily_dir = (getattr(meta_mem, "daily_memory_dir", None) or "").strip() or None
+                                daily_raw = load_daily_memory_for_dates(
+                                    [yesterday, today],
+                                    workspace_dir=ws_dir,
+                                    daily_memory_dir=daily_dir,
+                                    max_chars=0,
+                                )
+                                if daily_raw and daily_raw.strip():
+                                    parts_bootstrap.append("## Daily memory (bootstrap)\n\n" + daily_raw.strip())
+                            if parts_bootstrap:
+                                combined = "\n\n".join(parts_bootstrap)
+                                trimmed = trim_content_bootstrap(combined, bootstrap_max)
+                                if trimmed and trimmed.strip():
+                                    system_parts.append(trimmed.strip() + "\n\n")
+                                    _component_log("agent_memory", f"injected bootstrap (cap={bootstrap_max}, local_cap={use_local_cap})")
+                        except Exception as e:
+                            logger.debug("Agent/daily memory bootstrap inject failed: {}", e)
                 except Exception as e:
                     logger.warning("Skipping agent memory directive due to error: {}", e, exc_info=False)
             else:
@@ -3752,6 +4018,8 @@ class Core(CoreInterface):
                                 "## Agent memory (curated)\n" + agent_content + "\n\n"
                                 "When both this section and the RAG context below mention the same fact, prefer this curated agent memory as authoritative.\n\n"
                             )
+                        if not _memory_flush_primary:
+                            system_parts.append("You can add lasting facts or preferences with append_agent_memory when the user says to remember something.\n\n")
                     except Exception as e:
                         logger.warning("Skipping AGENT_MEMORY.md injection due to error: {}", e, exc_info=False)
 
@@ -3770,6 +4038,8 @@ class Core(CoreInterface):
                         )
                         if daily_content:
                             system_parts.append("## Recent (daily memory)\n" + daily_content + "\n\n")
+                        if not _memory_flush_primary:
+                            system_parts.append("You can add to today's daily memory with append_daily_memory when useful (e.g. session summary, today's context).\n\n")
                     except Exception as e:
                         logger.warning("Skipping daily memory injection due to error: {}", e, exc_info=False)
 
@@ -4141,10 +4411,110 @@ class Core(CoreInterface):
             if system_parts:
                 llm_input = [{"role": "system", "content": "\n".join(system_parts)}]
 
-            # Compaction: trim messages when over limit so we stay within context window
+            # Compaction: optional pre-compaction memory flush (when memory_flush_primary is true), then trim messages when over limit
             compaction_cfg = getattr(Util().get_core_metadata(), "compaction", None) or {}
             if compaction_cfg.get("enabled") and isinstance(messages, list) and len(messages) > 0:
                 max_msg = max(2, int(compaction_cfg.get("max_messages_before_compact", 30) or 30))
+                run_flush = (
+                    compaction_cfg.get("memory_flush_primary", True)
+                    and len(messages) > max_msg
+                    and getattr(Util().get_core_metadata(), "use_tools", False)
+                    and (
+                        getattr(Util().get_core_metadata(), "use_agent_memory_file", False)
+                        or getattr(Util().get_core_metadata(), "use_daily_memory", False)
+                    )
+                )
+                if run_flush and system_parts:
+                    context_flush = None
+                    try:
+                        flush_prompt = (compaction_cfg.get("memory_flush_prompt") or "").strip()
+                        if not flush_prompt:
+                            flush_prompt = "Store durable memories now. Use append_agent_memory for lasting facts and append_daily_memory for today. APPEND only. If nothing to store, reply briefly."
+                        flush_system = "\n".join(system_parts)
+                        flush_input = [{"role": "system", "content": flush_system}] + list(messages) + [{"role": "user", "content": flush_prompt}]
+                        registry_flush = get_tool_registry()
+                        if registry_flush is None:
+                            _component_log("compaction", "memory flush skipped: no tool registry")
+                        else:
+                            all_tools_flush = registry_flush.get_openai_tools() if registry_flush.list_tools() else None
+                            if not unified and all_tools_flush:
+                                all_tools_flush = [t for t in all_tools_flush if (t.get("function") or {}).get("name") not in ("route_to_tam", "route_to_plugin")]
+                            if not all_tools_flush:
+                                _component_log("compaction", "memory flush skipped: no tools available")
+                            else:
+                                context_flush = ToolContext(
+                                    core=self,
+                                    app_id=app_id or "homeclaw",
+                                    user_name=user_name,
+                                    user_id=user_id,
+                                    system_user_id=getattr(request, "system_user_id", None) or user_id,
+                                    session_id=session_id,
+                                    run_id=run_id,
+                                    request=request,
+                                )
+                                current_flush = list(flush_input)
+                                meta_flush = Util().get_core_metadata()
+                                tool_timeout_flush = max(0, int(getattr(meta_flush, "tool_timeout_seconds", 120) or 0))
+                                for _round in range(10):
+                                    try:
+                                        msg_flush = await Util().openai_chat_completion_message(
+                                            current_flush, tools=all_tools_flush, tool_choice="auto", llm_name=effective_llm_name
+                                        )
+                                    except Exception as e:
+                                        logger.debug("Memory flush LLM call failed: {}", e)
+                                        break
+                                    if msg_flush is None:
+                                        break
+                                    current_flush.append(msg_flush)
+                                    tool_calls_flush = msg_flush.get("tool_calls") if isinstance(msg_flush.get("tool_calls"), list) else None
+                                    content_flush = (msg_flush.get("content") or "").strip()
+                                    if not tool_calls_flush and content_flush:
+                                        try:
+                                            if _parse_raw_tool_calls_from_content(content_flush):
+                                                tool_calls_flush = _parse_raw_tool_calls_from_content(content_flush)
+                                        except Exception:
+                                            pass
+                                    if not tool_calls_flush:
+                                        break
+                                    for tc in (tool_calls_flush or []):
+                                        if not isinstance(tc, dict):
+                                            continue
+                                        tcid = tc.get("id") or ""
+                                        fn = tc.get("function") or {}
+                                        name = (fn.get("name") or "").strip()
+                                        if not name:
+                                            continue
+                                        try:
+                                            args = json.loads(fn.get("arguments") or "{}")
+                                        except (json.JSONDecodeError, TypeError):
+                                            args = {}
+                                        if not isinstance(args, dict):
+                                            args = {}
+                                        try:
+                                            if tool_timeout_flush > 0:
+                                                result = await asyncio.wait_for(
+                                                    registry_flush.execute_async(name, args, context_flush),
+                                                    timeout=tool_timeout_flush,
+                                                )
+                                            else:
+                                                result = await registry_flush.execute_async(name, args, context_flush)
+                                        except asyncio.TimeoutError:
+                                            result = f"Error: tool {name} timed out after {tool_timeout_flush}s."
+                                        except Exception as e:
+                                            result = f"Error: {e!s}"
+                                        try:
+                                            current_flush.append({"role": "tool", "tool_call_id": tcid, "content": result})
+                                        except Exception:
+                                            break
+                                _component_log("compaction", "memory flush turn completed")
+                    except Exception as e:
+                        logger.warning("Memory flush failed (continuing with compaction): {}", e, exc_info=True)
+                    finally:
+                        if context_flush is not None:
+                            try:
+                                await close_browser_session(context_flush)
+                            except Exception as e:
+                                logger.debug("Memory flush close_browser_session failed: {}", e)
                 if len(messages) > max_msg:
                     messages = messages[-max_msg:]
                     _component_log("compaction", f"trimmed to last {max_msg} messages")
@@ -4623,6 +4993,240 @@ class Core(CoreInterface):
             await self.mem_instance.add(user_input, user_name=user_name, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata, filters=filters)
         except Exception as e:
             logger.exception(e)
+
+    def _memory_summarization_state_path(self) -> Path:
+        """Path to memory summarization state JSON (last_run, next_run). Uses database dir under project root. Never raises."""
+        try:
+            root = Path(Util().root_path()).resolve()
+            meta = Util().get_core_metadata()
+            db = getattr(meta, "database", None)
+            if getattr(db, "path", None):
+                base = root / str(db.path).strip()
+            else:
+                base = root / "database"
+            base.mkdir(parents=True, exist_ok=True)
+            return base / "memory_summarization_state.json"
+        except Exception as e:
+            logger.debug("Memory summarization state path: {}", e)
+            return Path("database") / "memory_summarization_state.json"
+
+    def _read_memory_summarization_state(self) -> Dict[str, str]:
+        """Read last_run and next_run from state file. Returns {} on error or missing."""
+        try:
+            p = self._memory_summarization_state_path()
+            if p.is_file():
+                with open(p, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.debug("Read memory summarization state: {}", e)
+        return {}
+
+    def _write_memory_summarization_state(self, last_run: str, next_run: str) -> None:
+        """Write last_run and next_run (ISO datetime strings) to state file."""
+        try:
+            p = self._memory_summarization_state_path()
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump({"last_run": last_run, "next_run": next_run}, f, indent=0)
+        except Exception as e:
+            logger.warning("Write memory summarization state: {}", e)
+
+    async def run_memory_summarization(self) -> Dict[str, Any]:
+        """
+        Run one pass of RAG memory summarization: batch old raw memories per user, LLM-summarize, store summary (kept forever);
+        then delete raw memories older than keep_original_days (TTL). Supported for Chroma and Cognee.
+        Returns dict with ok, message, summaries_created, ttl_deleted, next_run. Never raises; returns error dict on failure.
+        """
+        def _fail(msg: str) -> Dict[str, Any]:
+            return {"ok": False, "message": msg, "summaries_created": 0, "ttl_deleted": 0}
+
+        try:
+            meta = Util().get_core_metadata()
+            if not getattr(meta, "use_memory", False):
+                return _fail("use_memory is disabled.")
+            cfg = getattr(meta, "memory_summarization", None) or {}
+            if not cfg.get("enabled"):
+                return _fail("memory_summarization.enabled is false.")
+            mem = getattr(self, "mem_instance", None)
+            if mem is None or not getattr(mem, "supports_summarization", lambda: False)():
+                return _fail("Memory backend does not support summarization (requires list + get_data + delete_data).")
+
+            keep_original_days = max(1, int(cfg.get("keep_original_days", 365) or 365))
+            min_age_days = max(1, int(cfg.get("min_age_days", 7) or 7))
+            max_per_batch = max(1, min(200, int(cfg.get("max_memories_per_batch", 50) or 50)))
+            tz = datetime.now().astimezone().tzinfo
+            now = datetime.now(tz)
+            cutoff_min_age = now - timedelta(days=min_age_days)
+            cutoff_ttl = now - timedelta(days=keep_original_days)
+
+            def parse_created(s: Any) -> Optional[datetime]:
+                if not s:
+                    return None
+                try:
+                    if isinstance(s, datetime):
+                        return s
+                    return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+                except Exception:
+                    return None
+
+            try:
+                if hasattr(mem, "get_all_async") and asyncio.iscoroutinefunction(mem.get_all_async):
+                    all_items = await mem.get_all_async(limit=10000)
+                else:
+                    all_items = mem.get_all(limit=10000)
+            except Exception as e:
+                logger.exception(e)
+                return _fail(f"get_all failed: {e}")
+
+            if not all_items or not isinstance(all_items, list):
+                all_items = []
+
+            def _is_summary_item(item: dict) -> bool:
+                if item.get("metadata", {}).get("is_summary") or item.get("is_summary"):
+                    return True
+                return (item.get("memory") or "").strip().startswith("[HomeClaw summary]")
+
+            # Build set of memory ids that are already covered by a summary (so we don't re-summarize)
+            summarized_ids = set()
+            for item in all_items:
+                if not isinstance(item, dict):
+                    continue
+                meta_item = item.get("metadata") or {}
+                if _is_summary_item(item):
+                    raw = meta_item.get("summarized_memory_ids") or item.get("summarized_memory_ids")
+                    if isinstance(raw, str):
+                        try:
+                            for mid in json.loads(raw):
+                                summarized_ids.add(str(mid))
+                        except Exception:
+                            pass
+                    elif isinstance(raw, list):
+                        for mid in raw:
+                            summarized_ids.add(str(mid))
+
+            # Group by (user_id, agent_id); for each group take raw memories older than min_age_days, not in summarized_ids, sorted by created_at asc
+            by_user: Dict[Tuple[str, str], List[Dict]] = {}
+            for item in all_items:
+                if not isinstance(item, dict):
+                    continue
+                if _is_summary_item(item):
+                    continue
+                mid = item.get("id")
+                if mid in summarized_ids:
+                    continue
+                created = parse_created(item.get("created_at"))
+                if created is None or created >= cutoff_min_age:
+                    continue
+                user_id = (item.get("user_id") or "").strip() or "default"
+                agent_id = (item.get("agent_id") or "").strip() or "default"
+                key = (user_id, agent_id)
+                by_user.setdefault(key, []).append({**item, "_created": created})
+
+            for key in by_user:
+                by_user[key].sort(key=lambda x: x["_created"])
+                by_user[key] = by_user[key][:max_per_batch]
+
+            summaries_created = 0
+            for (user_id, agent_id), batch in by_user.items():
+                if not batch:
+                    continue
+                texts = []
+                ids = []
+                latest_created = None
+                for m in batch:
+                    ids.append(m.get("id"))
+                    texts.append((m.get("memory") or "").strip())
+                    c = m.get("_created")
+                    if c and (latest_created is None or c > latest_created):
+                        latest_created = c
+                if not texts or not ids:
+                    continue
+                memories_text = "\n".join(f"- {t}" for t in texts if t)
+                if not memories_text.strip():
+                    continue
+                prompt = MEMORY_BATCH_SUMMARIZE_PROMPT.format(memories_text=memories_text[:50000])
+                messages = [
+                    {"role": "system", "content": "You output only the summary text, no preamble or explanation."},
+                    {"role": "user", "content": prompt},
+                ]
+                try:
+                    summary = await self.openai_chat_completion(messages=messages)
+                except Exception as e:
+                    logger.warning("Summarization LLM failed for user_id={}: {}", user_id, e)
+                    continue
+                if not summary or not (summary := (summary or "").strip()):
+                    continue
+                latest_str = latest_created.isoformat() if latest_created else ""
+                extra_meta = {
+                    "is_summary": "true",
+                    "summarized_memory_ids": json.dumps(ids),
+                    "summarized_until": latest_str,
+                }
+                summary_to_store = "[HomeClaw summary] " + summary
+                try:
+                    await mem.add(
+                        summary_to_store,
+                        user_id=user_id,
+                        agent_id=agent_id,
+                        metadata=extra_meta,
+                    )
+                    summaries_created += 1
+                    _component_log("memory", f"summarized: user_id={user_id} batch={len(ids)}")
+                except Exception as e:
+                    logger.warning("Add summary failed for user_id={}: {}", user_id, e)
+
+            ttl_deleted = 0
+            try:
+                if hasattr(mem, "get_all_async") and asyncio.iscoroutinefunction(mem.get_all_async):
+                    all_items_after = await mem.get_all_async(limit=10000)
+                else:
+                    all_items_after = mem.get_all(limit=10000)
+            except Exception:
+                all_items_after = all_items
+            else:
+                if not isinstance(all_items_after, list):
+                    all_items_after = []
+            for item in all_items_after or []:
+                if not isinstance(item, dict):
+                    continue
+                if _is_summary_item(item):
+                    continue
+                created = parse_created(item.get("created_at"))
+                if created is None or created >= cutoff_ttl:
+                    continue
+                mid = item.get("id")
+                if not mid:
+                    continue
+                try:
+                    if hasattr(mem, "delete_async") and asyncio.iscoroutinefunction(mem.delete_async):
+                        await mem.delete_async(mid)
+                    else:
+                        mem.delete(mid)
+                    ttl_deleted += 1
+                except Exception as e:
+                    logger.debug("TTL delete memory {}: {}", mid, e)
+
+            schedule = (cfg.get("schedule") or "daily").strip().lower()
+            interval_days = max(1, int(cfg.get("interval_days", 1) or 1))
+            next_run_dt = now + timedelta(days=interval_days)
+            if schedule == "weekly":
+                next_run_dt = now + timedelta(days=7)
+            elif schedule == "next_run":
+                next_run_dt = now + timedelta(days=interval_days)
+            try:
+                self._write_memory_summarization_state(now.isoformat(), next_run_dt.isoformat())
+            except Exception as e:
+                logger.warning("Write memory summarization state: {}", e)
+
+            return {
+                "ok": True,
+                "message": f"Summaries created: {summaries_created}, TTL deleted: {ttl_deleted}.",
+                "summaries_created": summaries_created,
+                "ttl_deleted": ttl_deleted,
+                "next_run": next_run_dt.isoformat(),
+            }
+        except Exception as e:
+            logger.exception(e)
+            return _fail(str(e))
 
     async def _fetch_relevant_memories(
         self, query, messages, user_name,user_id, agent_id, run_id, filters, limit

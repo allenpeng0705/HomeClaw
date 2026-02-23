@@ -280,7 +280,10 @@ class ChromaDB(VectorStoreBase):
         Returns:
             List[OutputData]: List of vectors.
         """
-        results = self.collection.get(where=filters, limit=limit)
+        if filters and len(filters) > 0:
+            results = self.collection.get(where=filters, limit=limit)
+        else:
+            results = self.collection.get(limit=limit)
         return [self._parse_output(results)]
 
     def list_ids(self, limit: int = 10000) -> List[str]:

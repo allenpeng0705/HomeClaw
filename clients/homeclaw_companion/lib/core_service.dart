@@ -10,8 +10,8 @@ import 'node_service.dart';
 /// HomeClaw Core API client.
 /// Sends messages via POST /inbound and returns the reply text.
 class CoreService {
-  /// Timeout for sending a message (POST /inbound). Tool use (e.g. web search + reply) can take several minutes.
-  static const int sendMessageTimeoutSeconds = 300;
+  /// Timeout for sending a message (POST /inbound). Tool use (e.g. document_read + summarize) can take several minutes; use 600 for large PDFs.
+  static const int sendMessageTimeoutSeconds = 600;
 
   static const String _keyBaseUrl = 'core_base_url';
   static const String _keyApiKey = 'core_api_key';

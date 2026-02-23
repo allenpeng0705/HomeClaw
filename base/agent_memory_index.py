@@ -11,6 +11,8 @@ from base.workspace import (
     get_agent_memory_file_path,
     get_daily_memory_dir,
     get_daily_memory_path_for_date,
+    ensure_daily_memory_file_exists,
+    ensure_agent_memory_file_exists,
 )
 from loguru import logger
 
@@ -84,8 +86,9 @@ def get_agent_memory_files_to_index(
     except Exception:
         return []
 
-    # AGENT_MEMORY.md
+    # AGENT_MEMORY.md (create if missing so file exists and can be appended to)
     try:
+        ensure_agent_memory_file_exists(workspace_dir=workspace_dir, agent_memory_path=agent_memory_path)
         agent_path = get_agent_memory_file_path(workspace_dir=workspace_dir, agent_memory_path=agent_memory_path)
         if agent_path is not None and agent_path.is_file():
             if workspace_dir in agent_path.parents or agent_path == workspace_dir / AGENT_MEMORY_REL:
@@ -96,8 +99,9 @@ def get_agent_memory_files_to_index(
     except Exception:
         pass
 
-    # memory/yesterday.md, memory/today.md
+    # memory/yesterday.md, memory/today.md (create today's file if missing so it exists and can be appended to)
     try:
+        ensure_daily_memory_file_exists(today, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir)
         base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir)
         for d in (today - timedelta(days=1), today):
             path = get_daily_memory_path_for_date(d, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir)

@@ -35,7 +35,7 @@ def get_api_key(provided_key: str | None) -> str | None:
     """Get API key from argument first, then environment."""
     if provided_key:
         return provided_key
-    return "AIzaSyABrb_ZCt9nPSNwgluWBSqDSGJp-UeHW6w" #os.environ.get("GEMINI_API_KEY")
+    return os.environ.get("GEMINI_API_KEY")
 
 
 def main():

@@ -77,6 +77,8 @@ class InboundRequest(BaseModel):
     audios: Optional[List[str]] = None
     # Optional file paths (Core must be able to read) or data URLs; Core runs file-understanding
     files: Optional[List[str]] = None
+    # Optional location (e.g. from Companion/WebChat/browser when user grants permission); Core stores as latest per user and injects into system context
+    location: Optional[str] = None
 
 class IntentType(Enum):
     TIME = "TIME"
@@ -570,8 +572,9 @@ class CoreMetadata:
     silent: bool
     log_to_console: bool  # when False, all logs go only to file (no stdout); use with tail to monitor logs
     use_memory: bool
-    reset_memory: bool
     memory_backend: str  # cognee (default) | chroma (in-house RAG)
+    memory_check_before_add: bool = False  # when True, for small/local models run an extra LLM call to gate what gets added to RAG memory; default False = store every message, rely on retrieval quality
+    default_location: str = ""  # optional; fallback location when no request/profile location (e.g. "New York, US"); see SystemContextDateTimeAndLocation.md
     database: Database
     vectorDB: VectorDB
     graphDB: GraphDB
@@ -588,8 +591,10 @@ class CoreMetadata:
     agent_memory_max_chars: int = 5000  # max chars to inject; default 5k. 0 = no truncation. When > 0, only last N chars; see MemoryFilesUsage.md
     use_daily_memory: bool = False  # inject memory/YYYY-MM-DD.md for today + yesterday (short-term, bounded context); see SessionAndDualMemoryDesign.md
     daily_memory_dir: str = ""  # empty = workspace_dir/memory; or path relative to project (e.g. database/daily_memory)
-    use_agent_memory_search: bool = True  # when True (default), retrieval-only: no bulk inject; model uses agent_memory_search + agent_memory_get. Set false for legacy bulk inject.
+    use_agent_memory_search: bool = True  # when True (default), inject capped bootstrap (OpenClaw-style) + tools; set false for legacy bulk inject only
     agent_memory_vector_collection: str = "homeclaw_agent_memory"  # Chroma collection for agent memory chunks
+    agent_memory_bootstrap_max_chars: int = 20000  # max chars for agent+daily bootstrap block (default/cloud); over cap = head 70% + tail 20% + marker
+    agent_memory_bootstrap_max_chars_local: int = 8000  # when request uses local model (mix mode); smaller cap for small context
     session: Dict[str, Any] = field(default_factory=dict)  # prune_keep_last_n, prune_after_turn, daily_reset_at_hour, idle_minutes, api_enabled
     compaction: Dict[str, Any] = field(default_factory=dict)  # enabled, reserve_tokens, max_messages_before_compact, compact_tool_results
     use_tools: bool = False  # enable tool layer (tool registry, execute tool_calls in chat loop)
@@ -639,6 +644,8 @@ class CoreMetadata:
     hybrid_router: Dict[str, Any] = field(default_factory=dict)  # default_route, heuristic, semantic, slm (enabled, threshold, paths/model)
     # Companion feature: when enabled, requests with conversation_type or session_id or channel_name matching session_id_value are routed to the companion plugin only (external plugin). See docs_design/CompanionFeatureDesign.md.
     companion: Dict[str, Any] = field(default_factory=dict)  # enabled: bool; plugin_id: str (default "companion"); session_id_value: str (default "companion")
+    # RAG memory summarization: periodic summarization + TTL for originals; summaries kept forever. See docs_design/RAGMemorySummarizationDesign.md
+    memory_summarization: Dict[str, Any] = field(default_factory=dict)  # enabled, schedule (daily|weekly|next_run), interval_days, keep_original_days, min_age_days, max_memories_per_batch
 
     @staticmethod
     def _normalize_system_plugins_env(raw: Any) -> Dict[str, Dict[str, str]]:
@@ -819,8 +826,9 @@ class CoreMetadata:
             silent=data.get('silent', False),
             log_to_console=data.get('log_to_console', True),
             use_memory=data.get('use_memory', True),
-            reset_memory=data.get('reset_memory', False),
             memory_backend=(data.get('memory_backend') or 'cognee').strip().lower(),
+            memory_check_before_add=bool(data.get('memory_check_before_add', False)),
+            default_location=(data.get('default_location') or '').strip(),
             database=database,
             vectorDB=vectorDB,
             graphDB=graphDB,
@@ -839,6 +847,8 @@ class CoreMetadata:
             daily_memory_dir=(data.get('daily_memory_dir') or '').strip(),
             use_agent_memory_search=bool(data.get('use_agent_memory_search', True)),
             agent_memory_vector_collection=(data.get('agent_memory_vector_collection') or 'homeclaw_agent_memory').strip(),
+            agent_memory_bootstrap_max_chars=max(500, int(data.get('agent_memory_bootstrap_max_chars', 20000) or 20000)),
+            agent_memory_bootstrap_max_chars_local=max(500, int(data.get('agent_memory_bootstrap_max_chars_local', 8000) or 8000)),
             session=data.get('session') if isinstance(data.get('session'), dict) else {},
             compaction=data.get('compaction') if isinstance(data.get('compaction'), dict) else {},
             use_tools=data.get('use_tools', False),
@@ -880,6 +890,7 @@ class CoreMetadata:
             main_llm_cloud=main_llm_cloud_val,
             hybrid_router=hybrid_router_val,
             companion=data.get('companion') if isinstance(data.get('companion'), dict) else {},
+            memory_summarization=data.get('memory_summarization') if isinstance(data.get('memory_summarization'), dict) else {},
         )
 
     # @staticmethod
@@ -906,8 +917,8 @@ class CoreMetadata:
                 'silent': core.silent,
                 'log_to_console': getattr(core, 'log_to_console', True),
                 'use_memory': core.use_memory,
-                'reset_memory': core.reset_memory,
                 'memory_backend': getattr(core, 'memory_backend', 'cognee') or 'cognee',
+                'default_location': getattr(core, 'default_location', '') or '',
                 'use_workspace_bootstrap': getattr(core, 'use_workspace_bootstrap', True),
                 'workspace_dir': getattr(core, 'workspace_dir', 'config/workspace'),
                 'use_tools': getattr(core, 'use_tools', False),

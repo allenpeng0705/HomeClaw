@@ -12,11 +12,23 @@ silent: false
 # When false: all logs go only to the log file (logs/core_debug.log); nothing to console. Use with e.g. "Get-Content logs\core_debug.log -Wait -Tail 50" or "tail -f logs/core_debug.log" to monitor. When true: logs also go to console.
 log_to_console: false
 use_memory: true
-reset_memory: false
 # memory_backend: cognee (always default) | chroma. Both backends supported. Cognee: configure via cognee: or Cognee .env. Chroma: in-house RAG via core.yml database, vectorDB, graphDB.
 # To empty memory for testing: POST or GET http://<core_host>:<core_port>/memory/reset (e.g. curl http://127.0.0.1:9000/memory/reset)
 # To empty knowledge base (all users): POST or GET http://<core_host>:<core_port>/knowledge_base/reset
 memory_backend: cognee   # default; set to chroma for in-house SQLite+Chroma
+# memory_check_before_add: when true, for small/local models (≤8B or ≤14B+GPU) an extra LLM call asks "should we store?" and only adds to RAG memory if answer contains "yes". Default false = store every user message; retrieval (top-k, score) filters at read time. Set true only if you want to reduce write volume at the cost of one extra call per message.
+# it will cost more time, suggest to be false.
+memory_check_before_add: false
+# default_location: optional fallback when no request/profile location (e.g. "New York, US"); see docs_design/SystemContextDateTimeAndLocation.md
+
+# RAG memory summarization: summarize batches of old memories into long-term summaries; originals kept for keep_original_days then deleted; summaries kept forever. See docs_design/RAGMemorySummarizationDesign.md. Supported with Chroma and Cognee (default) when the backend exposes list/get_data/delete_data.
+memory_summarization:
+  enabled: false
+  schedule: daily              # daily | weekly | next_run (next run time stored after each run)
+  interval_days: 1              # for next_run: run again after this many days
+  keep_original_days: 365       # TTL for raw memories; after this they are deleted (summary stays forever)
+  min_age_days: 7               # only summarize memories older than this (days)
+  max_memories_per_batch: 50     # max raw memories per summary batch
 # Per-user profile (learned facts: name, birthday, preferences, families, etc.). One JSON file per user under profile.dir (default: database/profiles). See docs/UserProfileDesign.md.
 profile:
   enabled: true
@@ -25,14 +37,19 @@ profile:
 use_workspace_bootstrap: true
 # Which workspace dir to load (e.g. config/workspace_day vs config/workspace_night for day/night agents)
 workspace_dir: config/workspace
-# Optional: inject curated long-term memory from a single Markdown file (AGENT_MEMORY.md). See docs_design/SessionAndDualMemoryDesign.md.
+# Optional: inject curated long-term memory from a single Markdown file (AGENT_MEMORY.md). See docs_design/SessionAndDualMemoryDesign.md. Format: plain Markdown; recommended one fact per paragraph (see MemoryFilesUsage.md § Format).
 use_agent_memory_file: true
 agent_memory_path: ""   # empty = workspace_dir/AGENT_MEMORY.md; or set path relative to project or absolute
 agent_memory_max_chars: 5000   # max chars to inject; default 5k. 0 = no truncation; see docs_design/MemoryFilesUsage.md
-# When true (recommended): index AGENT_MEMORY.md + daily memory and do NOT inject their content; model uses agent_memory_search + agent_memory_get to pull only relevant parts. Saves context and scales to large files.
+# use_agent_memory_search: how agent/daily memory is used in the prompt.
+#   true (default): Like OpenClaw: inject a capped bootstrap of AGENT_MEMORY + daily into the system prompt every time (so memory is always used), and index for tools; model can still use agent_memory_search + agent_memory_get for more.
+#   false (legacy): Inject last agent_memory_max_chars of AGENT_MEMORY.md and yesterday+today daily files into the system prompt every time. Simpler but uses more tokens and can duplicate with RAG.
 use_agent_memory_search: true
 agent_memory_vector_collection: homeclaw_agent_memory   # Chroma collection for agent memory chunks
-# Optional: inject short-term daily memory (memory/YYYY-MM-DD.md). Load yesterday + today on each request to keep context bounded and avoid filling the context window. Use append_daily_memory tool or write files manually.
+# Bootstrap cap (OpenClaw-style): when use_agent_memory_search is true, we inject a trimmed chunk of AGENT_MEMORY + daily so memory is always in context. When over cap we keep head (70%) + tail (20%) + marker.
+agent_memory_bootstrap_max_chars: 20000       # default/cloud; total chars for agent + daily bootstrap block
+agent_memory_bootstrap_max_chars_local: 8000 # when the request uses the local model (mix mode); use this smaller cap for small context windows
+# Optional: inject short-term daily memory (memory/YYYY-MM-DD.md). Load yesterday + today on each request. Today's file is created automatically at startup/first use; the model can append via append_daily_memory tool. Format: plain Markdown; recommended one note per paragraph (see MemoryFilesUsage.md § Format).
 use_daily_memory: true
 daily_memory_dir: ""    # empty = workspace_dir/memory; or e.g. database/daily_memory
 # Session management: pruning, lifecycle, API, dmScope. 
@@ -62,6 +79,9 @@ compaction:
   reserve_tokens: 4096        # tokens to leave free for the model's reply (not the same as ctx_size). Should be less than llama_cpp.ctx_size (e.g. 1024–4096); ctx_size is total window, this is just the reserve for output.
   max_messages_before_compact: 30   # max user+assistant+tool messages to keep (older trimmed or summarized)
   compact_tool_results: true  # when true, trim or replace large tool results in the tool loop with a short placeholder when over limit
+  # Single flag: when true, memory is written only in a dedicated flush turn before compaction; main prompt does not ask the model to call append_*. Omit or set true for default; set false to use the old behavior (model writes during the turn).
+  memory_flush_primary: true
+  memory_flush_prompt: "Pre-compaction memory flush. From the conversation so far, store durable memories now. Use append_agent_memory for lasting facts and append_daily_memory for today's short-term notes. APPEND only; do not overwrite. If nothing to store, reply briefly with 'Nothing to store.'"
 # Optional: enable tool layer (tool registry; model can call tools by name with args); see Design.md §3.6
 use_tools: true
 # Optional: inject skills (SKILL.md) from skills_dir into system prompt; see Design.md §3.6
@@ -115,6 +135,8 @@ system_plugins_env:
 orchestrator_unified_with_tools: true
 # Timeout for orchestrator intent/plugin LLM call and plugin.run() when unified is false. Unit: seconds. 0 = no timeout.
 orchestrator_timeout_seconds: 30
+# How long clients/proxies should wait for Core to respond (e.g. read PDF + summarize). Increase if you hit timeouts on long tasks (document_read, summarization). Proxies (nginx, Cloudflare) may need read_timeout >= this.
+inbound_request_timeout_seconds: 300
 # Prompt manager: load prompts from config/prompts with language/model overrides. See docs/PromptManagement.md.
 use_prompt_manager: true
 prompts_dir: config/prompts
@@ -178,7 +200,7 @@ tools:
   browser_enabled: false
   # When browser_enabled true and Playwright available: set to false to show the browser window (local testing only; on servers without a display use true or run under Xvfb).
   browser_headless: false
-  # Per-tool execution timeout. Unit: seconds. Prevents a single tool from hanging the system. 0 = no timeout.
+  # Per-tool execution timeout. Unit: seconds. Prevents a single tool from hanging the system. 0 = no timeout. For PDF read + summarize, use 300–600 so document_read and LLM reply can finish.
   tool_timeout_seconds: 0
 # Complex result viewer: save HTML result pages and optionally send a link. One web server for reports (port below); starts/stops with Core. Link = base_url + /result/<id>.html. We do not fetch public IP — you set base_url. Guide: docs/ComplexResultViewerDesign.md § "User guide: making the link work" (Cloudflare tunnel recommended: easy, cheap, stable; or use ngrok / any tunnel).
 result_viewer:
@@ -362,7 +384,7 @@ cloud_models:
     host: 127.0.0.1
     port: 4002
     api_key_name: GEMINI_API_KEY
-    api_key: "AIzaSyABrb_ZCt9nPSNwgluWBSqDSGJp-UeHW6w"
+    api_key: "AIzaSyCdkBoxeHK3oEMkD227xy7E-451DW-g3Rw"
     capabilities: [Functioncall, Chat]
   # Anthropic Claude
   - id: Claude-Sonnet
@@ -459,7 +481,7 @@ cloud_models:
 # main_llm: optional when main_llm_mode is set. When mode is "local" we use main_llm_local; when "cloud" we use main_llm_cloud; when "mix" we use both per request. Set main_llm only if you omit main_llm_mode (legacy: derive mode from main_llm).
 #main_llm: local_models/main_vl_model_4B
 main_llm_mode: mix
-main_llm_local: local_models/main_vl_model_4B
+main_llm_local: local_models/main_vl_model_8B
 main_llm_cloud: cloud_models/Gemini-2.5-Flash
 hybrid_router:
   default_route: cloud

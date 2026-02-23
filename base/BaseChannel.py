@@ -170,8 +170,9 @@ class BaseChannel:
             request_json = request.model_dump()
             request_json['channelType'] = request.channelType.value
             request_json['contentType'] = request.contentType.value
+            timeout_sec = float(os.environ.get("CORE_REQUEST_TIMEOUT", "300"))
             async with httpx.AsyncClient() as client:
-                response = await client.post(process_url, json=request_json, timeout=120.0)
+                response = await client.post(process_url, json=request_json, timeout=timeout_sec)
 
             logger.debug(f"core response: {response}")
             if response.status_code == 200:
@@ -192,8 +193,9 @@ class BaseChannel:
             request_json = request.model_dump()
             request_json['channelType'] = request.channelType.value
             request_json['contentType'] = request.contentType.value
+            timeout_sec = float(os.environ.get("CORE_REQUEST_TIMEOUT", "300"))
             async with httpx.AsyncClient() as client:
-                response = await client.post(process_url, json=request_json, timeout=120.0)
+                response = await client.post(process_url, json=request_json, timeout=timeout_sec)
 
             if response.status_code == 200:
                 return response.text
@@ -219,8 +221,9 @@ class BaseChannel:
             request_json = request.model_dump()
             request_json['channelType'] = request.channelType.value
             request_json['contentType'] = request.contentType.value
+            timeout_sec = float(os.environ.get("CORE_REQUEST_TIMEOUT", "300"))
             with httpx.Client() as client:
-                response = client.post(process_url, json=request_json, timeout=120.0)
+                response = client.post(process_url, json=request_json, timeout=timeout_sec)
 
             logger.info(f"core response: status={response.status_code}")
             if response.status_code == 200:

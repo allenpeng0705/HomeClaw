@@ -2,8 +2,8 @@
 # Character and language are what make the companion interesting and useful: they shape who the companion is and how they reply.
 # Per-user overrides: database/companion_store/{user_id}_settings.json or POST .../settings/{user_id}
 
-name: Veda
-character: friend   # girlfriend, boyfriend, wife, husband, sister, brother, child, friend, parent — defines the relationship and tone
+name: Sabrina
+character: girlfriend   # girlfriend, boyfriend, wife, husband, sister, brother, child, friend, parent — defines the relationship and tone
 language: en        # en, zh, ja, ko, es, fr, de, pt, it, ... — reply language; very important for a natural experience
 response_length: medium   # short, medium, long
-idle_days_before_nudge: 0   # 0 = disabled; after N days without message, companion may nudge (proactive)
+idle_days_before_nudge: 1   # 0 = disabled; after N days without message, companion may nudge (proactive)

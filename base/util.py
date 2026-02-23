@@ -38,10 +38,6 @@ from base.base import CoreMetadata, User, LLM, EmailAccount
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 core_metadata =CoreMetadata.from_yaml(os.path.join(root_dir, 'config', 'core.yml'))
 data_root = os.path.join(root_dir, 'database')
-if  (os.path.exists(data_root) and core_metadata.reset_memory == True):
-    core_metadata.reset_memory = False
-    CoreMetadata.to_yaml(core_metadata, os.path.join(root_dir, 'config', 'core.yml'))
-    shutil.rmtree(data_root)
 
 # Keys (case-insensitive) whose values are redacted in plugin/tool logs
 _SENSITIVE_PARAM_KEYS = frozenset(k.lower() for k in (
@@ -195,10 +191,6 @@ class Util:
         root = self.root_path()
         return os.path.join(root, 'database')    
 
-    def reset_memory(self): 
-        self.core_metadata.reset_memory = True
-        CoreMetadata.to_yaml(self.core_metadata, os.path.join(self.config_path(), 'core.yml'))
-    
     def plugins_path(self):
         root = self.root_path()
         return os.path.join(root, 'plugins')

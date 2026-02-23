@@ -14,17 +14,17 @@ This doc describes how a **companion** feature (girlfriend/boyfriend/parent/frie
 ## 2. Chat history (per user)
 
 - **Key:** Conversation is keyed by **sender** (user) and **responder** (companion name).
-- **API:** `get_latest_chats_by_role(sender_name=user_name, responder_name=companion_name, num_rounds=N)` returns **that user’s** chat history with the companion.
-- **Storage:** Companion chat is stored **only in companion-specific storage**, not in the main user database (see §7). Use `add_chat_history_by_role(...)` (or equivalent) into the companion store.
-- So: one thread per (user, companion). Each user has their own thread; no mixing; main user DB untouched.
+- **When combined (picker = a user from user.yml):** All companion chats go into **that user's memory and chat histories**; the channel is **companion**. So storage is the main user DB (memory + chat history), not a separate companion-only store. One unified history per user, with channel distinguishing assistant vs companion.
+- **When not combined (picker = "System"):** Use current behavior (e.g. companion-specific storage or default "companion" user). See §7.
+- So: when combined, one thread per (user, companion) in the user's main chat/memory; when System, behavior as today.
 
 ---
 
 ## 3. Memory (RAG, per user)
 
-- **Scope:** When the companion uses RAG (e.g. to recall facts, preferences, or past context), **search memory for that user only** — pass `user_id` (and optionally filters) so results are scoped to that user.
-- **Do not** use the main user/assistant memory for companion; use a dedicated companion memory store/namespace keyed by user_id (and companion name for multi-companion). So companion memory is **combined with one user** and **separate** from the main system (see §7).
-- Companion memory is **combined with one user** — no mixing with other users’ memories.
+- **When combined (picker = user):** Companion uses the **same** user's memory and chat history as the main assistant; RAG and chat are scoped to that user, with channel = companion for companion traffic. So one user, one memory/chat store; channel distinguishes assistant vs companion.
+- **When not combined (picker = System):** Use current behavior (e.g. dedicated companion store or default user scope). See §7.
+- **Scope:** When the companion uses RAG, **search memory for that user only** — pass `user_id` (and optionally channel filter). No mixing across users.
 
 ---
 
@@ -40,14 +40,13 @@ This doc describes how a **companion** feature (girlfriend/boyfriend/parent/frie
 
 ## 5. Summary
 
-| Aspect | Combined with one user | How |
-|--------|------------------------|-----|
-| **Chat history** | Yes | `sender_name=user`, `responder_name=companion_name` — one thread per (user, companion). |
-| **Memory (RAG)** | Yes | Search with `user_id` (or user-scoped namespace); no shared pool for companion. |
-| **Proactive delivery** | Yes | Persist last channel per user; send via `send_response_to_channel_by_key(user_key)`. |
-| **Settings/persona** | Optional per user | Store companion name, character, settings keyed by user_id if you want per-user customization. |
+| Aspect | Combined (picker = user) | Not combined (picker = System) |
+|--------|---------------------------|---------------------------------|
+| **Chat / memory** | All chats go into the user's memory and chat histories; **channel = companion**. | Current behavior (e.g. companion store or default user). |
+| **Picker** | User selects a user from user.yml; client sends that `user_id`. | User selects "System"; no per-user binding. |
+| **Location** | Companion app, WebChat, control UI ask for location permission; when granted, send location → latest location per user. | Same clients can still send location if permitted; when System, stored for default user if applicable. |
 
-Implementing the companion as a **plugin** (or external service) that always receives and uses **one user_id** (and optionally user_name) for chat, memory, and delivery keeps the feature **combined with one user** and avoids mixing data across users.
+When combined, the companion is implemented so that it receives **one user_id** (from the picker) and all storage (memory, chat history, profile, latest location) is for that user, with channel = companion where applicable.
 
 ---
 
@@ -69,13 +68,13 @@ These clients send **target** or **session** (e.g. `conversation_type=companion`
 
 ---
 
-## 7. Data separation: companion data never in main user DB
+## 7. Data separation and combined mode
 
-**Principle:** Store **all** companion-related data (messages, chat histories, memory, etc.) **separately** from the main user/assistant database. The companion feature must not affect the rest of the system for that user.
+**When the client is combined with a user (picker = a user from user.yml):** All companion chats go into **that user's memory and chat histories**; the channel is **companion**. So there is no separate companion-only store for that case — the user's main memory and chat history include both assistant and companion traffic, with channel distinguishing them. This gives one unified history per user.
 
-- Even when messages come from the **same channel** and the **same user**, if they are for the companion, **do not** store them in the main user database. Store them only in companion-specific storage (or a dedicated namespace keyed by companion name and user_id).
-- So: same user, same channel — assistant traffic → main user DB; companion traffic → companion store only. No mixing. The main system (user DB, assistant chat, etc.) is untouched by companion activity.
-- This keeps the companion feature **fully separated** and is **reasonable** for isolation, security, and future multi-companion support.
+**When the client is not combined (picker = "System"):** Use current behavior: no per-user binding; companion may use a default user (e.g. "companion") or plugin-specific storage as today. So "System" = no combination; data handling remains as before (e.g. separate or default store).
+
+**Summary:** Combined → user's memory and chat, channel = companion. Not combined (System) → works like now. Companion app, WebChat, and control UI provide a picker (users from user.yml + "System") and request location permission on their platforms.
 
 ---
 
@@ -100,6 +99,17 @@ The design should allow running **multiple companions** with different names (e.
 **Recommendation:** Prefer **1 (client sends target or session)** so Core doesn’t have to guess. If the channel cannot send metadata (e.g. plain WhatsApp with one number), use **3 (keywords)** as fallback and document the trigger clearly. Option **2** is good when you can afford a separate channel or number for the companion.
 
 **Companion app and WebChat:** We control these clients, so we can send target/session there (e.g. "Assistant" vs "Companion" tab → different `session_id` or `conversation_type`). We **do not need a new user** for the companion: the **same real user** (the human) is the `user_id` in both flows. The companion is a **conversation mode** for that user (distinguished by session or conversation_type), not a separate user identity. So: one user_id, two conversation types (assistant vs companion).
+
+**User picker (combined vs System), storage when combined, and location permission:**
+
+- **Picker:** The Companion app (and WebChat, homeclaw-browser) must provide a **picker list** to select which user to combine with. The list contains:
+  - Every user defined in `config/user.yml` (e.g. from Core API that returns allowed users).
+  - **"System"** — meaning **no combination**; when selected, the app works like today (current logic, no per-user binding).
+- **When a user is selected (combined):** All companion chats for that session go into **that user's memory and chat histories**; the channel is **companion**. So when combined, we do **not** keep companion data in a separate companion-only store — we store in the main user's memory and chat history with channel = companion. The user gets one unified history (assistant + companion) keyed by that user.
+- **When "System" is selected (not combined):** No combination; behavior stays as it is now (e.g. default "companion" user or plugin-specific storage, no per-user identity from the picker).
+- **Location permission:** The **Companion app** must request **location permission on all platforms** (iOS, Android, desktop). **WebChat** and **homeclaw-browser control UI** must also ask for location permission when running in a context that supports geolocation (e.g. browser). So when the user grants it, these clients can send location to Core for latest-location-per-user (see SystemContextDateTimeAndLocation.md).
+
+**Linking the app to a user in user.yml (multi-user / family):** When multiple people use the same Companion app (or WebChat, homeclaw-browser), each person uses the **picker** to select their identity (a user from user.yml). The client sends that **user_id** with every request. Core resolves it via `check_permission` and sets `system_user_id`; when combined, all storage (memory, chat history, profile, latest location) is for that user, channel = companion where applicable. **"System"** in the picker means no combination and current behavior.
 
 **Implementation note:** The entry point (bridge, WebChat, companion app, homeclaw-browser) decides “this request is for the companion” (using `conversation_type` / `session_id` for in-scope clients, or the configurable keyword for other channels), then invokes the **companion plugin** only. Core/main flow is not involved.
 

@@ -4,6 +4,31 @@ This doc summarizes how **AGENT_MEMORY.md** and **daily memory** (`memory/YYYY-M
 
 ---
 
+## Format (recommended)
+
+Both files are **plain Markdown** (`.md`). The code does not enforce a schema; it only appends the `content` you pass (with a blank line before each new append). For consistent, search-friendly entries, use this convention:
+
+| File | Recommended format | Why |
+|------|--------------------|-----|
+| **AGENT_MEMORY.md** | One fact or preference per **paragraph** (blank line between). Optionally prefix with date: `YYYY-MM-DD: ...`. Use `## Section` headings to group (e.g. `## Preferences`, `## Decisions`). | Indexing chunks by size; one paragraph per entry keeps retrieval precise. Dates help traceability. |
+| **Daily memory** (`memory/YYYY-MM-DD.md`) | One note per paragraph. Optionally start with a bullet and short label: `- **Session:** ...` or `- 14:30 Summarized the report.` | Same chunking; labels make the file scannable. The filename already is the date, so time-in-day is optional. |
+
+**Examples**
+
+- **AGENT_MEMORY.md:**  
+  `2025-02-19: User prefers dark mode for the app.`  
+  or with headings:  
+  `## Preferences\n\n- Dark mode for the app.\n\n- Notifications off after 22:00.`
+
+- **Daily memory:**  
+  `- **Session:** Discussed project timeline; user will confirm by Friday.`  
+  or  
+  `Summarized the PDF; key points saved. User asked to remind next week.`
+
+You can write in any Markdown you like; the above is a **recommendation** so the model and humans produce consistent, easy-to-search entries.
+
+---
+
 ## Two kinds of memory files
 
 | File(s) | Purpose | When loaded | Bounded? |
@@ -32,8 +57,8 @@ If the same fact appears in both, the system prompt already says that **AGENT_ME
 
 **It depends on `use_agent_memory_search`.**
 
-- **When use_agent_memory_search is true (default):** We do **not** load or inject any AGENT_MEMORY or daily memory content. The system prompt includes only a short directive: the model must use **agent_memory_search** (semantic search over AGENT_MEMORY.md + daily memory) and **agent_memory_get** (read by path and line range) to pull only relevant parts before answering questions about prior work, decisions, preferences, dates, people, or todos. This **retrieval-first** approach saves context and scales to large files.
-- **When use_agent_memory_search is false:** We inject the last `agent_memory_max_chars` (default 5k) of AGENT_MEMORY into the prompt, and optionally the full daily memory block. So the model sees a capped chunk every time (legacy behavior).
+- **When use_agent_memory_search is true (default):** We use the **same approach as OpenClaw**: (1) **Bootstrap:** We inject a capped chunk of AGENT_MEMORY.md and daily memory (yesterday + today) into the system prompt every time, so memory is always in context. The combined block is trimmed to `agent_memory_bootstrap_max_chars` (default 20k for cloud) or `agent_memory_bootstrap_max_chars_local` (default 8k when the request uses the local model in mix mode). (2) **When content exceeds the cap:** We keep **head (70% of cap) + tail (20% of cap)** with a marker in between, so the model still sees structure and recent content. (3) **Tools:** The model can still use **agent_memory_search** and **agent_memory_get** to pull more. So memory is always used (bootstrap) and the model can retrieve more via tools.
+- **When use_agent_memory_search is false:** We inject the last `agent_memory_max_chars` (default 5k) of AGENT_MEMORY into the prompt, and optionally the full daily memory block (legacy behavior).
 
 **OpenClaw (from `../clawdbot`):** They do **not** load the whole MEMORY.md into context. Their approach:
 
@@ -41,14 +66,14 @@ If the same fact appears in both, the system prompt already says that **AGENT_ME
 2. **Retrieval tools:** The agent is given **memory_search** (semantic search over MEMORY.md + memory/*.md) and **memory_get** (read a snippet by path + from/lines). The system prompt tells the model: “Before answering anything about prior work… run memory_search on MEMORY.md + memory/*.md; then use memory_get to pull only the needed lines.” So additional context is **retrieved on demand** as tool results (snippets), not as a full-file block (`agents/tools/memory-tool.ts`, `agents/system-prompt.ts`).
 3. **Indexing:** MEMORY.md and memory/*.md are indexed (vector + optional keyword/SQLite) so memory_search returns relevant snippets; there is even a `maxInjectedChars`-style clamp on search results for the qmd backend.
 
-So OpenClaw avoids loading the whole MEMORY.md by: (a) capping its bootstrap copy at 20k chars, and (b) relying on memory_search + memory_get to pull only relevant parts when needed. **HomeClaw leverages (b) by default:** when `use_agent_memory_search: true`, we inject no agent/daily memory content and the model uses agent_memory_search + agent_memory_get to pull only what’s needed.
+So OpenClaw avoids loading the whole MEMORY.md by: (a) capping its bootstrap copy at 20k chars, and (b) relying on memory_search + memory_get to pull only relevant parts when needed. **HomeClaw now aligns with OpenClaw (bootstrap + tools):** when `use_agent_memory_search: true`, we inject a capped bootstrap of agent/daily memory and the model uses agent_memory_search + agent_memory_get to pull only what’s needed.
 
 ---
 
 ## When is AGENT_MEMORY.md used?
 
-- **When:** When `use_agent_memory_file` is `true`, the file is either (1) indexed for retrieval when `use_agent_memory_search: true`, or (2) read and injected (capped) when `use_agent_memory_search: false`.
-- **How (retrieval-first, default):** No content is injected. The model is instructed to use **agent_memory_search** then **agent_memory_get** before answering questions about prior work, decisions, preferences, etc. Indexing runs at startup.
+- **When:** When `use_agent_memory_file` is `true`, the file is either (1) bootstrap-injected (capped) + indexed for tools when `use_agent_memory_search: true`, or (2) read and injected (last N chars) when `use_agent_memory_search: false`.
+- **How (retrieval + bootstrap, default):** A capped bootstrap of AGENT_MEMORY + daily is injected (see **Do we load the whole AGENT_MEMORY.md** above); over cap we use head 70% + tail 20% + marker. The model is also instructed to use **agent_memory_search** then **agent_memory_get** for more. Indexing runs at startup.
 - **How (legacy):** The last `agent_memory_max_chars` (default 5k) is injected as **"## Agent memory (curated)"**. The model is told this section is authoritative when it conflicts with RAG.
 - **Writing:** The agent (or user) can append via the `append_agent_memory` tool. Users can also edit the file manually. After manual edits, restart Core to reindex when using retrieval.
 

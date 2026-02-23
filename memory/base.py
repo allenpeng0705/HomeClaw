@@ -172,9 +172,13 @@ class MemoryBase(ABC):
         pass
 
 
-    @abstractmethod       
+    @abstractmethod
     def delete_all(self, user_name=None, user_id=None, agent_id=None, run_id=None):
         pass
+
+    def supports_summarization(self) -> bool:
+        """Whether this backend supports RAG memory summarization (get_all with created_at, add with metadata, delete by id). Default False."""
+        return False
 
 
     @abstractmethod
