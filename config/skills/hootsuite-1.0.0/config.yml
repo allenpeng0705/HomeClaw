@@ -1,0 +1,5 @@
+# Hootsuite — OAuth 2.0 access token
+# Get token at https://developer.hootsuite.com (create app, OAuth flow).
+# Environment variable HOOTSUITE_ACCESS_TOKEN overrides this value when set.
+
+hootsuite_access_token: ""

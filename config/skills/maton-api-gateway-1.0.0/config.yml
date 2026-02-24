@@ -1,0 +1,5 @@
+# Maton API Gateway skill — API key for gateway.maton.ai and ctrl.maton.ai
+# Get key at https://www.maton.ai/settings
+# Environment variable MATON_API_KEY overrides this value when set.
+
+maton_api_key: ""

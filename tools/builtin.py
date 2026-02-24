@@ -28,7 +28,7 @@ from base.tools import ToolContext, ToolDefinition, ToolRegistry, ROUTING_RESPON
 from base.skills import get_skills_dir
 from base.workspace import get_workspace_dir, get_agent_memory_file_path, append_daily_memory
 from base.util import Util, redact_params_for_log
-from base.base import PluginResult
+from base.base import PluginResult, User
 from base.media_io import save_data_url_to_media_folder
 from loguru import logger
 import time as _time
@@ -36,6 +36,55 @@ import time as _time
 # ---- Process job store (background exec) ----
 _process_jobs: Dict[str, Dict[str, Any]] = {}
 _process_jobs_lock = asyncio.Lock()
+
+# Keyed skills: require API key from user.yml (per user) or from skill config/env (Companion without user).
+# skill_name -> (user_yml_key, env_var)
+KEYED_SKILLS = {
+    "maton-api-gateway-1.0.0": ("maton_api_key", "MATON_API_KEY"),
+    "x-api-1.0.0": ("x_access_token", "X_ACCESS_TOKEN"),
+    "meta-social-1.0.0": ("meta_access_token", "META_ACCESS_TOKEN"),
+    "hootsuite-1.0.0": ("hootsuite_access_token", "HOOTSUITE_ACCESS_TOKEN"),
+}
+
+
+def _get_keyed_skill_env_overrides(
+    skill_name: str, context: ToolContext
+) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
+    """
+    Get env overrides for a keyed skill from current user's skill_api_keys in user.yml.
+    Returns (env_overrides, error_msg). If error_msg is set, caller should return it.
+    If env_overrides is not None and not empty, caller should add to skill env (subprocess) or pass to in-process.
+    If system_user_id is None or 'system' or 'companion' (Companion without user): return (None, None) = use skill config/env directly.
+    Never raises: on any exception returns (None, generic_error_msg) so Core never crashes.
+    """
+    try:
+        if skill_name not in KEYED_SKILLS:
+            return {}, None
+        user_yml_key, env_var = KEYED_SKILLS[skill_name]
+        system_user_id = (getattr(context, "system_user_id", None) or "").strip()
+        if not system_user_id or system_user_id.lower() in ("system", "companion"):
+            return None, None
+        users = Util().get_users() or []
+        if not isinstance(users, list):
+            users = []
+        user = next((u for u in users if (getattr(u, "id", None) or getattr(u, "name", "")) == system_user_id), None)
+        keys = (getattr(user, "skill_api_keys", None) or {}) if user else {}
+        if not isinstance(keys, dict):
+            keys = {}
+        raw_val = keys.get(user_yml_key)
+        key_val = (str(raw_val).strip() if raw_val is not None else "") or ""
+        if not key_val:
+            return (
+                None,
+                f"This skill requires an API key. Add it under your user in config/user.yml (skill_api_keys.{user_yml_key}).",
+            )
+        return {env_var: key_val}, None
+    except Exception as e:
+        logger.debug("keyed skill env overrides failed: {}", e)
+        return (
+            None,
+            "Could not load user config. Add your API key under config/user.yml (skill_api_keys) for this skill.",
+        )
 
 
 async def _process_reader(proc: asyncio.subprocess.Process, job_id: str, out_key: str, stream: asyncio.StreamReader) -> None:
@@ -74,15 +123,25 @@ async def _start_background_process(executable: str, args: List[str], timeout: i
     asyncio.create_task(_process_reader(proc, job_id, "stderr", proc.stderr))
     return job_id
 
-def _run_py_script_in_process(script_path: Path, args_list: List[str], skill_folder: Path) -> tuple:
+def _run_py_script_in_process(
+    script_path: Path, args_list: List[str], skill_folder: Path, env_overrides: Optional[Dict[str, str]] = None
+) -> tuple:
     """Run a .py script in Core's process (same env). Returns (stdout_str, stderr_str). Run from a thread to avoid blocking.
     Same logic for all Python skills. Script runs in Core's process so a buggy script (e.g. C extension crash, os._exit)
-    could affect Core; only skills listed in run_skill_py_in_process_skills run in-process; others run in subprocess."""
+    could affect Core; only skills listed in run_skill_py_in_process_skills run in-process; others run in subprocess.
+    env_overrides: optional dict of env var -> value to set for the duration of the script (e.g. per-user API keys); restored in finally. Never None inside (caller passes {})."""
     import io
+    if env_overrides is None or not isinstance(env_overrides, dict):
+        env_overrides = {}
     old_argv = list(sys.argv)
     old_cwd = os.getcwd()
     old_stdout, old_stderr = sys.stdout, sys.stderr
     old_path = list(sys.path)
+    old_env: Dict[str, Optional[str]] = {}
+    for k, v in env_overrides.items():
+        if k and isinstance(v, str):
+            old_env[k] = os.environ.get(k)
+            os.environ[k] = v
     out_io = io.StringIO()
     err_io = io.StringIO()
     try:
@@ -110,6 +169,11 @@ def _run_py_script_in_process(script_path: Path, args_list: List[str], skill_fol
         # Catch all (Exception + KeyboardInterrupt etc.) so nothing propagates out of this thread
         err_io.write(f"{type(e).__name__}: {e}\n")
     finally:
+        for k, v in old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
         sys.argv = old_argv
         os.chdir(old_cwd)
         sys.path[:] = old_path
@@ -867,7 +931,8 @@ async def _append_agent_memory_executor(arguments: Dict[str, Any], context: Tool
             return json.dumps({"ok": False, "message": "AGENT_MEMORY.md is disabled (use_agent_memory_file: false). Enable in config/core.yml to use append_agent_memory."})
         ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
         agent_path = getattr(meta, "agent_memory_path", None) or ""
-        path = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=agent_path or None)
+        sys_uid = getattr(context, "system_user_id", None) if context else None
+        path = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=agent_path or None, system_user_id=sys_uid)
         if path is None:
             return json.dumps({"ok": False, "message": "AGENT_MEMORY path not configured."})
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -881,7 +946,7 @@ async def _append_agent_memory_executor(arguments: Dict[str, Any], context: Tool
             try:
                 re_sync = getattr(core, "re_sync_agent_memory", None)
                 if callable(re_sync):
-                    n = await re_sync()
+                    n = await re_sync(system_user_id=sys_uid)
                     return json.dumps({"ok": True, "message": f"Appended to {path.name}", "path": str(path), "chunks_indexed": n})
             except Exception:
                 pass
@@ -902,7 +967,8 @@ async def _append_daily_memory_executor(arguments: Dict[str, Any], context: Tool
             return json.dumps({"ok": False, "message": "Daily memory is disabled (use_daily_memory: false). Enable in config/core.yml to use append_daily_memory."})
         ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
         daily_dir = getattr(meta, "daily_memory_dir", None) or ""
-        ok = append_daily_memory(content, d=None, workspace_dir=ws_dir, daily_memory_dir=daily_dir if daily_dir else None)
+        sys_uid = getattr(context, "system_user_id", None) if context else None
+        ok = append_daily_memory(content, d=None, workspace_dir=ws_dir, daily_memory_dir=daily_dir if daily_dir else None, system_user_id=sys_uid)
         if ok:
             from datetime import date
             # Re-sync so agent_memory_search finds the new content without restarting Core
@@ -911,7 +977,7 @@ async def _append_daily_memory_executor(arguments: Dict[str, Any], context: Tool
                 try:
                     re_sync = getattr(core, "re_sync_agent_memory", None)
                     if callable(re_sync):
-                        n = await re_sync()
+                        n = await re_sync(system_user_id=sys_uid)
                         return json.dumps({"ok": True, "message": f"Appended to daily memory ({date.today().isoformat()}.md)", "chunks_indexed": n})
                 except Exception:
                     pass
@@ -947,7 +1013,8 @@ async def _agent_memory_search_executor(arguments: Dict[str, Any], context: Tool
         except (TypeError, ValueError):
             min_score = None
     try:
-        results = await core.search_agent_memory(query=query, max_results=max_results, min_score=min_score)
+        sys_uid = getattr(context, "system_user_id", None) if context else None
+        results = await core.search_agent_memory(query=query, max_results=max_results, min_score=min_score, system_user_id=sys_uid)
     except Exception as e:
         return json.dumps({"results": [], "message": str(e)})
     return json.dumps({"results": results}, ensure_ascii=False, indent=0)
@@ -980,7 +1047,8 @@ async def _agent_memory_get_executor(arguments: Dict[str, Any], context: ToolCon
         except (TypeError, ValueError):
             lines = None
     try:
-        out = core.get_agent_memory_file(path=path, from_line=from_line, lines=lines)
+        sys_uid = getattr(context, "system_user_id", None) if context else None
+        out = core.get_agent_memory_file(path=path, from_line=from_line, lines=lines, system_user_id=sys_uid)
     except Exception as e:
         return json.dumps({"path": path, "text": "", "message": str(e)})
     if out is None:
@@ -1993,6 +2061,15 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
         full_out, base_for_validation = r_out
         if base_for_validation is not None:
             skill_env["HOMECLAW_OUTPUT_DIR"] = str(full_out)
+    # Keyed skills: inject per-user API keys from user.yml, or use skill config/env when Companion without user.
+    try:
+        keyed_overrides, keyed_error = _get_keyed_skill_env_overrides(skill_name, context)
+    except Exception:
+        keyed_overrides, keyed_error = None, "Could not load user config for this skill."
+    if keyed_error:
+        return keyed_error
+    if isinstance(keyed_overrides, dict) and keyed_overrides:
+        skill_env.update(keyed_overrides)
     args_list: List[str] = []
     if args_input is not None:
         if isinstance(args_input, list):
@@ -2035,8 +2112,16 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
             if in_process:
                 logger.info("run_skill: executing Python script in-process (Core Python: %s)", sys.executable)
                 loop = asyncio.get_event_loop()
+                env_for_process = keyed_overrides if isinstance(keyed_overrides, dict) else {}
                 out_str, err_str = await asyncio.wait_for(
-                    loop.run_in_executor(None, _run_py_script_in_process, script_path, args_list, skill_folder),
+                    loop.run_in_executor(
+                        None,
+                        _run_py_script_in_process,
+                        script_path,
+                        args_list,
+                        skill_folder,
+                        env_for_process,
+                    ),
                     timeout=timeout,
                 )
                 out = (out_str or "").strip()

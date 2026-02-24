@@ -46,9 +46,10 @@ You do **not** need to add a matching entry to `skills_force_include_rules` in c
 
 1. Create a subfolder under `config/skills/`, e.g. `config/skills/weather-help/`.
 2. Add **SKILL.md** with `name`, `description`, and optional body.
-3. (Optional) Add **scripts/** with runnable scripts; the agent can call **run_skill**(skill_name, script, args).
-4. Set **use_skills: true** and **skills_dir: config/skills** in `config/core.yml`.
-5. Restart or send a new message; the model will see "Available skills" in its context.
+3. (Optional) Add **USAGE.md** in the same folder: user-facing "how to ask" examples. When the skill is loaded with body (see **skills_include_body_for** in core.yml), USAGE.md is appended to the skill body so the model can answer "how do I use this?".
+4. (Optional) Add **scripts/** with runnable scripts; the agent can call **run_skill**(skill_name, script, args).
+5. Set **use_skills: true** and **skills_dir: config/skills** in `config/core.yml`. To include full skill body (and USAGE.md) for specific skills so the model can answer "how do I use this?", set **skills_include_body_for: [folder-name]** (e.g. `[maton-api-gateway-1.0.0]`).
+6. Restart or send a new message; the model will see "Available skills" in its context.
 
 ## When to add a force-include rule (config/core.yml)
 
@@ -81,6 +82,8 @@ When `skills_use_vector_search` is false, Core loads every skill from `skills_di
 
 - **desktop-ui** — macOS-only desktop UI automation (peekaboo). Use **run_skill**(skill_name="desktop-ui", script="run.py", args=[...]). On Windows/Linux, run.py returns a clear "not available on this platform" message; Core does not crash.
 - **ip-cameras** — RTSP/ONVIF IP cameras (camsnap + ffmpeg). Use **run_skill**(skill_name="ip-cameras", script="run.py", args=[...]). If camsnap or ffmpeg is missing, run.py returns a clear error; Core does not crash.
+- **Social (official APIs, free):** **x-api-1.0.0** (X/Twitter — post tweet, read timeline via X API v2), **meta-social-1.0.0** (Facebook Page + Instagram via Meta Graph API). Use **run_skill** with script `request.py`; set `X_ACCESS_TOKEN` or `META_ACCESS_TOKEN` (or in skill config.yml).
+- **Social (optional, paid):** **hootsuite-1.0.0** — post/schedule to X, Facebook, LinkedIn, Instagram via Hootsuite. Requires Hootsuite subscription and **HOOTSUITE_ACCESS_TOKEN**. Use **run_skill** with script `request.py`: `list` (profiles), `post <profile_id> <text> [scheduledSendTime]`.
 
 You can add skill folders from other registries or create your own. HomeClaw has equivalent tools for exec, browser, cron, sessions_*, memory, file, web; most skills that use those tools are usable. See **Design.md §3.6**.
 

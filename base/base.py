@@ -242,28 +242,87 @@ class User:
     permissions: List[str] = field(default_factory=list)
     # Unique system user id for all storage (chat, memory, KB, profile). If omitted in yaml, defaults to name.
     id: Optional[str] = None
+    # Optional: API keys for keyed skills (maton-api-gateway, x-api, meta-social, hootsuite). If missing for a user, that skill is not available. Keys: maton_api_key, x_access_token, meta_access_token, hootsuite_access_token.
+    skill_api_keys: Optional[Dict[str, str]] = None
 
     @staticmethod
     def from_yaml(yaml_file: str) -> List['User']:
-        with open(yaml_file, 'r', encoding='utf-8') as file:
-            data = yaml.safe_load(file)
+        """Load users from user.yml. Never raises: on any error returns [] so Core never crashes."""
+        try:
+            with open(yaml_file, 'r', encoding='utf-8') as file:
+                data = yaml.safe_load(file)
+        except Exception:
+            return []
+        if not isinstance(data, dict):
+            return []
+        raw_list = data.get('users')
+        if not isinstance(raw_list, list):
+            return []
         users = []
-        for u in data.get('users') or []:
-            uid = u.get('id') or u.get('name')
-            users.append(User(
-                name=u.get('name', ''),
-                email=u.get('email') or [],
-                im=u.get('im') or [],
-                phone=u.get('phone') or [],
-                permissions=u.get('permissions') or [],
-                id=uid,
-            ))
+        for i, u in enumerate(raw_list):
+            if not isinstance(u, dict):
+                continue
+            try:
+                name = (u.get('name') or '').strip() or f"user_{i}"
+                uid = (u.get('id') or u.get('name') or name).strip() or name
+                email = u.get('email')
+                im = u.get('im')
+                phone = u.get('phone')
+                permissions = u.get('permissions')
+                if not isinstance(email, list):
+                    email = []
+                if not isinstance(im, list):
+                    im = []
+                if not isinstance(phone, list):
+                    phone = []
+                if not isinstance(permissions, list):
+                    permissions = []
+                raw_keys = u.get('skill_api_keys')
+                skill_api_keys = None
+                if isinstance(raw_keys, dict):
+                    try:
+                        skill_api_keys = {
+                            str(k).strip(): str(v).strip()
+                            for k, v in raw_keys.items()
+                            if k and v and str(v).strip()
+                        }
+                        if not skill_api_keys:
+                            skill_api_keys = None
+                    except Exception:
+                        skill_api_keys = None
+                users.append(User(
+                    name=name,
+                    email=email,
+                    im=im,
+                    phone=phone,
+                    permissions=permissions,
+                    id=uid,
+                    skill_api_keys=skill_api_keys,
+                ))
+            except Exception:
+                continue
         return users
 
     @staticmethod
-    def to_yaml(users: List['User'], yaml_file: str):
-        """Write users to user.yml; preserve comments and other keys (ruamel round-trip)."""
-        users_data = [user.__dict__ for user in users]
+    def to_yaml(users: List['User'], yaml_file: str) -> None:
+        """Write users to user.yml; preserve comments and other keys. Never raises: logs and returns on write failure."""
+        users_data = []
+        for user in users:
+            try:
+                d = {
+                    "name": getattr(user, "name", "") or "",
+                    "email": list(getattr(user, "email", None) or []),
+                    "im": list(getattr(user, "im", None) or []),
+                    "phone": list(getattr(user, "phone", None) or []),
+                    "permissions": list(getattr(user, "permissions", None) or []),
+                    "id": getattr(user, "id", None) or getattr(user, "name", ""),
+                }
+                keys = getattr(user, "skill_api_keys", None)
+                if isinstance(keys, dict) and keys:
+                    d["skill_api_keys"] = {str(k): str(v) for k, v in keys.items() if k and v}
+                users_data.append(d)
+            except Exception:
+                continue
         try:
             from ruamel.yaml import YAML
             yaml_rt = YAML()
@@ -277,9 +336,11 @@ class User:
                 return
         except Exception:
             pass
-        # Fallback: file missing or ruamel not available
-        with open(yaml_file, 'w', encoding='utf-8') as file:
-            yaml.safe_dump({'users': users_data}, file, default_flow_style=False, sort_keys=False)
+        try:
+            with open(yaml_file, 'w', encoding='utf-8') as file:
+                yaml.safe_dump({'users': users_data}, file, default_flow_style=False, sort_keys=False)
+        except Exception:
+            pass
 
     @staticmethod
     def validate_no_overlapping_channel_ids(users: List['User']) -> None:
@@ -613,6 +674,8 @@ class CoreMetadata:
     skills_refresh_on_startup: bool = True  # resync skills_dir → vector DB on Core startup when skills_use_vector_search
     skills_test_dir: str = ""  # optional; if set, full sync every time (id = test__<folder>); for testing skills
     skills_incremental_sync: bool = False  # when true, skills_dir only processes folders not already in vector store (new only)
+    # Optional: for these skill folders, include full SKILL.md body (and USAGE.md if present) in the prompt so the model can answer "how do I use this?". List of folder names.
+    skills_include_body_for: List[str] = field(default_factory=list)
     # Optional: when user query matches a regex, ensure these skill folders are in the prompt and optionally append an instruction. List of { pattern: str, folders: [str], instruction?: str }.
     skills_force_include_rules: List[Dict[str, Any]] = field(default_factory=list)
     # Optional: when user query matches a regex, ensure these plugin ids are in the routing block and optionally append an instruction. List of { pattern: str, plugins: [str], instruction?: str }.
@@ -905,6 +968,7 @@ class CoreMetadata:
             skills_refresh_on_startup=bool(data.get('skills_refresh_on_startup', True)),
             skills_test_dir=(data.get('skills_test_dir') or '').strip(),
             skills_incremental_sync=bool(data.get('skills_incremental_sync', False)),
+            skills_include_body_for=[str(f).strip() for f in (data.get('skills_include_body_for') or []) if f],
             skills_force_include_rules=[r for r in (data.get('skills_force_include_rules') or []) if isinstance(r, dict) and (r.get('pattern') or r.get('patterns')) and r.get('folders')],
             plugins_force_include_rules=[r for r in (data.get('plugins_force_include_rules') or []) if isinstance(r, dict) and r.get('pattern') and r.get('plugins')],
             orchestrator_timeout_seconds=int(data.get('orchestrator_timeout_seconds', 30) or 0),
@@ -979,6 +1043,7 @@ class CoreMetadata:
                 'skills_refresh_on_startup': getattr(core, 'skills_refresh_on_startup', True),
                 'skills_test_dir': getattr(core, 'skills_test_dir', '') or '',
                 'skills_incremental_sync': getattr(core, 'skills_incremental_sync', False),
+                'skills_include_body_for': getattr(core, 'skills_include_body_for', None) or [],
                 'skills_force_include_rules': getattr(core, 'skills_force_include_rules', None) or [],
                 'plugins_force_include_rules': getattr(core, 'plugins_force_include_rules', None) or [],
                 'orchestrator_timeout_seconds': getattr(core, 'orchestrator_timeout_seconds', 30),

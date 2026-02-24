@@ -1521,7 +1521,16 @@ class Core(CoreInterface):
                 im = list(body.get("im") or []) if isinstance(body.get("im"), list) else []
                 phone = list(body.get("phone") or []) if isinstance(body.get("phone"), list) else []
                 permissions = list(body.get("permissions") or []) if isinstance(body.get("permissions"), list) else []
-                user = User(name=name, id=uid, email=email, im=im, phone=phone, permissions=permissions)
+                skill_api_keys = None
+                try:
+                    if isinstance(body.get("skill_api_keys"), dict):
+                        skill_api_keys = {str(k): str(v).strip() for k, v in body["skill_api_keys"].items() if k and v and str(v).strip()}
+                except Exception:
+                    skill_api_keys = None
+                user = User(
+                    name=name, id=uid, email=email, im=im, phone=phone, permissions=permissions,
+                    skill_api_keys=skill_api_keys,
+                )
                 Util().add_user(user)
                 return JSONResponse(content={"result": "ok", "name": name})
             except ValueError as e:
@@ -1552,7 +1561,16 @@ class Core(CoreInterface):
                 im = _list("im", "im")
                 phone = _list("phone", "phone")
                 permissions = _list("permissions", "permissions")
-                updated = User(name=name, id=uid, email=email, im=im, phone=phone, permissions=permissions)
+                skill_api_keys = getattr(found, "skill_api_keys", None) if found else None
+                try:
+                    if "skill_api_keys" in body and isinstance(body.get("skill_api_keys"), dict):
+                        skill_api_keys = {str(k): str(v).strip() for k, v in body["skill_api_keys"].items() if k and v and str(v).strip()}
+                except Exception:
+                    skill_api_keys = getattr(found, "skill_api_keys", None) if found else None
+                updated = User(
+                    name=name, id=uid, email=email, im=im, phone=phone, permissions=permissions,
+                    skill_api_keys=skill_api_keys,
+                )
                 idx = users.index(found)
                 users[idx] = updated
                 User.validate_no_overlapping_channel_ids(users)
@@ -3734,12 +3752,21 @@ class Core(CoreInterface):
                         except Exception as e:
                             logger.warning("Plugins vector sync failed: {}", e)
 
-            # Sync agent memory (AGENT_MEMORY.md + daily) to vector store when use_agent_memory_search
+            # Sync agent memory (AGENT_MEMORY + daily markdown) to vector store when use_agent_memory_search. Index global + per-user when multiple users.
             if getattr(core_metadata, "use_agent_memory_search", False):
                 if getattr(self, "agent_memory_vector_store", None) and getattr(self, "embedder", None):
                     from base.workspace import get_workspace_dir
                     from base.agent_memory_index import sync_agent_memory_to_vector_store
                     ws_dir = get_workspace_dir(getattr(core_metadata, "workspace_dir", None) or "config/workspace")
+                    try:
+                        users = Util().get_users() or []
+                        system_user_ids = [None] + [
+                            getattr(u, "id", None) or getattr(u, "name", None)
+                            for u in users
+                            if getattr(u, "id", None) or getattr(u, "name", None)
+                        ]
+                    except Exception:
+                        system_user_ids = [None]
                     try:
                         n = await sync_agent_memory_to_vector_store(
                             workspace_dir=Path(ws_dir),
@@ -3747,6 +3774,7 @@ class Core(CoreInterface):
                             daily_memory_dir=(getattr(core_metadata, "daily_memory_dir", None) or "").strip() or None,
                             vector_store=self.agent_memory_vector_store,
                             embedder=self.embedder,
+                            system_user_ids=system_user_ids,
                         )
                         _component_log("agent_memory", f"synced {n} chunk(s) to vector store")
                     except Exception as e:
@@ -4333,12 +4361,14 @@ class Core(CoreInterface):
                                 else max(500, int(getattr(meta_mem, "agent_memory_bootstrap_max_chars", 20000) or 20000))
                             )
                             ws_dir = get_workspace_dir(getattr(meta_mem, "workspace_dir", None) or "config/workspace")
+                            _sys_uid = getattr(request, "system_user_id", None) if request else None
                             parts_bootstrap = []
                             if use_agent_file:
                                 agent_raw = load_agent_memory_file(
                                     workspace_dir=ws_dir,
                                     agent_memory_path=getattr(meta_mem, "agent_memory_path", None) or None,
                                     max_chars=0,
+                                    system_user_id=_sys_uid,
                                 )
                                 if agent_raw and agent_raw.strip():
                                     parts_bootstrap.append("## Agent memory (bootstrap)\n\n" + agent_raw.strip())
@@ -4351,6 +4381,7 @@ class Core(CoreInterface):
                                     workspace_dir=ws_dir,
                                     daily_memory_dir=daily_dir,
                                     max_chars=0,
+                                    system_user_id=_sys_uid,
                                 )
                                 if daily_raw and daily_raw.strip():
                                     parts_bootstrap.append("## Daily memory (bootstrap)\n\n" + daily_raw.strip())
@@ -4371,8 +4402,9 @@ class Core(CoreInterface):
                         ws_dir = get_workspace_dir(getattr(Util().core_metadata, 'workspace_dir', None) or 'config/workspace')
                         agent_path = getattr(Util().core_metadata, 'agent_memory_path', None) or ''
                         max_chars = max(0, int(getattr(Util().core_metadata, 'agent_memory_max_chars', 5000) or 0))
+                        _sys_uid_legacy = getattr(request, "system_user_id", None) if request else None
                         agent_content = load_agent_memory_file(
-                            workspace_dir=ws_dir, agent_memory_path=agent_path or None, max_chars=max_chars
+                            workspace_dir=ws_dir, agent_memory_path=agent_path or None, max_chars=max_chars, system_user_id=_sys_uid_legacy
                         )
                         if agent_content:
                             system_parts.append(
@@ -4391,11 +4423,13 @@ class Core(CoreInterface):
                         yesterday = today - timedelta(days=1)
                         ws_dir = get_workspace_dir(getattr(Util().core_metadata, 'workspace_dir', None) or 'config/workspace')
                         daily_dir = getattr(Util().core_metadata, 'daily_memory_dir', None) or ''
+                        _sys_uid_daily = getattr(request, "system_user_id", None) if request else None
                         daily_content = load_daily_memory_for_dates(
                             [yesterday, today],
                             workspace_dir=ws_dir,
                             daily_memory_dir=daily_dir if daily_dir else None,
                             max_chars=80_000,
+                            system_user_id=_sys_uid_daily,
                         )
                         if daily_content:
                             system_parts.append("## Recent (daily memory)\n" + daily_content + "\n\n")
@@ -4555,7 +4589,17 @@ class Core(CoreInterface):
                     if skills_list:
                         selected_names = [s.get("folder") or s.get("name") or "?" for s in skills_list]
                         _component_log("skills", f"selected: {', '.join(selected_names)}")
-                    skills_block = build_skills_system_block(skills_list, include_body=False)
+                    # For skills in skills_include_body_for, re-load with body (and USAGE.md if present) so the model can answer "how do I use this?"
+                    include_body_for = list(getattr(meta_skills, "skills_include_body_for", None) or [])
+                    if include_body_for:
+                        for i, s in enumerate(skills_list):
+                            folder = (s.get("folder") or "").strip()
+                            if folder and folder in include_body_for:
+                                full_skill = load_skill_by_folder(skills_path, folder, include_body=True)
+                                if full_skill:
+                                    skills_list[i] = full_skill
+                    include_body = bool(include_body_for)
+                    skills_block = build_skills_system_block(skills_list, include_body=include_body)
                     if skills_block:
                         system_parts.append(skills_block)
                     force_include_instructions.extend(matched_instructions)
@@ -5670,8 +5714,8 @@ class Core(CoreInterface):
         except Exception:
             return None
 
-    async def re_sync_agent_memory(self) -> int:
-        """Re-index AGENT_MEMORY.md + daily memory into the vector store. Call after append_agent_memory/append_daily_memory so new content is searchable without restart. Returns number of chunks synced (0 on failure or nothing to index)."""
+    async def re_sync_agent_memory(self, system_user_id: Optional[str] = None) -> int:
+        """Re-index AGENT_MEMORY + daily memory (markdown) into the vector store for the given user (or global when None). Call after append so new content is searchable. Returns number of chunks synced."""
         if not getattr(Util().get_core_metadata(), "use_agent_memory_search", False):
             return 0
         store = getattr(self, "agent_memory_vector_store", None)
@@ -5689,6 +5733,7 @@ class Core(CoreInterface):
                 daily_memory_dir=(getattr(meta, "daily_memory_dir", None) or "").strip() or None,
                 vector_store=store,
                 embedder=embedder,
+                system_user_ids=[system_user_id],
             )
             if n > 0:
                 _component_log("agent_memory", f"re-synced {n} chunk(s) after append")
@@ -5702,8 +5747,9 @@ class Core(CoreInterface):
         query: str,
         max_results: int = 10,
         min_score: Optional[float] = None,
+        system_user_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Search AGENT_MEMORY.md + daily memory (vector store). For agent_memory_search tool. Returns list of {path, start_line, end_line, snippet, score}. Never raises."""
+        """Search AGENT_MEMORY + daily memory (vector store). For agent_memory_search tool. Filters by system_user_id when set. Returns list of {path, start_line, end_line, snippet, score}. Never raises."""
         store = getattr(self, "agent_memory_vector_store", None)
         embedder = getattr(self, "embedder", None)
         if not store or not embedder:
@@ -5714,7 +5760,10 @@ class Core(CoreInterface):
             emb = await embedder.embed((query or "").strip())
             if not emb:
                 return []
-            raw = store.search(query=[emb], limit=max(1, min(max_results, 50)), filters=None)
+            from base.workspace import _is_global_agent_memory_user, _sanitize_system_user_id
+            scope_key = "" if _is_global_agent_memory_user(system_user_id) else _sanitize_system_user_id(system_user_id)
+            filters = {"system_user_id": scope_key}
+            raw = store.search(query=[emb], limit=max(1, min(max_results, 50)), filters=filters)
         except Exception as e:
             logger.debug("search_agent_memory failed: {}", e)
             return []
@@ -5749,10 +5798,11 @@ class Core(CoreInterface):
         path: str,
         from_line: Optional[int] = None,
         lines: Optional[int] = None,
+        system_user_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Read AGENT_MEMORY.md or memory/YYYY-MM-DD.md (by path). For agent_memory_get tool. Returns {path, text, start_line, end_line} or None. Never raises."""
+        """Read AGENT_MEMORY or daily memory markdown (by path). For agent_memory_get tool. Resolves per-user paths when system_user_id is set. Returns {path, text, start_line, end_line} or None. Never raises."""
         try:
-            from base.workspace import get_workspace_dir, get_agent_memory_file_path, get_daily_memory_dir
+            from base.workspace import get_workspace_dir, get_agent_memory_file_path, get_daily_memory_dir, get_daily_memory_path_for_date
             meta = Util().get_core_metadata()
             ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
             path = (path or "").strip()
@@ -5760,21 +5810,39 @@ class Core(CoreInterface):
                 return None
             fp = None
             if path == "AGENT_MEMORY.md":
-                fp = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=getattr(meta, "agent_memory_path", None) or None)
-            else:
-                if path.startswith("memory/") and path.endswith(".md"):
-                    try:
-                        date_str = path.replace("memory/", "").replace(".md", "")
-                        d = date.fromisoformat(date_str)
-                        base = get_daily_memory_dir(workspace_dir=ws_dir, daily_memory_dir=(getattr(meta, "daily_memory_dir", None) or "").strip() or None)
-                        fp = base / f"{d.isoformat()}.md"
-                    except Exception:
-                        fp = Path(ws_dir) / path
-                else:
+                fp = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=getattr(meta, "agent_memory_path", None) or None, system_user_id=system_user_id)
+            elif path.startswith("agent_memory/") and path.endswith(".md"):
+                try:
+                    user_part = path.replace("agent_memory/", "").replace(".md", "").strip()
+                    if user_part:
+                        fp = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=None, system_user_id=user_part)
+                except Exception:
                     fp = Path(ws_dir) / path
+            elif path.startswith("memory/") and path.endswith(".md"):
+                try:
+                    date_str = path.replace("memory/", "").replace(".md", "")
+                    d = date.fromisoformat(date_str)
+                    base = get_daily_memory_dir(workspace_dir=ws_dir, daily_memory_dir=(getattr(meta, "daily_memory_dir", None) or "").strip() or None, system_user_id=system_user_id)
+                    fp = base / f"{d.isoformat()}.md"
+                except Exception:
+                    fp = Path(ws_dir) / path
+            elif path.startswith("daily_memory/") and "/" in path.replace("daily_memory/", "", 1):
+                try:
+                    rest = path.replace("daily_memory/", "", 1)
+                    user_part, file_part = rest.split("/", 1)
+                    date_str = file_part.replace(".md", "")
+                    d = date.fromisoformat(date_str)
+                    fp = get_daily_memory_path_for_date(d, workspace_dir=ws_dir, daily_memory_dir=(getattr(meta, "daily_memory_dir", None) or "").strip() or None, system_user_id=user_part.strip() or system_user_id)
+                except Exception:
+                    fp = Path(ws_dir) / path
+            else:
+                fp = Path(ws_dir) / path
             if fp is None or not fp.is_file():
                 return None
-            text = fp.read_text(encoding="utf-8")
+            try:
+                text = fp.read_text(encoding="utf-8")
+            except Exception:
+                return None
             start_line = from_line if from_line is not None else 1
             line_list = text.splitlines()
             total_lines = len(line_list)

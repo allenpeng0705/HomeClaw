@@ -1,0 +1,5 @@
+# X (Twitter) API v2 — user access token (OAuth 2.0 or 1.0a user context)
+# Get token at https://developer.x.com (create app, complete OAuth flow).
+# Environment variable X_ACCESS_TOKEN overrides this value when set.
+
+x_access_token: ""

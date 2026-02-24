@@ -24,6 +24,32 @@ FILE_TO_KEY = {
     "TOOLS.md": KEY_TOOLS,
 }
 
+# When system_user_id is one of these (or None/empty), use global AGENT_MEMORY and daily memory (company app).
+_GLOBAL_AGENT_MEMORY_IDS = frozenset(("system", "companion"))
+
+
+def _is_global_agent_memory_user(system_user_id: Optional[str]) -> bool:
+    """True if we should use global (shared) AGENT_MEMORY and daily memory paths. Never raises."""
+    try:
+        if not system_user_id or not str(system_user_id).strip():
+            return True
+        return str(system_user_id).strip().lower() in _GLOBAL_AGENT_MEMORY_IDS
+    except Exception:
+        return True
+
+
+def _sanitize_system_user_id(system_user_id: Optional[str]) -> str:
+    """Sanitize for use in file paths (no directory traversal or invalid chars). Never raises."""
+    try:
+        if not system_user_id:
+            return ""
+        s = str(system_user_id).strip()
+        for c in r'/\:*?"<>|':
+            s = s.replace(c, "_")
+        return s or ""
+    except Exception:
+        return ""
+
 
 def get_workspace_dir(config_dir: Optional[str] = None) -> Path:
     """Return workspace directory path. Prefer config_dir if given and absolute or under project. Never raises."""
@@ -79,10 +105,18 @@ def build_workspace_system_prefix(workspace: Dict[str, str]) -> str:
     return "\n\n".join(parts) + "\n\n"
 
 
-def get_agent_memory_file_path(workspace_dir: Optional[Path] = None, agent_memory_path: Optional[str] = None) -> Optional[Path]:
-    """Return the Path for AGENT_MEMORY.md, or None if not configured. Used for read and append. Never raises."""
+def get_agent_memory_file_path(
+    workspace_dir: Optional[Path] = None,
+    agent_memory_path: Optional[str] = None,
+    system_user_id: Optional[str] = None,
+) -> Optional[Path]:
+    """Return the Path for AGENT_MEMORY (markdown). When system_user_id is set (and not system/companion), uses workspace_dir/agent_memory/{user_id}.md; otherwise global path. Never raises."""
     try:
         root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
+        if not _is_global_agent_memory_user(system_user_id):
+            uid = _sanitize_system_user_id(system_user_id)
+            if uid:
+                return root / "agent_memory" / f"{uid}.md"
         if agent_memory_path and str(agent_memory_path).strip():
             p = Path(str(agent_memory_path).strip())
             if not p.is_absolute():
@@ -96,9 +130,10 @@ def get_agent_memory_file_path(workspace_dir: Optional[Path] = None, agent_memor
 def ensure_agent_memory_file_exists(
     workspace_dir: Optional[Path] = None,
     agent_memory_path: Optional[str] = None,
+    system_user_id: Optional[str] = None,
 ) -> bool:
-    """Create AGENT_MEMORY.md if it does not exist (empty). Returns True if created or already existed."""
-    path = get_agent_memory_file_path(workspace_dir=workspace_dir, agent_memory_path=agent_memory_path)
+    """Create AGENT_MEMORY markdown file if it does not exist (empty). Returns True if created or already existed."""
+    path = get_agent_memory_file_path(workspace_dir=workspace_dir, agent_memory_path=agent_memory_path, system_user_id=system_user_id)
     if path is None:
         return False
     if path.is_file():
@@ -115,15 +150,15 @@ def load_agent_memory_file(
     workspace_dir: Optional[Path] = None,
     agent_memory_path: Optional[str] = None,
     max_chars: int = 0,
+    system_user_id: Optional[str] = None,
 ) -> str:
     """
-    Load AGENT_MEMORY.md (curated long-term memory). Used with RAG; AGENT_MEMORY is authoritative on conflict.
-    If agent_memory_path is set and is a valid path, use it; otherwise workspace_dir/AGENT_MEMORY.md.
-    If max_chars > 0 and content is longer, returns only the last max_chars with an omission note (avoids filling context window).
+    Load AGENT_MEMORY markdown (curated long-term memory). Per-user when system_user_id is set; otherwise global.
+    If max_chars > 0 and content is longer, returns only the last max_chars with an omission note.
     Returns file content or empty string.
     """
     root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
-    path = get_agent_memory_file_path(workspace_dir=root, agent_memory_path=agent_memory_path)
+    path = get_agent_memory_file_path(workspace_dir=root, agent_memory_path=agent_memory_path, system_user_id=system_user_id)
     if path is None or not path.is_file():
         return ""
     try:
@@ -160,14 +195,14 @@ def trim_content_bootstrap(content: str, max_chars: int) -> str:
 def clear_agent_memory_file(
     workspace_dir: Optional[Path] = None,
     agent_memory_path: Optional[str] = None,
+    system_user_id: Optional[str] = None,
 ) -> bool:
     """
-    Clear AGENT_MEMORY.md (write empty file). Used when memory is reset (e.g. /memory/reset) so curated
-    long-term memory is cleared together with RAG. Creates parent dirs and file if needed.
+    Clear AGENT_MEMORY markdown (write empty file). Per-user when system_user_id is set. Used when memory is reset.
     Returns True if the file was cleared (or created empty), False if path is not configured.
     """
     root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
-    path = get_agent_memory_file_path(workspace_dir=root, agent_memory_path=agent_memory_path)
+    path = get_agent_memory_file_path(workspace_dir=root, agent_memory_path=agent_memory_path, system_user_id=system_user_id)
     if path is None:
         return False
     try:
@@ -183,10 +218,15 @@ def clear_agent_memory_file(
 def get_daily_memory_dir(
     workspace_dir: Optional[Path] = None,
     daily_memory_dir: Optional[str] = None,
+    system_user_id: Optional[str] = None,
 ) -> Path:
-    """Return the directory for daily memory files (memory/YYYY-MM-DD.md). Default: workspace_dir/memory. Never raises."""
+    """Return the directory for daily memory markdown files (YYYY-MM-DD.md). Per-user when system_user_id is set: daily_memory/{user_id}/. Otherwise global: memory/ or daily_memory_dir. Never raises."""
     try:
         root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
+        if not _is_global_agent_memory_user(system_user_id):
+            uid = _sanitize_system_user_id(system_user_id)
+            if uid:
+                return root / "daily_memory" / uid
         if daily_memory_dir and str(daily_memory_dir).strip():
             p = Path(str(daily_memory_dir).strip())
             if not p.is_absolute():
@@ -201,9 +241,10 @@ def get_daily_memory_path_for_date(
     d: date,
     workspace_dir: Optional[Path] = None,
     daily_memory_dir: Optional[str] = None,
+    system_user_id: Optional[str] = None,
 ) -> Path:
-    """Return the Path for memory/YYYY-MM-DD.md for the given date."""
-    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir)
+    """Return the Path for the daily memory markdown file (YYYY-MM-DD.md) for the given date. Per-user when system_user_id is set."""
+    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
     return base / f"{d.isoformat()}.md"
 
 
@@ -211,9 +252,10 @@ def ensure_daily_memory_file_exists(
     d: date,
     workspace_dir: Optional[Path] = None,
     daily_memory_dir: Optional[str] = None,
+    system_user_id: Optional[str] = None,
 ) -> bool:
-    """Create today's daily memory file if it does not exist (empty). Returns True if created or already existed."""
-    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir)
+    """Create the daily memory markdown file for date d if it does not exist (empty). Returns True if created or already existed."""
+    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
     path = base / f"{d.isoformat()}.md"
     if path.is_file():
         return True
@@ -230,22 +272,22 @@ def load_daily_memory_for_dates(
     workspace_dir: Optional[Path] = None,
     daily_memory_dir: Optional[str] = None,
     max_chars: int = 0,
+    system_user_id: Optional[str] = None,
 ) -> str:
     """
-    Load and concatenate daily memory files for the given dates (newest last).
-    Returns a single string with optional "## YYYY-MM-DD" headers per file. Used to inject yesterday + today into the prompt.
-    If max_chars > 0 and concatenated content is longer, returns only the last max_chars with an omission note.
+    Load and concatenate daily memory markdown files for the given dates (newest last). Per-user when system_user_id is set.
+    Returns a single string with optional "## YYYY-MM-DD" headers per file. If max_chars > 0, truncates with an omission note.
     Creates today's file if missing so the file exists for the model to append to later.
     """
     if not dates:
         return ""
-    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir)
+    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
     today = date.today()
     parts = []
     for d in sorted(dates):
         path = base / f"{d.isoformat()}.md"
         if d == today and not path.is_file():
-            ensure_daily_memory_file_exists(d, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir)
+            ensure_daily_memory_file_exists(d, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
         if path.is_file():
             try:
                 text = path.read_text(encoding="utf-8").strip()
@@ -267,15 +309,16 @@ def append_daily_memory(
     d: Optional[date] = None,
     workspace_dir: Optional[Path] = None,
     daily_memory_dir: Optional[str] = None,
+    system_user_id: Optional[str] = None,
 ) -> bool:
     """
-    Append content to the daily memory file for the given date (default: today).
+    Append content to the daily memory markdown file for the given date (default: today). Per-user when system_user_id is set.
     Creates the file and parent dir if needed. Returns True on success.
     """
     if not content or not content.strip():
         return False
     day = d or date.today()
-    path = get_daily_memory_path_for_date(day, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir)
+    path = get_daily_memory_path_for_date(day, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         existing = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
@@ -290,11 +333,12 @@ def clear_daily_memory_for_dates(
     dates: List[date],
     workspace_dir: Optional[Path] = None,
     daily_memory_dir: Optional[str] = None,
+    system_user_id: Optional[str] = None,
 ) -> int:
-    """Clear (truncate to empty) daily memory files for the given dates. Returns number of files cleared."""
+    """Clear (truncate to empty) daily memory markdown files for the given dates. Per-user when system_user_id is set. Returns number of files cleared."""
     if not dates:
         return 0
-    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir)
+    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
     cleared = 0
     for d in dates:
         path = base / f"{d.isoformat()}.md"

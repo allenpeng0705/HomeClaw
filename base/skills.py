@@ -19,6 +19,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_SKILLS_DIR = _PROJECT_ROOT / "config" / "skills"
 
 SKILL_FILENAME = "SKILL.md"
+USAGE_FILENAME = "USAGE.md"
 
 
 def _parse_skill_md(content: str) -> Dict[str, Any]:
@@ -50,6 +51,27 @@ def _parse_skill_md(content: str) -> Dict[str, Any]:
     except Exception as e:
         logger.warning("Failed to parse SKILL.md frontmatter: {}", e)
     return result
+
+
+# Max chars of USAGE.md to append to skill body (0 = do not append). Keeps context small; full USAGE.md stays on disk for file_read.
+USAGE_APPEND_MAX_CHARS = 2200
+
+
+def _append_usage_if_present(skill_dir: Path, parsed: Dict[str, Any]) -> None:
+    """If USAGE.md exists in skill_dir, append up to USAGE_APPEND_MAX_CHARS to parsed['body']. Modifies parsed in place."""
+    if not USAGE_APPEND_MAX_CHARS or not parsed.get("body"):
+        return
+    usage_file = skill_dir / USAGE_FILENAME
+    if not usage_file.is_file():
+        return
+    try:
+        usage_content = usage_file.read_text(encoding="utf-8", errors="replace").strip()
+        if usage_content:
+            if len(usage_content) > USAGE_APPEND_MAX_CHARS:
+                usage_content = usage_content[: USAGE_APPEND_MAX_CHARS] + "\n\n*(Full list: see USAGE.md in this skill folder.)*"
+            parsed["body"] = (parsed["body"] or "").strip() + "\n\n## User guide (how to ask)\n\n" + usage_content
+    except Exception as e:
+        logger.warning("Failed to read {}: {}", usage_file, e)
 
 
 def get_skills_dir(config_dir: Optional[str] = None, root: Optional[Path] = None) -> Path:
@@ -85,6 +107,8 @@ def load_skills(skills_dir: Optional[Path] = None, include_body: bool = True) ->
             parsed["folder"] = item.name  # folder name under skills_dir; use as skill_name in run_skill
             if not include_body:
                 parsed.pop("body", None)
+            elif parsed.get("body") is not None:
+                _append_usage_if_present(item, parsed)
             if parsed.get("name") or parsed.get("description") or parsed.get("body"):
                 skills.append(parsed)
                 logger.debug("Loaded skill: {} from {}", parsed.get("name") or item.name, item)
@@ -111,6 +135,8 @@ def load_skill_by_folder(skills_dir: Path, folder: str, include_body: bool = Fal
         parsed["folder"] = item.name
         if not include_body:
             parsed.pop("body", None)
+        elif parsed.get("body") is not None:
+            _append_usage_if_present(item, parsed)
         return parsed
     except Exception as e:
         logger.warning("Failed to load skill from {}: {}", skill_file, e)

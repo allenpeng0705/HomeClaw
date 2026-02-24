@@ -113,7 +113,12 @@ class Util:
                     self.core_metadata.main_llm = self.llm_for_cpu()
                     CoreMetadata.to_yaml(self.core_metadata, os.path.join(self.config_path(), 'core.yml'))
                 logger.debug("CUDA is not available. Using CPU.")
-            self.users : list = User.from_yaml(os.path.join(self.config_path(), 'user.yml'))
+            try:
+                self.users = User.from_yaml(os.path.join(self.config_path(), 'user.yml'))
+                if not isinstance(self.users, list):
+                    self.users = []
+            except Exception:
+                self.users = []
             self.email_account: EmailAccount = EmailAccount.from_yaml(os.path.join(self.config_path(), 'email_account.yml'))
             
             # Start to monitor the specified config files
@@ -1182,14 +1187,22 @@ class Util:
         """
         Loads the users from the configuration file.
         Validates that different users have distinct email/im/phone (no overlap).
+        Never raises: on any error returns [] or previously loaded list so Core never crashes.
 
         Returns:
-            Users: The users object, or None if the loading failed.
+            Users: The users list, or [] if loading failed.
         """
-        if self.users == None:
-            self.users = User.from_yaml(os.path.join(self.config_path(), 'user.yml'))
-            User.validate_no_overlapping_channel_ids(self.users)
-        return self.users
+        if self.users is None:
+            try:
+                path = os.path.join(self.config_path(), 'user.yml')
+                self.users = User.from_yaml(path)
+                if not isinstance(self.users, list):
+                    self.users = []
+                else:
+                    User.validate_no_overlapping_channel_ids(self.users)
+            except Exception:
+                self.users = []
+        return self.users or []
     
     def add_user(self, user: User):
         if self.users == None or len(self.users) == 0:
@@ -1349,7 +1362,12 @@ class Util:
                 return
         
     def save_users(self, users: List[User] = None):
-        User.to_yaml(users, os.path.join(self.config_path(), 'user.yml'))
+        """Save users to user.yml. Never raises (User.to_yaml catches all exceptions)."""
+        try:
+            path = os.path.join(self.config_path(), 'user.yml')
+            User.to_yaml(users or [], path)
+        except Exception:
+            pass
     
     def get_email_account(self):
         if self.email_account == None:

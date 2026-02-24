@@ -105,6 +105,8 @@ skills_refresh_on_startup: true
 # Optional test folder: full sync every time (id = test__<folder>). Production skills_dir can be incremental (only new).
 skills_test_dir: ""
 skills_incremental_sync: false
+# Which skills get full body in the prompt (does not change when a skill is selected—that is RAG + trigger). For these folders only, include SKILL.md body + a short USAGE.md prefix so the model can answer "how do I use this?". Other skills get name + description only.
+skills_include_body_for: [maton-api-gateway-1.0.0]
 # Force-include for skills: use "trigger:" in each skill's SKILL.md (see config/skills/README.md). You can omit skills_force_include_rules; add it only if you need config-only overrides (e.g. a skill with no trigger in SKILL.md).
 # Vector retrieval for plugins (separate collection): same design as skills. RAG finds relevant plugins; only those go into prompt.
 # plugins_use_vector_search=false → include ALL plugins; true → RAG (plugins_max_retrieved → threshold → plugins_max_in_prompt).

@@ -1,0 +1,5 @@
+# Meta Graph API — Page access token (Facebook Page + optional Instagram Business linked to Page)
+# Get token at https://developers.facebook.com (create app, request pages_manage_posts; for IG add instagram_business_content_publish).
+# Environment variable META_ACCESS_TOKEN overrides this value when set.
+
+meta_access_token: ""
