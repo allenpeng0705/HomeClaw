@@ -634,11 +634,11 @@ class CoreMetadata:
     log_to_console: bool  # when False, all logs go only to file (no stdout); use with tail to monitor logs
     use_memory: bool
     memory_backend: str  # cognee (default) | chroma (in-house RAG)
-    memory_check_before_add: bool = False  # when True, for small/local models run an extra LLM call to gate what gets added to RAG memory; default False = store every message, rely on retrieval quality
-    default_location: str = ""  # optional; fallback location when no request/profile location (e.g. "New York, US"); see SystemContextDateTimeAndLocation.md
     database: Database
     vectorDB: VectorDB
     graphDB: GraphDB
+    memory_check_before_add: bool = False  # when True, for small/local models run an extra LLM call to gate what gets added to RAG memory; default False = store every message, rely on retrieval quality
+    default_location: str = ""  # optional; fallback location when no request/profile location (e.g. "New York, US"); see SystemContextDateTimeAndLocation.md
     cognee: Dict[str, Any] = field(default_factory=dict)  # optional; when set, applied as Cognee env before Cognee loads (see docs/MemoryAndDatabase.md)
     endpoints: List[Endpoint] = field(default_factory=list)
     llama_cpp: Dict[str, Any] = field(default_factory=dict)

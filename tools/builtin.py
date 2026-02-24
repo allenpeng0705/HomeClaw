@@ -44,6 +44,7 @@ KEYED_SKILLS = {
     "x-api-1.0.0": ("x_access_token", "X_ACCESS_TOKEN"),
     "meta-social-1.0.0": ("meta_access_token", "META_ACCESS_TOKEN"),
     "hootsuite-1.0.0": ("hootsuite_access_token", "HOOTSUITE_ACCESS_TOKEN"),
+    "weibo-api-1.0.0": ("weibo_access_token", "WEIBO_ACCESS_TOKEN"),
 }
 
 
