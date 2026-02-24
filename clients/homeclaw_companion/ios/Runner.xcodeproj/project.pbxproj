@@ -54,6 +54,7 @@
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		7841794FC33B59B6AFA6F093 /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Release.xcconfig; path = Flutter/Release.xcconfig; sourceTree = "<group>"; };
+		7AFA3C8F1D35360C0083082E /* Profile.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Profile.xcconfig; path = Flutter/Profile.xcconfig; sourceTree = "<group>"; };
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = Debug.xcconfig; path = Flutter/Debug.xcconfig; sourceTree = "<group>"; };
 		9740EEB31CF90195004384FC /* Generated.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; name = Generated.xcconfig; path = Flutter/Generated.xcconfig; sourceTree = "<group>"; };
 		97C146EE1CF9000F007C117D /* Runner.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Runner.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -123,6 +124,7 @@
 			children = (
 				3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */,
 				9740EEB21CF90195004384FC /* Debug.xcconfig */,
+				7AFA3C8F1D35360C0083082E /* Profile.xcconfig */,
 				7AFA3C8E1D35360C0083082E /* Release.xcconfig */,
 				9740EEB31CF90195004384FC /* Generated.xcconfig */,
 			);
@@ -285,7 +287,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" embed_and_thin";
+			shellScript = "# Set FLUTTER_ROOT from Generated.xcconfig when building from Xcode (not \"flutter run\")\nif [ -z \"$FLUTTER_ROOT\" ] && [ -f \"${SRCROOT}/Flutter/Generated.xcconfig\" ]; then\n  export FLUTTER_ROOT=\"$(grep -E \"^FLUTTER_ROOT=\" \"${SRCROOT}/Flutter/Generated.xcconfig\" | head -1 | sed 's/^FLUTTER_ROOT=//')\"\nfi\nif [ -z \"$FLUTTER_ROOT\" ]; then\n  echo \"error: FLUTTER_ROOT not set. Run 'flutter pub get' in clients/homeclaw_companion.\" >&2\n  exit 1\nfi\n/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" embed_and_thin";
 		};
 		4B17B4960AEEE6B85ACC3101 /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -317,7 +319,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" build";
+			shellScript = "# Set FLUTTER_ROOT from Generated.xcconfig when building from Xcode (not \"flutter run\")\nif [ -z \"$FLUTTER_ROOT\" ] && [ -f \"${SRCROOT}/Flutter/Generated.xcconfig\" ]; then\n  export FLUTTER_ROOT=\"$(grep -E \"^FLUTTER_ROOT=\" \"${SRCROOT}/Flutter/Generated.xcconfig\" | head -1 | sed 's/^FLUTTER_ROOT=//')\"\nfi\nif [ -z \"$FLUTTER_ROOT\" ]; then\n  echo \"error: FLUTTER_ROOT not set. Run 'flutter pub get' in clients/homeclaw_companion.\" >&2\n  exit 1\nfi\n/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" build";
 		};
 		AE8DDF60052F43C4E4BD29BF /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -484,7 +486,7 @@
 		};
 		249021D4217E4FDB00AE95B9 /* Profile */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 7AFA3C8E1D35360C0083082E /* Release.xcconfig */;
+			baseConfigurationReference = 7AFA3C8F1D35360C0083082E /* Profile.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;

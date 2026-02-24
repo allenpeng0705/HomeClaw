@@ -29,7 +29,7 @@ dependencies:
   web_socket_channel: ^3.0.1
   permission_handler: ^11.3.0
   geolocator: ^13.0.2
-  geolocator_linux: ^0.1.0   # Linux location (optional; geolocator uses it when building for Linux)
+  geolocator_linux: ^0.2.0   # Linux location; 0.2.x required for Position.altitudeAccuracy (geolocator_platform_interface 4.x)
   flutter_markdown: ^0.7.4+1
   url_launcher: ^6.2.5
 
