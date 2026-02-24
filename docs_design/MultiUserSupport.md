@@ -113,6 +113,11 @@ So for normal chat, **multi-user is correct**: each user gets their own reply on
 - **Direct reply** to a user message: **per-request** — goes to the right user.
 - **Reminders and cron:** Stored globally; delivery is to **one** “latest” channel. So with multiple users, reminders/cron do **not** target a specific user; they go to whoever was last. If you need “User A’s reminders only to User A,” that would require adding `user_id` (and possibly per-user last-channel key) and changing TAM and last-channel logic.
 
+**AGENT_MEMORY and daily memory (markdown):**
+
+- **AGENT_MEMORY** and **daily memory** are **per-user** when a user is present: paths are `agent_memory/{user_id}.md` and `daily_memory/{user_id}/YYYY-MM-DD.md` (all markdown). When there is no user (company app / companion / system), global paths are used: `AGENT_MEMORY.md` and `memory/YYYY-MM-DD.md`.
+- So **user-specific content** stays in that user's markdown file(s); no leak between users. See **docs_design/AgentMemoryDailyMemoryPerUser.md** for details.
+
 ---
 
 ## 5. Summary table
@@ -127,8 +132,10 @@ So for normal chat, **multi-user is correct**: each user gets their own reply on
 | **Direct reply** | Yes | Reply uses the request’s channel → correct user. |
 | **Last channel** | No (single “default”) | One global “latest”; overwritten on every request. |
 | **TAM reminders / cron** | No | No `user_id` in DB; delivery via “latest channel” only. |
+| **AGENT_MEMORY** | Yes (per-user when user present) | Markdown: per-user `agent_memory/{user_id}.md`; global `AGENT_MEMORY.md` for company app (no user). |
+| **Daily memory** | Yes (per-user when user present) | Markdown: per-user `daily_memory/{user_id}/YYYY-MM-DD.md`; global `memory/` for company app. |
 
-So: **multi-user is supported for identity (user.yml), storage (chat/sessions/memory/KB), and direct replies.** It is **not** supported for **reminder/cron delivery** and **last-channel** — both are single-channel today. User profile (one JSON file per user) will naturally be **per-user** by user id and fits this model.
+So: **multi-user is supported for identity (user.yml), storage (chat/sessions/memory/KB), direct replies, AGENT_MEMORY, and daily memory** (all markdown; per-user when a user is present; global for company app). It is **not** supported for **reminder/cron delivery** and **last-channel** — those remain single-channel. User profile is **per-user** and fits this model.
 
 ---
 

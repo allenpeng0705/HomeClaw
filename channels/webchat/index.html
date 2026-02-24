@@ -36,6 +36,7 @@
     <input type="text" id="msg" placeholder="Type a message…" autocomplete="off">
     <input type="file" id="files" multiple accept="image/*,video/*,audio/*,*/*" title="Attach images, video, audio, or files">
     <button id="send">Send</button>
+    <button id="sync_kb" title="Sync knowledge base folder for selected user">Sync KB</button>
   </div>
   <script>
     (function() {
@@ -46,6 +47,7 @@
       const userIdInput = document.getElementById('user_id');
       const filesInput = document.getElementById('files');
       const sendBtn = document.getElementById('send');
+      const syncKbBtn = document.getElementById('sync_kb');
 
       function addLog(cls, text) {
         const p = document.createElement('p');
@@ -98,6 +100,29 @@
       msgInput.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') send();
       });
+      if (syncKbBtn) {
+        syncKbBtn.addEventListener('click', async function() {
+          const user_id = (userIdInput && userIdInput.value ? userIdInput.value : config.user_id || '').trim();
+          if (!user_id) {
+            addLog('sys', 'Select a user_id first.');
+            return;
+          }
+          syncKbBtn.disabled = true;
+          addLog('sys', 'Syncing knowledge base for ' + user_id + '…');
+          try {
+            const r = await fetch(location.origin + '/api/knowledge_base/sync_folder?user_id=' + encodeURIComponent(user_id));
+            const data = await r.json().catch(function() { return {}; });
+            if (r.ok && data.ok) {
+              addLog('sys', 'KB sync: ' + (data.message || '') + ' (added: ' + (data.added || 0) + ', removed: ' + (data.removed || 0) + ')');
+            } else {
+              addLog('error', 'KB sync failed: ' + (data.detail || data.message || r.status));
+            }
+          } catch (e) {
+            addLog('error', 'KB sync error: ' + e.message);
+          }
+          syncKbBtn.disabled = false;
+        });
+      }
 
       async function send() {
         const user_id = (userIdInput && userIdInput.value ? userIdInput.value : config.user_id || '').trim();

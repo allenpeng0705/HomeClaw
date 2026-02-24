@@ -329,10 +329,15 @@ const payload = {
 
 async function main() {
   const url = `${CORE_URL.replace(/\/$/, '')}/api/plugins/register`;
+  const headers = { 'Content-Type': 'application/json' };
+  if (process.env.CORE_API_KEY) {
+    headers['X-API-Key'] = process.env.CORE_API_KEY;
+    headers['Authorization'] = 'Bearer ' + process.env.CORE_API_KEY;
+  }
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload),
     });
     const data = await res.json();

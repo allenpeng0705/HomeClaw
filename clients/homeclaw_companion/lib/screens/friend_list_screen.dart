@@ -3,15 +3,8 @@ import '../core_service.dart';
 import 'chat_screen.dart';
 import 'settings_screen.dart';
 
-/// Chat target: System (Core assistant) or Friend (Friends plugin).
-enum ChatType {
-  system,
-  friend,
-}
-
-/// Friend list (WhatsApp-style): two entries — System and Friend.
-/// Tapping one opens the chat for that target.
-class FriendListScreen extends StatelessWidget {
+/// User list from Core (user.yml). One chat per user; tap to open chat and send that user's id with every message.
+class FriendListScreen extends StatefulWidget {
   final CoreService coreService;
   final String? initialMessage;
 
@@ -21,30 +14,42 @@ class FriendListScreen extends StatelessWidget {
     this.initialMessage,
   });
 
-  static String titleFor(ChatType type) {
-    switch (type) {
-      case ChatType.system:
-        return 'System';
-      case ChatType.friend:
-        return 'Friend';
-    }
+  @override
+  State<FriendListScreen> createState() => _FriendListScreenState();
+}
+
+class _FriendListScreenState extends State<FriendListScreen> {
+  List<Map<String, dynamic>> _users = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUsers();
   }
 
-  static String subtitleFor(ChatType type) {
-    switch (type) {
-      case ChatType.system:
-        return 'Talk with Core (main assistant). Identity is set in Settings.';
-      case ChatType.friend:
-        return 'Talk with the Friend persona (Friends plugin).';
-    }
-  }
-
-  static IconData iconFor(ChatType type) {
-    switch (type) {
-      case ChatType.system:
-        return Icons.smart_toy;
-      case ChatType.friend:
-        return Icons.person;
+  Future<void> _loadUsers() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final list = await widget.coreService.getConfigUsers();
+      if (mounted) {
+        setState(() {
+          _users = list;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+          _users = [];
+        });
+      }
     }
   }
 
@@ -55,44 +60,72 @@ class FriendListScreen extends StatelessWidget {
         title: const Text('HomeClaw'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loading ? null : _loadUsers,
+            tooltip: 'Refresh user list',
+          ),
+          IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => SettingsScreen(coreService: coreService),
+                  builder: (context) => SettingsScreen(coreService: widget.coreService),
                 ),
               );
             },
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-        children: [
-          _FriendTile(
-            chatType: ChatType.system,
-            coreService: coreService,
-            initialMessage: initialMessage,
-          ),
-          _FriendTile(
-            chatType: ChatType.friend,
-            coreService: coreService,
-            initialMessage: null,
-          ),
-        ],
-      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                        const SizedBox(height: 16),
+                        FilledButton(onPressed: _loadUsers, child: const Text('Retry')),
+                      ],
+                    ),
+                  ),
+                )
+              : _users.isEmpty
+                  ? const Center(child: Text('No users in config. Add users in Core (user.yml).'))
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                      itemCount: _users.length,
+                      itemBuilder: (context, index) {
+                        final u = _users[index];
+                        final userId = (u['id'] ?? u['name'] ?? '').toString();
+                        final name = (u['name'] ?? userId).toString();
+                        return _UserTile(
+                          userId: userId,
+                          userName: name,
+                          userType: (u['type'] ?? '').toString(),
+                          coreService: widget.coreService,
+                          initialMessage: index == 0 ? widget.initialMessage : null,
+                        );
+                      },
+                    ),
     );
   }
 }
 
-class _FriendTile extends StatelessWidget {
-  final ChatType chatType;
+class _UserTile extends StatelessWidget {
+  final String userId;
+  final String userName;
+  final String userType;
   final CoreService coreService;
   final String? initialMessage;
 
-  const _FriendTile({
-    required this.chatType,
+  const _UserTile({
+    required this.userId,
+    required this.userName,
+    required this.userType,
     required this.coreService,
     this.initialMessage,
   });
@@ -101,30 +134,22 @@ class _FriendTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Card(
-      margin: const EdgeInsets.symmetric(vertical: 6),
+      margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: theme.colorScheme.primaryContainer,
-          child: Icon(FriendListScreen.iconFor(chatType), color: theme.colorScheme.onPrimaryContainer),
+          child: Icon(Icons.person, color: theme.colorScheme.onPrimaryContainer),
         ),
-        title: Text(
-          FriendListScreen.titleFor(chatType),
-          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          FriendListScreen.subtitleFor(chatType),
-          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: const Icon(Icons.chevron_right),
+        title: Text(userName),
+        subtitle: Text(userType.isNotEmpty ? 'type: $userType' : ''),
         onTap: () {
           Navigator.push(
             context,
             MaterialPageRoute(
               builder: (context) => ChatScreen(
                 coreService: coreService,
-                chatType: chatType,
+                userId: userId,
+                userName: userName,
                 initialMessage: initialMessage,
               ),
             ),

@@ -114,6 +114,63 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (method === 'GET' && url === '/api/core/users') {
+    const coreUsersUrl = CORE_URL + '/api/config/users';
+    const parsed = new URL(coreUsersUrl);
+    const headers = { ...req.headers, host: parsed.host };
+    if (CORE_API_KEY) {
+      headers['x-api-key'] = CORE_API_KEY;
+      headers['Authorization'] = 'Bearer ' + CORE_API_KEY;
+    }
+    const httpModule = parsed.protocol === 'https:' ? require('https') : require('http');
+    const proxyReq = httpModule.request(
+      coreUsersUrl,
+      { method: 'GET', headers },
+      (proxyRes) => {
+        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+        proxyRes.pipe(res);
+      }
+    );
+    proxyReq.on('error', (e) => {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: String(e.message), users: [] }));
+    });
+    proxyReq.end();
+    return;
+  }
+
+  const kbSyncMatch = url === '/api/core/knowledge_base/sync_folder' || url.startsWith('/api/core/knowledge_base/sync_folder?');
+  if (kbSyncMatch && (method === 'GET' || method === 'POST')) {
+    const q = url.includes('?') ? url.slice(url.indexOf('?')) : '';
+    const coreSyncUrl = CORE_URL + '/knowledge_base/sync_folder' + q;
+    const parsed = new URL(coreSyncUrl);
+    const headers = { ...req.headers, host: parsed.host };
+    delete headers['content-length'];
+    if (CORE_API_KEY) {
+      headers['x-api-key'] = CORE_API_KEY;
+      headers['Authorization'] = 'Bearer ' + CORE_API_KEY;
+    }
+    const httpModule = parsed.protocol === 'https:' ? require('https') : require('http');
+    const proxyReq = httpModule.request(
+      coreSyncUrl,
+      { method, headers },
+      (proxyRes) => {
+        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+        proxyRes.pipe(res);
+      }
+    );
+    proxyReq.on('error', (e) => {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, message: String(e.message) }));
+    });
+    if (method === 'POST') {
+      req.pipe(proxyReq);
+    } else {
+      proxyReq.end();
+    }
+    return;
+  }
+
   if (method === 'POST' && url === '/run') {
     // Allow long-running node commands (e.g. camera_snap/clip can wait up to CMD_TIMEOUT_MS). Prevent Node/socket timeout from closing the request.
     const RUN_TIMEOUT_MS = 360000; // 6 min, must be > nodes/command.js CMD_TIMEOUT_MS

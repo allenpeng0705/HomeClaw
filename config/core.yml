@@ -226,6 +226,14 @@ knowledge_base:
   store_timeout: 60   # Unit: seconds
   # Configurable similarity threshold (0-1, higher = more relevant). Only inject chunks with score >= this; if none pass, no KB block. Set to null to disable (inject top-k regardless).
   retrieval_min_score: null   # e.g. 0.5 or 0.7
+  # Per-user folder sync: scan {homeclaw_root}/{user_id}/knowledgebase/, add new/changed files to KB, remove when file deleted. See docs_design/PerUserKnowledgeBaseFolder.md.
+  folder_sync:
+    enabled: false
+    folder_name: knowledgebase   # subdir under each user's sandbox
+    schedule: ""   # cron expression, e.g. "0 */6 * * *" every 6h; empty = only on-demand via POST /knowledge_base/sync_folder
+    allowed_extensions: [".md", ".txt", ".pdf", ".docx", ".html", ".htm", ".rst", ".csv", ".ppt", ".pptx"]
+    max_file_size_bytes: 5000000
+    resync_on_mtime_change: true
 
 # File-understanding (request.files from channels): always inject short notice with paths so the model uses document_read / knowledge_base_add. When user sends file(s) only (no text) and doc is not too big, add to KB directly. See docs_design/FileUnderstandingDesign.md.
 file_understanding:

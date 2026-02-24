@@ -59,8 +59,13 @@ payload = {
 
 def main():
     url = f"{CORE_URL.rstrip('/')}/api/plugins/register"
+    headers = {}
+    api_key = os.environ.get("CORE_API_KEY", "").strip()
+    if api_key:
+        headers["X-API-Key"] = api_key
+        headers["Authorization"] = f"Bearer {api_key}"
     try:
-        r = httpx.post(url, json=payload, timeout=10)
+        r = httpx.post(url, json=payload, headers=headers or None, timeout=10)
         data = r.json()
         if r.status_code == 200 and data.get("registered"):
             print("Registered time plugin:", data.get("plugin_id"))

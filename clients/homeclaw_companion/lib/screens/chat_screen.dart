@@ -18,18 +18,19 @@ import 'package:url_launcher/url_launcher.dart';
 import '../chat_history_store.dart';
 import '../core_service.dart';
 import 'canvas_screen.dart';
-import 'friend_list_screen.dart';
 import 'settings_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   final CoreService coreService;
-  final ChatType chatType;
+  final String userId;
+  final String userName;
   final String? initialMessage;
 
   const ChatScreen({
     super.key,
     required this.coreService,
-    required this.chatType,
+    required this.userId,
+    required this.userName,
     this.initialMessage,
   });
 
@@ -80,7 +81,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _loadChatHistory() {
     try {
-      final loaded = ChatHistoryStore().load(widget.chatType);
+      final loaded = ChatHistoryStore().load(widget.userId);
       if (loaded.isEmpty) return;
       _messages.clear();
       _messageImages.clear();
@@ -99,7 +100,7 @@ class _ChatScreenState extends State<ChatScreen> {
     for (var i = 0; i < _messages.length; i++) {
       list.add(MapEntry(_messages[i], i < _messageImages.length ? _messageImages[i] : null));
     }
-    await ChatHistoryStore().save(widget.chatType, list);
+    await ChatHistoryStore().save(widget.userId, list);
   }
 
   /// Get current position as "lat,lng" for Core. Returns null if unavailable or on error.
@@ -123,7 +124,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _clearChatHistory() async {
-    await ChatHistoryStore().clear(widget.chatType);
+    await ChatHistoryStore().clear(widget.userId);
     if (!mounted) return;
     setState(() {
       _messages.clear();
@@ -133,6 +134,32 @@ class _ChatScreenState extends State<ChatScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Chat history cleared')),
+      );
+    }
+  }
+
+  Future<void> _syncKnowledgeBase() async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Syncing knowledge base…')),
+    );
+    try {
+      final result = await widget.coreService.syncKnowledgeBaseFolder(widget.userId);
+      if (!mounted) return;
+      final ok = result['ok'] == true;
+      final msg = result['message']?.toString() ?? '';
+      final added = result['added'] is int ? result['added'] as int : 0;
+      final removed = result['removed'] is int ? result['removed'] as int : 0;
+      final summary = ok
+          ? 'KB sync: $msg (added: $added, removed: $removed)'
+          : 'Sync failed: $msg';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(summary), backgroundColor: ok ? null : Theme.of(context).colorScheme.errorContainer),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sync failed: $e'), backgroundColor: Theme.of(context).colorScheme.errorContainer),
       );
     }
   }
@@ -240,7 +267,7 @@ class _ChatScreenState extends State<ChatScreen> {
       } catch (_) {}
       final result = await widget.coreService.sendMessage(
         text.isEmpty ? 'See attached.' : text,
-        isFriendChat: widget.chatType == ChatType.friend,
+        userId: widget.userId,
         location: locationStr,
         images: imagePaths.isEmpty ? null : imagePaths,
         videos: videoPaths.isEmpty ? null : videoPaths,
@@ -1022,7 +1049,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(FriendListScreen.titleFor(widget.chatType)),
+        title: Text(widget.userName),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.of(context).pop(),
@@ -1110,6 +1137,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 case 'clear_chat':
                   await _clearChatHistory();
                   break;
+                case 'sync_kb':
+                  await _syncKnowledgeBase();
+                  break;
               }
             },
             itemBuilder: (context) => [
@@ -1120,6 +1150,7 @@ class _ChatScreenState extends State<ChatScreen> {
               const PopupMenuItem(value: 'run', child: Text('Run command')),
               const PopupMenuItem(value: 'speak', child: Text('Speak last reply')),
               const PopupMenuItem(value: 'stop_tts', child: Text('Stop speaking')),
+              const PopupMenuItem(value: 'sync_kb', child: Text('Sync knowledge base')),
               const PopupMenuItem(value: 'clear_chat', child: Text('Clear chat history')),
             ],
           ),

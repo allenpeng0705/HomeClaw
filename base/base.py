@@ -244,6 +244,10 @@ class User:
     id: Optional[str] = None
     # Optional: API keys for keyed skills (maton-api-gateway, x-api, meta-social, hootsuite). If missing for a user, that skill is not available. Keys: maton_api_key, x_access_token, meta_access_token, hootsuite_access_token.
     skill_api_keys: Optional[Dict[str, str]] = None
+    # User type: "normal" (can use channels, combine with companion app) or "companion" (dedicated to companion app / webchat / control UI only; no channels). Default "normal".
+    type: str = "normal"
+    # Optional identity/persona for companion-type users. Dict: description (free-text summary), gender, roles, personalities, language, response_length; idle_days_before_nudge is reserved for future proactive nudge (not injected). Used to build a system-prompt section so the model behaves as this identity; no LLM call for injection.
+    who: Optional[Dict[str, Any]] = None
 
     @staticmethod
     def from_yaml(yaml_file: str) -> List['User']:
@@ -290,6 +294,12 @@ class User:
                             skill_api_keys = None
                     except Exception:
                         skill_api_keys = None
+                user_type = str(u.get('type') or 'normal').strip().lower() or 'normal'
+                if user_type not in ('normal', 'companion'):
+                    user_type = 'normal'
+                who = u.get('who')
+                if not isinstance(who, dict):
+                    who = None
                 users.append(User(
                     name=name,
                     email=email,
@@ -298,6 +308,8 @@ class User:
                     permissions=permissions,
                     id=uid,
                     skill_api_keys=skill_api_keys,
+                    type=user_type,
+                    who=who,
                 ))
             except Exception:
                 continue
@@ -316,10 +328,14 @@ class User:
                     "phone": list(getattr(user, "phone", None) or []),
                     "permissions": list(getattr(user, "permissions", None) or []),
                     "id": getattr(user, "id", None) or getattr(user, "name", ""),
+                    "type": str(getattr(user, "type", None) or "normal").strip().lower() or "normal",
                 }
                 keys = getattr(user, "skill_api_keys", None)
                 if isinstance(keys, dict) and keys:
                     d["skill_api_keys"] = {str(k): str(v) for k, v in keys.items() if k and v}
+                who = getattr(user, "who", None)
+                if isinstance(who, dict) and who:
+                    d["who"] = who
                 users_data.append(d)
             except Exception:
                 continue
@@ -691,7 +707,7 @@ class CoreMetadata:
     auth_api_key: str = ""  # key to require (X-API-Key header or Authorization: Bearer <key>); also used to sign file links when core_public_url is set
     core_public_url: str = ""  # public URL that reaches Core (e.g. https://homeclaw.example.com). Used for file/report links: core_public_url/files/out?path=...&token=...
     llm_max_concurrent: int = 1  # max concurrent LLM calls (channel + plugin API); 1 = serialize, avoid backend overload; see PluginLLMAndQueueDesign.md
-    knowledge_base: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, collection_name, chunk_size, unused_ttl_days; see docs/MemoryAndDatabase.md
+    knowledge_base: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, collection_name, chunk_size, unused_ttl_days, folder_sync (enabled, folder_name, schedule, allowed_extensions, max_file_size_bytes, resync_on_mtime_change); see docs/MemoryAndDatabase.md and PerUserKnowledgeBaseFolder.md
     profile: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, dir (base path for profiles); see docs/UserProfileDesign.md
     result_viewer: Dict[str, Any] = field(default_factory=dict)  # deprecated; kept for backward compat when loading old config. File serving uses core_public_url + GET /files/out.
     # When true, Core starts and registers all (or allowlisted) plugins in system_plugins/ so one command runs Core + system plugins.
@@ -708,8 +724,8 @@ class CoreMetadata:
     main_llm_local: str = ""   # e.g. local_models/main_vl_model_4B; required when main_llm_mode == "mix"
     main_llm_cloud: str = ""  # e.g. cloud_models/Gemini-2.5-Flash; required when main_llm_mode == "mix"
     hybrid_router: Dict[str, Any] = field(default_factory=dict)  # default_route, heuristic, semantic, slm (enabled, threshold, paths/model)
-    # Companion feature: when enabled, requests with conversation_type or session_id or channel_name matching session_id_value are routed to the companion plugin only (external plugin). See docs_design/CompanionFeatureDesign.md.
-    companion: Dict[str, Any] = field(default_factory=dict)  # enabled: bool; plugin_id: str (default "friends"); session_id_value: str (default "friend")
+    # Companion: config kept for backward compat; Core no longer routes to Friends plugin. All users (normal + companion type) use the same main flow. See docs_design/CompanionFeatureDesign.md.
+    companion: Dict[str, Any] = field(default_factory=dict)
     # RAG memory summarization: periodic summarization + TTL for originals; summaries kept forever. See docs_design/RAGMemorySummarizationDesign.md
     memory_summarization: Dict[str, Any] = field(default_factory=dict)  # enabled, schedule (daily|weekly|next_run), interval_days, keep_original_days, min_age_days, max_memories_per_batch
 
