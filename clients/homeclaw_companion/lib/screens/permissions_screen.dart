@@ -6,7 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core_service.dart';
-import 'chat_screen.dart';
+import 'friend_list_screen.dart';
 
 /// Keys for [SharedPreferences] (caller must ensure shared_preferences is used).
 const String _keyPermissionsIntroShown = 'permissions_intro_shown';
@@ -88,6 +88,13 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
       request: () => Permission.notification.request(),
     ));
 
+    // Location (when in use) – sent to Core so it can use your location in system context (e.g. weather, scheduling).
+    items.add(_PermissionItem(
+      title: 'Location (when in use)',
+      description: 'Send your location to Core so it can use it (e.g. weather, reminders). Stored per user or shared when not combined.',
+      request: () => Permission.locationWhenInUse.request(),
+    ));
+
     // Screen recording (macOS only) – no API to request; user must allow in System Settings.
     if (Platform.isMacOS) {
       items.add(_PermissionItem(
@@ -128,7 +135,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     } else {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
-          builder: (context) => ChatScreen(
+          builder: (context) => FriendListScreen(
             coreService: widget.coreService,
             initialMessage: widget.initialMessage,
           ),

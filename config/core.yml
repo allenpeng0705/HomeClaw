@@ -640,6 +640,6 @@ endpoints: []
 # keyword is required when enabled: companion routing is disabled until keyword (or name) is set here. Used for message-prefix routing (e.g. "Veda, hi").
 # companion:
 #   enabled: true
-#   plugin_id: companion
-#   session_id_value: companion
+#   plugin_id: friends
+#   session_id_value: friend
 #   keyword: Veda

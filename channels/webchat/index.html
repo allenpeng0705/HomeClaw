@@ -28,9 +28,9 @@
   <p class="status" id="status">Loading config…</p>
   <div id="log"></div>
   <div id="input" class="input-row" style="display:none;">
-    <select id="conversation_type" title="Assistant = main chat; Companion = companion thread (session_id=companion)">
+    <select id="conversation_type" title="Assistant = main chat; Friend = Friends plugin (session_id=friend)">
       <option value="assistant">Assistant</option>
-      <option value="companion">Companion</option>
+      <option value="friend">Friend</option>
     </select>
     <input type="text" id="user_id" placeholder="user_id" title="Must exist in config/user.yml">
     <input type="text" id="msg" placeholder="Type a message…" autocomplete="off">
@@ -115,10 +115,20 @@
 
         const conversationType = (document.getElementById('conversation_type') && document.getElementById('conversation_type').value) || 'assistant';
       const payload = { user_id: user_id, text: text || '(no text)' };
-      if (conversationType === 'companion') {
-        payload.session_id = 'companion';
-        payload.conversation_type = 'companion';
+      if (conversationType === 'friend') {
+        payload.session_id = 'friend';
+        payload.conversation_type = 'friend';
+        payload.channel_name = 'friend';
+      } else {
+        payload.channel_name = 'companion';
       }
+      try {
+        var pos = await new Promise(function(res, rej) {
+          if (!navigator.geolocation) { rej(new Error('no geolocation')); return; }
+          navigator.geolocation.getCurrentPosition(function(p) { res(p); }, rej, { timeout: 5000, maximumAge: 60000 });
+        });
+        if (pos && pos.coords) payload.location = pos.coords.latitude + ',' + pos.coords.longitude;
+        } catch (_) {}
         if (fileList.length === 0) {
           ws.send(JSON.stringify(payload));
           return;

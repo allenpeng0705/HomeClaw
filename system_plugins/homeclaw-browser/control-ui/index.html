@@ -30,9 +30,9 @@
   <p class="meta">Chat with HomeClaw. Ensure <code>user_id</code> exists in <code>config/user.yml</code> (e.g. add <code>webchat_user</code>).</p>
   <div id="log"></div>
   <div class="input-row">
-    <select id="conversation_type" title="Assistant = main chat; Companion = companion thread">
+    <select id="conversation_type" title="Assistant = main chat; Friend = Friends plugin (session_id=friend)">
       <option value="assistant">Assistant</option>
-      <option value="companion">Companion</option>
+      <option value="friend">Friend</option>
     </select>
     <input type="text" id="user_id" placeholder="user_id" value="webchat_user" title="Must exist in config/user.yml">
     <input type="text" id="text" placeholder="Type a message..." autocomplete="off">
@@ -118,10 +118,20 @@
 
       const conversationType = (document.getElementById('conversation_type') && document.getElementById('conversation_type').value) || 'assistant';
       const payload = { user_id, text: text || '(no text)' };
-      if (conversationType === 'companion') {
-        payload.session_id = 'companion';
-        payload.conversation_type = 'companion';
+      if (conversationType === 'friend') {
+        payload.session_id = 'friend';
+        payload.conversation_type = 'friend';
+        payload.channel_name = 'friend';
+      } else {
+        payload.channel_name = 'companion';
       }
+      try {
+        const pos = await new Promise((res, rej) => {
+          if (!navigator.geolocation) { rej(new Error('no geolocation')); return; }
+          navigator.geolocation.getCurrentPosition(res, rej, { timeout: 5000, maximumAge: 60000 });
+        });
+        if (pos && pos.coords) payload.location = pos.coords.latitude + ',' + pos.coords.longitude;
+      } catch (_) {}
       if (fileList.length === 0) {
         addLog('Sending message (text only).', 'sys');
         ws.send(JSON.stringify(payload));

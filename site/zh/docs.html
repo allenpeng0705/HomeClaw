@@ -53,6 +53,8 @@
         <li><a href="#memory">6. 记忆</a></li>
         <li><a href="#knowledge-base">7. 知识库</a></li>
         <li><a href="#profile">8. 个人资料</a></li>
+        <li><a href="#sandbox-file-links">9. 每用户沙箱与文件链接</a></li>
+        <li><a href="#friends-plugin">10. Friends 插件</a></li>
         <li><a href="#core-config">Core 配置（core.yml）</a></li>
         <li><a href="#model-configs">模型配置（已测试）</a></li>
       </ul>
@@ -295,6 +297,24 @@ pip install -r requirements.txt</code></pre>
             <li><code>profile.enabled: true</code>、<code>profile.dir</code>（空则 <code>database/profiles</code>）。见 <code>docs/UserProfileDesign.md</code>。</li>
           </ul>
         </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="sandbox-file-links">
+      <div class="doc-section-body">
+        <h2>9. 每用户沙箱与文件链接</h2>
+        <p class="doc-section-summary">每个用户（及未绑定用户时的伴侣）拥有私有工作区与 <strong>output</strong> 输出目录；助手可为报告和导出生成可分享链接。</p>
+        <p>在配置中设置 <strong>tools.file_read_base</strong> 后，文件工具被限制在该基路径下：<strong>base/{user_id}/</strong> 或 <strong>base/companion/</strong>。路径 <strong>output/文件名</strong> 会写入该用户或伴侣的 <strong>output</strong> 目录。工具如 <strong>save_result_page</strong> 或 <strong>file_write</strong> 写入该目录；Core 可返回签名链接（<strong>GET /files/out?path=...&amp;token=...</strong>）供浏览器打开或下载。设置 <strong>auth_api_key</strong> 及可选 <strong>core_public_url</strong> 以启用可分享链接。</p>
+        <p><a href="https://allenpeng0705.github.io/HomeClaw/per-user-sandbox-and-file-links/" target="_blank" rel="noopener">完整文档：每用户沙箱与文件链接</a>。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="friends-plugin">
+      <div class="doc-section-body">
+        <h2>10. Friends 插件</h2>
+        <p class="doc-section-summary">可从伴侣应用或 WebChat 与之对话的人设（如“朋友”），与主系统助手分离。</p>
+        <p>伴侣应用有<strong>好友列表</strong>：<strong>系统</strong>（主助手）与<strong>朋友</strong>（Friends 插件）。点击<strong>朋友</strong>进入专属对话；该对话的消息会路由到 <strong>Friends 插件</strong>（外部插件，plugin_id <strong>friends</strong>）。WebChat 与 homeclaw-browser 控制界面提供<strong>助手</strong>/<strong>朋友</strong>下拉；选择朋友时客户端发送 session_id/conversation_type/channel_name = <strong>friend</strong>，Core 据此路由到插件。伴侣中的“与某用户合并”仅影响<strong>系统</strong>对话（使用的 user_id）；朋友对话独立。</p>
+        <p><a href="https://allenpeng0705.github.io/HomeClaw/friends-plugin/" target="_blank" rel="noopener">完整文档：Friends 插件</a>。</p>
       </div>
     </section>
 

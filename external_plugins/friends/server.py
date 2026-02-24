@@ -1,9 +1,9 @@
 """
-Companion external plugin — HTTP server with single capability "chat".
-All companion settings (name, character, language, response_length, idle_days) live in this plugin only; Core only routes.
-Stores chat only in companion store; uses Core's LLM via POST /api/plugins/llm/generate.
-Run: python -m external_plugins.companion.server
-Then register with Core: python -m external_plugins.companion.register
+Friends external plugin — HTTP server with single capability "chat".
+All persona settings (name, character, language, response_length, idle_days) live in this plugin only; Core only routes.
+Stores chat only in friends store; uses Core's LLM via POST /api/plugins/llm/generate.
+Run: python -m external_plugins.friends.server
+Then register with Core: python -m external_plugins.friends.register
 """
 import os
 import sys
@@ -18,21 +18,21 @@ import yaml
 from fastapi import FastAPI
 from typing import Dict, Any
 
-from external_plugins.companion import store
+from external_plugins.friends import store
 
 app = FastAPI()
 
-_COMPANION_CONFIG: Dict[str, Any] = {}
+_FRIENDS_CONFIG: Dict[str, Any] = {}
 
 
 def _load_plugin_config() -> Dict[str, Any]:
-    """Load plugin config from config.yml (next to this file). Env overrides: COMPANION_NAME, etc."""
-    global _COMPANION_CONFIG
-    if _COMPANION_CONFIG:
-        return _COMPANION_CONFIG
+    """Load plugin config from config.yml (next to this file). Env overrides: FRIENDS_NAME, FRIENDS_PERSONA_NAME, etc."""
+    global _FRIENDS_CONFIG
+    if _FRIENDS_CONFIG:
+        return _FRIENDS_CONFIG
     config_path = Path(__file__).resolve().parent / "config.yml"
     out = {
-        "name": (os.environ.get("COMPANION_NAME") or "Veda").strip() or "Veda",
+        "name": (os.environ.get("FRIENDS_PERSONA_NAME") or os.environ.get("FRIENDS_NAME") or "Veda").strip() or "Veda",
         "character": "friend",
         "language": "en",
         "response_length": "medium",
@@ -50,18 +50,18 @@ def _load_plugin_config() -> Dict[str, Any]:
                         out[k] = str(data[k]).strip().lower() if k != "name" else str(data[k]).strip()
         except Exception:
             pass
-    if os.environ.get("COMPANION_NAME"):
-        out["name"] = (os.environ.get("COMPANION_NAME") or "").strip() or out["name"]
-    _COMPANION_CONFIG.update(out)
-    return _COMPANION_CONFIG
+    if os.environ.get("FRIENDS_PERSONA_NAME") or os.environ.get("FRIENDS_NAME"):
+        out["name"] = (os.environ.get("FRIENDS_PERSONA_NAME") or os.environ.get("FRIENDS_NAME") or "").strip() or out["name"]
+    _FRIENDS_CONFIG.update(out)
+    return _FRIENDS_CONFIG
 
 
-def _companion_name_from_request(_body: Dict[str, Any]) -> str:
-    """Companion name: from plugin config only (Core does not pass it)."""
+def _persona_name_from_request(_body: Dict[str, Any]) -> str:
+    """Persona name: from plugin config only (Core does not pass it)."""
     return _load_plugin_config().get("name") or "Veda"
 
 
-def _merge_companion_settings(user_id: str, _body: Dict[str, Any]) -> Dict[str, Any]:
+def _merge_friends_settings(user_id: str, _body: Dict[str, Any]) -> Dict[str, Any]:
     """Merge plugin config (defaults) with per-user settings. Per-user overrides."""
     defaults = {
         "character": (_load_plugin_config().get("character") or "friend").strip().lower(),
@@ -79,7 +79,7 @@ def _merge_companion_settings(user_id: str, _body: Dict[str, Any]) -> Dict[str, 
     return defaults
 
 
-# Character defines who the companion is to the user — central to making the companion interesting and useful.
+# Character defines who the persona is to the user — central to making the friend interesting and useful.
 CHARACTER_ROLES = {
     "girlfriend": "the user's girlfriend. Be warm, affectionate, supportive, and emotionally attuned. Match their energy; be playful when they are, calm when they need it.",
     "boyfriend": "the user's boyfriend. Be warm, caring, supportive, and present. Show interest in their day; be steady and reassuring when they need it.",
@@ -92,7 +92,6 @@ CHARACTER_ROLES = {
     "parent": "the user's parent. Be caring, wise, and supportive. Offer a steady, nurturing presence without being overbearing.",
 }
 
-# Language is critical for a natural, useful experience — always reply in the configured language.
 LANGUAGE_INSTRUCTIONS = {
     "en": "Reply in English only.",
     "zh": "只用中文回复。",
@@ -130,36 +129,97 @@ def health():
 
 @app.get("/settings/{user_id}")
 def get_settings(user_id: str):
-    """Get per-user companion settings (character, language, response_length, idle_days_before_nudge)."""
+    """Get per-user friends settings (character, language, response_length, idle_days_before_nudge)."""
     return store.get_user_settings(user_id or "default")
 
 
 @app.post("/settings/{user_id}")
 def post_settings(user_id: str, body: Dict[str, Any]):
-    """Update per-user companion settings. Body: { character?, language?, response_length?, idle_days_before_nudge? }. Omitted keys are unchanged."""
+    """Update per-user friends settings. Body: { character?, language?, response_length?, idle_days_before_nudge? }. Omitted keys are unchanged."""
     user_id = (user_id or "default").strip() or "default"
     store.set_user_settings(user_id, body or {})
     return {"ok": True, "settings": store.get_user_settings(user_id)}
 
 
-def _build_messages(user_id: str, user_input: str, companion_name: str, settings: Dict[str, Any]) -> list:
-    """Build messages for LLM. Character and language are central: they define who the companion is and how they reply."""
-    history = store.get_history(user_id, companion_name, num_rounds=10)
+def _build_messages(user_id: str, user_input: str, persona_name: str, settings: Dict[str, Any], memory_context: str = "") -> list:
+    """Build messages for LLM. Character and language define who the persona is and how they reply. memory_context is injected from Core RAG if enabled."""
+    history = store.get_history(user_id, persona_name, num_rounds=10)
     character = settings.get("character") or "friend"
     role_desc = CHARACTER_ROLES.get(character) or CHARACTER_ROLES["friend"]
     lang_inst = _language_instruction(settings.get("language") or "en")
     length_inst = _response_length_instruction(settings.get("response_length") or "medium")
     system = (
-        f"You are {companion_name}, {role_desc}\n"
+        f"You are {persona_name}, {role_desc}\n"
         f"Language: {lang_inst}\n"
         f"Length: {length_inst}\n"
         "Stay in character and be natural and conversational."
     )
+    if memory_context and memory_context.strip():
+        system += "\n\nRelevant things you remember about the user (use naturally in conversation):\n" + memory_context.strip()
     messages = [{"role": "system", "content": system}]
     for t in history:
         messages.append({"role": t["role"], "content": t["content"]})
     messages.append({"role": "user", "content": user_input})
     return messages
+
+
+# When the Companion app is in system mode (not combined with a user), Core sends user_id "companion" to the plugin. Use a dedicated Core memory user_id for that case so Friend memories are never mixed with Assistant (Companion app talking to Core with user_id "companion").
+MEMORY_USER_FRIEND = "companion_friend"
+
+
+def _core_headers() -> Dict[str, str]:
+    """Headers for Core API (memory, LLM)."""
+    api_key = os.environ.get("CORE_API_KEY", "").strip()
+    h = {"Content-Type": "application/json"}
+    if api_key:
+        h["X-API-Key"] = api_key
+        h["Authorization"] = f"Bearer {api_key}"
+    return h
+
+
+def _memory_user_id(user_id: str) -> str:
+    """When app is in system mode (Core sends user_id 'companion'), use dedicated memory user so Friend memories are not mixed with Assistant."""
+    return MEMORY_USER_FRIEND if (user_id or "").strip().lower() == "companion" else (user_id or "").strip() or "default"
+
+
+async def _call_core_memory_add(user_id: str, text: str, user_name: str = "", app_id: str = "homeclaw") -> bool:
+    """Add user message to Core RAG memory. Returns True if added or memory disabled; False on error. Uses companion_friend when app is in system mode to avoid mixing with Assistant."""
+    try:
+        import httpx
+    except ImportError:
+        return False
+    mem_uid = _memory_user_id(user_id)
+    core_url = os.environ.get("CORE_URL", "http://127.0.0.1:9000").rstrip("/")
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            f"{core_url}/api/plugins/memory/add",
+            json={"user_id": mem_uid, "text": text, "user_name": user_name or mem_uid, "app_id": app_id},
+            headers=_core_headers(),
+        )
+        if r.status_code in (200, 400):
+            data = r.json() if r.text else {}
+            return data.get("ok", False) or "Memory not enabled" in str(data.get("error", ""))
+        return False
+
+
+async def _call_core_memory_search(user_id: str, query: str, limit: int = 8) -> list:
+    """Search Core RAG memory for user_id. Returns list of {memory, score}. Uses companion_friend when app is in system mode (user_id 'companion')."""
+    try:
+        import httpx
+    except ImportError:
+        return []
+    mem_uid = _memory_user_id(user_id)
+    core_url = os.environ.get("CORE_URL", "http://127.0.0.1:9000").rstrip("/")
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(
+            f"{core_url}/api/plugins/memory/search",
+            json={"user_id": mem_uid, "query": query, "app_id": "homeclaw", "limit": limit},
+            headers=_core_headers(),
+        )
+        if r.status_code != 200:
+            return []
+        data = r.json() if r.text else {}
+        return data.get("memories") or []
 
 
 async def _call_core_llm(messages: list) -> str:
@@ -169,19 +229,14 @@ async def _call_core_llm(messages: list) -> str:
     except ImportError:
         return "Error: install httpx to use Core LLM."
     core_url = os.environ.get("CORE_URL", "http://127.0.0.1:9000").rstrip("/")
-    api_key = os.environ.get("CORE_API_KEY", "").strip()
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["X-API-Key"] = api_key
-        headers["Authorization"] = f"Bearer {api_key}"
     async with httpx.AsyncClient(timeout=120.0) as client:
         r = await client.post(
             f"{core_url}/api/plugins/llm/generate",
             json={"messages": messages, "llm_name": None},
-            headers=headers,
+            headers=_core_headers(),
         )
         if r.status_code != 200:
-            return f"Companion could not reach Core (HTTP {r.status_code})."
+            return f"Friends plugin could not reach Core (HTTP {r.status_code})."
         data = r.json()
         if isinstance(data.get("error"), str):
             return data.get("error", "Unknown error")
@@ -190,15 +245,15 @@ async def _call_core_llm(messages: list) -> str:
 
 @app.post("/run")
 async def run(body: Dict[str, Any]):
-    """Accept PluginRequest; capability_id 'chat' → companion reply. Return PluginResult."""
+    """Accept PluginRequest; capability_id 'chat' → persona reply. Return PluginResult."""
     request_id = (body.get("request_id") or "").strip()
-    plugin_id = (body.get("plugin_id") or "companion").strip()
+    plugin_id = (body.get("plugin_id") or "friends").strip()
     user_id = (body.get("user_id") or "").strip() or "default"
     user_name = (body.get("user_name") or "").strip() or user_id
     user_input = (body.get("user_input") or "").strip()
     cap_id = ((body.get("capability_id") or "").strip().lower().replace(" ", "_")) or "chat"
-    companion_name = _companion_name_from_request(body)
-    settings = _merge_companion_settings(user_id, body)
+    persona_name = _persona_name_from_request(body)
+    settings = _merge_friends_settings(user_id, body)
 
     if cap_id != "chat":
         return {
@@ -220,7 +275,10 @@ async def run(body: Dict[str, Any]):
             "metadata": {},
         }
 
-    messages = _build_messages(user_id, user_input, companion_name, settings)
+    await _call_core_memory_add(user_id, user_input, user_name=user_name, app_id="homeclaw")
+    memory_list = await _call_core_memory_search(user_id, user_input, limit=8)
+    memory_context = "\n".join((m.get("memory") or "").strip() for m in memory_list if (m.get("memory") or "").strip())[:2000]
+    messages = _build_messages(user_id, user_input, persona_name, settings, memory_context=memory_context)
     try:
         reply = await _call_core_llm(messages)
     except Exception as e:
@@ -233,7 +291,7 @@ async def run(body: Dict[str, Any]):
             "metadata": {},
         }
 
-    store.append_turn(user_id, companion_name, user_input, reply)
+    store.append_turn(user_id, persona_name, user_input, reply)
     return {
         "request_id": request_id,
         "plugin_id": plugin_id,
@@ -245,5 +303,5 @@ async def run(body: Dict[str, Any]):
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("COMPANION_PORT", "3103"))
+    port = int(os.environ.get("FRIENDS_PORT", "3103"))
     uvicorn.run(app, host="0.0.0.0", port=port)

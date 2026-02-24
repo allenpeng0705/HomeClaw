@@ -50,6 +50,8 @@ nav:
   - Companion app (macOS permissions): companion-app-macos-permissions.md
   - Channels: channels.md
   - Companion vs Channels: companion-vs-channels.md
+  - Per-user sandbox and file links: per-user-sandbox-and-file-links.md
+  - Friends plugin: friends-plugin.md
   - Tools: tools.md
   - Plugins: plugins.md
   - Writing plugins and skills: writing-plugins-and-skills.md

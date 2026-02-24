@@ -1,10 +1,10 @@
 # Start external plugin servers and register them with Core (one step).
 # Run from project root after Core is running:  .\external_plugins\run.ps1
-# Or specific plugins:  .\external_plugins\run.ps1 -Plugins time,companion,quote-node
+# Or specific plugins:  .\external_plugins\run.ps1 -Plugins time,friends,quote-node
 # Requires: Python, Node (for quote-node), Go (for time-go), Maven (for quote-java).
 
 param(
-    [string[]] $Plugins = @("time", "companion", "quote-node", "time-go", "quote-java"),
+    [string[]] $Plugins = @("time", "friends", "quote-node", "time-go", "quote-java"),
     [string] $CoreUrl = $env:CORE_URL
 )
 if (-not $CoreUrl) { $CoreUrl = "http://127.0.0.1:9000" }
@@ -71,9 +71,9 @@ try {
         Run-One -Name "time" -Port 3102 -StartExe "python" -StartArgs @("-m","external_plugins.time.server") -StartCwd $Root `
             -RegisterExe "python" -RegisterArgs @("-m","external_plugins.time.register") -RegisterCwd $Root
     }
-    if ($Plugins -contains "companion") {
-        Run-One -Name "companion" -Port 3103 -StartExe "python" -StartArgs @("-m","external_plugins.companion.server") -StartCwd $Root `
-            -RegisterExe "python" -RegisterArgs @("-m","external_plugins.companion.register") -RegisterCwd $Root
+    if ($Plugins -contains "friends") {
+        Run-One -Name "friends" -Port 3103 -StartExe "python" -StartArgs @("-m","external_plugins.friends.server") -StartCwd $Root `
+            -RegisterExe "python" -RegisterArgs @("-m","external_plugins.friends.register") -RegisterCwd $Root
     }
     if ($Plugins -contains "quote-node") {
         $qnDir = Join-Path $ScriptDir "quote-node"

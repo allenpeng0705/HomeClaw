@@ -50,3 +50,8 @@ Optional config file: `~/.summarize/config.json` — set `model` to the same id 
 Optional services:
 - `FIRECRAWL_API_KEY` for blocked sites
 - `APIFY_API_TOKEN` for YouTube fallback
+
+## Output
+
+- **Response:** Return the summary as **plain text** or **Markdown** in your reply so the user sees it in chat.
+- **Saving to file:** If the user wants the summary saved, run `summarize` (via terminal/exec) and then use **file_write** with path **output/summary_<slug>.md** (e.g. `output/summary_article-name.md`). That path goes to the user's private output folder (`workspace/{user_id}/output/` or `companion/output/`). You can paste the summarize CLI stdout into the file, or run summarize and capture output then write it. Prefer returning the summary in your reply; add "Also saved to output/…" or a link when you save. Response can be plain text, Markdown, or text with a link to the saved file.

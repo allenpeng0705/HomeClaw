@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Start all external plugin servers and register them with Core (one step).
 # Run from project root after Core is running:  ./external_plugins/run.sh
-# Or run specific plugins:  ./external_plugins/run.sh time companion quote-node
+# Or run specific plugins:  ./external_plugins/run.sh time friends quote-node
 # Requires: curl, and for each plugin the runtime (python3, node, go, mvn).
 
 set -e
@@ -67,10 +67,10 @@ run_time() {
     "python -m external_plugins.time.register"
 }
 
-run_companion() {
-  run_plugin_background "companion" 3103 \
-    "python -m external_plugins.companion.server" \
-    "python -m external_plugins.companion.register"
+run_friends() {
+  run_plugin_background "friends" 3103 \
+    "python -m external_plugins.friends.server" \
+    "python -m external_plugins.friends.register"
 }
 
 run_quote_node() {
@@ -99,7 +99,7 @@ run_quote_java() {
 }
 
 # Default: run all.
-PLUGINS="${*:-time companion quote-node time-go quote-java}"
+PLUGINS="${*:-time friends quote-node time-go quote-java}"
 echo "Core URL: $CORE_URL"
 echo "Plugins:  $PLUGINS"
 echo "Logs:     $LOG_DIR/"
@@ -108,12 +108,12 @@ echo ""
 for p in $PLUGINS; do
   case "$p" in
     time)        ( run_time ) || echo "[time] Failed (see above). Continuing." ;;
-    companion)   ( run_companion ) || echo "[companion] Failed (see above). Continuing." ;;
+    friends)     ( run_friends ) || echo "[friends] Failed (see above). Continuing." ;;
     quote-node)  ( run_quote_node ) || echo "[quote-node] Failed (see above). Continuing." ;;
     time-go)     ( run_time_go ) || echo "[time-go] Failed (see above). Continuing." ;;
     quote-java)  ( run_quote_java ) || echo "[quote-java] Failed (see above). Continuing." ;;
     *)
-      echo "Unknown plugin: $p (use: time, companion, quote-node, time-go, quote-java)" >&2
+      echo "Unknown plugin: $p (use: time, friends, quote-node, time-go, quote-java)" >&2
       exit 1
       ;;
   esac

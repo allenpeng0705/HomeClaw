@@ -34,5 +34,7 @@
 	<string>Voice input for messages</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Convert your voice to text for messages</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Send your location to Core so it can use it for weather, reminders, and context.</string>
 </dict>
 </plist>

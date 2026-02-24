@@ -1,13 +1,23 @@
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
+import 'chat_history_store.dart';
 import 'core_service.dart';
-import 'screens/chat_screen.dart';
+import 'screens/friend_list_screen.dart';
 import 'screens/permissions_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await ChatHistoryStore.init();
+  } catch (_) {
+    // Hive init failed (e.g. storage permission); app still runs, chat history won't persist.
+  }
   final coreService = CoreService();
-  await coreService.loadSettings();
+  try {
+    await coreService.loadSettings();
+  } catch (_) {
+    // Settings load failed; app uses defaults.
+  }
   String? initialMessage;
   try {
     final appLinks = AppLinks();
@@ -50,7 +60,7 @@ class _InitialScreen extends StatefulWidget {
 }
 
 class _InitialScreenState extends State<_InitialScreen> {
-  late final Future<Widget> _homeFuture;
+  Future<Widget>? _homeFuture;
 
   @override
   void initState() {
@@ -66,7 +76,7 @@ class _InitialScreenState extends State<_InitialScreen> {
         initialMessage: widget.initialMessage,
       );
     }
-    return ChatScreen(
+    return FriendListScreen(
       coreService: widget.coreService,
       initialMessage: widget.initialMessage,
     );
@@ -74,10 +84,37 @@ class _InitialScreenState extends State<_InitialScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final future = _homeFuture;
+    if (future == null) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     return FutureBuilder<Widget>(
-      future: _homeFuture,
+      future: future,
       builder: (context, snapshot) {
-        if (snapshot.hasData) return snapshot.data!;
+        if (snapshot.hasData && snapshot.data != null) return snapshot.data!;
+        if (snapshot.hasError) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('HomeClaw')),
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Something went wrong: ${snapshot.error}'),
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: () => setState(() {
+                        _homeFuture = _resolveHome();
+                      }),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
         return const Scaffold(
           body: Center(child: CircularProgressIndicator()),
         );

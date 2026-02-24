@@ -1,6 +1,6 @@
 """
-Register the Companion external plugin with Core.
-Run after Core is up and after starting the companion server.
+Register the Friends external plugin with Core.
+Run after Core is up and after starting the friends server.
 """
 import os
 import sys
@@ -14,14 +14,14 @@ except ImportError:
     sys.exit(1)
 
 CORE_URL = os.environ.get("CORE_URL", "http://127.0.0.1:9000")
-COMPANION_NAME = os.environ.get("COMPANION_NAME", "Veda").strip() or "Veda"
-PLUGIN_BASE = os.environ.get("COMPANION_BASE_URL", "http://127.0.0.1:3103")
+FRIENDS_NAME = (os.environ.get("FRIENDS_PERSONA_NAME") or os.environ.get("FRIENDS_NAME") or "Veda").strip() or "Veda"
+PLUGIN_BASE = os.environ.get("FRIENDS_BASE_URL", "http://127.0.0.1:3103")
 
 payload = {
-    "plugin_id": "companion",
-    "name": "Companion",
-    "description": f"Chat with {COMPANION_NAME}, a companion persona. Use when the user is in the companion thread (session_id=companion or conversation_type=companion). Data is stored separately from the main assistant.",
-    "description_long": f"Companion feature: one conversation thread per user with {COMPANION_NAME}. All messages and history are stored only in the companion store, not in the main user database. Core routes to this plugin when the client sends conversation_type=companion or session_id=companion (or channel_name=companion).",
+    "plugin_id": "friends",
+    "name": "Friends",
+    "description": f"Chat with {FRIENDS_NAME}, a friend/persona. Use when the user is in the companion thread (session_id=companion or conversation_type=companion). Data is stored separately from the main assistant.",
+    "description_long": f"Friends feature: one conversation thread per user with {FRIENDS_NAME}. All messages and history are stored only in the friends store, not in the main user database. Core routes to this plugin when the client sends conversation_type=companion or session_id=companion (or channel_name=companion).",
     "health_check_url": f"{PLUGIN_BASE.rstrip('/')}/health",
     "type": "http",
     "config": {
@@ -32,8 +32,8 @@ payload = {
     "capabilities": [
         {
             "id": "chat",
-            "name": "Companion chat",
-            "description": f"One turn of conversation with {COMPANION_NAME}. User message in user_input; returns companion reply.",
+            "name": "Friends chat",
+            "description": f"One turn of conversation with {FRIENDS_NAME}. User message in user_input; returns persona reply.",
             "parameters": [],
             "method": "POST",
             "path": "/run",
@@ -52,7 +52,6 @@ def main():
         headers["X-API-Key"] = key
         headers["Authorization"] = f"Bearer {key}"
     try:
-        # Pre-check: ensure Core is reachable (avoids cryptic 502 when proxy is in front)
         try:
             r0 = httpx.get("%s/ready" % base, headers=headers or None, timeout=5)
             if r0.status_code != 200:
@@ -71,7 +70,7 @@ def main():
             print("Core returned non-JSON. status=%s body=%s" % (r.status_code, text[:500]))
             sys.exit(1)
         if r.status_code == 200 and data.get("registered"):
-            print("Registered companion plugin:", data.get("plugin_id"))
+            print("Registered friends plugin:", data.get("plugin_id"))
         else:
             body = data if data else (text[:500] if text.strip() else "(empty)")
             print("Registration failed: %s %s" % (r.status_code, body))

@@ -83,6 +83,11 @@ web_search "site:answeroverflow.com prisma many-to-many"
 - Check the server/channel name to understand the context (e.g., official support vs community)
 - Many open source projects index their Discord support channels here
 
+## Output
+
+- **Response:** Use plain text or Markdown in your reply. When you fetch a thread or cite a result, include the link (e.g. `https://www.answeroverflow.com/m/<message-id>`).
+- **Saving to file:** If the user asks to save results or a thread, use **file_write** with path **output/<filename>** (e.g. `output/answeroverflow-thread-123.md`). That path goes to the user's private output folder (`workspace/{user_id}/output/` or `companion/output/`). You can return a short summary in chat plus "Saved to output/…" or a link to open the file if Core is configured with file serving.
+
 ## Links
 
 - **Website:** https://www.answeroverflow.com

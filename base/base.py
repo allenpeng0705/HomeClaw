@@ -646,7 +646,7 @@ class CoreMetadata:
     main_llm_cloud: str = ""  # e.g. cloud_models/Gemini-2.5-Flash; required when main_llm_mode == "mix"
     hybrid_router: Dict[str, Any] = field(default_factory=dict)  # default_route, heuristic, semantic, slm (enabled, threshold, paths/model)
     # Companion feature: when enabled, requests with conversation_type or session_id or channel_name matching session_id_value are routed to the companion plugin only (external plugin). See docs_design/CompanionFeatureDesign.md.
-    companion: Dict[str, Any] = field(default_factory=dict)  # enabled: bool; plugin_id: str (default "companion"); session_id_value: str (default "companion")
+    companion: Dict[str, Any] = field(default_factory=dict)  # enabled: bool; plugin_id: str (default "friends"); session_id_value: str (default "friend")
     # RAG memory summarization: periodic summarization + TTL for originals; summaries kept forever. See docs_design/RAGMemorySummarizationDesign.md
     memory_summarization: Dict[str, Any] = field(default_factory=dict)  # enabled, schedule (daily|weekly|next_run), interval_days, keep_original_days, min_age_days, max_memories_per_batch
 

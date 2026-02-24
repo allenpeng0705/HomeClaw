@@ -98,7 +98,7 @@ All commands assume **project root** for Python; Node/Go/Java samples are run fr
 | Sample | Language | Port | Run | Register |
 |--------|----------|------|-----|-----------|
 | Time | Python | 3102 | `python -m external_plugins.time.server` | `python -m external_plugins.time.register` |
-| Companion | Python | 3103 | `python -m external_plugins.companion.server` | `python -m external_plugins.companion.register` |
+| Friends | Python | 3103 | `python -m external_plugins.friends.server` | `python -m external_plugins.friends.register` |
 | Quote | Node.js | 3111 | `cd external_plugins/quote-node && npm install && node server.js` | `node register.js` (from that dir) |
 | Time | Go | 3112 | `cd external_plugins/time-go && go run main.go` | `./register.sh` |
 | Quote | Java | 3113 | `cd external_plugins/quote-java && mvn compile exec:java -Dexec.mainClass="QuotePlugin"` | `./register.sh` |

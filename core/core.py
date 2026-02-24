@@ -1489,7 +1489,7 @@ class Core(CoreInterface):
 
         @self.app.get("/api/config/users", dependencies=[Depends(_verify_inbound_auth)])
         async def api_config_users_get():
-            """Return list of users from user.yml."""
+            """Return list of users from user.yml. Single entry point for Companion 'combine with user' (identity options when talking to System). Response: { \"users\": [ { \"id\", \"name\", \"email\", \"im\", \"phone\", \"permissions\" }, ... ] }."""
             try:
                 users = Util().get_users() or []
                 out = [
@@ -1733,6 +1733,82 @@ class Core(CoreInterface):
             except Exception as e:
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"error": str(e), "text": ""})
+
+        @self.app.post("/api/plugins/memory/add", dependencies=[Depends(_verify_inbound_auth)])
+        async def api_plugins_memory_add(request: Request):
+            """
+            Add a user message to Core RAG memory. For external plugins (e.g. Friends) that want the same memory system as Core.
+            Body: { "user_id": "...", "text": "...", "app_id": "...", "user_name": "..." }. user_id and text required.
+            Returns { "ok": true } or { "error": "..." }. Auth: same as /inbound when auth_enabled.
+            """
+            try:
+                try:
+                    body = await request.json()
+                except Exception:
+                    body = {}
+                if not isinstance(body, dict):
+                    body = {}
+                user_id = (body.get("user_id") or "").strip()
+                text = (body.get("text") or "").strip()
+                if not user_id or not text:
+                    return JSONResponse(status_code=400, content={"error": "user_id and text are required", "ok": False})
+                app_id = (body.get("app_id") or "").strip() or "homeclaw"
+                user_name = (body.get("user_name") or "").strip() or user_id
+                mem = getattr(self, "mem_instance", None)
+                if mem is None:
+                    return JSONResponse(content={"ok": False, "error": "Memory not enabled"})
+                await mem.add(text, user_name=user_name, user_id=user_id, agent_id=app_id, run_id=None, metadata=None, filters=None)
+                return JSONResponse(content={"ok": True})
+            except Exception as e:
+                logger.exception(e)
+                return JSONResponse(status_code=500, content={"error": str(e), "ok": False})
+
+        @self.app.post("/api/plugins/memory/search", dependencies=[Depends(_verify_inbound_auth)])
+        async def api_plugins_memory_search(request: Request):
+            """
+            Search Core RAG memory for a user. For external plugins (e.g. Friends) that want the same memory system as Core.
+            Body: { "user_id": "...", "query": "...", "app_id": "...", "limit": 10 }. user_id and query required.
+            Returns { "memories": [ { "memory": "...", "score": ... }, ... ] } or { "error": "..." }. Auth: same as /inbound when auth_enabled.
+            """
+            try:
+                try:
+                    body = await request.json()
+                except Exception:
+                    body = {}
+                if not isinstance(body, dict):
+                    body = {}
+                user_id = (body.get("user_id") or "").strip()
+                query = (body.get("query") or "").strip()
+                if not user_id or not query:
+                    return JSONResponse(status_code=400, content={"error": "user_id and query are required", "memories": []})
+                app_id = (body.get("app_id") or "").strip() or "homeclaw"
+                try:
+                    limit = max(1, min(50, int(body.get("limit", 10) or 10)))
+                except (TypeError, ValueError):
+                    limit = 10
+                mem = getattr(self, "mem_instance", None)
+                if mem is None:
+                    return JSONResponse(content={"memories": []})
+                results = await mem.search(
+                    query=query,
+                    user_name=user_id,
+                    user_id=user_id,
+                    agent_id=app_id,
+                    run_id=None,
+                    filters={},
+                    limit=limit,
+                )
+                out = []
+                if isinstance(results, list):
+                    for r in results:
+                        if isinstance(r, dict):
+                            out.append({"memory": r.get("memory", r.get("data", "")), "score": r.get("score", 0.0)})
+                        else:
+                            out.append({"memory": str(r), "score": 0.0})
+                return JSONResponse(content={"memories": out})
+            except Exception as e:
+                logger.exception(e)
+                return JSONResponse(status_code=500, content={"error": str(e), "memories": []})
 
         @self.app.get("/api/plugin-ui")
         async def api_plugin_ui_list():
@@ -1998,6 +2074,15 @@ class Core(CoreInterface):
 
     async def _handle_inbound_request(self, request: InboundRequest) -> Tuple[bool, str, int, Optional[List[str]]]:
         """Shared logic for POST /inbound and WebSocket /ws. Returns (success, text_or_error, status_code, image_paths_or_none)."""
+        try:
+            return await self._handle_inbound_request_impl(request)
+        except Exception as e:
+            logger.exception(e)
+            msg = (str(e) or "Internal error").strip()[:500]
+            return False, msg or "Internal error", 500, None
+
+    async def _handle_inbound_request_impl(self, request: InboundRequest) -> Tuple[bool, str, int, Optional[List[str]]]:
+        """Implementation of _handle_inbound_request. Do not call directly; use _handle_inbound_request for crash-safe handling."""
         from datetime import datetime
         req_id = str(datetime.now().timestamp())
         user_name = request.user_name or request.user_id
@@ -2083,8 +2168,15 @@ class Core(CoreInterface):
         self._persist_last_channel(pr)
         # Companion routing: when combined with a user (user_id in user.yml, not "system"/"companion") → main flow with channel=companion; else → companion plugin. See docs_design/CompanionFeatureDesign.md.
         # keyword is required when companion is enabled (no default in code); routing is disabled until it is set in config.
-        meta = Util().get_core_metadata()
-        companion_cfg = getattr(meta, "companion", None) or {}
+        # Wrapped in try/except so config/plugin errors never crash Core; on failure we fall through to main flow.
+        try:
+            meta = Util().get_core_metadata()
+            companion_cfg = getattr(meta, "companion", None)
+            if not isinstance(companion_cfg, dict):
+                companion_cfg = {}
+        except Exception as cfg_err:
+            logger.debug("Companion config load failed, skipping companion routing: %s", cfg_err)
+            companion_cfg = {}
         if companion_cfg.get("enabled"):
             keyword = (companion_cfg.get("keyword") or companion_cfg.get("name") or "").strip()
             if not keyword:
@@ -2093,15 +2185,19 @@ class Core(CoreInterface):
                     "Set it in config/core.yml under companion to enable companion routing."
                 )
             else:
-                session_id_val = (companion_cfg.get("session_id_value") or "companion").strip().lower()
-                plugin_id = (companion_cfg.get("plugin_id") or "companion").strip().lower().replace(" ", "_")
+                session_id_val = (companion_cfg.get("session_id_value") or "friend").strip().lower() or "friend"
+                plugin_id = (companion_cfg.get("plugin_id") or "friends").strip().lower().replace(" ", "_") or "friends"
+                # Route to Friends plugin when client signals "Friend chat" via conversation_type, session_id, or channel_name (all use session_id_value).
+                conv_type = (getattr(request, "conversation_type", None) or "").strip().lower()
+                sess_id = (getattr(request, "session_id", None) or "").strip().lower()
+                ch_name = (getattr(request, "channel_name", None) or "").strip().lower()
                 is_companion = (
-                    (getattr(request, "conversation_type", None) or "").strip().lower() == "companion"
-                    or (getattr(request, "session_id", None) or "").strip().lower() == session_id_val
-                    or (request.channel_name or "").strip().lower() == session_id_val
+                    conv_type == session_id_val
+                    or sess_id == session_id_val
+                    or ch_name == session_id_val
                 )
                 if not is_companion and keyword:
-                    text_stripped = (request.text or "").strip()
+                    text_stripped = (getattr(request, "text", None) or "").strip()
                     kw_lower = keyword.lower()
                     if text_stripped.lower().startswith(kw_lower + ",") or text_stripped.lower().startswith(kw_lower + " ") or text_stripped.lower().startswith("hey " + kw_lower) or text_stripped.lower().startswith("hi " + kw_lower):
                         is_companion = True
@@ -2137,23 +2233,44 @@ class Core(CoreInterface):
                             )
                         except Exception as lc_err:
                             logger.debug("Failed to persist companion last channel: {}", lc_err)
-                        plug = self.plugin_manager.get_plugin_by_id(plugin_id) if self.plugin_manager else None
+                        plug = None
+                        try:
+                            plug = self.plugin_manager.get_plugin_by_id(plugin_id) if self.plugin_manager else None
+                        except Exception as plug_err:
+                            logger.debug("get_plugin_by_id failed: %s", plug_err)
                         if isinstance(plug, dict):
-                            pr_companion = copy.deepcopy(pr)
-                            (pr_companion.request_metadata or {}).update({"capability_id": "chat", "capability_parameters": {}})
+                            plugin_display_name = (plug.get("name") or plugin_id or "Friends").strip() or "Friends"
+                            try:
+                                pr_companion = copy.deepcopy(pr)
+                            except Exception as deep_err:
+                                logger.debug("deepcopy pr failed: %s", deep_err)
+                                return True, f"{plugin_display_name} is offline now.", 200, None
+                            try:
+                                (pr_companion.request_metadata or {}).update({"capability_id": "chat", "capability_parameters": {}})
+                            except Exception:
+                                pass
                             try:
                                 result = await self.plugin_manager.run_external_plugin(plug, pr_companion)
                                 if result and getattr(result, "success", False):
                                     out_text = (result.text or "").strip()
                                     img_paths = list(getattr(result, "metadata", None) or {}).get("images") or []
                                     return True, out_text, 200, img_paths if isinstance(img_paths, list) else None
-                                err = getattr(result, "error", None) or "Companion plugin returned no text"
-                                return False, err, 500, None
+                                err = getattr(result, "error", None) or ""
+                                err_lower = (err or "").lower()
+                                if any(x in err_lower for x in ("connect", "refused", "connection", "timeout", "timed out", "unreachable")):
+                                    return True, f"{plugin_display_name} is offline now.", 200, None
+                                return False, err or f"{plugin_display_name} returned no reply.", 500, None
                             except Exception as e:
+                                err_str = str(e).lower() if e else ""
+                                if any(x in err_str for x in ("connect", "refused", "connection", "timeout", "timed out", "unreachable")):
+                                    logger.debug("Friends plugin unreachable: %s", e)
+                                    return True, f"{plugin_display_name} is offline now.", 200, None
                                 logger.exception(e)
                                 return False, f"Companion error: {e!s}", 500, None
                         else:
-                            logger.warning("Companion enabled but plugin_id=%s not found or not external; falling back to main flow.", plugin_id)
+                            logger.warning("Companion enabled but plugin_id=%s not found or not external.", plugin_id)
+                            display_when_missing = (plugin_id or "friends").replace("_", " ").strip().title() or "Friends"
+                            return True, f"{display_when_missing} is offline now.", 200, None
         # if companion enabled but keyword not set, routing was skipped (must set companion.keyword in config)
         if not getattr(self, "orchestrator_unified_with_tools", True):
             flag = await self.orchestrator_handler(pr)

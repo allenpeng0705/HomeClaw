@@ -4,6 +4,10 @@ Minimal **browser UI** that talks to the Core over **WebSocket /ws**. Run this c
 
 **Synced with system plugin WebChat** (homeclaw-browser control-ui): same behavior — images are uploaded via **POST /api/upload** (channel proxies to Core), Core saves to `database/uploads/`, and the client sends the chat message with **paths** in `payload.images` so the model receives the image from disk. Video/audio/other files still go as data URLs.
 
+**Features (Companion parity):**
+- **Assistant vs Friend:** Dropdown "Assistant" (main chat) or "Friend" (Friends plugin). When Friend is selected, the client sends `session_id`, `conversation_type`, and `channel_name` = **friend** (Core config `companion.session_id_value`, default `friend`).
+- **Location:** When the browser supports Geolocation API, the page requests position before each send (with permission). If granted, `payload.location` is set to `"lat,lng"` so Core can store latest location per user (see SystemContextDateTimeAndLocation.md). If denied or unavailable, the message is sent without location.
+
 ## Run
 
 ```bash

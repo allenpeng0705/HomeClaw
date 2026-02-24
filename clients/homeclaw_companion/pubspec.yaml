@@ -11,6 +11,8 @@ dependencies:
     sdk: flutter
   http: ^1.2.0
   shared_preferences: ^2.2.2
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
   cupertino_icons: ^1.0.6
   mobile_scanner: ^6.0.2   # QR scan for "Scan to connect" (iOS/Android)
   homeclaw_native:
@@ -26,6 +28,10 @@ dependencies:
   path: ^1.9.0
   web_socket_channel: ^3.0.1
   permission_handler: ^11.3.0
+  geolocator: ^13.0.2
+  geolocator_linux: ^0.1.0   # Linux location (optional; geolocator uses it when building for Linux)
+  flutter_markdown: ^0.7.4+1
+  url_launcher: ^6.2.5
 
 dev_dependencies:
   flutter_test:

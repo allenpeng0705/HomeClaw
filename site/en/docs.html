@@ -53,6 +53,8 @@
         <li><a href="#memory">6. Memory</a></li>
         <li><a href="#knowledge-base">7. Knowledge base</a></li>
         <li><a href="#profile">8. Profile</a></li>
+        <li><a href="#sandbox-file-links">9. Per-user sandbox &amp; file links</a></li>
+        <li><a href="#friends-plugin">10. Friends plugin</a></li>
         <li><a href="#core-config">Core config (core.yml)</a></li>
         <li><a href="#model-configs">Model configs (tested)</a></li>
       </ul>
@@ -295,6 +297,24 @@ pip install -r requirements.txt</code></pre>
             <li><code>profile.enabled: true</code>, <code>profile.dir</code> (empty = <code>database/profiles</code>). See <code>docs/UserProfileDesign.md</code>.</li>
           </ul>
         </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="sandbox-file-links">
+      <div class="doc-section-body">
+        <h2>9. Per-user sandbox &amp; file links</h2>
+        <p class="doc-section-summary">Each user (and Companion when not combined) has a private workspace and an <strong>output</strong> folder for generated files; the assistant can return a shareable link for reports and exports.</p>
+        <p>When <strong>tools.file_read_base</strong> is set in config, file tools are restricted to paths under that base: <strong>base/{user_id}/</strong> or <strong>base/companion/</strong>. Paths like <strong>output/filename</strong> go to the user's or companion's <strong>output</strong> folder. Tools such as <strong>save_result_page</strong> or <strong>file_write</strong> write there; Core can return a signed link (<strong>GET /files/out?path=...&amp;token=...</strong>) so you can open or download the file in a browser. Set <strong>auth_api_key</strong> and optionally <strong>core_public_url</strong> for shareable links.</p>
+        <p><a href="https://allenpeng0705.github.io/HomeClaw/per-user-sandbox-and-file-links/" target="_blank" rel="noopener">Full doc: Per-user sandbox and file links</a>.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="friends-plugin">
+      <div class="doc-section-body">
+        <h2>10. Friends plugin</h2>
+        <p class="doc-section-summary">A persona you can chat with from the Companion app or WebChat (e.g. Friend), separate from the main System assistant.</p>
+        <p>The Companion app has a <strong>friend list</strong>: <strong>System</strong> (main assistant) and <strong>Friend</strong> (Friends plugin). Tapping <strong>Friend</strong> opens a dedicated chat; messages from that chat are routed to the <strong>Friends plugin</strong> (external plugin, plugin_id <strong>friends</strong>). WebChat and the homeclaw-browser control UI offer an <strong>Assistant</strong> / <strong>Friend</strong> dropdown; when Friend is selected, the client sends session_id/conversation_type/channel_name = <strong>friend</strong> so Core routes to the plugin. &quot;Combine with one user&quot; in Companion only affects <strong>System</strong> chat (which user_id is used); Friend chat is independent.</p>
+        <p><a href="https://allenpeng0705.github.io/HomeClaw/friends-plugin/" target="_blank" rel="noopener">Full doc: Friends plugin</a>.</p>
       </div>
     </section>
 

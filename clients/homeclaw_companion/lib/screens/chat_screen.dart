@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:path/path.dart' as path;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
@@ -10,16 +11,26 @@ import 'package:homeclaw_voice/homeclaw_voice.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../chat_history_store.dart';
 import '../core_service.dart';
 import 'canvas_screen.dart';
+import 'friend_list_screen.dart';
 import 'settings_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   final CoreService coreService;
+  final ChatType chatType;
   final String? initialMessage;
 
-  const ChatScreen({super.key, required this.coreService, this.initialMessage});
+  const ChatScreen({
+    super.key,
+    required this.coreService,
+    required this.chatType,
+    this.initialMessage,
+  });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -56,12 +67,72 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     _loadTtsAutoSpeak();
     _loadVoiceInputLocale();
+    _loadChatHistory();
     _checkCoreConnection();
     _connectionCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkCoreConnection());
     if (widget.initialMessage != null && widget.initialMessage!.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _inputController.text = widget.initialMessage!;
       });
+    }
+  }
+
+  void _loadChatHistory() {
+    try {
+      final loaded = ChatHistoryStore().load(widget.chatType);
+      if (loaded.isEmpty) return;
+      _messages.clear();
+      _messageImages.clear();
+      for (final e in loaded) {
+        _messages.add(e.key);
+        _messageImages.add(e.value);
+      }
+      if (mounted) setState(() {});
+    } catch (_) {
+      // Store load failed; keep empty chat.
+    }
+  }
+
+  Future<void> _persistChatHistory() async {
+    final list = <MapEntry<MapEntry<String, bool>, List<String>?>>[];
+    for (var i = 0; i < _messages.length; i++) {
+      list.add(MapEntry(_messages[i], i < _messageImages.length ? _messageImages[i] : null));
+    }
+    await ChatHistoryStore().save(widget.chatType, list);
+  }
+
+  /// Get current position as "lat,lng" for Core. Returns null if unavailable or on error.
+  Future<String?> _getCurrentLocationString() async {
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) return null;
+      final perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        final requested = await Geolocator.requestPermission();
+        if (requested != LocationPermission.whileInUse && requested != LocationPermission.always) return null;
+      }
+      if (perm == LocationPermission.deniedForever) return null;
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
+      ).timeout(const Duration(seconds: 5));
+      return '${pos.latitude},${pos.longitude}';
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _clearChatHistory() async {
+    await ChatHistoryStore().clear(widget.chatType);
+    if (!mounted) return;
+    setState(() {
+      _messages.clear();
+      _messageImages.clear();
+      _lastReply = null;
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Chat history cleared')),
+      );
     }
   }
 
@@ -108,11 +179,13 @@ class _ChatScreenState extends State<ChatScreen> {
         : _inputController.text.trim();
     final hasAttachments = _pendingImagePaths.isNotEmpty || _pendingVideoPaths.isNotEmpty || _pendingFilePaths.isNotEmpty;
     if ((text.isEmpty && !hasAttachments) || _loading) return;
+    if (!mounted) return;
     if (_voiceListening) {
       // Cancel subscription first so no more "final" events can trigger _send() and cause double send.
       _voiceSubscription?.cancel();
       _voiceSubscription = null;
       await _voice.stopVoiceListening();
+      if (!mounted) return;
       setState(() {
         _voiceListening = false;
         _voiceTranscript = '';
@@ -128,6 +201,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final userImageDataUrls = imagesToSend.isNotEmpty
         ? await _filePathsToImageDataUrls(imagesToSend)
         : <String>[];
+    if (!mounted) return;
     setState(() {
       _pendingImagePaths.clear();
       _pendingVideoPaths.clear();
@@ -136,6 +210,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _messageImages.add(userImageDataUrls.isEmpty ? null : userImageDataUrls);
       _loading = true;
     });
+    _persistChatHistory();
     try {
       List<String> imagePaths = [];
       List<String> videoPaths = [];
@@ -158,8 +233,14 @@ class _ChatScreenState extends State<ChatScreen> {
           // Videos and documents not sent on upload failure to avoid huge payloads.
         }
       }
+      String? locationStr;
+      try {
+        locationStr = await _getCurrentLocationString();
+      } catch (_) {}
       final result = await widget.coreService.sendMessage(
         text.isEmpty ? 'See attached.' : text,
+        isFriendChat: widget.chatType == ChatType.friend,
+        location: locationStr,
         images: imagePaths.isEmpty ? null : imagePaths,
         videos: videoPaths.isEmpty ? null : videoPaths,
         files: filePaths.isEmpty ? null : filePaths,
@@ -168,7 +249,7 @@ class _ChatScreenState extends State<ChatScreen> {
         final reply = (result['text'] as String?) ?? '';
         final imageList = result['images'] as List<dynamic>?;
         final imageDataUrls = imageList != null
-            ? imageList.map((e) => e as String).where((s) => s.startsWith('data:image/')).toList()
+            ? imageList.whereType<String>().where((s) => s.startsWith('data:image/')).toList()
             : <String>[];
         _lastReply = reply;
         setState(() {
@@ -176,6 +257,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _messageImages.add(imageDataUrls.isEmpty ? null : imageDataUrls);
           _loading = false;
         });
+        await _persistChatHistory();
         final preview = reply.isEmpty ? 'No reply' : (reply.length > 80 ? '${reply.substring(0, 80)}…' : reply);
         await _native.showNotification(title: 'HomeClaw', body: preview);
         if (_ttsAutoSpeak && reply.isNotEmpty) _speakReplyText(reply);
@@ -187,6 +269,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _messageImages.add(null);
           _loading = false;
         });
+        _persistChatHistory();
       }
     }
   }
@@ -213,6 +296,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   _messageImages.removeAt(index);
                 }
               });
+              _persistChatHistory();
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Message deleted')),
@@ -937,7 +1021,11 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('HomeClaw'),
+        title: Text(FriendListScreen.titleFor(widget.chatType)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
         actions: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
@@ -1018,6 +1106,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 case 'stop_tts':
                   await _stopTts();
                   break;
+                case 'clear_chat':
+                  await _clearChatHistory();
+                  break;
               }
             },
             itemBuilder: (context) => [
@@ -1028,6 +1119,7 @@ class _ChatScreenState extends State<ChatScreen> {
               const PopupMenuItem(value: 'run', child: Text('Run command')),
               const PopupMenuItem(value: 'speak', child: Text('Speak last reply')),
               const PopupMenuItem(value: 'stop_tts', child: Text('Stop speaking')),
+              const PopupMenuItem(value: 'clear_chat', child: Text('Clear chat history')),
             ],
           ),
           IconButton(
@@ -1082,22 +1174,32 @@ class _ChatScreenState extends State<ChatScreen> {
                                           .where((u) => u.startsWith('data:image/'))
                                           .map((imageDataUrl) => Padding(
                                                 padding: const EdgeInsets.only(bottom: 6),
-                                                child: ClipRRect(
-                                                  borderRadius: BorderRadius.circular(8),
-                                                  child: Image.memory(
-                                                    base64Decode(imageDataUrl.contains(',') ? imageDataUrl.split(',').last : ''),
-                                                    fit: BoxFit.contain,
-                                                    width: 280,
-                                                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                                child: GestureDetector(
+                                                  onTap: () {
+                                                    Navigator.of(context).push(
+                                                      MaterialPageRoute<void>(
+                                                        builder: (ctx) => _FullScreenImagePage(imageDataUrl: imageDataUrl),
+                                                      ),
+                                                    );
+                                                  },
+                                                  child: ClipRRect(
+                                                    borderRadius: BorderRadius.circular(8),
+                                                    child: Image.memory(
+                                                      base64Decode(imageDataUrl.contains(',') ? imageDataUrl.split(',').last : ''),
+                                                      fit: BoxFit.contain,
+                                                      width: 280,
+                                                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                                    ),
                                                   ),
                                                 ),
                                               ))
                                           .toList(),
                                     ),
                                   ),
-                                SelectableText(
-                                  entry.key,
-                                  style: Theme.of(context).textTheme.bodyLarge,
+                                _ChatMessageText(
+                                  text: entry.key,
+                                  isUser: isUser,
+                                  theme: Theme.of(context),
                                 ),
                               ],
                             ),
@@ -1448,6 +1550,155 @@ class _AttachmentChip extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Renders chat message text as Markdown (bold, lists, code, links, etc.) with selectable text and tappable links.
+class _ChatMessageText extends StatelessWidget {
+  final String text;
+  final bool isUser;
+  final ThemeData theme;
+
+  const _ChatMessageText({
+    required this.text,
+    required this.isUser,
+    required this.theme,
+  });
+
+  /// File extensions that should open with system default app (e.g. PPT, PDF, DOC).
+  static const List<String> _fileExtensions = [
+    'ppt', 'pptx', 'pdf', 'doc', 'docx', 'xls', 'xlsx',
+    'odt', 'ods', 'odp', 'rtf', 'txt', 'csv', 'zip',
+    'png', 'jpg', 'jpeg', 'gif', 'webp', 'mp4', 'mp3',
+  ];
+
+  static bool _isFileLink(String href) {
+    final lower = href.toLowerCase().trim();
+    if (lower.startsWith('file:')) return true;
+    if (lower.startsWith('http:') || lower.startsWith('https:')) {
+      final path = Uri.tryParse(href)?.path ?? '';
+      final ext = path.contains('.') ? path.split('.').last.toLowerCase() : '';
+      return ext.isNotEmpty && _fileExtensions.contains(ext);
+    }
+    return false;
+  }
+
+  Future<void> _onTapLink(String text, String? href, String title) async {
+    if (href == null || href.isEmpty) return;
+    Uri? uri = Uri.tryParse(href);
+    if (uri == null) return;
+    try {
+      final isFile = _isFileLink(href);
+      if (isFile && uri.scheme == 'file') {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+      if (isFile && (uri.scheme == 'http' || uri.scheme == 'https')) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+      if (uri.scheme == 'http' || uri.scheme == 'https') {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+      if (uri.scheme.isEmpty && (RegExp(r'^[A-Za-z]:[/\\]').hasMatch(href) || href.startsWith('/'))) {
+        final fileUri = Uri.file(href);
+        if (await canLaunchUrl(fileUri)) {
+          await launchUrl(fileUri, mode: LaunchMode.externalApplication);
+        }
+        return;
+      }
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveText = text.isEmpty ? '\u200B' : text;
+    final styleSheet = MarkdownStyleSheet.fromTheme(theme).copyWith(
+      p: theme.textTheme.bodyLarge,
+      listBullet: theme.textTheme.bodyLarge,
+      h1: theme.textTheme.headlineSmall,
+      h2: theme.textTheme.titleLarge,
+      h3: theme.textTheme.titleMedium,
+      code: theme.textTheme.bodyMedium?.copyWith(
+        fontFamily: 'monospace',
+        backgroundColor: theme.colorScheme.surfaceContainerHighest,
+      ),
+      codeblockDecoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      blockquote: theme.textTheme.bodyMedium?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant,
+      ),
+      blockquoteDecoration: BoxDecoration(
+        border: Border(
+          left: BorderSide(color: theme.colorScheme.primary, width: 4),
+        ),
+      ),
+    );
+    return MarkdownBody(
+      data: effectiveText,
+      selectable: true,
+      styleSheet: styleSheet,
+      onTapLink: _onTapLink,
+      softLineBreak: true,
+      shrinkWrap: true,
+      fitContent: true,
+    );
+  }
+}
+
+/// Full-screen image viewer. Tap anywhere to go back.
+class _FullScreenImagePage extends StatelessWidget {
+  final String imageDataUrl;
+
+  const _FullScreenImagePage({required this.imageDataUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = imageDataUrl.contains(',')
+        ? base64Decode(imageDataUrl.split(',').last)
+        : <int>[];
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: GestureDetector(
+        onTap: () => Navigator.of(context).pop(),
+        behavior: HitTestBehavior.opaque,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (bytes.isNotEmpty)
+              Center(
+                child: InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 4.0,
+                  child: Image.memory(
+                    bytes,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image, color: Colors.white54, size: 64)),
+                  ),
+                ),
+              )
+            else
+              const Center(child: Icon(Icons.broken_image, color: Colors.white54, size: 64)),
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topRight,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                  onPressed: () => Navigator.of(context).pop(),
+                  tooltip: 'Close',
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -54,10 +54,12 @@ Rotate through these categories for balanced content:
 
 1. **Research:** Use `web_fetch` on news sites (theverge.com, techcrunch.com, news.ycombinator.com)
 2. **Generate:** Spawn a content-agent via `sessions_spawn` with research results
-3. **Store:** Save drafts in `memory/tweet-drafts-YYYY-MM-DD.json`
+3. **Store:** Save drafts with **file_write** to **output/tweet-drafts-YYYY-MM-DD.json** (user's private output folder)
 4. **Review:** Check drafts for quality, brand consistency
 5. **Post:** Use browser automation to publish
-6. **Track:** Log posted tweets in `memory/social-log.json`
+6. **Track:** Log posted tweets with **file_write** to **output/social-log.json**
+
+Paths like **output/…** resolve to the user's private output folder (`workspace/{user_id}/output/` or `companion/output/`). See FileSandboxDesign.md.
 
 ### Draft Format
 
@@ -105,7 +107,7 @@ Use `sessionTarget: "isolated"` with `payload.kind: "agentTurn"` for autonomous 
 
 ## Analytics Tracking
 
-Track engagement in `memory/social-log.json`:
+Track engagement with **file_write** to **output/social-log.json** (append or overwrite as needed):
 
 ```json
 {
@@ -120,6 +122,11 @@ Track engagement in `memory/social-log.json`:
 ```
 
 Review weekly: What topics got most engagement? Adjust strategy accordingly.
+
+## Output
+
+- **Response:** Use **plain text**, **Markdown**, or **text with link** in your reply (e.g. link to a saved draft or report in the user's output folder if Core is configured with file serving).
+- **Files:** All generated files (drafts, logs) go to the user's private output folder via path **output/<filename>**. Use **file_write** with paths like `output/tweet-drafts-YYYY-MM-DD.json` and `output/social-log.json`.
 
 ## Quick Reference
 

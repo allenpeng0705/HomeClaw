@@ -17,6 +17,9 @@ Control UI lives in the **control-ui/** folder (like **browser/**, **canvas/**, 
 **Images / vision in WebChat**  
 When you attach **images**, the client first uploads them via **POST /api/upload** (plugin proxies to Core). Core saves files under **database/uploads/** and returns their paths. The chat message then sends **payload.images = [path, ...]** so the model receives the image from disk (no huge data URLs over WebSocket). Video/audio/other still go as data URLs in `payload.videos`, `payload.audios`, `payload.files`. For the assistant to describe images, Core must use a **vision-capable main LLM** (e.g. `main_llm: local_models/main_vl_model` with `mmproj` / `supported_media: [image]` in **config/core.yml**). See **docs_design/Multimodal.md** and the "Vision request" / "main_llm_supported_media" logs if the model says it cannot see images.
 
+**Assistant vs Friend and location (Companion parity)**  
+The Control UI dropdown offers **Assistant** (main chat) or **Friend** (Friends plugin). When Friend is selected, the client sends `session_id`, `conversation_type`, and `channel_name` = **friend** (Core config `companion.session_id_value`, default `friend`). When the browser supports the Geolocation API, the page requests position before each send; if the user grants permission, `payload.location` is set to `"lat,lng"` so Core can store latest location per user (see SystemContextDateTimeAndLocation.md). If denied or unavailable, the message is sent without location.
+
 ---
 
 ## How to use

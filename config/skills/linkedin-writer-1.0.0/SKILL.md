@@ -76,3 +76,8 @@ The first 2 lines determine if anyone reads the rest. Use these:
 - [ ] Ends with engagement driver (question or clear CTA)
 - [ ] No cringe buzzwords
 - [ ] Under 1300 characters (unless story format)
+
+## Output
+
+- **Response:** Return the post as **plain text** or **Markdown** in your reply so the user can copy it into LinkedIn.
+- **Saving to file:** If the user asks to save a copy, use **file_write** with path **output/<filename>** (e.g. `output/linkedin-post-2026-02-19.md`). That path goes to the user's private output folder (`workspace/{user_id}/output/` or `companion/output/`). You can respond with the post in chat and add "Also saved to output/…" or a link to open the file if Core is configured with file serving.

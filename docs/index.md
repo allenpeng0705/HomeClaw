@@ -45,6 +45,8 @@
 | [**Platform**](platform.md) | Config files, multi-user, memory backend |
 | [**Remote access**](remote-access.md) | Tailscale and Cloudflare Tunnel to reach Core from anywhere |
 | [**Companion vs Channels**](companion-vs-channels.md) | How the Companion app and channels differ; how Core handles them |
+| [**Per-user sandbox and file links**](per-user-sandbox-and-file-links.md) | Per-user workspace, output folder, and generate link for reports/files |
+| [**Friends plugin**](friends-plugin.md) | Companion persona (Friend chat); how to use from Companion and WebChat |
 | [**Help**](help.md) | Doctor, troubleshooting, and repo docs |
 
 ---

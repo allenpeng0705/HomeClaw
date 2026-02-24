@@ -2,6 +2,8 @@
 
 This document defines how HomeClaw restricts file and folder access per user and companion, and how all file-related features (including **outputs**) must behave. The implementation never crashes Core: all file tools return string messages on error.
 
+**User-facing doc:** [docs/per-user-sandbox-and-file-links.md](../docs/per-user-sandbox-and-file-links.md) — summary for users (per-user sandbox, output folder, generate link).
+
 ## Overview
 
 - **One configurable base directory** (`tools.file_read_base` in `config/core.yml`). When set, all file/folder tools are restricted to paths under this base. When not set, absolute paths are allowed (no sandbox).
