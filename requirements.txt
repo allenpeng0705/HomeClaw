@@ -1,28 +1,29 @@
-loguru
-PyYAML
+# Version lower bounds reduce pip resolution depth and avoid resolution-too-deep (see https://pip.pypa.io/en/stable/topics/dependency-resolution/)
+loguru>=0.7.0
+PyYAML>=6.0
 ruamel.yaml>=0.18.0   # preserve comments when updating core.yml
-python-dotenv
-tqdm
-transformers
-chromadb
-numpy
-fastapi
-openai
+python-dotenv>=1.0.0
+tqdm>=4.65.0
+transformers>=4.30.0
+chromadb>=0.4.0
+numpy>=1.24.0,<3.0.0
+fastapi>=0.100.0
+openai>=1.0.0
 litellm>=1.50.0
-watchdog
-alembic
-schedule
-croniter
-pytz
+watchdog>=3.0.0
+alembic>=1.12.0
+schedule>=1.2.0
+croniter>=1.4.0
+pytz>=2023.3
 httpx>=0.24.0
 # Core HTTP / templates (used by core, base, memory, channels)
-aiohttp
-requests
-jinja2
+aiohttp>=3.8.0
+requests>=2.28.0
+jinja2>=3.1.0
 # DB: SQLite via sqlalchemy (memory/chat, memory/database)
-sqlalchemy
+sqlalchemy>=2.0.0
 # Pydantic (models; fastapi brings it, but explicit for non-FastAPI paths)
-pydantic
+pydantic>=2.0.0
 # PPT Maker plugin (generate .pptx)
 python-pptx>=0.6.21
 # Constrain fsspec so datasets (transforms/cognee dep) is satisfied: datasets requires fsspec[http]<=2024.12.0
@@ -30,9 +31,9 @@ fsspec[http]>=2023.1.0,<=2024.12.0
 # Full browser (navigate, snapshot, click, type). After pip install: playwright install chromium
 playwright>=1.40.0
 # Pinggy tunnel (remote access): when pinggy.token set in core.yml, Core starts tunnel and serves /pinggy with QR for Companion.
-pinggy
+pinggy>=0.0.18
 # QR code for /pinggy page (Companion scan-to-connect)
-qrcode[pil]
+qrcode[pil]>=7.4.0
 
 # For Channels
 # Wechat
@@ -46,21 +47,21 @@ qrcode[pil]
 
 
 # Memory: Cognee is default (memory_backend=cognee). Alternative: chroma + optional graph (kuzu/neo4j).
-cognee   # default memory backend
+cognee>=0.3.0   # default memory backend
 kuzu>=0.4.0   # optional graph for memory_backend=chroma
 protego>=0.1
 # neo4j>=5.0.0   # optional: graph for memory_backend=chroma (uncomment if using Neo4j)
 
 # Hybrid router Layer 2: semantic routing (mix mode). Uses existing embedding via custom encoder.
-semantic-router
+semantic-router>=0.0.20
 
 # Optional (uncomment if needed):
 # document_read tool: PDF, PPT, Word, MD, HTML, XML, JSON, etc. (one powerful tool)
 # numba>=0.59 required for Python 3.12 (unstructured[all-docs] pulls numba)
 numba>=0.59.0
-unstructured[all-docs]
+unstructured[all-docs]>=0.10.0
 # web_search: provider=duckduckgo (no key) or fallback when other providers fail
-duckduckgo-search
+duckduckgo-search>=4.0.0
 # web_extract / web_crawl: better main-content extraction (free; no API key)
 # trafilatura   # preferred for article extraction
 # beautifulsoup4 # fallback if trafilatura not installed

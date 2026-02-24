@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -1711,7 +1712,7 @@ class _FullScreenImagePage extends StatelessWidget {
                   minScale: 0.5,
                   maxScale: 4.0,
                   child: Image.memory(
-                    bytes,
+                    Uint8List.fromList(bytes),
                     fit: BoxFit.contain,
                     errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image, color: Colors.white54, size: 64)),
                   ),
