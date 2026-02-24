@@ -1,6 +1,6 @@
 # WebChat channel
 
-Minimal **browser UI** that talks to the Core over **WebSocket /ws**. Run this channel to serve the page; the page loads the Core WebSocket URL from the server (which reads **channels/.env** only). No IM bot token; add `webchat_local` (or the value of `WEBCHAT_USER_ID`) to `config/user.yml` under `im` if you restrict by user.
+Minimal **browser UI** that talks to the Core over **WebSocket /ws**. Run this channel to serve the page; the page loads the Core WebSocket URL from the server (which reads **channels/.env** only). No IM bot token; ensure the default user (e.g. `webchat_user`) exists in `config/user.yml` so Core accepts the request (match by user id/name).
 
 **Synced with system plugin WebChat** (homeclaw-browser control-ui): same behavior — images are uploaded via **POST /api/upload** (channel proxies to Core), Core saves to `database/uploads/`, and the client sends the chat message with **paths** in `payload.images` so the model receives the image from disk. Video/audio/other files still go as data URLs.
 
@@ -18,8 +18,8 @@ Then open **http://127.0.0.1:8014/** in your browser. The page fetches `/config`
 
 ## Config
 
-- **channels/.env**: Core URL (core_host, core_port or CORE_URL). Optional: `WEBCHAT_USER_ID` (default `webchat_local`), `WEBCHAT_HOST`, `WEBCHAT_PORT` (default 8014). If Core has **auth_enabled**, set **CORE_API_KEY** so the channel can proxy uploads to Core `/api/upload`.
-- **config/user.yml**: Add `webchat_local` (or your WEBCHAT_USER_ID) under `im` for a user with `IM` permission if you use allowlists.
+- **channels/.env**: Core URL (core_host, core_port or CORE_URL). Optional: `WEBCHAT_USER_ID` (default `webchat_user`), `WEBCHAT_HOST`, `WEBCHAT_PORT` (default 8014). If Core has **auth_enabled**, set **CORE_API_KEY** so the channel can proxy uploads to Core `/api/upload`.
+- **config/user.yml**: Ensure a user with id matching WEBCHAT_USER_ID exists (e.g. `id: webchat_user`, `type: companion`). Core matches by user id/name for WebSocket /inbound.
 
 ## From anywhere
 

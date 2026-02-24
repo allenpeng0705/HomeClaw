@@ -1,2 +1,2 @@
 name: webchat
-# Core connection: channels/.env only. Optional: WEBCHAT_USER_ID, WEBCHAT_HOST, WEBCHAT_PORT in channels/.env
+# Core connection: channels/.env only. Optional: WEBCHAT_USER_ID (default webchat_user), WEBCHAT_HOST, WEBCHAT_PORT in channels/.env

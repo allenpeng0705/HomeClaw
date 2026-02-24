@@ -1,6 +1,6 @@
 """
 WebChat channel: serves a minimal browser UI that talks to Core over WebSocket /ws.
-Core URL from channels/.env only. No IM bot token; add webchat_<user_id> to config/user.yml if you restrict by user.
+Core URL from channels/.env only. No IM bot token; ensure the default user (e.g. webchat_user) exists in config/user.yml so Core accepts WebSocket/inbound by user id/name.
 Sync with system_plugins/homeclaw-browser control-ui: same upload-then-path flow for images (POST /api/upload → Core saves → client sends paths).
 """
 import os
@@ -37,10 +37,10 @@ def get_ws_url() -> str:
 
 @app.get("/config")
 def config():
-    """Return Core WebSocket URL and default user_id for the client. From channels/.env only."""
+    """Return Core WebSocket URL and default user_id for the client. From channels/.env only. Default webchat_user matches sample config/user.yml."""
     return {
         "ws_url": get_ws_url(),
-        "user_id": os.getenv("WEBCHAT_USER_ID", "webchat_local"),
+        "user_id": os.getenv("WEBCHAT_USER_ID", "webchat_user"),
     }
 
 

@@ -5136,9 +5136,10 @@ class Core(CoreInterface):
                         if base_str and llm_input and llm_input[0].get("role") == "system":
                             block = (
                                 "\n\n## File tools base path\n"
-                                "For file_read, file_write, document_read, folder_list, file_find: "
-                                "paths are relative to the configured base (homeclaw_root). Use relative paths only (e.g. path=\".\" for the base, path=\"subdir\" for a subfolder). "
-                                "To find files by type: call file_find with pattern only (e.g. pattern=\"*.docx\" for Word, pattern=\"*.pdf\" for PDF, pattern=\"*.jpg\" for images). "
+                                "The user can access two root folders: (1) their private folder homeclaw_root/{user_id}/, (2) the shared folder homeclaw_root/share/. "
+                                "For file_read, file_write, document_read, folder_list, file_find use path=\".\" for the user's private folder (their default root), path=\"share\" or \"share/\" for the shared folder, or path=\"subdir\" (relative to private folder). "
+                                "When the user asks what files are in their directory, or to list their files (e.g. 你的目录下都有哪些文件, 列出文件, what's in my folder), call folder_list with path=\".\" to list their private folder, or path=\"share\" to list the shared folder, then report the result. "
+                                "To find files by type: call file_find with pattern (e.g. pattern=\"*.docx\", pattern=\"*.pdf\"). "
                                 "Report only paths returned by file_find or folder_list; do not invent or guess paths. "
                                 "To read Word/PDF content use document_read(path=<relative path from tool result>). "
                                 f"Current homeclaw_root: {base_str}"
@@ -5255,7 +5256,29 @@ class Core(CoreInterface):
                                         logger.debug("Fallback route_to_plugin failed: {}", e)
                                         response = content_str or "The action could not be completed. Try a model that supports tool calling."
                                 else:
-                                    response = content_str
+                                    # Fallback: user may have asked to list directory (e.g. 你的目录下都有哪些文件) but model didn't call folder_list
+                                    list_dir_phrases = ("目录", "哪些文件", "列出文件", "list file", "list directory", "what file", "what's in my", "files in my", "folder content", "目录下")
+                                    if registry and any(t.name == "folder_list" for t in (registry.list_tools() or [])) and any(p in (query or "") for p in list_dir_phrases):
+                                        try:
+                                            _component_log("tools", "fallback folder_list (model did not call tool)")
+                                            result = await registry.execute_async("folder_list", {"path": "."}, context)
+                                            if isinstance(result, str) and result.strip():
+                                                try:
+                                                    entries = json.loads(result)
+                                                    if isinstance(entries, list) and entries:
+                                                        lines = [f"- {e.get('name', '?')} ({e.get('type', '?')})" for e in entries if isinstance(e, dict)]
+                                                        response = "目录下的内容：\n" + "\n".join(lines) if lines else result
+                                                    else:
+                                                        response = "目录为空。" if isinstance(entries, list) else result
+                                                except (json.JSONDecodeError, TypeError):
+                                                    response = result
+                                            else:
+                                                response = content_str or "Directory is empty or could not be listed."
+                                        except Exception as e:
+                                            logger.debug("Fallback folder_list failed: {}", e)
+                                            response = content_str or "Could not list directory. Please try again."
+                                    else:
+                                        response = content_str
                         break
                     routing_sent = False
                     routing_response_text = None  # when route_to_plugin/route_to_tam return text (sync inbound/ws), use as final response

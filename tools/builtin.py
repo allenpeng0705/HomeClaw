@@ -4694,11 +4694,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="folder_list",
-            description="List contents of a directory (files and subdirectories). Path is relative to config tools.file_read_base (default: project root). Use to explore the filesystem.",
+            description="List contents of a directory (files and subdirectories). The user can access two roots: path '.' = their private folder (homeclaw_root/{user_id}/), path 'share' = shared folder (homeclaw_root/share/). Use when the user asks what files are in their directory (e.g. 你的目录下都有哪些文件, 列出文件).",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path to the directory (use '.' for base).", "default": "."},
+                    "path": {"type": "string", "description": "Relative path to the directory (use '.' for the user's base directory).", "default": "."},
                     "max_entries": {"type": "integer", "description": "Max entries to return (default 500).", "default": 500},
                 },
                 "required": [],
