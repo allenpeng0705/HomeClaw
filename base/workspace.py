@@ -9,6 +9,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from loguru import logger
+
 # Project root: parent of base/
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_WORKSPACE_DIR = _PROJECT_ROOT / "config" / "workspace"
@@ -51,6 +53,95 @@ def _sanitize_system_user_id(system_user_id: Optional[str]) -> str:
         return ""
 
 
+def get_user_knowledgebase_dir(homeclaw_root: str, user_id: str, folder_name: str = "knowledgebase") -> Optional[Path]:
+    """
+    Path to a user's knowledge base folder: {homeclaw_root}/{user_id}/{folder_name}/.
+    Used for folder_sync: files here are scanned and synced to the user's KB. Returns None if homeclaw_root is empty.
+    Never raises.
+    """
+    try:
+        root = (homeclaw_root or "").strip()
+        if not root:
+            return None
+        uid = _sanitize_system_user_id(user_id)
+        if not uid:
+            return None
+        name = (folder_name or "knowledgebase").strip() or "knowledgebase"
+        for c in r'/\:*?"<>|':
+            name = name.replace(c, "_")
+        if not name:
+            name = "knowledgebase"
+        return Path(root).resolve() / uid / name
+    except Exception:
+        return None
+
+
+def ensure_user_sandbox_folders(
+    homeclaw_root: str,
+    user_ids: List[str],
+    *,
+    share_dir: str = "share",
+    companion: bool = True,
+    output_subdir: str = "output",
+    knowledgebase_subdir: str = "knowledgebase",
+) -> None:
+    """
+    Create per-user and shared sandbox folders under homeclaw_root so they exist for file tools and KB sync.
+    For each user_id: {homeclaw_root}/{user_id}, {user_id}/output, {user_id}/knowledgebase.
+    Also creates: {homeclaw_root}/share, and if companion: {homeclaw_root}/companion, companion/output.
+    Uses _sanitize_system_user_id for path segments. Never raises; logs on mkdir failure.
+    """
+    try:
+        root = (homeclaw_root or "").strip()
+        if not root:
+            return
+        if not isinstance(user_ids, (list, tuple)):
+            user_ids = []
+        else:
+            user_ids = list(user_ids)
+        base = Path(root).resolve()
+        try:
+            if not base.exists():
+                base.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.debug("ensure_user_sandbox_folders: mkdir root {} failed: {}", base, e)
+            return
+        # Share folder (all users + companion)
+        share_name = (share_dir or "share").strip() or "share"
+        for c in r'/\:*?"<>|':
+            share_name = share_name.replace(c, "_")
+        try:
+            (base / share_name).mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.debug("ensure_user_sandbox_folders: mkdir share {} failed: {}", base / share_name, e)
+        # Companion folder (when app not tied to a user)
+        if companion:
+            try:
+                comp = base / "companion"
+                comp.mkdir(parents=True, exist_ok=True)
+                (comp / (output_subdir or "output").strip() or "output").mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                logger.debug("ensure_user_sandbox_folders: mkdir companion failed: {}", e)
+        out_sub = (output_subdir or "output").strip() or "output"
+        kb_sub = (knowledgebase_subdir or "knowledgebase").strip() or "knowledgebase"
+        for c in r'/\:*?"<>|':
+            out_sub = out_sub.replace(c, "_")
+            kb_sub = kb_sub.replace(c, "_")
+        for uid_raw in user_ids:
+            uid = _sanitize_system_user_id(uid_raw)
+            if not uid:
+                continue
+            try:
+                user_base = base / uid
+                user_base.mkdir(parents=True, exist_ok=True)
+                (user_base / out_sub).mkdir(parents=True, exist_ok=True)
+                (user_base / kb_sub).mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                logger.debug("ensure_user_sandbox_folders: mkdir user {} failed: {}", uid, e)
+    except Exception as e:
+        logger.debug("ensure_user_sandbox_folders: {}", e)
+
+
 def get_workspace_dir(config_dir: Optional[str] = None) -> Path:
     """Return workspace directory path. Prefer config_dir if given and absolute or under project. Never raises."""
     if not config_dir or not str(config_dir).strip():
@@ -88,13 +179,14 @@ def load_workspace(workspace_dir: Optional[Path] = None) -> Dict[str, str]:
     return result
 
 
-def build_workspace_system_prefix(workspace: Dict[str, str]) -> str:
+def build_workspace_system_prefix(workspace: Dict[str, str], skip_identity: bool = False) -> str:
     """
     Build a single system-prompt block from workspace dict.
-    Only includes non-empty identity, agents, tools; each wrapped with a short header.
+    Only includes non-empty identity (unless skip_identity), agents, tools; each wrapped with a short header.
+    When skip_identity is True (e.g. companion user with "who"), the Identity section is omitted so the caller can inject a who-based identity instead.
     """
     parts = []
-    if workspace.get(KEY_IDENTITY):
+    if not skip_identity and workspace.get(KEY_IDENTITY):
         parts.append("## Identity\n" + workspace[KEY_IDENTITY])
     if workspace.get(KEY_AGENTS):
         parts.append("## Agents / behavior\n" + workspace[KEY_AGENTS])

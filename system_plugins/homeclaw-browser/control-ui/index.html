@@ -27,17 +27,14 @@
 </head>
 <body>
   <h1>HomeClaw WebChat</h1>
-  <p class="meta">Chat with HomeClaw. Ensure <code>user_id</code> exists in <code>config/user.yml</code> (e.g. add <code>webchat_user</code>).</p>
+  <p class="meta">Chat with HomeClaw. Select a user (from Core user.yml); each message is sent as that user.</p>
   <div id="log"></div>
   <div class="input-row">
-    <select id="conversation_type" title="Assistant = main chat; Friend = Friends plugin (session_id=friend)">
-      <option value="assistant">Assistant</option>
-      <option value="friend">Friend</option>
-    </select>
-    <input type="text" id="user_id" placeholder="user_id" value="webchat_user" title="Must exist in config/user.yml">
+    <select id="user_id" title="User from Core (user.yml). Must exist in config."></select>
     <input type="text" id="text" placeholder="Type a message..." autocomplete="off">
     <input type="file" id="files" multiple accept="image/*,video/*,audio/*,*/*" title="Attach images, video, audio, or files">
     <button type="button" id="send">Send</button>
+    <button type="button" id="sync_kb" title="Sync knowledge base folder for selected user">Sync KB</button>
   </div>
   <div id="status"></div>
 
@@ -48,6 +45,36 @@
     const filesEl = document.getElementById('files');
     const sendBtn = document.getElementById('send');
     const statusEl = document.getElementById('status');
+
+    async function loadUsers() {
+      try {
+        const r = await fetch(location.origin + '/api/core/users');
+        const data = await r.json().catch(() => ({}));
+        const users = Array.isArray(data.users) ? data.users : [];
+        userIdEl.innerHTML = '';
+        users.forEach((u) => {
+          const id = (u.id ?? u.name ?? '').toString().trim();
+          const name = (u.name ?? id).toString().trim();
+          if (id) {
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.textContent = name;
+            userIdEl.appendChild(opt);
+          }
+        });
+        if (userIdEl.options.length === 0) {
+          const opt = document.createElement('option');
+          opt.value = 'webchat_user';
+          opt.textContent = 'webchat_user (add users in user.yml)';
+          userIdEl.appendChild(opt);
+        }
+      } catch (e) {
+        const opt = document.createElement('option');
+        opt.value = 'webchat_user';
+        opt.textContent = 'webchat_user';
+        userIdEl.appendChild(opt);
+      }
+    }
 
     function mediaKind(type) {
       if (!type) return 'file';
@@ -116,15 +143,7 @@
       textEl.value = '';
       filesEl.value = '';
 
-      const conversationType = (document.getElementById('conversation_type') && document.getElementById('conversation_type').value) || 'assistant';
-      const payload = { user_id, text: text || '(no text)' };
-      if (conversationType === 'friend') {
-        payload.session_id = 'friend';
-        payload.conversation_type = 'friend';
-        payload.channel_name = 'friend';
-      } else {
-        payload.channel_name = 'companion';
-      }
+      const payload = { user_id, text: text || '(no text)', channel_name: 'companion' };
       try {
         const pos = await new Promise((res, rej) => {
           if (!navigator.geolocation) { rej(new Error('no geolocation')); return; }
@@ -215,10 +234,36 @@
       ws.send(JSON.stringify(payload));
     });
 
+    const syncKbBtn = document.getElementById('sync_kb');
+    if (syncKbBtn) {
+      syncKbBtn.addEventListener('click', async () => {
+        const user_id = (userIdEl.value || '').trim();
+        if (!user_id) {
+          addLog('Select a user first.', 'error');
+          return;
+        }
+        syncKbBtn.disabled = true;
+        addLog('Syncing knowledge base for ' + user_id + '…', 'sys');
+        try {
+          const r = await fetch(location.origin + '/api/core/knowledge_base/sync_folder?user_id=' + encodeURIComponent(user_id));
+          const data = await r.json().catch(() => ({}));
+          if (r.ok && data.ok) {
+            addLog('KB sync: ' + (data.message || '') + ' (added: ' + (data.added || 0) + ', removed: ' + (data.removed || 0) + ')', 'sys');
+          } else {
+            addLog('KB sync failed: ' + (data.detail || data.message || r.status), 'error');
+          }
+        } catch (e) {
+          addLog('KB sync error: ' + (e.message || e), 'error');
+        }
+        syncKbBtn.disabled = false;
+      });
+    }
+
     textEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') sendBtn.click();
     });
 
+    loadUsers();
     connect();
   </script>
 </body>

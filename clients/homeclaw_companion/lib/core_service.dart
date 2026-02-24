@@ -18,27 +18,19 @@ class CoreService {
   static const String _keyExecAllowlist = 'exec_allowlist';
   static const String _keyCanvasUrl = 'canvas_url';
   static const String _keyNodesUrl = 'nodes_url';
-  static const String _keySystemUserId = 'system_user_id';
   static const String _defaultBaseUrl = 'http://127.0.0.1:9000';
-
-  /// Session id value sent to Core to route to Friends plugin. Must match Core config companion.session_id_value (default "friend").
-  static const String sessionIdValueFriend = 'friend';
 
   String _baseUrl = _defaultBaseUrl;
   String? _apiKey;
   List<String> _execAllowlist = [];
   String? _canvasUrl;
   String? _nodesUrl;
-  /// When talking to System: "companion" or empty = system user (not combined); else = combined user id from user.yml.
-  String _systemUserId = '';
 
   String get baseUrl => _baseUrl;
   String? get apiKey => _apiKey;
   List<String> get execAllowlist => List.unmodifiable(_execAllowlist);
   String? get canvasUrl => _canvasUrl;
   String? get nodesUrl => _nodesUrl;
-  /// Identity when talking to System: empty or "companion" = system (default); else combined user id.
-  String get systemUserId => _systemUserId.isEmpty ? 'companion' : _systemUserId;
 
   NodeService? _nodeService;
   NodeService? get nodeService => _nodeService;
@@ -80,7 +72,6 @@ class CoreService {
     if (_canvasUrl != null && _canvasUrl!.isEmpty) _canvasUrl = null;
     _nodesUrl = prefs.getString(_keyNodesUrl)?.trim();
     if (_nodesUrl != null && _nodesUrl!.isEmpty) _nodesUrl = null;
-    _systemUserId = (prefs.getString(_keySystemUserId) ?? '').trim();
   }
 
   Future<void> saveSettings({required String baseUrl, String? apiKey}) async {
@@ -118,18 +109,6 @@ class CoreService {
       await prefs.setString(_keyNodesUrl, _nodesUrl!);
     } else {
       await prefs.remove(_keyNodesUrl);
-    }
-  }
-
-  /// Identity when talking to System: null or empty or "companion" = system (default); else combined user id from user.yml.
-  Future<void> saveSystemUserId(String? id) async {
-    final v = (id ?? '').trim();
-    _systemUserId = (v.isEmpty || v == 'companion') ? '' : v;
-    final prefs = await SharedPreferences.getInstance();
-    if (_systemUserId.isEmpty) {
-      await prefs.remove(_keySystemUserId);
-    } else {
-      await prefs.setString(_keySystemUserId, _systemUserId);
     }
   }
 
@@ -196,15 +175,13 @@ class CoreService {
   }
 
   /// Send a message to Core and return the reply: { "text": String, "image": String? (data URL) }.
-  /// Same payload shape as web chat and Core InboundRequest: text, images, videos, audios, files, location.
+  /// [userId] must be the id of the user in user.yml (the chat owner). Same payload shape as WebChat: text, images, videos, audios, files, location.
   /// [images], [videos], [audios], [files] are paths (e.g. from upload) or data URLs Core can read.
-  /// [location]: optional "lat,lng" or address string; Core stores it as latest location (per user or shared) and uses it in system context.
-  /// [isFriendChat]: true = Friend chat (Core routes to Friends plugin via session_id_value); false = System chat (Core main flow).
-  /// When [isFriendChat] is false, user_id is taken from "identity when talking to System" (systemUserId: companion or combined user).
+  /// [location]: optional "lat,lng" or address string; Core stores it as latest location (per user) and uses it in system context.
   /// Throws on network or API error.
   Future<Map<String, dynamic>> sendMessage(
     String text, {
-    bool isFriendChat = false,
+    required String userId,
     String? appId,
     String? location,
     List<String>? images,
@@ -214,17 +191,11 @@ class CoreService {
   }) async {
     final url = Uri.parse('$_baseUrl/inbound');
     final body = <String, dynamic>{
-      'user_id': isFriendChat ? 'companion' : systemUserId,
+      'user_id': userId,
       'text': text,
       'action': 'respond',
+      'channel_name': 'companion',
     };
-    if (isFriendChat) {
-      body['channel_name'] = sessionIdValueFriend;
-      body['conversation_type'] = sessionIdValueFriend;
-      body['session_id'] = sessionIdValueFriend;
-    } else {
-      body['channel_name'] = 'companion';
-    }
     if (appId != null && appId.isNotEmpty) body['app_id'] = appId;
     if (location != null && location.trim().isNotEmpty) body['location'] = location.trim();
     if (images != null && images.isNotEmpty) body['images'] = images;
@@ -281,7 +252,7 @@ class CoreService {
     }
   }
 
-  /// GET /api/config/users — list users from Core (user.yml). Single entry point for "combine with user" (identity when talking to System). Throws on error.
+  /// GET /api/config/users — list users from Core (user.yml). Use for chat list: one chat per user, send user id with every message. Throws on error.
   Future<List<Map<String, dynamic>>> getConfigUsers() async {
     final url = Uri.parse('$_baseUrl/api/config/users');
     final response = await http
@@ -356,6 +327,19 @@ class CoreService {
     if (response.statusCode != 200) {
       throw Exception('Knowledge base reset: ${response.statusCode} ${response.body}');
     }
+  }
+
+  /// GET or POST /knowledge_base/sync_folder — trigger manual sync of user's knowledgebase folder. Returns {ok, message, added, removed, errors}.
+  Future<Map<String, dynamic>> syncKnowledgeBaseFolder(String userId) async {
+    final url = Uri.parse('$_baseUrl/knowledge_base/sync_folder').replace(queryParameters: {'user_id': userId});
+    final response = await http
+        .get(url, headers: _authHeaders())
+        .timeout(const Duration(seconds: 60));
+    final body = jsonDecode(response.body is String ? response.body as String : '{}') as Map<String, dynamic>? ?? {};
+    if (response.statusCode != 200) {
+      throw Exception(body['detail']?.toString() ?? 'Sync failed: ${response.statusCode}');
+    }
+    return body;
   }
 
   /// POST /api/testing/clear-all — unregister external plugins and clear skills vector store. For testing.

@@ -64,6 +64,32 @@ async def api_upload_proxy(request: Request):
         return JSONResponse(status_code=502, content={"error": str(e), "paths": []})
 
 
+@app.get("/api/knowledge_base/sync_folder")
+@app.post("/api/knowledge_base/sync_folder")
+async def api_kb_sync_folder_proxy(request: Request):
+    """Proxy to Core GET/POST /knowledge_base/sync_folder so the client can trigger manual KB folder sync (same-origin). Pass user_id as query param or in POST body."""
+    import httpx
+    sync_url = get_core_url() + "/knowledge_base/sync_folder"
+    if request.method == "GET":
+        sync_url = sync_url + "?" + request.url.query
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
+    if os.getenv("CORE_API_KEY"):
+        headers["x-api-key"] = os.getenv("CORE_API_KEY", "").strip()
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            if request.method == "GET":
+                r = await client.get(sync_url, headers=headers)
+            else:
+                body = await request.body()
+                r = await client.post(sync_url, content=body, headers=headers)
+        ct = r.headers.get("content-type", "")
+        if "application/json" in ct:
+            return JSONResponse(status_code=r.status_code, content=r.json())
+        return JSONResponse(status_code=r.status_code, content={"ok": False, "message": r.text})
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"ok": False, "message": str(e)})
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     """Serve the WebChat UI."""

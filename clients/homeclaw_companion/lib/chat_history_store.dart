@@ -2,10 +2,7 @@ import 'dart:convert';
 
 import 'package:hive_flutter/hive_flutter.dart';
 
-import 'screens/friend_list_screen.dart';
-
-/// Hive-backed store for Companion chat histories (System and Friend).
-/// Each chat type has its own list of messages; messages are persisted locally.
+/// Hive-backed store for Companion chat histories. One history per user (keyed by user id from user.yml).
 class ChatHistoryStore {
   static const String _boxName = 'companion_chat';
   static const String _keyPrefix = 'chat_';
@@ -14,14 +11,7 @@ class ChatHistoryStore {
   factory ChatHistoryStore() => _instance;
   ChatHistoryStore._();
 
-  static String _keyFor(ChatType type) {
-    switch (type) {
-      case ChatType.system:
-        return '${_keyPrefix}system';
-      case ChatType.friend:
-        return '${_keyPrefix}friend';
-    }
-  }
+  static String _keyFor(String userId) => '$_keyPrefix${userId.replaceAll(RegExp(r'[^\w\-]'), '_')}';
 
   Box<String>? _box;
 
@@ -70,13 +60,13 @@ class ChatHistoryStore {
     return null;
   }
 
-  /// Load messages for [chatType]. Returns list of (text, isUser, images?).
+  /// Load messages for [userId]. Returns list of (text, isUser, images?).
   /// Returns [] if Hive not initialized or on any error.
-  List<MapEntry<MapEntry<String, bool>, List<String>?>> load(ChatType chatType) {
+  List<MapEntry<MapEntry<String, bool>, List<String>?>> load(String userId) {
     try {
       final b = _boxSafe;
       if (b == null) return [];
-      final raw = b.get(_keyFor(chatType));
+      final raw = b.get(_keyFor(userId));
       if (raw == null || raw.isEmpty) return [];
       final list = jsonDecode(raw) as List<dynamic>?;
       if (list == null) return [];
@@ -94,10 +84,10 @@ class ChatHistoryStore {
     }
   }
 
-  /// Save messages for [chatType]. [messages] is same shape as ChatScreen: list of (MapEntry(text, isUser), images?).
+  /// Save messages for [userId]. [messages] is same shape as ChatScreen: list of (MapEntry(text, isUser), images?).
   /// No-op if Hive not initialized or on any error.
   Future<void> save(
-    ChatType chatType,
+    String userId,
     List<MapEntry<MapEntry<String, bool>, List<String>?>> messages,
   ) async {
     try {
@@ -109,16 +99,16 @@ class ChatHistoryStore {
         final images = entry.value;
         return messageToMap(text, isUser, images);
       }).toList();
-      await b.put(_keyFor(chatType), jsonEncode(list));
+      await b.put(_keyFor(userId), jsonEncode(list));
     } catch (_) {}
   }
 
-  /// Clear history for one chat type. No-op if Hive not initialized or on error.
-  Future<void> clear(ChatType chatType) async {
+  /// Clear history for one user. No-op if Hive not initialized or on error.
+  Future<void> clear(String userId) async {
     try {
       final b = _boxSafe;
       if (b == null) return;
-      await b.delete(_keyFor(chatType));
+      await b.delete(_keyFor(userId));
     } catch (_) {}
   }
 
@@ -127,8 +117,11 @@ class ChatHistoryStore {
     try {
       final b = _boxSafe;
       if (b == null) return;
-      await b.delete(_keyFor(ChatType.system));
-      await b.delete(_keyFor(ChatType.friend));
+      for (final key in b.keys) {
+        if (key is String && key.startsWith(_keyPrefix)) {
+          await b.delete(key);
+        }
+      }
     } catch (_) {}
   }
 }

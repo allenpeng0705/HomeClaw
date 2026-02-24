@@ -64,7 +64,9 @@ from memory.base import MemoryBase, VectorStoreBase, EmbeddingBase, LLMBase
 from base.prompt_manager import get_prompt_manager
 from memory.prompts import RESPONSE_TEMPLATE, MEMORY_CHECK_PROMPT, MEMORY_BATCH_SUMMARIZE_PROMPT
 from base.workspace import (
+    ensure_user_sandbox_folders,
     get_workspace_dir,
+    get_user_knowledgebase_dir,
     load_workspace,
     build_workspace_system_prefix,
     load_agent_memory_file,
@@ -951,6 +953,7 @@ class Core(CoreInterface):
         self.response_queue_task = asyncio.create_task(self.process_response_queue())
         self.memory_queue_task = asyncio.create_task(self.process_memory_queue())
         self.memory_summarization_scheduler_task = asyncio.create_task(self.process_memory_summarization_scheduler())
+        self.kb_folder_sync_task = asyncio.create_task(self._process_kb_folder_sync_scheduler())
 
         # Register built-in tools (sessions_transcript, etc.); used when use_tools is True
         register_builtin_tools(get_tool_registry())
@@ -1186,18 +1189,21 @@ class Core(CoreInterface):
                 raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
         def _ws_auth_ok(websocket: WebSocket) -> bool:
-            """Check API key from WebSocket handshake headers; return True if auth disabled or key valid."""
-            meta = Util().get_core_metadata()
-            if not getattr(meta, 'auth_enabled', False):
-                return True
-            expected = (getattr(meta, 'auth_api_key', '') or '').strip()
-            if not expected:
-                return True
-            headers = dict((k.decode().lower(), v.decode()) for k, v in websocket.scope.get("headers", []))
-            key = (headers.get("x-api-key") or "").strip()
-            if not key and (headers.get("authorization") or "").strip().startswith("Bearer "):
-                key = (headers.get("authorization") or "").strip().split(" ", 1)[1].strip()
-            return key == expected
+            """Check API key from WebSocket handshake headers; return True if auth disabled or key valid. Never raises (returns False on any error)."""
+            try:
+                meta = Util().get_core_metadata()
+                if not getattr(meta, 'auth_enabled', False):
+                    return True
+                expected = (getattr(meta, 'auth_api_key', '') or '').strip()
+                if not expected:
+                    return True
+                headers = dict((k.decode().lower(), v.decode()) for k, v in websocket.scope.get("headers", []))
+                key = (headers.get("x-api-key") or "").strip()
+                if not key and (headers.get("authorization") or "").strip().startswith("Bearer "):
+                    key = (headers.get("authorization") or "").strip().split(" ", 1)[1].strip()
+                return key == expected
+            except Exception:
+                return False
 
         @self.app.post("/inbound")
         async def inbound(request: InboundRequest, _: None = Depends(_verify_inbound_auth)):
@@ -1341,6 +1347,74 @@ class Core(CoreInterface):
             if not s:
                 return ""
             return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
+
+        @self.app.get("/api/sandbox/list", dependencies=[Depends(_verify_inbound_auth)])
+        async def api_sandbox_list(scope: str = "companion", path: str = "."):
+            """
+            List contents of a sandbox folder without combining a user or using the LLM.
+            Use this to check the file sandbox for the companion app (scope=companion) or a user (scope=<user_id>).
+            Query: scope (e.g. 'companion', 'default', or user id from user.yml), path (e.g. '.' or 'output').
+            Returns JSON list of { name, type, path }. Auth: same as /inbound when auth_enabled.
+            """
+            try:
+                meta = Util().get_core_metadata()
+                if meta is None:
+                    return JSONResponse(status_code=503, content={"error": "Core config not available"})
+                base_str = str(meta.get_homeclaw_root() or "").strip()
+                if not base_str:
+                    return JSONResponse(status_code=503, content={"error": "Sandbox not configured (homeclaw_root)"})
+                base = Path(base_str).resolve()
+                scope_clean = str(scope or "companion").strip().lower()
+                if scope_clean == "companion":
+                    effective_scope = "companion"
+                elif scope_clean == "share":
+                    effective_scope = "share"
+                elif scope_clean == "default":
+                    effective_scope = "default"
+                else:
+                    import re
+                    effective_scope = re.sub(r"[^\w\-]", "_", str(scope or "").strip())[:64] or "default"
+                path_arg = str(path or ".").strip().replace("\\", "/").strip().lstrip("/") or "."
+                try:
+                    full = (base / effective_scope / path_arg).resolve()
+                except (OSError, RuntimeError, ValueError):
+                    return JSONResponse(status_code=400, content={"error": "Invalid path"})
+                try:
+                    full.relative_to(base)
+                except ValueError:
+                    return JSONResponse(status_code=403, content={"error": "Path not in sandbox"})
+                try:
+                    full.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    pass
+                if not full.is_dir():
+                    return JSONResponse(status_code=404, content={"error": "Not a directory or not found"})
+                max_entries = 500
+                entries = []
+                try:
+                    children = sorted(full.iterdir(), key=lambda x: (not x.is_dir(), (x.name or "").lower()))
+                except OSError:
+                    children = []
+                for i, p in enumerate(children):
+                    if i >= max_entries:
+                        entries.append({"name": "...", "type": "truncated", "path": ""})
+                        break
+                    try:
+                        rel = str(p.relative_to(base))
+                    except ValueError:
+                        rel = p.name or ""
+                    try:
+                        entries.append({
+                            "name": p.name or "",
+                            "type": "dir" if p.is_dir() else "file",
+                            "path": rel,
+                        })
+                    except Exception:
+                        pass
+                return JSONResponse(content={"scope": effective_scope, "path": path_arg, "entries": entries})
+            except Exception as e:
+                logger.debug("api_sandbox_list failed: {}", e)
+                return JSONResponse(status_code=500, content={"error": "Failed to list sandbox"})
 
         @self.app.post("/api/upload", dependencies=[Depends(_verify_inbound_auth)])
         async def api_upload(files: List[UploadFile] = File(..., description="Image or file(s) to save for the model")):
@@ -1489,20 +1563,24 @@ class Core(CoreInterface):
 
         @self.app.get("/api/config/users", dependencies=[Depends(_verify_inbound_auth)])
         async def api_config_users_get():
-            """Return list of users from user.yml. Single entry point for Companion 'combine with user' (identity options when talking to System). Response: { \"users\": [ { \"id\", \"name\", \"email\", \"im\", \"phone\", \"permissions\" }, ... ] }."""
+            """Return list of users from user.yml. Companion app / WebChat / control UI list all users and chat with each separately. Response: { \"users\": [ { \"id\", \"name\", \"type\", \"who\", \"email\", \"im\", \"phone\", \"permissions\" }, ... ] }."""
             try:
                 users = Util().get_users() or []
-                out = [
-                    {
+                out = []
+                for u in users:
+                    entry = {
                         "id": getattr(u, "id", None) or u.name,
                         "name": u.name,
+                        "type": str(getattr(u, "type", None) or "normal").strip().lower() or "normal",
                         "email": list(getattr(u, "email", []) or []),
                         "im": list(getattr(u, "im", []) or []),
                         "phone": list(getattr(u, "phone", []) or []),
                         "permissions": list(getattr(u, "permissions", []) or []),
                     }
-                    for u in users
-                ]
+                    who = getattr(u, "who", None)
+                    if isinstance(who, dict) and who:
+                        entry["who"] = who
+                    out.append(entry)
                 return JSONResponse(content={"users": out})
             except Exception as e:
                 logger.exception("Config users get failed: {}", e)
@@ -1527,11 +1605,23 @@ class Core(CoreInterface):
                         skill_api_keys = {str(k): str(v).strip() for k, v in body["skill_api_keys"].items() if k and v and str(v).strip()}
                 except Exception:
                     skill_api_keys = None
+                user_type = str(body.get("type") or "normal").strip().lower() or "normal"
+                if user_type not in ("normal", "companion"):
+                    user_type = "normal"
+                who = body.get("who")
+                if not isinstance(who, dict):
+                    who = None
                 user = User(
                     name=name, id=uid, email=email, im=im, phone=phone, permissions=permissions,
-                    skill_api_keys=skill_api_keys,
+                    skill_api_keys=skill_api_keys, type=user_type, who=who,
                 )
                 Util().add_user(user)
+                root_str = (getattr(Util().get_core_metadata(), "homeclaw_root", None) or "").strip()
+                if root_str and uid:
+                    try:
+                        ensure_user_sandbox_folders(root_str, [uid])
+                    except Exception:
+                        pass
                 return JSONResponse(content={"result": "ok", "name": name})
             except ValueError as e:
                 return JSONResponse(status_code=400, content={"detail": str(e)})
@@ -1567,9 +1657,15 @@ class Core(CoreInterface):
                         skill_api_keys = {str(k): str(v).strip() for k, v in body["skill_api_keys"].items() if k and v and str(v).strip()}
                 except Exception:
                     skill_api_keys = getattr(found, "skill_api_keys", None) if found else None
+                user_type = str(body.get("type") or getattr(found, "type", None) or "normal").strip().lower() or "normal"
+                if user_type not in ("normal", "companion"):
+                    user_type = "normal"
+                who = body.get("who") if "who" in body else getattr(found, "who", None)
+                if not isinstance(who, dict):
+                    who = None
                 updated = User(
                     name=name, id=uid, email=email, im=im, phone=phone, permissions=permissions,
-                    skill_api_keys=skill_api_keys,
+                    skill_api_keys=skill_api_keys, type=user_type, who=who,
                 )
                 idx = users.index(found)
                 users[idx] = updated
@@ -1609,14 +1705,15 @@ class Core(CoreInterface):
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"ok": False, "message": str(e), "summaries_created": 0, "ttl_deleted": 0})
 
-        @self.app.post("/memory/reset")
-        @self.app.get("/memory/reset")
+        @self.app.post("/memory/reset", dependencies=[Depends(_verify_inbound_auth)])
+        @self.app.get("/memory/reset", dependencies=[Depends(_verify_inbound_auth)])
         async def memory_reset():
             """
             Empty the memory store (for testing). Uses the configured memory backend's reset().
+            Also clears chat history (homeclaw_chat_history, sessions, history-by-role, run history).
             If use_agent_memory_file is true, also clears AGENT_MEMORY.md.
             If use_daily_memory is true, also clears yesterday's and today's daily memory files.
-            No auth required by default; protect in production if needed.
+            When auth_enabled, require X-API-Key or Authorization: Bearer (same as /inbound).
             """
             mem = getattr(self, "mem_instance", None)
             if mem is None:
@@ -1625,6 +1722,14 @@ class Core(CoreInterface):
                 mem.reset()
                 logger.info("Memory reset completed (backend={})", type(mem).__name__)
                 message = "Memory cleared."
+                chat_cleared = False
+                chat_db = getattr(self, "chatDB", None)
+                if chat_db is not None:
+                    try:
+                        chat_db.reset()
+                        chat_cleared = True
+                    except Exception as e:
+                        logger.debug("Chat history reset during memory reset: {}", e)
                 try:
                     meta = Util().get_core_metadata()
                     if getattr(meta, "use_agent_memory_file", False):
@@ -1650,17 +1755,19 @@ class Core(CoreInterface):
                             logger.debug("clear_daily_memory during reset: {}", e)
                 except Exception as e:
                     logger.debug("Memory reset agent/daily clear: {}", e)
+                if chat_cleared:
+                    message = (message + " Chat history cleared.") if message else "Chat history cleared."
                 return JSONResponse(content={"result": "ok", "message": message})
             except Exception as e:
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"detail": str(e)})
 
-        @self.app.post("/knowledge_base/reset")
-        @self.app.get("/knowledge_base/reset")
+        @self.app.post("/knowledge_base/reset", dependencies=[Depends(_verify_inbound_auth)])
+        @self.app.get("/knowledge_base/reset", dependencies=[Depends(_verify_inbound_auth)])
         async def knowledge_base_reset():
             """
             Empty the knowledge base (all users, all sources). Uses the configured KB backend's reset().
-            For testing or to clear all saved documents/web/notes. No auth required by default; protect in production if needed.
+            For testing or to clear all saved documents/web/notes. When auth_enabled, require X-API-Key or Bearer (same as /inbound).
             """
             kb = getattr(self, "knowledge_base", None)
             if kb is None:
@@ -1681,8 +1788,72 @@ class Core(CoreInterface):
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"detail": str(e)})
 
+        @self.app.get("/knowledge_base/folder_sync_config", dependencies=[Depends(_verify_inbound_auth)])
+        async def knowledge_base_folder_sync_config():
+            """
+            Return folder_sync config for clients: allowed_extensions and max_file_size_bytes
+            so they can confirm whether a file type can be added to the knowledge base before
+            offering 'Add to knowledge base' or uploading. When auth_enabled, require X-API-Key or Bearer (same as /inbound).
+            """
+            try:
+                meta = Util().get_core_metadata()
+                kb_cfg = getattr(meta, "knowledge_base", None) or {}
+                if not isinstance(kb_cfg, dict):
+                    kb_cfg = {}
+                fs_cfg = kb_cfg.get("folder_sync") or {}
+                if not isinstance(fs_cfg, dict):
+                    fs_cfg = {}
+                allowed = fs_cfg.get("allowed_extensions") or [".md", ".txt", ".pdf", ".docx", ".html", ".htm", ".rst", ".csv", ".ppt", ".pptx"]
+                if not isinstance(allowed, list):
+                    allowed = [".md", ".txt", ".pdf", ".docx", ".html", ".htm", ".rst", ".csv", ".ppt", ".pptx"]
+                allowed = [str(e).strip().lower() for e in allowed if e]
+                max_bytes = max(0, int(fs_cfg.get("max_file_size_bytes", 5_000_000) or 5_000_000))
+                return JSONResponse(content={
+                    "enabled": bool(fs_cfg.get("enabled")),
+                    "allowed_extensions": allowed,
+                    "max_file_size_bytes": max_bytes,
+                })
+            except Exception as e:
+                logger.exception(e)
+                return JSONResponse(status_code=500, content={"detail": str(e)})
+
+        async def _sync_folder_user_id(request: Request) -> tuple[str | None, JSONResponse | None]:
+            """Get user_id from query (GET) or body (POST). Returns (user_id, None) or (None, error_response)."""
+            user_id = (request.query_params.get("user_id") or "").strip()
+            if not user_id and request.method == "POST":
+                try:
+                    body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+                except Exception:
+                    body = {}
+                if not isinstance(body, dict):
+                    body = {}
+                user_id = (body.get("user_id") or "").strip()
+            if not user_id and hasattr(request, "state") and getattr(request.state, "user_id", None):
+                user_id = (request.state.user_id or "").strip()
+            if not user_id:
+                return None, JSONResponse(status_code=400, content={"detail": "user_id is required (query param or body)."})
+            return user_id, None
+
+        @self.app.get("/knowledge_base/sync_folder", dependencies=[Depends(_verify_inbound_auth)])
+        @self.app.post("/knowledge_base/sync_folder", dependencies=[Depends(_verify_inbound_auth)])
+        async def knowledge_base_sync_folder(request: Request):
+            """
+            Trigger knowledge base folder sync manually: scan {homeclaw_root}/{user_id}/knowledgebase/,
+            add new/changed files to KB, remove when file deleted.
+            GET: ?user_id=...  POST: body { "user_id": "..." }. When auth_enabled, require X-API-Key or Bearer (same as /inbound).
+            """
+            user_id, err = await _sync_folder_user_id(request)
+            if err is not None:
+                return err
+            try:
+                result = await self.sync_user_kb_folder(user_id)
+                return JSONResponse(content=result)
+            except Exception as e:
+                logger.exception(e)
+                return JSONResponse(status_code=500, content={"detail": str(e), "ok": False})
+
         # External plugin registration API (see docs/PluginStandard.md §3)
-        @self.app.post("/api/plugins/register")
+        @self.app.post("/api/plugins/register", dependencies=[Depends(_verify_inbound_auth)])
         async def api_plugins_register(body: ExternalPluginRegisterRequest):
             """
             Register an external plugin. Plugin sends id, name, description, health_check_url, type, config; optional description_long, tools.
@@ -1699,9 +1870,9 @@ class Core(CoreInterface):
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"detail": str(e), "registered": False})
 
-        @self.app.post("/api/plugins/unregister")
+        @self.app.post("/api/plugins/unregister", dependencies=[Depends(_verify_inbound_auth)])
         async def api_plugins_unregister(request: Request):
-            """Unregister an API-registered external plugin. Body: { "plugin_id": "..." }."""
+            """Unregister an API-registered external plugin. Body: { "plugin_id": "..." }. When auth_enabled, require X-API-Key or Bearer."""
             try:
                 data = await request.json()
                 plugin_id = (data or {}).get("plugin_id") or ""
@@ -1713,9 +1884,9 @@ class Core(CoreInterface):
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"detail": str(e)})
 
-        @self.app.post("/api/plugins/unregister-all")
+        @self.app.post("/api/plugins/unregister-all", dependencies=[Depends(_verify_inbound_auth)])
         async def api_plugins_unregister_all():
-            """Unregister all API-registered external plugins. For testing."""
+            """Unregister all API-registered external plugins. For testing. When auth_enabled, require X-API-Key or Bearer."""
             try:
                 removed = self.plugin_manager.unregister_all_external_plugins()
                 return JSONResponse(content={"removed": removed, "count": len(removed)})
@@ -1723,7 +1894,7 @@ class Core(CoreInterface):
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"detail": str(e)})
 
-        @self.app.get("/api/plugins/health/{plugin_id}")
+        @self.app.get("/api/plugins/health/{plugin_id}", dependencies=[Depends(_verify_inbound_auth)])
         async def api_plugins_health(plugin_id: str):
             """Core calls the plugin's health_check_url and returns { ok: true/false }."""
             plug = self.plugin_manager.get_plugin_by_id(plugin_id)
@@ -1840,9 +2011,9 @@ class Core(CoreInterface):
                 out.append(entry)
             return JSONResponse(content={"plugins": out})
 
-        @self.app.post("/api/skills/clear-vector-store")
+        @self.app.post("/api/skills/clear-vector-store", dependencies=[Depends(_verify_inbound_auth)])
         async def api_skills_clear_vector_store():
-            """Clear all skills from the skills vector store. For testing (e.g. no skills retrieved until next sync)."""
+            """Clear all skills from the skills vector store. For testing (e.g. no skills retrieved until next sync). When auth_enabled, require X-API-Key or Bearer."""
             try:
                 vs = getattr(self, "skills_vector_store", None)
                 if not vs:
@@ -1866,9 +2037,9 @@ class Core(CoreInterface):
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"detail": str(e)})
 
-        @self.app.post("/api/testing/clear-all")
+        @self.app.post("/api/testing/clear-all", dependencies=[Depends(_verify_inbound_auth)])
         async def api_testing_clear_all():
-            """Unregister all external plugins and clear the skills vector store. For testing."""
+            """Unregister all external plugins and clear the skills vector store. For testing. When auth_enabled, require X-API-Key or Bearer."""
             try:
                 removed_plugins = self.plugin_manager.unregister_all_external_plugins()
                 cleared_skills = 0
@@ -1897,9 +2068,9 @@ class Core(CoreInterface):
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"detail": str(e)})
 
-        @self.app.get("/api/sessions")
+        @self.app.get("/api/sessions", dependencies=[Depends(_verify_inbound_auth)])
         async def api_sessions_list():
-            """List sessions for plugin UIs. Requires session.api_enabled in config. Returns app_id, user_name, user_id, session_id, created_at."""
+            """List sessions for plugin UIs. Requires session.api_enabled in config. Returns app_id, user_name, user_id, session_id, created_at. When auth_enabled, require X-API-Key or Bearer."""
             try:
                 session_cfg = getattr(Util().get_core_metadata(), "session", None) or {}
                 if not session_cfg.get("api_enabled", True):
@@ -1982,14 +2153,19 @@ class Core(CoreInterface):
                         html_parts.append(f"<li><strong>{name}</strong> — <a href='{c_url}' target='_blank' rel='noopener'>{c_name}</a></li>")
             html_parts.append("</ul><p class='meta'>Add plugins that declare <code>ui</code> in registration to see them here. See docs_design/PluginUIsAndHomeClawControlUI.md.</p>")
             # Testing: clear memory, knowledge base, or skills+plugins (for development)
-            html_parts.append("<h2>Testing</h2><p class='meta'>Clear data for a clean test. Requires no auth when Core auth is off.</p>")
+            auth_enabled_ui = bool(getattr(Util().get_core_metadata(), "auth_enabled", False))
+            auth_key_ui = (getattr(Util().get_core_metadata(), "auth_api_key", None) or "").strip()
+            if auth_enabled_ui and auth_key_ui:
+                html_parts.append("<h2>Testing</h2><p class='meta'>Clear data for a clean test. When auth is enabled, use Companion (Manage Core → Testing) or send X-API-Key / Authorization: Bearer with requests.</p>")
+            else:
+                html_parts.append("<h2>Testing</h2><p class='meta'>Clear data for a clean test.</p>")
             html_parts.append("<div style='display:flex;flex-wrap:wrap;gap:0.5rem;margin-top:0.5rem;'>")
             html_parts.append("<button type='button' class='test-btn' data-url='/memory/reset' data-label='Clear memory'>Clear memory</button>")
             html_parts.append("<button type='button' class='test-btn' data-url='/knowledge_base/reset' data-label='Clear knowledge base'>Clear knowledge base</button>")
             html_parts.append("<button type='button' class='test-btn' data-url='/api/testing/clear-all' data-label='Clear all (skills &amp; plugins)'>Clear all (skills &amp; plugins)</button>")
             html_parts.append("</div><p id='test-msg' class='meta' style='margin-top:0.5rem;min-height:1.2rem;'></p>")
             html_parts.append("<style>.test-btn{padding:0.4rem 0.8rem;cursor:pointer;background:#e65100;color:#fff;border:none;border-radius:4px;font-size:0.9rem;}.test-btn:hover{background:#bf360c;}</style>")
-            html_parts.append("<script>document.querySelectorAll('.test-btn').forEach(function(btn){btn.onclick=function(){var url=btn.getAttribute('data-url');var label=btn.getAttribute('data-label');var msg=document.getElementById('test-msg');msg.textContent=label+'...';fetch(url,{method:'POST'}).then(function(r){return r.ok ? r.text().then(function(t){msg.textContent=label+' done.';}) : r.text().then(function(t){msg.textContent=label+' failed: '+t;});}).catch(function(e){msg.textContent=label+' error: '+e.message;});};});</script>")
+            html_parts.append("<script>document.querySelectorAll('.test-btn').forEach(function(btn){btn.onclick=function(){var url=btn.getAttribute('data-url');var label=btn.getAttribute('data-label');var msg=document.getElementById('test-msg');msg.textContent=label+'...';var opts={method:'POST'};if(window._homeclaw_api_key){opts.headers={'X-API-Key':window._homeclaw_api_key,'Authorization':'Bearer '+window._homeclaw_api_key};}fetch(url,opts).then(function(r){return r.ok ? r.text().then(function(t){msg.textContent=label+' done.';}) : r.text().then(function(t){msg.textContent=label+' failed: '+t;});}).catch(function(e){msg.textContent=label+' error: '+e.message;});};});</script>")
             html_parts.append("</body></html>")
             return HTMLResponse(content="".join(html_parts))
 
@@ -2184,112 +2360,7 @@ class Core(CoreInterface):
             logger.debug("Store latest location on inbound: {}", e)
         self.latestPromptRequest = copy.deepcopy(pr)
         self._persist_last_channel(pr)
-        # Companion routing: when combined with a user (user_id in user.yml, not "system"/"companion") → main flow with channel=companion; else → companion plugin. See docs_design/CompanionFeatureDesign.md.
-        # keyword is required when companion is enabled (no default in code); routing is disabled until it is set in config.
-        # Wrapped in try/except so config/plugin errors never crash Core; on failure we fall through to main flow.
-        try:
-            meta = Util().get_core_metadata()
-            companion_cfg = getattr(meta, "companion", None)
-            if not isinstance(companion_cfg, dict):
-                companion_cfg = {}
-        except Exception as cfg_err:
-            logger.debug("Companion config load failed, skipping companion routing: %s", cfg_err)
-            companion_cfg = {}
-        if companion_cfg.get("enabled"):
-            keyword = (companion_cfg.get("keyword") or companion_cfg.get("name") or "").strip()
-            if not keyword:
-                logger.warning(
-                    "Companion is enabled but companion.keyword (or companion.name) is not set in config. "
-                    "Set it in config/core.yml under companion to enable companion routing."
-                )
-            else:
-                session_id_val = (companion_cfg.get("session_id_value") or "friend").strip().lower() or "friend"
-                plugin_id = (companion_cfg.get("plugin_id") or "friends").strip().lower().replace(" ", "_") or "friends"
-                # Route to Friends plugin when client signals "Friend chat" via conversation_type, session_id, or channel_name (all use session_id_value).
-                conv_type = (getattr(request, "conversation_type", None) or "").strip().lower()
-                sess_id = (getattr(request, "session_id", None) or "").strip().lower()
-                ch_name = (getattr(request, "channel_name", None) or "").strip().lower()
-                is_companion = (
-                    conv_type == session_id_val
-                    or sess_id == session_id_val
-                    or ch_name == session_id_val
-                )
-                if not is_companion and keyword:
-                    text_stripped = (getattr(request, "text", None) or "").strip()
-                    kw_lower = keyword.lower()
-                    if text_stripped.lower().startswith(kw_lower + ",") or text_stripped.lower().startswith(kw_lower + " ") or text_stripped.lower().startswith("hey " + kw_lower) or text_stripped.lower().startswith("hi " + kw_lower):
-                        is_companion = True
-                        if text_stripped.lower().startswith(kw_lower + ",") or text_stripped.lower().startswith(kw_lower + " "):
-                            pr.text = text_stripped[len(keyword):].strip().lstrip(",").strip() or pr.text
-                if is_companion:
-                    # Combined with user: user_id is in user.yml and not "system"/"companion" → main flow (user's memory/chat, channel=companion)
-                    combined = (
-                        has_permission
-                        and user is not None
-                        and (inbound_user_id.strip().lower() not in ("system", "companion"))
-                    )
-                    if combined:
-                        try:
-                            (pr.request_metadata or {})["channel"] = "companion"
-                        except Exception:
-                            pass
-                        # Fall through to main flow (process_text_message)
-                    else:
-                        # System or not in user.yml → companion plugin. Treat as one special user "companion".
-                        pr.system_user_id = "companion"
-                        pr.user_id = "companion"
-                        # Persist last channel under key "companion" so cron/LLM can send to Companion app
-                        try:
-                            last_channel_store.save_last_channel(
-                                request_id=pr.request_id,
-                                host=pr.host,
-                                port=int(pr.port),
-                                channel_name=pr.channel_name,
-                                request_metadata=pr.request_metadata or {},
-                                key="companion",
-                                app_id=getattr(pr, "app_id", None) or "",
-                            )
-                        except Exception as lc_err:
-                            logger.debug("Failed to persist companion last channel: {}", lc_err)
-                        plug = None
-                        try:
-                            plug = self.plugin_manager.get_plugin_by_id(plugin_id) if self.plugin_manager else None
-                        except Exception as plug_err:
-                            logger.debug("get_plugin_by_id failed: %s", plug_err)
-                        if isinstance(plug, dict):
-                            plugin_display_name = (plug.get("name") or plugin_id or "Friends").strip() or "Friends"
-                            try:
-                                pr_companion = copy.deepcopy(pr)
-                            except Exception as deep_err:
-                                logger.debug("deepcopy pr failed: %s", deep_err)
-                                return True, f"{plugin_display_name} is offline now.", 200, None
-                            try:
-                                (pr_companion.request_metadata or {}).update({"capability_id": "chat", "capability_parameters": {}})
-                            except Exception:
-                                pass
-                            try:
-                                result = await self.plugin_manager.run_external_plugin(plug, pr_companion)
-                                if result and getattr(result, "success", False):
-                                    out_text = (result.text or "").strip()
-                                    img_paths = list(getattr(result, "metadata", None) or {}).get("images") or []
-                                    return True, out_text, 200, img_paths if isinstance(img_paths, list) else None
-                                err = getattr(result, "error", None) or ""
-                                err_lower = (err or "").lower()
-                                if any(x in err_lower for x in ("connect", "refused", "connection", "timeout", "timed out", "unreachable")):
-                                    return True, f"{plugin_display_name} is offline now.", 200, None
-                                return False, err or f"{plugin_display_name} returned no reply.", 500, None
-                            except Exception as e:
-                                err_str = str(e).lower() if e else ""
-                                if any(x in err_str for x in ("connect", "refused", "connection", "timeout", "timed out", "unreachable")):
-                                    logger.debug("Friends plugin unreachable: %s", e)
-                                    return True, f"{plugin_display_name} is offline now.", 200, None
-                                logger.exception(e)
-                                return False, f"Companion error: {e!s}", 500, None
-                        else:
-                            logger.warning("Companion enabled but plugin_id=%s not found or not external.", plugin_id)
-                            display_when_missing = (plugin_id or "friends").replace("_", " ").strip().title() or "Friends"
-                            return True, f"{display_when_missing} is offline now.", 200, None
-        # if companion enabled but keyword not set, routing was skipped (must set companion.keyword in config)
+        # All users (normal + companion type) use the same main flow: tools, memory, chat, sandbox per user. No Friends plugin; list all users and chat with each separately. See docs_design/CompanionFeatureDesign.md.
         if not getattr(self, "orchestrator_unified_with_tools", True):
             flag = await self.orchestrator_handler(pr)
             if flag:
@@ -2920,6 +2991,36 @@ class Core(CoreInterface):
                     logger.exception(f"Error check whether to save to memory: {e}")
                 finally:
                     self.memory_queue.task_done()
+
+    async def _process_kb_folder_sync_scheduler(self) -> None:
+        """Background loop: when knowledge_base.folder_sync.enabled and schedule set, run sync for all users periodically. Never raises."""
+        await asyncio.sleep(120)  # let Core settle
+        while True:
+            try:
+                interval = 3600 * 6  # default 6 hours
+                meta = Util().get_core_metadata()
+                kb_cfg = getattr(meta, "knowledge_base", None) or {}
+                if isinstance(kb_cfg, dict):
+                    fs = kb_cfg.get("folder_sync") or {}
+                    if isinstance(fs, dict) and fs.get("enabled") and (fs.get("schedule") or "").strip():
+                        try:
+                            users = Util().get_users() or []
+                            for u in users:
+                                uid = getattr(u, "id", None) or getattr(u, "name", "") or ""
+                                if not uid:
+                                    continue
+                                try:
+                                    await self.sync_user_kb_folder(str(uid))
+                                except Exception as e:
+                                    logger.debug("KB folder sync for user {} failed: {}", uid, e)
+                        except Exception as e:
+                            logger.debug("KB folder sync scheduler: {}", e)
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug("KB folder sync scheduler loop: {}", e)
+                await asyncio.sleep(interval)
 
     async def process_memory_summarization_scheduler(self):
         """Background loop: when memory_summarization.enabled, check next_run and run summarization when due (daily/weekly/next_run). Runs at free time."""
@@ -3573,9 +3674,18 @@ class Core(CoreInterface):
             return None
 
 
-    def check_permission(self, user_name: str, user_id: str, channel_type: ChannelType, content_type: ContentType) -> bool:
-        user: User = None
-        users = Util().get_users()
+    def check_permission(self, user_name: str, user_id: str, channel_type: ChannelType, content_type: ContentType) -> Tuple[bool, Optional[User]]:
+        """Match request to a user; return (has_permission, user). Never raises. Caller must check has_permission and user is not None before using user."""
+        user: Optional[User] = None
+        users = Util().get_users() or []
+        # For IM: prefer user.yml when user_id matches a user's id or name (e.g. "companion", "math_teacher"). So adding "companion" (or Math, Music, Sport) in user.yml makes them work like any other user.
+        if channel_type == ChannelType.IM and users:
+            uid = str(user_id or "").strip().lower()
+            for u in users:
+                u_id = (getattr(u, "id", None) or "").strip().lower()
+                u_name = (getattr(u, "name", None) or "").strip().lower()
+                if uid and (uid == u_id or uid == u_name):
+                    return (ChannelType.IM in u.permissions or len(u.permissions) == 0), u
         for user in users:
             logger.debug(f"User:  + {user}")
             if channel_type == ChannelType.Email:
@@ -3779,6 +3889,21 @@ class Core(CoreInterface):
                         _component_log("agent_memory", f"synced {n} chunk(s) to vector store")
                     except Exception as e:
                         logger.warning("Agent memory vector sync failed: {}", e)
+
+            # Create per-user and shared sandbox folders (private, output, knowledgebase, share, companion) when homeclaw_root is set in config
+            root_str = (getattr(core_metadata, "homeclaw_root", None) or "").strip() if core_metadata else ""
+            if root_str:
+                try:
+                    users = Util().get_users() or []
+                    user_ids = [
+                        (getattr(u, "id", None) or getattr(u, "name", None) or "")
+                        for u in users
+                        if getattr(u, "id", None) or getattr(u, "name", None)
+                    ]
+                    user_ids = [uid for uid in user_ids if str(uid).strip()]
+                    ensure_user_sandbox_folders(root_str, user_ids)
+                except Exception as e:
+                    logger.debug("ensure_user_sandbox_folders at startup: {}", e)
 
             # File serving: sandbox files and folder listings at GET /files/out (core_public_url/files/out?path=...&token=...)
             if (getattr(core_metadata, "core_public_url", None) or "").strip():
@@ -4252,13 +4377,67 @@ class Core(CoreInterface):
             force_include_instructions = []  # collected from skills_force_include_rules and plugins_force_include_rules; appended at end of system so model sees it last
             force_include_auto_invoke = []  # when model returns no tool_calls, run these (e.g. run_skill) so the skill runs anyway; each item: {"tool": str, "arguments": dict}
 
-            # Workspace bootstrap (identity / agents / tools) — optional; see Comparison.md §7.4
+            # Resolve current user once: used to decide workspace Identity vs who-based identity and for who injection.
+            _sys_uid = getattr(request, "system_user_id", None) or user_id
+            _companion_with_who = False
+            _current_user_for_identity = None
+            try:
+                if _sys_uid:
+                    _users = Util().get_users() or []
+                    _current_user_for_identity = next(
+                        (u for u in _users if (getattr(u, "id", None) or getattr(u, "name", "") or "").strip().lower() == str(_sys_uid or "").strip().lower()),
+                        None,
+                    )
+                    if _current_user_for_identity and str(getattr(_current_user_for_identity, "type", "normal") or "normal").strip().lower() == "companion":
+                        _who = getattr(_current_user_for_identity, "who", None)
+                        if isinstance(_who, dict) and _who:
+                            _companion_with_who = True
+            except Exception:
+                pass
+
+            # Workspace bootstrap (identity / agents / tools). When companion user has "who", skip workspace Identity so we inject only who-based identity below.
             if getattr(Util().core_metadata, 'use_workspace_bootstrap', True):
                 ws_dir = get_workspace_dir(getattr(Util().core_metadata, 'workspace_dir', None) or 'config/workspace')
                 workspace = load_workspace(ws_dir)
-                workspace_prefix = build_workspace_system_prefix(workspace)
+                workspace_prefix = build_workspace_system_prefix(workspace, skip_identity=_companion_with_who)
                 if workspace_prefix:
                     system_parts.append(workspace_prefix)
+
+            # Companion identity (who): when companion-type user has "who", inject a single identity from who (pre-defined template; no LLM). Replaces default assistant description; all other behavior (memory, chat, KB) same as normal user.
+            if _companion_with_who and _current_user_for_identity:
+                try:
+                    _who = getattr(_current_user_for_identity, "who", None)
+                    if isinstance(_who, dict) and _who:
+                        _lines = ["## Identity\n"]
+                        _desc = (_who.get("description") or "").strip() if isinstance(_who.get("description"), str) else ""
+                        if _desc:
+                            _lines.append(_desc)
+                        _name = getattr(_current_user_for_identity, "name", "") or _sys_uid or ""
+                        _lines.append(f"You are {_name}.")
+                        if _who.get("gender"):
+                            _lines.append(f"Gender: {_who.get('gender')}.")
+                        if _who.get("roles"):
+                            _roles = _who["roles"] if isinstance(_who["roles"], list) else [_who["roles"]] if _who.get("roles") else []
+                            if _roles:
+                                _lines.append(f"Roles: {', '.join(str(r) for r in _roles)}.")
+                        if _who.get("personalities"):
+                            _pers = _who["personalities"] if isinstance(_who["personalities"], list) else [_who["personalities"]] if _who.get("personalities") else []
+                            if _pers:
+                                _lines.append(f"Personalities: {', '.join(str(p) for p in _pers)}.")
+                        if _who.get("language"):
+                            _lines.append(f"Reply in language: {_who.get('language')}.")
+                        if _who.get("response_length"):
+                            _rl = str(_who.get("response_length", "")).strip().lower()
+                            if _rl == "short":
+                                _lines.append("Keep replies brief: one or two sentences unless the user asks for more.")
+                            elif _rl == "long":
+                                _lines.append("You may reply at length when the topic deserves it; be thorough but natural.")
+                            else:
+                                _lines.append("Keep replies to a short paragraph unless the user asks for more or less.")
+                        _lines.append("Stay in character and be natural.")
+                        system_parts.append("\n".join(_lines) + "\n\n")
+                except Exception as e:
+                    logger.debug("Companion identity (who) inject failed: {}", e)
 
             # System context: current date/time (system timezone) + optional location. Never crash; see SystemContextDateTimeAndLocation.md
             try:
@@ -5394,6 +5573,125 @@ class Core(CoreInterface):
             await self.mem_instance.add(user_input, user_name=user_name, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata, filters=filters)
         except Exception as e:
             logger.exception(e)
+
+    async def sync_user_kb_folder(self, user_id: str) -> Dict[str, Any]:
+        """
+        Sync the user's knowledge base folder to the KB: add new/changed files, remove when file deleted.
+        source_id for folder files = "folder/" + relative path. Never raises; returns {ok, message, added, removed, errors}.
+        """
+        out = {"ok": False, "message": "", "added": 0, "removed": 0, "errors": []}
+        try:
+            meta = Util().get_core_metadata()
+            kb_cfg = getattr(meta, "knowledge_base", None) or {}
+            if not isinstance(kb_cfg, dict):
+                kb_cfg = {}
+            fs_cfg = kb_cfg.get("folder_sync") or {}
+            if not isinstance(fs_cfg, dict) or not fs_cfg.get("enabled"):
+                out["message"] = "folder_sync is disabled or not configured."
+                return out
+            kb = getattr(self, "knowledge_base", None)
+            if kb is None:
+                out["message"] = "Knowledge base not initialized."
+                return out
+            root = (meta.get_homeclaw_root() or "").strip()
+            if not root:
+                out["message"] = "homeclaw_root not set; cannot sync folder."
+                return out
+            folder_name = (fs_cfg.get("folder_name") or "knowledgebase").strip() or "knowledgebase"
+            kb_dir = get_user_knowledgebase_dir(root, user_id, folder_name)
+            if kb_dir is None or not kb_dir.is_dir():
+                out["ok"] = True
+                out["message"] = "User knowledge base folder does not exist or is not a directory."
+                return out
+            allowed = fs_cfg.get("allowed_extensions") or [".md", ".txt", ".pdf", ".docx", ".html", ".htm", ".rst", ".csv", ".ppt", ".pptx"]
+            if not isinstance(allowed, list):
+                allowed = [".md", ".txt", ".pdf", ".docx", ".html", ".htm", ".rst", ".csv", ".ppt", ".pptx"]
+            allowed_set = {str(e).strip().lower() for e in allowed if e}
+            max_bytes = max(0, int(fs_cfg.get("max_file_size_bytes", 5_000_000) or 5_000_000))
+            resync = bool(fs_cfg.get("resync_on_mtime_change", True))
+
+            # List current KB sources that are from folder (source_id starts with "folder/")
+            try:
+                all_sources = await kb.list_sources(user_id, limit=1000)
+            except Exception as e:
+                out["message"] = f"list_sources failed: {e}"
+                out["errors"].append(str(e))
+                return out
+            folder_source_ids = {s["source_id"]: s for s in (all_sources or []) if (s.get("source_id") or "").startswith("folder/")}
+
+            # Remove from KB when file no longer exists
+            for sid in list(folder_source_ids.keys()):
+                rel = sid[7:] if len(sid) > 7 else ""  # "folder/" prefix
+                if not rel:
+                    continue
+                full = (kb_dir / rel).resolve()
+                try:
+                    if not full.is_file():
+                        try:
+                            msg = await kb.remove_by_source_id(user_id, sid)
+                            if "Error" not in str(msg):
+                                out["removed"] += 1
+                        except Exception as e:
+                            out["errors"].append(f"remove {sid}: {e}")
+                except Exception:
+                    pass
+
+            # List files on disk (one level; use path relative to kb_dir)
+            files_on_disk = []
+            try:
+                for p in kb_dir.iterdir():
+                    if not p.is_file():
+                        continue
+                    suf = p.suffix.lower()
+                    if suf not in allowed_set:
+                        continue
+                    try:
+                        if p.stat().st_size > max_bytes:
+                            continue
+                    except OSError:
+                        continue
+                    rel = str(p.relative_to(kb_dir)).replace("\\", "/")
+                    source_id = "folder/" + rel
+                    files_on_disk.append((p, rel, source_id))
+            except Exception as e:
+                out["message"] = f"listdir failed: {e}"
+                out["errors"].append(str(e))
+                return out
+
+            # Add or update each file
+            from base.file_understanding import extract_document_text
+            base_str = str(kb_dir.resolve())
+            for p, rel, source_id in files_on_disk:
+                try:
+                    if source_id not in folder_source_ids and not resync:
+                        # already in KB and we're not resyncing
+                        continue
+                    if resync and source_id in folder_source_ids:
+                        await kb.remove_by_source_id(user_id, source_id)
+                    text = extract_document_text(str(p), base_str, max_chars=500_000)
+                    if not text or not text.strip():
+                        out["errors"].append(f"no text extracted: {rel}")
+                        continue
+                    err = await asyncio.wait_for(
+                        kb.add(user_id=user_id, content=text, source_type="folder", source_id=source_id, metadata=None),
+                        timeout=120,
+                    )
+                    if err and "Error" in str(err):
+                        out["errors"].append(f"add {rel}: {err}")
+                    else:
+                        out["added"] += 1
+                except asyncio.TimeoutError:
+                    out["errors"].append(f"add {rel}: timeout")
+                except Exception as e:
+                    out["errors"].append(f"add {rel}: {e}")
+
+            out["ok"] = True
+            out["message"] = f"Sync done: added={out['added']}, removed={out['removed']}" + (f"; errors={len(out['errors'])}" if out["errors"] else "")
+        except Exception as e:
+            logger.debug("sync_user_kb_folder failed: {}", e)
+            out["message"] = str(e)
+            out["errors"].append(str(e))
+        return out
 
     def _memory_summarization_state_path(self) -> Path:
         """Path to memory summarization state JSON (last_run, next_run). Uses database dir under project root. Never raises."""

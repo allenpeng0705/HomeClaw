@@ -1,6 +1,9 @@
-# user.yml — allowlist for who can talk to Core via channels.
-# Each user has: id (optional, unique system user id; defaults to name), name (required), email / im / phone (channel identities), permissions.
-# All chat, memory, KB, and profile data are keyed by this system user id. Different users must use different email/im/phone (no overlap).
+# user.yml — users who can talk to Core. Each user has: id, name, type (normal | companion), optional who (identity for companion-type).
+# type "normal": can use channels (email, im, phone). type "companion": companion app / WebChat / control UI only; no channels.
+# All users have per-user sandbox (base/{user_id}/), share folder, AGENT_MEMORY, daily memory, RAG memory, chat history, knowledge_base.
+#
+# Companion app "System" mode: add a user with id "companion" so AGENT_MEMORY, daily memory, chat, and sandbox work like any other user.
+# Future roles (Math, Music, Sport): add users e.g. id: math_teacher, music, sport; same machinery (sandbox base/{user_id}/, per-user memory/chat).
 #
 # skill_api_keys: optional per-user API keys for keyed skills (maton-api-gateway, x-api, meta-social, hootsuite, weibo-api).
 #   If missing for a user, that skill is not available for that user. Companion without user uses keys in the skill's config.yml / env directly.
@@ -11,9 +14,26 @@
 # permissions: e.g. [IM, EMAIL, PHONE] or [] to allow all.
 users:
   - id: webchat_user
-    name: WebChat User
+    name: webchat_user
+    type: companion
+  - id: System
+    name: System
+    type: companion
+  - id: Sabrina
+    name: Sabrina
+    type: companion
+    # who: identity for system prompt (template-filled, no LLM). description = optional free-text; idle_days_before_nudge reserved for future use, not injected.
+    who:
+      # description: optional paragraph describing the companion (injected first)
+      gender: 'female'
+      roles: ['girlfriend']  # friend, girlfriend, boyfriend, wife, husband, sister, brother, child, parent, teacher, student, etc.
+      personalities: ['funny', 'sarcastic', 'humorous', 'knowledge']   # gentle, funny, serious, sarcastic, humorous, knowledge, etc.
+      language: en        # en, zh, ja, ko, es, fr, de, pt, it, ... — reply language
+      response_length: medium   # short, medium, long
+      idle_days_before_nudge: 1   # reserved: 0 = disabled; future proactive nudge after N days (not used in Core today)    
   - id: AllenPeng
     name: AllenPeng
+    type: normal
     email: []
     im: ['matrix:@pengshilei:matrix.org']
     phone: []

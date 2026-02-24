@@ -5,12 +5,6 @@ import 'config_core_screen.dart';
 import 'permissions_screen.dart';
 import 'scan_connect_screen.dart';
 
-/// Result of system identity picker: null = cancelled; else userId (null = System default).
-class _SystemIdentityResult {
-  final String? userId;
-  _SystemIdentityResult(this.userId);
-}
-
 class SettingsScreen extends StatefulWidget {
   final CoreService coreService;
 
@@ -28,7 +22,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _nodeIdController;
   late TextEditingController _execCommandController;
   bool _nodeConnecting = false;
-  List<Map<String, dynamic>> _configUsers = [];
 
   @override
   void initState() {
@@ -39,98 +32,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _nodesUrlController = TextEditingController(text: widget.coreService.nodesUrl ?? 'http://127.0.0.1:3020');
     _nodeIdController = TextEditingController(text: 'companion');
     _execCommandController = TextEditingController();
-    _loadConfigUsers();
-  }
-
-  Future<void> _loadConfigUsers() async {
-    try {
-      final list = await widget.coreService.getConfigUsers();
-      if (mounted) setState(() => _configUsers = list);
-    } catch (_) {
-      if (mounted) setState(() => _configUsers = []);
-    }
-  }
-
-  String _systemUserIdDisplay() {
-    final id = widget.coreService.systemUserId;
-    if (id.isEmpty || id == 'companion') return 'System (default)';
-    for (final u in _configUsers) {
-      if ((u['id'] as String?).toString().trim() == id) {
-        final name = (u['name'] as String?)?.trim();
-        if (name != null && name.isNotEmpty) return name;
-        break;
-      }
-    }
-    return id;
-  }
-
-  Future<void> _showSystemIdentityPicker() async {
-    List<Map<String, dynamic>> users = [];
-    try {
-      users = await widget.coreService.getConfigUsers();
-    } catch (_) {}
-    if (!mounted) return;
-    final currentId = widget.coreService.systemUserId;
-    final result = await showDialog<_SystemIdentityResult>(
-      context: context,
-      builder: (ctx) {
-        String? value = (currentId.isEmpty || currentId == 'companion') ? null : currentId;
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) => AlertDialog(
-            title: const Text('Identity when talking to System'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Only affects the System chat. Friend chat is separate.',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                  const SizedBox(height: 12),
-                  RadioListTile<String?>(
-                    title: const Text('System (default)'),
-                    subtitle: const Text('user_id "companion"'),
-                    value: null,
-                    groupValue: value,
-                    onChanged: (v) => setDialogState(() => value = v),
-                  ),
-                  ...users.map((u) {
-                    final id = (u['id'] as String?)?.trim() ?? '';
-                    final name = (u['name'] as String?)?.trim() ?? id;
-                    if (id.isEmpty) return const SizedBox.shrink();
-                    return RadioListTile<String?>(
-                      title: Text(name),
-                      subtitle: Text(id),
-                      value: id,
-                      groupValue: value,
-                      onChanged: (v) => setDialogState(() => value = v),
-                    );
-                  }),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(_SystemIdentityResult(value)),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-    if (result == null) return;
-    await widget.coreService.saveSystemUserId(result.userId);
-    if (!mounted) return;
-    setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Identity for System chat updated')),
-    );
   }
 
   @override
@@ -259,25 +160,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 24),
             const Text(
-              'Identity when talking to System',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Only affects the System chat. Friend chat is separate. List is from Core (user.yml). Default = System (user_id "companion").',
+              'Users are listed on the chat screen (from Core user.yml). Select a user to chat; each message is sent with that user\'s id.',
               style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'To add or edit users, use Manage Core (core.yml & user.yml) below.',
-              style: TextStyle(fontSize: 11, color: Colors.grey),
-            ),
-            const SizedBox(height: 8),
-            ListTile(
-              title: const Text('Current identity'),
-              subtitle: Text(_systemUserIdDisplay()),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: _showSystemIdentityPicker,
             ),
             const SizedBox(height: 16),
             OutlinedButton.icon(

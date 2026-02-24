@@ -106,9 +106,22 @@ This feature lets HomeClaw generate files (HTML reports, exported data, and late
 - **Path safety:** Token path and scope are validated (no `..`, no `/` in scope); resolved path is checked to stay under **file_read_base**. Symlinks are resolved; access outside the base returns 403.
 - **Token:** Signed with **auth_api_key**; expired or invalid token returns 403.
 
+## Checking the sandbox without combining a user
+
+When the Companion app is used **without** combining a user, requests are routed to the companion plugin (e.g. Friends), which does not run Core’s file tools. To **check the file sandbox** for the companion (or any scope) without going through the LLM or combining a user, use:
+
+- **`GET /api/sandbox/list?scope=companion&path=.`**  
+  Lists the companion’s private folder (same as `homeclaw_root/companion/`). Use `path=output` to list only the output subfolder.
+- **`GET /api/sandbox/list?scope=companion&path=output`**  
+  Lists `homeclaw_root/companion/output/`.
+- **`GET /api/sandbox/list?scope=<user_id>&path=.`**  
+  Lists a specific user’s folder (use the same `scope` as in user.yml / `system_user_id`).
+
+Auth: when `auth_enabled` and `auth_api_key` are set, send `X-API-Key` or `Authorization: Bearer` as for `/inbound`. Response: JSON `{ "scope", "path", "entries": [ { "name", "type", "path" }, ... ] }`.
+
 ## References
 
-- Implementation: `tools/builtin.py` (file executors, `_resolve_file_path`, `_path_under`); `core/result_viewer.py` (tokens, `generate_result_html`); `core/core.py` (`GET /files/out`).
+- Implementation: `tools/builtin.py` (file executors, `_resolve_file_path`, `_path_under`); `core/result_viewer.py` (tokens, `generate_result_html`); `core/core.py` (`GET /files/out`, `GET /api/sandbox/list`).
 - Config: `config/core.yml` top-level `core_public_url`, `auth_api_key`; under `tools`: `file_read_base`, `file_read_shared_dir`. Optional under `tools`: `save_result_page_max_file_size_kb` (default 500) for generated report HTML size limit.
 - User identity: `config/user.yml` (`system_user_id` for per-user folder name).
 - Docs: `docs/tools.md` (file tools section), `docs_design/MultiUserSupport.md` (file workspace row).
