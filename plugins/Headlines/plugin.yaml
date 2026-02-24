@@ -1,7 +1,7 @@
 id: headlines
 name: Headlines Plugin
 description: Top headlines from News API (curated sources). Use when the user wants top headlines, headlines by category/source, or "headlines every 8 am". Do NOT use for "search the web for news" or "search latest sports news" — use web_search (or cron run_tool web_search) instead.
-description_long: Fetches top headlines from News API (not a web search). Use for "top 5 headlines", "headlines about sports", "headlines from BBC", or scheduled "headlines every 8 am". For "search the latest sports news every 7 am" use cron_schedule with task_type=run_tool, tool_name=web_search, tool_arguments={query: "latest sports news"}.
+description_long: "Fetches top headlines from News API (not a web search). Use for \"top 5 headlines\", \"headlines about sports\", \"headlines from BBC\", or scheduled \"headlines every 8 am\". For \"search the latest sports news every 7 am\" use cron_schedule with task_type=run_tool, tool_name=web_search, tool_arguments={\"query\": \"latest sports news\"}."
 type: inline
 config:
   config_file: config.yml
