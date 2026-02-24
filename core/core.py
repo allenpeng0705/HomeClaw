@@ -4434,7 +4434,7 @@ class Core(CoreInterface):
                                 _lines.append("You may reply at length when the topic deserves it; be thorough but natural.")
                             else:
                                 _lines.append("Keep replies to a short paragraph unless the user asks for more or less.")
-                        _lines.append("Stay in character and be natural.")
+                        _lines.append("Stay in character and chat as a human would: natural, conversational, and in-person. Do not say you are an AI, assistant, or language model; do not break character to explain how you work. Reply only as this person would reply.")
                         system_parts.append("\n".join(_lines) + "\n\n")
                 except Exception as e:
                     logger.debug("Companion identity (who) inject failed: {}", e)
@@ -5140,6 +5140,7 @@ class Core(CoreInterface):
                                 "For file_read, file_write, document_read, folder_list, file_find use path=\".\" for the user's private folder (their default root), path=\"share\" or \"share/\" for the shared folder, or path=\"subdir\" (relative to private folder). "
                                 "When the user asks what files are in their directory, or to list their files (e.g. 你的目录下都有哪些文件, 列出文件, what's in my folder), call folder_list with path=\".\" to list their private folder, or path=\"share\" to list the shared folder, then report the result. "
                                 "To find files by type: call file_find with pattern (e.g. pattern=\"*.docx\", pattern=\"*.pdf\"). "
+                                "When the user asks to summarize or read a document (e.g. a PDF or a filename in quotes) without giving a path: search both roots—call file_find with path=\".\" and path=\"share\" (each with a pattern matching the filename, e.g. pattern=\"*Transformer*.pdf\"), then call document_read(path=<path from file_find; use \"share/\" prefix for results from path=\"share\">) to get the content, then summarize or answer. "
                                 "Report only paths returned by file_find or folder_list; do not invent or guess paths. "
                                 "To read Word/PDF content use document_read(path=<relative path from tool result>). "
                                 f"Current homeclaw_root: {base_str}"
@@ -5277,6 +5278,62 @@ class Core(CoreInterface):
                                         except Exception as e:
                                             logger.debug("Fallback folder_list failed: {}", e)
                                             response = content_str or "Could not list directory. Please try again."
+                                    elif (
+                                        registry
+                                        and any(t.name == "file_find" for t in (registry.list_tools() or []))
+                                        and any(t.name == "document_read" for t in (registry.list_tools() or []))
+                                        and "summarize" in (query or "").lower()
+                                        and (".pdf" in (query or "") or ".docx" in (query or ""))
+                                    ):
+                                        # Fallback: user asked to summarize a document but model didn't call file_find/document_read. Search both user folder and share folder.
+                                        try:
+                                            _component_log("tools", "fallback summarize document (model did not call tool)")
+                                            ext = ".pdf" if ".pdf" in (query or "") else ".docx"
+                                            pattern = "*" + ext
+                                            files = []
+                                            for path_arg, prefix in ((".", ""), ("share", "share/")):
+                                                find_result = await registry.execute_async("file_find", {"path": path_arg, "pattern": pattern}, context)
+                                                if isinstance(find_result, str) and find_result.strip():
+                                                    try:
+                                                        entries = json.loads(find_result)
+                                                        if isinstance(entries, list):
+                                                            for e in entries:
+                                                                if isinstance(e, dict) and e.get("type") == "file":
+                                                                    p = (e.get("path") or "").strip()
+                                                                    if p and p != "(truncated)":
+                                                                        files.append({"path": prefix + p, "name": (e.get("name") or "").strip()})
+                                                    except (json.JSONDecodeError, TypeError):
+                                                        pass
+                                            doc_path = None
+                                            if len(files) == 1:
+                                                doc_path = files[0]["path"]
+                                            elif files:
+                                                q_lower = (query or "").lower()
+                                                best = max(
+                                                    files,
+                                                    key=lambda e: sum(1 for w in q_lower.replace(".", " ").split() if len(w) > 2 and w in (e.get("name") or "").lower()),
+                                                )
+                                                doc_path = best["path"]
+                                            if doc_path:
+                                                doc_content = await registry.execute_async("document_read", {"path": doc_path}, context)
+                                                if isinstance(doc_content, str) and doc_content.strip() and "not found" not in doc_content.lower() and "error" not in doc_content.lower():
+                                                    summary_messages = [
+                                                        {"role": "user", "content": (
+                                                            f"The user asked: {query}\n\n"
+                                                            "Provide a concise summary of the following document. Do not invent content; base your summary only on the text below.\n\n"
+                                                            "---\n\n" + (doc_content[:120000] if len(doc_content) > 120000 else doc_content)
+                                                        )},
+                                                    ]
+                                                    response = await self.openai_chat_completion(summary_messages, llm_name=effective_llm_name)
+                                                    if not (response or (response and response.strip())):
+                                                        response = "I read the document but could not generate a summary. You can ask for a specific section."
+                                                else:
+                                                    response = content_str or "Could not read the document. It may be empty or in an unsupported format."
+                                            else:
+                                                response = content_str or "No matching PDF or document found in your private or share folder. Try listing files with folder_list or use a more specific filename."
+                                        except Exception as e:
+                                            logger.debug("Fallback summarize document failed: {}", e)
+                                            response = content_str or "Could not find or summarize the document. Please try again."
                                     else:
                                         response = content_str
                         break
