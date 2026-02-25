@@ -1376,9 +1376,13 @@ class Core(CoreInterface):
                 return JSONResponse(status_code=500, content={"error": "Failed to serve file"})
 
         def _escape_for_html(s: str) -> str:
-            if not s:
+            """Escape for HTML attribute/text. Never raises."""
+            try:
+                if not isinstance(s, str) or not s:
+                    return ""
+                return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
+            except Exception:
                 return ""
-            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
 
         @self.app.get("/api/sandbox/list", dependencies=[Depends(_verify_inbound_auth)])
         async def api_sandbox_list(scope: str = "companion", path: str = "."):
@@ -1742,10 +1746,9 @@ class Core(CoreInterface):
         async def memory_reset():
             """
             Empty the memory store (for testing). Uses the configured memory backend's reset().
-            Also clears chat history (homeclaw_chat_history, sessions, history-by-role, run history).
-            If use_agent_memory_file is true, also clears AGENT_MEMORY.md.
-            If use_daily_memory is true, also clears yesterday's and today's daily memory files.
-            If profile is enabled, also clears all user profiles (per-user JSON files).
+            Also clears: chat history; AGENT_MEMORY.md; daily memory (yesterday/today); all user profiles;
+            and recorded events from record_date (e.g. son's birthday, holidays). Recorded events are
+            currently stored globally (one list); after reset they are empty.
             When auth_enabled, require X-API-Key or Authorization: Bearer (same as /inbound).
             """
             mem = getattr(self, "mem_instance", None)
@@ -1797,6 +1800,15 @@ class Core(CoreInterface):
                                 message = (message + " Profiles cleared.") if message else "Profiles cleared."
                         except Exception as e:
                             logger.debug("clear_all_profiles during reset: {}", e)
+                    # Clear TAM recorded events (record_date: e.g. "son's birthday") so memory reset forgets them too.
+                    try:
+                        orch = getattr(self, "orchestratorInst", None)
+                        tam = getattr(orch, "tam", None) if orch else None
+                        if tam is not None and hasattr(tam, "clear_recorded_events") and tam.clear_recorded_events():
+                            logger.info("Recorded events (record_date) cleared.")
+                            message = (message + " Recorded events cleared.") if message else "Recorded events cleared."
+                    except Exception as e:
+                        logger.debug("clear_recorded_events during reset: {}", e)
                 except Exception as e:
                     logger.debug("Memory reset agent/daily clear: {}", e)
                 if chat_cleared:
@@ -5113,11 +5125,11 @@ class Core(CoreInterface):
                 system_parts.append(routing_block)
                 force_include_instructions.extend(plugin_force_instructions)
 
-            # Optional: surface recorded events (TAM) in context so model knows what's coming up
+            # Optional: surface recorded events (TAM) in context so model knows what's coming up (per-user)
             if getattr(self, "orchestratorInst", None) and getattr(self.orchestratorInst, "tam", None):
                 tam = self.orchestratorInst.tam
                 if hasattr(tam, "get_recorded_events_summary"):
-                    summary = tam.get_recorded_events_summary(limit=10)
+                    summary = tam.get_recorded_events_summary(limit=10, system_user_id=_sys_uid)
                     if summary:
                         system_parts.append("## Recorded events (from record_date)\n" + summary)
 

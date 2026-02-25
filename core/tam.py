@@ -44,6 +44,20 @@ from base.util import Util
 from core.coreInterface import CoreInterface
 from memory import tam_storage
 
+
+def _safe_user_id_for_recorded_events(system_user_id: Optional[str]) -> str:
+    """Safe filename for per-user recorded events. None/empty -> '_default'. Never raises."""
+    try:
+        if not system_user_id or not isinstance(system_user_id, str):
+            return "_default"
+        import re
+        s = re.sub(r"[^\w\-.]", "_", (system_user_id or "").strip())
+        s = (s[:200] if len(s) > 200 else s) or "_default"
+        return s or "_default"
+    except Exception:
+        return "_default"
+
+
 class TAM:
     def __init__(self, coreInst: CoreInterface):
         logger.debug("TAM initializing...")
@@ -55,10 +69,9 @@ class TAM:
         # Cron-style jobs: list of {cron_expr, task, job_id, next_run, params}; next_run is datetime
         self.cron_jobs: List[Dict] = []
         self._cron_lock = threading.Lock()
-        # Recorded events (no LLM): from record_date tool; e.g. "Spring Festival is in two weeks"
-        self.recorded_events: List[Dict] = []
-        self._recorded_events_path: Optional[Path] = None
-        self._load_recorded_events()
+        # Recorded events (no LLM): from record_date tool; e.g. "son's birthday", "Spring Festival".
+        # Stored per-user under database/tam_recorded_events/{safe_user_id}.json. Cleared on memory reset (all users).
+        self._recorded_events_dir: Optional[Path] = None
 
         # Load persisted cron jobs and one-shot reminders (survives Core restart)
         self._load_cron_jobs_from_db()
@@ -810,31 +823,61 @@ class TAM:
             logger.warning("TAM: remove_cron_job failed: {}", e)
             return False
 
-    def _load_recorded_events(self) -> None:
-        """Load recorded events from file (no LLM; from record_date tool). Removes past events on load so the list does not grow indefinitely."""
+    def _get_recorded_events_dir(self) -> Path:
+        """Directory for per-user recorded event files: database/tam_recorded_events/. Never raises."""
+        if self._recorded_events_dir is not None:
+            return self._recorded_events_dir
         try:
             root = Path(__file__).resolve().parent.parent
-            self._recorded_events_path = root / "database" / "tam_recorded_events.json"
-            if self._recorded_events_path.exists():
-                raw = self._recorded_events_path.read_text(encoding="utf-8")
-                data = json.loads(raw)
-                self.recorded_events = data if isinstance(data, list) else []
-            else:
-                self.recorded_events = []
-            removed = self._cleanup_past_recorded_events()
-            if removed > 0:
-                self._save_recorded_events()
-                logger.debug("TAM: Removed {} past recorded event(s) on load", removed)
+            self._recorded_events_dir = root / "database" / "tam_recorded_events"
+            return self._recorded_events_dir
         except Exception as e:
-            logger.debug("TAM: Could not load recorded_events: {}", e)
-            self.recorded_events = []
+            logger.warning("TAM: _get_recorded_events_dir fallback: {}", e)
+            self._recorded_events_dir = Path.cwd() / "database" / "tam_recorded_events"
+            return self._recorded_events_dir
 
-    def _cleanup_past_recorded_events(self, max_age_days_no_date: int = 90) -> int:
-        """Remove events that are finished: (1) event_date in the past, (2) no event_date but recorded_at older than max_age_days_no_date. Returns number removed."""
+    def _get_recorded_events_path(self, system_user_id: Optional[str]) -> Path:
+        """Path to this user's recorded events JSON file."""
+        safe = _safe_user_id_for_recorded_events(system_user_id)
+        return self._get_recorded_events_dir() / f"{safe}.json"
+
+    def _load_recorded_events_for_user(self, system_user_id: Optional[str]) -> List[Dict]:
+        """Load recorded events for one user. Returns list (possibly empty). Never raises."""
+        try:
+            path = self._get_recorded_events_path(system_user_id)
+            if not path.exists():
+                return []
+            raw = path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            return data if isinstance(data, list) else []
+        except Exception as e:
+            logger.debug("TAM: Could not load recorded_events for user {}: {}", system_user_id, e)
+            return []
+
+    def _save_recorded_events_for_user(self, system_user_id: Optional[str], events: List[Dict]) -> None:
+        """Save recorded events for one user. Never raises."""
+        try:
+            events = events if isinstance(events, list) else []
+            path = self._get_recorded_events_path(system_user_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(events, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.warning("TAM: Could not save recorded_events for user {}: {}", system_user_id, e)
+
+    @staticmethod
+    def _cleanup_past_recorded_events(events: List[Dict], max_age_days_no_date: int = 90) -> tuple:
+        """Remove events that are finished. Returns (kept_list, number_removed). Never raises."""
+        events = events if isinstance(events, list) else []
         today = datetime.now().date()
-        before = len(self.recorded_events)
+        before = len(events)
         kept: List[Dict] = []
-        for entry in self.recorded_events:
+        for entry in events:
+            if not isinstance(entry, dict):
+                kept.append(entry)
+                continue
             event_date_str = (entry.get("event_date") or "").strip()
             if event_date_str:
                 try:
@@ -849,28 +892,13 @@ class TAM:
             recorded_at = (entry.get("recorded_at") or "").strip()
             if recorded_at:
                 try:
-                    # "YYYY-MM-DD HH:MM:SS"
                     rec_date = datetime.strptime(recorded_at[:10], "%Y-%m-%d").date()
                     if (today - rec_date).days > max_age_days_no_date:
-                        continue  # drop old undated event
+                        continue
                 except ValueError:
                     pass
             kept.append(entry)
-        self.recorded_events = kept
-        return before - len(kept)
-
-    def _save_recorded_events(self) -> None:
-        try:
-            if self._recorded_events_path is None:
-                root = Path(__file__).resolve().parent.parent
-                self._recorded_events_path = root / "database" / "tam_recorded_events.json"
-            self._recorded_events_path.parent.mkdir(parents=True, exist_ok=True)
-            self._recorded_events_path.write_text(
-                json.dumps(self.recorded_events, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except Exception as e:
-            logger.warning("TAM: Could not save recorded_events: {}", e)
+        return (kept, before - len(kept))
 
     _RECURRING_CANCEL_HINT = "\n(To cancel this recurring reminder, say 'list my recurring reminders' and ask to remove it.)"
 
@@ -1150,75 +1178,113 @@ class TAM:
         event_date: Optional[str] = None,
         remind_on: Optional[str] = None,
         remind_message: Optional[str] = None,
+        system_user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Record a date/event for future reference (no LLM; from record_date tool).
-        Optional inference: if event_date (YYYY-MM-DD) and remind_on ('day_before' or 'on_day') are set,
-        schedule a one-shot reminder. remind_message overrides the default reminder text.
-        Returns dict with recorded entry and any scheduled reminder info."""
-        entry = {
-            "event_name": event_name.strip() or "event",
-            "when": when.strip() or "",
-            "note": note.strip() or "",
-            "recorded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "event_date": event_date.strip() if event_date else "",
-            "remind_on": (remind_on or "").strip().lower() or "",
-            "remind_message": (remind_message or "").strip() or "",
-        }
-        self.recorded_events.append(entry)
-        self._save_recorded_events()
-        logger.debug("TAM: Recorded event {} when={}", entry["event_name"], entry["when"])
+        """Record a date/event for future reference (no LLM; from record_date tool). Per-user. Never raises."""
+        try:
+            entry = {
+                "event_name": (event_name or "").strip() or "event",
+                "when": (when or "").strip() or "",
+                "note": (note or "").strip() or "",
+                "recorded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "event_date": (event_date or "").strip() if event_date else "",
+                "remind_on": (remind_on or "").strip().lower() or "",
+                "remind_message": (remind_message or "").strip() or "",
+            }
+            events = self._load_recorded_events_for_user(system_user_id)
+            if not isinstance(events, list):
+                events = []
+            events.append(entry)
+            self._save_recorded_events_for_user(system_user_id, events)
+            logger.debug("TAM: Recorded event {} when={} (user={})", entry["event_name"], entry["when"], system_user_id or "_default")
 
-        result: Dict[str, Any] = {"recorded": True, "event_name": entry["event_name"], "when": entry["when"]}
-        reminders_scheduled: List[str] = []
+            result: Dict[str, Any] = {"recorded": True, "event_name": entry["event_name"], "when": entry["when"]}
+            reminders_scheduled: List[str] = []
 
-        if entry["event_date"] and entry["remind_on"]:
-            try:
-                ev_date = datetime.strptime(entry["event_date"], "%Y-%m-%d")
-            except ValueError:
-                logger.warning("TAM: Invalid event_date {}; skipping reminder", entry["event_date"])
-            else:
-                msg = entry["remind_message"] or f"Reminder: {entry['event_name']} is today!"
-                if entry["remind_on"] == "day_before":
-                    run_date = ev_date - timedelta(days=1)
-                    run_time_str = run_date.strftime("%Y-%m-%d 09:00:00")
-                    day_before_msg = entry["remind_message"] or f"Reminder: {entry['event_name']} is tomorrow!"
-                    self.schedule_one_shot(day_before_msg, run_time_str)
-                    reminders_scheduled.append(f"day before ({run_time_str})")
-                elif entry["remind_on"] == "on_day":
-                    run_time_str = ev_date.strftime("%Y-%m-%d 09:00:00")
-                    self.schedule_one_shot(msg, run_time_str)
-                    reminders_scheduled.append(f"on day ({run_time_str})")
-                if reminders_scheduled:
-                    result["reminders_scheduled"] = reminders_scheduled
-        return result
+            if entry["event_date"] and entry["remind_on"]:
+                try:
+                    ev_date = datetime.strptime(entry["event_date"], "%Y-%m-%d")
+                except ValueError:
+                    logger.warning("TAM: Invalid event_date {}; skipping reminder", entry["event_date"])
+                else:
+                    msg = entry["remind_message"] or f"Reminder: {entry['event_name']} is today!"
+                    if entry["remind_on"] == "day_before":
+                        run_date = ev_date - timedelta(days=1)
+                        run_time_str = run_date.strftime("%Y-%m-%d 09:00:00")
+                        day_before_msg = entry["remind_message"] or f"Reminder: {entry['event_name']} is tomorrow!"
+                        self.schedule_one_shot(day_before_msg, run_time_str)
+                        reminders_scheduled.append(f"day before ({run_time_str})")
+                    elif entry["remind_on"] == "on_day":
+                        run_time_str = ev_date.strftime("%Y-%m-%d 09:00:00")
+                        self.schedule_one_shot(msg, run_time_str)
+                        reminders_scheduled.append(f"on day ({run_time_str})")
+                    if reminders_scheduled:
+                        result["reminders_scheduled"] = reminders_scheduled
+            return result
+        except Exception as e:
+            logger.warning("TAM: record_event failed: {}", e)
+            return {"recorded": False, "error": str(e), "event_name": (event_name or "").strip() or "event", "when": (when or "").strip() or ""}
 
-    def list_recorded_events(self) -> List[Dict]:
-        """Return recorded events (for 'what is coming up?' etc.). Past events are removed before returning so the list does not grow indefinitely."""
-        removed = self._cleanup_past_recorded_events()
-        if removed > 0:
-            self._save_recorded_events()
-            logger.debug("TAM: Removed {} past recorded event(s) on list", removed)
-        return list(self.recorded_events)
+    def list_recorded_events(self, system_user_id: Optional[str] = None) -> List[Dict]:
+        """Return recorded events for this user (for 'what is coming up?' etc.). Past events are removed before returning. Never raises."""
+        try:
+            events = self._load_recorded_events_for_user(system_user_id)
+            kept, removed = self._cleanup_past_recorded_events(events)
+            if removed > 0:
+                self._save_recorded_events_for_user(system_user_id, kept)
+                logger.debug("TAM: Removed {} past recorded event(s) on list (user={})", removed, system_user_id or "_default")
+            return kept
+        except Exception as e:
+            logger.warning("TAM: list_recorded_events failed: {}", e)
+            return []
 
-    def get_recorded_events_summary(self, limit: int = 10) -> str:
-        """Short text summary of recorded events for injection into system context (e.g. 'what is coming up')."""
-        events = self.list_recorded_events()
-        if not events:
+    def clear_recorded_events(self) -> bool:
+        """Clear all users' recorded events (from record_date). Used when user does memory reset. Returns True if cleared."""
+        try:
+            dir_path = self._get_recorded_events_dir()
+            if not dir_path.exists():
+                return True
+            cleared = 0
+            for path in dir_path.glob("*.json"):
+                if path.is_file():
+                    try:
+                        path.write_text("[]", encoding="utf-8")
+                        cleared += 1
+                    except Exception as e:
+                        logger.warning("TAM: Could not clear recorded_events file {}: {}", path, e)
+            if cleared > 0:
+                logger.debug("TAM: recorded_events cleared ({} user file(s))", cleared)
+            return True
+        except Exception as e:
+            logger.warning("TAM: clear_recorded_events failed: {}", e)
+            return False
+
+    def get_recorded_events_summary(self, limit: int = 10, system_user_id: Optional[str] = None) -> str:
+        """Short text summary of this user's recorded events for injection into system context. Never raises."""
+        try:
+            events = self.list_recorded_events(system_user_id=system_user_id)
+            if not events or not isinstance(events, list):
+                return ""
+            limit = max(0, int(limit) if isinstance(limit, (int, float)) else 10)
+            lines = []
+            for e in events[-limit:]:
+                if not isinstance(e, dict):
+                    continue
+                name = e.get("event_name") or "event"
+                when = e.get("when") or ""
+                ed = e.get("event_date") or ""
+                ro = e.get("remind_on") or ""
+                part = f"- {name}: {when}"
+                if ed:
+                    part += f" (date: {ed}"
+                    if ro:
+                        part += f", remind: {ro}"
+                    part += ")"
+                lines.append(part)
+            return "Recorded events: " + "; ".join(lines) if lines else ""
+        except Exception as e:
+            logger.debug("TAM: get_recorded_events_summary failed: {}", e)
             return ""
-        lines = []
-        for e in events[-limit:]:
-            name = e.get("event_name") or "event"
-            when = e.get("when") or ""
-            ed = e.get("event_date") or ""
-            ro = e.get("remind_on") or ""
-            part = f"- {name}: {when}"
-            if ed:
-                part += f" (date: {ed}"
-                if ro:
-                    part += f", remind: {ro}"
-                part += ")"
-            lines.append(part)
-        return "Recorded events: " + "; ".join(lines) if lines else ""
 
     def _run_cron_pending(self) -> None:
         """Run any cron jobs that are due; advance next_run; record run history. Never raises (logs and continues)."""

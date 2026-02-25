@@ -759,6 +759,7 @@ async def _record_date_executor(arguments: Dict[str, Any], context: ToolContext)
     if remind_on and not event_date:
         return "Error: event_date (YYYY-MM-DD) is required when remind_on is set (compute from 'when')"
     try:
+        system_user_id = getattr(context, "system_user_id", None) or getattr(context, "user_id", None)
         result = tam.record_event(
             event_name=event_name,
             when=when,
@@ -766,6 +767,7 @@ async def _record_date_executor(arguments: Dict[str, Any], context: ToolContext)
             event_date=event_date or None,
             remind_on=remind_on or None,
             remind_message=remind_message or None,
+            system_user_id=system_user_id,
         )
         return json.dumps(result)
     except Exception as e:
@@ -781,7 +783,8 @@ async def _recorded_events_list_executor(arguments: Dict[str, Any], context: Too
     tam = getattr(orchestrator, "tam", None)
     if tam is None or not hasattr(tam, "list_recorded_events"):
         return json.dumps({"recorded_events": []})
-    events = tam.list_recorded_events()
+    system_user_id = getattr(context, "system_user_id", None) or getattr(context, "user_id", None)
+    events = tam.list_recorded_events(system_user_id=system_user_id)
     return json.dumps({"recorded_events": events})
 
 
@@ -2710,12 +2713,12 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
             max_in_chat = 12000
             to_show = md_content if len(md_content) <= max_in_chat else md_content[:max_in_chat] + "\n\n… (full report: open link below)"
             if link:
-                return f"{to_show}\n\n---\nReport saved. You MUST share this link with the user (use the full link in one line; do not break or truncate): {link}"
+                return f"{to_show}\n\n---\nReport saved. You MUST share this link with the user (full link in one line; if it does not open, tell user to copy the entire URL and paste in browser): {link}"
             return f"{to_show}\n\n---\nReport saved to your output folder. {link_err or 'Set auth_api_key in config for a shareable link.'}"
 
         # HTML: return the link — you MUST include this link in your reply to the user so they can view the report.
         if link:
-            return f"SUCCESS. You MUST share this link with the user in your reply so they can view the report (use the full link in one line; do not break or truncate): {link}"
+            return f"SUCCESS. You MUST share this link with the user in your reply so they can view the report. Use the full link in one line; if it does not open when clicked, tell the user to copy the entire URL and paste it in the browser: {link}"
         return f"Report saved to your output folder. {link_err or 'Set core_public_url and auth_api_key in config for shareable links.'}"
     except Exception as e:
         logger.debug("save_result_page failed: {}", e)
@@ -2736,18 +2739,27 @@ async def _file_write_executor(arguments: Dict[str, Any], context: ToolContext) 
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
         full.parent.mkdir(parents=True, exist_ok=True)
-        full.write_text(str(content), encoding="utf-8")
+        content_str = str(content or "")
+        full.write_text(content_str, encoding="utf-8")
         out = json.dumps({"written": True, "path": path_arg})
-        # When writing to output/, provide a view link so the user can open the file (same as save_result_page).
+        # When writing to output/, provide a view link only if the file has real content (avoid linking to empty pages).
         if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
             scope = _get_file_workspace_subdir(context)
             if scope:
                 from core.result_viewer import build_file_view_link
-                link, _ = build_file_view_link(scope, path_arg)
-                if link:
-                    out = f"File saved. View (use full link in one line): {link}\n{out}"
+                # Do not return a view link for empty or minimal content (same threshold as save_result_page for HTML).
+                content_size = len((content_str or "").strip())
+                if content_size >= 250:
+                    link, _ = build_file_view_link(scope, path_arg)
+                    if link:
+                        out = f"File saved. View (use full link in one line; if it does not open, copy the entire URL and paste in browser): {link}\n{out}"
+                    else:
+                        out = f"{out}\nPath: {path_arg}. To get a view link, set core_public_url and auth_api_key in config/core.yml."
                 else:
-                    out = f"{out}\nPath: {path_arg}. To get a view link, set core_public_url and auth_api_key in config/core.yml."
+                    out = (
+                        f"{out}\nPath: {path_arg}. The file is empty or too small ({content_size} chars). "
+                        "Do NOT share this link with the user. Generate the full HTML/content (e.g. document_read then build the slide), then call save_result_page with that content or file_write again with the full content."
+                    )
         return out
     except Exception as e:
         logger.debug("file_write failed: %s", e)
