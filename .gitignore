@@ -31,7 +31,6 @@
 /__pycache__
 /channels/wechat/__pycache__
 /channels/whatsapp/__pycache__
-/dist
 /clients/homeclaw_companion/release
 /external_plugins/.run_logs
 /plugins/Headlines/__pycache__
