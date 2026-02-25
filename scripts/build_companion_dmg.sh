@@ -39,7 +39,7 @@ cd "$COMPANION_DIR"
 flutter pub get
 flutter build macos --release
 
-APP_PATH="$COMPANION_DIR/build/macos/Build/Products/Release/homeclaw_companion.app"
+APP_PATH="$COMPANION_DIR/build/macos/Build/Products/Release/HomeClawApp.app"
 if [[ ! -d "$APP_PATH" ]]; then
   echo "Build did not produce $APP_PATH" >&2
   exit 1

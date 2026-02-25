@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "homeclaw_companion" "\0"
+            VALUE "CompanyName", "HomeClaw" "\0"
+            VALUE "FileDescription", "HomeClawApp" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "homeclaw_companion" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "homeclaw_companion.exe" "\0"
-            VALUE "ProductName", "homeclaw_companion" "\0"
+            VALUE "InternalName", "HomeClawApp" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 HomeClaw. All rights reserved." "\0"
+            VALUE "OriginalFilename", "HomeClawApp.exe" "\0"
+            VALUE "ProductName", "HomeClawApp" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

@@ -36,8 +36,8 @@ popd
 set "RELEASE_DIR=%COMPANION_DIR%\build\windows\x64\runner\Release"
 if not exist "%RELEASE_DIR%" set "RELEASE_DIR=%COMPANION_DIR%\build\windows\runner\Release"
 
-if not exist "%RELEASE_DIR%\homeclaw_companion.exe" (
-  echo Build did not produce homeclaw_companion.exe at %RELEASE_DIR%
+if not exist "%RELEASE_DIR%\HomeClawApp.exe" (
+  echo Build did not produce HomeClawApp.exe at %RELEASE_DIR%
   exit /b 1
 )
 
