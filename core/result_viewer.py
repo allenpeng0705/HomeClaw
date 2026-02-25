@@ -72,6 +72,10 @@ def create_file_access_token(scope: str, path: str, expiry_sec: int = DEFAULT_FI
         return None
 
 
+# Token alphabet: base64url (A-Za-z0-9_-) + 32 hex for sig. Strip any other char (e.g. spurious char from LLM/channel).
+_TOKEN_ALPHABET = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+
+
 def verify_file_access_token(token: str) -> Optional[Tuple[str, str]]:
     """Verify token and return (scope, path) if valid and not expired. Otherwise None. Never raises."""
     try:
@@ -80,7 +84,17 @@ def verify_file_access_token(token: str) -> Optional[Tuple[str, str]]:
         if not raw:
             logger.debug("files/out token: empty token_len=0")
             return None
-        token = unquote(raw) if "%" in raw else raw
+        # Decode percent-encoding (e.g. %25 -> %; repeat so double-encoded tokens decode fully)
+        while "%" in raw:
+            prev, raw = raw, unquote(raw)
+            if prev == raw:
+                break
+        token = raw
+        # Remove any character not in token alphabet (Core generates only b64+hex; spurious chars can be inserted by LLM/channel).
+        token = "".join(c for c in token if c in _TOKEN_ALPHABET)
+        if len(token) < 33:
+            logger.debug("files/out token: too short after sanitize token_len={}", len(token))
+            return None
         secret = _get_file_token_secret()
         if not secret:
             logger.debug("files/out token: auth_api_key not set on this server token_len={}", token_len)
