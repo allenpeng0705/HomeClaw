@@ -5291,12 +5291,13 @@ class Core(CoreInterface):
                                 )
                             else:
                                 block = (
-                                    "\n\n## File tools base path (sandbox + share)\n"
-                                    "Do not use workspace or config/workspace for user files — that is internal. "
-                                    "User-accessible areas: (1) User sandbox = homeclaw_root/{user_id}/ (path \".\" or \"subdir\") — main folder for this user; put generated files in output/ (path \"output/filename\") and return the link. "
-                                    "(2) Share = homeclaw_root/share/ (path \"share\" or \"share/...\") — shared by all users. "
-                                    "When the user asks for file search, list, or read without specifying a folder: use path=\".\" (user sandbox and its subfolders) first; if not found or user says \"share\", use path=\"share\" or \"share/...\". "
-                                    "folder_list(path=\".\") = list user's sandbox; folder_list(path=\"share\") = list shared folder. file_find(path=\".\", pattern=\"*.pdf\") = search user sandbox recursively. "
+                                    "\n\n## File tools — sandbox (only two bases)\n"
+                                    "Only these two bases are the search path and working area; their subfolders can be accessed. Any other folder cannot be accessed (sandbox). "
+                                    "(1) User sandbox root = homeclaw_root/{user_id}/ (path \".\" or \"subdir\"); (2) share = homeclaw_root/share/ (path \"share\" or \"share/...\"). "
+                                    "Do not use workspace, config, or paths outside these two trees. Put generated files in output/ (path \"output/filename\") and return the link. "
+                                    "When the user asks for file search, list, or read: use path=\".\" for the user sandbox (and its subfolders) first; if not found or user says \"share\", use path=\"share\" or \"share/...\". "
+                                    "folder_list(path=\".\") = list user sandbox; folder_list(path=\"share\") = list share; file_find(path=\".\", pattern=\"*.pdf\") = search user sandbox recursively. "
+                                    "To read a file, use the exact path returned by folder_list or file_find (e.g. path \"1.pdf\" → document_read(path=\"1.pdf\")). "
                                     "Report only paths returned by file_find or folder_list; do not invent paths. "
                                     f"Current homeclaw_root: {base_str}"
                                 )

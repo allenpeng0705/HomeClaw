@@ -2813,12 +2813,12 @@ FILE_OUTPUT_SUBDIR = "output"
 
 # Polite messages for file tools (never crash; user-friendly responses)
 _FILE_ACCESS_DENIED_MSG = (
-    "You don't have permission to access that path. You can only access files under your workspace, "
-    "the shared folder (share/), or the companion folder (companion/)."
+    "That path is outside the sandbox. You can only access (1) the user sandbox root and its subfolders (path '.' or 'subdir'), "
+    "or (2) share and its subfolders (path 'share' or 'share/...'). Any other folder cannot be accessed."
 )
 _FILE_NOT_FOUND_MSG = (
-    "That file or path wasn't found. Try: (1) List your files with folder_list(path='.') or path='share' for the shared folder. "
-    "(2) Search with file_find(path='.', pattern='*name*'). (3) Use path 'share/...' if the file is in the shared folder."
+    "That file or path wasn't found. Only two bases are accessible (sandbox): user sandbox (path '.') and share (path 'share'), and their subfolders. "
+    "Try: (1) folder_list(path='.') or folder_list(path='share'). (2) file_find(path='.', pattern='*name*'). Use the exact path returned."
 )
 _FILE_PATH_INVALID_MSG = "I couldn't resolve that path. Please check the path and try again."
 _FILE_HOMECLAW_ROOT_NOT_SET_MSG = (
@@ -2903,8 +2903,9 @@ def _resolve_file_path(
 ) -> Optional[Tuple[Path, Optional[Path]]]:
     """
     Resolve a file path for file tools. Returns (full_path, base_for_validation) or None on error (caller should return polite message).
-    - When homeclaw_root is SET: default base is user's private folder (base/{user_id} or base/companion). Empty path or "." resolves to that.
-      Only when path is "share" or starts with "share/" go under base/share. Use "output/<filename>" for generated files (see FILE_OUTPUT_SUBDIR).
+    Sandbox: only two bases are allowed — (1) user sandbox homeclaw_root/{user_id}/, (2) share homeclaw_root/share/.
+    Paths must stay under one of these; their subfolders are allowed; any other path is denied.
+    - When homeclaw_root is SET: path "." or "subdir" → user sandbox; path "share" or "share/..." → share. Use "output/<filename>" for generated files.
     - When homeclaw_root is NOT SET: path_arg can be absolute. base_for_validation = None.
     Never raises; returns None on any exception.
     """
@@ -2949,7 +2950,8 @@ def _resolve_file_path(
                 pass
 
         full = (effective_base / rest).resolve()
-        return (full, base)
+        # Validate under the allowed sandbox root (user folder or share); reject escape (e.g. ../other_user)
+        return (full, effective_base)
     except Exception as e:
         logger.debug("_resolve_file_path failed: %s", e)
         return None
@@ -3106,13 +3108,15 @@ async def _folder_list_executor(arguments: Dict[str, Any], context: ToolContext)
             return _FILE_NOT_FOUND_MSG
         max_entries = int(arguments.get("max_entries", 0)) or 500
         entries = []
-        base_for_rel = base if base is not None else full
+        # Paths must be relative to the user sandbox (effective_base) so file_read/document_read(path=...) resolve to the same file.
+        path_arg_normalized = (path_arg or ".").strip() in (".", "")
+        base_for_rel = full if path_arg_normalized else full.parent
         for i, p in enumerate(sorted(full.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))):
             if i >= max_entries:
                 entries.append({"name": "...", "type": "(truncated)", "path": ""})
                 break
             try:
-                rel = str(p.relative_to(base_for_rel))
+                rel = str(p.relative_to(base_for_rel)).replace("\\", "/")
             except ValueError:
                 rel = p.name
             entries.append({
@@ -4792,7 +4796,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="folder_list",
-            description="List contents of a directory (files and subdirectories). The user can access two roots: path '.' = their private folder (homeclaw_root/{user_id}/), path 'share' = shared folder (homeclaw_root/share/). Use when the user asks what files are in their directory (e.g. 你的目录下都有哪些文件, 列出文件).",
+            description="List contents of a directory (files and subdirectories). Sandbox: only two bases are the search path and working area — (1) user sandbox root and its subfolders (path '.' or 'subdir'); (2) share and its subfolders (path 'share' or 'share/...'). Any other folder cannot be accessed. Use when the user asks what files are in their directory. The returned 'path' is what to pass to file_read/document_read.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -4807,7 +4811,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_find",
-            description="Find files or folders by name pattern (glob). Default base: user's private folder (homeclaw_root/{user_id}); use path 'share' only when the user says share folder. E.g. pattern '*.pdf', '*config*'. Returns list of path, type (file/dir), name.",
+            description="Find files or folders by name pattern (glob). Sandbox: only two bases are accessible — (1) user sandbox root and subfolders (path '.' or 'subdir'); (2) share and subfolders (path 'share' or 'share/...'). Any other folder cannot be accessed. E.g. file_find(path='.', pattern='*.pdf'). Use the returned path with file_read/document_read.",
             parameters={
                 "type": "object",
                 "properties": {
