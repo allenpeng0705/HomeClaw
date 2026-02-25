@@ -7,9 +7,15 @@ Usage: python get_weather.py [--location] <location>
 """
 import argparse
 import sys
+import time
 import urllib.request
 import urllib.parse
 import urllib.error
+
+try:
+    import ssl
+except ImportError:
+    ssl = None
 
 
 def fetch_weather(location: str, compact: bool = True) -> str:
@@ -26,27 +32,31 @@ def fetch_weather(location: str, compact: bool = True) -> str:
     else:
         url = f"https://wttr.in/{loc_encoded}?T"
     req = urllib.request.Request(url, headers={"User-Agent": "curl/7.64.1"})
-    timeout_sec = 90  # wttr.in can be slow; 45s + one retry gives a good chance to succeed
+    timeout_sec = 60
     last_err = None
-    for attempt in range(2):
+    max_attempts = 3
+    retry_delay_sec = 2
+    for attempt in range(max_attempts):
         try:
             with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
                 return resp.read().decode("utf-8", errors="replace").strip()
         except urllib.error.HTTPError as e:
             return f"Error: wttr.in returned {e.code} for {loc_str}. Try another location or check spelling."
-        except urllib.error.URLError as e:
+        except (urllib.error.URLError, OSError, TimeoutError) as e:
             last_err = e
-            if attempt == 0:
+            if attempt < max_attempts - 1:
+                time.sleep(retry_delay_sec)
                 continue
-            return f"Error: could not reach wttr.in: {getattr(e, 'reason', e)}"
-        except (OSError, TimeoutError) as e:
-            last_err = e
-            if attempt == 0:
-                continue
-            return f"Error: {e}"
+            reason = getattr(e, "reason", e)
+            return f"Error: could not reach wttr.in: {reason}"
         except Exception as e:
-            return f"Error: {e}"
-    return f"Error: could not reach wttr.in after retry: {getattr(last_err, 'reason', last_err)}"
+            if ssl and isinstance(e, ssl.SSLError):
+                last_err = e
+                if attempt < max_attempts - 1:
+                    time.sleep(retry_delay_sec)
+                    continue
+            return f"Error: could not reach wttr.in: {e}"
+    return f"Error: could not reach wttr.in after {max_attempts} tries. Check network or try again later."
 
 
 def extract_location_from_query(text: str) -> str:

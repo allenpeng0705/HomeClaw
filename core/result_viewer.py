@@ -84,6 +84,9 @@ def verify_file_access_token(token: str) -> Optional[Tuple[str, str]]:
         if not raw:
             logger.debug("files/out token: empty token_len=0")
             return None
+        if token_len > 500:
+            logger.debug("files/out token: too long, likely corrupted by client/LLM token_len={}", token_len)
+            return None
         # Decode percent-encoding (e.g. %25 -> %; repeat so double-encoded tokens decode fully)
         while "%" in raw:
             prev, raw = raw, unquote(raw)
