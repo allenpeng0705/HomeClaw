@@ -2204,7 +2204,7 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
     # Inject user's location from profile so skills (e.g. weather) can use it when the query has no location.
     try:
         req = getattr(context, "request", None)
-        uid = (getattr(context, "system_user_id", None) or (getattr(req, "user_id", None) if req else None) or ""
+        uid = (getattr(context, "system_user_id", None) or (getattr(req, "user_id", None) if req else None)) or ""
         if (uid or "").strip() and _profile_base_dir() != "__disabled__":
             from base.profile_store import get_profile
             base_dir = _profile_base_dir()
@@ -2877,12 +2877,12 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
             max_in_chat = 12000
             to_show = md_content if len(md_content) <= max_in_chat else md_content[:max_in_chat] + "\n\n… (full report: open link below)"
             if link:
-                return f"{to_show}\n\n---\nReport saved. Share this link with the user (use Markdown link so it is clickable): [View report]({link})"
+                return f"{to_show}\n\n---\nReport saved. Share with the user (include full URL, do not truncate): [View report]({link})\nFull URL:\n{link}"
             return f"{to_show}\n\n---\nReport saved to your output folder. {link_err or 'Set auth_api_key in config for a shareable link.'}"
 
-        # HTML: return the link in Markdown format so the client can render it as a clickable link.
+        # HTML: return the link in Markdown format; also include raw URL on its own line so it is not truncated.
         if link:
-            return f"SUCCESS. Share this link with the user — include it in your reply as a Markdown link so the user can click it: [View slide]({link}) or [点击查看]({link}). Do not put the URL in backticks or a code block."
+            return f"SUCCESS. Share this link with the user — include the full URL in your reply without truncation.\n[View slide]({link})\nFull URL (copy entire line):\n{link}"
         return f"Report saved to your output folder. {link_err or 'Set core_public_url and auth_api_key in config for shareable links.'}"
     except Exception as e:
         logger.debug("save_result_page failed: {}", e)
@@ -2916,7 +2916,7 @@ async def _file_write_executor(arguments: Dict[str, Any], context: ToolContext) 
                 if content_size >= 250:
                     link, _ = build_file_view_link(scope, path_arg)
                     if link:
-                        out = f"File saved. Share with the user as a clickable link (use Markdown): [View file]({link})\n{out}"
+                        out = f"File saved. Share with the user (include full URL, do not truncate): [View file]({link})\nFull URL:\n{link}\n{out}"
                     else:
                         out = f"{out}\nPath: {path_arg}. To get a view link, set core_public_url and auth_api_key in config/core.yml."
                 else:
@@ -2945,7 +2945,7 @@ async def _get_file_view_link_executor(arguments: Dict[str, Any], context: ToolC
             return "Could not determine user/companion scope. Use the path from the previous file save (e.g. output/allen_resume_slides.html)."
         link, link_err = build_file_view_link(scope, path_arg)
         if link:
-            return f"View link — share with the user as a Markdown link so they can click it: [View file]({link}) or [点击查看]({link}). Do not put the URL in backticks."
+            return f"View link — share with the user (include full URL, do not truncate): [View file]({link})\nFull URL:\n{link}"
         return f"View link is not available: {link_err or 'set core_public_url and auth_api_key in config/core.yml.'}"
     except Exception as e:
         logger.debug("get_file_view_link failed: %s", e)
@@ -4158,7 +4158,7 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
                     link, _ = build_file_view_link(scope, path_rel)
                     if link:
                         msg = (parsed.get("message") or "File saved.").strip()
-                        result_text = f"{msg} Open: {link}"
+                        result_text = f"{msg}\n\nOpen (include the full URL in your reply; do not truncate):\n[View file]({link})\nFull URL (copy entire line):\n{link}"
         except (json.JSONDecodeError, TypeError):
             pass
         # Post-process with LLM if capability has post_process and post_process_prompt (only prompt + plugin output; no extra info)

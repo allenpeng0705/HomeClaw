@@ -26,15 +26,27 @@ def fetch_weather(location: str, compact: bool = True) -> str:
     else:
         url = f"https://wttr.in/{loc_encoded}?T"
     req = urllib.request.Request(url, headers={"User-Agent": "curl/7.64.1"})
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return resp.read().decode("utf-8", errors="replace").strip()
-    except urllib.error.HTTPError as e:
-        return f"Error: wttr.in returned {e.code} for {loc_str}. Try another location or check spelling."
-    except urllib.error.URLError as e:
-        return f"Error: could not reach wttr.in: {e.reason}"
-    except Exception as e:
-        return f"Error: {e}"
+    timeout_sec = 90  # wttr.in can be slow; 45s + one retry gives a good chance to succeed
+    last_err = None
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+                return resp.read().decode("utf-8", errors="replace").strip()
+        except urllib.error.HTTPError as e:
+            return f"Error: wttr.in returned {e.code} for {loc_str}. Try another location or check spelling."
+        except urllib.error.URLError as e:
+            last_err = e
+            if attempt == 0:
+                continue
+            return f"Error: could not reach wttr.in: {getattr(e, 'reason', e)}"
+        except (OSError, TimeoutError) as e:
+            last_err = e
+            if attempt == 0:
+                continue
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error: {e}"
+    return f"Error: could not reach wttr.in after retry: {getattr(last_err, 'reason', last_err)}"
 
 
 def extract_location_from_query(text: str) -> str:
