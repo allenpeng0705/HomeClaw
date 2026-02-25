@@ -402,7 +402,7 @@ class CoreService {
           Duration(seconds: sendMessageTimeoutSeconds),
           onTimeout: () {
             _pendingInboundResult.remove(requestId);
-            return null;
+            throw TimeoutException('Inbound result push timed out', Duration(seconds: sendMessageTimeoutSeconds));
           },
         );
         if (result != null) return result;
