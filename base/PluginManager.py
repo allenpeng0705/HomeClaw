@@ -411,6 +411,35 @@ class PluginManager:
                 if not any(_normalize_plugin_id(d.get("id")) == pid for d in self.external_plugins):
                     self._register_external(manifest)
                 external_folders.add(folder_name)
+        # Scan plugins_extra_dirs for manifest-based external plugins (http/subprocess/mcp only; no Python load)
+        try:
+            meta = Util().get_core_metadata()
+            extra_dirs = getattr(meta, "plugins_extra_dirs", None) or []
+            root = Util().root_path()
+            for raw in extra_dirs:
+                path = (raw or "").strip()
+                if not path:
+                    continue
+                if not os.path.isabs(path):
+                    path = os.path.join(root, path)
+                if not os.path.isdir(path):
+                    continue
+                for folder_name in os.listdir(path):
+                    plugin_folder = os.path.join(path, folder_name)
+                    if not os.path.isdir(plugin_folder):
+                        continue
+                    manifest = _load_plugin_manifest(plugin_folder)
+                    if not manifest or (manifest.get("type") or "inline").lower() not in EXTERNAL_TYPES:
+                        continue
+                    pid = _normalize_plugin_id(manifest.get("id") or folder_name)
+                    if pid in self.plugin_by_id and isinstance(self.plugin_by_id.get(pid), dict) and self.plugin_by_id[pid].get("_source") == "api":
+                        continue
+                    manifest["_folder"] = plugin_folder
+                    manifest["_source"] = "manifest"
+                    if not any(_normalize_plugin_id(d.get("id")) == pid for d in self.external_plugins):
+                        self._register_external(manifest)
+        except Exception as e:
+            logger.warning("Failed to scan plugins_extra_dirs: {}", e)
         # Merge API-registered into plugin_by_id and external_plugins
         for d in self.api_registered_plugins:
             d["_source"] = "api"

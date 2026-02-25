@@ -44,6 +44,8 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<List<String>?> _messageImages = [];
   final TextEditingController _inputController = TextEditingController();
   bool _loading = false;
+  /// When streaming is on, latest progress message from Core (e.g. "Generating your presentation…"); shown under the loading bar.
+  String? _loadingMessage;
   bool _voiceListening = false;
   String _voiceTranscript = '';
   StreamSubscription<Map<String, dynamic>>? _voiceSubscription;
@@ -209,7 +211,10 @@ class _ChatScreenState extends State<ChatScreen> {
     if ((text.isEmpty && !hasAttachments) || _loading) return;
     if (!mounted) return;
     // Claim sending immediately so a concurrent "final" voice event or double tap cannot trigger a second send.
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _loadingMessage = null;
+    });
     if (_voiceListening) {
       // Cancel subscription first so no more "final" events can trigger _send() and cause double send.
       _voiceSubscription?.cancel();
@@ -280,6 +285,11 @@ class _ChatScreenState extends State<ChatScreen> {
         images: imagePaths.isEmpty ? null : imagePaths,
         videos: videoPaths.isEmpty ? null : videoPaths,
         files: filePaths.isEmpty ? null : filePaths,
+        onProgress: widget.coreService.showProgressDuringLongTasks
+            ? (String message) {
+                if (mounted) setState(() => _loadingMessage = message);
+              }
+            : null,
       );
       if (mounted) {
         final reply = (result['text'] as String?) ?? '';
@@ -292,6 +302,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _messages.add(MapEntry(reply.isEmpty ? '(no reply)' : reply, false));
           _messageImages.add(imageDataUrls.isEmpty ? null : imageDataUrls);
           _loading = false;
+          _loadingMessage = null;
         });
         await _persistChatHistory();
         final preview = reply.isEmpty ? 'No reply' : (reply.length > 80 ? '${reply.substring(0, 80)}…' : reply);
@@ -304,6 +315,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _messages.add(MapEntry('Error: $e', false));
           _messageImages.add(null);
           _loading = false;
+          _loadingMessage = null;
         });
         _persistChatHistory();
       }
@@ -1264,9 +1276,25 @@ class _ChatScreenState extends State<ChatScreen> {
             ),
           ),
           if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: LinearProgressIndicator(),
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const LinearProgressIndicator(),
+                  if (_loadingMessage != null && _loadingMessage!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6.0),
+                      child: Text(
+                        _loadingMessage!,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           if (_voiceListening)
             Padding(

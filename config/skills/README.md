@@ -51,22 +51,15 @@ You do **not** need to add a matching entry to `skills_force_include_rules` in c
 5. Set **use_skills: true** and **skills_dir: config/skills** in `config/core.yml`. To include full skill body (and USAGE.md) for specific skills so the model can answer "how do I use this?", set **skills_include_body_for: [folder-name]** (e.g. `[maton-api-gateway-1.0.0]`).
 6. Restart or send a new message; the model will see "Available skills" in its context.
 
-## When to add a force-include rule (config/core.yml)
+## Prefer LLM selection; no per-skill config rules
 
-You **do not** need a `skills_force_include_rules` entry for every skill. Most skills are discovered by RAG (vector search) and the model calls **run_skill** when appropriate.
+With **include-all** (`skills_use_vector_search: false`, default), every skill is in the prompt. The **LLM selects** which skill to use from the list—you do **not** need to add a `skills_force_include_rules` entry for each skill.
 
-Add a rule only when:
+**Put trigger in each skill's SKILL.md** so the model gets a nudge when the query matches:
 
-- **RAG under-ranks the skill** — e.g. "weather in Beijing" might not retrieve the weather skill in the top N, so we force-include it when the query matches a pattern.
-- **The model often refuses** — some models reply "I can't fetch weather" instead of calling the tool; a **force-include** with a strong instruction (and optionally **auto_invoke**) ensures the skill runs.
+- In **SKILL.md** frontmatter add `trigger.patterns` (regex list) and `trigger.instruction` (e.g. "You have this skill; use run_skill(...). Do not say you have no skill."). When the user message matches, that instruction is appended to the system prompt and the skill is emphasized. No config rules needed.
 
-Use **auto_invoke** only when:
-
-1. User intent is **clear and narrow** (weather, web search, generate image).
-2. The **only** correct response is to run that skill (not to say "I can't").
-3. Arguments can be derived from the user message (e.g. `{{query}}` or a single extracted value). Do **not** use auto_invoke for skills that need the model to choose among options (e.g. which file to summarize, which style).
-
-So we have rules (with or without auto_invoke) for **image generation**, **weather**, and **Baidu search**; other skills (summarize, LinkedIn writer, etc.) rely on RAG + model tool use and do not need special rules unless you observe repeated failures.
+**Optional override:** `skills_force_include_rules` in `core.yml` is for rare cases where you want a **global** instruction for specific phrases (e.g. cross-skill wording). Leave it **empty** (`[]`) and rely on LLM selection + per-skill `trigger` in SKILL.md. When using vector search, a rule can also force-include a skill that RAG missed; with include-all that is unnecessary.
 
 ## Include all skills (OpenClaw-style)
 

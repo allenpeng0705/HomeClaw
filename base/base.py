@@ -79,6 +79,8 @@ class InboundRequest(BaseModel):
     files: Optional[List[str]] = None
     # Optional location (e.g. from Companion/WebChat/browser when user grants permission); Core stores as latest per user and injects into system context
     location: Optional[str] = None
+    # When true, POST /inbound returns Server-Sent Events (SSE) with progress messages during long tasks (e.g. "Generating your PPT...") then a final event with the result. Clients can show progress instead of a static loading state.
+    stream: Optional[bool] = False
 
 class IntentType(Enum):
     TIME = "TIME"
@@ -665,11 +667,11 @@ class CoreMetadata:
     workspace_dir: str = "config/workspace"  # which workspace dir to load (e.g. config/workspace_day vs config/workspace_night for day/night agents)
     # Root for file/folder tools and links (share + per-user + companion). Empty or missing = same as workspace_dir. Required conceptually; when unset we fall back to workspace_dir.
     homeclaw_root: str = ""
-    use_agent_memory_file: bool = False  # inject AGENT_MEMORY.md (curated long-term memory); see SessionAndDualMemoryDesign.md
-    agent_memory_path: str = ""  # empty = workspace_dir/AGENT_MEMORY.md
-    agent_memory_max_chars: int = 5000  # max chars to inject; default 5k. 0 = no truncation. When > 0, only last N chars; see MemoryFilesUsage.md
-    use_daily_memory: bool = False  # inject memory/YYYY-MM-DD.md for today + yesterday (short-term, bounded context); see SessionAndDualMemoryDesign.md
-    daily_memory_dir: str = ""  # empty = workspace_dir/memory; or path relative to project (e.g. database/daily_memory)
+    use_agent_memory_file: bool = True  # inject AGENT_MEMORY.md (curated long-term memory); default true when missing. See SessionAndDualMemoryDesign.md
+    agent_memory_path: str = ""  # empty = workspace_dir/AGENT_MEMORY.md; default "" when missing
+    agent_memory_max_chars: int = 20000  # max chars to inject; default 20k when missing. 0 = no truncation. When > 0, only last N chars; see MemoryFilesUsage.md
+    use_daily_memory: bool = True  # inject memory/YYYY-MM-DD.md for today + yesterday; default true when missing. See SessionAndDualMemoryDesign.md
+    daily_memory_dir: str = ""  # empty = workspace_dir/memory when missing; or path relative to project (e.g. database/daily_memory)
     use_agent_memory_search: bool = True  # when True (default), inject capped bootstrap (OpenClaw-style) + tools; set false for legacy bulk inject only
     agent_memory_vector_collection: str = "homeclaw_agent_memory"  # Chroma collection for agent memory chunks
     agent_memory_bootstrap_max_chars: int = 20000  # max chars for agent+daily bootstrap block (default/cloud); over cap = head 70% + tail 20% + marker
@@ -679,8 +681,12 @@ class CoreMetadata:
     use_tools: bool = False  # enable tool layer (tool registry, execute tool_calls in chat loop)
     use_skills: bool = False  # inject skills (SKILL.md from skills_dir) into system prompt; see Design.md §3.6
     skills_dir: str = "config/skills"  # directory to scan for skill folders (each with SKILL.md)
+    skills_extra_dirs: List[str] = field(default_factory=list)  # optional extra dirs (paths relative to project root); user can put more skills here
+    skills_disabled: List[str] = field(default_factory=list)  # folder names to not load (e.g. ["x-api-1.0.0"]); case-insensitive match
     skills_max_in_prompt: int = 5  # when skills_use_vector_search=true, cap RAG results to this many in prompt; when false (include all) this is not used
     plugins_max_in_prompt: int = 5  # when plugins_use_vector_search=true, cap RAG results to this many; when false (include all) this is not used
+    plugins_use_vector_search: bool = False  # default: load all plugins; when True, use vector store and RAG to pick top-N
+    plugins_vector_collection: str = "homeclaw_plugins"  # Chroma collection when plugins_use_vector_search
     plugins_description_max_chars: int = 0  # max chars per plugin description in routing block; 0 = no truncation. With RAG or plugins_max_in_prompt we already cap how many plugins appear; this only limits per-item length. Use 0 (default) for full descriptions; set 512 or 300 only if you need to shrink prompt or cap one very long description.
     # Vector retrieval for skills (separate collection from memory); see docs/ToolsSkillsPlugins.md §8
     skills_use_vector_search: bool = False  # when True, retrieve skills by similarity to user query instead of injecting all/first N
@@ -690,15 +696,20 @@ class CoreMetadata:
     skills_refresh_on_startup: bool = True  # resync skills_dir → vector DB on Core startup when skills_use_vector_search
     skills_test_dir: str = ""  # optional; if set, full sync every time (id = test__<folder>); for testing skills
     skills_incremental_sync: bool = False  # when true, skills_dir only processes folders not already in vector store (new only)
-    # Optional: for these skill folders, include full SKILL.md body (and USAGE.md if present) in the prompt so the model can answer "how do I use this?". List of folder names.
+    # Optional: for these skill folders, include SKILL.md body (and USAGE.md if present) in the prompt so the model can answer "how do I use this?". List of folder names.
     skills_include_body_for: List[str] = field(default_factory=list)
+    # When > 0, cap the body for skills in skills_include_body_for to this many chars (avoids blowing up context). 0 = no truncation.
+    skills_include_body_max_chars: int = 0
     # Optional: when user query matches a regex, ensure these skill folders are in the prompt and optionally append an instruction. List of { pattern: str, folders: [str], instruction?: str }.
     skills_force_include_rules: List[Dict[str, Any]] = field(default_factory=list)
     # Optional: when user query matches a regex, ensure these plugin ids are in the routing block and optionally append an instruction. List of { pattern: str, plugins: [str], instruction?: str }.
     plugins_force_include_rules: List[Dict[str, Any]] = field(default_factory=list)
-    orchestrator_timeout_seconds: int = 30  # timeout for intent/plugin call and plugin.run(); 0 = no timeout
+    # Optional extra dirs to scan for manifest-based external plugins (http/subprocess/mcp). Paths relative to project root or absolute. Python plugins are not loaded from here.
+    plugins_extra_dirs: List[str] = field(default_factory=list)
+    orchestrator_timeout_seconds: int = 60  # timeout for intent/plugin call and plugin.run() when unified is false; 0 = no timeout. Default when missing: 60.
     tool_timeout_seconds: int = 120  # per-tool execution timeout; prevents one tool from hanging the system; 0 = no timeout (from config tools.tool_timeout_seconds)
     orchestrator_unified_with_tools: bool = True  # when True (default), main LLM with tools routes TAM/plugin/chat; when False, separate orchestrator_handler runs first (one LLM for intent+plugin)
+    inbound_request_timeout_seconds: int = 0  # recommended max seconds for clients/proxies waiting for Core; 0 = unlimited. Default when missing: 0. Not enforced by Core; set proxies read_timeout >= this when >0.
     use_prompt_manager: bool = True  # load prompts from config/prompts (language/model overrides); see docs/PromptManagement.md
     prompts_dir: str = "config/prompts"  # base dir for section/name.lang.model layout
     prompt_default_language: str = "en"  # fallback when lang not in request/metadata
@@ -740,21 +751,13 @@ class CoreMetadata:
             return ""
 
     def get_homeclaw_root(self) -> str:
-        """Effective root for file/folder tools and links. When homeclaw_root is empty or missing, returns workspace_dir (resolved). Never raises."""
+        """Effective root for file/folder tools and links (sandbox + share). When homeclaw_root is empty or missing, returns '' — do not use workspace_dir for user file access; workspace is internal. Set homeclaw_root in config/core.yml for channel/companion file and folder tools. Never raises."""
         try:
-            from base.workspace import get_workspace_dir
             raw = getattr(self, "homeclaw_root", None)
             root = (str(raw).strip() if raw is not None and raw != "" else "")
-            if root:
-                return root
-            ws = getattr(self, "workspace_dir", None) or "config/workspace"
-            return str(get_workspace_dir(ws if isinstance(ws, str) else "config/workspace"))
+            return root
         except Exception:
-            try:
-                from base.workspace import get_workspace_dir
-                return str(get_workspace_dir("config/workspace"))
-            except Exception:
-                return "."
+            return ""
 
     @staticmethod
     def _normalize_system_plugins_env(raw: Any) -> Dict[str, Dict[str, str]]:
@@ -778,10 +781,10 @@ class CoreMetadata:
 
     @staticmethod
     def _parse_agent_memory_max_chars(raw: Any) -> int:
-        """Default 5000 when key missing; 0 = no truncation when explicitly set."""
+        """Default 20000 when key missing; 0 = no truncation when explicitly set."""
         if raw is None:
-            return 5000
-        return max(0, int(raw) if raw != '' else 5000)
+            return 20000
+        return max(0, int(raw) if raw != '' else 20000)
 
     @staticmethod
     def from_yaml(yaml_file: str) -> 'CoreMetadata':
@@ -943,7 +946,7 @@ class CoreMetadata:
             main_llm_api_key_name=main_llm_api_key_name_val,
             main_llm_api_key=main_llm_api_key_val,
             silent=data.get('silent', False),
-            log_to_console=data.get('log_to_console', True),
+            log_to_console=data.get('log_to_console', False),
             use_memory=data.get('use_memory', True),
             memory_backend=(data.get('memory_backend') or 'cognee').strip().lower(),
             memory_check_before_add=bool(data.get('memory_check_before_add', False)),
@@ -960,10 +963,10 @@ class CoreMetadata:
             use_workspace_bootstrap=data.get('use_workspace_bootstrap', True),
             workspace_dir=data.get('workspace_dir', 'config/workspace'),
             homeclaw_root=CoreMetadata._safe_str_strip(data.get('homeclaw_root')),
-            use_agent_memory_file=bool(data.get('use_agent_memory_file', False)),
+            use_agent_memory_file=bool(data.get('use_agent_memory_file', True)),
             agent_memory_path=(data.get('agent_memory_path') or '').strip(),
-            agent_memory_max_chars=max(0, int(data.get('agent_memory_max_chars', 5000) or 0)),
-            use_daily_memory=bool(data.get('use_daily_memory', False)),
+            agent_memory_max_chars=max(0, int(data.get('agent_memory_max_chars', 20000) or 0)),
+            use_daily_memory=bool(data.get('use_daily_memory', True)),
             daily_memory_dir=(data.get('daily_memory_dir') or '').strip(),
             use_agent_memory_search=bool(data.get('use_agent_memory_search', True)),
             agent_memory_vector_collection=(data.get('agent_memory_vector_collection') or 'homeclaw_agent_memory').strip(),
@@ -974,8 +977,12 @@ class CoreMetadata:
             use_tools=data.get('use_tools', False),
             use_skills=data.get('use_skills', False),
             skills_dir=data.get('skills_dir', 'config/skills'),
+            skills_extra_dirs=[str(p).strip() for p in (data.get('skills_extra_dirs') or []) if str(p).strip()],
+            skills_disabled=[str(f).strip() for f in (data.get('skills_disabled') or []) if str(f).strip()],
             skills_max_in_prompt=max(0, int(data.get('skills_max_in_prompt', 5) or 5)),
             plugins_max_in_prompt=max(0, int(data.get('plugins_max_in_prompt', 5) or 5)),
+            plugins_use_vector_search=bool(data.get('plugins_use_vector_search', False)),
+            plugins_vector_collection=(data.get('plugins_vector_collection') or 'homeclaw_plugins').strip(),
             plugins_description_max_chars=max(0, int(data.get('plugins_description_max_chars', 0) or 0)),
             skills_use_vector_search=bool(data.get('skills_use_vector_search', False)),
             skills_vector_collection=(data.get('skills_vector_collection') or 'homeclaw_skills').strip(),
@@ -985,11 +992,14 @@ class CoreMetadata:
             skills_test_dir=(data.get('skills_test_dir') or '').strip(),
             skills_incremental_sync=bool(data.get('skills_incremental_sync', False)),
             skills_include_body_for=[str(f).strip() for f in (data.get('skills_include_body_for') or []) if f],
+            skills_include_body_max_chars=max(0, int(data.get('skills_include_body_max_chars', 0) or 0)),
             skills_force_include_rules=[r for r in (data.get('skills_force_include_rules') or []) if isinstance(r, dict) and (r.get('pattern') or r.get('patterns')) and r.get('folders')],
             plugins_force_include_rules=[r for r in (data.get('plugins_force_include_rules') or []) if isinstance(r, dict) and r.get('pattern') and r.get('plugins')],
-            orchestrator_timeout_seconds=int(data.get('orchestrator_timeout_seconds', 30) or 0),
+            plugins_extra_dirs=[str(p).strip() for p in (data.get('plugins_extra_dirs') or []) if str(p).strip()],
+            orchestrator_timeout_seconds=(lambda v: max(0, int(v)) if v is not None else 60)(data.get('orchestrator_timeout_seconds', 60)),
             tool_timeout_seconds=int((data.get('tools') or {}).get('tool_timeout_seconds', 120) or 0),
             orchestrator_unified_with_tools=data.get('orchestrator_unified_with_tools', True),
+            inbound_request_timeout_seconds=max(0, int(data.get('inbound_request_timeout_seconds', 0) or 0)),
             use_prompt_manager=data.get('use_prompt_manager', True),
             prompts_dir=(data.get('prompts_dir') or 'config/prompts').strip(),
             prompt_default_language=(data.get('prompt_default_language') or 'en').strip() or 'en',
@@ -1039,7 +1049,7 @@ class CoreMetadata:
                 'main_llm_language': core.main_llm_language,
                 'main_llm': core.main_llm,
                 'silent': core.silent,
-                'log_to_console': getattr(core, 'log_to_console', True),
+                'log_to_console': getattr(core, 'log_to_console', False),
                 'use_memory': core.use_memory,
                 'memory_backend': getattr(core, 'memory_backend', 'cognee') or 'cognee',
                 'default_location': getattr(core, 'default_location', '') or '',
@@ -1049,8 +1059,12 @@ class CoreMetadata:
                 'use_tools': getattr(core, 'use_tools', False),
                 'use_skills': getattr(core, 'use_skills', False),
                 'skills_dir': getattr(core, 'skills_dir', 'config/skills'),
+                'skills_extra_dirs': getattr(core, 'skills_extra_dirs', None) or [],
+                'skills_disabled': getattr(core, 'skills_disabled', None) or [],
                 'skills_max_in_prompt': getattr(core, 'skills_max_in_prompt', 0),
                 'plugins_max_in_prompt': getattr(core, 'plugins_max_in_prompt', 0),
+                'plugins_use_vector_search': getattr(core, 'plugins_use_vector_search', False),
+                'plugins_vector_collection': getattr(core, 'plugins_vector_collection', 'homeclaw_plugins') or 'homeclaw_plugins',
                 'plugins_description_max_chars': getattr(core, 'plugins_description_max_chars', 0),
                 'skills_use_vector_search': getattr(core, 'skills_use_vector_search', False),
                 'skills_vector_collection': getattr(core, 'skills_vector_collection', 'homeclaw_skills') or 'homeclaw_skills',
@@ -1060,11 +1074,14 @@ class CoreMetadata:
                 'skills_test_dir': getattr(core, 'skills_test_dir', '') or '',
                 'skills_incremental_sync': getattr(core, 'skills_incremental_sync', False),
                 'skills_include_body_for': getattr(core, 'skills_include_body_for', None) or [],
+                'skills_include_body_max_chars': getattr(core, 'skills_include_body_max_chars', 0),
                 'skills_force_include_rules': getattr(core, 'skills_force_include_rules', None) or [],
                 'plugins_force_include_rules': getattr(core, 'plugins_force_include_rules', None) or [],
-                'orchestrator_timeout_seconds': getattr(core, 'orchestrator_timeout_seconds', 30),
+                'plugins_extra_dirs': getattr(core, 'plugins_extra_dirs', None) or [],
+                'orchestrator_timeout_seconds': getattr(core, 'orchestrator_timeout_seconds', 60),
                 # tool_timeout_seconds is written under data["tools"] below, not as top-level
                 'orchestrator_unified_with_tools': getattr(core, 'orchestrator_unified_with_tools', True),
+                'inbound_request_timeout_seconds': getattr(core, 'inbound_request_timeout_seconds', 0),
                 'notify_unknown_request': getattr(core, 'notify_unknown_request', False),
                 'outbound_markdown_format': getattr(core, 'outbound_markdown_format', 'whatsapp') or 'whatsapp',
                 'use_prompt_manager': getattr(core, 'use_prompt_manager', True),

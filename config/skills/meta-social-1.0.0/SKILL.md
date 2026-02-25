@@ -4,8 +4,8 @@ description: |
   Post to a Facebook Page and to Instagram (Business/Creator) via Meta Graph API. Use when the user wants to post to Facebook or Instagram and you have META_ACCESS_TOKEN (Page access token) and the Page ID set.
 compatibility: Requires network access and META_ACCESS_TOKEN (Page access token from developers.facebook.com; Page must have pages_manage_posts; for Instagram, link IG Business account to the Page)
 trigger:
-  patterns: ["post to facebook|facebook.*post|post to (instagram|ig)|instagram.*post|meta graph|facebook page|instagram.*publish"]
-  instruction: "User asked to post to Facebook or Instagram. Use run_skill with script request.py: facebook post <page_id> <message> or instagram post <page_id> <image_url> [caption]. Requires META_ACCESS_TOKEN and page_id (Instagram requires IG Business account linked to Page)."
+  patterns: ["post to facebook|facebook.*post|post to (instagram|ig)|instagram.*post|meta graph|facebook page|instagram.*publish|发.*facebook|发.*ins|发.*脸书|发.*instagram"]
+  instruction: "User asked to post to Facebook or Instagram. Use run_skill(skill_name='meta-social-1.0.0', script='request.py', args=[...]). Requires META_ACCESS_TOKEN and page_id. Do not say you have no skill."
 ---
 
 # Meta Social (Facebook Page + Instagram)

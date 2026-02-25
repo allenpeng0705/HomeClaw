@@ -4,25 +4,38 @@ This document defines how HomeClaw restricts file and folder access per user and
 
 **User-facing doc:** [docs/per-user-sandbox-and-file-links.md](../docs/per-user-sandbox-and-file-links.md) — summary for users (per-user sandbox, output folder, generate link).
 
+## Three areas: workspace vs sandbox vs share
+
+| Area | Purpose | Used by channel/companion? | Config / path |
+|------|---------|----------------------------|---------------|
+| **Workspace** | Internal working folder: IDENTITY.md, AGENTS.md, TOOLS.md, AGENT_MEMORY, daily memory. | **No** — do not use for user file access. | `workspace_dir` (e.g. `config/workspace`) |
+| **Sandbox (per user)** | Main folder for each user. File search, read, write; generated files go into **output**; **knowledgebase** subfolder for KB sync. | **Yes** — default base for file tools. | `homeclaw_root/{user_id}/` (or `homeclaw_root/companion/`) |
+| **Share** | Shared by all users. Use when the user says "share" or when the file is not in the user's sandbox. | **Yes** — path `share` or `share/...`. | `homeclaw_root/share/` |
+
+- **homeclaw_root** (in `config/core.yml`, top-level) is **required** for file and folder access from channel/companion. When it is not set, file tools return a clear message: set homeclaw_root so that each user has a subfolder (e.g. `homeclaw_root/{user_id}/` for private files, `homeclaw_root/share` for shared). Core does **not** fall back to workspace_dir for user files — workspace is internal only.
+- Under **homeclaw_root** we have:
+  - **Per-user sandbox** – `homeclaw_root/{user_id}/` (or `homeclaw_root/companion/` when not tied to a user). Path `"."` or `"subdir"` resolves here. Subfolders: **output/** (generated files; use path `output/<filename>` and return a link), **knowledgebase/** (for KB folder sync).
+  - **Share** – `homeclaw_root/share/`. Path `share` or `share/...` resolves here. Visible and writable by all users and companion.
+- When the user asks for file search, list, or read **without specifying a folder**: search/list in the user's sandbox first (path `"."`); if not found or the user says "share", use path `"share"` or `"share/..."`. Results (e.g. generated reports, PPT) go into **output/** and Core generates a link and sends it back.
+
 ## Overview
 
-- **One configurable base directory** (`tools.file_read_base` in `config/core.yml`). When set, all file/folder tools are restricted to paths under this base. When not set, absolute paths are allowed (no sandbox).
-- Under the base we have:
-  - **Shared folder** – paths starting with `share/` (or the configured `file_read_shared_dir`) are visible and writable by all users and the companion app.
-  - **Per-user folders** – one folder per user (by `system_user_id` from `config/user.yml`). Paths that do not start with `share/` are resolved under `base/{user_id}/`.
-  - **Companion folder** – when the request is from the companion app and not tied to a specific user, paths resolve under `base/companion/`.
-  - **Default folder** – when there is no user and no companion context, paths resolve under `base/default/`.
-- **Output folder** – each user and the companion have a dedicated **output** subfolder for generated files (e.g. images, reports, exports). Paths like `output/filename` resolve to `base/{user_id}/output/` or `base/companion/output/`. All future file-output features must write there (see below).
+- **One configurable root** (`homeclaw_root` in `config/core.yml`, top-level). When set, all file/folder tools are restricted to paths under this root. When **not** set, file tools return a clear error — do not use workspace for user files.
+- Under the root we have:
+  - **Shared folder** – paths starting with `share/` (or the configured `tools.file_read_shared_dir`) are visible and writable by all users and the companion app.
+  - **Per-user folders** – one folder per user (by `system_user_id` from `config/user.yml`). Paths that do not start with `share/` are resolved under `homeclaw_root/{user_id}/` (or `companion/` when not tied to a user).
+  - **Default folder** – when there is no user and no companion context, paths resolve under `homeclaw_root/default/`.
+- **Output folder** – each user and the companion have a dedicated **output** subfolder for generated files (e.g. images, reports, exports). Paths like `output/filename` resolve to `homeclaw_root/{user_id}/output/` or `homeclaw_root/companion/output/`. All file-output features must write there and return a link (see below).
 
-## When `file_read_base` is set
+## When `homeclaw_root` is set
 
 | Path form        | Resolves to                    | Who can access        |
 |------------------|---------------------------------|------------------------|
-| `share` / `share/...` | `base/share/` or `base/share/...` | All users + companion |
-| Any other path   | `base/{user_id}/...` or `base/companion/...` or `base/default/...` | That user or companion only |
-| `output/...`     | `base/{user_id}/output/...` or `base/companion/output/...` | That user or companion only |
+| `share` / `share/...` | `homeclaw_root/share/` or `homeclaw_root/share/...` | All users + companion |
+| Any other path   | `homeclaw_root/{user_id}/...` or `homeclaw_root/companion/...` or `homeclaw_root/default/...` | That user or companion only |
+| `output/...`     | `homeclaw_root/{user_id}/output/...` or `homeclaw_root/companion/output/...` | That user or companion only |
 
-- Folder names under the base are derived from `system_user_id` (user.yml) with a safe segment (alphanumeric, underscore, hyphen; max 64 chars). Unknown or missing user falls back to `default`.
+- Folder names under the root are derived from `system_user_id` (user.yml) with a safe segment (alphanumeric, underscore, hyphen; max 64 chars). Unknown or missing user falls back to `default`.
 - Companion context is detected when any of `session_id`, `user_id`, `app_id`, `channel_name`, or request metadata `conversation_type`/`session_id` is `"companion"` (case-insensitive).
 - Shared directory name is configurable via `tools.file_read_shared_dir` (default `"share"`). Comparison is case-insensitive for the prefix.
 
@@ -34,9 +47,9 @@ This document defines how HomeClaw restricts file and folder access per user and
   - For **companion** (no user): use path `output/<filename>` so the file is stored under `base/companion/output/`.
 - No special resolution is required: the existing `_resolve_file_path(path, context, for_write=True)` already resolves `output/...` to the correct per-user or companion output directory. Skills, plugins, and built-in tools that produce files should pass paths like `output/report.pdf` or `output/image.png` so outputs stay in the user’s (or companion’s) private area and follow this design.
 
-## When `file_read_base` is not set
+## When `homeclaw_root` is not set
 
-- Paths can be absolute; there is no base restriction. Validation `_path_under(full, base)` receives `base=None` and allows any path. Use this only in trusted/single-user setups.
+- File and folder tools return a clear message: set **homeclaw_root** in config/core.yml so that each user has a subfolder (e.g. `homeclaw_root/{user_id}/` for private files, `homeclaw_root/share` for shared). Core does **not** use workspace_dir for user file access — workspace is internal only.
 
 ## Safety and robustness
 
@@ -61,7 +74,7 @@ Core serves sandbox files and folder listings from **its own server** at `GET /f
   - **`core_public_url`** – Public URL that reaches Core (e.g. from Cloudflare Tunnel, Tailscale Funnel). Used to build shareable links. Leave empty for local-only. When you use **Pinggy** (`pinggy.token`), Core does **not** write this to config; instead, when the Pinggy tunnel is up, Core sets a **runtime public URL** so the same Pinggy URL is used for file/report links, folder listing links, and the /pinggy scan-to-connect page.
   - **`auth_api_key`** – Used to sign file-access tokens so links can be opened in a browser without sending the API key. When `auth_enabled` is true, the same key protects `/inbound` and `/ws`. Set both for shareable report/folder links.
 - **Flow:** Tools (e.g. **save_result_page**) write files into the user’s or companion’s **output** folder, then return a link: `core_public_url/files/out?path=output/report_xxx.html&token=...`. The token is signed (scope + path + expiry) with `auth_api_key`.
-- **Route:** `GET /files/out?path=...&token=...` verifies the token, resolves the path under `file_read_base/{scope}/`, and either serves the **file** (HTML, Markdown, images, etc.) or, if the path is a **directory**, returns an **HTML listing** with links to each file and subfolder (each link has its own token). So “what’s in this folder?” can be answered with a link that opens a web page listing the contents.
+- **Route:** `GET /files/out?path=...&token=...` verifies the token, resolves the path under `homeclaw_root/{scope}/`, and either serves the **file** (HTML, Markdown, images, etc.) or, if the path is a **directory**, returns an **HTML listing** with links to each file and subfolder (each link has its own token). So “what’s in this folder?” can be answered with a link that opens a web page listing the contents.
 - **HTML/MD in chat:** When a response is better shown as HTML or Markdown (e.g. a report or folder listing), the model can use **save_result_page** and return the link. In the future, the Companion app may render HTML and Markdown directly in the chat view so the user can see formatted content without opening a browser.
 
 ## How to use: reports, HTML, PPT, and file links
@@ -73,7 +86,7 @@ This feature lets HomeClaw generate files (HTML reports, exported data, and late
 - **`config/core.yml`** (top level):
   - **`auth_api_key`** – Set to any non-empty string (e.g. a secret you choose). Required to **sign** file links so they can be opened in a browser without sending the API key. If you use **`auth_enabled: true`** for /inbound, use the same key here.
   - **`core_public_url`** – Optional. When set (e.g. `https://homeclaw.example.com`), report/folder links use this URL. When **empty**, Core uses **`http://127.0.0.1:<port>`** (or **host:port** from config) so links work on the same machine. When using **Pinggy**, leave empty and Core will use the Pinggy URL once the tunnel is up.
-- **`tools.file_read_base`** – Must be set (e.g. `D:/homeclaw`) so the sandbox and output folders exist. Files are stored under `file_read_base/<user_id>/output/` or `file_read_base/companion/output/`.
+- **`homeclaw_root`** (top-level in config/core.yml) – Must be set (e.g. `D:/homeclaw`) so the sandbox and output folders exist. Files are stored under `homeclaw_root/<user_id>/output/` or `homeclaw_root/companion/output/`. When not set, file tools return a clear error; Core does not use workspace for user files.
 
 ### 2. Markdown vs HTML: when to use which
 
@@ -103,7 +116,7 @@ This feature lets HomeClaw generate files (HTML reports, exported data, and late
 ### 6. Safety (no crash, no escape)
 
 - **Core never crashes:** All file tools and **GET /files/out** return JSON or HTML responses; errors return HTTP 4xx/5xx and a message, never an uncaught exception.
-- **Path safety:** Token path and scope are validated (no `..`, no `/` in scope); resolved path is checked to stay under **file_read_base**. Symlinks are resolved; access outside the base returns 403.
+- **Path safety:** Token path and scope are validated (no `..`, no `/` in scope); resolved path is checked to stay under **homeclaw_root**. Symlinks are resolved; access outside the root returns 403.
 - **Token:** Signed with **auth_api_key**; expired or invalid token returns 403.
 
 ## Checking the sandbox without combining a user
@@ -122,6 +135,6 @@ Auth: when `auth_enabled` and `auth_api_key` are set, send `X-API-Key` or `Autho
 ## References
 
 - Implementation: `tools/builtin.py` (file executors, `_resolve_file_path`, `_path_under`); `core/result_viewer.py` (tokens, `generate_result_html`); `core/core.py` (`GET /files/out`, `GET /api/sandbox/list`).
-- Config: `config/core.yml` top-level `core_public_url`, `auth_api_key`; under `tools`: `file_read_base`, `file_read_shared_dir`. Optional under `tools`: `save_result_page_max_file_size_kb` (default 500) for generated report HTML size limit.
+- Config: `config/core.yml` top-level `core_public_url`, `auth_api_key`, **`homeclaw_root`** (required for file/sandbox access); under `tools`: `file_read_shared_dir`. Optional under `tools`: `save_result_page_max_file_size_kb` (default 500) for generated report HTML size limit.
 - User identity: `config/user.yml` (`system_user_id` for per-user folder name).
 - Docs: `docs/tools.md` (file tools section), `docs_design/MultiUserSupport.md` (file workspace row).

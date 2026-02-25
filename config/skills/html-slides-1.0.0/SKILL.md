@@ -1,9 +1,9 @@
 ---
 name: html-slides
-description: 将用户讲稿生成乔布斯风极简竖屏单页HTML演示（单文件，浏览器打开）。仅当用户明确要求乔布斯风、极简、竖屏或HTML演示时使用。若需标准PowerPoint(.pptx)或“做个PPT”无风格要求时请使用PPT生成插件 route_to_plugin(plugin_id=ppt-generation)。输出写入用户/伴侣 output 文件夹并返回打开链接。
+description: "Generate a 乔布斯-style minimal vertical single-page HTML presentation from the user's script (single file, open in browser). Use this skill when the user asks for 乔布斯/极简/竖屏/HTML slides. For standard PowerPoint (.pptx) without style preference use route_to_plugin(plugin_id=ppt-generation). Output goes to user/companion output folder; return the open link."
 trigger:
-  patterns: ["乔布斯|极简.*演示|竖屏.*演示|HTML.*演示|单页.*演示|极简.*幻灯片|乔布斯.*幻灯片"]
-  instruction: "The user asked for 乔布斯-style, 极简, 竖屏, or single-file HTML presentation. Use run_skill(skill_name='html-slides-1.0.0', ...) and follow the skill's step-by-step flow. If they want standard PowerPoint (.pptx), use route_to_plugin(plugin_id=ppt-generation) instead."
+  patterns: ["乔布斯|极简.*演示|竖屏.*演示|HTML.*演示|单页.*演示|极简.*幻灯片|乔布斯.*幻灯片|HTML\\s*slides|html\\s*slides|生成.*HTML.*[Ss]lides|生成.*幻灯片|乔布斯.*极简|极简.*乔布斯"]
+  instruction: "The user asked for 乔布斯-style, 极简, or HTML presentation. You HAVE the html-slides skill: follow its steps (refine script, design slides, generate full HTML), then call file_write(path='output/<title>_slides.html', content=...) or save_result_page(format='html', ...) and return the link to the user. Do not say you have no skill or cannot do it. If they want standard .pptx only, use route_to_plugin(plugin_id=ppt-generation) instead."
 ---
 
 # HTML Slides（乔布斯风竖屏单页演示）

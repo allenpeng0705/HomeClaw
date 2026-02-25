@@ -2,7 +2,7 @@
 name: social-media-agent
 description: Autonomous social media management for X/Twitter using only HomeClaw native tools. Use when a user wants to automate X posting, generate content, track engagement, or build an audience. Triggers on requests about tweets, social media strategy, X engagement, content calendars, or growing a following. No API keys required — uses browser automation and web_fetch.
 trigger:
-  patterns: ["tweet|twitter|x\\.com|post\\s+on\\s+x|social\\s+media|发推|推特"]
+  patterns: ["tweet|twitter|x\\.com|post\\s+on\\s+x|social\\s+media|发推|推特|发.*[Xx]|发一条.*[Xx]|帮.*发.*[Xx]"]
   instruction: "The user asked about tweeting, X/Twitter, or social media. Use this skill: browser for posting, web_fetch for content, cron for scheduling. See skill body for steps (open x.com/compose/post, snapshot, type, click Post)."
 ---
 

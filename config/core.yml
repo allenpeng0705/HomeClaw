@@ -9,7 +9,7 @@ mode: dev
 model_path: ../models/
 # When false: log [memory], [tools], [skills], [plugin], [TAM], [orchestrator] activity at INFO (verbose). When true: only INFO to console (less noise). On Windows CMD, use true to avoid huge output and "Press Space to continue" blocking.
 silent: false
-# When false: all logs go only to the log file (logs/core_debug.log); nothing to console. Use with e.g. "Get-Content logs\core_debug.log -Wait -Tail 50" or "tail -f logs/core_debug.log" to monitor. When true: logs also go to console.
+# When false: all logs go only to the log file (logs/core_debug.log); nothing to console. To monitor: "Get-Content logs\core_debug.log -Wait -Tail 50 -Encoding UTF8" (PowerShell; -Encoding UTF8 needed for Chinese/special chars on Windows) or "tail -f logs/core_debug.log" (Unix). When true: logs also go to console.
 log_to_console: false
 use_memory: true
 # memory_backend: cognee (always default) | chroma. Both backends supported. Cognee: configure via cognee: or Cognee .env. Chroma: in-house RAG via core.yml database, vectorDB, graphDB.
@@ -33,18 +33,19 @@ memory_summarization:
 profile:
   enabled: true
   dir: ""   # empty = database/profiles; or set a path for profile JSON files
-# Optional: inject workspace bootstrap (IDENTITY.md, AGENTS.md, TOOLS.md) into system prompt; see Comparison.md §7.4
+# Optional: inject workspace bootstrap (IDENTITY.md, AGENTS.md, TOOLS.md) into system prompt. Default when missing: true.
 use_workspace_bootstrap: true
 # Which workspace dir to load (e.g. config/workspace_day vs config/workspace_night for day/night agents)
 workspace_dir: config/workspace
-# Root for file/folder tools and links (share + per-user + companion). Empty or missing = same as workspace_dir. All links sent to channel/companion point under this (share or user private folder).
+# Root for file/folder tools and links (sandbox + share). Required for channel/companion file access. When empty, file tools return a clear error; do not use workspace for user files. Structure: homeclaw_root/{user_id}/ (private), homeclaw_root/share (shared), homeclaw_root/companion (companion app). Subfolders: output/, knowledgebase/.
 homeclaw_root: "D:/homeclaw"
 # Optional: inject curated long-term memory from a single Markdown file (AGENT_MEMORY.md). See docs_design/SessionAndDualMemoryDesign.md. Format: plain Markdown; recommended one fact per paragraph (see MemoryFilesUsage.md § Format).
+# Agent memory file: default when missing = true, "", 20000. See docs_design/MemoryFilesUsage.md
 use_agent_memory_file: true
 agent_memory_path: ""   # empty = workspace_dir/AGENT_MEMORY.md; or set path relative to project or absolute
-agent_memory_max_chars: 5000   # max chars to inject; default 5k. 0 = no truncation; see docs_design/MemoryFilesUsage.md
-# use_agent_memory_search: how agent/daily memory is used in the prompt.
-#   true (default): Like OpenClaw: inject a capped bootstrap of AGENT_MEMORY + daily into the system prompt every time (so memory is always used), and index for tools; model can still use agent_memory_search + agent_memory_get for more.
+agent_memory_max_chars: 20000   # max chars to inject; 0 = no truncation
+# Default when missing: use_agent_memory_search true, agent_memory_vector_collection homeclaw_agent_memory, bootstrap 20000/8000, use_daily_memory true, daily_memory_dir "".
+# use_agent_memory_search: true (default) = inject capped bootstrap + index + tools; false = legacy inject last N chars.
 #   false (legacy): Inject last agent_memory_max_chars of AGENT_MEMORY.md and yesterday+today daily files into the system prompt every time. Simpler but uses more tokens and can duplicate with RAG.
 use_agent_memory_search: true
 agent_memory_vector_collection: homeclaw_agent_memory   # Chroma collection for agent memory chunks
@@ -74,7 +75,7 @@ outbound_markdown_format: whatsapp
 # Max concurrent LLM calls (channel queue + plugin API /api/plugins/llm/generate).
 # Local model: use 1 (default) to avoid overloading one GPU/process.
 # Cloud model: may use 2–10 (or per-provider limit) for parallel channel + plugin API; stay under provider RPM/TPM. See docs_design/PluginLLMAndQueueDesign.md.
-llm_max_concurrent: 2
+llm_max_concurrent: 1
 # Compaction: trim or summarize context when approaching model limit. Reduces token use and avoids overflows.
 compaction:
   enabled: false              # when true, trim/summarize messages before LLM when over limit
@@ -89,38 +90,64 @@ use_tools: true
 # Optional: inject skills (SKILL.md) from skills_dir into system prompt; see Design.md §3.6
 use_skills: true
 skills_dir: config/skills
+# Optional extra dirs for skills (paths relative to project root). User can put more skill folders here; merged with skills_dir (first wins by folder name). See docs_design/SkillsAndPluginsSamePolicy.md.
+# skills_extra_dirs: [config/external_skills]
+# Folder names to not load (case-insensitive). Use to disable a skill without removing it (e.g. ["x-api-1.0.0"]).
+# skills_disabled: []
 # Skills: skills_use_vector_search=false → include ALL skills. true → RAG (skills_max_retrieved → threshold → skills_max_in_prompt). Same for plugins.
 
 # Max chars per plugin description in the routing block. 0 = no truncation (default). With RAG (plugins_use_vector_search) or plugins_max_in_prompt we already limit how many plugins appear; this only caps per-description length. Use 0 for full descriptions; set 512 or 300 only to shrink prompt or cap one very long description.
 plugins_description_max_chars: 0
-# When true: inject ALL skills (no RAG, no cap). skills_force_include_rules still apply: matching rules add their instruction and auto_invoke (e.g. weather/search/image).
-# Vector retrieval for skills (separate Chroma collection): when true, retrieve by similarity; when false, include ALL skills (OpenClaw-style). See docs/ToolsSkillsPlugins.md §8.
-skills_use_vector_search: true
+# Default: load all skills/plugins; no vector store. If skills_use_vector_search or plugins_use_vector_search (or related keys) are omitted, we use this default: load all, do not create or use the vector store.
+# Vector retrieval for skills: when false or omitted → include ALL skills; when true → create store, sync, and RAG (skills_max_retrieved → threshold → skills_max_in_prompt). See docs_design/SkillsAndPluginsSamePolicy.md.
+skills_use_vector_search: false
 skills_vector_collection: homeclaw_skills
 skills_max_retrieved: 10      # when using vector search: max skills to retrieve from RAG (then threshold + skills_max_in_prompt cap)
-skills_max_in_prompt: 5      # when skills_use_vector_search=true: max skills in prompt; ignored when false
-# Min similarity (0..1) to keep a skill; below this, RAG drops it. 0.5 can drop cross-lingual or short queries; 0.3 or 0.0 improves selection (e.g. Chinese "创建图片" vs English skill text). Force-include rules still add skills by pattern.
-skills_similarity_threshold: 0.4
+skills_max_in_prompt: 5     # when skills_use_vector_search=true: cap; when false, all skills are included (this value ignored)
+# Min similarity (0..1) to keep a skill; below this, RAG drops it. 0.5 can drop cross-lingual or short queries; 0.3 or 0.0 improves selection (e.g. Chinese "创建图片" vs English skill text). Use 0.3 so Chinese/mixed queries (e.g. 发一条X, 生成HTML slides) still retrieve relevant skills. Force-include rules still add skills by pattern.
+skills_similarity_threshold: 0.5
 skills_refresh_on_startup: true
 # Optional test folder: full sync every time (id = test__<folder>). Production skills_dir can be incremental (only new).
 skills_test_dir: ""
 skills_incremental_sync: false
-# Which skills get full body in the prompt (does not change when a skill is selected—that is RAG + trigger). For these folders only, include SKILL.md body + a short USAGE.md prefix so the model can answer "how do I use this?". Other skills get name + description only.
-skills_include_body_for: [maton-api-gateway-1.0.0]
-# Force-include for skills: use "trigger:" in each skill's SKILL.md (see config/skills/README.md). You can omit skills_force_include_rules; add it only if you need config-only overrides (e.g. a skill with no trigger in SKILL.md).
-# Vector retrieval for plugins (separate collection): same design as skills. RAG finds relevant plugins; only those go into prompt.
-# plugins_use_vector_search=false → include ALL plugins; true → RAG (plugins_max_retrieved → threshold → plugins_max_in_prompt).
-plugins_use_vector_search: true
+# Which skills get body in the prompt (SKILL.md + USAGE.md prefix). For these folders only, so the model can answer "how do I use this?". Set skills_include_body_max_chars > 0 (e.g. 8000) to cap body length and avoid exceeding context.
+skills_include_body_for: [maton-api-gateway-1.0.0, x-api-1.0.0, meta-social-1.0.0]
+# skills_include_body_max_chars: 8000   # 0 = no truncation; when > 0, cap body for skills_include_body_for to this many chars
+# Optional: force-include rules add an extra instruction when the query matches. With include-all you do NOT need these—LLM selects from the full list. Prefer trigger in each skill's SKILL.md. Uncomment and edit below if you want a global override.
+skills_force_include_rules: []
+# Example (uncomment to use):
+# skills_force_include_rules:
+#   - patterns: ["乔布斯|极简.*演示|HTML\\s*slides|html\\s*slides|幻灯片|生成.*HTML"]
+#     folders: [html-slides-1.0.0]
+#     instruction: "User asked for 乔布斯-style or HTML slides. You have the html-slides skill: follow its steps, then file_write or save_result_page to output/ and return the link. Do not say you have no skill."
+#   - patterns: ["generate.*image|create.*image|画.*图|生成.*图|来一张图|做.*图|创建图片"]
+#     folders: [image-generation-1.0.0]
+#     instruction: "User asked to generate or create an image. Call run_skill(skill_name='image-generation-1.0.0', script='generate_image.py', args=['--prompt', '<description>']). Do not say no image tool."
+#   - patterns: ["发.*[Xx]|发推|发一条.*[Xx]|post.*tweet|tweet.*post"]
+#     folders: [x-api-1.0.0, social-media-agent-1.0.0]
+#     instruction: "User asked to post to X/Twitter. Use x-api-1.0.0 (run_skill with request.py) if you have X_ACCESS_TOKEN, else social-media-agent-1.0.0 (browser). Do not say you have no skill."
+#   - patterns: ["summarize|总结|摘要|概括|summarise"]
+#     folders: [summarize-1.0.0]
+#     instruction: "User asked to summarize. Use run_skill(skill_name='summarize-1.0.0', ...) or the summarize CLI / web_search as needed. Do not say you have no skill."
+# Vector retrieval for plugins: when false or omitted → include ALL plugins; when true → create store, sync, and RAG. Same default as skills.
+plugins_use_vector_search: false
 plugins_vector_collection: homeclaw_plugins
 plugins_max_retrieved: 10     # when using vector search: max plugins to retrieve from RAG
-plugins_max_in_prompt: 5      # when plugins_use_vector_search=true: max plugins in prompt; ignored when false
+plugins_max_in_prompt: 15    # when plugins_use_vector_search=true: cap; when false, all plugins included (this value ignored)
 plugins_similarity_threshold: 0.0
 plugins_refresh_on_startup: true
-# Optional: when user query matches a regex, ensure these plugin ids are in the routing block and optionally append an instruction. List of { pattern: str, plugins: [str], instruction?: str }. No per-plugin code in Core.
-plugins_force_include_rules:
-  - pattern: "open\\s+(the\\s+)?browser|navigate\\s+to|go\\s+to\\s+https?://"
-    plugins: [homeclaw-browser]
-    instruction: "The user asked to open a URL or use the browser. Use route_to_plugin(plugin_id='homeclaw-browser', capability_id='browser_navigate', parameters={\"url\": \"<URL>\"})."
+# Optional: when the query matches a pattern, add an instruction (and ensure plugin in block when using plugin RAG). With include-all you do NOT need these—LLM selects from full list. Uncomment and edit below if you want an override.
+plugins_force_include_rules: []
+# Example (uncomment to use):
+# plugins_force_include_rules:
+#   - pattern: "open\\s+(the\\s+)?browser|navigate\\s+to|go\\s+to\\s+https?://"
+#     plugins: [homeclaw-browser]
+#     instruction: "The user asked to open a URL or use the browser. Use route_to_plugin(plugin_id='homeclaw-browser', capability_id='browser_navigate', parameters={\"url\": \"<URL>\"})."
+#   - pattern: "生成.*PPT|做个PPT|做.*PPT|生成.*演示|create.*ppt|make.*presentation"
+#     plugins: [ppt-generation]
+#     instruction: "The user asked to create a PPT or PowerPoint presentation. Use route_to_plugin(plugin_id='ppt-generation', capability_id='create_from_outline' or 'create_from_source', parameters with outline/source and optional title). The plugin saves to the user's output folder and returns a link; include that link in your reply so the user can open the file."
+# Optional extra dirs to scan for manifest-based external plugins (http/subprocess/mcp). Paths relative to project root. Drop a folder with plugin.yaml (type: http|subprocess|mcp) and restart Core to discover it. See docs_design/SkillsAndPluginsSamePolicy.md.
+# plugins_extra_dirs: [config/external_plugins]
 # System plugins (system_plugins/): when true, Core starts each plugin (e.g. node server.js) and runs register (e.g. node register.js) so one command runs Core + all system plugins. See system_plugins/README.md.
 system_plugins_auto_start: true   # set true to start homeclaw-browser etc. with Core
 system_plugins: [homeclaw-browser]                 # optional allowlist by plugin id (folder name); empty = start all discovered
@@ -136,19 +163,19 @@ system_plugins_env:
 # Orchestrator + TAM + plugins are always enabled. Single choice: routing style.
 # orchestrator_unified_with_tools: true (default) — main LLM with tools does routing (route_to_tam / route_to_plugin). One LLM call.
 # orchestrator_unified_with_tools: false — separate orchestrator LLM call for intent + plugin selection, then plugin runs.
-orchestrator_unified_with_tools: true
+# orchestrator_unified_with_tools: true
 # Timeout for orchestrator intent/plugin LLM call and plugin.run() when unified is false. Unit: seconds. 0 = no timeout.
-orchestrator_timeout_seconds: 30
-# How long clients/proxies should wait for Core to respond (e.g. read PDF + summarize). Increase if you hit timeouts on long tasks (document_read, summarization). Proxies (nginx, Cloudflare) may need read_timeout >= this.
-inbound_request_timeout_seconds: 300
+# orchestrator_timeout_seconds: 60
+# Recommended max time (seconds) for clients/proxies waiting for Core to respond (e.g. /inbound). 0 = unlimited (no recommended limit). Long tasks (document_read, summarization, video) may need several minutes; set >0 (e.g. 300) if you want a cap, or 0 so clients/proxies can wait as long as needed. Proxies (nginx, Cloudflare) should set read_timeout >= this when >0.
+# inbound_request_timeout_seconds: 0
 # Prompt manager: load prompts from config/prompts with language/model overrides. See docs/PromptManagement.md.
 use_prompt_manager: true
 prompts_dir: config/prompts
 prompt_default_language: en
 prompt_cache_ttl_seconds: 0   # Unit: seconds. 0 = cache by file mtime; >0 = TTL
 # Optional: require API key for /inbound and /ws when exposing Core on the internet; see docs/RemoteAccess.md
-auth_enabled: false
-auth_api_key: ""   # when auth_enabled: true, require X-API-Key header or Authorization: Bearer <key>. Also used to sign file/report links (GET /files/out) when core_public_url is set.
+auth_enabled: true
+auth_api_key: "1234567890"   # when auth_enabled: true, require X-API-Key header or Authorization: Bearer <key>. Also used to sign file/report links (GET /files/out) when core_public_url is set.
 # Public URL that reaches this Core instance (e.g. https://homeclaw.example.com via Cloudflare Tunnel). Used for: (1) file/report links core_public_url/files/out?path=...&token=... (2) GET /pinggy scan-to-connect page and QR for Companion. Leave empty for local-only or if using pinggy.token for tunnel.
 core_public_url: "https://homeclaw.gpt4people.online"
 # Pinggy tunnel: when token is set, Core starts a tunnel to this port and serves /pinggy with public URL + QR for Companion. open_browser: true = open browser to /pinggy when tunnel is ready. See docs_design/PinggyIntegration.md.
@@ -170,7 +197,7 @@ tools:
   # Reserved subfolder for user/companion generated files (reports, images, exports). Path "output/..." → base/{user_id}/output/ or base/companion/output/. See docs_design/FileSandboxDesign.md.
   # file_read_output_dir: "output"
   # Max characters returned by file_read when the tool does not pass max_chars (default 32000). Increase for long PDFs/documents (e.g. 128000).
-  file_read_max_chars: 128000
+  file_read_max_chars: 5000000
   # Max size (KB) for save_result_page generated HTML; default 500. Used when writing report to user output folder.
   # save_result_page_max_file_size_kb: 500
   # (Baidu API key is set in the skill: config/skills/baidu-search-1.1.0/config.yml api_key, or env BAIDU_API_KEY)
@@ -220,12 +247,12 @@ knowledge_base:
   collection_name: homeclaw_kb   # used only when backend is chroma
   chunk_size: 800
   chunk_overlap: 100
-  unused_ttl_days: 30   # Unit: days. Cognee: remove sources older than this (age-based); chroma: remove by last_used_timestamp
+  unused_ttl_days: 90   # Unit: days. Cognee: remove sources older than this (age-based); chroma: remove by last_used_timestamp
   max_sources_per_user: 0   # Cognee only: max KB sources per user (0 = no cap). Oldest evicted when over cap.
-  embed_timeout: 60   # Unit: seconds
-  store_timeout: 60   # Unit: seconds
+  embed_timeout: 600   # Unit: seconds
+  store_timeout: 600   # Unit: seconds
   # Configurable similarity threshold (0-1, higher = more relevant). Only inject chunks with score >= this; if none pass, no KB block. Set to null to disable (inject top-k regardless).
-  retrieval_min_score: null   # e.g. 0.5 or 0.7
+  retrieval_min_score: 0.5   # e.g. 0.5 or 0.7
   # Per-user folder sync: scan {homeclaw_root}/{user_id}/knowledgebase/, add new/changed files to KB, remove when file deleted. See docs_design/PerUserKnowledgeBaseFolder.md.
   folder_sync:
     enabled: false
@@ -238,7 +265,7 @@ knowledge_base:
 # File-understanding (request.files from channels): always inject short notice with paths so the model uses document_read / knowledge_base_add. When user sends file(s) only (no text) and doc is not too big, add to KB directly. See docs_design/FileUnderstandingDesign.md.
 file_understanding:
   # When user sends only file(s) (no or negligible text): add extracted document to the user's KB only if extracted text length <= this (chars). If larger, skip; user can say what they want and model uses document_read / knowledge_base_add. 0 = never auto-add (tool-based only).
-  add_to_kb_max_chars: 50000   # e.g. 50000; 0 = never add to KB on file-only
+  add_to_kb_max_chars: 5000000   # e.g. 50000; 0 = never add to KB on file-only
 
 # ——— 1. llama.cpp server settings (for local models) ———
 # ctx_size, predict, temp are used when starting the llama.cpp server.
@@ -389,7 +416,7 @@ cloud_models:
     host: 127.0.0.1
     port: 4002
     api_key_name: GEMINI_API_KEY
-    api_key:
+    api_key: 
     capabilities: [Functioncall, Chat]
   # Anthropic Claude
   - id: Claude-Sonnet

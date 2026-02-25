@@ -9,7 +9,7 @@ registration and retrieval by user query (docs/ToolsSkillsPlugins.md §8).
 """
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import yaml
 from loguru import logger
@@ -117,9 +117,72 @@ def load_skills(skills_dir: Optional[Path] = None, include_body: bool = True) ->
     return skills
 
 
-def load_skill_by_folder(skills_dir: Path, folder: str, include_body: bool = False) -> Optional[Dict[str, Any]]:
+def _normalize_folder_for_disable(folder: str) -> str:
+    """Normalize folder name for disabled-list matching (case-insensitive)."""
+    return (folder or "").strip().lower()
+
+
+def load_skills_from_dirs(
+    dirs: List[Path],
+    disabled_folders: Optional[Iterable[str]] = None,
+    include_body: bool = True,
+) -> List[Dict[str, Any]]:
+    """
+    Load skills from multiple directories. First occurrence of each folder name wins.
+    Exclude any skill whose folder is in disabled_folders (case-insensitive).
+    """
+    disabled_set: Set[str] = set()
+    if disabled_folders is not None:
+        disabled_set = {_normalize_folder_for_disable(f) for f in disabled_folders if (f or "").strip()}
+    seen: Set[str] = set()
+    out: List[Dict[str, Any]] = []
+    for d in dirs:
+        if not d or not Path(d).is_dir():
+            continue
+        for s in load_skills(Path(d), include_body=include_body):
+            folder = (s.get("folder") or "").strip()
+            if not folder:
+                continue
+            if _normalize_folder_for_disable(folder) in disabled_set:
+                continue
+            key = _normalize_folder_for_disable(folder)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(s)
+    return out
+
+
+def load_skill_by_folder_from_dirs(
+    dirs: List[Path],
+    folder: str,
+    include_body: bool = False,
+    body_max_chars: int = 0,
+) -> Optional[Dict[str, Any]]:
+    """Load a single skill by folder name from the first dir that contains it. body_max_chars caps body when include_body True."""
+    folder = (folder or "").strip()
+    if not folder:
+        return None
+    for d in dirs:
+        if not d or not Path(d).is_dir():
+            continue
+        skill_dict = load_skill_by_folder(
+            Path(d), folder, include_body=include_body, body_max_chars=body_max_chars
+        )
+        if skill_dict is not None:
+            return skill_dict
+    return None
+
+
+def load_skill_by_folder(
+    skills_dir: Path,
+    folder: str,
+    include_body: bool = False,
+    body_max_chars: int = 0,
+) -> Optional[Dict[str, Any]]:
     """
     Load a single skill by folder name. Returns skill dict or None if folder/SKILL.md missing.
+    When include_body is True and body_max_chars > 0, truncate body to that many chars (keeps prompt bounded).
     """
     root = skills_dir if isinstance(skills_dir, Path) else Path(skills_dir)
     item = root / folder
@@ -137,6 +200,11 @@ def load_skill_by_folder(skills_dir: Path, folder: str, include_body: bool = Fal
             parsed.pop("body", None)
         elif parsed.get("body") is not None:
             _append_usage_if_present(item, parsed)
+            if body_max_chars > 0 and len(parsed["body"]) > body_max_chars:
+                parsed["body"] = (
+                    parsed["body"][:body_max_chars].rstrip()
+                    + "\n\n*(Body truncated; see SKILL.md in skill folder for full text.)*"
+                )
         return parsed
     except Exception as e:
         logger.warning("Failed to load skill from {}: {}", skill_file, e)
@@ -214,13 +282,14 @@ async def sync_skills_to_vector_store(
     refined_body_max_chars: int = 0,
     skills_test_dir: Optional[Path] = None,
     incremental: bool = False,
+    skills_extra_dirs: Optional[List[Path]] = None,
+    disabled_folders: Optional[Iterable[str]] = None,
 ) -> int:
     """
     Resync skills to the vector store.
     refined_body_max_chars: 0 = do not store body (recommended; body is in prompt when skill is selected). >0 = store first N chars of body.
     - If skills_test_dir is set: full sync of that dir (all folders embedded and upserted with id = test__<folder>).
-    - skills_dir: if incremental is True, only process folders not already in the store (get(folder) is None);
-      else process all and upsert.
+    - skills_dir (and skills_extra_dirs): merged with first-wins by folder; disabled_folders excluded. If incremental is True, only process folders not already in the store.
     Returns the total number of skills upserted.
     """
     total = 0
@@ -272,7 +341,10 @@ async def sync_skills_to_vector_store(
             except Exception as e:
                 logger.warning("Failed to list ids for test cleanup: {}", e)
 
-    skills = load_skills(skills_dir, include_body=True)
+    main_dirs: List[Path] = [Path(skills_dir)]
+    if skills_extra_dirs:
+        main_dirs.extend(Path(p) for p in skills_extra_dirs)
+    skills = load_skills_from_dirs(main_dirs, disabled_folders=disabled_folders, include_body=True)
     if not skills:
         return total
     vectors_list = []

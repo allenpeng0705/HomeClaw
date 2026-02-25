@@ -12,8 +12,8 @@ const PLUGIN_BASE = process.env.PLUGIN_BASE || 'http://127.0.0.1:3020';
 const payload = {
   plugin_id: 'homeclaw-browser',
   name: 'HomeClaw Browser',
-  description: 'Browser automation (navigate, snapshot, click, type), canvas (push title/blocks to /canvas), nodes (list/send commands), and Control UI (WebChat at /, WS proxy to Core). Use when the user asks to: open a URL or interact with a web page; update or show content on the canvas; list nodes or send a command to a node; or open WebChat/dashboard to chat with the agent.',
-  description_long: 'Playwright-based browser automation in Node.js. One browser context per user/session. Capabilities: browser_navigate, browser_snapshot, browser_click, browser_type, browser_fill, browser_scroll, browser_close_session; canvas_update (push UI to canvas viewer); node_list, node_command. Set tools.browser_enabled: false in Core to use this plugin for browser actions.',
+  description: 'Use when the user asks to: open a URL, go to a website, browse or interact with a web page; take a photo or record a video on a device/node; list connected nodes or send a command to a node; update or show something on the canvas; or use WebChat/dashboard. Key capabilities: browser_navigate (url), browser_snapshot then browser_click/browser_type for page interaction; canvas_update for canvas; node_list for "what nodes are connected"; node_camera_snap for photo on a node, node_camera_clip for video (parameters: node_id, duration, includeAudio). Node ids (e.g. test-node-1) are NOT URLs—use browser_navigate only for http/https URLs.',
+  description_long: 'Playwright-based browser automation in Node.js. One browser context per user/session. Capabilities: browser_navigate, browser_snapshot, browser_click, browser_type, browser_fill, browser_scroll, browser_close_session; canvas_update (push UI to canvas viewer); node_list, node_command, node_camera_snap, node_camera_clip. Set tools.browser_enabled: false in Core to use this plugin for browser actions.',
   health_check_url: `${PLUGIN_BASE}/health`,
   type: 'http',
   config: {

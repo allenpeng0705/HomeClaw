@@ -2,4 +2,4 @@
 # Get token at https://developer.x.com (create app, complete OAuth flow).
 # Environment variable X_ACCESS_TOKEN overrides this value when set.
 
-x_access_token: ""
+x_access_token: "2026150840344694784-m9l9lXuVxm6hMAkAuRlbzhJuqUNj3U"
