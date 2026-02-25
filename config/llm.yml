@@ -134,7 +134,7 @@ cloud_models:
     host: 127.0.0.1
     port: 4005
     api_key_name: DEEPSEEK_API_KEY
-    api_key: sk-eb1f151236524086a0967357233b9c88
+    api_key: 
     capabilities: [Chat]
   # Alibaba Qwen (Dashscope), Groq, Mistral, xAI, OpenRouter, Cohere, Perplexity: uncomment and set api_key_name as needed.
 
@@ -159,7 +159,7 @@ hybrid_router:
     rules_path: config/hybrid/heuristic_rules.yml
   semantic:
     enabled: true
-    threshold: 0.6   # min similarity (0..1) to accept the best route; higher = stricter, more fall-through
+    threshold: 0.5   # min similarity (0..1) to accept the best route; higher = stricter, more fall-through
     routes_path: config/hybrid/semantic_routes.yml
   slm:
     enabled: true

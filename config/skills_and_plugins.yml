@@ -49,13 +49,13 @@ skills_force_include_rules:
     folders: []
     auto_invoke:
       tool: folder_list
-      arguments: { path: "." }
+      arguments: { path: "" }
   - patterns:
     - "find\\s+(file|files)|search\\s+(for\\s+)?file|file_find|查找文件|搜索文件|找文件"
     folders: []
     auto_invoke:
       tool: file_find
-      arguments: { path: ".", pattern: "*" }
+      arguments: { path: "", pattern: "*" }
   - patterns:
     - "search\\s+(the\\s+)?web|search\\s+for\\s+.+|google\\s+.+|网上搜|搜索一下|查一下|搜一下|search\\s+online"
     folders: []

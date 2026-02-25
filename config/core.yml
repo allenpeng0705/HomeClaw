@@ -19,7 +19,7 @@ memory_kb_config_file: memory_kb.yml
 use_workspace_bootstrap: true
 # Which workspace dir to load (e.g. config/workspace_day vs config/workspace_night for day/night agents)
 workspace_dir: config/workspace
-# Root for file/folder tools and links (sandbox + share). Required for channel/companion file access. When empty, file tools return a clear error; do not use workspace for user files. Structure: homeclaw_root/{user_id}/ (private), homeclaw_root/share (shared), homeclaw_root/companion (companion app). Subfolders: output/, knowledgebase/.
+# Root for file/folder tools and links. Required for channel/companion file access. When empty, file tools return a clear error; do not use workspace for user files. Each user has two major folders: (1) their sandbox homeclaw_root/{user_id}/ (private), (2) the share folder homeclaw_root/share/ (accessible by all users). Companion app uses homeclaw_root/companion/. Subfolders: output/, knowledgebase/.
 homeclaw_root: "D:/homeclaw"
 # Session management: in config/memory_kb.yml (see memory_kb_config_file above).
 # When an unknown user (not in user.yml) tries to access, notify the owner via last-used channel so they can add to user.yml. See docs_design/OutboundMarkdownAndUnknownRequest.md.

@@ -230,8 +230,8 @@ def get_sandbox_paths_file_path() -> Path:
 
 def get_sandbox_paths_for_user_key(user_key: str) -> Optional[Dict[str, str]]:
     """
-    Resolve absolute sandbox_root and share for a user key (folder name under homeclaw_root: e.g. 'System', 'companion', 'default').
-    Returns {"sandbox_root": "<abs>", "share": "<abs>"} or None if homeclaw_root not set. Never raises.
+    Resolve absolute sandbox_root and share for a user key. Each user has two major folders: (1) sandbox_root = homeclaw_root/{user_id}/ (private), (2) share = homeclaw_root/share/ (accessible by all users).
+    user_key = folder name under homeclaw_root (e.g. 'System', 'AllenPeng', 'companion', 'default'). Returns {"sandbox_root": "<abs>", "share": "<abs>"} or None if homeclaw_root not set. Never raises.
     """
     try:
         base_str = _get_homeclaw_root()
@@ -250,7 +250,7 @@ def get_sandbox_paths_for_user_key(user_key: str) -> Optional[Dict[str, str]]:
 def build_and_save_sandbox_paths_json() -> Dict[str, Any]:
     """
     Build per-user sandbox_root and share (absolute paths), save to database/sandbox_paths.json, return the dict.
-    Keys = folder names under homeclaw_root (one per user from user.yml + 'companion'). Always use this JSON for file tools.
+    Structure: homeclaw_root/{user_id}/ (sandbox_root), homeclaw_root/share (share). Keys = user_id from user.yml + 'companion'. Always use this JSON for file tools.
     """
     out = {"users": {}}
     try:
@@ -1987,7 +1987,7 @@ async def _image_executor(arguments: Dict[str, Any], context: ToolContext) -> st
                 else:
                     if not _path_under(full, base):
                         return _FILE_ACCESS_DENIED_MSG
-                    return _FILE_NOT_FOUND_MSG
+                    return _file_not_found_msg(context)
             if not used_request_image and not _path_under(full, base):
                 return _FILE_ACCESS_DENIED_MSG
             image_bytes = full.read_bytes()
@@ -2456,7 +2456,7 @@ async def _file_read_executor(arguments: Dict[str, Any], context: ToolContext) -
             return _FILE_ACCESS_DENIED_MSG
         config = _get_tools_config()
         if not full.is_file():
-            return _FILE_NOT_FOUND_MSG
+            return _file_not_found_msg(context)
         content = full.read_text(encoding="utf-8", errors="replace")
         default_max = int(config.get("file_read_max_chars") or 0) or 32_000
         max_chars = int(arguments.get("max_chars", 0)) or default_max
@@ -2465,7 +2465,7 @@ async def _file_read_executor(arguments: Dict[str, Any], context: ToolContext) -
         return content
     except Exception as e:
         logger.debug("file_read failed: %s", e)
-        return _FILE_NOT_FOUND_MSG
+        return _file_not_found_msg(context)
 
 
 # Document types supported by Unstructured (one powerful tool for PDF, PPT, Word, MD, HTML, XML, JSON, etc.)
@@ -2554,7 +2554,7 @@ async def _document_read_executor(arguments: Dict[str, Any], context: ToolContex
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
         if not full.is_file():
-            return _FILE_NOT_FOUND_MSG
+            return _file_not_found_msg(context)
         suffix = full.suffix.lower()
 
         # 1) Try Unstructured first for supported types (one powerful tool for all)
@@ -2590,7 +2590,7 @@ async def _document_read_executor(arguments: Dict[str, Any], context: ToolContex
         return _document_read_plain_text(full, max_chars, suffix)
     except Exception as e:
         logger.debug("document_read failed: %s", e)
-        return _FILE_NOT_FOUND_MSG
+        return _file_not_found_msg(context)
 
 
 async def _file_understand_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
@@ -2627,7 +2627,7 @@ async def _file_understand_executor(arguments: Dict[str, Any], context: ToolCont
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
         if not full.is_file():
-            return _FILE_NOT_FOUND_MSG
+            return _file_not_found_msg(context)
         base_str = str(full.parent)
         path_str = str(full)
         ftype = detect_file_type(path_str)
@@ -2903,7 +2903,7 @@ async def _file_write_executor(arguments: Dict[str, Any], context: ToolContext) 
         return out
     except Exception as e:
         logger.debug("file_write failed: %s", e)
-        return _FILE_NOT_FOUND_MSG
+        return _file_not_found_msg(context)
 
 
 async def _get_file_view_link_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
@@ -2932,17 +2932,26 @@ FILE_OUTPUT_SUBDIR = "output"
 
 # Polite messages for file tools (never crash; user-friendly responses)
 _FILE_ACCESS_DENIED_MSG = (
-    "That path is outside the sandbox. You can only access (1) the user sandbox root and its subfolders (path '.' or 'subdir'), "
+    "That path is outside the sandbox. You can only access (1) the user sandbox root and its subfolders (omit path or use subdir name), "
     "or (2) share and its subfolders (path 'share' or 'share/...'). Any other folder cannot be accessed."
 )
-_FILE_NOT_FOUND_MSG = (
-    "That file or path wasn't found. Only two bases are accessible (sandbox): user sandbox (path '.') and share (path 'share'), and their subfolders. "
-    "Try: (1) folder_list(path='.') or file_find(path='.', pattern='*filename*') to get the path; (2) use the exact path that matches the filename the user asked for (e.g. user asked for 1.pdf → use path '1.pdf', not a path under output/ or another file)."
-)
+def _file_not_found_msg(context: Optional[Any] = None) -> str:
+    """Message when file/path not found. Include current sandbox (user_key) so operator can fix user_id if files live under another user folder."""
+    base = "That file or path wasn't found. Only two bases are accessible (sandbox): user sandbox root (omit path) and share (path 'share'), and their subfolders. "
+    hint = "Try: (1) folder_list() or file_find(pattern='*filename*') to list/search user sandbox; (2) use the **exact path** from the result that matches the filename the user asked for in document_read (e.g. user asked for 1.pdf → use path '1.pdf' only, not output/ or any other path)."
+    try:
+        user_key = _get_file_workspace_subdir(context) if context is not None else "?"
+        if user_key and user_key != "?":
+            base += f"Current sandbox: {user_key}. If your files are under a different user folder, ensure the request sends the correct user_id. "
+    except Exception:
+        pass
+    return base + hint
+
+
 _FILE_PATH_INVALID_MSG = "I couldn't resolve that path. Please check the path and try again."
 _FILE_HOMECLAW_ROOT_NOT_SET_MSG = (
     "File and folder access is not configured. Set homeclaw_root in config/core.yml to the root folder where each user has a subfolder (e.g. homeclaw_root/{user_id}/ for private files, homeclaw_root/share for shared). "
-    "Then list or search with folder_list(path='.') or file_find(path='.', pattern='*')."
+    "Then list or search with folder_list() or file_find(pattern='*')."
 )
 
 
@@ -3002,7 +3011,7 @@ def _is_companion_context(context: Optional[Any]) -> bool:
 
 
 def _get_file_workspace_subdir(context: Optional[Any]) -> str:
-    """Folder name under homeclaw_root: 'companion' when companion app without user, else user id from user.yml (or 'default')."""
+    """Folder name for homeclaw_root/{user_id}: 'companion' when companion app without user, else user_id from request/user.yml (or 'default')."""
     if context is None:
         return "default"
     system_user_id = (getattr(context, "system_user_id", None) or "").strip()
@@ -3014,6 +3023,52 @@ def _get_file_workspace_subdir(context: Optional[Any]) -> str:
     return _safe_user_dir(uid)
 
 
+def _normalize_relative_path(path_arg: Optional[str]) -> str:
+    """Normalize relative path: strip leading './' or '.\\\\', collapse to '.' if empty. Used before joining with absolute base from sandbox_paths.json. Never raises."""
+    try:
+        rest = (str(path_arg).strip() if path_arg is not None else "")
+    except Exception:
+        rest = ""
+    if not rest or rest == ".":
+        return "."
+    if rest.startswith("./") or rest.startswith(".\\"):
+        rest = rest[2:].lstrip("/\\")
+    return rest or "."
+
+
+def _resolve_relative_to_absolute_via_sandbox_json(
+    user_key: str,
+    relative_path: str,
+    use_share: bool,
+    paths_data: Optional[Dict[str, Any]] = None,
+) -> Optional[Tuple[Path, Path]]:
+    """
+    Translate a relative path to an absolute path using database/sandbox_paths.json (or computed paths when user_key not in JSON).
+    Structure: sandbox_root = homeclaw_root/{user_id}, share = homeclaw_root/share. Relative path is resolved under the appropriate base.
+    When user_key is missing from JSON (e.g. System, default), paths are computed on the fly so file tools resolve correctly for local and cloud model.
+    Returns (full_absolute_path, base_absolute_path) or None if paths invalid.
+    """
+    if not (user_key or "").strip():
+        return None
+    if paths_data is None:
+        paths_data = load_sandbox_paths_json()
+    user_paths = (paths_data.get("users") or {}).get(user_key)
+    if not user_paths or not isinstance(user_paths, dict):
+        user_paths = get_sandbox_paths_for_user_key(user_key)
+    if not user_paths or not isinstance(user_paths, dict):
+        return None
+    base_str = (user_paths.get("share") if use_share else user_paths.get("sandbox_root")) or ""
+    if not (base_str or "").strip():
+        return None
+    try:
+        base_absolute = Path(base_str).resolve()
+        rest = _normalize_relative_path(relative_path)
+        full = (base_absolute / rest).resolve()
+        return (full, base_absolute)
+    except Exception:
+        return None
+
+
 def _resolve_file_path(
     path_arg: str,
     context: Optional[Any],
@@ -3022,9 +3077,8 @@ def _resolve_file_path(
 ) -> Optional[Tuple[Path, Optional[Path]]]:
     """
     Resolve a file path for file tools. Returns (full_path, base_for_validation) or None on error (caller should return polite message).
-    Sandbox: only two bases are allowed — (1) user sandbox homeclaw_root/{user_id}/, (2) share homeclaw_root/share/.
-    Paths must stay under one of these; their subfolders are allowed; any other path is denied.
-    - When homeclaw_root is SET: path "." or "subdir" → user sandbox; path "share" or "share/..." → share. Use "output/<filename>" for generated files.
+    Each user has two major folders: (1) their sandbox homeclaw_root/{user_id}/ (private), (2) the share folder homeclaw_root/share/ (accessible by all users). Paths must stay under one of these.
+    - When homeclaw_root is SET: path "." or "subdir" → homeclaw_root/{user_id}/; path "share" or "share/..." → homeclaw_root/share/. Use "output/<filename>" for generated files.
     - When homeclaw_root is NOT SET: path_arg can be absolute. base_for_validation = None.
     Never raises; returns None on any exception.
     """
@@ -3049,29 +3103,24 @@ def _resolve_file_path(
         shared_dir_lower = shared_dir.lower()
         shared_prefix = shared_dir_lower + "/"
 
-        # Prefer per-user paths from sandbox_paths.json (single source of truth; always use these when present)
+        # Translate relative path to absolute using database/sandbox_paths.json (single source of truth)
         user_key = _get_file_workspace_subdir(context)
         paths_data = load_sandbox_paths_json()
-        user_paths = (paths_data.get("users") or {}).get(user_key)
-        if user_paths:
-            base_sandbox = Path(user_paths.get("sandbox_root") or "").resolve()
-            base_share = Path(user_paths.get("share") or "").resolve()
-            if base_sandbox and base_share:
-                if normalized == shared_dir_lower or normalized.startswith(shared_prefix):
-                    rest = path_arg[len(shared_dir):].lstrip("/\\").strip() if path_arg.lower().startswith(shared_dir_lower) else path_arg
-                    if not rest:
-                        rest = "."
-                    effective_base = base_share
-                else:
-                    effective_base = base_sandbox
-                    rest = path_arg or "."
-                try:
-                    effective_base.mkdir(parents=True, exist_ok=True)
-                except OSError:
-                    pass
-                full = (effective_base / rest).resolve()
-                return (full, effective_base)
+        use_share = normalized == shared_dir_lower or normalized.startswith(shared_prefix)
+        if use_share:
+            rest = path_arg[len(shared_dir):].lstrip("/\\").strip() if path_arg.lower().startswith(shared_dir_lower) else path_arg
+        else:
+            rest = path_arg or "."
+        resolved = _resolve_relative_to_absolute_via_sandbox_json(user_key, rest, use_share=use_share, paths_data=paths_data)
+        if resolved is not None:
+            full, effective_base = resolved
+            try:
+                effective_base.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+            return (full, effective_base)
 
+        # Fallback when user_key not in sandbox_paths.json: use homeclaw_root + user_sub, still normalize relative path
         base = Path(base_str).resolve()
         if normalized == shared_dir_lower or normalized.startswith(shared_prefix):
             rest = path_arg[len(shared_dir):].lstrip("/\\").strip() if path_arg.lower().startswith(shared_dir_lower) else path_arg
@@ -3090,7 +3139,7 @@ def _resolve_file_path(
                 effective_base.mkdir(parents=True, exist_ok=True)
             except OSError:
                 pass
-
+        rest = _normalize_relative_path(rest)
         full = (effective_base / rest).resolve()
         # Validate under the allowed sandbox root (user folder or share); reject escape (e.g. ../other_user)
         return (full, effective_base)
@@ -3126,7 +3175,7 @@ async def _file_edit_executor(arguments: Dict[str, Any], context: ToolContext) -
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
         if not full.is_file():
-            return _FILE_NOT_FOUND_MSG
+            return _file_not_found_msg(context)
         content = full.read_text(encoding="utf-8", errors="replace")
         if replace_all:
             if old_str not in content:
@@ -3140,7 +3189,7 @@ async def _file_edit_executor(arguments: Dict[str, Any], context: ToolContext) -
         return json.dumps({"edited": True, "path": path_arg})
     except Exception as e:
         logger.debug("file_edit failed: %s", e)
-        return _FILE_NOT_FOUND_MSG
+        return _file_not_found_msg(context)
 
 
 def _parse_unified_diff_patch(patch_text: str) -> List[Dict[str, Any]]:
@@ -3237,8 +3286,8 @@ async def _apply_patch_executor(arguments: Dict[str, Any], context: ToolContext)
 
 # ---- Folder / file explore (cross-platform) ----
 async def _folder_list_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """List directory contents. Use 'share' or 'share/' for shared folder, '.' or path for your user or companion folder. When base not set, absolute path allowed."""
-    path_arg = (arguments.get("path") or ".").strip()
+    """List directory contents. Omit path for user sandbox root; use 'share' or 'share/' for shared folder; or subdir name. When base not set, absolute path allowed."""
+    path_arg = (arguments.get("path") or "").strip() or "."
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
@@ -3247,7 +3296,7 @@ async def _folder_list_executor(arguments: Dict[str, Any], context: ToolContext)
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
         if not full.is_dir():
-            return _FILE_NOT_FOUND_MSG
+            return _file_not_found_msg(context)
         max_entries = int(arguments.get("max_entries", 0)) or 500
         entries = []
         # Paths must be relative to the user sandbox (effective_base) so file_read/document_read(path=...) resolve to the same file.
@@ -3269,12 +3318,12 @@ async def _folder_list_executor(arguments: Dict[str, Any], context: ToolContext)
         return json.dumps(entries, ensure_ascii=False, indent=0)
     except Exception as e:
         logger.debug("folder_list failed: %s", e)
-        return _FILE_NOT_FOUND_MSG
+        return _file_not_found_msg(context)
 
 
 async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Find files by pattern (glob). Search under 'share/', your user folder, or companion folder. When base not set, path can be absolute."""
-    path_arg = (arguments.get("path") or ".").strip()
+    """Find files by pattern (glob). Omit path for user sandbox root; use 'share' for shared folder. When base not set, path can be absolute."""
+    path_arg = (arguments.get("path") or "").strip() or "."
     pattern = (arguments.get("pattern") or arguments.get("name") or "*").strip()
     if not pattern:
         pattern = "*"
@@ -3286,7 +3335,7 @@ async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -
         if not _path_under(full_dir, base):
             return _FILE_ACCESS_DENIED_MSG
         if not full_dir.is_dir():
-            return _FILE_NOT_FOUND_MSG
+            return _file_not_found_msg(context)
         max_results = int(arguments.get("max_results", 0)) or 200
         results = []
         base_for_rel = base if base is not None else full_dir
@@ -3306,7 +3355,7 @@ async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -
         return json.dumps(results, ensure_ascii=False, indent=0)
     except Exception as e:
         logger.debug("file_find failed: %s", e)
-        return _FILE_NOT_FOUND_MSG
+        return _file_not_found_msg(context)
 
 
 # ---- Browser: fetch URL (lightweight, no JS) and optional full browser (Playwright) ----
@@ -4941,11 +4990,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="folder_list",
-            description="List contents of a directory (files and subdirectories). Sandbox: only two bases are the search path and working area — (1) user sandbox root and its subfolders (path '.' or 'subdir'); (2) share and its subfolders (path 'share' or 'share/...'). Any other folder cannot be accessed. Use when the user asks what files are in their directory. The returned 'path' is what to pass to file_read/document_read.",
+            description="List contents of a directory (files and subdirectories). Sandbox: (1) user sandbox root and subfolders — omit path or use subdir name; (2) share and subfolders — path 'share' or 'share/...'. Use when the user asks what files they have. The returned 'path' is the exact path to pass to document_read (e.g. 1.pdf); do not invent or guess paths.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path to the directory (use '.' for the user's base directory).", "default": "."},
+                    "path": {"type": "string", "description": "Omit or leave empty for user sandbox root. For a subfolder use its name (e.g. output). For document_read use only the exact path from this tool's result (e.g. 1.pdf).", "default": ""},
                     "max_entries": {"type": "integer", "description": "Max entries to return (default 500).", "default": 500},
                 },
                 "required": [],
@@ -4956,12 +5005,12 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_find",
-            description="Find files or folders by name pattern (glob). Sandbox: only two bases are accessible — (1) user sandbox root and subfolders (path '.' or 'subdir'); (2) share and subfolders (path 'share' or 'share/...'). Any other folder cannot be accessed. E.g. file_find(path='.', pattern='*.pdf'). Use the returned path with file_read/document_read.",
+            description="Find files or folders by name pattern (glob). Sandbox: (1) user sandbox root and subfolders — omit path; (2) share — path 'share'. E.g. file_find(pattern='*.pdf'). Use the **exact path** from the result in document_read (e.g. 1.pdf); do not use a different path like output/3.pdf.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "pattern": {"type": "string", "description": "Glob pattern for name (e.g. '*.pdf', '*notes*'). Default '*' lists all.", "default": "*"},
-                    "path": {"type": "string", "description": "Directory to search: '.' = user's private folder (default); 'share' = shared folder when user says share.", "default": "."},
+                    "pattern": {"type": "string", "description": "Glob pattern for name (e.g. '*.pdf', '*1*.pdf*'). Default '*' lists all.", "default": "*"},
+                    "path": {"type": "string", "description": "Omit or empty = user sandbox root. Use 'share' only when user says share. For document_read use only the exact path from this tool's result.", "default": ""},
                     "max_results": {"type": "integer", "description": "Max results to return (default 200).", "default": 200},
                 },
                 "required": [],

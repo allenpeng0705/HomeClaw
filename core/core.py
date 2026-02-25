@@ -4637,7 +4637,7 @@ class Core(CoreInterface):
                         route = selection
                         route_layer = "heuristic"
                         route_score = score
-                # Layer 2: semantic (aurelio-labs/semantic-router + existing embedding)
+                # Layer 2: semantic (aurelio-labs/semantic-router + existing embedding). Only accepts when similarity_score >= threshold; otherwise falls through to Layer 3.
                 if route is None:
                     semantic_cfg = hr.get("semantic") if isinstance(hr.get("semantic"), dict) else {}
                     s_enabled = bool(semantic_cfg.get("enabled", False))
@@ -5554,6 +5554,7 @@ class Core(CoreInterface):
                         from tools.builtin import (
                             load_sandbox_paths_json,
                             get_current_user_sandbox_key,
+                            get_sandbox_paths_for_user_key,
                         )
                         base_str = (Util().get_core_metadata().get_homeclaw_root() or "").strip()
                         if llm_input and llm_input[0].get("role") == "system":
@@ -5567,22 +5568,24 @@ class Core(CoreInterface):
                                 paths_data = load_sandbox_paths_json()
                                 user_key = get_current_user_sandbox_key(request)
                                 user_paths = (paths_data.get("users") or {}).get(user_key)
+                                if not user_paths or not isinstance(user_paths, dict):
+                                    user_paths = get_sandbox_paths_for_user_key(user_key)
                                 paths_json = ""
                                 if user_paths:
                                     paths_json = (
-                                        f" For this user the paths are (use only these; do not invent paths like /homeclaw/user): "
-                                        f"sandbox_root = {user_paths.get('sandbox_root', '')} (use path '.' or 'subdir'); "
-                                        f"share = {user_paths.get('share', '')} (use path 'share' or 'share/...'). "
+                                        f" For this user the paths are (use only these; do not invent paths): "
+                                        f"sandbox_root = {user_paths.get('sandbox_root', '')} (omit path or use subdir name); "
+                                        f"share = {user_paths.get('share', '')} (path 'share' or 'share/...'). "
                                     )
                                 block = (
                                     "\n\n## File tools — sandbox (only two bases)\n"
                                     "Only these two bases are the search path and working area; their subfolders can be accessed. Any other folder cannot be accessed (sandbox). "
-                                    "(1) User sandbox root (path \".\" or \"subdir\"); (2) share (path \"share\" or \"share/...\"). "
+                                    "(1) User sandbox root — omit path or use subdir name; (2) share — path \"share\" or \"share/...\". "
                                     "Do not use workspace, config, or paths outside these two trees. Put generated files in output/ (path \"output/filename\") and return the link. "
-                                    "When the user asks about a **specific file by name** (e.g. \"能告诉我1.pdf都讲了什么吗\", \"what is in 1.pdf\"): (1) call folder_list(path='.') or file_find(path='.', pattern='*1.pdf*') to get the path for that file; (2) use the **exact path** from the result that matches the requested name (e.g. path \"1.pdf\") in document_read(path='1.pdf'). Do **not** use a different file (e.g. from output/) or guess a path; use the path that matches the filename the user asked for. "
-                                    "When the user asks for file search, list, or read without a specific name: use path=\".\" for the user sandbox first; if not found or user says \"share\", use path=\"share\" or \"share/...\". "
-                                    "folder_list(path=\".\") = list user sandbox; folder_list(path=\"share\") = list share; file_find(path=\".\", pattern=\"*.pdf\") = search user sandbox recursively. "
-                                    "To read a file, use the exact path returned by folder_list or file_find. Report only paths returned; do not invent paths. "
+                                    "When the user asks about a **specific file by name** (e.g. \"能告诉我1.pdf都讲了什么吗\", \"what is in 1.pdf\"): (1) call folder_list() or file_find(pattern='*1.pdf*') to list/search user sandbox; (2) use the **exact path** from the result that matches the requested name in document_read — e.g. if the user asked for 1.pdf, use path \"1.pdf\" only, not output/3.pdf or any other path. Do **not** guess or invent paths. "
+                                    "When the user asks for file search, list, or read without a specific name: omit path for user sandbox; if user says \"share\", use path \"share\" or \"share/...\". "
+                                    "folder_list() = list user sandbox; folder_list(path=\"share\") = list share; file_find(pattern=\"*.pdf\") = search user sandbox. "
+                                    "To read a file, use **only** the exact path returned by folder_list or file_find in document_read; do not invent paths. "
                                     f"Current homeclaw_root: {base_str}.{paths_json}"
                                 )
                             llm_input[0]["content"] = (llm_input[0].get("content") or "") + block
