@@ -2047,8 +2047,9 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
     if not scripts_dir.is_dir():
         if not script_arg:
             return (
-                f"Instruction-only skill confirmed: {skill_name}. Do NOT reply to the user with only this line. "
-                "You MUST continue in this turn: follow the skill's steps from the Available skills section (e.g. document_read to get content, generate the output, then file_write(path='output/...', content=...) or save_result_page(format='html', ...)) and return the view link to the user."
+                f"Instruction-only skill confirmed: {skill_name}. Do NOT reply with only this line. "
+                "You MUST in this turn: (1) document_read(the file path the user asked about) to get the source text, (2) use that returned text to generate the full output (e.g. full HTML for slides), (3) call save_result_page(title=..., content=<the full HTML you just generated>, format='html') or file_write(path='output/...', content=<full HTML>). "
+                "The content parameter must be the actual generated HTML/text—never empty. Then return the view link to the user."
             )
         return f"Error: skill has no scripts/ folder: {skill_name}. Use the skill's instructions in your response instead of run_skill."
     if not script_arg:
@@ -2668,10 +2669,16 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
         content_str = str(content or "").strip()
         if fmt == "html":
             if not content_str:
-                return "Error: content is required for format=html. Generate the full HTML (e.g. from the document using the skill's steps), then call save_result_page again with that content. Do not pass empty content."
+                return (
+                    "Error: content is required for format=html. Use the **content from the previous document_read result** to generate the full HTML, then call save_result_page with that content. "
+                    "**Stop calling tools now.** Reply to the user: say you need to generate the slide from the document content first, then save it."
+                )
             # Reject title-only or minimal HTML so the page has real body content (e.g. full slide deck, not just a heading)
             if len(content_str) < 250:
-                return "Error: content for format=html is too short (title-only or minimal). Generate the full HTML (e.g. complete slide deck with all slides and content from the document), then call save_result_page with that full HTML. Do not pass only a title."
+                return (
+                    "Error: content for format=html is too short. Use the **previous document_read result** to build the full HTML (all slides with content), then call save_result_page with that HTML. "
+                    "**Stop calling tools now.** Reply to the user: explain that the slide needs full content from the document and ask them to try again or wait for you to generate it."
+                )
         content = content_str or content
         scope = _get_file_workspace_subdir(context)
         file_id = uuid.uuid4().hex[:16]
@@ -2758,7 +2765,8 @@ async def _file_write_executor(arguments: Dict[str, Any], context: ToolContext) 
                 else:
                     out = (
                         f"{out}\nPath: {path_arg}. The file is empty or too small ({content_size} chars). "
-                        "Do NOT share this link with the user. Generate the full HTML/content (e.g. document_read then build the slide), then call save_result_page with that content or file_write again with the full content."
+                        "Do NOT share this link. You must use the **content from the previous document_read result** as the source: generate the full HTML from that text, then call save_result_page(title=..., content=<full HTML>, format='html'). "
+                        "**Stop calling tools now.** Reply to the user: say the slide was not generated yet because content was empty; you need to use the document content to build the HTML first, then save it (or ask them to try again)."
                     )
         return out
     except Exception as e:

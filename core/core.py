@@ -5118,6 +5118,7 @@ class Core(CoreInterface):
                     "If the request clearly matches one of the available plugins below, call route_to_plugin with that plugin_id (and capability_id/parameters when relevant).\n"
                     "For time-related requests only: one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only when the user clearly asks to schedule or remind (e.g. \"remind me in 5 minutes\", \"every day at 9am\").\n"
                     "For script-based workflows use run_skill(skill_name, script, ...). For instruction-only skills (no scripts/) use run_skill(skill_name) with no script—then you MUST continue in the same turn (document_read, generate content, file_write or save_result_page, return link); do not reply with only the confirmation. skill_name can be folder or short name (e.g. html-slides).\n"
+                    "When the user asks to generate an HTML slide or report from a document/file: (1) call document_read(path) to get the file content, (2) use that returned text as the source and generate the full HTML (or summary) yourself, (3) call save_result_page(title=..., content=<your generated full HTML>, format='html') with that generated content. Never call save_result_page or file_write to output/ with empty content—the content parameter must be the full HTML you generated from the document.\n"
                     "When a tool returns a view/open link (e.g. save_result_page or file_write to output/), you MUST include that exact link in your reply to the user so they can open the result.\n"
                     "Otherwise respond or use other tools.\n"
                     + ("Available plugins:\n" + "\n".join(plugin_lines) if plugin_lines else "")
@@ -5564,8 +5565,11 @@ class Core(CoreInterface):
                                     routing_response_text = result
                                 # route_to_tam: fallback string means TAM couldn't parse as scheduling; don't set routing_sent so the tool result is appended and the loop continues — model can then try route_to_plugin or other tools
                         tool_content = result
-                        if compaction_cfg.get("compact_tool_results") and isinstance(tool_content, str) and len(tool_content) > 4000:
-                            tool_content = tool_content[:4000] + "\n[Output truncated for context.]"
+                        if compaction_cfg.get("compact_tool_results") and isinstance(tool_content, str):
+                            # document_read: keep more context so the model can generate HTML/summary from it; other tools: 4000
+                            limit = 28000 if name == "document_read" else 4000
+                            if len(tool_content) > limit:
+                                tool_content = tool_content[:limit] + "\n[Output truncated for context.]"
                         current_messages.append({"role": "tool", "tool_call_id": tcid, "content": tool_content})
                     if routing_sent:
                         out = routing_response_text if routing_response_text is not None else ROUTING_RESPONSE_ALREADY_SENT
@@ -5596,6 +5600,9 @@ class Core(CoreInterface):
 
             if response is None or (isinstance(response, str) and len(response.strip()) == 0):
                 return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
+            # If the model echoed the internal file_write/save_result_page empty-content message, show a short user-facing message instead
+            if isinstance(response, str) and ("Do NOT share this link" in response or ("empty or too small" in response and '"written"' in response)):
+                response = "The slide wasn’t generated yet because the content was empty. Please try again; I’ll generate the HTML from the document and then save it. （幻灯片尚未生成，请再试一次。）"
             if mix_route_this_request and mix_show_route_label:
                 layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
                 label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
