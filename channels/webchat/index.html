@@ -24,7 +24,7 @@
 </head>
 <body>
   <h1>HomeClaw WebChat</h1>
-  <p class="meta">Chat with HomeClaw. Ensure <code>user_id</code> exists in <code>config/user.yml</code> (e.g. add <code>webchat_local</code>).</p>
+  <p class="meta">Chat with HomeClaw. Ensure <code>user_id</code> exists in <code>config/user.yml</code> (e.g. <code>webchat_user</code>).</p>
   <p class="status" id="status">Loading config…</p>
   <div id="log"></div>
   <div id="input" class="input-row" style="display:none;">
@@ -58,7 +58,7 @@
       }
 
       let ws = null;
-      let config = { ws_url: '', user_id: 'webchat_local' };
+      let config = { ws_url: '', user_id: 'webchat_user' };
 
       function connect() {
         if (!config.ws_url) return;
@@ -235,7 +235,7 @@
         .then(function(r) { return r.json(); })
         .then(function(cfg) {
           config = cfg;
-          if (userIdInput) userIdInput.value = cfg.user_id || 'webchat_local';
+          if (userIdInput) userIdInput.value = cfg.user_id || 'webchat_user';
           connect(cfg.ws_url);
         })
         .catch(function() {
