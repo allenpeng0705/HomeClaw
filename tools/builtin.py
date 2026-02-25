@@ -2666,6 +2666,14 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
             fmt = "markdown"
         if fmt == "md":
             fmt = "markdown"
+        content_str = str(content or "").strip()
+        if fmt == "html":
+            if not content_str:
+                return "Error: content is required for format=html. Generate the full HTML (e.g. from the document using the skill's steps), then call save_result_page again with that content. Do not pass empty content."
+            # Reject title-only or minimal HTML so the page has real body content (e.g. full slide deck, not just a heading)
+            if len(content_str) < 250:
+                return "Error: content for format=html is too short (title-only or minimal). Generate the full HTML (e.g. complete slide deck with all slides and content from the document), then call save_result_page with that full HTML. Do not pass only a title."
+        content = content_str or content
         scope = _get_file_workspace_subdir(context)
         file_id = uuid.uuid4().hex[:16]
         # Markdown → .md (suitable for in-chat display; client can fetch and render). HTML → .html (styled page, open in browser).
@@ -4955,7 +4963,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="save_result_page",
-            description="Save the result as a page and get a shareable link. **format=markdown:** Saves as .md. The tool returns the markdown content in its result — **include that content in your reply** so the channel/Companion/web chat can **display it directly in the chat view**; also give the link for opening the full report. **format=html:** Saves as .html; the tool returns only the link — user opens it in a browser. **Rule:** Simple/short → markdown (content shown in chat + link). Complex/long → html (link only). Pass the exact same content you generated. Link is produced when auth_api_key is set in config.",
+            description="Save the result as a page and get a shareable link. **format=markdown:** Saves as .md; include the returned content in your reply. **format=html:** Saves as .html; the tool returns only the link. For HTML you MUST pass the **full generated content** (complete slide deck or report body from the document), not just a title or empty/minimal content—generate the full HTML first (e.g. all slides with content), then call save_result_page with that content. Link is produced when auth_api_key is set in config.",
             parameters={
                 "type": "object",
                 "properties": {

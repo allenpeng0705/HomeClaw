@@ -5424,8 +5424,9 @@ class Core(CoreInterface):
                                         and any(t.name == "document_read" for t in (registry.list_tools() or []))
                                         and "summarize" in (query or "").lower()
                                         and (".pdf" in (query or "") or ".docx" in (query or ""))
+                                        and not (content_str and ("/files/out?" in content_str or "已生成" in content_str or "generated" in content_str.lower() or "链接" in content_str or "view link" in content_str.lower()))
                                     ):
-                                        # Fallback: user asked to summarize a document but model didn't call file_find/document_read. Default: search user's private folder only; if user said "share", also search share folder.
+                                        # Fallback: user asked to summarize a document but model didn't call file_find/document_read. Skip if model already returned a success (link or "generated").
                                         try:
                                             _component_log("tools", "fallback summarize document (model did not call tool)")
                                             ext = ".pdf" if ".pdf" in (query or "") else ".docx"
