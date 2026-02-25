@@ -72,7 +72,7 @@ HomeClaw 是运行在本机的**本地优先 AI 助手**。通过**渠道**（We
 ### 3.1 core.yml（概览）
 
 - **Core 服务：** `host`、`port`（默认 9000）、`mode`。
-- **路径：** `model_path`（GGUF 根目录）、`workspace_dir`（默认 `config/workspace`）、`skills_dir`（默认 `config/skills`）。
+- **路径：** `model_path`（GGUF 根目录）、`workspace_dir`（默认 `config/workspace`）、`skills_dir`（默认 `skills`）。
 - **功能开关：** `use_memory`、`use_tools`、`use_skills`、`use_workspace_bootstrap`、`memory_backend`（如 `cognee` 或 `chroma`）。
 - **LLM：** `local_models`、`cloud_models`、`main_llm`、`embedding_llm`，见 [§4](#4-本地-gguf-模型) 与 [§5](#5-云端模式与-api-密钥)。
 - **记忆：** `memory_backend`、`cognee:`（使用 Cognee 时），或 `database`、`vectorDB`、`graphDB`（当 `memory_backend: chroma`）。见 [§6](#6-记忆系统)。
@@ -288,9 +288,9 @@ embedding_llm: local_models/embedding_text_model
 
 **技能**是以任务为导向的说明包（SKILL.md + 可选脚本），告诉助手*如何*用**工具**完成目标。由 LLM 按说明执行，而非独立插件代码。
 
-- **启用：** 在 **`config/core.yml`** 中设置 **`use_skills: true`** 和 **`skills_dir`**（默认 `config/skills`）。重启 Core。
+- **启用：** 在 **`config/core.yml`** 中设置 **`use_skills: true`** 和 **`skills_dir`**（默认 `skills`）。重启 Core。
 - **添加技能：** 在 `skills_dir` 下新建文件夹，内含 **SKILL.md**（名称、描述、正文）。可选在 `scripts/` 下放脚本，通过 **run_skill** 调用。
 - **向量检索：** 技能较多时可设 **`skills_use_vector_search: true`**，仅注入与查询相关的技能。选项见 **docs/SkillsGuide.md**。
-- **复用 OpenClaw 技能：** OpenClaw 使用不同的扩展模型（渠道/提供商/技能在一个 manifest 中）。HomeClaw 技能是 **SKILL.md + scripts**，放在 `config/skills/` 下。若要将 OpenClaw 的“技能”复用到 HomeClaw，把说明整理成 **SKILL.md**（名称、描述、步骤正文）放入 `config/skills/<技能名>/` 即可；若行为可用工具步骤表达，无需移植代码。OpenClaw 与 HomeClaw 对比见 **docs/ToolsSkillsPlugins.md** §2.7。
+- **复用 OpenClaw 技能：** OpenClaw 使用不同的扩展模型（渠道/提供商/技能在一个 manifest 中）。HomeClaw 技能是 **SKILL.md + scripts**，放在 `skills/` 下。若要将 OpenClaw 的“技能”复用到 HomeClaw，把说明整理成 **SKILL.md**（名称、描述、步骤正文）放入 `skills/<技能名>/` 即可；若行为可用工具步骤表达，无需移植代码。OpenClaw 与 HomeClaw 对比见 **docs/ToolsSkillsPlugins.md** §2.7。
 
 **完整技能指南：** **docs/SkillsGuide.md**（结构、使用、实现、测试）。**docs/ToolsSkillsPlugins.md** 为工具/技能/插件整体设计。

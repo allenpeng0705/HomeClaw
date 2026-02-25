@@ -2,4 +2,4 @@
 # Get token at https://developers.facebook.com (create app, request pages_manage_posts; for IG add instagram_business_content_publish).
 # Environment variable META_ACCESS_TOKEN overrides this value when set.
 
-meta_access_token: ""
+meta_access_token: "EAACNCYLz6FUBQ4XZCySAupRcgbmQoNkerWDwh2BmxfuFN5mkZBi8ZA54smLB5LlIoSYAqOyiCCwlkcGMDVRpqKsb1ZBZBZAImDV7WkgNnbsqvhiMvgH06u0L7vqyUndfGtYmDNYBth9eB5NuuWaMJn6diGS6TSnSoSigoH5o3ibL7MSnR9HAOre1aBI7TfcXjzqZBwKxlf3PeZCnnZCgFI5mTcOehyebkPwZDZD"

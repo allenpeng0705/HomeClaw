@@ -1,6 +1,6 @@
 # Skills review and how to test them via chat
 
-Summary of bundled skills and example chat prompts to test each one. Ensure **use_skills: true** and **skills_dir** (e.g. `config/skills`) in `config/core.yml`; optionally **skills_use_vector_search: true** so the model retrieves skills by query.
+Summary of bundled skills and example chat prompts to test each one. Ensure **use_skills: true** and **skills_dir** (e.g. `skills`) in `config/core.yml`; optionally **skills_use_vector_search: true** so the model retrieves skills by query.
 
 ---
 
@@ -42,7 +42,7 @@ The model can call **run_skill(skill_name, script, args)**. Use the folder name 
 
 ## Quick testing checklist
 
-1. **Config:** `use_skills: true`, `skills_dir: config/skills`. Optional: `skills_use_vector_search: true`, `skills_refresh_on_startup: true`.
+1. **Config:** `use_skills: true`, `skills_dir: skills`. Optional: `skills_use_vector_search: true`, `skills_refresh_on_startup: true`.
 2. **Restart Core** so skills are loaded (and synced to vector store if vector search is on).
 3. **Chat:** Use WebChat, inbound, or your main chat UI. Send a message that clearly matches one skill (e.g. “Write a LinkedIn post about …”, “What’s the weather in Tokyo?”).
 4. **Logs:** Check for `[skills] selected: …` to see which skill(s) were injected.

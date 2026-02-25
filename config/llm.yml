@@ -1,0 +1,180 @@
+# =============================================================================
+# LLM configuration: local models, cloud models, main/embedding selection, mix-mode routing
+# =============================================================================
+# This file is loaded by Core when core.yml sets:
+#   llm_config_file: llm.yml
+# Path is relative to the directory containing core.yml (config/).
+# Only keys listed below are read; they override or supply values merged into
+# the main config. Edit this file for all LLM/model settings.
+# =============================================================================
+
+# ——— 2. Local models (llama.cpp server per model; path relative to model_path) ———
+# Optional per model: mmproj (vision), lora (adapter(s)), lora_base (optional base for LoRA).
+#   mmproj: path to projector .gguf; llama-server -m <path> --mmproj <mmproj>
+#   lora: single path or array of paths to LoRA adapter .gguf; each gets --lora <path> (multi-LoRA if supported)
+#   lora_base: optional; only when the adapter requires a specific base; --lora-base <path>
+# Optional supported_media: list of media types the model can handle — [image], [image, audio], or [image, audio, video].
+#   If omitted: local model defaults to [] (text-only) unless mmproj is set, then [image]. Cloud model defaults to [image, audio, video].
+#   Use supported_media to override (e.g. restrict cloud to [image] or enable image for a local model without mmproj).
+# Paths are relative to model_path (same as path).
+local_models:
+  - id: embedding_text_model
+    alias: embedding
+    path: Qwen3-Embedding-0.6B-Q8_0.gguf  #Qwen3-Embedding-4B-Q4_K_M.gguf,  bge-m3-Q5_K_M.gguf
+    host: 127.0.0.1
+    port: 5066
+    capabilities: [embedding]
+  # Example vision model (uncomment and set paths): mmproj required; supported_media defaults to [image]
+  # - id: llava_1_5_7b
+  #   alias: LLaVA 1.5 7B
+  #   path: llava/llava-v1.5-7b-model.gguf
+  #   mmproj: llava/llava-v1.5-7b-mmproj.gguf
+  #   # supported_media: [image]   # optional; default [image] when mmproj is set
+  #   host: 127.0.0.1
+  #   port: 5020
+  #   capabilities: [Chat]
+  # Example LoRA (uncomment): lora (single path or array), lora_base optional
+  # - id: base_with_lora
+  #   alias: Base + LoRA
+  #   path: base/base-model.gguf
+  #   lora: adapters/adapter-01.gguf
+  #   # lora_base: base/base-model.gguf   # optional; only if adapter needs a specific base
+  #   host: 127.0.0.1
+  #   port: 5021
+  #   capabilities: [Chat]
+  # Multi-LoRA (if llama-server supports multiple --lora): use array
+  #   lora: [adapters/a1.gguf, adapters/a2.gguf]
+  - id: main_vl_model_4B
+    alias: main_vl_model_4B
+    path: Qwen3VL-4B-Instruct-Q4_K_M.gguf
+    mmproj: mmproj-Qwen3VL-4B-Instruct-F16.gguf
+    host: 127.0.0.1
+    port: 5023
+    capabilities: [Chat]
+    supported_media: [image]
+
+  - id: main_vl_model_8B
+    alias: main_vl_model_8B
+    path: Qwen3-VL-8B-Instruct-Q4_K_M.gguf
+    mmproj: mmproj-Qwen3-VL-8B-BF16.gguf
+    host: 127.0.0.1
+    port: 5024
+    capabilities: [Chat]
+    supported_media: [image]
+
+  - id: gemma_3_4b_it_4B
+    alias: gemma_3_4b_it_4B
+    path: gemma-3-4b-it-Q4_K_M.gguf
+    mmproj: mmproj-gemma-3-4b-BF16.gguf
+    host: 127.0.0.1
+    port: 5025
+    capabilities: [Chat]
+    supported_media: [image]
+
+  # Optional: Layer 3 classifier for mix mode (hybrid_router.slm.model). Small model (e.g. Qwen3-0.5B) on a separate port; Core starts it when main_llm_mode: mix and slm.enabled.
+  - id: classifier_0_6b
+    alias: classifier
+    path: Qwen3-0.6B-Q5_K_M.gguf
+    host: 127.0.0.1
+    port: 5089
+    capabilities: [Chat]
+
+
+# ——— 3. Cloud models (LiteLLM; one service per entry, each host/port) ———
+# api_key_name: env var name (e.g. GEMINI_API_KEY); Core uses that env var for the key. Optional api_key: set the key here instead of env (use for convenience only; avoid committing secrets).
+# Start LiteLLM per model or use one proxy. See https://github.com/BerriAI/litellm and docs.litellm.ai/docs/providers
+# Use as main LLM (Chat/Functioncall) or as embedding model (capabilities: [embedding]); main and embedding can mix local + cloud.
+# Optional supported_media per entry: [image], [image, audio], or [image, audio, video]. If omitted, cloud models default to [image, audio, video].
+cloud_models:
+  # OpenAI (chat and embedding). supported_media: gpt-4o supports image only; gpt-4o-audio-preview supports audio only (see MediaSupportAndProviders.md).
+  # - id: OpenAI-GPT4o
+  #   alias: OpenAI GPT-4o
+  #   path: openai/gpt-4o
+  #   host: 127.0.0.1
+  #   port: 4001
+  #   api_key_name: OPENAI_API_KEY
+  #   supported_media: [image]   # gpt-4o = vision only; audio is a different model (gpt-4o-audio-preview)
+  #   capabilities: [Functioncall, Chat]
+  # - id: OpenAI-GPT4o-mini
+  #   alias: OpenAI GPT-4o mini
+  #   path: openai/gpt-4o-mini
+  #   host: 127.0.0.1
+  #   port: 4001
+  #   api_key_name: OPENAI_API_KEY
+  #   # supported_media: [image, audio, video]   # optional; cloud default is all
+  #   capabilities: [Functioncall, Chat]
+  # Google Gemini
+  # - id: Gemini-2.5-Flash
+  #   alias: Gemini 2.5 Flash
+  #   path: gemini/gemini-2.5-flash
+  #   host: 127.0.0.1
+  #   port: 4002
+  #   api_key_name: GEMINI_API_KEY
+  #   api_key:
+  #   capabilities: [Functioncall, Chat]
+  # Anthropic Claude
+  # - id: Claude-Sonnet
+  #   alias: Claude 3.5 Sonnet
+  #   path: anthropic/claude-3-5-sonnet-20241022
+  #   host: 127.0.0.1
+  #   port: 4003
+  #   api_key_name: ANTHROPIC_API_KEY
+  #   capabilities: [Functioncall, Chat]
+  # # Ollama (local; no API key)
+  # - id: Ollama-qwen2
+  #   alias: Ollama Qwen2
+  #   path: ollama/qwen2.5:7b
+  #   host: 127.0.0.1
+  #   port: 4004
+  #   capabilities: [Chat]
+  # DeepSeek
+  - id: DeepSeek-Chat
+    alias: DeepSeek Chat
+    path: deepseek/deepseek-chat
+    host: 127.0.0.1
+    port: 4005
+    api_key_name: DEEPSEEK_API_KEY
+    api_key: sk-eb1f151236524086a0967357233b9c88
+    capabilities: [Chat]
+  # Alibaba Qwen (Dashscope), Groq, Mistral, xAI, OpenRouter, Cohere, Perplexity: uncomment and set api_key_name as needed.
+
+# ——— Media support (image / audio / video) for main_llm ———
+# Add optional "supported_media" on the model entry used as main_llm. See docs_design/MediaSupportAndProviders.md.
+# CLOUD: default [image, audio, video]; OpenAI: set per model (e.g. gpt-4o → [image]). LOCAL: default [] unless mmproj then [image].
+
+# ——— Selected main and embedding model: local_models/<id> or cloud_models/<id> ———
+# main_llm: optional when main_llm_mode is set. When mode is "local" we use main_llm_local; when "cloud" we use main_llm_cloud; when "mix" we use both per request.
+#main_llm: local_models/main_vl_model_4B
+main_llm_mode: mix
+main_llm_local: local_models/main_vl_model_8B
+main_llm_cloud: cloud_models/DeepSeek-Chat
+# Mix mode routing: heuristic (Layer 1), semantic (Layer 2), SLM (Layer 3: classifier or perplexity). See comments in hybrid_router.
+hybrid_router:
+  default_route: local
+  show_route_in_response: true
+  fallback_on_llm_error: true
+  prefer_cloud_if_long_chars: 800
+  heuristic:
+    enabled: true
+    rules_path: config/hybrid/heuristic_rules.yml
+  semantic:
+    enabled: true
+    threshold: 0.6   # min similarity (0..1) to accept the best route; higher = stricter, more fall-through
+    routes_path: config/hybrid/semantic_routes.yml
+  slm:
+    enabled: true
+    model: local_models/classifier_0_6b
+    mode: perplexity
+    perplexity_max_tokens: 10
+    perplexity_threshold: -0.5   # logprob: avg >= this → local; higher (e.g. -0.3) = more to cloud
+# main_llm_language: list of allowed/preferred response languages (e.g. [zh, en]). First = primary for prompt loading and default when user language unknown.
+main_llm_language: [en, zh]
+
+embedding_llm: local_models/embedding_text_model
+
+# Legacy fields (derived from model entry when using local_models/cloud_models)
+embedding_host: 127.0.0.1
+embedding_port: 5066
+# embedding_health_check_timeout_sec: 120   # seconds to wait for local embedding server; default 120
+main_llm_host: 127.0.0.1
+main_llm_port: 5023

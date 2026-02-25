@@ -60,7 +60,7 @@ Two design choices were there from the beginning and stayed.
 
 Recently **OpenClaw** got a lot of attention. When I looked at it, I saw that **many ideas were similar** to what I’d been building: channels to reach your assistant, the home computer as the place where the AI runs, and the LLM doing things for you (tools, skills). That was encouraging—it meant the direction made sense to others too.
 
-I decided to **learn from OpenClaw** without throwing away what already worked in GPT4People. OpenClaw had a rich **skills** ecosystem (SKILL.md, workflows, ClawHub). So I made HomeClaw **support the same skillset format**: you can take skills from OpenClaw, put them under `config/skills/`, and the assistant can use them. We kept our own strengths: **local-first**, **RAG memory**, **multi-user sandbox**, and the **plugin model** we’d already built. The result wasn’t “clone OpenClaw,” but “take the best of both.”
+I decided to **learn from OpenClaw** without throwing away what already worked in GPT4People. OpenClaw had a rich **skills** ecosystem (SKILL.md, workflows, ClawHub). So I made HomeClaw **support the same skillset format**: you can take skills from OpenClaw, put them under `skills/`, and the assistant can use them. We kept our own strengths: **local-first**, **RAG memory**, **multi-user sandbox**, and the **plugin model** we’d already built. The result wasn’t “clone OpenClaw,” but “take the best of both.”
 
 ---
 
@@ -74,7 +74,7 @@ After a lot of upgrades and a rename to **HomeClaw**, the system today looks lik
 
 - **Built-in and external plugins:** **Built-in plugins** (Python) live in the `plugins/` folder—Weather, News, Mail, and your own. **External plugins** can be written in **any language** (Node.js, Go, Java, Rust, etc.) and run as a separate HTTP service; you register with the Core and implement a simple request/response contract. So you extend either by dropping in a Python plugin or by connecting an existing service.
 
-- **OpenClaw skills:** You can reuse **skills from OpenClaw** (SKILL.md under `config/skills/`). The assistant sees “available skills” and uses tools to follow those workflows. No need to port everything—if it’s expressible as “use these tools in this way,” it can run on HomeClaw.
+- **OpenClaw skills:** You can reuse **skills from OpenClaw** (SKILL.md under `skills/`). The assistant sees “available skills” and uses tools to follow those workflows. No need to port everything—if it’s expressible as “use these tools in this way,” it can run on HomeClaw.
 
 - **Multi-user, RAG memory, permission:** Still there. Each user has isolated chat and memory; permission is a simple config file; RAG gives long-term, semantic recall across sessions.
 

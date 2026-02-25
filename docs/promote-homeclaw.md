@@ -41,11 +41,11 @@ The **HomeClaw Companion** is a **Flutter-based** client for **Mac, Windows, iPh
 
 ## 3. Skills: Reuse OpenClaw Skillsets
 
-HomeClaw supports **OpenClaw-style skills**: each skill is a folder under `config/skills/` with a **SKILL.md** (name, description, workflow). The LLM sees the skill list and uses **tools** to accomplish workflows, or calls **run_skill** to run scripts under `skill/scripts/`.
+HomeClaw supports **OpenClaw-style skills**: each skill is a folder under `skills/` with a **SKILL.md** (name, description, workflow). The LLM sees the skill list and uses **tools** to accomplish workflows, or calls **run_skill** to run scripts under `skill/scripts/`.
 
-**You can reuse skillsets from OpenClaw:** put the same skill folders (with SKILL.md and any scripts) into HomeClaw’s `config/skills/` and they work. No rewrite—same format, same idea. HomeClaw loads them at startup and injects the skills block into the prompt so the model can choose and run them.
+**You can reuse skillsets from OpenClaw:** put the same skill folders (with SKILL.md and any scripts) into HomeClaw’s `skills/` and they work. No rewrite—same format, same idea. HomeClaw loads them at startup and injects the skills block into the prompt so the model can choose and run them.
 
-**Takeaway:** OpenClaw skills are compatible. Copy skill folders into `config/skills/` and use them in HomeClaw as-is.
+**Takeaway:** OpenClaw skills are compatible. Copy skill folders into `skills/` and use them in HomeClaw as-is.
 
 ---
 
@@ -103,7 +103,7 @@ HomeClaw supports **OpenClaw-style skills**: each skill is a folder under `confi
 |-------------|------------------|
 | **Companion app** | Flutter app for Mac, Windows, iPhone, Android: chat, voice, attachments, and edit core.yml/user.yml from the app. |
 | **Plugins** | Add capabilities with built-in (Python) or external (any language) plugins; register once, LLM routes to them. |
-| **Skills**  | Reuse **OpenClaw skillsets**: same SKILL.md format in `config/skills/`; copy skill folders over and they work. |
+| **Skills**  | Reuse **OpenClaw skillsets**: same SKILL.md format in `skills/`; copy skill folders over and they work. |
 | **Mix mode**| Per-request routing: local for simple/private, cloud for hard tasks; 3-layer router + usage reports to control cost. |
 | **Multi-agent** | One instance = one agent; run multiple instances (different ports/configs) for multiple agents, no orchestrator. |
 

@@ -12,7 +12,7 @@
 | **core/tam.py** | `create_prompt(text, chat_history)` — long Python f-string; plus inline `prompt_template` for cron/reminder parsing. | TAM `process_intent` (scheduling LLM call) | None. English only, hardcoded. |
 | **core/core.py** | Hardcoded user-message wrapper in `answer_from_memory`: `"Please provide a response to my input: '{query}'..."`. Routing block built in code (unified flow). | Main chat, unified routing | None. |
 | **config/workspace/** | IDENTITY.md, AGENTS.md, TOOLS.md — injected as system-prompt blocks. | `answer_from_memory` (workspace bootstrap) | Not prompt “templates”; content is loaded as-is. |
-| **config/skills/** | SKILL.md per skill — name/description (and optionally body) injected as system block. | `answer_from_memory` (skills block) | Not per-prompt language/model. |
+| **skills/** | SKILL.md per skill — name/description (and optionally body) injected as system block. | `answer_from_memory` (skills block) | Not per-prompt language/model. |
 
 ### 1.2 Selection logic today
 

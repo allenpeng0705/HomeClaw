@@ -11,7 +11,7 @@
 - **伴侣应用** — 基于 Flutter，支持 **Mac、Windows、iPhone、Android**：聊天、语音、附件，以及**管理 Core**（在应用中编辑 core.yml 和 user.yml）。一个应用，全平台。
 - **记忆** — **RAG**（向量 + 关系 + 可选图）与**智能体记忆**（AGENT_MEMORY.md、每日记忆）。默认 Cognee 或自研 Chroma 后端。
 - **插件** — **内置**（Python，位于 `plugins/`）与**外部**（任意语言：Node.js、Go、Java、Python 等）。**系统插件**（如 **homeclaw-browser**）为 Node.js 编写；您可用任意语言编写插件并向 Core 注册。
-- **技能** — 完整支持 **OpenClaw 风格技能集**：工作流位于 `config/skills/`（SKILL.md）；LLM 使用工具与可选 `run_skill` 完成任务。
+- **技能** — 完整支持 **OpenClaw 风格技能集**：工作流位于 `skills/`（SKILL.md）；LLM 使用工具与可选 `run_skill` 完成任务。
 - **多智能体** — 运行**多个 HomeClaw 实例**（如按用户或场景）；每个实例为一个智能体，拥有自己的记忆与配置。
 - **云端与多模态** — **Gemini** 等云端模型表现良好。**多模态**（图像、音频、视频）在**本地模型**（如 Qwen2-VL + mmproj）与**云端**（如 Gemini、GPT-4o）均支持。
 
@@ -244,7 +244,7 @@ HomeClaw 支持 **macOS**、**Windows** 与 **Linux**。需要：
 
 ## 9. 技能：用工作流扩展 HomeClaw
 
-**技能**是 `config/skills/` 下的文件夹，内含 **SKILL.md**（名称、描述、工作流）。LLM 会看到「可用技能」并使用工具（或 **run_skill** 运行脚本）完成任务。在 `config/core.yml` 中设置 `use_skills: true`。[SkillsGuide.md](docs_design/SkillsGuide.md) · [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
+**技能**是 `skills/` 下的文件夹，内含 **SKILL.md**（名称、描述、工作流）。LLM 会看到「可用技能」并使用工具（或 **run_skill** 运行脚本）完成任务。在 `config/core.yml` 中设置 `use_skills: true`。[SkillsGuide.md](docs_design/SkillsGuide.md) · [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
 
 ---
 

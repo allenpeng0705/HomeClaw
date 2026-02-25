@@ -16,7 +16,7 @@
 - **로컬 LLM**(llama.cpp 서버)과 **클라우드 AI**(OpenAI 호환 API, **LiteLLM** 사용)를 지원합니다.
 - **다중 채널**(이메일, IM, CLI)로 어시스턴트를 노출해 어디서든(예: 휴대폰) 자택 인스턴스와 상호작용할 수 있습니다.
 - **RAG 스타일 메모리**를 사용합니다: **Cognee**(기본) 또는 자체 SQLite + Chroma; 선택적으로 사용자별 **프로필**과 **지식 베이스**. docs_design/MemoryAndDatabase.md 참조.
-- **플러그인**(plugin.yaml + config.yml + plugin.py; route_to_plugin 또는 orchestrator), **스킬**(config/skills/ 아래 SKILL.md; 선택적 벡터 검색; run_skill 도구), **도구 계층**(use_tools: true — exec, browser, cron, sessions_*, memory_*, file_* 등)으로 동작을 확장합니다. docs_design/ToolsSkillsPlugins.md 참조.
+- **플러그인**(plugin.yaml + config.yml + plugin.py; route_to_plugin 또는 orchestrator), **스킬**(skills/ 아래 SKILL.md; 선택적 벡터 검색; run_skill 도구), **도구 계층**(use_tools: true — exec, browser, cron, sessions_*, memory_*, file_* 등)으로 동작을 확장합니다. docs_design/ToolsSkillsPlugins.md 참조.
 
 ### 1.2 설계 목표
 
@@ -131,7 +131,7 @@ Core는 core.yml에서 main_llm, embedding_llm(id)를 읽고 **local_models** �
 - **메모리/RAG**: 기본 Cognee; 대안 memory_backend: chroma. docs_design/MemoryAndDatabase.md 참조.
 - **플러그인**: plugins/ 아래에 폴더 추가하고 plugin.yaml, config.yml, plugin.py(내장) 또는 type: http + 엔드포인트(외부); 외부는 POST /api/plugins/register도 가능. docs_design/PluginsGuide.md, docs_design/PluginStandard.md, docs_design/RunAndTestPlugins.md 참조.
 - **도구 계층**: §3.6 참조; 내장 도구는 구현됨; 선택적으로 플러그인이 get_tools()/run_tool()로 도구 노출 가능.
-- **스킬(SKILL.md)**: 구현됨; base/skills.py가 config/skills/에서 로드; use_skills, skills_dir, skills_use_vector_search; run_skill 도구. docs_design/SkillsGuide.md, docs_design/ToolsSkillsPlugins.md 참조.
+- **스킬(SKILL.md)**: 구현됨; base/skills.py가 skills/에서 로드; use_skills, skills_dir, skills_use_vector_search; run_skill 도구. docs_design/SkillsGuide.md, docs_design/ToolsSkillsPlugins.md 참조.
 - **TAM**: 시간 의도는 분류됨; 스케줄링/리마인더 확장 가능.
 
 ---
@@ -143,7 +143,7 @@ Core는 core.yml에서 main_llm, embedding_llm(id)를 읽고 **local_models** �
 | Core | core/core.py, core/coreInterface.py, core/orchestrator.py, core/tam.py |
 | Channels | base/BaseChannel.py, base/base.py(InboundRequest), channels/, main.py. 실행: `python -m channels.run <name>`. |
 | LLM | llm/llmService.py, llm/litellmService.py |
-| Memory | memory/base.py, memory/mem.py, memory/chroma.py, memory/storage.py, memory/embedding.py, memory/chat/chat.py; memory/graph/(chroma 시); memory/cognee_adapter.py(cognee 시); base/profile_store.py, database/profiles/; 지식 베이스는 core.yml 참조. 워크스페이스: base/workspace.py, config/workspace/. 스킬: base/skills.py, config/skills/; run_skill은 tools/builtin.py. docs_design/MemoryAndDatabase.md, docs_design/SkillsGuide.md 참조. |
+| Memory | memory/base.py, memory/mem.py, memory/chroma.py, memory/storage.py, memory/embedding.py, memory/chat/chat.py; memory/graph/(chroma 시); memory/cognee_adapter.py(cognee 시); base/profile_store.py, database/profiles/; 지식 베이스는 core.yml 참조. 워크스페이스: base/workspace.py, config/workspace/. 스킬: base/skills.py, skills/; run_skill은 tools/builtin.py. docs_design/MemoryAndDatabase.md, docs_design/SkillsGuide.md 참조. |
 | Tools | base/tools.py, tools/builtin.py; 설정은 core.yml tools:. docs_design/ToolsDesign.md, docs_design/ToolsAndSkillsTesting.md 참조. |
 | Plugins | base/BasePlugin.py, base/PluginManager.py, plugins/Weather/(plugin.yaml, config.yml, plugin.py); 외부: POST /api/plugins/register. docs_design/PluginsGuide.md, docs_design/PluginStandard.md 참조. |
 | Shared | base/base.py(PromptRequest, AsyncResponse, 열거, 설정 데이터클래스), base/util.py |

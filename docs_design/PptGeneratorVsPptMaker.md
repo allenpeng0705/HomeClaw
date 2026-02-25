@@ -29,7 +29,7 @@
 
 ## Paths
 
-- Skill: `config/skills/html-slides-1.0.0/` (SKILL.md, references, assets, agents).
+- Skill: `skills/html-slides-1.0.0/` (SKILL.md, references, assets, agents).
 - Plugin: `plugins/ppt-generation/` (plugin.py, plugin.yaml; **plugin id**: `ppt-generation`).
 
 ## Output and links (private, dynamic per user)

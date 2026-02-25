@@ -52,20 +52,20 @@ def run_onboard():
         choice = input(f"Embedding LLM (1-{len(llm_opts)}) or Enter to keep [{current_emb}]: ").strip()
         if choice.isdigit() and 1 <= int(choice) <= len(llm_opts):
             config["embedding_llm"] = llm_opts[int(choice) - 1]
-    # use_skills
-    current_skills = config.get("use_skills", False)
+    # use_skills (default True; always on)
+    current_skills = config.get("use_skills", True)
     val = input(f"Enable skills (y/n) [{'y' if current_skills else 'n'}]: ").strip().lower()
     if val in ("y", "yes"):
         config["use_skills"] = True
     elif val in ("n", "no"):
         config["use_skills"] = False
-    if config.get("use_skills"):
-        current_sd = config.get("skills_dir") or "config/skills"
+    if config.get("use_skills", True):
+        current_sd = config.get("skills_dir") or "skills"
         val = input(f"Skills directory [{current_sd}]: ").strip()
         if val:
             config["skills_dir"] = val
-    # use_tools
-    current_tools = config.get("use_tools", False)
+    # use_tools (default True; always on)
+    current_tools = config.get("use_tools", True)
     val = input(f"Enable tool layer (y/n) [{'y' if current_tools else 'n'}]: ").strip().lower()
     if val in ("y", "yes"):
         config["use_tools"] = True
@@ -100,9 +100,9 @@ def run_doctor():
         ok.append("workspace_dir exists: " + ws_dir)
     else:
         issues.append("workspace_dir missing or not a directory: " + ws_dir)
-    # skills_dir if use_skills
-    if config.get("use_skills"):
-        sd = config.get("skills_dir") or "config/skills"
+    # skills_dir (skills always on)
+    if config.get("use_skills", True):
+        sd = config.get("skills_dir") or "skills"
         sd_path = os.path.join(root, sd) if not os.path.isabs(sd) else sd
         if os.path.isdir(sd_path):
             ok.append("skills_dir exists: " + sd)

@@ -26,7 +26,7 @@ The Control UI dropdown offers **Assistant** (main chat) or **Friend** (Friends 
 
 ## How to use
 
-**use_skills** and **skills_dir** in **config/core.yml** must be set so these skills load (e.g. `use_skills: true`, `skills_dir: config/skills`).
+**use_skills** and **skills_dir** in **config/core.yml** must be set so these skills load (e.g. `use_skills: true`, `skills_dir: skills`).
 
 - **desktop-ui (macOS):** Install peekaboo: `brew install steipete/tap/peekaboo`. Then the agent can call e.g. `run_skill(skill_name="desktop-ui", script="run.py", args=["see", "--annotate", "--path", "/tmp/see.png"])`.
 - **ip-cameras:** Install camsnap and ffmpeg (e.g. `brew install steipete/tap/camsnap ffmpeg`), configure cameras in **~/.config/camsnap/config.yaml**. Then the agent can call e.g. `run_skill(skill_name="ip-cameras", script="run.py", args=["snap", "kitchen", "--out", "/tmp/shot.jpg"])`.

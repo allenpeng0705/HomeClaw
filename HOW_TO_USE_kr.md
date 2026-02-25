@@ -72,7 +72,7 @@ HomeClaw은 사용자 기기에서 실행되는 **로컬 우선 AI 어시스턴�
 ### 3.1 core.yml(개요)
 
 - **Core 서버:** `host`, `port`(기본 9000), `mode`.
-- **경로:** `model_path`(GGUF 루트), `workspace_dir`(기본 `config/workspace`), `skills_dir`(기본 `config/skills`).
+- **경로:** `model_path`(GGUF 루트), `workspace_dir`(기본 `config/workspace`), `skills_dir`(기본 `skills`).
 - **기능:** `use_memory`, `use_tools`, `use_skills`, `use_workspace_bootstrap`, `memory_backend`(예: `cognee` 또는 `chroma`).
 - **LLM:** `local_models`, `cloud_models`, `main_llm`, `embedding_llm`([§4](#4-로컬-gguf-모델) 및 [§5](#5-클라우드-모드와-api-키) 참조).
 - **메모리:** `memory_backend`, `cognee:`(Cognee 사용 시), 또는 `database`, `vectorDB`, `graphDB`(`memory_backend: chroma` 시). [§6](#6-메모리-시스템) 참조.
@@ -288,9 +288,9 @@ embedding_llm: local_models/embedding_text_model
 
 **스킬**은 **도구**를 사용해 목표를 달성하는 *방법*을 어시스턴트에게 알려주는 작업 지향 지시 패키지(SKILL.md + 선택적 스크립트)입니다. LLM이 지시에 따라 실행하는 워크플로이며, 별도 플러그인 코드가 아닙니다.
 
-- **활성화:** **`config/core.yml`**에서 **`use_skills: true`**와 **`skills_dir`**(기본 `config/skills`)를 설정한 뒤 Core를 재시작합니다.
+- **활성화:** **`config/core.yml`**에서 **`use_skills: true`**와 **`skills_dir`**(기본 `skills`)를 설정한 뒤 Core를 재시작합니다.
 - **스킬 추가:** `skills_dir` 아래에 폴더를 만들고 **SKILL.md**(이름, 설명, 본문)를 넣습니다. 선택적으로 `scripts/` 아래에 스크립트를 두고 **run_skill**로 참조합니다.
 - **벡터 검색:** 스킬이 많으면 **`skills_use_vector_search: true`**로 쿼리당 관련 스킬만 주입할 수 있습니다. 옵션은 **docs/SkillsGuide.md**를 참조하세요.
-- **OpenClaw 스킬 재사용:** OpenClaw은 다른 확장 모델(채널/프로바이더/스킬을 하나의 manifest로)을 사용합니다. HomeClaw 스킬은 **SKILL.md + scripts**를 `config/skills/` 아래에 두는 형태입니다. OpenClaw "스킬"을 HomeClaw에서 쓰려면 지시를 **SKILL.md**(이름, 설명, 단계 본문)로 정리해 `config/skills/<스킬명>/`에 넣으면 됩니다. 도구 사용 단계로 표현 가능하면 코드 이식은 필요 없습니다. OpenClaw와 HomeClaw 비교는 **docs/ToolsSkillsPlugins.md** §2.7을 참조하세요.
+- **OpenClaw 스킬 재사용:** OpenClaw은 다른 확장 모델(채널/프로바이더/스킬을 하나의 manifest로)을 사용합니다. HomeClaw 스킬은 **SKILL.md + scripts**를 `skills/` 아래에 두는 형태입니다. OpenClaw "스킬"을 HomeClaw에서 쓰려면 지시를 **SKILL.md**(이름, 설명, 단계 본문)로 정리해 `skills/<스킬명>/`에 넣으면 됩니다. 도구 사용 단계로 표현 가능하면 코드 이식은 필요 없습니다. OpenClaw와 HomeClaw 비교는 **docs/ToolsSkillsPlugins.md** §2.7을 참조하세요.
 
 **스킬 전체 가이드:** **docs/SkillsGuide.md**(구조, 사용, 구현, 테스트). **docs/ToolsSkillsPlugins.md**에서 도구/스킬/플러그인 전체 설계를 설명합니다.

@@ -72,7 +72,7 @@ HomeClaw は自機で動く**ローカルファーストの AI アシスタン�
 ### 3.1 core.yml（概要）
 
 - **Core サーバ：** `host`、`port`（デフォルト 9000）、`mode`。
-- **パス：** `model_path`（GGUF のベースディレクトリ）、`workspace_dir`（デフォルト `config/workspace`）、`skills_dir`（デフォルト `config/skills`）。
+- **パス：** `model_path`（GGUF のベースディレクトリ）、`workspace_dir`（デフォルト `config/workspace`）、`skills_dir`（デフォルト `skills`）。
 - **機能：** `use_memory`、`use_tools`、`use_skills`、`use_workspace_bootstrap`、`memory_backend`（例：`cognee` または `chroma`）。
 - **LLM：** `local_models`、`cloud_models`、`main_llm`、`embedding_llm`（[§4](#4-ローカル-gguf-モデル) と [§5](#5-クラウドモードと-api-キー) 参照）。
 - **メモリ：** `memory_backend`、`cognee:`（Cognee 利用時）、または `database`、`vectorDB`、`graphDB`（`memory_backend: chroma` 時）。[§6](#6-メモリシステム) 参照。
@@ -288,9 +288,9 @@ embedding_llm: local_models/embedding_text_model
 
 **スキル**はタスク向けの指示パッケージ（SKILL.md + オプションのスクリプト）で、**ツール**を使って目標を達成する*方法*をアシスタントに伝えます。LLM が指示に従って実行するワークフローであり、別のプラグインコードではありません。
 
-- **有効化：** **`config/core.yml`** で **`use_skills: true`** と **`skills_dir`**（デフォルト `config/skills`）を設定し、Core を再起動します。
+- **有効化：** **`config/core.yml`** で **`use_skills: true`** と **`skills_dir`**（デフォルト `skills`）を設定し、Core を再起動します。
 - **スキルの追加：** `skills_dir` 以下にフォルダを作り、**SKILL.md**（名前、説明、本文）を置きます。オプションで `scripts/` にスクリプトを置き、**run_skill** で参照します。
 - **ベクトル検索：** スキルが多い場合は **`skills_use_vector_search: true`** にすると、クエリごとに関連スキルのみが注入されます。オプションは **docs/SkillsGuide.md** を参照。
-- **OpenClaw のスキルの流用：** OpenClaw は別の拡張モデル（チャネル／プロバイダ／スキルを 1 つの manifest で）を使います。HomeClaw のスキルは **SKILL.md + scripts** を `config/skills/` 以下に置く形式です。OpenClaw の「スキル」を HomeClaw で使うには、指示を **SKILL.md**（名前、説明、手順本文）にまとめて `config/skills/<スキル名>/` に置いてください。ツール利用の手順で表現できる場合はコードの移植は不要です。OpenClaw と HomeClaw の対比は **docs/ToolsSkillsPlugins.md** §2.7 を参照。
+- **OpenClaw のスキルの流用：** OpenClaw は別の拡張モデル（チャネル／プロバイダ／スキルを 1 つの manifest で）を使います。HomeClaw のスキルは **SKILL.md + scripts** を `skills/` 以下に置く形式です。OpenClaw の「スキル」を HomeClaw で使うには、指示を **SKILL.md**（名前、説明、手順本文）にまとめて `skills/<スキル名>/` に置いてください。ツール利用の手順で表現できる場合はコードの移植は不要です。OpenClaw と HomeClaw の対比は **docs/ToolsSkillsPlugins.md** §2.7 を参照。
 
 **スキル完全ガイド：** **docs/SkillsGuide.md**（構造、利用、実装、テスト）。**docs/ToolsSkillsPlugins.md** でツール／スキル／プラグインの全体設計を説明しています。

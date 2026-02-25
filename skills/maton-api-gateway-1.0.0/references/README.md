@@ -6,7 +6,7 @@ These reference files describe **how to access each supported service** via the 
 - **To refresh** from upstream, run from the repo root:
 
   ```bash
-  python config/skills/maton-api-gateway-1.0.0/scripts/sync_references.py
+  python skills/maton-api-gateway-1.0.0/scripts/sync_references.py
   ```
 
 Use these files to know the exact paths and parameters for each service when calling `https://gateway.maton.ai/{app}/{path}` (e.g. Slack: `slack/api/chat.postMessage`, HubSpot: `hubspot/crm/v3/objects/contacts`).

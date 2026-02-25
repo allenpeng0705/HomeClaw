@@ -74,7 +74,7 @@ def main() -> int:
     if not token:
         print(
             "Error: X access token not set. Set X_ACCESS_TOKEN in env or x_access_token in "
-            "config/skills/x-api-1.0.0/config.yml. Get token at https://developer.x.com",
+            "skills/x-api-1.0.0/config.yml. Get token at https://developer.x.com",
             file=sys.stderr,
         )
         return 1

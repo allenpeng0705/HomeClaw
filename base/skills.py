@@ -2,7 +2,7 @@
 Skill loader: read SKILL.md (YAML frontmatter + body) from a directory.
 
 Skills are folders containing SKILL.md. Used to inject "Available skills" into the system
-prompt so the model knows about them. See Design.md §3.6 and config/skills/README.md.
+prompt so the model knows about them. See Design.md §3.6 and skills/README.md.
 
 Vector retrieval: sync_skills_to_vector_store() and search_skills_by_query() for persistent
 registration and retrieval by user query (docs/ToolsSkillsPlugins.md §8).
@@ -16,7 +16,7 @@ from loguru import logger
 
 # Project root: parent of base/
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_DEFAULT_SKILLS_DIR = _PROJECT_ROOT / "config" / "skills"
+_DEFAULT_SKILLS_DIR = _PROJECT_ROOT / "skills"
 
 SKILL_FILENAME = "SKILL.md"
 USAGE_FILENAME = "USAGE.md"

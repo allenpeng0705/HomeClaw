@@ -16,7 +16,7 @@
 - 支持**本地 LLM**（通过 llama.cpp 服务）与**云端 AI**（通过 OpenAI 兼容 API，使用 **LiteLLM**）。
 - 通过**多种渠道**（邮件、IM、CLI）暴露助手，使用户可从任意位置（如手机）与家中实例交互。
 - 使用 **RAG 式记忆**：**Cognee**（默认）或自管 SQLite + Chroma；可选每用户**档案**与**知识库**。见 docs_design/MemoryAndDatabase.md。
-- 通过**插件**（plugin.yaml + config.yml + plugin.py；route_to_plugin 或 orchestrator）、**技能**（config/skills/ 下的 SKILL.md；可选向量检索；run_skill 工具）与**工具层**（use_tools: true — exec、browser、cron、sessions_*、memory_*、file_* 等）扩展行为。见 docs_design/ToolsSkillsPlugins.md。
+- 通过**插件**（plugin.yaml + config.yml + plugin.py；route_to_plugin 或 orchestrator）、**技能**（skills/ 下的 SKILL.md；可选向量检索；run_skill 工具）与**工具层**（use_tools: true — exec、browser、cron、sessions_*、memory_*、file_* 等）扩展行为。见 docs_design/ToolsSkillsPlugins.md。
 
 ### 1.2 设计目标
 
@@ -166,7 +166,7 @@ Core 从 core.yml 读取 main_llm、embedding_llm（id），并从 local_models 
 - **记忆/RAG**：默认 Cognee；替代为 memory_backend: chroma。见 docs_design/MemoryAndDatabase.md。
 - **插件**：在 plugins/ 下新增目录，含 plugin.yaml、config.yml、plugin.py（内置）或 type: http + 端点（外部）；外部也可 POST /api/plugins/register。见 docs_design/PluginsGuide.md、docs_design/PluginStandard.md、docs_design/RunAndTestPlugins.md。
 - **工具层**：见 §3.6；已实现内置工具；可选让插件通过 get_tools()/run_tool() 暴露工具。
-- **技能（SKILL.md）**：已实现；base/skills.py 从 config/skills/ 加载；use_skills、skills_dir、skills_use_vector_search；run_skill 工具。见 docs_design/SkillsGuide.md、docs_design/ToolsSkillsPlugins.md。
+- **技能（SKILL.md）**：已实现；base/skills.py 从 skills/ 加载；use_skills、skills_dir、skills_use_vector_search；run_skill 工具。见 docs_design/SkillsGuide.md、docs_design/ToolsSkillsPlugins.md。
 - **TAM**：时间意图已分类；可扩展更多定时/提醒行为与集成。
 
 ---
@@ -178,7 +178,7 @@ Core 从 core.yml 读取 main_llm、embedding_llm（id），并从 local_models 
 | Core | core/core.py、core/coreInterface.py、core/orchestrator.py、core/tam.py |
 | Channels | base/BaseChannel.py、base/base.py（InboundRequest）、channels/、main.py。运行：`python -m channels.run <name>`。 |
 | LLM | llm/llmService.py、llm/litellmService.py |
-| Memory | memory/base.py、memory/mem.py、memory/chroma.py、memory/storage.py、memory/embedding.py、memory/chat/chat.py；memory/graph/（chroma 时）；memory/cognee_adapter.py（cognee 时）；base/profile_store.py、database/profiles/；知识库见 core.yml。工作区：base/workspace.py、config/workspace/。技能：base/skills.py、config/skills/；run_skill 在 tools/builtin.py。见 docs_design/MemoryAndDatabase.md、docs_design/SkillsGuide.md。 |
+| Memory | memory/base.py、memory/mem.py、memory/chroma.py、memory/storage.py、memory/embedding.py、memory/chat/chat.py；memory/graph/（chroma 时）；memory/cognee_adapter.py（cognee 时）；base/profile_store.py、database/profiles/；知识库见 core.yml。工作区：base/workspace.py、config/workspace/。技能：base/skills.py、skills/；run_skill 在 tools/builtin.py。见 docs_design/MemoryAndDatabase.md、docs_design/SkillsGuide.md。 |
 | Tools | base/tools.py、tools/builtin.py；配置见 core.yml tools:。见 docs_design/ToolsDesign.md、docs_design/ToolsAndSkillsTesting.md。 |
 | Plugins | base/BasePlugin.py、base/PluginManager.py、plugins/Weather/（plugin.yaml、config.yml、plugin.py）；外部：POST /api/plugins/register。见 docs_design/PluginsGuide.md、docs_design/PluginStandard.md。 |
 | Shared | base/base.py（PromptRequest、AsyncResponse、枚举、配置数据类）、base/util.py |

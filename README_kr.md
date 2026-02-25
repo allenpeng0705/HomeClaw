@@ -11,7 +11,7 @@
 - **동반 앱** — Flutter 기반으로 **Mac, Windows, iPhone, Android** 지원: 채팅, 음성, 첨부, **Manage Core**(앱에서 core.yml, user.yml 편집). 한 앱으로 모든 플랫폼.
 - **메모리** — **RAG**(벡터 + 관계형 + 선택적 그래프)와 **에이전트 메모리**(AGENT_MEMORY.md, 일일 메모리). 기본 Cognee 또는 자체 Chroma 백엔드.
 - **플러그인** — **내장**(Python, `plugins/`)과 **외부**(어떤 언어든: Node.js, Go, Java, Python 등). **시스템 플러그인**(예: **homeclaw-browser**)은 Node.js로 작성; 어떤 언어로든 플러그인을 작성해 Core에 등록할 수 있습니다.
-- **스킬** — **OpenClaw 스타일 스킬셋** 전체 지원: `config/skills/`(SKILL.md)의 워크플로; LLM이 도구와 선택적 `run_skill`로 작업 수행.
+- **스킬** — **OpenClaw 스타일 스킬셋** 전체 지원: `skills/`(SKILL.md)의 워크플로; LLM이 도구와 선택적 `run_skill`로 작업 수행.
 - **멀티 에이전트** — **여러 HomeClaw 인스턴스** 실행(사용자·용도별 등); 각 인스턴스는 하나의 에이전트로 자체 메모리와 설정을 가집니다.
 - **클라우드·멀티모달** — **Gemini** 등 클라우드 모델이 잘 동작합니다. **멀티모달**(이미지·오디오·비디오)은 **로컬 모델**(예: Qwen2-VL + mmproj)과 **클라우드**(예: Gemini, GPT-4o) 모두 지원.
 
@@ -244,7 +244,7 @@ HomeClaw는 **macOS**, **Windows**, **Linux**에서 동작합니다. 필요 사�
 
 ## 9. 스킬: 워크플로로 HomeClaw 확장
 
-**스킬**은 `config/skills/` 아래 폴더로 **SKILL.md**(이름, 설명, 워크플로)를 포함합니다. LLM은 "사용 가능한 스킬"을 보고 도구(또는 **run_skill**로 스크립트)로 실행합니다. `config/core.yml`에서 `use_skills: true` 설정. [SkillsGuide.md](docs_design/SkillsGuide.md) · [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
+**스킬**은 `skills/` 아래 폴더로 **SKILL.md**(이름, 설명, 워크플로)를 포함합니다. LLM은 "사용 가능한 스킬"을 보고 도구(또는 **run_skill**로 스크립트)로 실행합니다. `config/core.yml`에서 `use_skills: true` 설정. [SkillsGuide.md](docs_design/SkillsGuide.md) · [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
 
 ---
 

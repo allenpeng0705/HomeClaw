@@ -161,6 +161,27 @@ def _infer_route_to_plugin_fallback(query: str) -> Optional[Dict[str, Any]]:
     # "list nodes", "what nodes are connected"
     if ("list" in q and "node" in q) or ("node" in q and ("connect" in q or "list" in q or "what" in q)):
         return {"plugin_id": "homeclaw-browser", "capability_id": "node_list", "parameters": {}}
+    # "open URL", "navigate to X", "go to https://..." — use homeclaw-browser (plugin or built-in tool path). Extract URL from query.
+    if any(kw in q for kw in ("open ", "navigate", "go to ", "打开", "访问", "浏览")) or re.search(r"https?://", query):
+        url = None
+        m = re.search(r"(https?://[^\s]+)", query)
+        if m:
+            url = m.group(1).strip().rstrip(".,;:)")
+        if not url and re.search(r"(?:open|navigate to|go to)\s+([a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,})", q):
+            m = re.search(r"(?:open|navigate to|go to)\s+([a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,})", q)
+            if m:
+                url = "https://" + m.group(1).strip()
+        if not url:
+            for m in re.finditer(r"(?:打开|访问)\s*(\S+)", query):
+                cand = m.group(1).strip()
+                if cand.startswith(("http://", "https://")):
+                    url = cand
+                    break
+                if "." in cand and len(cand) > 3:
+                    url = "https://" + cand
+                    break
+        if url:
+            return {"plugin_id": "homeclaw-browser", "capability_id": "browser_navigate", "parameters": {"url": url}}
     # PPT / slides / presentation (avoids "I need some time" with no tool call — run plugin so user gets the file + link)
     if any(kw in q for kw in ("ppt", "powerpoint", "slides", "presentation", ".pptx", "幻灯片", "演示文稿")):
         return {"plugin_id": "ppt-generation", "capability_id": "create_from_source", "parameters": {"source": query.strip()}}
@@ -4739,6 +4760,7 @@ class Core(CoreInterface):
             system_parts = []
             force_include_instructions = []  # collected from skills_force_include_rules and plugins_force_include_rules; appended at end of system so model sees it last
             force_include_auto_invoke = []  # when model returns no tool_calls, run these (e.g. run_skill) so the skill runs anyway; each item: {"tool": str, "arguments": dict}
+            force_include_plugin_ids = set()  # plugin ids to add to plugin list when skills_force_include_rules match (optional "plugins" in rule)
 
             # Resolve current user once: used to decide workspace Identity vs who-based identity and for who injection.
             _sys_uid = getattr(request, "system_user_id", None) or user_id
@@ -4981,7 +5003,7 @@ class Core(CoreInterface):
                         logger.warning("Skipping daily memory injection due to error: {}", e, exc_info=False)
 
             # Skills (SKILL.md from skills_dir + skills_extra_dirs); skills_disabled excluded
-            if getattr(Util().core_metadata, 'use_skills', False):
+            if getattr(Util().core_metadata, 'use_skills', True):
                 try:
                     root = Path(__file__).resolve().parent.parent
                     meta_skills = Util().core_metadata
@@ -5044,8 +5066,7 @@ class Core(CoreInterface):
                             patterns = [rule.get("pattern")]
                         pattern = rule.get("pattern") if isinstance(rule, dict) else None
                         folders = rule.get("folders") if isinstance(rule, dict) else None
-                        if not folders or not isinstance(folders, (list, tuple)):
-                            continue
+                        folders = list(folders) if isinstance(folders, (list, tuple)) else []
                         if not patterns and not pattern:
                             continue
                         to_try = list(patterns) if patterns else ([pattern] if pattern else [])
@@ -5077,12 +5098,25 @@ class Core(CoreInterface):
                         if isinstance(auto_invoke, dict) and auto_invoke.get("tool") and isinstance(auto_invoke.get("arguments"), dict):
                             args = dict(auto_invoke["arguments"])
                             user_q = (query or "").strip()
-                            for k, v in list(args.items()):
-                                if isinstance(v, str) and "{{query}}" in v:
-                                    args[k] = v.replace("{{query}}", user_q)
-                                elif isinstance(v, list):
-                                    args[k] = [s.replace("{{query}}", user_q) if isinstance(s, str) else s for s in v]
+
+                            def _replace_query_in_obj(obj):
+                                if isinstance(obj, str):
+                                    return obj.replace("{{query}}", user_q) if "{{query}}" in obj else obj
+                                if isinstance(obj, dict):
+                                    return {k: _replace_query_in_obj(v) for k, v in obj.items()}
+                                if isinstance(obj, list):
+                                    return [_replace_query_in_obj(s) for s in obj]
+                                return obj
+
+                            args = _replace_query_in_obj(args)
                             force_include_auto_invoke.append({"tool": str(auto_invoke["tool"]).strip(), "arguments": args})
+                        # Optional: when this rule matches, also force-include these plugins in the plugin list (so model sees them for route_to_plugin)
+                        plugins_in_rule = rule.get("plugins") if isinstance(rule, dict) else None
+                        if isinstance(plugins_in_rule, (list, tuple)):
+                            for pid in plugins_in_rule:
+                                pid = str(pid).strip().lower().replace(" ", "_")
+                                if pid:
+                                    force_include_plugin_ids.add(pid)
                     # Skill-driven triggers: declare trigger.patterns + instruction + auto_invoke in each skill's SKILL.md; no need to repeat in core.yml
                     for skill_dict in load_skills_from_dirs(skills_dirs, disabled_folders=disabled_folders, include_body=False):
                         trigger = skill_dict.get("trigger") if isinstance(skill_dict, dict) else None
@@ -5235,7 +5269,7 @@ class Core(CoreInterface):
 
             unified = (
                 getattr(Util().get_core_metadata(), "orchestrator_unified_with_tools", True)
-                and getattr(Util().get_core_metadata(), "use_tools", False)
+                and getattr(Util().get_core_metadata(), "use_tools", True)
             )
             if unified and getattr(self, "plugin_manager", None):
                 plugin_list = []
@@ -5318,6 +5352,22 @@ class Core(CoreInterface):
                         instr = rule.get("instruction") if isinstance(rule, dict) else None
                         if instr and isinstance(instr, str) and instr.strip():
                             plugin_force_instructions.append(instr.strip())
+                    # Plugins from skills_force_include_rules (rule has optional "plugins: [id, ...]"); ensure they are in the list
+                    desc_max_rag = max(0, int(getattr(meta_plugins, "plugins_description_max_chars", 0) or 0))
+                    for pid in force_include_plugin_ids:
+                        if not pid or pid in ids_present:
+                            continue
+                        plug = self.plugin_manager.get_plugin_by_id(pid)
+                        if plug is None:
+                            continue
+                        if isinstance(plug, dict):
+                            desc_raw = (plug.get("description") or "").strip()
+                        else:
+                            desc_raw = (getattr(plug, "get_description", lambda: "")() or "").strip()
+                        desc = desc_raw[:desc_max_rag] if desc_max_rag > 0 else desc_raw
+                        plugin_list = [{"id": pid, "description": desc}] + [p for p in plugin_list if (p.get("id") or "").strip().lower().replace(" ", "_") != pid]
+                        ids_present.add(pid)
+                        _component_log("plugin", f"included {pid} for skills_force_include_rules (plugins)")
                     if use_plugin_vector_search:
                         plugins_max = max(0, int(getattr(meta_plugins, "plugins_max_in_prompt", 5) or 5))
                         if plugins_max > 0 and len(plugin_list) > plugins_max:
@@ -5371,7 +5421,7 @@ class Core(CoreInterface):
                 run_flush = (
                     compaction_cfg.get("memory_flush_primary", True)
                     and len(messages) > max_msg
-                    and getattr(Util().get_core_metadata(), "use_tools", False)
+                    and getattr(Util().get_core_metadata(), "use_tools", True)
                     and (
                         getattr(Util().get_core_metadata(), "use_agent_memory_file", True)
                         or getattr(Util().get_core_metadata(), "use_daily_memory", True)
@@ -5483,7 +5533,7 @@ class Core(CoreInterface):
             logger.debug("Start to generate the response for user input: " + query)
             logger.info("Main LLM input (user query): {}", _truncate_for_log(query, 500))
 
-            use_tools = getattr(Util().get_core_metadata(), "use_tools", False)
+            use_tools = getattr(Util().get_core_metadata(), "use_tools", True)
             registry = get_tool_registry()
             all_tools = registry.get_openai_tools() if use_tools and registry.list_tools() else None
             if all_tools and not unified:
@@ -5647,9 +5697,17 @@ class Core(CoreInterface):
                                         logger.debug("Fallback route_to_plugin failed: {}", e)
                                         response = content_str or "The action could not be completed. Try a model that supports tool calling."
                                 else:
-                                    # Fallback: user may have asked to list directory (e.g. 你的目录下都有哪些文件) but model didn't call folder_list
-                                    list_dir_phrases = ("目录", "哪些文件", "列出文件", "list file", "list directory", "what file", "what's in my", "files in my", "folder content", "目录下")
-                                    if registry and any(t.name == "folder_list" for t in (registry.list_tools() or [])) and any(p in (query or "") for p in list_dir_phrases):
+                                    # Fallback: user may have asked to list directory (e.g. 你的目录下都有哪些文件) but model didn't call folder_list (common when local model returns no tool_calls)
+                                    list_dir_phrases = (
+                                        "目录", "哪些文件", "列出文件", "目录下", "列出", "有什么文件", "文件列表", "我的文件", "看看文件", "显示文件",
+                                        "list file", "list files", "list directory", "list folder", "list content", "what file", "what's in my", "files in my",
+                                        "folder content", "folder list", "file list", "show file", "show files", "show directory", "show folder", "view file", "view directory",
+                                    )
+                                    _query_lower = (query or "").lower()
+                                    _query_raw = query or ""
+                                    if registry and any(t.name == "folder_list" for t in (registry.list_tools() or [])) and any(
+                                        (p in _query_lower if p.isascii() else p in _query_raw) for p in list_dir_phrases
+                                    ):
                                         try:
                                             _component_log("tools", "fallback folder_list (model did not call tool)")
                                             result = await registry.execute_async("folder_list", {"path": "."}, context)

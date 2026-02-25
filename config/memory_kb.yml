@@ -1,0 +1,153 @@
+# =============================================================================
+# Memory, knowledge base, and database configuration
+# =============================================================================
+# This file is loaded by Core when core.yml sets:
+#   memory_kb_config_file: memory_kb.yml
+# Path is relative to the directory containing core.yml (config/).
+# Only keys listed below are read; they override or supply values merged into
+# the main config. Edit this file for all memory/KB/database/session settings.
+# =============================================================================
+
+# --- RAG memory ---
+# When true, Core stores and retrieves conversation memories (RAG). Reset: GET /memory/reset
+use_memory: true
+# cognee (default) | chroma. Cognee: configure via cognee: below or Cognee .env. Chroma: in-house RAG via database, vectorDB, graphDB below.
+memory_backend: cognee
+# When true: extra LLM call per message asks "should we store?" before adding to RAG. Default false = store every message; retrieval filters at read time.
+memory_check_before_add: false
+# RAG memory summarization: batch old memories into long-term summaries; originals TTL then deleted; summaries kept forever. See docs_design/RAGMemorySummarizationDesign.md.
+memory_summarization:
+  enabled: false
+  schedule: daily              # daily | weekly | next_run (next run time stored after each run)
+  interval_days: 1            # for next_run: run again after this many days
+  keep_original_days: 365      # TTL for raw memories; after this they are deleted (summary stays forever)
+  min_age_days: 7              # only summarize memories older than this (days)
+  max_memories_per_batch: 50   # max raw memories per summary batch
+
+# --- Session management (pruning, lifecycle, API, dmScope) ---
+# How to scope DM sessions: main = all DMs share one session; per-peer = by sender id; per-channel-peer = channel + sender (multi-user inboxes); per-account-channel-peer = account + channel + sender.
+session:
+  dm_scope: main               # main | per-peer | per-channel-peer | per-account-channel-peer
+  # Optional: map canonical id -> list of provider-prefixed peer ids so same person shares DM across channels. E.g. { "alice": ["telegram:123", "discord:456"] }
+  identity_links: {}
+  prune_keep_last_n: 50        # after each turn (if prune_after_turn) or manually: keep last N turns per session
+  prune_after_turn: false      # when true, run transcript prune after each reply (keeps last prune_keep_last_n)
+  daily_reset_at_hour: -1      # -1 = disabled; 0-23 = new session when last activity was before today at this hour (local time)
+  idle_minutes: -1             # -1 = disabled; >0 = new session when last activity older than N minutes
+  api_enabled: true            # expose GET /api/sessions for plugin UIs
+
+# --- Per-user profile (learned facts: name, birthday, preferences). See docs/UserProfileDesign.md ---
+profile:
+  enabled: true
+  dir: ""   # empty = database/profiles; or set path for profile JSON files
+
+# --- Agent memory file (AGENT_MEMORY.md) and daily memory. See docs_design/SessionAndDualMemoryDesign.md ---
+use_agent_memory_file: true    # inject curated long-term memory from a single Markdown file
+agent_memory_path: ""          # empty = workspace_dir/AGENT_MEMORY.md; or path relative to project or absolute
+agent_memory_max_chars: 20000  # max chars to inject; 0 = no truncation
+# true (default) = inject capped bootstrap + index + tools; false = legacy inject last N chars of AGENT_MEMORY + daily files
+use_agent_memory_search: true
+agent_memory_vector_collection: homeclaw_agent_memory   # Chroma collection for agent memory chunks
+# Bootstrap cap: when use_agent_memory_search true, we inject trimmed AGENT_MEMORY + daily; over cap = head 70% + tail 20% + marker
+agent_memory_bootstrap_max_chars: 20000       # default/cloud; total chars for agent + daily bootstrap block
+agent_memory_bootstrap_max_chars_local: 8000 # when request uses local model (mix mode); smaller cap for small context
+use_daily_memory: true         # inject memory/YYYY-MM-DD.md (yesterday + today); model can append via append_daily_memory tool
+daily_memory_dir: ""           # empty = workspace_dir/memory; or e.g. database/daily_memory
+
+# --- Knowledge base (documents, web, URLs, manual). See docs/MemoryAndDatabase.md. Reset: GET /knowledge_base/reset ---
+knowledge_base:
+  enabled: true
+  backend: auto                # auto | cognee | chroma. auto = same as memory_backend
+  collection_name: homeclaw_kb # used only when backend is chroma
+  chunk_size: 800
+  chunk_overlap: 100
+  unused_ttl_days: 90          # Cognee: remove sources older than this (age-based); chroma: by last_used_timestamp
+  max_sources_per_user: 0      # Cognee only: max KB sources per user (0 = no cap). Oldest evicted when over cap
+  embed_timeout: 600           # seconds
+  store_timeout: 600            # seconds
+  retrieval_min_score: 0.5     # only inject chunks with score >= this (0-1); null = inject top-k regardless
+  # Per-user folder sync: scan {homeclaw_root}/{user_id}/knowledgebase/, add/remove files. See docs_design/PerUserKnowledgeBaseFolder.md
+  folder_sync:
+    enabled: false
+    folder_name: knowledgebase # subdir under each user's sandbox
+    schedule: ""               # cron, e.g. "0 */6 * * *" every 6h; empty = only on-demand via POST /knowledge_base/sync_folder
+    allowed_extensions: [".md", ".txt", ".pdf", ".docx", ".html", ".htm", ".rst", ".csv", ".ppt", ".pptx"]
+    max_file_size_bytes: 5000000
+    resync_on_mtime_change: true
+
+# --- Relational DB (chat history, sessions, runs) ---
+# backend: sqlite | mysql | postgresql. For sqlite, url can be empty (uses database/chats.db). MySQL: mysql+pymysql://user:pass@host:3306/db. PostgreSQL: postgresql+psycopg2://user:pass@host:5432/db
+database:
+  backend: sqlite
+  url: ""
+
+# --- Vector DB (RAG memory when memory_backend: chroma). When memory_backend: cognee, Cognee uses its own store. ---
+# backend: chroma | qdrant | milvus | pinecone | weaviate. Only the selected backend's block is used.
+vectorDB:
+  backend: chroma
+  Chroma:
+    anonymized_telemetry: false
+    api: chromadb.api.fastapi.FastAPI
+    host: 0.0.0.0
+    is_persistent: true
+    port: 5000
+    path: ""   # empty = use data_path (database/)
+  Qdrant:
+    host: localhost
+    port: 6333
+    url: ""
+    api_key: ""
+  Milvus:
+    host: localhost
+    port: 19530
+    uri: ""
+  Pinecone:
+    api_key: ""
+    environment: ""
+    index_name: memory
+  Weaviate:
+    url: http://localhost:8080
+    api_key: ""
+
+# --- Graph DB (entities and relationships for in-house RAG when memory_backend: chroma). When cognee, Cognee uses its own graph. ---
+# backend: kuzu | neo4j. When missing or kuzu not installed, graph is disabled.
+graphDB:
+  backend: kuzu
+  Kuzu:
+    path: ""   # empty = use data_path/graph_kuzu (e.g. database/graph_kuzu)
+  Neo4j:
+    url: bolt://localhost:7687
+    username: neo4j
+    password: ""
+
+# --- Cognee (when memory_backend: cognee). Converted to Cognee env at runtime. See docs/MemoryAndDatabase.md. ---
+# Leave llm/embedding empty to use Core's main_llm and embedding_llm. ENABLE_BACKEND_ACCESS_CONTROL=false by default (avoids UserNotFoundError).
+cognee:
+  relational:
+    provider: sqlite           # sqlite | postgres (set host, port, username, password)
+    name: cognee_db
+    host: ""
+    port: 5432
+    username: ""
+    password: ""
+  vector:
+    provider: chroma           # chroma | lancedb | qdrant | pgvector | redis | falkordb | neptune_analytics
+    url: ""
+    port: ""
+    key: ""
+  graph:
+    provider: kuzu             # kuzu | kuzu-remote | neo4j | neptune | neptune_analytics
+    url: ""
+    username: ""
+    password: ""
+  llm:
+    provider: ""
+    model: ""
+    endpoint: ""
+    api_key: ""
+  embedding:
+    provider: ""
+    model: ""
+    endpoint: ""
+    api_key: ""
+    tokenizer: "./models/tokenizer/Qwen3_0.6B"   # local path for token counting (no HuggingFace at runtime)

@@ -60,7 +60,7 @@ def main() -> int:
     if not token:
         print(
             "Error: Hootsuite access token not set. Set HOOTSUITE_ACCESS_TOKEN in env or hootsuite_access_token in "
-            "config/skills/hootsuite-1.0.0/config.yml. Get token at https://developer.hootsuite.com",
+            "skills/hootsuite-1.0.0/config.yml. Get token at https://developer.hootsuite.com",
             file=sys.stderr,
         )
         return 1

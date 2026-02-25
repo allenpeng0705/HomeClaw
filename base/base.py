@@ -1,3 +1,4 @@
+import copy
 from datetime import datetime
 from enum import Enum
 import json
@@ -683,9 +684,9 @@ class CoreMetadata:
     agent_memory_bootstrap_max_chars_local: int = 8000  # when request uses local model (mix mode); smaller cap for small context
     session: Dict[str, Any] = field(default_factory=dict)  # prune_keep_last_n, prune_after_turn, daily_reset_at_hour, idle_minutes, api_enabled
     compaction: Dict[str, Any] = field(default_factory=dict)  # enabled, reserve_tokens, max_messages_before_compact, compact_tool_results
-    use_tools: bool = False  # enable tool layer (tool registry, execute tool_calls in chat loop)
-    use_skills: bool = False  # inject skills (SKILL.md from skills_dir) into system prompt; see Design.md §3.6
-    skills_dir: str = "config/skills"  # directory to scan for skill folders (each with SKILL.md)
+    use_tools: bool = True   # always on; kept for optional override. Tool layer (tool registry, execute tool_calls in chat loop).
+    use_skills: bool = True  # always on; kept for optional override. Inject skills (SKILL.md from skills_dir) into system prompt.
+    skills_dir: str = "skills"  # directory to scan for skill folders (each with SKILL.md); project root, same level as plugin
     skills_extra_dirs: List[str] = field(default_factory=list)  # optional extra dirs (paths relative to project root); user can put more skills here
     skills_disabled: List[str] = field(default_factory=list)  # folder names to not load (e.g. ["x-api-1.0.0"]); case-insensitive match
     skills_max_in_prompt: int = 5  # when skills_use_vector_search=true, cap RAG results to this many in prompt; when false (include all) this is not used
@@ -709,10 +710,17 @@ class CoreMetadata:
     skills_force_include_rules: List[Dict[str, Any]] = field(default_factory=list)
     # Optional: when user query matches a regex, ensure these plugin ids are in the routing block and optionally append an instruction. List of { pattern: str, plugins: [str], instruction?: str }.
     plugins_force_include_rules: List[Dict[str, Any]] = field(default_factory=list)
+    # Optional: path to a YAML file (relative to config dir) with skills_*, plugins_*, system_plugins* keys. When set, those keys are loaded from that file and core.yml stays short.
+    skills_and_plugins_config_file: str = field(default='')
+    # Optional: path to a YAML file (relative to config dir) with memory, knowledge_base, database, vectorDB, graphDB, cognee, profile, file_understanding. When set, those keys are loaded from that file.
+    memory_kb_config_file: str = field(default='')
+    # Optional: path to a YAML file (relative to config dir) with local_models, cloud_models, main_llm*, hybrid_router, embedding_llm, embedding_host/port, main_llm_host/port. When set, those keys are loaded from that file.
+    llm_config_file: str = field(default='')
     # Optional extra dirs to scan for manifest-based external plugins (http/subprocess/mcp). Paths relative to project root or absolute. Python plugins are not loaded from here.
     plugins_extra_dirs: List[str] = field(default_factory=list)
     orchestrator_timeout_seconds: int = 60  # timeout for intent/plugin call and plugin.run() when unified is false; 0 = no timeout. Default when missing: 60.
     tool_timeout_seconds: int = 120  # per-tool execution timeout; prevents one tool from hanging the system; 0 = no timeout (from config tools.tool_timeout_seconds)
+    tools_config: Dict[str, Any] = field(default_factory=dict)  # merged tools dict from core.yml + optional skills_and_plugins file; used by tool layer (exec_allowlist, web.search, etc.)
     orchestrator_unified_with_tools: bool = True  # when True (default), main LLM with tools routes TAM/plugin/chat; when False, separate orchestrator_handler runs first (one LLM for intent+plugin)
     inbound_request_timeout_seconds: int = 0  # recommended max seconds for clients/proxies waiting for Core; 0 = unlimited. Default when missing: 0. Not enforced by Core; set proxies read_timeout >= this when >0.
     use_prompt_manager: bool = True  # load prompts from config/prompts (language/model overrides); see docs/PromptManagement.md
@@ -804,6 +812,121 @@ class CoreMetadata:
         if not isinstance(data, dict):
             raise RuntimeError("config/core.yml is empty or invalid (root must be a YAML object). Fix the file before starting Core.")
         data = data or {}
+
+        # Optional: merge skills/plugins config from external file so core.yml stays short.
+        # Never crash: file missing/malformed or bad value types are logged and skipped; Core starts with core.yml + safe merged keys only.
+        _ext_file = (data.get('skills_and_plugins_config_file') or '').strip()
+        if _ext_file:
+            _config_dir = os.path.dirname(os.path.abspath(yaml_file))
+            _ext_path = os.path.join(_config_dir, _ext_file)
+            if os.path.isfile(_ext_path):
+                try:
+                    with open(_ext_path, 'r', encoding='utf-8') as _f:
+                        _ext_data = yaml.safe_load(_f)
+                    if isinstance(_ext_data, dict):
+                        for _k, _v in _ext_data.items():
+                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k == 'tools'):
+                                continue
+                            # Avoid injecting wrong types so later from_yaml never raises on this key
+                            if _k in ('skills_force_include_rules', 'plugins_force_include_rules', 'system_plugins', 'skills_include_body_for', 'skills_extra_dirs', 'skills_disabled', 'plugins_extra_dirs') and not isinstance(_v, list):
+                                logging.warning("skills_and_plugins config %s: %s must be a list, got %s; skipping", _ext_path, _k, type(_v).__name__)
+                                continue
+                            if _k == 'system_plugins_env' and not isinstance(_v, dict):
+                                logging.warning("skills_and_plugins config %s: system_plugins_env must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
+                                continue
+                            if _k == 'tools' and not isinstance(_v, dict):
+                                logging.warning("skills_and_plugins config %s: tools must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
+                                continue
+                            # Numeric/string keys: only set if value is safe so int/float/str later never raise
+                            if _k in ('skills_max_in_prompt', 'plugins_max_in_prompt', 'plugins_description_max_chars', 'skills_max_retrieved', 'skills_include_body_max_chars'):
+                                try:
+                                    _ = int(_v) if _v is not None else 0
+                                except (TypeError, ValueError):
+                                    logging.warning("skills_and_plugins config %s: %s must be an integer, got %s; skipping", _ext_path, _k, type(_v).__name__)
+                                    continue
+                            if _k == 'skills_similarity_threshold':
+                                try:
+                                    _ = float(_v) if _v is not None else 0.0
+                                except (TypeError, ValueError):
+                                    logging.warning("skills_and_plugins config %s: %s must be a number, got %s; skipping", _ext_path, _k, type(_v).__name__)
+                                    continue
+                            if _k == 'system_plugins_start_delay':
+                                try:
+                                    _ = float(_v) if _v is not None else 2.0
+                                except (TypeError, ValueError):
+                                    logging.warning("skills_and_plugins config %s: %s must be a number, got %s; skipping", _ext_path, _k, type(_v).__name__)
+                                    continue
+                            data[_k] = _v
+                except Exception as _e:
+                    logging.warning("Could not load skills_and_plugins config from %s: %s", _ext_path, _e)
+
+        # Optional: merge memory/kb/database config from external file (memory_kb.yml).
+        _mem_kb_file = (data.get('memory_kb_config_file') or '').strip()
+        _MEMORY_KB_KEYS = frozenset({
+            'use_memory', 'memory_backend', 'memory_check_before_add', 'memory_summarization',
+            'database', 'vectorDB', 'graphDB', 'cognee', 'knowledge_base', 'profile', 'session',
+            'use_agent_memory_file', 'agent_memory_path', 'agent_memory_max_chars',
+            'use_daily_memory', 'daily_memory_dir', 'use_agent_memory_search',
+            'agent_memory_vector_collection', 'agent_memory_bootstrap_max_chars', 'agent_memory_bootstrap_max_chars_local',
+        })
+        if _mem_kb_file:
+            _config_dir = os.path.dirname(os.path.abspath(yaml_file))
+            _mem_kb_path = os.path.join(_config_dir, _mem_kb_file)
+            if os.path.isfile(_mem_kb_path):
+                try:
+                    with open(_mem_kb_path, 'r', encoding='utf-8') as _f:
+                        _mem_kb_data = yaml.safe_load(_f)
+                    if isinstance(_mem_kb_data, dict):
+                        for _k, _v in _mem_kb_data.items():
+                            if _k not in _MEMORY_KB_KEYS:
+                                continue
+                            _dict_keys = ('database', 'vectorDB', 'graphDB', 'cognee', 'knowledge_base', 'memory_summarization', 'profile', 'session')
+                            if _k in _dict_keys and not isinstance(_v, dict):
+                                logging.warning("memory_kb config %s: %s must be a dict, got %s; skipping", _mem_kb_path, _k, type(_v).__name__)
+                                continue
+                            if _k in ('agent_memory_max_chars', 'agent_memory_bootstrap_max_chars', 'agent_memory_bootstrap_max_chars_local'):
+                                try:
+                                    _ = int(_v) if _v is not None else 0
+                                except (TypeError, ValueError):
+                                    logging.warning("memory_kb config %s: %s must be an integer, got %s; skipping", _mem_kb_path, _k, type(_v).__name__)
+                                    continue
+                            data[_k] = _v
+                except Exception as _e:
+                    logging.warning("Could not load memory_kb config from %s: %s", _mem_kb_path, _e)
+
+        # Optional: merge LLM config from external file (llm.yml).
+        _llm_file = (data.get('llm_config_file') or '').strip()
+        _LLM_KEYS = frozenset({
+            'local_models', 'cloud_models', 'main_llm', 'main_llm_mode', 'main_llm_local', 'main_llm_cloud',
+            'hybrid_router', 'main_llm_language', 'embedding_llm',
+            'embedding_host', 'embedding_port', 'main_llm_host', 'main_llm_port', 'embedding_health_check_timeout_sec',
+        })
+        if _llm_file:
+            _config_dir = os.path.dirname(os.path.abspath(yaml_file))
+            _llm_path = os.path.join(_config_dir, _llm_file)
+            if os.path.isfile(_llm_path):
+                try:
+                    with open(_llm_path, 'r', encoding='utf-8') as _f:
+                        _llm_data = yaml.safe_load(_f)
+                    if isinstance(_llm_data, dict):
+                        for _k, _v in _llm_data.items():
+                            if _k not in _LLM_KEYS:
+                                continue
+                            if _k in ('local_models', 'cloud_models') and not isinstance(_v, list):
+                                logging.warning("llm config %s: %s must be a list, got %s; skipping", _llm_path, _k, type(_v).__name__)
+                                continue
+                            if _k == 'hybrid_router' and not isinstance(_v, dict):
+                                logging.warning("llm config %s: hybrid_router must be a dict, got %s; skipping", _llm_path, type(_v).__name__)
+                                continue
+                            if _k in ('embedding_port', 'main_llm_port'):
+                                try:
+                                    _ = int(_v) if _v is not None else 0
+                                except (TypeError, ValueError):
+                                    logging.warning("llm config %s: %s must be an integer, got %s; skipping", _llm_path, _k, type(_v).__name__)
+                                    continue
+                            data[_k] = _v
+                except Exception as _e:
+                    logging.warning("Could not load llm config from %s: %s", _llm_path, _e)
 
         # Relational database (optional; default sqlite)
         db_cfg = data.get('database') or {}
@@ -980,9 +1103,9 @@ class CoreMetadata:
             agent_memory_bootstrap_max_chars_local=max(500, int(data.get('agent_memory_bootstrap_max_chars_local', 8000) or 8000)),
             session=data.get('session') if isinstance(data.get('session'), dict) else {},
             compaction=data.get('compaction') if isinstance(data.get('compaction'), dict) else {},
-            use_tools=data.get('use_tools', False),
-            use_skills=data.get('use_skills', False),
-            skills_dir=data.get('skills_dir', 'config/skills'),
+            use_tools=data.get('use_tools', True),
+            use_skills=data.get('use_skills', True),
+            skills_dir=(data.get('skills_dir') or 'skills').strip() or 'skills',
             skills_extra_dirs=[str(p).strip() for p in (data.get('skills_extra_dirs') or []) if str(p).strip()],
             skills_disabled=[str(f).strip() for f in (data.get('skills_disabled') or []) if str(f).strip()],
             skills_max_in_prompt=max(0, int(data.get('skills_max_in_prompt', 5) or 5)),
@@ -999,11 +1122,15 @@ class CoreMetadata:
             skills_incremental_sync=bool(data.get('skills_incremental_sync', False)),
             skills_include_body_for=[str(f).strip() for f in (data.get('skills_include_body_for') or []) if f],
             skills_include_body_max_chars=max(0, int(data.get('skills_include_body_max_chars', 0) or 0)),
-            skills_force_include_rules=[r for r in (data.get('skills_force_include_rules') or []) if isinstance(r, dict) and (r.get('pattern') or r.get('patterns')) and r.get('folders')],
+            skills_force_include_rules=[r for r in (data.get('skills_force_include_rules') or []) if isinstance(r, dict) and (r.get('pattern') or r.get('patterns')) and (r.get('folders') is not None or r.get('auto_invoke'))],
             plugins_force_include_rules=[r for r in (data.get('plugins_force_include_rules') or []) if isinstance(r, dict) and r.get('pattern') and r.get('plugins')],
+            skills_and_plugins_config_file=(data.get('skills_and_plugins_config_file') or '').strip(),
+            memory_kb_config_file=(data.get('memory_kb_config_file') or '').strip(),
+            llm_config_file=(data.get('llm_config_file') or '').strip(),
             plugins_extra_dirs=[str(p).strip() for p in (data.get('plugins_extra_dirs') or []) if str(p).strip()],
             orchestrator_timeout_seconds=(lambda v: max(0, int(v)) if v is not None else 60)(data.get('orchestrator_timeout_seconds', 60)),
             tool_timeout_seconds=int((data.get('tools') or {}).get('tool_timeout_seconds', 120) or 0),
+            tools_config=copy.deepcopy(data.get('tools')) if isinstance(data.get('tools'), dict) else {},
             orchestrator_unified_with_tools=data.get('orchestrator_unified_with_tools', True),
             inbound_request_timeout_seconds=max(0, int(data.get('inbound_request_timeout_seconds', 0) or 0)),
             use_prompt_manager=data.get('use_prompt_manager', True),
@@ -1063,9 +1190,8 @@ class CoreMetadata:
                 'use_workspace_bootstrap': getattr(core, 'use_workspace_bootstrap', True),
                 'workspace_dir': getattr(core, 'workspace_dir', 'config/workspace'),
                 'homeclaw_root': CoreMetadata._safe_str_strip(getattr(core, 'homeclaw_root', None)),
-                'use_tools': getattr(core, 'use_tools', False),
-                'use_skills': getattr(core, 'use_skills', False),
-                'skills_dir': getattr(core, 'skills_dir', 'config/skills'),
+                # use_tools / use_skills omitted from core_dict so core.yml stays minimal; both default True in from_yaml
+                'skills_dir': getattr(core, 'skills_dir', 'skills'),
                 'skills_extra_dirs': getattr(core, 'skills_extra_dirs', None) or [],
                 'skills_disabled': getattr(core, 'skills_disabled', None) or [],
                 'skills_max_in_prompt': getattr(core, 'skills_max_in_prompt', 0),
@@ -1084,6 +1210,9 @@ class CoreMetadata:
                 'skills_include_body_max_chars': getattr(core, 'skills_include_body_max_chars', 0),
                 'skills_force_include_rules': getattr(core, 'skills_force_include_rules', None) or [],
                 'plugins_force_include_rules': getattr(core, 'plugins_force_include_rules', None) or [],
+                'skills_and_plugins_config_file': getattr(core, 'skills_and_plugins_config_file', '') or '',
+                'memory_kb_config_file': getattr(core, 'memory_kb_config_file', '') or '',
+                'llm_config_file': getattr(core, 'llm_config_file', '') or '',
                 'plugins_extra_dirs': getattr(core, 'plugins_extra_dirs', None) or [],
                 'orchestrator_timeout_seconds': getattr(core, 'orchestrator_timeout_seconds', 60),
                 # tool_timeout_seconds is written under data["tools"] below, not as top-level
@@ -1124,6 +1253,39 @@ class CoreMetadata:
                     vars(ep) for ep in core.endpoints
                 ]
         }
+        # When using external skills/plugins config file, do not write those keys into core.yml (keep them only in the external file)
+        _ext = (getattr(core, 'skills_and_plugins_config_file', None) or '').strip()
+        if _ext:
+            for _k in list(core_dict.keys()):
+                if _k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins'):
+                    core_dict.pop(_k, None)
+            core_dict['skills_and_plugins_config_file'] = _ext
+        # When using external memory_kb config file, do not write memory/kb/database keys into core.yml
+        _mem_kb_ext = (getattr(core, 'memory_kb_config_file', None) or '').strip()
+        _MEMORY_KB_POP = frozenset({
+            'use_memory', 'memory_backend', 'memory_check_before_add', 'memory_summarization',
+            'database', 'vectorDB', 'graphDB', 'cognee', 'knowledge_base', 'profile', 'session',
+            'use_agent_memory_file', 'agent_memory_path', 'agent_memory_max_chars',
+            'use_daily_memory', 'daily_memory_dir', 'use_agent_memory_search',
+            'agent_memory_vector_collection', 'agent_memory_bootstrap_max_chars', 'agent_memory_bootstrap_max_chars_local',
+        })
+        if _mem_kb_ext:
+            for _k in list(core_dict.keys()):
+                if _k in _MEMORY_KB_POP:
+                    core_dict.pop(_k, None)
+            core_dict['memory_kb_config_file'] = _mem_kb_ext
+        # When using external llm config file, do not write LLM keys into core.yml
+        _llm_ext = (getattr(core, 'llm_config_file', None) or '').strip()
+        _LLM_POP = frozenset({
+            'local_models', 'cloud_models', 'main_llm', 'main_llm_mode', 'main_llm_local', 'main_llm_cloud',
+            'hybrid_router', 'main_llm_language', 'embedding_llm',
+            'embedding_host', 'embedding_port', 'main_llm_host', 'main_llm_port', 'embedding_health_check_timeout_sec',
+        })
+        if _llm_ext:
+            for _k in list(core_dict.keys()):
+                if _k in _LLM_POP:
+                    core_dict.pop(_k, None)
+            core_dict['llm_config_file'] = _llm_ext
         # Only write api key fields when set (cloud main model; key can be set via CLI)
         if (core.main_llm_api_key_name or '').strip():
             core_dict['main_llm_api_key_name'] = core.main_llm_api_key_name
@@ -1254,6 +1416,16 @@ class CoreMetadata:
                     data["tools"]["tool_timeout_seconds"] = getattr(core, "tool_timeout_seconds", 120)
                 if "tool_timeout_seconds" in data:
                     del data["tool_timeout_seconds"]  # avoid duplicate; only under tools:
+                if _ext:
+                    data.pop("tools", None)  # tools live in skills_and_plugins config file; do not write to core.yml
+                data.pop("use_tools", None)
+                data.pop("use_skills", None)  # always on; omit from file so core.yml stays minimal
+                if _mem_kb_ext:
+                    for _k in _MEMORY_KB_POP:
+                        data.pop(_k, None)
+                if _llm_ext:
+                    for _k in _LLM_POP:
+                        data.pop(_k, None)
                 _restore_api_keys_from_original(data, original_snapshot)
                 _reorder_core_yml_keys(data)
                 _write_atomic(yaml_file, lambda f: yaml_rt.dump(data, f))
@@ -1278,6 +1450,16 @@ class CoreMetadata:
                     existing["tools"]["tool_timeout_seconds"] = getattr(core, "tool_timeout_seconds", 120)
                 if "tool_timeout_seconds" in existing:
                     del existing["tool_timeout_seconds"]  # avoid duplicate; only under tools:
+                if _ext:
+                    existing.pop("tools", None)  # tools live in skills_and_plugins config file; do not write to core.yml
+                existing.pop("use_tools", None)
+                existing.pop("use_skills", None)  # always on; omit from file so core.yml stays minimal
+                if _mem_kb_ext:
+                    for _k in _MEMORY_KB_POP:
+                        existing.pop(_k, None)
+                if _llm_ext:
+                    for _k in _LLM_POP:
+                        existing.pop(_k, None)
                 _restore_api_keys_from_original(existing, original_snapshot)
                 _reorder_core_yml_keys(existing)
                 def _dump_safe(f):
