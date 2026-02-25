@@ -28,7 +28,9 @@ if "%OUTPUT_BUNDLE%"=="" (
 echo Building Companion app (Windows release)...
 pushd "%COMPANION_DIR%"
 call flutter pub get
+if errorlevel 1 (popd & echo flutter pub get failed & exit /b 1)
 call flutter build windows --release
+if errorlevel 1 (popd & echo flutter build windows failed & exit /b 1)
 popd
 
 set "RELEASE_DIR=%COMPANION_DIR%\build\windows\x64\runner\Release"
