@@ -158,6 +158,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: _save,
               child: const Text('Save'),
             ),
+            const SizedBox(height: 16),
+            SwitchListTile(
+              title: const Text('Show progress during long tasks'),
+              subtitle: const Text(
+                'When on, shows messages like "Generating your presentation…" while Core is working. Uses streaming (SSE); turn off for a simple loading bar.',
+              ),
+              value: widget.coreService.showProgressDuringLongTasks,
+              onChanged: (bool value) async {
+                await widget.coreService.saveShowProgressDuringLongTasks(value);
+                if (mounted) setState(() {});
+              },
+            ),
             const SizedBox(height: 24),
             const Text(
               'Users are listed on the chat screen (from Core user.yml). Select a user to chat; each message is sent with that user\'s id.',

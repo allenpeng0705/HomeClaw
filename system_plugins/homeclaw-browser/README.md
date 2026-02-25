@@ -4,6 +4,8 @@ Node.js **system plugin** (in **system_plugins/homeclaw-browser**) that provides
 
 **Design:** [docs_design/BrowserCanvasNodesPluginDesign.md](../../docs_design/BrowserCanvasNodesPluginDesign.md)
 
+**Discoverability:** When the plugin is registered, Core injects its **description** (from `register.js`) into the system prompt under "Available plugins". The LLM selects it by matching user intent (e.g. "open google.com", "take a photo on the node", "list nodes") and calls `route_to_plugin(plugin_id=homeclaw-browser, capability_id=..., parameters=...)`. The description in `register.js` is written so the model can find and use it without config force-include rules: it lists user phrases and key capability_ids (browser_navigate, browser_snapshot, node_list, node_camera_snap, node_camera_clip, canvas_update). Keep that description up to date when adding capabilities so the plugin remains easy to discover.
+
 ---
 
 ## Control UI (WebChat)

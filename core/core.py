@@ -30,7 +30,7 @@ from aiohttp.client_exceptions import ClientConnectorError
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from typing import Any, Optional, Dict, List, Tuple, Union
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi import FastAPI, Request, Response
 from loguru import logger
 import requests
@@ -75,7 +75,7 @@ from base.workspace import (
     clear_daily_memory_for_dates,
     trim_content_bootstrap,
 )
-from base.skills import get_skills_dir, load_skills, build_skills_system_block
+from base.skills import get_skills_dir, load_skills, load_skills_from_dirs, load_skill_by_folder_from_dirs, build_skills_system_block
 from base.tools import ToolContext, get_tool_registry, ROUTING_RESPONSE_ALREADY_SENT
 from base import last_channel as last_channel_store
 from base.markdown_outbound import markdown_to_channel, looks_like_markdown, classify_outbound_format
@@ -147,6 +147,9 @@ def _infer_route_to_plugin_fallback(query: str) -> Optional[Dict[str, Any]]:
     # "list nodes", "what nodes are connected"
     if ("list" in q and "node" in q) or ("node" in q and ("connect" in q or "list" in q or "what" in q)):
         return {"plugin_id": "homeclaw-browser", "capability_id": "node_list", "parameters": {}}
+    # PPT / slides / presentation (avoids "I need some time" with no tool call — run plugin so user gets the file + link)
+    if any(kw in q for kw in ("ppt", "powerpoint", "slides", "presentation", ".pptx", "幻灯片", "演示文稿")):
+        return {"plugin_id": "ppt-generation", "capability_id": "create_from_source", "parameters": {"source": query.strip()}}
     return None
 
 
@@ -208,8 +211,9 @@ class Core(CoreInterface):
             self.latestPromptRequest: PromptRequest = None
             Util().setup_logging("core", Util().get_core_metadata().mode)
             meta = Util().get_core_metadata()
-            self.orchestrator_timeout_seconds = max(0, int(getattr(meta, "orchestrator_timeout_seconds", 30) or 0))
+            self.orchestrator_timeout_seconds = max(0, int(getattr(meta, "orchestrator_timeout_seconds", 60) or 0))
             self.orchestrator_unified_with_tools = getattr(meta, "orchestrator_unified_with_tools", True)
+            self.inbound_request_timeout_seconds = max(0, int(getattr(meta, "inbound_request_timeout_seconds", 0) or 0))
             root = Util().root_path()
             db_folder = os.path.join(root, 'database')
             if not os.path.exists(db_folder):
@@ -1111,7 +1115,7 @@ class Core(CoreInterface):
                                     host=last.get("host") or "",
                                     port=port,
                                     from_channel=ch_name,
-                                    response_data={"text": self._format_outbound_text(msg), "format": self._safe_classify_format(msg)},
+                                    response_data={"text": self._format_outbound_text(msg), "format": "plain"},
                                 )
                                 await self.response_queue.put(async_resp)
                     except Exception as notify_e:
@@ -1211,8 +1215,21 @@ class Core(CoreInterface):
             Minimal API for any bot: POST {"user_id": "...", "text": "..."} and get {"text": "..."} back.
             No channel process needed; add user_id to config/user.yml allowlist. Use channel_name to tag the source (e.g. telegram, discord).
             When auth_enabled and auth_api_key are set in config, require X-API-Key or Authorization: Bearer.
+            Optional stream: true — returns Server-Sent Events (text/event-stream): progress messages during long tasks (e.g. "Generating your presentation…") then a final event with event "done" and the result (same shape as non-stream).
             """
             try:
+                if getattr(request, "stream", False):
+                    progress_queue = asyncio.Queue()
+                    try:
+                        progress_queue.put_nowait({"event": "progress", "message": "Processing your request…", "tool": ""})
+                    except Exception:
+                        pass
+                    task = asyncio.create_task(self._handle_inbound_request_impl(request, progress_queue=progress_queue))
+                    return StreamingResponse(
+                        self._inbound_sse_generator(progress_queue, task),
+                        media_type="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+                    )
                 ok, text, status, image_paths = await self._handle_inbound_request(request)
                 if not ok:
                     return JSONResponse(status_code=status, content={"error": text, "text": ""})
@@ -1462,7 +1479,7 @@ class Core(CoreInterface):
             "skills_incremental_sync", "plugins_use_vector_search", "plugins_vector_collection",
             "plugins_max_retrieved", "plugins_similarity_threshold", "plugins_refresh_on_startup",
             "system_plugins_auto_start", "system_plugins", "system_plugins_env", "orchestrator_unified_with_tools",
-            "orchestrator_timeout_seconds", "use_prompt_manager", "prompts_dir", "prompt_default_language",
+            "orchestrator_timeout_seconds", "inbound_request_timeout_seconds", "use_prompt_manager", "prompts_dir", "prompt_default_language",
             "prompt_cache_ttl_seconds", "auth_enabled", "auth_api_key", "core_public_url", "tools", "result_viewer", "knowledge_base",
             "file_understanding", "llama_cpp", "completion", "local_models", "cloud_models", "main_llm",
             "embedding_llm", "main_llm_language", "embedding_host", "embedding_port", "main_llm_host", "main_llm_port",
@@ -1713,6 +1730,7 @@ class Core(CoreInterface):
             Also clears chat history (homeclaw_chat_history, sessions, history-by-role, run history).
             If use_agent_memory_file is true, also clears AGENT_MEMORY.md.
             If use_daily_memory is true, also clears yesterday's and today's daily memory files.
+            If profile is enabled, also clears all user profiles (per-user JSON files).
             When auth_enabled, require X-API-Key or Authorization: Bearer (same as /inbound).
             """
             mem = getattr(self, "mem_instance", None)
@@ -1732,7 +1750,7 @@ class Core(CoreInterface):
                         logger.debug("Chat history reset during memory reset: {}", e)
                 try:
                     meta = Util().get_core_metadata()
-                    if getattr(meta, "use_agent_memory_file", False):
+                    if getattr(meta, "use_agent_memory_file", True):
                         try:
                             workspace_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "")
                             agent_path = getattr(meta, "agent_memory_path", "") or ""
@@ -1741,7 +1759,7 @@ class Core(CoreInterface):
                                 message = "Memory and AGENT_MEMORY.md cleared."
                         except Exception as e:
                             logger.debug("clear_agent_memory_file during reset: {}", e)
-                    if getattr(meta, "use_daily_memory", False):
+                    if getattr(meta, "use_daily_memory", True):
                         try:
                             workspace_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "")
                             daily_dir = getattr(meta, "daily_memory_dir", "") or ""
@@ -1753,6 +1771,17 @@ class Core(CoreInterface):
                                 message = (message + " Daily memory (yesterday/today) cleared.") if message else "Memory and daily memory cleared."
                         except Exception as e:
                             logger.debug("clear_daily_memory during reset: {}", e)
+                    profile_cfg = getattr(meta, "profile", None) or {}
+                    if isinstance(profile_cfg, dict) and profile_cfg.get("enabled", True):
+                        try:
+                            from base.profile_store import clear_all_profiles
+                            profile_base_dir = (profile_cfg.get("dir") or "").strip() or None
+                            n_profiles = clear_all_profiles(base_dir=profile_base_dir)
+                            if n_profiles > 0:
+                                logger.info("Profiles cleared ({} file(s)).", n_profiles)
+                                message = (message + " Profiles cleared.") if message else "Profiles cleared."
+                        except Exception as e:
+                            logger.debug("clear_all_profiles during reset: {}", e)
                 except Exception as e:
                     logger.debug("Memory reset agent/daily clear: {}", e)
                 if chat_cleared:
@@ -2266,17 +2295,17 @@ class Core(CoreInterface):
         logger.debug("core initialized and all the endpoints are registered!")
 
 
-    async def _handle_inbound_request(self, request: InboundRequest) -> Tuple[bool, str, int, Optional[List[str]]]:
-        """Shared logic for POST /inbound and WebSocket /ws. Returns (success, text_or_error, status_code, image_paths_or_none)."""
+    async def _handle_inbound_request(self, request: InboundRequest, progress_queue: Optional[asyncio.Queue] = None) -> Tuple[bool, str, int, Optional[List[str]]]:
+        """Shared logic for POST /inbound and WebSocket /ws. Returns (success, text_or_error, status_code, image_paths_or_none). When progress_queue is set (stream=true), progress messages are put on the queue during long-running tools."""
         try:
-            return await self._handle_inbound_request_impl(request)
+            return await self._handle_inbound_request_impl(request, progress_queue=progress_queue)
         except Exception as e:
             logger.exception(e)
             msg = (str(e) or "Internal error").strip()[:500]
             return False, msg or "Internal error", 500, None
 
-    async def _handle_inbound_request_impl(self, request: InboundRequest) -> Tuple[bool, str, int, Optional[List[str]]]:
-        """Implementation of _handle_inbound_request. Do not call directly; use _handle_inbound_request for crash-safe handling."""
+    async def _handle_inbound_request_impl(self, request: InboundRequest, progress_queue: Optional[asyncio.Queue] = None) -> Tuple[bool, str, int, Optional[List[str]]]:
+        """Implementation of _handle_inbound_request. Do not call directly; use _handle_inbound_request for crash-safe handling. When progress_queue is set, progress events are put on it during long-running tools so stream=true clients can show status."""
         from datetime import datetime
         req_id = str(datetime.now().timestamp())
         user_name = request.user_name or request.user_id
@@ -2358,6 +2387,8 @@ class Core(CoreInterface):
                         self._set_latest_location(pr.system_user_id, display_loc, lat_lng_str=lat_lng_str)
         except Exception as e:
             logger.debug("Store latest location on inbound: {}", e)
+        if progress_queue is not None:
+            pr.request_metadata["progress_queue"] = progress_queue
         self.latestPromptRequest = copy.deepcopy(pr)
         self._persist_last_channel(pr)
         # All users (normal + companion type) use the same main flow: tools, memory, chat, sandbox per user. No Friends plugin; list all users and chat with each separately. See docs_design/CompanionFeatureDesign.md.
@@ -2378,6 +2409,79 @@ class Core(CoreInterface):
         if not img_paths and getattr(self, "_response_image_paths_by_request_id", None):
             img_paths = self._response_image_paths_by_request_id.pop(pr.request_id, None)
         return True, resp_text, 200, img_paths
+
+    async def _inbound_sse_generator(self, progress_queue: asyncio.Queue, task: asyncio.Task) -> Any:
+        """Yield Server-Sent Events: progress messages from the queue, then a final 'done' event with the result (same shape as non-stream /inbound). Used when POST /inbound has stream=true. Never raises; on any error yields a 'done' event with ok=False."""
+        def _yield_done(ok: bool, text: str = "", error: str = "", status: int = 200, data_urls: Optional[List[str]] = None) -> str:
+            """Build and return one SSE line for event 'done'. Never raises."""
+            payload = {"event": "done", "ok": ok, "text": (text or "")[:50000], "format": "plain", "status": status}
+            if error:
+                payload["error"] = (error or "")[:2000]
+            if data_urls:
+                payload["images"] = data_urls
+                payload["image"] = data_urls[0] if data_urls else None
+            try:
+                return f"data: {json.dumps(payload)}\n\n"
+            except Exception:
+                return f"data: {json.dumps({'event': 'done', 'ok': False, 'error': 'Serialization error', 'text': ''})}\n\n"
+
+        try:
+            while not task.done():
+                try:
+                    msg = await asyncio.wait_for(progress_queue.get(), timeout=0.4)
+                    if isinstance(msg, dict):
+                        try:
+                            yield f"data: {json.dumps(msg)}\n\n"
+                        except Exception:
+                            pass
+                except asyncio.TimeoutError:
+                    continue
+                except Exception:
+                    continue
+            try:
+                ok, text, status, image_paths = task.result()
+            except Exception as e:
+                logger.exception("inbound stream task failed: {}", e)
+                yield _yield_done(ok=False, error=str(e)[:2000])
+                return
+            try:
+                out_text, out_fmt = self._outbound_text_and_format(text) if text else ("", "plain")
+            except Exception as e:
+                logger.debug("inbound SSE outbound_text_and_format: {}", e)
+                out_text, out_fmt = (str(text)[:50000] if text else "", "plain")
+            content = {"event": "done", "ok": ok, "text": out_text, "format": out_fmt, "status": status}
+            if not ok:
+                content["error"] = (text or "")[:2000]
+            data_urls = []
+            if image_paths:
+                for image_path in image_paths:
+                    if not isinstance(image_path, str) or not os.path.isfile(image_path):
+                        continue
+                    try:
+                        with open(image_path, "rb") as f:
+                            b64 = base64.b64encode(f.read()).decode("ascii")
+                        ext = (image_path.lower().split(".")[-1] if "." in image_path else "png") or "png"
+                        mime = "image/png" if ext == "png" else ("image/jpeg" if ext in ("jpg", "jpeg") else "image/" + ext)
+                        if mime == "image/jpeg":
+                            pass
+                        elif mime == "image/jpg":
+                            mime = "image/jpeg"
+                        data_urls.append(f"data:{mime};base64,{b64}")
+                    except Exception:
+                        pass
+            if data_urls:
+                content["images"] = data_urls
+                content["image"] = data_urls[0]
+            try:
+                yield f"data: {json.dumps(content)}\n\n"
+            except Exception:
+                yield _yield_done(ok=ok, text=out_text, error=content.get("error", ""), status=status, data_urls=data_urls if data_urls else None)
+        except Exception as e:
+            logger.exception("inbound SSE generator: {}", e)
+            try:
+                yield _yield_done(ok=False, error=str(e)[:2000])
+            except Exception:
+                yield "data: {\"event\":\"done\",\"ok\":false,\"error\":\"SSE error\",\"text\":\"\"}\n\n"
 
     def _persist_last_channel(self, request: PromptRequest) -> None:
         """Persist last channel to DB and atomic file (database/latest_channel.json) for robust send_response_to_latest_channel. Also saves with per-session key for cron delivery_target='session'."""
@@ -2621,7 +2725,7 @@ class Core(CoreInterface):
         Only used when orchestrator_unified_with_tools is false. When true (default), routing is done via
         route_to_tam / route_to_plugin tools in the main chat.
         """
-        timeout_sec = getattr(self, "orchestrator_timeout_seconds", 0) or 0
+        timeout_sec = getattr(self, "orchestrator_timeout_seconds", 60) or 0
         request_id = getattr(request, "request_id", None) or ""
         t0 = time.time()
 
@@ -2768,7 +2872,8 @@ class Core(CoreInterface):
                     if resp_text == ROUTING_RESPONSE_ALREADY_SENT:
                         logger.debug("Routing tool already sent response to channel")
                         continue
-                    resp_data = {"text": self._format_outbound_text(resp_text), "format": self._safe_classify_format(resp_text)}
+                    # Channel queue gets converted (channel-ready) text; format must be "plain" so it matches content (avoid markdown/link hint with whatsapp/plain text).
+                    resp_data = {"text": self._format_outbound_text(resp_text), "format": "plain"}
                     # Any skill/tool output that includes images: HOMECLAW_IMAGE_PATH=<path> → send to channel/companion
                     img_paths = (request.request_metadata or {}).get("response_image_paths")
                     if not isinstance(img_paths, list):
@@ -2834,7 +2939,8 @@ class Core(CoreInterface):
         try:
             if not key:
                 key = last_channel_store._DEFAULT_KEY
-            resp_data = {"text": self._format_outbound_text(response), "format": self._safe_classify_format(response)}
+            # Channel queue: send converted (channel-ready) text; format "plain" so it matches content.
+            resp_data = {"text": self._format_outbound_text(response), "format": "plain"}
             request: Optional[PromptRequest] = self.latestPromptRequest
             if key != last_channel_store._DEFAULT_KEY or request is None:
                 stored = last_channel_store.get_last_channel(key)
@@ -2881,7 +2987,8 @@ class Core(CoreInterface):
         audio_path: Optional[str] = None,
     ):
         """Send text and optional media (file paths) to the channel. Channels that support image/video/audio send them; others use text only."""
-        resp_data = {"text": self._format_outbound_text(response), "format": self._safe_classify_format(response)}
+        # Channel queue: converted text; format "plain" so it matches content.
+        resp_data = {"text": self._format_outbound_text(response), "format": "plain"}
         if request is None:
             return
         if image_path and isinstance(image_path, str) and os.path.isfile(image_path):
@@ -3813,7 +3920,7 @@ class Core(CoreInterface):
             need_embedder = (
                 getattr(core_metadata, "skills_use_vector_search", False)
                 or getattr(core_metadata, "plugins_use_vector_search", False)
-                or getattr(core_metadata, "use_agent_memory_search", False)
+                or getattr(core_metadata, "use_agent_memory_search", True)
             )
             if need_embedder and getattr(self, "embedder", None) and Util()._effective_embedding_llm_type() == "local":
                 try:
@@ -3831,11 +3938,16 @@ class Core(CoreInterface):
                     skills_path = get_skills_dir(getattr(core_metadata, "skills_dir", None), root=root)
                     skills_test_dir_str = (getattr(core_metadata, "skills_test_dir", None) or "").strip()
                     skills_test_path = get_skills_dir(skills_test_dir_str, root=root) if skills_test_dir_str else None
+                    skills_extra_raw = getattr(core_metadata, "skills_extra_dirs", None) or []
+                    skills_extra_paths = [root / p if not Path(p).is_absolute() else Path(p) for p in skills_extra_raw if (p or "").strip()]
+                    disabled_folders = getattr(core_metadata, "skills_disabled", None) or []
                     incremental = bool(getattr(core_metadata, "skills_incremental_sync", False))
                     try:
                         n = await sync_skills_to_vector_store(
                             skills_path, self.skills_vector_store, self.embedder,
                             skills_test_dir=skills_test_path, incremental=incremental,
+                            skills_extra_dirs=skills_extra_paths if skills_extra_paths else None,
+                            disabled_folders=disabled_folders if disabled_folders else None,
                         )
                         _component_log("skills", f"synced {n} skill(s) to vector store")
                     except Exception as e:
@@ -3863,7 +3975,7 @@ class Core(CoreInterface):
                             logger.warning("Plugins vector sync failed: {}", e)
 
             # Sync agent memory (AGENT_MEMORY + daily markdown) to vector store when use_agent_memory_search. Index global + per-user when multiple users.
-            if getattr(core_metadata, "use_agent_memory_search", False):
+            if getattr(core_metadata, "use_agent_memory_search", True):
                 if getattr(self, "agent_memory_vector_store", None) and getattr(self, "embedder", None):
                     from base.workspace import get_workspace_dir
                     from base.agent_memory_index import sync_agent_memory_to_vector_store
@@ -4512,8 +4624,8 @@ class Core(CoreInterface):
                         "If low confidence after search, say you checked. "
                         "This curated agent memory is authoritative when it conflicts with RAG context below."
                     )
-                    use_agent_file = getattr(Util().core_metadata, "use_agent_memory_file", False)
-                    use_daily = getattr(Util().core_metadata, "use_daily_memory", False)
+                    use_agent_file = getattr(Util().core_metadata, "use_agent_memory_file", True)
+                    use_daily = getattr(Util().core_metadata, "use_daily_memory", True)
                     if _memory_flush_primary:
                         directive += " Durable and daily memory are written in a dedicated step; you do not need to call append_agent_memory or append_daily_memory in this conversation."
                     elif use_agent_file or use_daily:
@@ -4576,11 +4688,11 @@ class Core(CoreInterface):
                     logger.warning("Skipping agent memory directive due to error: {}", e, exc_info=False)
             else:
                 # Legacy: inject AGENT_MEMORY content (capped) and optionally daily memory.
-                if getattr(Util().core_metadata, 'use_agent_memory_file', False):
+                if getattr(Util().core_metadata, 'use_agent_memory_file', True):
                     try:
                         ws_dir = get_workspace_dir(getattr(Util().core_metadata, 'workspace_dir', None) or 'config/workspace')
                         agent_path = getattr(Util().core_metadata, 'agent_memory_path', None) or ''
-                        max_chars = max(0, int(getattr(Util().core_metadata, 'agent_memory_max_chars', 5000) or 0))
+                        max_chars = max(0, int(getattr(Util().core_metadata, 'agent_memory_max_chars', 20000) or 0))
                         _sys_uid_legacy = getattr(request, "system_user_id", None) if request else None
                         agent_content = load_agent_memory_file(
                             workspace_dir=ws_dir, agent_memory_path=agent_path or None, max_chars=max_chars, system_user_id=_sys_uid_legacy
@@ -4596,7 +4708,7 @@ class Core(CoreInterface):
                         logger.warning("Skipping AGENT_MEMORY.md injection due to error: {}", e, exc_info=False)
 
                 # Daily memory (memory/YYYY-MM-DD.md): yesterday + today; only when not using retrieval-first.
-                if getattr(Util().core_metadata, 'use_daily_memory', False):
+                if getattr(Util().core_metadata, 'use_daily_memory', True):
                     try:
                         today = date.today()
                         yesterday = today - timedelta(days=1)
@@ -4617,21 +4729,24 @@ class Core(CoreInterface):
                     except Exception as e:
                         logger.warning("Skipping daily memory injection due to error: {}", e, exc_info=False)
 
-            # Skills (SKILL.md from skills_dir) — optional; see Design.md §3.6
+            # Skills (SKILL.md from skills_dir + skills_extra_dirs); skills_disabled excluded
             if getattr(Util().core_metadata, 'use_skills', False):
                 try:
                     root = Path(__file__).resolve().parent.parent
                     meta_skills = Util().core_metadata
                     skills_path = get_skills_dir(getattr(meta_skills, 'skills_dir', None), root=root)
+                    skills_extra_raw = getattr(meta_skills, 'skills_extra_dirs', None) or []
+                    skills_dirs = [skills_path] + [root / p if not Path(p).is_absolute() else Path(p) for p in skills_extra_raw if (p or "").strip()]
+                    disabled_folders = getattr(meta_skills, 'skills_disabled', None) or []
                     skills_list = []
                     use_vector_search = bool(getattr(meta_skills, 'skills_use_vector_search', False))
                     if not use_vector_search:
                         # skills_use_vector_search=false means include ALL skills (no RAG, no cap)
-                        skills_list = load_skills(skills_path, include_body=False)
+                        skills_list = load_skills_from_dirs(skills_dirs, disabled_folders=disabled_folders, include_body=False)
                         if skills_list:
                             _component_log("skills", f"included all {len(skills_list)} skill(s) (skills_use_vector_search=false)")
                     if not skills_list and use_vector_search and getattr(self, 'skills_vector_store', None) and getattr(self, 'embedder', None):
-                        from base.skills import search_skills_by_query, load_skill_by_folder, TEST_ID_PREFIX
+                        from base.skills import search_skills_by_query, load_skill_by_folder, load_skill_by_folder_from_dirs, TEST_ID_PREFIX
                         max_retrieved = max(1, min(100, int(getattr(meta_skills, 'skills_max_retrieved', 10) or 10)))
                         threshold = float(getattr(meta_skills, 'skills_similarity_threshold', 0.0) or 0.0)
                         hits = await search_skills_by_query(
@@ -4644,12 +4759,10 @@ class Core(CoreInterface):
                             if hit_id.startswith(TEST_ID_PREFIX):
                                 load_path = skills_test_path if skills_test_path and skills_test_path.is_dir() else None
                                 folder_name = hit_id[len(TEST_ID_PREFIX):]
+                                skill_dict = load_skill_by_folder(load_path, folder_name, include_body=False) if load_path else None
                             else:
-                                load_path = skills_path
                                 folder_name = hit_id
-                            if load_path is None:
-                                continue
-                            skill_dict = load_skill_by_folder(load_path, folder_name, include_body=False)
+                                skill_dict = load_skill_by_folder_from_dirs(skills_dirs, folder_name, include_body=False)
                             if skill_dict is None:
                                 try:
                                     self.skills_vector_store.delete(hit_id)
@@ -4665,7 +4778,7 @@ class Core(CoreInterface):
                             _component_log("skills", f"capped to {skills_max} skill(s) after threshold (skills_max_in_prompt)")
                     if not skills_list:
                         # RAG returned nothing; fallback: load all skills from disk
-                        skills_list = load_skills(skills_path, include_body=False)
+                        skills_list = load_skills_from_dirs(skills_dirs, disabled_folders=disabled_folders, include_body=False)
                         if skills_list:
                             _component_log("skills", f"loaded {len(skills_list)} skill(s) from disk (RAG had no hits)")
                     # Force-include: config rules (core.yml) and skill-driven triggers (SKILL.md trigger:). Query-matched skills get instruction + optional auto_invoke.
@@ -4673,7 +4786,6 @@ class Core(CoreInterface):
                     skills_list = skills_list or []
                     q = (query or "").strip().lower()
                     folders_present = {s.get("folder") for s in skills_list}
-                    from base.skills import load_skill_by_folder
                     for rule in (getattr(meta_skills, "skills_force_include_rules", None) or []):
                         # Support single "pattern" (str) or "patterns" (list) for multi-language / general matching
                         patterns = rule.get("patterns") if isinstance(rule, dict) else None
@@ -4702,7 +4814,7 @@ class Core(CoreInterface):
                             folder = str(folder).strip()
                             if not folder or folder in folders_present:
                                 continue
-                            skill_dict = load_skill_by_folder(skills_path, folder, include_body=False)
+                            skill_dict = load_skill_by_folder_from_dirs(skills_dirs, folder, include_body=False)
                             if skill_dict:
                                 skills_list = [skill_dict] + [s for s in skills_list if s.get("folder") != folder]
                                 folders_present.add(folder)
@@ -4721,7 +4833,7 @@ class Core(CoreInterface):
                                     args[k] = [s.replace("{{query}}", user_q) if isinstance(s, str) else s for s in v]
                             force_include_auto_invoke.append({"tool": str(auto_invoke["tool"]).strip(), "arguments": args})
                     # Skill-driven triggers: declare trigger.patterns + instruction + auto_invoke in each skill's SKILL.md; no need to repeat in core.yml
-                    for skill_dict in load_skills(skills_path, include_body=False):
+                    for skill_dict in load_skills_from_dirs(skills_dirs, disabled_folders=disabled_folders, include_body=False):
                         trigger = skill_dict.get("trigger") if isinstance(skill_dict, dict) else None
                         if not isinstance(trigger, dict):
                             continue
@@ -4770,11 +4882,14 @@ class Core(CoreInterface):
                         _component_log("skills", f"selected: {', '.join(selected_names)}")
                     # For skills in skills_include_body_for, re-load with body (and USAGE.md if present) so the model can answer "how do I use this?"
                     include_body_for = list(getattr(meta_skills, "skills_include_body_for", None) or [])
+                    body_max_chars = max(0, int(getattr(meta_skills, "skills_include_body_max_chars", 0) or 0))
                     if include_body_for:
                         for i, s in enumerate(skills_list):
                             folder = (s.get("folder") or "").strip()
                             if folder and folder in include_body_for:
-                                full_skill = load_skill_by_folder(skills_path, folder, include_body=True)
+                                full_skill = load_skill_by_folder_from_dirs(
+                                    skills_dirs, folder, include_body=True, body_max_chars=body_max_chars
+                                )
                                 if full_skill:
                                     skills_list[i] = full_skill
                     include_body = bool(include_body_for)
@@ -5004,8 +5119,8 @@ class Core(CoreInterface):
                     and len(messages) > max_msg
                     and getattr(Util().get_core_metadata(), "use_tools", False)
                     and (
-                        getattr(Util().get_core_metadata(), "use_agent_memory_file", False)
-                        or getattr(Util().get_core_metadata(), "use_daily_memory", False)
+                        getattr(Util().get_core_metadata(), "use_agent_memory_file", True)
+                        or getattr(Util().get_core_metadata(), "use_daily_memory", True)
                     )
                 )
                 if run_flush and system_parts:
@@ -5128,23 +5243,29 @@ class Core(CoreInterface):
 
             if openai_tools:
                 logger.info("Tools available for this turn: {}", tool_names)
-                # Inject actual homeclaw_root into system prompt so the model uses correct paths (avoids hallucinated bases)
+                # Inject file/sandbox rules so the model uses correct paths (avoids wrong base and "file not found")
                 _file_tool_names = {"file_read", "file_write", "document_read", "folder_list", "file_find"}
                 if tool_names and _file_tool_names.intersection(set(tool_names)):
                     try:
-                        base_str = (Util().get_core_metadata().get_homeclaw_root() or ".").strip()
-                        if base_str and llm_input and llm_input[0].get("role") == "system":
-                            block = (
-                                "\n\n## File tools base path\n"
-                                "Default base for all file search, read, and write is the user's private folder: homeclaw_root/{user_id}. Use path=\".\" (or omit path where the tool allows) for this default. "
-                                "Only when the user explicitly says \"share\" or \"share folder\" use path=\"share\" (or path=\"share/...\") to access homeclaw_root/share. "
-                                "For file_read, file_write, document_read, folder_list, file_find: path=\".\" or omitted = user's private folder; path=\"share\" or \"share/...\" = shared folder; path=\"subdir\" = relative to private folder. "
-                                "When the user asks what files are in their directory, or to list their files (e.g. 你的目录下都有哪些文件, 列出文件, what's in my folder), call folder_list with path=\".\" for private folder, or path=\"share\" for shared folder, then report the result. "
-                                "To find files by type: call file_find with pattern (e.g. pattern=\"*.pdf\"); default path=\".\" searches the user's private folder. "
-                                "When the user asks to summarize or read a document (e.g. a PDF or a filename in quotes) without giving a path: search the user's private folder first (file_find path=\".\"), then if needed the share folder (path=\"share\"); use document_read(path=<path from file_find; prefix \"share/\" for results from path=\"share\">), then summarize or answer. "
-                                "Report only paths returned by file_find or folder_list; do not invent or guess paths. "
-                                f"Current homeclaw_root: {base_str}"
-                            )
+                        base_str = (Util().get_core_metadata().get_homeclaw_root() or "").strip()
+                        if llm_input and llm_input[0].get("role") == "system":
+                            if not base_str:
+                                block = (
+                                    "\n\n## File tools (not configured)\n"
+                                    "homeclaw_root is not set in config/core.yml. File and folder tools will fail until it is set. "
+                                    "Tell the user: file access is not configured; the admin must set homeclaw_root in config/core.yml to the root folder where each user has a subfolder (e.g. homeclaw_root/{user_id}/ for private files, homeclaw_root/share for shared)."
+                                )
+                            else:
+                                block = (
+                                    "\n\n## File tools base path (sandbox + share)\n"
+                                    "Do not use workspace or config/workspace for user files — that is internal. "
+                                    "User-accessible areas: (1) User sandbox = homeclaw_root/{user_id}/ (path \".\" or \"subdir\") — main folder for this user; put generated files in output/ (path \"output/filename\") and return the link. "
+                                    "(2) Share = homeclaw_root/share/ (path \"share\" or \"share/...\") — shared by all users. "
+                                    "When the user asks for file search, list, or read without specifying a folder: use path=\".\" (user sandbox and its subfolders) first; if not found or user says \"share\", use path=\"share\" or \"share/...\". "
+                                    "folder_list(path=\".\") = list user's sandbox; folder_list(path=\"share\") = list shared folder. file_find(path=\".\", pattern=\"*.pdf\") = search user sandbox recursively. "
+                                    "Report only paths returned by file_find or folder_list; do not invent paths. "
+                                    f"Current homeclaw_root: {base_str}"
+                                )
                             llm_input[0]["content"] = (llm_input[0].get("content") or "") + block
                     except Exception as e:
                         logger.debug("Inject homeclaw_root into system prompt failed: {}", e)
@@ -5363,6 +5484,26 @@ class Core(CoreInterface):
                                 args.get("capability_id"),
                                 args_redacted.get("parameters") if isinstance(args_redacted.get("parameters"), dict) else args_redacted.get("parameters"),
                             )
+                        # Progress for stream=true: let the user know a long-running step is starting
+                        progress_queue = None
+                        if getattr(context, "request", None) and isinstance(getattr(context.request, "request_metadata", None), dict):
+                            progress_queue = context.request.request_metadata.get("progress_queue")
+                        if progress_queue and hasattr(progress_queue, "put_nowait") and name in ("route_to_plugin", "run_skill", "document_read", "save_result_page"):
+                            msg = "Working on it…"
+                            if name == "route_to_plugin" and isinstance(args, dict):
+                                pid = (args.get("plugin_id") or "").strip().lower()
+                                if "ppt" in pid or "slide" in pid:
+                                    msg = "Generating your presentation…"
+                                elif pid:
+                                    msg = f"Running {pid}…"
+                            elif name == "document_read":
+                                msg = "Reading the document…"
+                            elif name == "save_result_page":
+                                msg = "Saving the result…"
+                            try:
+                                progress_queue.put_nowait({"event": "progress", "message": msg, "tool": name})
+                            except Exception:
+                                pass
                         try:
                             if tool_timeout_sec > 0:
                                 result = await asyncio.wait_for(
@@ -6097,7 +6238,7 @@ class Core(CoreInterface):
 
     async def re_sync_agent_memory(self, system_user_id: Optional[str] = None) -> int:
         """Re-index AGENT_MEMORY + daily memory (markdown) into the vector store for the given user (or global when None). Call after append so new content is searchable. Returns number of chunks synced."""
-        if not getattr(Util().get_core_metadata(), "use_agent_memory_search", False):
+        if not getattr(Util().get_core_metadata(), "use_agent_memory_search", True):
             return 0
         store = getattr(self, "agent_memory_vector_store", None)
         embedder = getattr(self, "embedder", None)

@@ -133,7 +133,7 @@ class Util:
         CoreMetadata.to_yaml(self.core_metadata, os.path.join(self.config_path(), 'core.yml'))
 
         log_format = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
-        log_to_console = getattr(self.core_metadata, 'log_to_console', True)
+        log_to_console = getattr(self.core_metadata, 'log_to_console', False)
         if log_to_console:
             if self.silent:
                 logger.remove(sys.stdout)
@@ -249,7 +249,7 @@ class Util:
 
         # remove the stdio logger
         logger.remove()
-        log_to_console = getattr(self.core_metadata, 'log_to_console', True)
+        log_to_console = getattr(self.core_metadata, 'log_to_console', False)
         if mode == "production":
             file_name = module_name + '_production.log'
             log_file = os.path.join(log_path, file_name)

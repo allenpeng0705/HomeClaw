@@ -197,13 +197,13 @@ def _get_tools_config() -> Dict[str, Any]:
 
 
 def _get_homeclaw_root() -> str:
-    """Effective file/folder root (homeclaw_root from config; empty = workspace_dir). Never raises."""
+    """Effective file/folder root (homeclaw_root from config). Empty when not set — do not use workspace for user files. Never raises."""
     try:
         from base.util import Util
         out = Util().get_core_metadata().get_homeclaw_root()
-        return (str(out).strip() if out else "") or "."
+        return (str(out).strip() if out else "") or ""
     except Exception:
-        return "."
+        return ""
 
 
 # ---- Session tools ----
@@ -928,7 +928,7 @@ async def _append_agent_memory_executor(arguments: Dict[str, Any], context: Tool
         return "Error: content is required"
     try:
         meta = Util().get_core_metadata()
-        if not getattr(meta, "use_agent_memory_file", False):
+        if not getattr(meta, "use_agent_memory_file", True):
             return json.dumps({"ok": False, "message": "AGENT_MEMORY.md is disabled (use_agent_memory_file: false). Enable in config/core.yml to use append_agent_memory."})
         ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
         agent_path = getattr(meta, "agent_memory_path", None) or ""
@@ -943,7 +943,7 @@ async def _append_agent_memory_executor(arguments: Dict[str, Any], context: Tool
             f.write("\n")
         # Re-sync so agent_memory_search finds the new content without restarting Core
         core = getattr(context, "core", None)
-        if core and getattr(meta, "use_agent_memory_search", False):
+        if core and getattr(meta, "use_agent_memory_search", True):
             try:
                 re_sync = getattr(core, "re_sync_agent_memory", None)
                 if callable(re_sync):
@@ -964,7 +964,7 @@ async def _append_daily_memory_executor(arguments: Dict[str, Any], context: Tool
         return "Error: content is required"
     try:
         meta = Util().get_core_metadata()
-        if not getattr(meta, "use_daily_memory", False):
+        if not getattr(meta, "use_daily_memory", True):
             return json.dumps({"ok": False, "message": "Daily memory is disabled (use_daily_memory: false). Enable in config/core.yml to use append_daily_memory."})
         ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
         daily_dir = getattr(meta, "daily_memory_dir", None) or ""
@@ -974,7 +974,7 @@ async def _append_daily_memory_executor(arguments: Dict[str, Any], context: Tool
             from datetime import date
             # Re-sync so agent_memory_search finds the new content without restarting Core
             core = getattr(context, "core", None)
-            if core and getattr(meta, "use_agent_memory_search", False):
+            if core and getattr(meta, "use_agent_memory_search", True):
                 try:
                     re_sync = getattr(core, "re_sync_agent_memory", None)
                     if callable(re_sync):
@@ -995,7 +995,7 @@ async def _agent_memory_search_executor(arguments: Dict[str, Any], context: Tool
         meta = Util().get_core_metadata()
     except Exception:
         return json.dumps({"results": [], "message": "Config unavailable."})
-    if not getattr(meta, "use_agent_memory_search", False):
+    if not getattr(meta, "use_agent_memory_search", True):
         return json.dumps({"results": [], "message": "Agent memory search is disabled. Set use_agent_memory_search: true in config/core.yml."})
     core = getattr(context, "core", None)
     if core is None:
@@ -1027,7 +1027,7 @@ async def _agent_memory_get_executor(arguments: Dict[str, Any], context: ToolCon
         meta = Util().get_core_metadata()
     except Exception:
         return json.dumps({"path": "", "text": "", "message": "Config unavailable."})
-    if not getattr(meta, "use_agent_memory_search", False):
+    if not getattr(meta, "use_agent_memory_search", True):
         return json.dumps({"path": "", "text": "", "message": "Agent memory get is disabled. Set use_agent_memory_search: true in config/core.yml."})
     core = getattr(context, "core", None)
     if core is None:
@@ -1852,7 +1852,7 @@ async def _image_executor(arguments: Dict[str, Any], context: ToolContext) -> st
         else:
             r = _resolve_file_path(path_arg, context, for_write=False)
             if r is None:
-                return _FILE_PATH_INVALID_MSG
+                return _file_resolve_error_msg()
             full, base = r
             used_request_image = False
             if not full.is_file():
@@ -2315,7 +2315,7 @@ async def _file_read_executor(arguments: Dict[str, Any], context: ToolContext) -
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
-            return _FILE_PATH_INVALID_MSG
+            return _file_resolve_error_msg()
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -2414,7 +2414,7 @@ async def _document_read_executor(arguments: Dict[str, Any], context: ToolContex
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
-            return _FILE_PATH_INVALID_MSG
+            return _file_resolve_error_msg()
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -2487,7 +2487,7 @@ async def _file_understand_executor(arguments: Dict[str, Any], context: ToolCont
             max_chars = default_max
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
-            return _FILE_PATH_INVALID_MSG
+            return _file_resolve_error_msg()
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -2662,7 +2662,7 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
         path_arg = f"{FILE_OUTPUT_SUBDIR}/report_{file_id}{ext}"
         r = _resolve_file_path(path_arg, context, for_write=True)
         if r is None:
-            return _FILE_PATH_INVALID_MSG
+            return _file_resolve_error_msg()
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -2717,7 +2717,7 @@ async def _file_write_executor(arguments: Dict[str, Any], context: ToolContext) 
     try:
         r = _resolve_file_path(path_arg, context, for_write=True)
         if r is None:
-            return _FILE_PATH_INVALID_MSG
+            return _file_resolve_error_msg()
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -2737,8 +2737,26 @@ _FILE_ACCESS_DENIED_MSG = (
     "You don't have permission to access that path. You can only access files under your workspace, "
     "the shared folder (share/), or the companion folder (companion/)."
 )
-_FILE_NOT_FOUND_MSG = "That file or path wasn't found. Please check the path and try again."
+_FILE_NOT_FOUND_MSG = (
+    "That file or path wasn't found. Try: (1) List your files with folder_list(path='.') or path='share' for the shared folder. "
+    "(2) Search with file_find(path='.', pattern='*name*'). (3) Use path 'share/...' if the file is in the shared folder."
+)
 _FILE_PATH_INVALID_MSG = "I couldn't resolve that path. Please check the path and try again."
+_FILE_HOMECLAW_ROOT_NOT_SET_MSG = (
+    "File and folder access is not configured. Set homeclaw_root in config/core.yml to the root folder where each user has a subfolder (e.g. homeclaw_root/{user_id}/ for private files, homeclaw_root/share for shared). "
+    "Then list or search with folder_list(path='.') or file_find(path='.', pattern='*')."
+)
+
+
+def _file_resolve_error_msg() -> str:
+    """When _resolve_file_path returned None: homeclaw_root not set vs invalid path. Never raises."""
+    try:
+        root = _get_homeclaw_root()
+        if not (root or "").strip():
+            return _FILE_HOMECLAW_ROOT_NOT_SET_MSG
+    except Exception:
+        pass
+    return _FILE_PATH_INVALID_MSG
 
 
 def _path_under(full: Path, base: Optional[Path]) -> bool:
@@ -2816,11 +2834,14 @@ def _resolve_file_path(
         base_str = _get_homeclaw_root()
         path_arg = (path_arg or "").strip()
         if not path_arg:
-            if not base_str or base_str == ".":
-                return (Path("."), None)
+            if not base_str:
+                return None  # homeclaw_root not set; caller should return clear message
             path_arg = "."  # default to user's private folder (homeclaw_root/{user_id}) when homeclaw_root is set
 
-        if not base_str or base_str == ".":
+        if not base_str:
+            # homeclaw_root not set: do not resolve relative paths (would be wrong). Require homeclaw_root in config.
+            if not path_arg or path_arg == "." or not Path(path_arg).is_absolute():
+                return None
             full = Path(path_arg).resolve()
             return (full, None)
 
@@ -2877,7 +2898,7 @@ async def _file_edit_executor(arguments: Dict[str, Any], context: ToolContext) -
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
-            return _FILE_PATH_INVALID_MSG
+            return _file_resolve_error_msg()
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -2998,7 +3019,7 @@ async def _folder_list_executor(arguments: Dict[str, Any], context: ToolContext)
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
-            return _FILE_PATH_INVALID_MSG
+            return _file_resolve_error_msg()
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -3035,7 +3056,7 @@ async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
-            return _FILE_PATH_INVALID_MSG
+            return _file_resolve_error_msg()
         full_dir, base = r
         if not _path_under(full_dir, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -3879,7 +3900,7 @@ def register_routing_tools(registry: ToolRegistry, core: Any) -> None:
     registry.register(
         ToolDefinition(
             name="route_to_plugin",
-            description="Route this request to a specific plugin by plugin_id. Use when the user intent clearly matches one of the available plugins. For homeclaw-browser you MUST pass capability_id and parameters (e.g. node_id, url) when the user asks to take a photo, record video, open a URL, or use a node; otherwise the plugin returns an error.",
+            description="Route this request to a specific plugin by plugin_id. Use when the user intent clearly matches one of the available plugins. You MUST call this tool (do not just reply 'I need some time' or 'working on it') — the user gets the result only when the plugin runs and returns. For PPT/slides/presentation: use plugin_id ppt-generation and capability create_from_source (parameters.source = user request or outline) or create_from_outline/create_presentation. For homeclaw-browser pass capability_id and parameters (e.g. node_id, url) when the user asks for photo, video, or browser.",
             parameters={
                 "type": "object",
                 "properties": {

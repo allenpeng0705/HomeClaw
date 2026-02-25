@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -18,6 +19,7 @@ class CoreService {
   static const String _keyExecAllowlist = 'exec_allowlist';
   static const String _keyCanvasUrl = 'canvas_url';
   static const String _keyNodesUrl = 'nodes_url';
+  static const String _keyShowProgress = 'show_progress_during_long_tasks';
   static const String _defaultBaseUrl = 'http://127.0.0.1:9000';
 
   String _baseUrl = _defaultBaseUrl;
@@ -25,8 +27,10 @@ class CoreService {
   List<String> _execAllowlist = [];
   String? _canvasUrl;
   String? _nodesUrl;
+  bool _showProgressDuringLongTasks = true;
 
   String get baseUrl => _baseUrl;
+  bool get showProgressDuringLongTasks => _showProgressDuringLongTasks;
   String? get apiKey => _apiKey;
   List<String> get execAllowlist => List.unmodifiable(_execAllowlist);
   String? get canvasUrl => _canvasUrl;
@@ -72,6 +76,13 @@ class CoreService {
     if (_canvasUrl != null && _canvasUrl!.isEmpty) _canvasUrl = null;
     _nodesUrl = prefs.getString(_keyNodesUrl)?.trim();
     if (_nodesUrl != null && _nodesUrl!.isEmpty) _nodesUrl = null;
+    _showProgressDuringLongTasks = prefs.getBool(_keyShowProgress) ?? true;
+  }
+
+  Future<void> saveShowProgressDuringLongTasks(bool value) async {
+    _showProgressDuringLongTasks = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyShowProgress, value);
   }
 
   Future<void> saveSettings({required String baseUrl, String? apiKey}) async {
@@ -178,6 +189,7 @@ class CoreService {
   /// [userId] must be the id of the user in user.yml (the chat owner). Same payload shape as WebChat: text, images, videos, audios, files, location.
   /// [images], [videos], [audios], [files] are paths (e.g. from upload) or data URLs Core can read.
   /// [location]: optional "lat,lng" or address string; Core stores it as latest location (per user) and uses it in system context.
+  /// [useStream]: when true and [onProgress] is set, sends stream: true and parses SSE; progress events are reported via [onProgress], final result returned as usual. When false or [onProgress] null, uses single-JSON response (no streaming).
   /// Throws on network or API error.
   Future<Map<String, dynamic>> sendMessage(
     String text, {
@@ -188,8 +200,11 @@ class CoreService {
     List<String>? videos,
     List<String>? audios,
     List<String>? files,
+    bool? useStream,
+    void Function(String message)? onProgress,
   }) async {
     final url = Uri.parse('$_baseUrl/inbound');
+    final useStreamPath = (useStream ?? _showProgressDuringLongTasks) && onProgress != null;
     final body = <String, dynamic>{
       'user_id': userId,
       'text': text,
@@ -202,6 +217,12 @@ class CoreService {
     if (videos != null && videos.isNotEmpty) body['videos'] = videos;
     if (audios != null && audios.isNotEmpty) body['audios'] = audios;
     if (files != null && files.isNotEmpty) body['files'] = files;
+    if (useStreamPath) body['stream'] = true;
+
+    if (useStreamPath) {
+      return _sendMessageStream(url, body, onProgress!);
+    }
+
     final headers = <String, String>{
       'Content-Type': 'application/json',
       ..._authHeaders(),
@@ -222,6 +243,97 @@ class CoreService {
           ? responseImages.map((e) => e as String).toList()
           : (responseImage != null ? [responseImage as String] : null),
     };
+  }
+
+  /// POST /inbound with stream: true; parses SSE and calls [onProgress] for progress events, returns final result from "done" event.
+  Future<Map<String, dynamic>> _sendMessageStream(
+    Uri url,
+    Map<String, dynamic> body,
+    void Function(String message) onProgress,
+  ) async {
+    final client = http.Client();
+    try {
+      final request = http.Request('POST', url);
+      request.body = jsonEncode(body);
+      request.headers['Content-Type'] = 'application/json';
+      request.headers.addAll(_authHeaders());
+      final streamedResponse = await client.send(request).timeout(
+        Duration(seconds: sendMessageTimeoutSeconds),
+        onTimeout: () => throw TimeoutException('Inbound stream timed out'),
+      );
+      if (streamedResponse.statusCode != 200) {
+        final err = await streamedResponse.stream.bytesToString();
+        throw Exception('Core returned ${streamedResponse.statusCode}: $err');
+      }
+      final buffer = StringBuffer();
+      await for (final chunk in streamedResponse.stream.transform(utf8.decoder)) {
+        buffer.write(chunk);
+        final text = buffer.toString();
+        final parts = text.split('\n\n');
+        buffer.clear();
+        if (parts.length > 1) {
+          for (var i = 0; i < parts.length - 1; i++) {
+            final eventText = parts[i].trim();
+            for (final line in eventText.split('\n')) {
+              if (line.startsWith('data: ')) {
+                try {
+                  final json = jsonDecode(line.substring(6)) as Map<String, dynamic>?;
+                  if (json == null) continue;
+                  final event = json['event'] as String?;
+                  if (event == 'progress') {
+                    final message = json['message'] as String?;
+                    if (message != null && message.isNotEmpty) onProgress(message);
+                  } else if (event == 'done') {
+                    final ok = json['ok'] as bool? ?? false;
+                    final outText = (json['text'] as String?) ?? '';
+                    final err = json['error'] as String?;
+                    final responseImages = json['images'];
+                    final responseImage = json['image'];
+                    final imageList = responseImages is List
+                        ? (responseImages as List<dynamic>).whereType<String>().toList()
+                        : (responseImage is String ? <String>[responseImage as String] : null);
+                    return {
+                      'text': ok ? outText : (err ?? outText),
+                      'images': imageList != null && imageList.isNotEmpty ? imageList : null,
+                    };
+                  }
+                } catch (_) {}
+              }
+            }
+          }
+          buffer.write(parts.last);
+        } else {
+          buffer.write(text);
+        }
+      }
+      final remainder = buffer.toString();
+      if (remainder.trim().isNotEmpty) {
+        for (final line in remainder.split('\n')) {
+          if (line.startsWith('data: ')) {
+            try {
+              final json = jsonDecode(line.substring(6)) as Map<String, dynamic>?;
+              if (json != null && json['event'] == 'done') {
+                final ok = json['ok'] as bool? ?? false;
+                final outText = (json['text'] as String?) ?? '';
+                final err = json['error'] as String?;
+                final responseImages = json['images'];
+                final responseImage = json['image'];
+                final imageList = responseImages is List
+                    ? (responseImages as List<dynamic>).whereType<String>().toList()
+                    : (responseImage is String ? <String>[responseImage as String] : null);
+                return {
+                  'text': ok ? outText : (err ?? outText),
+                  'images': imageList != null && imageList.isNotEmpty ? imageList : null,
+                };
+              }
+            } catch (_) {}
+          }
+        }
+      }
+      throw Exception('Stream ended without done event');
+    } finally {
+      client.close();
+    }
   }
 
   /// GET /api/config/core — current core config (whitelisted keys). Throws on error.

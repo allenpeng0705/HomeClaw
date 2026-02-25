@@ -87,6 +87,23 @@ def update_profile(
                 pass
 
 
+def clear_all_profiles(base_dir: Optional[str] = None) -> int:
+    """
+    Delete all user profile JSON files in the profile directory. Used when memory is reset.
+    Returns the number of profile files removed.
+    """
+    dir_path = get_profile_dir(base_dir)
+    removed = 0
+    for path in dir_path.glob("*.json"):
+        if path.is_file():
+            try:
+                path.unlink()
+                removed += 1
+            except Exception as e:
+                logger.warning("profile_store: failed to remove {}: {}", path, e)
+    return removed
+
+
 def format_profile_for_prompt(profile: Dict[str, Any], max_chars: int = 2000) -> str:
     """Format profile dict as a compact string for system prompt (key: value or key: [list])."""
     if not profile:
