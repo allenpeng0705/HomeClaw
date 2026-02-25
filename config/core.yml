@@ -458,7 +458,7 @@ cloud_models:
     host: 127.0.0.1
     port: 4005
     api_key_name: DEEPSEEK_API_KEY
-    api_key: 
+    api_key: sk-eb1f151236524086a0967357233b9c88
     capabilities: [Chat]
   # Alibaba Qwen (Dashscope)
   # - id: Qwen-Turbo
@@ -586,6 +586,7 @@ embedding_llm: local_models/embedding_text_model
 # Legacy fields (kept for backward compat; derived from model entry when using local_models/cloud_models)
 embedding_host: 127.0.0.1
 embedding_port: 5066
+# embedding_health_check_timeout_sec: 120   # seconds to wait for local embedding server; default 120; increase for slow machines or large models
 main_llm_host: 127.0.0.1
 main_llm_port: 5023
 

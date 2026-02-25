@@ -237,6 +237,7 @@ class Core(CoreInterface):
             self.plugin_manager: PluginManager = None
             self.channels: List[BaseChannel] = []
             self.server = None
+            self._core_http_ready = False  # True when Core init is done; /ready returns 503 until then
             self.embedder: EmbeddingBase = None
             self.mem_instance: MemoryBase = None
             self.vector_store: VectorStoreBase = None
@@ -517,6 +518,7 @@ class Core(CoreInterface):
         url = (base_url.rstrip("/") + "/ready")
         deadline = time.monotonic() + timeout_sec
         last_err = None
+        logged_non200 = False
         while time.monotonic() < deadline:
             try:
                 async with httpx.AsyncClient(timeout=2.0) as client:
@@ -524,6 +526,17 @@ class Core(CoreInterface):
                     if r.status_code == 200:
                         return True
                     last_err = f"status {r.status_code}"
+                    # 503 = Core still initializing (expected). Log WARNING only for unexpected codes (e.g. 502).
+                    if r.status_code != 503 and not logged_non200:
+                        logged_non200 = True
+                        try:
+                            body_preview = (r.text or "")[:200]
+                        except Exception:
+                            body_preview = ""
+                        logger.warning(
+                            "system_plugins: GET {} returned {} (body: {}). If timeout, something else may be handling this URL.",
+                            url, r.status_code, body_preview or "(empty)",
+                        )
             except Exception as e:
                 last_err = e
             await asyncio.sleep(interval_sec)
@@ -1015,8 +1028,10 @@ class Core(CoreInterface):
 
         @self.app.get("/ready")
         async def ready():
-            """Lightweight readiness probe (no DB or plugin work). Used by system_plugins startup."""
-            return {"status": "ok"}
+            """Lightweight readiness probe. Returns 503 until Core init is done, then 200. Used by system_plugins startup."""
+            if getattr(self, "_core_http_ready", False):
+                return JSONResponse(status_code=200, content={"status": "ok"})
+            return JSONResponse(status_code=503, content={"status": "initializing"})
 
         @self.app.get("/pinggy", response_class=HTMLResponse)
         async def pinggy_page():
@@ -1656,6 +1671,8 @@ class Core(CoreInterface):
                 if root_str and uid:
                     try:
                         ensure_user_sandbox_folders(root_str, [uid])
+                        from tools.builtin import build_and_save_sandbox_paths_json
+                        build_and_save_sandbox_paths_json()
                     except Exception:
                         pass
                 return JSONResponse(content={"result": "ok", "name": name})
@@ -3940,26 +3957,30 @@ class Core(CoreInterface):
                 _uvicorn_access.addFilter(_SuppressConfigCoreAccessFilter())
             config = uvicorn.Config(self.app, host=core_metadata.host, port=core_metadata.port, log_level="critical", access_log=False)
             self.server = Server(config=config)
-            self.initialize()
-            self.start_email_channel()
-
-            # Embedding server must run first: we embed skills, plugins, and agent_memory so we can filter them by query (vector search). Start LLM manager (embedding + main LLM) before any sync.
-            logger.debug("Starting LLM manager...")
+            # Start HTTP server early so GET /ready is served by this process (avoids 502 from another process on same port). /ready returns 503 until init done.
+            server_task = asyncio.create_task(self.server.serve())
+            await asyncio.sleep(0.5)
+            # Start embedding (and main LLM) server before initializing Cognee so the server is loading while we init; Cognee and syncs need the embedding server.
+            logger.debug("Starting LLM manager (embedding + main LLM)...")
             self.llmManager.run()
             logger.debug("LLM manager started!")
-            # When embedding is local, wait for the embedding server to be ready before syncs that use it
+            self.initialize()
+            self.start_email_channel()
+            # When embedding is local, wait for the embedding server before Cognee or any sync uses it (Cognee add/cognify needs embedding; avoid "embedding server not connected").
             need_embedder = (
-                getattr(core_metadata, "skills_use_vector_search", False)
+                (getattr(core_metadata, "memory_backend", None) or "cognee").strip().lower() == "cognee"
+                or getattr(core_metadata, "skills_use_vector_search", False)
                 or getattr(core_metadata, "plugins_use_vector_search", False)
                 or getattr(core_metadata, "use_agent_memory_search", True)
             )
             if need_embedder and getattr(self, "embedder", None) and Util()._effective_embedding_llm_type() == "local":
                 try:
-                    ready = await asyncio.to_thread(Util().check_embedding_model_server_health, 90)
+                    # Timeout from config embedding_health_check_timeout_sec (default 120)
+                    ready = await asyncio.to_thread(Util().check_embedding_model_server_health, None)
                     if not ready:
-                        logger.warning("Embedding server did not become ready in time; skills/plugins/agent_memory sync may fail.")
+                        logger.warning("Embedding server did not become ready in time; Cognee memory and skills/plugins/agent_memory sync may fail.")
                 except Exception as e:
-                    logger.warning("Embedding server health check failed: {}; sync may fail.", e)
+                    logger.warning("Embedding server health check failed: {}; Cognee/sync may fail.", e)
 
             # Sync skills to vector store when skills_use_vector_search and skills_refresh_on_startup
             if getattr(core_metadata, "skills_use_vector_search", False) and getattr(core_metadata, "skills_refresh_on_startup", True):
@@ -4045,16 +4066,18 @@ class Core(CoreInterface):
                     ]
                     user_ids = [uid for uid in user_ids if str(uid).strip()]
                     ensure_user_sandbox_folders(root_str, user_ids)
+                    from tools.builtin import build_and_save_sandbox_paths_json
+                    build_and_save_sandbox_paths_json()
                 except Exception as e:
-                    logger.debug("ensure_user_sandbox_folders at startup: {}", e)
+                    logger.debug("ensure_user_sandbox_folders / sandbox_paths at startup: {}", e)
 
             # File serving: sandbox files and folder listings at GET /files/out (core_public_url/files/out?path=...&token=...)
             if (getattr(core_metadata, "core_public_url", None) or "").strip():
                 _component_log("files", "serving sandbox files at GET /files/out (core_public_url set)")
-
+            self._core_http_ready = True
             # LLM manager (embedding + main LLM) was started earlier, before skills/plugins/agent_memory sync.
             # Optionally start and register system_plugins (e.g. homeclaw-browser) so one command runs Core + plugins.
-            # Runs in a background asyncio task; each plugin is a separate OS process. Does not block Core or server.serve().
+            # GET /ready now returns 200 so probe will succeed.
             if getattr(core_metadata, "system_plugins_auto_start", False):
                 asyncio.create_task(self._run_system_plugins_startup())
             # Pinggy: only when pinggy.token is set — start tunnel and optionally open browser to /pinggy (public URL + QR). If neither core_public_url nor token is set, we just run Core and do not pop up QR.
@@ -4069,10 +4092,8 @@ class Core(CoreInterface):
                         asyncio.create_task(self._start_pinggy_and_open_browser())
             except Exception:
                 pass
-            # Start the server
-            #server_task = asyncio.create_task(self.server.serve())
-            #await asyncio.gather(llm_task, server_task)
-            await self.server.serve()
+            # Keep running until server stops (server was started early so /ready is served during init)
+            await server_task
 
         except asyncio.CancelledError:
             logger.debug("core uvicorn server was cancelled.")
@@ -5277,10 +5298,14 @@ class Core(CoreInterface):
 
             if openai_tools:
                 logger.info("Tools available for this turn: {}", tool_names)
-                # Inject file/sandbox rules so the model uses correct paths (avoids wrong base and "file not found")
+                # Inject file/sandbox rules and per-user paths JSON so the model uses correct paths (avoids wrong base and "file not found")
                 _file_tool_names = {"file_read", "file_write", "document_read", "folder_list", "file_find"}
                 if tool_names and _file_tool_names.intersection(set(tool_names)):
                     try:
+                        from tools.builtin import (
+                            load_sandbox_paths_json,
+                            get_current_user_sandbox_key,
+                        )
                         base_str = (Util().get_core_metadata().get_homeclaw_root() or "").strip()
                         if llm_input and llm_input[0].get("role") == "system":
                             if not base_str:
@@ -5290,16 +5315,26 @@ class Core(CoreInterface):
                                     "Tell the user: file access is not configured; the admin must set homeclaw_root in config/core.yml to the root folder where each user has a subfolder (e.g. homeclaw_root/{user_id}/ for private files, homeclaw_root/share for shared)."
                                 )
                             else:
+                                paths_data = load_sandbox_paths_json()
+                                user_key = get_current_user_sandbox_key(request)
+                                user_paths = (paths_data.get("users") or {}).get(user_key)
+                                paths_json = ""
+                                if user_paths:
+                                    paths_json = (
+                                        f" For this user the paths are (use only these; do not invent paths like /homeclaw/user): "
+                                        f"sandbox_root = {user_paths.get('sandbox_root', '')} (use path '.' or 'subdir'); "
+                                        f"share = {user_paths.get('share', '')} (use path 'share' or 'share/...'). "
+                                    )
                                 block = (
                                     "\n\n## File tools — sandbox (only two bases)\n"
                                     "Only these two bases are the search path and working area; their subfolders can be accessed. Any other folder cannot be accessed (sandbox). "
-                                    "(1) User sandbox root = homeclaw_root/{user_id}/ (path \".\" or \"subdir\"); (2) share = homeclaw_root/share/ (path \"share\" or \"share/...\"). "
+                                    "(1) User sandbox root (path \".\" or \"subdir\"); (2) share (path \"share\" or \"share/...\"). "
                                     "Do not use workspace, config, or paths outside these two trees. Put generated files in output/ (path \"output/filename\") and return the link. "
                                     "When the user asks about a **specific file by name** (e.g. \"能告诉我1.pdf都讲了什么吗\", \"what is in 1.pdf\"): (1) call folder_list(path='.') or file_find(path='.', pattern='*1.pdf*') to get the path for that file; (2) use the **exact path** from the result that matches the requested name (e.g. path \"1.pdf\") in document_read(path='1.pdf'). Do **not** use a different file (e.g. from output/) or guess a path; use the path that matches the filename the user asked for. "
                                     "When the user asks for file search, list, or read without a specific name: use path=\".\" for the user sandbox first; if not found or user says \"share\", use path=\"share\" or \"share/...\". "
                                     "folder_list(path=\".\") = list user sandbox; folder_list(path=\"share\") = list share; file_find(path=\".\", pattern=\"*.pdf\") = search user sandbox recursively. "
                                     "To read a file, use the exact path returned by folder_list or file_find. Report only paths returned; do not invent paths. "
-                                    f"Current homeclaw_root: {base_str}"
+                                    f"Current homeclaw_root: {base_str}.{paths_json}"
                                 )
                             llm_input[0]["content"] = (llm_input[0].get("content") or "") + block
                     except Exception as e:

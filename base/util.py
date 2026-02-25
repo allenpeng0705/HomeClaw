@@ -1,4 +1,5 @@
 import os
+import socket
 import sys
 from pathlib import Path
 
@@ -232,7 +233,7 @@ class Util:
         return os.path.join(self.root_path(), 'config')
     
     def models_path(self):
-        """Base path for local models (GGUF, tokenizer, etc.). Uses config model_path when set (relative to project root); else root_path()/models. Resolved with pathlib.Path so paths work on Windows, Mac, and Linux (config may use / or \)."""
+        r"""Base path for local models (GGUF, tokenizer, etc.). Uses config model_path when set (relative to project root); else root_path()/models. Resolved with pathlib.Path so paths work on Windows, Mac, and Linux (config may use / or \)."""
         root = self.root_path()
         meta = self.get_core_metadata()
         raw = (getattr(meta, 'model_path', None) or '').strip()
@@ -771,32 +772,74 @@ class Util:
         logger.error(f"Main model server did not become ready within {timeout} seconds.")
         return False
     
-    def check_embedding_model_server_health(self, timeout: int = 120) -> bool:
-        """Check if the LLM server is ready by making a request to its health endpoint."""
-        _, model, type, model_host, model_port = Util().embedding_llm()
-        health_url = f"http://{model_host}:{model_port}/health"
-        logger.debug(f"Embedding model Health URL: {health_url}")
+    def _is_port_open(self, host: str, port: int, timeout: float = 1.0) -> bool:
+        """Return True if a TCP connection to host:port can be opened (something is listening)."""
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except (socket.error, OSError):
+            return False
+
+    def check_embedding_model_server_health(self, timeout: Optional[int] = None) -> bool:
+        """Check if the embedding server is ready. Tries GET /health first; on 404/ConnectionError tries GET /v1/models (OpenAI-compatible). Timeout from config embedding_health_check_timeout_sec or 120."""
+        meta = self.get_core_metadata()
+        _timeout = timeout if timeout is not None else max(30, int(getattr(meta, "embedding_health_check_timeout_sec", 120) or 120))
+        res = self.embedding_llm()
+        if not res or len(res) < 5:
+            logger.error("Embedding LLM not configured; cannot check health.")
+            return False
+        _, model, _type, model_host, model_port = res
+        base_url = f"http://{model_host}:{model_port}"
+        health_url = f"{base_url}/health"
+        models_url = f"{base_url}/v1/models"
+        logger.info("Embedding health check: {} (timeout {}s)", health_url, _timeout)
         start_time = time.time()
-        while time.time() - start_time < timeout:
+        last_err = None
+        last_progress_log_at = [0]  # elapsed seconds when we last logged progress
+
+        while time.time() - start_time < _timeout:
+            elapsed = int(time.time() - start_time)
+            port_open = self._is_port_open(model_host, model_port)
+
             try:
                 response = requests.get(health_url, timeout=10)
                 if response.status_code == 200:
-                    logger.debug("Embedding server is healthy and ready to accept requests.")
+                    logger.info("Embedding server is ready ({}s).", elapsed)
                     return True
-                elif response.status_code == 503:
-                    # The server is not ready yet
-                    # logger.debug("Embedding server is not ready yet, retrying...")
-                    time.sleep(1)  # Wait for 1 second before trying again
+                if response.status_code == 503:
+                    last_err = "503 (server still loading)"
+                    time.sleep(1)
                     continue
-                else:
-                    # The server is up but returned an unexpected status code
-                    logger.error(f"Embedding server returned unexpected status code: {response.status_code}")
-                    return False
-            except requests.exceptions.ConnectionError:
-                # The request failed because the server is not up yet
-                logger.debug("Embedding server is not connected yet, retrying...")
-            time.sleep(1)  # Wait for 1 second before trying again
-        logger.error(f"LLM server did not become ready within {timeout} seconds.")
+                if response.status_code == 404:
+                    last_err = "404 on /health (port open)"
+            except requests.exceptions.ConnectionError as e:
+                last_err = "connection refused" if not port_open else str(e)
+            except requests.exceptions.RequestException as e:
+                last_err = str(e)
+            # Fallback: some llama-server builds use /v1/models for readiness
+            try:
+                r2 = requests.get(models_url, timeout=5)
+                if r2.status_code == 200:
+                    logger.info("Embedding server ready via /v1/models ({}s).", elapsed)
+                    return True
+            except requests.exceptions.RequestException:
+                pass
+            # Log progress every 15s so we know what is blocking
+            if elapsed - last_progress_log_at[0] >= 15:
+                logger.warning(
+                    "Embedding server not ready after {}s. Port {}:{} open: {}. Last: {}.",
+                    elapsed, model_host, model_port, port_open, last_err or "waiting",
+                )
+                last_progress_log_at[0] = elapsed
+            time.sleep(1)
+        emb_res = self.embedding_llm()
+        _port = emb_res[4] if emb_res and len(emb_res) > 4 else 5066
+        port_open_final = self._is_port_open(model_host, _port)
+        logger.error(
+            "Embedding server did not become ready within {} seconds. Diagnostic: port {}:{} open={}. Last error: {}. "
+            "Check above for: (1) 'Model file not found' or 'Using fallback model path'; (2) 'llama-server not found'; (3) 'Port ... already in use'; (4) 'llama.cpp server exited quickly. stderr: ...'.",
+            _timeout, model_host, _port, port_open_final, last_err or "timeout",
+        )
         return False
 
     def _get_completion_params(self) -> Tuple[Dict, Dict]:

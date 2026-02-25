@@ -206,6 +206,108 @@ def _get_homeclaw_root() -> str:
         return ""
 
 
+# ---- Sandbox paths JSON (per-user absolute paths; single source of truth for file tools) ----
+SANDBOX_PATHS_FILENAME = "sandbox_paths.json"
+
+
+def get_sandbox_paths_file_path() -> Path:
+    """Path to database/sandbox_paths.json. Never raises."""
+    try:
+        from base.util import Util
+        return Path(Util().data_root()) / SANDBOX_PATHS_FILENAME
+    except Exception:
+        return Path("database") / SANDBOX_PATHS_FILENAME
+
+
+def get_sandbox_paths_for_user_key(user_key: str) -> Optional[Dict[str, str]]:
+    """
+    Resolve absolute sandbox_root and share for a user key (folder name under homeclaw_root: e.g. 'System', 'companion', 'default').
+    Returns {"sandbox_root": "<abs>", "share": "<abs>"} or None if homeclaw_root not set. Never raises.
+    """
+    try:
+        base_str = _get_homeclaw_root()
+        if not (base_str or "").strip():
+            return None
+        config = _get_tools_config()
+        shared_dir = (config.get("file_read_shared_dir") or "share").strip() or "share"
+        base = Path(base_str).resolve()
+        sandbox_root = (base / user_key).resolve()
+        share = (base / shared_dir).resolve()
+        return {"sandbox_root": str(sandbox_root), "share": str(share)}
+    except Exception:
+        return None
+
+
+def build_and_save_sandbox_paths_json() -> Dict[str, Any]:
+    """
+    Build per-user sandbox_root and share (absolute paths), save to database/sandbox_paths.json, return the dict.
+    Keys = folder names under homeclaw_root (one per user from user.yml + 'companion'). Always use this JSON for file tools.
+    """
+    out = {"users": {}}
+    try:
+        from base.util import Util
+        base_str = _get_homeclaw_root()
+        if not (base_str or "").strip():
+            return out
+        users = Util().get_users() or []
+        keys = []
+        for u in users:
+            uid = getattr(u, "id", None) or getattr(u, "name", None)
+            if uid:
+                keys.append(_safe_user_dir(str(uid)))
+        keys.append("companion")
+        for k in keys:
+            paths = get_sandbox_paths_for_user_key(k)
+            if paths:
+                out["users"][k] = paths
+        path = get_sandbox_paths_file_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.debug("build_and_save_sandbox_paths_json failed: %s", e)
+    return out
+
+
+def load_sandbox_paths_json() -> Dict[str, Any]:
+    """Load database/sandbox_paths.json. Returns {"users": { user_key: {"sandbox_root": ..., "share": ...}}} or empty dict. Never raises."""
+    try:
+        path = get_sandbox_paths_file_path()
+        if not path.exists():
+            return {}
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception as e:
+        logger.debug("load_sandbox_paths_json failed: %s", e)
+        return {}
+
+
+def get_current_user_sandbox_key(request: Optional[Any]) -> str:
+    """
+    Return the sandbox path key for the current request (same as _get_file_workspace_subdir).
+    Used to look up this user's sandbox_root/share from sandbox_paths.json. Never raises.
+    """
+    if request is None:
+        return "default"
+    system_user_id = (getattr(request, "system_user_id", None) or "").strip()
+    if system_user_id:
+        return _safe_user_dir(system_user_id)
+    user_id = (getattr(request, "user_id", None) or getattr(request, "user_name", None) or "").strip().lower()
+    app_id = (getattr(request, "app_id", None) or "").strip().lower()
+    session_id = (getattr(request, "session_id", None) or "").strip().lower()
+    if user_id == "companion" or app_id == "companion" or session_id == "companion":
+        return "companion"
+    channel_name = (getattr(request, "channel_name", None) or getattr(request, "channelType", None) or "").strip().lower()
+    if channel_name == "companion":
+        return "companion"
+    meta = getattr(request, "request_metadata", None) or {}
+    if isinstance(meta, dict) and (meta.get("conversation_type") or meta.get("session_id") or "").strip().lower() == "companion":
+        return "companion"
+    uid = getattr(request, "user_id", None) or getattr(request, "user_name", None)
+    return _safe_user_dir(uid)
+
+
 # ---- Session tools ----
 async def _sessions_transcript_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Get session transcript for the current (or given) session."""
@@ -2925,12 +3027,35 @@ def _resolve_file_path(
             full = Path(path_arg).resolve()
             return (full, None)
 
-        base = Path(base_str).resolve()
         shared_dir = (config.get("file_read_shared_dir") or "share").strip() or "share"
         normalized = path_arg.replace("\\", "/").strip().lower()
         shared_dir_lower = shared_dir.lower()
         shared_prefix = shared_dir_lower + "/"
 
+        # Prefer per-user paths from sandbox_paths.json (single source of truth; always use these when present)
+        user_key = _get_file_workspace_subdir(context)
+        paths_data = load_sandbox_paths_json()
+        user_paths = (paths_data.get("users") or {}).get(user_key)
+        if user_paths:
+            base_sandbox = Path(user_paths.get("sandbox_root") or "").resolve()
+            base_share = Path(user_paths.get("share") or "").resolve()
+            if base_sandbox and base_share:
+                if normalized == shared_dir_lower or normalized.startswith(shared_prefix):
+                    rest = path_arg[len(shared_dir):].lstrip("/\\").strip() if path_arg.lower().startswith(shared_dir_lower) else path_arg
+                    if not rest:
+                        rest = "."
+                    effective_base = base_share
+                else:
+                    effective_base = base_sandbox
+                    rest = path_arg or "."
+                try:
+                    effective_base.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    pass
+                full = (effective_base / rest).resolve()
+                return (full, effective_base)
+
+        base = Path(base_str).resolve()
         if normalized == shared_dir_lower or normalized.startswith(shared_prefix):
             rest = path_arg[len(shared_dir):].lstrip("/\\").strip() if path_arg.lower().startswith(shared_dir_lower) else path_arg
             if not rest:

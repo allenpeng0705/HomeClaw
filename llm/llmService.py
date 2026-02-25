@@ -1,6 +1,7 @@
 from asyncio import subprocess
 import multiprocessing
 import os
+import socket
 import asyncio
 from pathlib import Path
 from subprocess import PIPE, Popen
@@ -157,11 +158,40 @@ class LLMServiceManager:
         if function_calling and opts.get("function_calling") is False:
             function_calling = False
 
-        logger.debug(f"model path {model_path}")
+        logger.debug("model path {}", model_path)
         thread_num = multiprocessing.cpu_count()
+        models_base = Util().models_path()
+        logger.debug("models_path() resolved: {}", models_base)
         model_sub_path = os.path.normpath(model_path)
-        full_model_path = os.path.join(Util().models_path(), model_sub_path)
-        logger.debug(f"Full model path: {full_model_path}")
+        # If already absolute (e.g. from embedding_llm()), use as-is; else relative to models_path()
+        if os.path.isabs(model_sub_path):
+            full_model_path = str(Path(model_sub_path).resolve())
+        else:
+            full_model_path = os.path.join(models_base, model_sub_path)
+        full_model_path = str(Path(full_model_path).resolve())
+        logger.debug("Full model path (resolved): {}", full_model_path)
+
+        path_obj = Path(full_model_path)
+        if not path_obj.is_file():
+            # Fallback: try project_root/models/<basename> (e.g. when model_path points elsewhere)
+            root_path = Util().root_path()
+            fallback = Path(root_path) / "models" / path_obj.name
+            if fallback.is_file():
+                full_model_path = str(fallback.resolve())
+                path_obj = Path(full_model_path)
+                logger.info("Using fallback model path: {}", full_model_path)
+            else:
+                parent = path_obj.parent
+                try:
+                    listing = list(parent.iterdir())[:10] if parent.is_dir() else []
+                    listing_str = ", ".join(p.name for p in listing) if listing else "(dir not found or empty)"
+                except Exception:
+                    listing_str = "(listdir failed)"
+                logger.error(
+                    "Model file not found: {}. Resolved path: {}. Parent dir exists: {}; first files: {}.",
+                    full_model_path, path_obj.resolve(), parent.is_dir(), listing_str,
+                )
+                return
 
         root_path = Util().root_path()
         exe_path, folder = resolve_llama_server(root_path)
@@ -216,6 +246,16 @@ class LLMServiceManager:
         if use_gpu:
             cmd_list.extend(["--n-gpu-layers", n_gpu_layers])
 
+        # Diagnose port in use before starting (common blocker)
+        try:
+            with socket.create_connection((host, port), timeout=1.0):
+                logger.warning(
+                    "Port {}:{} is already in use; llama-server may fail to bind. Free the port or change config (local_models port).",
+                    host, port,
+                )
+        except (socket.error, OSError):
+            pass
+
         try:
             logger.debug("llama.cpp server: {} (folder: {}), cmd: {}", exe_path, folder, " ".join(cmd_list))
             process = Popen(cmd_list, stdout=PIPE, stderr=PIPE)
@@ -225,10 +265,17 @@ class LLMServiceManager:
                 'host': host,
                 'port': port,
             })
-            logger.debug(
-                "Started LLM process on {}:{} with PID {} (folder: {}), model: {}",
+            logger.info(
+                "Started LLM process on {}:{} PID {} ({}), model: {}",
                 host, port, process.pid, folder, os.path.basename(full_model_path),
             )
+            # If process exits quickly, log stderr so user sees why (e.g. port in use, load error)
+            sleep(2)
+            if process.poll() is not None:
+                _, err = process.communicate()
+                err_text = (err or b"").decode("utf-8", errors="replace").strip()
+                if err_text:
+                    logger.error("llama.cpp server exited quickly (likely blocking startup). stderr: {}", err_text)
         except asyncio.CancelledError:
             logger.debug("Shutting down the daemon.")
         except Exception as e:
@@ -255,6 +302,10 @@ class LLMServiceManager:
                 # ctx_size: use embedding.ctx_size if set, else 0 so llama.cpp uses the model's native n_ctx
                 emb_ctx = embedding_opts.get("ctx_size")
                 ctx_size = str(emb_ctx) if emb_ctx is not None else "0"
+                logger.info(
+                    "Starting embedding server at {}:{} (model: {}). Health check will run after startup.",
+                    host, port, os.path.basename(embedding_model_path),
+                )
                 self.start_llama_cpp_server(
                     llm_name, host, port, embedding_model_path,
                     ctx_size=ctx_size, function_calling=False, pooling=True,
@@ -264,7 +315,7 @@ class LLMServiceManager:
             elif llm_type == 'litellm':
                 pass
             self.llms.append(llm_name)
-            logger.debug("Running Embedding services!")
+            logger.info("Embedding service started; if health check times out, check logs above for 'Model file not found', 'Port ... in use', or 'stderr'.")
         except asyncio.CancelledError:
             logger.debug("LLM for embeddingwas cancelled.")
         

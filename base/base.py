@@ -639,6 +639,7 @@ class CoreMetadata:
     embedding_llm: str
     embedding_host: str
     embedding_port: int
+    embedding_health_check_timeout_sec: int  # seconds to wait for embedding server; default 120
     embedding_llm_type: str
     main_llm: str
     main_llm_host: str
@@ -937,6 +938,7 @@ class CoreMetadata:
             embedding_llm=data.get('embedding_llm', ''),
             embedding_host=data.get('embedding_host', '127.0.0.1'),
             embedding_port=data.get('embedding_port', 5066),
+            embedding_health_check_timeout_sec=max(30, int(data.get('embedding_health_check_timeout_sec', 120) or 120)),
             embedding_llm_type=data.get('embedding_llm_type', 'local'),
             main_llm_type=data.get('main_llm_type', 'local'),
             main_llm=main_llm_ref,
@@ -1044,6 +1046,7 @@ class CoreMetadata:
                 'model_path': core.model_path,
                 'embedding_host': core.embedding_host,
                 'embedding_port': core.embedding_port,
+                'embedding_health_check_timeout_sec': getattr(core, 'embedding_health_check_timeout_sec', 120),
                 'main_llm_host': core.main_llm_host,
                 'main_llm_port': core.main_llm_port,
                 'main_llm_language': core.main_llm_language,
