@@ -2043,7 +2043,10 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
     scripts_dir = (skill_folder / "scripts").resolve()
     if not scripts_dir.is_dir():
         if not script_arg:
-            return f"This skill ({skill_name}) is instruction-only and has no scripts to run. Use the skill's instructions from the Available skills section to guide your response (e.g. write the LinkedIn post following the skill's guidelines)."
+            return (
+                f"Instruction-only skill confirmed: {skill_name}. Do NOT reply to the user with only this line. "
+                "You MUST continue in this turn: follow the skill's steps from the Available skills section (e.g. document_read to get content, generate the output, then file_write(path='output/...', content=...) or save_result_page(format='html', ...)) and return the view link to the user."
+            )
         return f"Error: skill has no scripts/ folder: {skill_name}. Use the skill's instructions in your response instead of run_skill."
     if not script_arg:
         return "Error: script (or script_name) is required for this skill; it has a scripts/ folder."
@@ -4183,7 +4186,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="run_skill",
-            description="Run a script from a skill's scripts/ folder, or confirm an instruction-only skill. Use when a skill has a scripts/ directory: pass skill_name and script (e.g. run.sh, main.py, index.js; path works with / or \\) and optional args. Supports Python (.py), Node.js (.js, .mjs, .cjs), and shell (.sh). For skills without scripts/: call with skill_name only. skill_name can be the exact folder name (e.g. html-slides-1.0.0) or a short name (e.g. html-slides, html slides); matching is flexible.",
+            description="Run a script from a skill's scripts/ folder, or confirm an instruction-only skill. Use when a skill has a scripts/ directory: pass skill_name and script (e.g. run.sh, main.py). For instruction-only skills (no scripts/): call run_skill(skill_name=<name>) with no script; the tool will confirm the skill—then you MUST continue in the same turn: follow the skill's steps (e.g. document_read, generate content, file_write or save_result_page to output/) and return the link to the user. Do not reply with only the confirmation message. skill_name can be folder name (e.g. html-slides-1.0.0) or short name (html-slides, html slides).",
             parameters={
                 "type": "object",
                 "properties": {

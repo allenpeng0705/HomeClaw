@@ -5104,7 +5104,7 @@ class Core(CoreInterface):
                     "Listing connected nodes or \"what nodes are connected\" -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_list).\n"
                     "If the request clearly matches one of the available plugins below, call route_to_plugin with that plugin_id (and capability_id/parameters when relevant).\n"
                     "For time-related requests only: one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only when the user clearly asks to schedule or remind (e.g. \"remind me in 5 minutes\", \"every day at 9am\").\n"
-                    "For script-based workflows use run_skill(skill_name, script, ...). For instruction-only skills (no scripts/) use run_skill(skill_name) with no script and follow the skill's instructions. skill_name can be the folder name or a short name (e.g. html-slides or html slides both work).\n"
+                    "For script-based workflows use run_skill(skill_name, script, ...). For instruction-only skills (no scripts/) use run_skill(skill_name) with no script—then you MUST continue in the same turn (document_read, generate content, file_write or save_result_page, return link); do not reply with only the confirmation. skill_name can be folder or short name (e.g. html-slides).\n"
                     "When a tool returns a view/open link (e.g. save_result_page or file_write to output/), you MUST include that exact link in your reply to the user so they can open the result.\n"
                     "Otherwise respond or use other tools.\n"
                     + ("Available plugins:\n" + "\n".join(plugin_lines) if plugin_lines else "")
