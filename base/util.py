@@ -231,9 +231,16 @@ class Util:
     def config_path(self):
         return os.path.join(self.root_path(), 'config')
     
-      
     def models_path(self):
-        return os.path.join(self.root_path(), 'models')
+        """Base path for local models (GGUF, tokenizer, etc.). Uses config model_path when set (relative to project root); else root_path()/models. Resolved with pathlib.Path so paths work on Windows, Mac, and Linux (config may use / or \)."""
+        root = self.root_path()
+        meta = self.get_core_metadata()
+        raw = (getattr(meta, 'model_path', None) or '').strip()
+        if raw:
+            # Path accepts both / and \ on all platforms; resolve() yields a normalized absolute path
+            p = Path(root) / raw
+            return str(p.resolve())
+        return os.path.join(root, 'models')
     
     def setup_logging(self, module_name, mode):
         """

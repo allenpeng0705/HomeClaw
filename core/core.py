@@ -5295,10 +5295,10 @@ class Core(CoreInterface):
                                     "Only these two bases are the search path and working area; their subfolders can be accessed. Any other folder cannot be accessed (sandbox). "
                                     "(1) User sandbox root = homeclaw_root/{user_id}/ (path \".\" or \"subdir\"); (2) share = homeclaw_root/share/ (path \"share\" or \"share/...\"). "
                                     "Do not use workspace, config, or paths outside these two trees. Put generated files in output/ (path \"output/filename\") and return the link. "
-                                    "When the user asks for file search, list, or read: use path=\".\" for the user sandbox (and its subfolders) first; if not found or user says \"share\", use path=\"share\" or \"share/...\". "
+                                    "When the user asks about a **specific file by name** (e.g. \"能告诉我1.pdf都讲了什么吗\", \"what is in 1.pdf\"): (1) call folder_list(path='.') or file_find(path='.', pattern='*1.pdf*') to get the path for that file; (2) use the **exact path** from the result that matches the requested name (e.g. path \"1.pdf\") in document_read(path='1.pdf'). Do **not** use a different file (e.g. from output/) or guess a path; use the path that matches the filename the user asked for. "
+                                    "When the user asks for file search, list, or read without a specific name: use path=\".\" for the user sandbox first; if not found or user says \"share\", use path=\"share\" or \"share/...\". "
                                     "folder_list(path=\".\") = list user sandbox; folder_list(path=\"share\") = list share; file_find(path=\".\", pattern=\"*.pdf\") = search user sandbox recursively. "
-                                    "To read a file, use the exact path returned by folder_list or file_find (e.g. path \"1.pdf\" → document_read(path=\"1.pdf\")). "
-                                    "Report only paths returned by file_find or folder_list; do not invent paths. "
+                                    "To read a file, use the exact path returned by folder_list or file_find. Report only paths returned; do not invent paths. "
                                     f"Current homeclaw_root: {base_str}"
                                 )
                             llm_input[0]["content"] = (llm_input[0].get("content") or "") + block

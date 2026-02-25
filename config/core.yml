@@ -6,6 +6,7 @@ name: core
 host: 0.0.0.0
 port: 9000
 mode: dev
+# model_path: base path for local models (GGUF, etc.). Relative to project root; resolved on Windows, Mac, and Linux (use / in config; pathlib normalizes). Use ../models to put models outside the repo. Use ./models or leave empty for project_root/models.
 model_path: ../models/
 # When false: log [memory], [tools], [skills], [plugin], [TAM], [orchestrator] activity at INFO (verbose). When true: only INFO to console (less noise). On Windows CMD, use true to avoid huge output and "Press Space to continue" blocking.
 silent: false
@@ -457,7 +458,7 @@ cloud_models:
     host: 127.0.0.1
     port: 4005
     api_key_name: DEEPSEEK_API_KEY
-    api_key: sk-eb1f151236524086a0967357233b9c88
+    api_key: 
     capabilities: [Chat]
   # Alibaba Qwen (Dashscope)
   # - id: Qwen-Turbo
@@ -677,13 +678,13 @@ cognee:
     endpoint: ""
     api_key: ""
   # Embedding for Cognee: leave empty to use Core's embedding_llm (embedding_host, embedding_port). Else set provider, model, endpoint, api_key.
-  # tokenizer: local path or HuggingFace model id for token counting (silences "Could not automatically map embedding_text_model to a tokeniser").
+  # tokenizer: local path for token counting (disk only, no HuggingFace at runtime). Resolved on Windows, Mac, Linux. Use ./models/tokenizer or ./models/tokenizer/ModelName (relative to project root) or absolute path.
   embedding:
     provider: ""
     model: ""
     endpoint: ""
     api_key: ""
-    tokenizer: "../models/tokenizer/Qwen3_0.6B"
+    tokenizer: "./models/tokenizer/Qwen3_0.6B"
   # Optional: raw Cognee env vars (key: value). Override or add any Cognee env var by name.
   # env:
   #   TELEMETRY_DISABLED: "true"

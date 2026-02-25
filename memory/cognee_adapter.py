@@ -88,8 +88,8 @@ def apply_cognee_config(config: Dict[str, Any]) -> None:
                 os.environ[env_key] = str(val)
         if "EMBEDDING_API_KEY" not in os.environ and emb.get("endpoint"):
             os.environ["EMBEDDING_API_KEY"] = "local"
-        # Tokenizer for token counting: Cognee maps embedding model to tiktoken; for custom/Ollama/HF models set HUGGINGFACE_TOKENIZER to silence "Could not automatically map embedding_text_model to a tokeniser" and get proper chunking (see docs.cognee.ai embedding providers).
-        # If value looks like a path (starts with . or / or contains \), resolve relative to project root so relative paths work regardless of cwd.
+        # Tokenizer for token counting: Cognee maps embedding model to tiktoken; for custom/Ollama models set tokenizer to a local path so Cognee loads from disk (no HuggingFace at runtime).
+        # Value: local directory path. Use "./path" or "../path" or absolute path; resolved to absolute (pathlib.Path, works on Windows/Mac/Linux) before setting HUGGINGFACE_TOKENIZER.
         for key, env_key in (("tokenizer", "HUGGINGFACE_TOKENIZER"), ("huggingface_tokenizer", "HUGGINGFACE_TOKENIZER")):
             val = emb.get(key)
             if val is not None and str(val).strip() != "":
@@ -98,8 +98,8 @@ def apply_cognee_config(config: Dict[str, Any]) -> None:
                     try:
                         from base.util import Util
                         root = Path(Util().root_path()).resolve()
-                        resolved = (root / s).resolve()
-                        s = str(resolved)
+                        p = (root / s).resolve() if not Path(s).is_absolute() else Path(s).resolve()
+                        s = str(p)
                     except Exception:
                         pass
                 os.environ[env_key] = s

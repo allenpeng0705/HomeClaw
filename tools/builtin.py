@@ -2818,7 +2818,7 @@ _FILE_ACCESS_DENIED_MSG = (
 )
 _FILE_NOT_FOUND_MSG = (
     "That file or path wasn't found. Only two bases are accessible (sandbox): user sandbox (path '.') and share (path 'share'), and their subfolders. "
-    "Try: (1) folder_list(path='.') or folder_list(path='share'). (2) file_find(path='.', pattern='*name*'). Use the exact path returned."
+    "Try: (1) folder_list(path='.') or file_find(path='.', pattern='*filename*') to get the path; (2) use the exact path that matches the filename the user asked for (e.g. user asked for 1.pdf → use path '1.pdf', not a path under output/ or another file)."
 )
 _FILE_PATH_INVALID_MSG = "I couldn't resolve that path. Please check the path and try again."
 _FILE_HOMECLAW_ROOT_NOT_SET_MSG = (
@@ -4702,7 +4702,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_read",
-            description="Read contents of a file. Default base: user's private folder (homeclaw_root/{user_id}). Use path '.' or a path under it; use path 'share/...' only when the user says share folder.",
+            description="Read contents of a file. When the user asks about a file by name (e.g. 1.pdf), use the path from folder_list or file_find that matches that name (e.g. path '1.pdf'); do not use a different file or output/ path. Default base: user sandbox; use path 'share/...' when user says share.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -4717,7 +4717,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="document_read",
-            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. Uses Unstructured when installed (pip install 'unstructured[all-docs]'); falls back to pypdf for PDF. Default base: user's private folder (homeclaw_root/{user_id}); use path 'share/...' only when the user says share folder. For long files, increase max_chars or ask for section-by-section summary.",
+            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. When the user asks about a file by name (e.g. 1.pdf), use the path from folder_list or file_find that matches that name (e.g. path '1.pdf'); do not use a different file or a path under output/. Default base: user sandbox; use path 'share/...' when user says share. For long files, increase max_chars or ask for section-by-section summary.",
             parameters={
                 "type": "object",
                 "properties": {
