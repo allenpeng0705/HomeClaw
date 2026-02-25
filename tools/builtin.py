@@ -2667,6 +2667,19 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
         if fmt == "md":
             fmt = "markdown"
         content_str = str(content or "").strip()
+        title_lower = title.lower()
+        # When user asked for HTML slides, insist on format=html and full content
+        if fmt == "markdown":
+            if content_str and (content_str.lstrip().lower().startswith("<html") or content_str.lstrip().startswith("<!DOCTYPE")):
+                return (
+                    "Error: content is HTML but format is markdown. For HTML slides or HTML output use format='html'. "
+                    "Call save_result_page again with format='html' and content=<your full HTML>."
+                )
+            if ("slide" in title_lower or "slides" in title_lower()) and len(content_str) < 500:
+                return (
+                    "Error: for HTML slides use format='html', not format='markdown'. "
+                    "Generate the full HTML slide deck from the document_read result and call save_result_page(title=..., content=<full HTML>, format='html')."
+                )
         if fmt == "html":
             if not content_str:
                 return (
@@ -4965,13 +4978,13 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="save_result_page",
-            description="Save the result as a page and get a shareable link. **format=markdown:** Saves as .md; include the returned content in your reply. **format=html:** Saves as .html; the tool returns only the link. For HTML you MUST pass the **full generated content** (complete slide deck or report body from the document), not just a title or empty/minimal content—generate the full HTML first (e.g. all slides with content), then call save_result_page with that content. Link is produced when auth_api_key is set in config.",
+            description="Save the result as a page and get a shareable link. **format=markdown:** Saves as .md; the tool returns the content so the companion app can display it directly in chat (include the returned content in your reply). **format=html:** Saves as .html; the tool returns only the link—share that link with the user so they can open the page in a browser. For html slide requests use format='html' and full HTML content. Link when auth_api_key is set.",
             parameters={
                 "type": "object",
                 "properties": {
                     "title": {"type": "string", "description": "Title of the result page (e.g. 'Summary', 'Report')."},
                     "content": {"type": "string", "description": "The full result content — exact same content you generated. Use clean text so the page displays correctly."},
-                    "format": {"type": "string", "description": "Use 'markdown' (default) for text/summaries suitable for in-chat display (saves as .md). Use 'html' for long or complex reports, or when content is full HTML (saves as .html).", "default": "markdown"},
+                    "format": {"type": "string", "description": "markdown: content is returned for companion to display in chat. html: only the view link is returned for the user to open in browser.", "default": "markdown"},
                 },
                 "required": ["title", "content"],
             },

@@ -114,9 +114,26 @@ skills_incremental_sync: false
 skills_include_body_for: [maton-api-gateway-1.0.0, x-api-1.0.0, meta-social-1.0.0]
 # skills_include_body_max_chars: 8000   # 0 = no truncation; when > 0, cap body for skills_include_body_for to this many chars
 # Optional: force-include rules add an extra instruction when the query matches. With include-all you do NOT need these—LLM selects from the full list. Prefer trigger in each skill's SKILL.md. Uncomment and edit below if you want a global override.
-skills_force_include_rules: []
-# Example (uncomment to use):
-# skills_force_include_rules:
+# Maton: one skill provides 100+ services (Slack, LinkedIn, Outlook, HubSpot, Notion, Gmail, Stripe, etc.). Force-include when user mentions any of them so the model uses run_skill(maton-api-gateway-1.0.0, request.py) instead of replying without calling.
+skills_force_include_rules:
+  - patterns:
+    - "slack|send.*slack|slack.*(message|channel)"
+    - "linkedin|领英|发.*linkedin|post.*linkedin|发送.*linkedin"
+    - "outlook|(outlook|microsoft).*(email|mail|calendar|contact)"
+    - "hubspot|(hubspot).*(contact|deal|company)"
+    - "notion|(notion).*(database|page|block)"
+    - "gmail|google.*mail|(gmail).*(send|list|search)"
+    - "stripe|(stripe).*(customer|payment|charge|invoice)"
+    - "google.*calendar|calendar.*event|(google).*(calendar)"
+    - "google.*(sheet|spreadsheet)|(sheet|spreadsheet).*row"
+    - "salesforce|(salesforce).*(contact|opportunity|soql)"
+    - "airtable|(airtable).*(base|record|table)"
+    - "calendly|(calendly).*(event|availability|schedule)"
+    - "github|(github).*(repo|issue|pr|pull.*request)"
+    - "maton|api gateway|gateway\\.maton|maton\\.ai"
+    folders: [maton-api-gateway-1.0.0]
+    instruction: "User asked to use an external service (Slack, LinkedIn, Outlook, HubSpot, Notion, Gmail, Stripe, Google Calendar/Sheets, Salesforce, Airtable, Calendly, GitHub, etc.). Use run_skill(skill_name='maton-api-gateway-1.0.0', script='request.py') with app and path from the maton skill body (Supported Services table and references/). Do not claim the action was done without calling the skill. For LinkedIn post: GET linkedin/rest/me then POST linkedin/rest/posts with commentary."
+# Example (uncomment to add more):
 #   - patterns: ["乔布斯|极简.*演示|HTML\\s*slides|html\\s*slides|幻灯片|生成.*HTML"]
 #     folders: [html-slides-1.0.0]
 #     instruction: "User asked for 乔布斯-style or HTML slides. You have the html-slides skill: follow its steps, then file_write or save_result_page to output/ and return the link. Do not say you have no skill."
@@ -393,46 +410,46 @@ local_models:
 # Optional supported_media per entry: [image], [image, audio], or [image, audio, video]. If omitted, cloud models default to [image, audio, video].
 cloud_models:
   # OpenAI (chat and embedding). supported_media: gpt-4o supports image only; gpt-4o-audio-preview supports audio only (see MediaSupportAndProviders.md).
-  - id: OpenAI-GPT4o
-    alias: OpenAI GPT-4o
-    path: openai/gpt-4o
-    host: 127.0.0.1
-    port: 4001
-    api_key_name: OPENAI_API_KEY
-    supported_media: [image]   # gpt-4o = vision only; audio is a different model (gpt-4o-audio-preview)
-    capabilities: [Functioncall, Chat]
-  - id: OpenAI-GPT4o-mini
-    alias: OpenAI GPT-4o mini
-    path: openai/gpt-4o-mini
-    host: 127.0.0.1
-    port: 4001
-    api_key_name: OPENAI_API_KEY
-    # supported_media: [image, audio, video]   # optional; cloud default is all
-    capabilities: [Functioncall, Chat]
+  # - id: OpenAI-GPT4o
+  #   alias: OpenAI GPT-4o
+  #   path: openai/gpt-4o
+  #   host: 127.0.0.1
+  #   port: 4001
+  #   api_key_name: OPENAI_API_KEY
+  #   supported_media: [image]   # gpt-4o = vision only; audio is a different model (gpt-4o-audio-preview)
+  #   capabilities: [Functioncall, Chat]
+  # - id: OpenAI-GPT4o-mini
+  #   alias: OpenAI GPT-4o mini
+  #   path: openai/gpt-4o-mini
+  #   host: 127.0.0.1
+  #   port: 4001
+  #   api_key_name: OPENAI_API_KEY
+  #   # supported_media: [image, audio, video]   # optional; cloud default is all
+  #   capabilities: [Functioncall, Chat]
   # Google Gemini
-  - id: Gemini-2.5-Flash
-    alias: Gemini 2.5 Flash
-    path: gemini/gemini-2.5-flash
-    host: 127.0.0.1
-    port: 4002
-    api_key_name: GEMINI_API_KEY
-    api_key: 
-    capabilities: [Functioncall, Chat]
+  # - id: Gemini-2.5-Flash
+  #   alias: Gemini 2.5 Flash
+  #   path: gemini/gemini-2.5-flash
+  #   host: 127.0.0.1
+  #   port: 4002
+  #   api_key_name: GEMINI_API_KEY
+  #   api_key: 
+  #   capabilities: [Functioncall, Chat]
   # Anthropic Claude
-  - id: Claude-Sonnet
-    alias: Claude 3.5 Sonnet
-    path: anthropic/claude-3-5-sonnet-20241022
-    host: 127.0.0.1
-    port: 4003
-    api_key_name: ANTHROPIC_API_KEY
-    capabilities: [Functioncall, Chat]
-  # Ollama (local; no API key)
-  - id: Ollama-qwen2
-    alias: Ollama Qwen2
-    path: ollama/qwen2.5:7b
-    host: 127.0.0.1
-    port: 4004
-    capabilities: [Chat]
+  # - id: Claude-Sonnet
+  #   alias: Claude 3.5 Sonnet
+  #   path: anthropic/claude-3-5-sonnet-20241022
+  #   host: 127.0.0.1
+  #   port: 4003
+  #   api_key_name: ANTHROPIC_API_KEY
+  #   capabilities: [Functioncall, Chat]
+  # # Ollama (local; no API key)
+  # - id: Ollama-qwen2
+  #   alias: Ollama Qwen2
+  #   path: ollama/qwen2.5:7b
+  #   host: 127.0.0.1
+  #   port: 4004
+  #   capabilities: [Chat]
   # DeepSeek
   - id: DeepSeek-Chat
     alias: DeepSeek Chat
@@ -443,61 +460,61 @@ cloud_models:
     api_key: sk-eb1f151236524086a0967357233b9c88
     capabilities: [Chat]
   # Alibaba Qwen (Dashscope)
-  - id: Qwen-Turbo
-    alias: Qwen Turbo (Dashscope)
-    path: dashscope/qwen-turbo
-    host: 127.0.0.1
-    port: 4006
-    api_key_name: DASHSCOPE_API_KEY
-    capabilities: [Chat]
-  # Groq
-  - id: Groq-Llama70B
-    alias: Groq Llama 3.1 70B
-    path: groq/llama-3.1-70b-versatile
-    host: 127.0.0.1
-    port: 4007
-    api_key_name: GROQ_API_KEY
-    capabilities: [Chat]
-  # Mistral
-  - id: Mistral-Large
-    alias: Mistral Large
-    path: mistral/mistral-large-latest
-    host: 127.0.0.1
-    port: 4008
-    api_key_name: MISTRAL_API_KEY
-    capabilities: [Functioncall, Chat]
-  # xAI (Grok)
-  - id: xAI-Grok
-    alias: xAI Grok 2
-    path: xai/grok-2
-    host: 127.0.0.1
-    port: 4009
-    api_key_name: XAI_API_KEY
-    capabilities: [Chat]
-  # OpenRouter (many models via one API)
-  - id: OpenRouter-GPT4o
-    alias: OpenRouter GPT-4o
-    path: openrouter/openai/gpt-4o
-    host: 127.0.0.1
-    port: 4010
-    api_key_name: OPENROUTER_API_KEY
-    capabilities: [Functioncall, Chat]
-  # Cohere
-  - id: Cohere-CommandR
-    alias: Cohere Command R+
-    path: cohere/command-r-plus
-    host: 127.0.0.1
-    port: 4011
-    api_key_name: COHERE_API_KEY
-    capabilities: [Chat]
-  # Perplexity (search-augmented)
-  - id: Perplexity-Sonar
-    alias: Perplexity Sonar
-    path: perplexity/llama-3.1-sonar-small-128k-online
-    host: 127.0.0.1
-    port: 4012
-    api_key_name: PERPLEXITY_API_KEY
-    capabilities: [Chat]
+  # - id: Qwen-Turbo
+  #   alias: Qwen Turbo (Dashscope)
+  #   path: dashscope/qwen-turbo
+  #   host: 127.0.0.1
+  #   port: 4006
+  #   api_key_name: DASHSCOPE_API_KEY
+  #   capabilities: [Chat]
+  # # Groq
+  # - id: Groq-Llama70B
+  #   alias: Groq Llama 3.1 70B
+  #   path: groq/llama-3.1-70b-versatile
+  #   host: 127.0.0.1
+  #   port: 4007
+  #   api_key_name: GROQ_API_KEY
+  #   capabilities: [Chat]
+  # # Mistral
+  # - id: Mistral-Large
+  #   alias: Mistral Large
+  #   path: mistral/mistral-large-latest
+  #   host: 127.0.0.1
+  #   port: 4008
+  #   api_key_name: MISTRAL_API_KEY
+  #   capabilities: [Functioncall, Chat]
+  # # xAI (Grok)
+  # - id: xAI-Grok
+  #   alias: xAI Grok 2
+  #   path: xai/grok-2
+  #   host: 127.0.0.1
+  #   port: 4009
+  #   api_key_name: XAI_API_KEY
+  #   capabilities: [Chat]
+  # # OpenRouter (many models via one API)
+  # - id: OpenRouter-GPT4o
+  #   alias: OpenRouter GPT-4o
+  #   path: openrouter/openai/gpt-4o
+  #   host: 127.0.0.1
+  #   port: 4010
+  #   api_key_name: OPENROUTER_API_KEY
+  #   capabilities: [Functioncall, Chat]
+  # # Cohere
+  # - id: Cohere-CommandR
+  #   alias: Cohere Command R+
+  #   path: cohere/command-r-plus
+  #   host: 127.0.0.1
+  #   port: 4011
+  #   api_key_name: COHERE_API_KEY
+  #   capabilities: [Chat]
+  # # Perplexity (search-augmented)
+  # - id: Perplexity-Sonar
+  #   alias: Perplexity Sonar
+  #   path: perplexity/llama-3.1-sonar-small-128k-online
+  #   host: 127.0.0.1
+  #   port: 4012
+  #   api_key_name: PERPLEXITY_API_KEY
+  #   capabilities: [Chat]
 
 # ——— Media support (image / audio / video) for main_llm ———
 # See docs_design/MediaSupportAndProviders.md for how LiteLLM, OpenAI, and Gemini support image/audio/video.

@@ -84,6 +84,8 @@ def main() -> int:
         req.add_header("Content-Type", "application/json")
     if connection_id:
         req.add_header("Maton-Connection", connection_id)
+    if app.lower() == "linkedin":
+        req.add_header("LinkedIn-Version", "202506")
 
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:

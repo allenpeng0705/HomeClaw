@@ -2,15 +2,38 @@
 name: maton-api-gateway
 description: |
   Call 100+ third-party APIs (Slack, HubSpot, Outlook, Notion, Google Workspace, Airtable, Salesforce, Stripe, etc.) with a single API key via Maton. Use when the user wants to interact with any of these services and you have MATON_API_KEY set.
+keywords: [slack, linkedin, outlook, hubspot, notion, gmail, stripe, google calendar, google sheets, salesforce, airtable, calendly, github, maton, api gateway]
 compatibility: Requires network access and MATON_API_KEY (get key at maton.ai/settings; connect each app via OAuth at maton.ai)
 trigger:
-  patterns: ["maton|api gateway|gateway\\.maton|maton\\.ai.*connect|connect.*(slack|hubspot|notion|salesforce|stripe).*api"]
-  instruction: "User asked about Maton API gateway or connecting to multiple APIs with one key. Use this skill to call any supported service via https://gateway.maton.ai/{app}/{path} with Authorization Bearer MATON_API_KEY. Prefer run_skill with script request.py (args: app, path, method, body_json); otherwise use exec with the Python snippets below."
+  patterns: ["maton|api gateway|gateway\\.maton|maton\\.ai.*connect|connect.*(slack|hubspot|notion|salesforce|stripe).*api|post.*linkedin|发送.*linkedin|发.*领英|linkedin.*post|publish.*linkedin|share.*linkedin|send.*slack|slack.*message|outlook.*(email|mail|calendar)|hubspot.*(contact|deal)|notion.*(database|page)|gmail|google.*calendar|google.*sheet|stripe.*(customer|payment)|salesforce|airtable|calendly|github.*(repo|issue|pr)"]
+  instruction: "User asked to use an external service (Slack, LinkedIn, Outlook, HubSpot, Notion, Gmail, Stripe, etc.). Use run_skill(skill_name='maton-api-gateway-1.0.0', script='request.py') with app and path from this skill's Supported Services table and references/. For LinkedIn post: GET linkedin/rest/me then POST linkedin/rest/posts with commentary. Do not reply that the action was done without calling the skill."
 ---
 
 # Maton API Gateway
 
 Call native third-party APIs through [Maton](https://maton.ai) with managed OAuth. **One API token** (`MATON_API_KEY`) is all you need: after you connect each app once at [maton.ai](https://www.maton.ai/) (Connections), that single token lets you access every connected service. The **references/** folder in this skill tells HomeClaw how to call each service—paths, methods, and examples—so the model can use the gateway for Slack, HubSpot, Outlook, Notion, and 100+ others.
+
+## When to use this skill
+
+Use **run_skill(skill_name='maton-api-gateway-1.0.0', script='request.py')** when the user asks to do any of the following (connect each app once at [maton.ai](https://www.maton.ai/) first):
+
+| User asks to… | app | Path / action (see references/) |
+|---------------|-----|----------------------------------|
+| Send Slack message, list channels | `slack` | e.g. `api/chat.postMessage`, `api/conversations.list` |
+| Post to LinkedIn, get profile | `linkedin` | `rest/me`, `rest/posts` (POST with commentary) |
+| Outlook email, calendar, contacts | `outlook` | `v1.0/me/messages`, `v1.0/me/events`, etc. |
+| Gmail send, list, search | `google-mail` | `gmail/v1/users/me/messages` |
+| HubSpot contacts, deals, companies | `hubspot` | `crm/v3/objects/contacts`, etc. |
+| Notion databases, pages, search | `notion` | See references/notion.md |
+| Google Calendar events | `google-calendar` | `calendar/v3/events` |
+| Google Sheets read/append | `google-sheets` | `sheets/v4/spreadsheets` |
+| Stripe customers, payments | `stripe` | `v1/customers`, `v1/charges` |
+| Salesforce SOQL, contacts | `salesforce` | See references/salesforce.md |
+| Airtable bases, records | `airtable` | `v0/{baseId}/{tableId}` |
+| Calendly events, availability | `calendly` | See references/calendly.md |
+| GitHub repos, issues, PRs | `github` | `repos`, `issues`, etc. |
+
+**App name** must match the Supported Services table below. **Path** is the native API path for that service (references/ files have examples). **Do not** claim the action was done without calling the skill.
 
 ## How users ask (natural language)
 
