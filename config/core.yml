@@ -440,7 +440,7 @@ cloud_models:
     host: 127.0.0.1
     port: 4005
     api_key_name: DEEPSEEK_API_KEY
-    api_key:
+    api_key: sk-eb1f151236524086a0967357233b9c88
     capabilities: [Chat]
   # Alibaba Qwen (Dashscope)
   - id: Qwen-Turbo
@@ -515,7 +515,7 @@ cloud_models:
 #main_llm: local_models/main_vl_model_4B
 main_llm_mode: mix
 main_llm_local: local_models/main_vl_model_8B
-main_llm_cloud: cloud_models/Gemini-2.5-Flash
+main_llm_cloud: cloud_models/DeepSeek-Chat
 # --- Mix mode routing thresholds (brief) ---
 # Heuristic (Layer 1): no threshold. When enabled, first match (long-input or keyword rule) wins.
 # Semantic (Layer 2): score = embedding similarity to the chosen route (0..1). Only the best-matching route is considered; if its similarity_score >= threshold, that route is chosen. Higher threshold = need stronger similarity (stricter; more fall-through to next layer). Lower = accept weaker matches.

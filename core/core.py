@@ -4764,7 +4764,7 @@ class Core(CoreInterface):
                         if skills_list:
                             _component_log("skills", f"included all {len(skills_list)} skill(s) (skills_use_vector_search=false)")
                     if not skills_list and use_vector_search and getattr(self, 'skills_vector_store', None) and getattr(self, 'embedder', None):
-                        from base.skills import search_skills_by_query, load_skill_by_folder, load_skill_by_folder_from_dirs, TEST_ID_PREFIX
+                        from base.skills import search_skills_by_query, load_skill_by_folder, TEST_ID_PREFIX
                         max_retrieved = max(1, min(100, int(getattr(meta_skills, 'skills_max_retrieved', 10) or 10)))
                         threshold = float(getattr(meta_skills, 'skills_similarity_threshold', 0.0) or 0.0)
                         hits = await search_skills_by_query(
@@ -5104,7 +5104,8 @@ class Core(CoreInterface):
                     "Listing connected nodes or \"what nodes are connected\" -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_list).\n"
                     "If the request clearly matches one of the available plugins below, call route_to_plugin with that plugin_id (and capability_id/parameters when relevant).\n"
                     "For time-related requests only: one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only when the user clearly asks to schedule or remind (e.g. \"remind me in 5 minutes\", \"every day at 9am\").\n"
-                    "For script-based workflows use run_skill(skill_name, script, ...). For instruction-only skills (no scripts/) use run_skill(skill_name) with no script and follow the skill's instructions.\n"
+                    "For script-based workflows use run_skill(skill_name, script, ...). For instruction-only skills (no scripts/) use run_skill(skill_name) with no script and follow the skill's instructions. skill_name can be the folder name or a short name (e.g. html-slides or html slides both work).\n"
+                    "When a tool returns a view/open link (e.g. save_result_page or file_write to output/), you MUST include that exact link in your reply to the user so they can open the result.\n"
                     "Otherwise respond or use other tools.\n"
                     + ("Available plugins:\n" + "\n".join(plugin_lines) if plugin_lines else "")
                 )

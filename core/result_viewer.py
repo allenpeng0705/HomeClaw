@@ -12,6 +12,7 @@ See docs_design/FileSandboxDesign.md. auth_api_key and core_public_url are in co
 import base64
 import hmac
 import hashlib
+import re
 import time
 from typing import Optional, Tuple
 
@@ -19,13 +20,21 @@ from loguru import logger
 
 DEFAULT_MAX_RESULT_HTML_BYTES = 500 * 1024  # 500 KB for generated report HTML
 
+# Normalize auth_api_key the same way for both create and verify (avoid mismatch from whitespace/control chars)
+def _normalize_file_token_secret_key(raw: Optional[str]) -> str:
+    try:
+        s = str(raw or "").strip()
+        return re.sub(r"[\x00-\x1f\x7f]", "", s) or ""
+    except Exception:
+        return ""
+
 
 def _get_file_token_secret() -> Optional[bytes]:
-    """Secret for signing file access tokens. Uses auth_api_key from config."""
+    """Secret for signing file access tokens. Uses auth_api_key from config (normalized)."""
     try:
         from base.util import Util
         meta = Util().get_core_metadata()
-        key = (getattr(meta, "auth_api_key", None) or "").strip()
+        key = _normalize_file_token_secret_key(getattr(meta, "auth_api_key", None))
         if key:
             return key.encode("utf-8")
     except Exception:
@@ -44,6 +53,7 @@ def create_file_access_token(scope: str, path: str, expiry_sec: int = 86400) -> 
     secret = _get_file_token_secret()
     if not secret:
         return None
+    logger.debug("files/out token created (secret_len={})", len(secret))
     expiry = int(time.time()) + max(1, min(expiry_sec, 7 * 86400))
     payload = f"{scope}\0{path}\0{expiry}"
     sig = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -52,11 +62,13 @@ def create_file_access_token(scope: str, path: str, expiry_sec: int = 86400) -> 
 
 
 def verify_file_access_token(token: str) -> Optional[Tuple[str, str]]:
-    """Verify token and return (scope, path) if valid and not expired. Otherwise None."""
+    """Verify token and return (scope, path) if valid and not expired. Otherwise None. Logs reason for failure at debug level."""
     if not token or "." not in token:
+        logger.debug("files/out token: missing or invalid format (no dot)")
         return None
     secret = _get_file_token_secret()
     if not secret:
+        logger.debug("files/out token: verification failed — auth_api_key not set on this server (token was signed elsewhere or key missing)")
         return None
     parts = token.split(".", 1)
     if len(parts) != 2:
@@ -68,9 +80,11 @@ def verify_file_access_token(token: str) -> Optional[Tuple[str, str]]:
             b64 += "=" * pad
         payload = base64.urlsafe_b64decode(b64).decode("utf-8")
     except Exception:
+        logger.debug("files/out token: payload decode failed (malformed or corrupted)")
         return None
     expected_sig = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected_sig, sig):
+        logger.debug("files/out token: signature mismatch (verify secret_len={}) — auth_api_key on this server differs from the one that signed the link", len(secret))
         return None
     chunks = payload.split("\0", 2)
     if len(chunks) != 3:
@@ -79,12 +93,12 @@ def verify_file_access_token(token: str) -> Optional[Tuple[str, str]]:
     try:
         expiry = int(expiry_str)
         if time.time() > expiry:
+            logger.debug("files/out token: expired (expiry_ts={})", expiry)
             return None
     except ValueError:
         return None
     if not scope or not path or ".." in path or path.startswith("/"):
         return None
-    # Scope must be a single segment (no path traversal)
     if "/" in scope or ".." in scope:
         return None
     return (scope, path)
@@ -106,27 +120,44 @@ def get_core_public_url() -> str:
     Returns, in order: (1) core_public_url from config if set, (2) runtime URL (e.g. from Pinggy), (3) http://127.0.0.1:<port> for local use.
     Link format: get_core_public_url() + "/files/out?path=" + quote(path) + "&token=" + create_file_access_token(...)
     """
-    try:
-        from base.util import Util
-        meta = Util().get_core_metadata()
-        url = (getattr(meta, "core_public_url", None) or "").strip()
-        if url:
-            return url.rstrip("/")
-    except Exception:
-        pass
-    if _runtime_public_url:
-        return _runtime_public_url
+    base = get_result_link_base_url()
+    if base:
+        return base
     try:
         from base.util import Util
         meta = Util().get_core_metadata()
         port = int(getattr(meta, "port", 0) or 9000)
         host = (getattr(meta, "host", None) or "").strip() or "0.0.0.0"
-        # 0.0.0.0 means "listen on all interfaces"; use 127.0.0.1 in URL so the link works when opened on this machine
         if host in ("0.0.0.0", "::", ""):
             host = "127.0.0.1"
         return f"http://{host}:{port}"
     except Exception:
         return "http://127.0.0.1:9000"
+
+
+def get_result_link_base_url() -> str:
+    """
+    Base URL to use when generating result/view links to send to the user (save_result_page, file_write output/, get_file_view_link).
+    Uses only core_public_url from config or runtime tunnel URL — never localhost.
+    Returns empty string if neither is set or on any error (caller should then ask user to set core_public_url and auth_api_key).
+    Never raises.
+    """
+    try:
+        from base.util import Util
+        meta = Util().get_core_metadata()
+        if meta is None:
+            return ""
+        url = str(getattr(meta, "core_public_url", None) or "").strip()
+        if url:
+            return url.rstrip("/")
+    except Exception:
+        pass
+    try:
+        if _runtime_public_url:
+            return str(_runtime_public_url).strip().rstrip("/") or ""
+    except Exception:
+        pass
+    return ""
 
 
 def generate_result_html(title: str, content: str, format: str = "html", max_bytes: Optional[int] = None) -> str:

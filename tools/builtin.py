@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 from base.tools import ToolContext, ToolDefinition, ToolRegistry, ROUTING_RESPONSE_ALREADY_SENT
-from base.skills import get_skills_dir
+from base.skills import get_skills_dir, resolve_skill_folder_name
 from base.workspace import get_workspace_dir, get_agent_memory_file_path, append_daily_memory
 from base.util import Util, redact_params_for_log
 from base.base import PluginResult, User
@@ -2024,14 +2024,22 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
     args_input = arguments.get("args")
     if not skill_name:
         return "Error: skill_name (or skill) is required"
-    # Resolve skills_dir from core config (Path for cross-platform Mac/Win/Linux)
-    meta = Util().get_core_metadata()
-    skills_dir_str = getattr(meta, "skills_dir", None) or "config/skills"
-    root = Path(Util().root_path())
-    skills_base = get_skills_dir(skills_dir_str, root=root)
-    skill_folder = (skills_base / skill_name).resolve()
+    try:
+        meta = Util().get_core_metadata()
+        if meta is None:
+            return "Error: Core config not available"
+        skills_dir_str = str(getattr(meta, "skills_dir", None) or "config/skills").strip() or "config/skills"
+        root = Path(Util().root_path())
+        skills_base = get_skills_dir(skills_dir_str, root=root)
+        resolved_folder = resolve_skill_folder_name(skills_base, skill_name)
+        if resolved_folder is not None:
+            skill_name = resolved_folder
+        skill_folder = (skills_base / skill_name).resolve()
+    except Exception as e:
+        logger.debug("run_skill setup failed: %s", e)
+        return f"Error: run_skill failed: {e!s}"
     if not skill_folder.is_dir():
-        return f"Error: skill folder not found: {skill_name} (under {skills_base})"
+        return f"Error: skill folder not found: {skill_name} (under {skills_base}). Try the exact folder name from Available skills (e.g. html-slides-1.0.0)."
     scripts_dir = (skill_folder / "scripts").resolve()
     if not scripts_dir.is_dir():
         if not script_arg:
@@ -2246,6 +2254,7 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
     except BaseException as e:
         if isinstance(e, (KeyboardInterrupt, SystemExit)):
             raise
+        logger.debug("run_skill failed: %s", e)
         return f"Error: {e!s}"
 
 
@@ -2643,7 +2652,7 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
     """Save a result page as HTML or Markdown. format=markdown: returns markdown content + link so reply can show it in chat. format=html: returns link only (open in browser)."""
     try:
         from core.result_viewer import (
-            get_core_public_url,
+            get_result_link_base_url,
             create_file_access_token,
             generate_result_html,
         )
@@ -2688,7 +2697,7 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
             logger.debug("save_result_page write failed: {}", e)
             return "Failed to save the result page to your output folder."
         token = create_file_access_token(scope, path_arg)
-        base_url = get_core_public_url()
+        base_url = get_result_link_base_url()
         link = f"{base_url}/files/out?path={quote(path_arg)}&token={token}" if (base_url and token) else None
 
         if is_md:
@@ -2696,12 +2705,12 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
             max_in_chat = 12000
             to_show = md_content if len(md_content) <= max_in_chat else md_content[:max_in_chat] + "\n\n… (full report: open link below)"
             if link:
-                return f"{to_show}\n\n---\nReport saved. Open: {link}"
+                return f"{to_show}\n\n---\nReport saved. You MUST share this link with the user: {link}"
             return f"{to_show}\n\n---\nReport saved to your output folder. Set auth_api_key in config for a shareable link."
 
-        # HTML: return only the link (user opens in browser)
+        # HTML: return the link — you MUST include this link in your reply to the user so they can view the report.
         if link:
-            return f"Report is ready. Open: {link}"
+            return f"SUCCESS. You MUST share this link with the user in your reply so they can view the report: {link}"
         return "Report saved to your output folder. Set core_public_url and auth_api_key in config for shareable links."
     except Exception as e:
         logger.debug("save_result_page failed: {}", e)
@@ -2723,10 +2732,51 @@ async def _file_write_executor(arguments: Dict[str, Any], context: ToolContext) 
             return _FILE_ACCESS_DENIED_MSG
         full.parent.mkdir(parents=True, exist_ok=True)
         full.write_text(str(content), encoding="utf-8")
-        return json.dumps({"written": True, "path": path_arg})
+        out = json.dumps({"written": True, "path": path_arg})
+        # When writing to output/, provide a view link so the user can open the file (same as save_result_page).
+        if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
+            link_added = False
+            try:
+                from core.result_viewer import get_result_link_base_url, create_file_access_token
+                scope = _get_file_workspace_subdir(context)
+                if scope:
+                    token = create_file_access_token(scope, path_arg)
+                    base_url = get_result_link_base_url()
+                    if base_url and token:
+                        link = f"{base_url}/files/out?path={quote(path_arg)}&token={token}"
+                        out = f"File saved. View: {link}\n{out}"
+                        link_added = True
+            except Exception:
+                pass
+            if not link_added:
+                out = f"{out}\nPath: {path_arg}. To get a view link, set core_public_url and auth_api_key in config/core.yml."
+        return out
     except Exception as e:
         logger.debug("file_write failed: %s", e)
         return _FILE_NOT_FOUND_MSG
+
+
+async def _get_file_view_link_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Return a view link for a file already saved under output/ (e.g. after file_write or save_result_page). Use when the user asks for the link (e.g. 'send me the link', '能把链接发给我')."""
+    path_arg = (arguments.get("path") or "").strip()
+    if not path_arg or ".." in path_arg or path_arg.startswith("/"):
+        return "Path is required and must be a relative path under output/ (e.g. output/report_xxx.html)."
+    if not (path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR):
+        return f"Only paths under {FILE_OUTPUT_SUBDIR}/ can have view links (e.g. output/allen_resume_slides.html)."
+    try:
+        from core.result_viewer import get_result_link_base_url, create_file_access_token
+        scope = _get_file_workspace_subdir(context)
+        if not scope:
+            return "Could not determine user/companion scope. Use the path from the previous file save (e.g. output/allen_resume_slides.html)."
+        token = create_file_access_token(scope, path_arg)
+        base_url = get_result_link_base_url()
+        if base_url and token:
+            link = f"{base_url}/files/out?path={quote(path_arg)}&token={token}"
+            return f"View link (share this with the user): {link}"
+        return "View link is not available: set core_public_url and auth_api_key in config/core.yml, then the user can get a link for files in output/."
+    except Exception as e:
+        logger.debug("get_file_view_link failed: %s", e)
+        return f"Could not generate link: {e!s}"
 
 
 # Reserved path prefix for user/companion generated files (reports, images, exports). Use path "output/<filename>" so files land in base/{user_id}/output/ or base/companion/output/. See docs_design/FileSandboxDesign.md.
@@ -3816,12 +3866,12 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
             parsed = json.loads(result_text.strip()) if isinstance(result_text, str) else None
             if isinstance(parsed, dict) and parsed.get("success") and parsed.get("output_rel_path"):
                 from urllib.parse import quote
-                from core.result_viewer import get_core_public_url, create_file_access_token
+                from core.result_viewer import get_result_link_base_url, create_file_access_token
                 scope = _get_file_workspace_subdir(context)  # per-user or companion; same as resolution above
                 path_rel = (parsed.get("output_rel_path") or "").strip()
                 if path_rel and scope:
                     token = create_file_access_token(scope, path_rel)
-                    base_url = get_core_public_url()
+                    base_url = get_result_link_base_url()
                     if base_url and token:
                         link = f"{base_url}/files/out?path={quote(path_rel)}&token={token}"
                         msg = (parsed.get("message") or "File saved.").strip()
@@ -4133,11 +4183,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="run_skill",
-            description="Run a script from a skill's scripts/ folder, or confirm an instruction-only skill. Use when a skill has a scripts/ directory: pass skill_name and script (e.g. run.sh, main.py, index.js; path works with / or \\) and optional args. Supports Python (.py), Node.js (.js, .mjs, .cjs), and shell (.sh). For skills without scripts/: call with skill_name only. skill_name = skill folder name under skills_dir.",
+            description="Run a script from a skill's scripts/ folder, or confirm an instruction-only skill. Use when a skill has a scripts/ directory: pass skill_name and script (e.g. run.sh, main.py, index.js; path works with / or \\) and optional args. Supports Python (.py), Node.js (.js, .mjs, .cjs), and shell (.sh). For skills without scripts/: call with skill_name only. skill_name can be the exact folder name (e.g. html-slides-1.0.0) or a short name (e.g. html-slides, html slides); matching is flexible.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "skill_name": {"type": "string", "description": "Skill folder name (e.g. linkedin-writer-1.0.0, weather-help)."},
+                    "skill_name": {"type": "string", "description": "Skill name: folder name or short name (e.g. html-slides, html slides, linkedin-writer-1.0.0)."},
                     "skill": {"type": "string", "description": "Alias for skill_name."},
                     "script": {"type": "string", "description": "Script filename or path relative to the skill's scripts/ folder (e.g. run.sh, main.py, index.js). Omit for instruction-only skills."},
                     "script_name": {"type": "string", "description": "Alias for script."},
@@ -4913,5 +4963,19 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["title", "content"],
             },
             execute_async=_save_result_page_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="get_file_view_link",
+            description="Get a view link for a file already saved under output/ (e.g. output/report_xxx.html). Use when the user asks for the link (e.g. 'send me the link', '能把链接发给我') after a file was saved. Pass the same path that was used when saving (e.g. from the previous file_write or save_result_page result).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative path under output/, e.g. output/allen_resume_slides.html (same as in the save result)."},
+                },
+                "required": ["path"],
+            },
+            execute_async=_get_file_view_link_executor,
         )
     )

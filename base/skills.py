@@ -122,6 +122,60 @@ def _normalize_folder_for_disable(folder: str) -> str:
     return (folder or "").strip().lower()
 
 
+def _normalize_skill_name_for_match(name: str) -> str:
+    """Normalize skill name for matching: lowercase, spaces/underscores to single hyphen, strip."""
+    try:
+        s = str(name or "").strip().lower()
+        s = re.sub(r"[\s_]+", "-", s)
+        return s.strip("-") or ""
+    except Exception:
+        return ""
+
+
+def resolve_skill_folder_name(skills_base: Path, skill_name: str) -> Optional[str]:
+    """
+    Resolve a user- or LLM-provided skill name to the actual folder name under skills_base.
+    Supports exact match and flexible match so 'html-slides', 'html slides', 'html_slides'
+    all resolve to 'html-slides-1.0.0'. Only considers subdirs that contain SKILL.md.
+    Returns the actual folder name (e.g. html-slides-1.0.0) or None if not found.
+    Never raises: returns None on any error so Core does not crash.
+    """
+    try:
+        if not skill_name or skills_base is None:
+            return None
+        base = Path(skills_base)
+        if not base.is_dir():
+            return None
+        normalized_input = _normalize_skill_name_for_match(skill_name)
+        if not normalized_input:
+            return None
+        candidates: List[Tuple[str, str]] = []
+        for item in sorted(base.iterdir()):
+            try:
+                if not item.is_dir():
+                    continue
+                if not (item / SKILL_FILENAME).is_file():
+                    continue
+                folder_name = item.name
+                norm = _normalize_skill_name_for_match(folder_name)
+                if norm:
+                    candidates.append((norm, folder_name))
+            except (OSError, TypeError):
+                continue
+        for norm, orig in candidates:
+            if orig == skill_name or norm == normalized_input:
+                return orig
+        for norm, orig in candidates:
+            if norm.startswith(normalized_input + "-") or norm == normalized_input:
+                return orig
+        for norm, orig in candidates:
+            if normalized_input.startswith(norm + "-") or normalized_input == norm:
+                return orig
+        return None
+    except Exception:
+        return None
+
+
 def load_skills_from_dirs(
     dirs: List[Path],
     disabled_folders: Optional[Iterable[str]] = None,
@@ -211,28 +265,87 @@ def load_skill_by_folder(
         return None
 
 
+def _skill_keywords_line(skill: Dict[str, Any]) -> str:
+    """Build a single 'Keywords: a, b, c' line from skill frontmatter (keywords + trigger.patterns). Never raises."""
+    try:
+        parts: List[str] = []
+        keywords = skill.get("keywords")
+        if keywords:
+            if isinstance(keywords, (list, tuple)):
+                for k in keywords:
+                    try:
+                        s = str(k).strip()
+                        if s and s not in parts:
+                            parts.append(s)
+                    except Exception:
+                        continue
+            else:
+                try:
+                    s = str(keywords).strip()
+                    if s:
+                        parts.append(s)
+                except Exception:
+                    pass
+        trigger = skill.get("trigger") if isinstance(skill.get("trigger"), dict) else None
+        if trigger:
+            raw = trigger.get("patterns")
+            if raw is None:
+                raw = [trigger.get("pattern")] if trigger.get("pattern") else []
+            elif isinstance(raw, str):
+                raw = [raw] if raw.strip() else []
+            elif not isinstance(raw, (list, tuple)):
+                raw = []
+            for pat in raw:
+                if not pat or not isinstance(pat, str):
+                    continue
+                try:
+                    words = re.sub(r"[\\^$.*+?()\[\]{}|]", " ", pat).replace("'", " ").split()
+                    for w in words:
+                        w = w.strip()
+                        if w and len(w) >= 2 and w not in parts:
+                            parts.append(w)
+                except Exception:
+                    continue
+        if not parts:
+            return ""
+        return "Keywords: " + ", ".join(parts[:15])
+    except Exception:
+        return ""
+
+
 def build_skills_system_block(skills: List[Dict[str, Any]], include_body: bool = False) -> str:
     """
-    Build a system-prompt block listing available skills (name + description, optionally body).
-    Includes folder name so the LLM knows what to pass as skill_name to run_skill (folder = skill folder under skills_dir).
+    Build a system-prompt block listing available skills (name + description, keywords, optionally body).
+    Includes folder and short-name hints so the LLM can call run_skill(skill_name=<folder or short name>) accurately.
     """
     if not skills:
         return ""
-    lines = ["## Available skills", ""]
+    lines = [
+        "## Available skills",
+        "Match the user's request to one skill by name, description, or keywords. Call run_skill(skill_name=<folder or short name>); short names (e.g. html-slides, html slides) work.",
+        "",
+    ]
     for s in skills:
-        name = s.get("name") or "(unnamed)"
-        folder = s.get("folder") or ""
-        desc = (s.get("description") or "").strip()
-        # Show folder so LLM can call run_skill(skill_name=folder, script=...)
-        if folder and folder != name:
-            line = f"- **{name}** (run_skill skill_name: `{folder}`): {desc}" if desc else f"- **{name}** (run_skill skill_name: `{folder}`)"
-        else:
-            line = f"- **{name}**: {desc}" if desc else f"- **{name}**"
-        lines.append(line)
-        if include_body and s.get("body"):
-            lines.append("  " + s["body"].replace("\n", "\n  ").strip())
+        try:
+            name = str(s.get("name") or "(unnamed)").strip() or "(unnamed)"
+            folder = str(s.get("folder") or "").strip()
+            desc = str(s.get("description") or "").strip()
+            if folder and folder != name:
+                line = f"- **{name}** (run_skill skill_name: `{folder}` or `{name}`): {desc}" if desc else f"- **{name}** (run_skill skill_name: `{folder}` or `{name}`)"
+            else:
+                line = f"- **{name}**: {desc}" if desc else f"- **{name}**"
+            lines.append(line)
+            kw_line = _skill_keywords_line(s)
+            if kw_line:
+                lines.append("  " + kw_line)
+            if include_body and s.get("body"):
+                body = str(s.get("body") or "").replace("\n", "\n  ").strip()
+                if body:
+                    lines.append("  " + body)
+        except Exception:
+            continue
         lines.append("")
-    lines.append("Skills without a scripts/ folder are instruction-only: call run_skill(skill_name=<folder>) with no script, then follow that skill's instructions in your response.")
+    lines.append("Skills without a scripts/ folder are instruction-only: call run_skill(skill_name=<folder or short name>) with no script, then follow that skill's instructions.")
     return "\n".join(lines).strip() + "\n\n"
 
 
