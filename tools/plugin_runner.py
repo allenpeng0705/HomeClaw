@@ -1,7 +1,9 @@
 """
 Run a built-in (inline) plugin in a subprocess so a buggy plugin cannot crash Core.
 Used when run_plugin_in_process_plugins does not include this plugin_id.
-Reads JSON from stdin: { "plugin_id", "capability_id"?, "parameters"?, "request_text"? }
+Reads JSON from: (1) file if invoked with --payload <path>, else (2) stdin.
+  Payload: { "plugin_id", "capability_id"?, "parameters"?, "request_text"?, "output_dir"? }
+  Using a payload file avoids pipe buffer limits on Windows/Unix for large parameters.
 Writes JSON to stdout: { "success": true, "text": "..." } or { "success": false, "error": "..." }
 Never raises; exits 0 on success, 1 on failure.
 """
@@ -111,15 +113,43 @@ def _run_plugin_sync(plugin_id: str, capability_id: Optional[str], parameters: D
         return {"success": False, "error": str(e)}
 
 
-def main() -> int:
+def _read_payload() -> Dict:
+    """Read payload from --payload <path> file (avoids pipe size limits) or from stdin. Never raises."""
     try:
+        if len(sys.argv) >= 3 and sys.argv[1] == "--payload":
+            path = (sys.argv[2] or "").strip()
+            if not path:
+                return {"_error": "Payload file path is empty"}
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    raw = f.read()
+            except OSError as e:
+                return {"_error": f"Failed to read payload file: {e}"}
+            except Exception as e:
+                return {"_error": f"Failed to read payload file: {e}"}
+            try:
+                return json.loads(raw) if (raw and raw.strip()) else {}
+            except (json.JSONDecodeError, TypeError):
+                return {"_error": "Payload file is not valid JSON"}
         raw = sys.stdin.read()
         raw = raw if raw is not None else ""
         try:
-            data = json.loads(raw) if raw.strip() else {}
+            return json.loads(raw) if (raw and raw.strip()) else {}
         except (json.JSONDecodeError, TypeError):
-            data = {}
-        plugin_id = (data.get("plugin_id") or "").strip()
+            return {}
+    except Exception:
+        return {"_error": "Could not read payload"}
+
+
+def main() -> int:
+    try:
+        data = _read_payload()
+        if "_error" in data:
+            out = {"success": False, "error": data["_error"]}
+            print(json.dumps(out, ensure_ascii=False))
+            return 1
+        # Accept plugin_id or pluginId (same normalization as Core)
+        plugin_id = (data.get("plugin_id") or data.get("pluginId") or "").strip()
         if not plugin_id:
             out = {"success": False, "error": "plugin_id is required"}
             print(json.dumps(out, ensure_ascii=False))

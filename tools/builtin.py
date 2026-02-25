@@ -18,6 +18,7 @@ import platform
 import re
 import shutil
 import sys
+import tempfile
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -2173,17 +2174,21 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
         return f"Error: skill has no scripts/ folder: {skill_name}. Use the skill's instructions in your response instead of run_skill."
     if not script_arg:
         return "Error: script (or script_name) is required for this skill; it has a scripts/ folder."
-    # Normalize script path for cross-platform: accept both / and \ in script_arg
-    script_parts = Path(script_arg).parts
-    if not script_parts or any(p == ".." for p in script_parts):
-        return "Error: script path must be under the skill's scripts/ directory"
-    script_path = (scripts_dir.joinpath(*script_parts)).resolve()
+    # Normalize: LLMs sometimes pass full paths (e.g. /homeclaw/skills/.../get_weather.py or C:\...\get_weather.py); use only the script filename so path resolves under scripts_dir on any OS.
+    script_arg_normalized = (script_arg or "").replace("\\", "/").strip()
+    if "/" in script_arg_normalized or script_arg_normalized.startswith("."):
+        script_arg_normalized = script_arg_normalized.rstrip("/").split("/")[-1] or script_arg_normalized
+    # Strip any remaining path/leading chars so we never join an absolute path to scripts_dir
+    script_arg_normalized = script_arg_normalized.lstrip("./\\").strip()
+    if not script_arg_normalized or ".." in script_arg_normalized:
+        return "Error: script must be a filename under the skill's scripts/ directory (e.g. get_weather.py)."
+    script_path = (scripts_dir / script_arg_normalized).resolve()
     try:
         script_path.resolve().relative_to(scripts_dir)
     except ValueError:
         return "Error: script path must be under the skill's scripts/ directory"
     if not script_path.is_file():
-        return f"Error: script not found: {script_arg} (under {skill_name}/scripts/)"
+        return f"Error: script not found: {script_arg_normalized} (under {skill_name}/scripts/)"
     config = _get_tools_config()
     allowlist = config.get("run_skill_allowlist")
     if allowlist and script_path.name not in allowlist:
@@ -2196,6 +2201,26 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
         full_out, base_for_validation = r_out
         if base_for_validation is not None:
             skill_env["HOMECLAW_OUTPUT_DIR"] = str(full_out)
+    # Inject user's location from profile so skills (e.g. weather) can use it when the query has no location.
+    try:
+        req = getattr(context, "request", None)
+        uid = (getattr(context, "system_user_id", None) or (getattr(req, "user_id", None) if req else None) or ""
+        if (uid or "").strip() and _profile_base_dir() != "__disabled__":
+            from base.profile_store import get_profile
+            base_dir = _profile_base_dir()
+            base_dir = None if base_dir == "__disabled__" else base_dir
+            profile = get_profile((uid or "").strip(), base_dir=base_dir)
+            if isinstance(profile, dict):
+                loc = profile.get("location") or profile.get("city")
+                loc = (loc if isinstance(loc, str) else "").strip()
+                if not loc and isinstance(profile.get("address"), str):
+                    addr = (profile.get("address") or "").strip()
+                    if addr:
+                        loc = addr.split(",")[0].strip() or addr[:80].strip()
+                if loc and isinstance(loc, str):
+                    skill_env["HOMECLAW_USER_LOCATION"] = loc
+    except Exception:
+        pass
     # Keyed skills: inject per-user API keys from user.yml, or use skill config/env when Companion without user.
     try:
         keyed_overrides, keyed_error = _get_keyed_skill_env_overrides(skill_name, context)
@@ -2852,12 +2877,12 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
             max_in_chat = 12000
             to_show = md_content if len(md_content) <= max_in_chat else md_content[:max_in_chat] + "\n\n… (full report: open link below)"
             if link:
-                return f"{to_show}\n\n---\nReport saved. You MUST share this link with the user (full link in one line; if it does not open, tell user to copy the entire URL and paste in browser): {link}"
+                return f"{to_show}\n\n---\nReport saved. Share this link with the user (use Markdown link so it is clickable): [View report]({link})"
             return f"{to_show}\n\n---\nReport saved to your output folder. {link_err or 'Set auth_api_key in config for a shareable link.'}"
 
-        # HTML: return the link — you MUST include this link in your reply to the user so they can view the report.
+        # HTML: return the link in Markdown format so the client can render it as a clickable link.
         if link:
-            return f"SUCCESS. You MUST share this link with the user in your reply so they can view the report. Use the full link in one line; if it does not open when clicked, tell the user to copy the entire URL and paste it in the browser: {link}"
+            return f"SUCCESS. Share this link with the user — include it in your reply as a Markdown link so the user can click it: [View slide]({link}) or [点击查看]({link}). Do not put the URL in backticks or a code block."
         return f"Report saved to your output folder. {link_err or 'Set core_public_url and auth_api_key in config for shareable links.'}"
     except Exception as e:
         logger.debug("save_result_page failed: {}", e)
@@ -2891,7 +2916,7 @@ async def _file_write_executor(arguments: Dict[str, Any], context: ToolContext) 
                 if content_size >= 250:
                     link, _ = build_file_view_link(scope, path_arg)
                     if link:
-                        out = f"File saved. View (use full link in one line; if it does not open, copy the entire URL and paste in browser): {link}\n{out}"
+                        out = f"File saved. Share with the user as a clickable link (use Markdown): [View file]({link})\n{out}"
                     else:
                         out = f"{out}\nPath: {path_arg}. To get a view link, set core_public_url and auth_api_key in config/core.yml."
                 else:
@@ -2920,7 +2945,7 @@ async def _get_file_view_link_executor(arguments: Dict[str, Any], context: ToolC
             return "Could not determine user/companion scope. Use the path from the previous file save (e.g. output/allen_resume_slides.html)."
         link, link_err = build_file_view_link(scope, path_arg)
         if link:
-            return f"View link (share this with the user; use the full link in one line): {link}"
+            return f"View link — share with the user as a Markdown link so they can click it: [View file]({link}) or [点击查看]({link}). Do not put the URL in backticks."
         return f"View link is not available: {link_err or 'set core_public_url and auth_api_key in config/core.yml.'}"
     except Exception as e:
         logger.debug("get_file_view_link failed: %s", e)
@@ -3872,10 +3897,11 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
     if not request:
         return "Error: route_to_plugin requires request context (unified orchestrator mode)."
     cron_scheduled = getattr(context, "cron_scheduled", False)
-    plugin_id = (arguments.get("plugin_id") or "").strip().lower().replace(" ", "_")
+    plugin_id = str(arguments.get("plugin_id") or "").strip().lower().replace(" ", "_")
     if not plugin_id:
         return "Error: plugin_id is required."
-    capability_id = (arguments.get("capability_id") or "").strip().lower().replace(" ", "_") or None
+    capability_id = (arguments.get("capability_id") or "")
+    capability_id = str(capability_id).strip().lower().replace(" ", "_") or None
     llm_params = arguments.get("parameters")
     if not isinstance(llm_params, dict):
         llm_params = {}
@@ -3998,7 +4024,9 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
             # Inline Python plugin (BasePlugin). By default run in subprocess so a buggy plugin never crashes Core.
             tools_config = _get_tools_config()
             in_process_list = tools_config.get("run_plugin_in_process_plugins")
-            run_in_process = isinstance(in_process_list, list) and (plugin_id in in_process_list)
+            _norm = lambda s: (s or "").strip().lower().replace(" ", "_").replace("-", "_")
+            in_process_set = {_norm(p) for p in (in_process_list or []) if isinstance(p, str)}
+            run_in_process = bool(in_process_set and _norm(plugin_id) in in_process_set)
             if run_in_process:
                 # In-process: same as before (for plugins that need Core refs or are trusted)
                 from base.base import PromptRequest
@@ -4033,8 +4061,10 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
             else:
                 # Subprocess: isolate plugin so it cannot crash Core
                 timeout_sec = int(tools_config.get("run_plugin_timeout", 300) or 300)
+                # Use same normalization as PluginManager so subprocess can resolve plugin (e.g. ppt_generation)
+                payload_plugin_id = plugin_id.replace("-", "_") if isinstance(plugin_id, str) else plugin_id
                 payload_obj = {
-                    "plugin_id": plugin_id,
+                    "plugin_id": payload_plugin_id,
                     "capability_id": capability_id,
                     "parameters": params,
                     "request_text": (getattr(request, "text", None) or "").strip(),
@@ -4047,31 +4077,54 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
                             payload_obj["output_dir"] = str(full_out.resolve())
                         except Exception:
                             pass  # do not crash Core on path resolve failure
-                payload = json.dumps(payload_obj, ensure_ascii=False)
+                stdout, stderr = None, None
+                proc = None
                 try:
+                    payload = json.dumps(payload_obj, ensure_ascii=False)
                     _proj_root = Path(__file__).resolve().parent.parent
                     _runner_script = Path(__file__).resolve().parent / "plugin_runner.py"
-                    proc = await asyncio.create_subprocess_exec(
-                        sys.executable,
-                        str(_runner_script),
-                        stdin=asyncio.subprocess.PIPE,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                        cwd=str(_proj_root),
-                    )
-                    stdout, stderr = await asyncio.wait_for(
-                        proc.communicate(input=payload.encode("utf-8")),
-                        timeout=timeout_sec,
-                    )
-                    out_str = (stdout or b"").decode("utf-8", errors="replace").strip()
+                    # Use temp file for payload so all plugins work with large parameters (avoids pipe buffer limits on Windows/Unix)
+                    payload_file = None
                     try:
-                        sub_result = json.loads(out_str) if out_str else {}
-                    except (json.JSONDecodeError, TypeError):
-                        sub_result = {"success": False, "error": out_str[:500] if out_str else "Plugin runner returned invalid JSON"}
-                    if sub_result.get("success"):
-                        result_text = (sub_result.get("text") or "").strip() or "(no output)"
-                    else:
-                        result_text = sub_result.get("error") or "Plugin subprocess failed"
+                        fd, payload_path = tempfile.mkstemp(suffix=".json", prefix="plugin_payload_")
+                        payload_file = payload_path
+                        try:
+                            os.write(fd, payload.encode("utf-8"))
+                        finally:
+                            try:
+                                os.close(fd)
+                            except Exception:
+                                pass
+                        proc = await asyncio.create_subprocess_exec(
+                            sys.executable,
+                            str(_runner_script),
+                            "--payload",
+                            payload_path,
+                            stdin=asyncio.subprocess.DEVNULL,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            cwd=str(_proj_root),
+                        )
+                        stdout, stderr = await asyncio.wait_for(
+                            proc.communicate(),
+                            timeout=timeout_sec,
+                        )
+                    finally:
+                        if payload_file and os.path.exists(payload_file):
+                            try:
+                                os.unlink(payload_file)
+                            except Exception:
+                                pass
+                    if stdout is not None:
+                        out_str = (stdout or b"").decode("utf-8", errors="replace").strip()
+                        try:
+                            sub_result = json.loads(out_str) if out_str else {}
+                        except (json.JSONDecodeError, TypeError):
+                            sub_result = {"success": False, "error": out_str[:500] if out_str else "Plugin runner returned invalid JSON"}
+                        if sub_result.get("success"):
+                            result_text = (sub_result.get("text") or "").strip() or "(no output)"
+                        else:
+                            result_text = sub_result.get("error") or "Plugin subprocess failed"
                 except asyncio.TimeoutError:
                     result_text = f"Error: plugin timed out after {timeout_sec}s"
                     try:

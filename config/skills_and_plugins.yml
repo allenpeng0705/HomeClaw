@@ -238,7 +238,7 @@ tools:
   # run_skill: .py scripts run in subprocess by default; list skill folder names here to run those .py in Core's process.
   run_skill_py_in_process_skills: []
   run_skill_timeout: 300   # seconds
-  # run_plugin: list plugin_ids to run in Core's process (default: subprocess).
+  # run_plugin: list plugin_ids to run in Core's process (default: subprocess). Subprocess uses a temp file for payload so large parameters work for all plugins; only add here if a plugin needs Core refs or must run in-process.
   run_plugin_in_process_plugins: []
   run_plugin_timeout: 300   # seconds
   # web_search: provider (tavily, duckduckgo, google_cse, bing, brave, serpapi). Tavily/brave need api_key here or env.

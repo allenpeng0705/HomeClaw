@@ -6,7 +6,7 @@ keywords: "weather forecast temperature rain wttr.in 天气 气温 预报"
 # Optional: when to force-include and auto-invoke (no need to add a rule in core.yml)
 trigger:
   patterns: ["weather|forecast|temperature|what'?s the weather|how'?s the weather|weather in|天气"]
-  instruction: "The user asked about weather or forecast. Call run_skill(skill_name='weather-1.0.0', script='get_weather.py', args=['<city or place>']) with the location from the message. Do not say you cannot fetch weather."
+  instruction: "The user asked about weather or forecast. Use run_skill(skill_name='weather-1.0.0', script='get_weather.py', args=['<city or place>']). Pass script as the filename only (e.g. 'get_weather.py'), not a full path. If the user did not give a location, call profile_get first and use the user's location from profile (e.g. city, location, address, or timezone) for args; otherwise use the location from the message. Do not say you cannot fetch weather."
   auto_invoke:
     script: get_weather.py
     args: ["{{query}}"]

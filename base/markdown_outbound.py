@@ -163,18 +163,17 @@ def markdown_to_channel(text: str, format: str = "plain") -> str:
         return text
 
 
-# Pattern for "link" format: message is short and contains an http(s) URL (e.g. "Report ready. Open: https://...")
+# Pattern to detect http(s) URLs so we can guarantee link-containing responses use markdown format.
 _HTTP_URL = re.compile(r"https?://[^\s]+")
 
 
 def classify_outbound_format(text: str) -> str:
     """
     Classify how the outbound response should be sent so clients can display correctly.
-    Returns one of: "plain" | "markdown" | "link".
+    Returns one of: "plain" | "markdown".
     - "plain": ordinary text; no markdown rendering.
-    - "markdown": content is Markdown; clients that support it (Companion, web chat, Control UI) should render it.
-    - "link": short message with a file/folder/report link (e.g. "Report is ready. Open: <url>" or /files/out); client shows text and makes link clickable.
-    File or folder references are shown via link. Images are sent directly by Core in the payload (images array), not via this classifier.
+    - "markdown": content is Markdown or contains an http(s) link; clients should render it so links are clickable.
+    Guarantee: if the response contains an http(s) URL, we always return "markdown" so the client can make the link clickable.
     Never raises; on any failure returns "plain".
     """
     try:
@@ -183,12 +182,12 @@ def classify_outbound_format(text: str) -> str:
         s = text.strip()
         if not s:
             return "plain"
-        # Markdown first: if it looks like markdown, client should render it (including messages that contain URLs).
+        # Guarantee: any response that contains a link uses markdown (or link) format so the link is clickable.
+        if _HTTP_URL.search(s):
+            return "markdown"
+        # Otherwise, if it looks like markdown, client should render it.
         if looks_like_markdown(s):
             return "markdown"
-        # Link: short message with an http(s) URL (file, folder, or report link e.g. /files/out). No markdown.
-        if len(s) <= 600 and _HTTP_URL.search(s):
-            return "link"
         return "plain"
     except Exception:
         return "plain"

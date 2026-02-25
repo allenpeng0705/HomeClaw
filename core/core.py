@@ -3131,7 +3131,7 @@ class Core(CoreInterface):
         """Return (text_to_send, format) for clients that support markdown (Companion, web chat, Control UI). format is 'plain'|'markdown'|'link'. For markdown/link we send raw text; for plain we apply _format_outbound_text. Never raises."""
         try:
             if text is None or not isinstance(text, str):
-                return (text if text is not None else "", "plain")
+                return (str(text)[:50000] if text is not None else "", "plain")
             fmt = self._safe_classify_format(text)
             if fmt == "markdown" or fmt == "link":
                 return (text, fmt)
@@ -3148,8 +3148,9 @@ class Core(CoreInterface):
         try:
             if not key:
                 key = last_channel_store._DEFAULT_KEY
-            # Channel queue: send converted (channel-ready) text; format "plain" so it matches content.
-            resp_data = {"text": self._format_outbound_text(response), "format": "plain"}
+            # Channel queue: use _outbound_text_and_format so markdown/link responses keep links clickable.
+            out_text, out_fmt = self._outbound_text_and_format(response) if response else ("", "plain")
+            resp_data = {"text": out_text, "format": out_fmt}
             request: Optional[PromptRequest] = self.latestPromptRequest
             if key != last_channel_store._DEFAULT_KEY or request is None:
                 stored = last_channel_store.get_last_channel(key)
@@ -3198,10 +3199,13 @@ class Core(CoreInterface):
         try:
             user_id = (user_id or "").strip() or "companion"
             try:
-                out_text = self._format_outbound_text(text) if text else ""
+                out_text, out_fmt = self._outbound_text_and_format(text) if text else ("", "plain")
             except Exception:
                 out_text = str(text)[:50000] if text else ""
-            payload = {"event": "push", "source": source, "text": out_text, "format": "plain"}
+                out_fmt = "plain"
+            if not text:
+                out_text, out_fmt = "", "plain"
+            payload = {"event": "push", "source": source, "text": out_text, "format": out_fmt}
             data_urls = []
             if images:
                 for image_path in images:
@@ -3246,7 +3250,8 @@ class Core(CoreInterface):
     ):
         """Send text and optional media (file paths) to the channel. Channels that support image/video/audio send them; others use text only."""
         # Channel queue: converted text; format "plain" so it matches content.
-        resp_data = {"text": self._format_outbound_text(response), "format": "plain"}
+        out_text, out_fmt = self._outbound_text_and_format(response) if response else ("", "plain")
+        resp_data = {"text": out_text, "format": out_fmt}
         if request is None:
             return
         if image_path and isinstance(image_path, str) and os.path.isfile(image_path):
@@ -5684,7 +5689,20 @@ class Core(CoreInterface):
                                         if result == ROUTING_RESPONSE_ALREADY_SENT:
                                             return ROUTING_RESPONSE_ALREADY_SENT
                                         if isinstance(result, str) and result.strip():
-                                            response = result
+                                            # Format folder_list/file_find JSON as user-friendly text so the user does not see raw JSON
+                                            if tname in ("folder_list", "file_find"):
+                                                try:
+                                                    entries = json.loads(result)
+                                                    if isinstance(entries, list):
+                                                        lines = [f"- {e.get('name', '?')} ({e.get('type', '?')})" for e in entries if isinstance(e, dict) and e.get("path") != "(truncated)" and (e.get("name") or e.get("path"))]
+                                                        header = "目录下的内容：\n" if tname == "folder_list" else "找到的文件：\n"
+                                                        response = header + "\n".join(lines) if lines else ("目录为空。" if tname == "folder_list" else "无匹配文件。")
+                                                    else:
+                                                        response = result
+                                                except (json.JSONDecodeError, TypeError):
+                                                    response = result
+                                            else:
+                                                response = result
                                             ran = True
                                         break
                                     except Exception as e:
