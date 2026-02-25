@@ -5581,16 +5581,25 @@ class Core(CoreInterface):
                                     "\n\n## File tools — sandbox (only two bases)\n"
                                     "Only these two bases are the search path and working area; their subfolders can be accessed. Any other folder cannot be accessed (sandbox). "
                                     "(1) User sandbox root — omit path or use subdir name; (2) share — path \"share\" or \"share/...\". "
+                                    "**Do not invent or fabricate file names, file paths, or URLs** to complete tasks. Use only: (a) values returned by your tool calls (e.g. path from folder_list, file_find), (b) the exact filename or path the user mentioned (e.g. 1.pdf), (c) links returned by save_result_page or get_file_view_link. If you need a path or URL, call the appropriate tool first and use its result. "
+                                    "**Never use absolute paths** (e.g. /mnt/, C:\\, /Users/). Use only relative paths under the sandbox: the filename (e.g. 1.pdf) or the path from folder_list/file_find. "
                                     "Do not use workspace, config, or paths outside these two trees. Put generated files in output/ (path \"output/filename\") and return the link. "
-                                    "When the user asks about a **specific file by name** (e.g. \"能告诉我1.pdf都讲了什么吗\", \"what is in 1.pdf\"): (1) call folder_list() or file_find(pattern='*1.pdf*') to list/search user sandbox; (2) use the **exact path** from the result that matches the requested name in document_read — e.g. if the user asked for 1.pdf, use path \"1.pdf\" only, not output/3.pdf or any other path. Do **not** guess or invent paths. "
+                                    "When the user asks about a **specific file by name** (e.g. \"能告诉我1.pdf都讲了什么吗\", \"what is in 1.pdf\"): (1) call folder_list() or file_find(pattern='*1.pdf*') to list/search user sandbox; (2) use the **exact path** from the result that matches the requested name in document_read — e.g. if the user asked for 1.pdf, use path \"1.pdf\" only. Do **not** use absolute paths or invent paths. "
                                     "When the user asks for file search, list, or read without a specific name: omit path for user sandbox; if user says \"share\", use path \"share\" or \"share/...\". "
                                     "folder_list() = list user sandbox; folder_list(path=\"share\") = list share; file_find(pattern=\"*.pdf\") = search user sandbox. "
-                                    "To read a file, use **only** the exact path returned by folder_list or file_find in document_read; do not invent paths. "
+                                    "To read a file, use **only** the exact path returned by folder_list or file_find in document_read (e.g. 1.pdf). "
                                     f"Current homeclaw_root: {base_str}.{paths_json}"
                                 )
                             llm_input[0]["content"] = (llm_input[0].get("content") or "") + block
                     except Exception as e:
                         logger.debug("Inject homeclaw_root into system prompt failed: {}", e)
+                # General rule when tools are present: do not invent paths, filenames, or URLs
+                if llm_input and llm_input[0].get("role") == "system":
+                    tool_rule = (
+                        "\n\n## Tool use — paths and URLs\n"
+                        "When a task requires a file path, filename, or URL: use only values returned by your tool calls or explicitly given by the user. Do not create, guess, or fabricate paths, filenames, or URLs."
+                    )
+                    llm_input[0]["content"] = (llm_input[0].get("content") or "") + tool_rule
                 # Tool loop: call LLM with tools; if it returns tool_calls, execute and append results, repeat
                 context = ToolContext(
                     core=self,

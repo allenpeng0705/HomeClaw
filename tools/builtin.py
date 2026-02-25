@@ -1974,7 +1974,7 @@ async def _image_executor(arguments: Dict[str, Any], context: ToolContext) -> st
         else:
             r = _resolve_file_path(path_arg, context, for_write=False)
             if r is None:
-                return _file_resolve_error_msg()
+                return _file_resolve_error_msg(path_arg)
             full, base = r
             used_request_image = False
             if not full.is_file():
@@ -2450,7 +2450,7 @@ async def _file_read_executor(arguments: Dict[str, Any], context: ToolContext) -
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
-            return _file_resolve_error_msg()
+            return _file_resolve_error_msg(path_arg)
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -2549,7 +2549,7 @@ async def _document_read_executor(arguments: Dict[str, Any], context: ToolContex
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
-            return _file_resolve_error_msg()
+            return _file_resolve_error_msg(path_arg)
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -2622,7 +2622,7 @@ async def _file_understand_executor(arguments: Dict[str, Any], context: ToolCont
             max_chars = default_max
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
-            return _file_resolve_error_msg()
+            return _file_resolve_error_msg(path_arg)
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -2820,7 +2820,7 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
         path_arg = f"{FILE_OUTPUT_SUBDIR}/report_{file_id}{ext}"
         r = _resolve_file_path(path_arg, context, for_write=True)
         if r is None:
-            return _file_resolve_error_msg()
+            return _file_resolve_error_msg(path_arg)
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -2873,7 +2873,7 @@ async def _file_write_executor(arguments: Dict[str, Any], context: ToolContext) 
     try:
         r = _resolve_file_path(path_arg, context, for_write=True)
         if r is None:
-            return _file_resolve_error_msg()
+            return _file_resolve_error_msg(path_arg)
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -2955,8 +2955,13 @@ _FILE_HOMECLAW_ROOT_NOT_SET_MSG = (
 )
 
 
-def _file_resolve_error_msg() -> str:
-    """When _resolve_file_path returned None: homeclaw_root not set vs invalid path. Never raises."""
+def _file_resolve_error_msg(path_arg: Optional[str] = None) -> str:
+    """When _resolve_file_path returned None: homeclaw_root not set vs invalid path. If path_arg looks absolute, say so. Never raises."""
+    if path_arg and (path_arg.strip().startswith("/") or (len(path_arg.strip()) > 1 and path_arg.strip()[1] == ":")):
+        return (
+            "Absolute paths are not allowed. Use only the filename or path under the user sandbox (e.g. 1.pdf, output/report.pdf). "
+            "Call folder_list() or file_find(pattern='*1.pdf*') to get the path, then use that exact path in document_read (e.g. path '1.pdf')."
+        )
     try:
         root = _get_homeclaw_root()
         if not (root or "").strip():
@@ -3091,6 +3096,10 @@ def _resolve_file_path(
                 return None  # homeclaw_root not set; caller should return clear message
             path_arg = "."  # default to user's private folder (homeclaw_root/{user_id}) when homeclaw_root is set
 
+        # When homeclaw_root is set, absolute paths are not allowed (sandbox only). Reject so caller can return a clear message.
+        if base_str and path_arg and (path_arg.startswith("/") or (len(path_arg) > 1 and path_arg[1] == ":")):
+            return None
+
         if not base_str:
             # homeclaw_root not set: do not resolve relative paths (would be wrong). Require homeclaw_root in config.
             if not path_arg or path_arg == "." or not Path(path_arg).is_absolute():
@@ -3170,7 +3179,7 @@ async def _file_edit_executor(arguments: Dict[str, Any], context: ToolContext) -
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
-            return _file_resolve_error_msg()
+            return _file_resolve_error_msg(path_arg)
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -3291,7 +3300,7 @@ async def _folder_list_executor(arguments: Dict[str, Any], context: ToolContext)
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
-            return _file_resolve_error_msg()
+            return _file_resolve_error_msg(path_arg)
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -3330,7 +3339,7 @@ async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
-            return _file_resolve_error_msg()
+            return _file_resolve_error_msg(path_arg)
         full_dir, base = r
         if not _path_under(full_dir, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -4896,11 +4905,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_read",
-            description="Read contents of a file. When the user asks about a file by name (e.g. 1.pdf), use the path from folder_list or file_find that matches that name (e.g. path '1.pdf'); do not use a different file or output/ path. Default base: user sandbox; use path 'share/...' when user says share.",
+            description="Read contents of a file. When the user asks about a file by name (e.g. 1.pdf), use path '1.pdf' only (filename or path from folder_list/file_find). Do not use absolute paths (e.g. /mnt/, C:\\) — they are rejected. Default base: user sandbox; use path 'share/...' when user says share.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Path relative to user's private folder (e.g. 'file.txt', 'subdir/file.txt'). Use 'share/filename' when user says share."},
+                    "path": {"type": "string", "description": "Relative path under user sandbox only (e.g. 1.pdf, output/report.txt). Do not use absolute paths. Use the path from folder_list or file_find, or the filename the user asked for."},
                     "max_chars": {"type": "integer", "description": "Max characters to return (default from config tools.file_read_max_chars, or 32000).", "default": 32000},
                 },
                 "required": ["path"],
@@ -4911,11 +4920,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="document_read",
-            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. When the user asks about a file by name (e.g. 1.pdf), use the path from folder_list or file_find that matches that name (e.g. path '1.pdf'); do not use a different file or a path under output/. Default base: user sandbox; use path 'share/...' when user says share. For long files, increase max_chars or ask for section-by-section summary.",
+            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. When the user asks about a file by name (e.g. 1.pdf), use path '1.pdf' only (the filename or path from folder_list/file_find). Do not use absolute paths (e.g. /mnt/, C:\\) — they are rejected. Default base: user sandbox; use path 'share/...' when user says share. For long files, increase max_chars or ask for section-by-section summary.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Path relative to user's private folder (e.g. report.pdf). Use 'share/filename' when user says share."},
+                    "path": {"type": "string", "description": "Relative path under user sandbox only (e.g. 1.pdf, output/report.pdf). Do not use absolute paths (/mnt/, C:\\, /Users/). Use the path from folder_list or file_find, or the filename the user asked for."},
                     "max_chars": {"type": "integer", "description": "Max characters to return (default from config tools.file_read_max_chars, or 64000).", "default": 64000},
                 },
                 "required": ["path"],
