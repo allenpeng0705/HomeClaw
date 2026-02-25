@@ -101,12 +101,12 @@ if %BUILD_COMPANION%==1 (
     popd
     set "COMPANION_RELEASE=%COMPANION_DIR%\build\windows\x64\runner\Release"
     if not exist "%COMPANION_RELEASE%" set "COMPANION_RELEASE=%COMPANION_DIR%\build\windows\runner\Release"
-    if exist "%COMPANION_RELEASE%\homeclaw_companion.exe" (
+    if exist "%COMPANION_RELEASE%\HomeClawApp.exe" (
       if not exist "%OUTPUT_DIR%\companion" mkdir "%OUTPUT_DIR%\companion"
       xcopy /E /I /Y "%COMPANION_RELEASE%\*" "%OUTPUT_DIR%\companion\"
       echo Companion app copied to %OUTPUT_DIR%\companion\
     ) else (
-      echo Companion build did not produce homeclaw_companion.exe at %COMPANION_RELEASE%
+      echo Companion build did not produce HomeClawApp.exe at %COMPANION_RELEASE%
     )
   )
 ) else (
@@ -211,9 +211,9 @@ echo Creating RunHomeClaw.bat launcher...
   echo ^)
   echo :core_ready
   echo.
-  echo if exist "%%PKG_ROOT%%companion\homeclaw_companion.exe" ^(
+  echo if exist "%%PKG_ROOT%%companion\HomeClawApp.exe" ^(
   echo   echo Opening Companion...
-  echo   start "" "%%PKG_ROOT%%companion\homeclaw_companion.exe"
+  echo   start "" "%%PKG_ROOT%%companion\HomeClawApp.exe"
   echo ^)
   echo.
   echo echo Core is running. Close this window to stop Core, or leave it open.
