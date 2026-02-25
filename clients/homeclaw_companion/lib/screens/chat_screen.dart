@@ -43,6 +43,7 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Optional image data URLs per message (same index as _messages; null or empty when no images).
   final List<List<String>?> _messageImages = [];
   final TextEditingController _inputController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   bool _loading = false;
   /// When streaming is on, latest progress message from Core (e.g. "Generating your presentation…"); shown under the loading bar.
   String? _loadingMessage;
@@ -251,6 +252,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _messageImages.add(userImageDataUrls.isEmpty ? null : userImageDataUrls);
       _loading = true;
     });
+    _scrollToBottom();
     _persistChatHistory();
     try {
       List<String> imagePaths = [];
@@ -304,6 +306,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _loading = false;
           _loadingMessage = null;
         });
+        _scrollToBottom();
         await _persistChatHistory();
         final preview = reply.isEmpty ? 'No reply' : (reply.length > 80 ? '${reply.substring(0, 80)}…' : reply);
         await _native.showNotification(title: 'HomeClaw', body: preview);
@@ -317,6 +320,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _loading = false;
           _loadingMessage = null;
         });
+        _scrollToBottom();
         _persistChatHistory();
       }
     }
@@ -1056,12 +1060,25 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// Scroll the message list to the bottom so the latest message is visible (and not covered by the keyboard).
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
   @override
   void dispose() {
     _connectionCheckTimer?.cancel();
     _voiceSubscription?.cancel();
     _voice.dispose();
     _inputController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -1191,6 +1208,7 @@ class _ChatScreenState extends State<ChatScreen> {
         children: [
           Expanded(
             child: ListView.builder(
+              controller: _scrollController,
               padding: const EdgeInsets.all(8),
               itemCount: _messages.length,
               itemBuilder: (context, i) {
