@@ -106,7 +106,7 @@ def main() -> None:
     if not api_key:
         fail(
             "Baidu AI Search requires an API key. Set it in this skill's config: "
-            "config/skills/baidu-search-1.1.0/config.yml (api_key: \"your-key\"), "
+            "skills/baidu-search-1.1.0/config.yml (api_key: \"your-key\"), "
             "or set BAIDU_API_KEY in the environment. "
             "Get a key from Baidu Qianfan: https://cloud.baidu.com/doc/qianfan-api/s/Hmbu8m06u"
         )
@@ -152,7 +152,7 @@ def main() -> None:
         msg = str(e)
         if "216003" in msg or "Authentication" in msg or "apikey" in msg.lower():
             fail(
-                msg + " Check that api_key in config/skills/baidu-search-1.1.0/config.yml or BAIDU_API_KEY is set and valid (Baidu Qianfan console)."
+                msg + " Check that api_key in skills/baidu-search-1.1.0/config.yml or BAIDU_API_KEY is set and valid (Baidu Qianfan console)."
             )
         fail(msg)
     except Exception as e:

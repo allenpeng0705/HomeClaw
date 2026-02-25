@@ -12,7 +12,7 @@
 | **Implementation** | Code: built-in (Python) or external (any language, HTTP server). | A **folder** with **SKILL.md** (name, description, workflow) and optional **scripts/**. |
 | **When to use** | New capability that needs its own logic or API. | Reusable “how to do X” that uses existing tools or small scripts. |
 
-Both are important: plugins give you new capabilities; skills give you reusable workflows and compatibility with **OpenClaw-style skillsets** (copy skill folders into `config/skills/` and they work).
+Both are important: plugins give you new capabilities; skills give you reusable workflows and compatibility with **OpenClaw-style skillsets** (copy skill folders into `skills/` and they work).
 
 ---
 
@@ -71,14 +71,14 @@ Each small example: run the plugin server, then register with Core via the provi
 
 ## How to write a skill
 
-- **Location:** A **folder** under **`config/skills/`** (or the path set by **skills_dir** in `config/core.yml`).
+- **Location:** A **folder** under **`skills/`** (or the path set by **skills_dir** in `config/core.yml`).
 - **Required:** **SKILL.md** with:
   - **Name** — short title.
   - **Description** — when to use this skill (for LLM routing).
   - **Workflow** — step-by-step instructions; the LLM uses **tools** (file_read, browser_*, cron, memory_search, etc.) to follow them.
 - **Optional:** **scripts/** — scripts the LLM can run via **`run_skill`** (e.g. Python, Node.js, shell).
 
-Enable skills in **config/core.yml**: `use_skills: true`, `skills_dir: config/skills`. Restart Core. The assistant sees “Available skills” and can choose and run them. **OpenClaw skills** use the same format; copy skill folders into `config/skills/` and they work.
+Enable skills in **config/core.yml**: `use_skills: true`, `skills_dir: skills`. Restart Core. The assistant sees “Available skills” and can choose and run them. **OpenClaw skills** use the same format; copy skill folders into `skills/` and they work.
 
 **Detailed reference:** [SkillsGuide.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/SkillsGuide.md), [ToolsSkillsPlugins.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/ToolsSkillsPlugins.md) in the repo.
 
@@ -90,7 +90,7 @@ Enable skills in **config/core.yml**: `use_skills: true`, `skills_dir: config/sk
 |------|-----------------|
 | **Write a built-in plugin** | `plugins/<Name>/` with plugin.yaml, config.yml, plugin.py; [HowToWriteAPlugin.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/HowToWriteAPlugin.md). |
 | **Write an external plugin** | HTTP server (GET /health, POST /run); register with Core; see **external_plugins/** and [HowToWriteAPlugin.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/HowToWriteAPlugin.md). |
-| **Write a skill** | Folder under `config/skills/` with SKILL.md (and optional scripts/); [SkillsGuide.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/SkillsGuide.md). |
+| **Write a skill** | Folder under `skills/` with SKILL.md (and optional scripts/); [SkillsGuide.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/SkillsGuide.md). |
 
 ---
 

@@ -20,7 +20,7 @@ If you want an AI assistant that runs at home and talks to you over Telegram, em
 - **LLM:** **Local-first**—llama.cpp (GGUF) by default; cloud (OpenAI, Gemini, DeepSeek, etc.) via LiteLLM is optional. You can use local for chat and cloud for embedding (or the other way around).
 - **Architecture:** A **Core** (FastAPI, port 9000) plus **separate channel processes** (or any bot that POSTs to `/inbound`). Channels are not inside the Core; they connect to it over HTTP or WebSocket.
 - **Memory:** **RAG** is central. Vector store (Cognee or Chroma) + SQLite chat history + optional per-user profile and knowledge base. The model gets “relevant memories” via semantic search on every request—so it can recall “what we said about X” across sessions.
-- **Extensibility:** **Tools** (exec, browser, cron, file, memory, web search, sessions, etc.) are first-class; the model calls them by name with arguments. **Plugins** (Weather, News, Mail, custom APIs) are single-feature modules selected via `route_to_plugin`. **Skills** (SKILL.md under `config/skills/`) describe workflows; the LLM uses tools to accomplish them or calls `run_skill` to run a script.
+- **Extensibility:** **Tools** (exec, browser, cron, file, memory, web search, sessions, etc.) are first-class; the model calls them by name with arguments. **Plugins** (Weather, News, Mail, custom APIs) are single-feature modules selected via `route_to_plugin`. **Skills** (SKILL.md under `skills/`) describe workflows; the LLM uses tools to accomplish them or calls `run_skill` to run a script.
 
 ### Architecture at a glance
 

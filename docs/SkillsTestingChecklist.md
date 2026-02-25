@@ -9,7 +9,7 @@ Use this checklist after adding many new skills to verify config, sync, selectio
 | Check | What to set |
 |-------|-------------|
 | Skills enabled | `use_skills: true` |
-| Skills directory | `skills_dir: config/skills` (or your path) |
+| Skills directory | `skills_dir: skills` (or your path) |
 | Vector search (recommended for many skills) | `skills_use_vector_search: true` |
 | Sync on startup | `skills_refresh_on_startup: true` so new skills are registered to the vector store |
 | How many in prompt | When vector search on: `skills_max_retrieved: 10`, `skills_max_in_prompt: 5`. When off: all skills. |
@@ -29,8 +29,8 @@ After adding new skills:
 
 If you use **skills_test_dir** for testing new skills first:
 
-- Set `skills_test_dir: config/skills_test` (or another path).
-- Put the new skill folder there (same structure: `config/skills_test/my-skill/SKILL.md`).
+- Set `skills_test_dir: skills_test` (or another path).
+- Put the new skill folder there (same structure: `skills_test/my-skill/SKILL.md`).
 - Restart; test folder is fully synced every time (ids stored as `test__<folder>`).
 - When ready, move the folder from `skills_test_dir` to `skills_dir` and restart.
 

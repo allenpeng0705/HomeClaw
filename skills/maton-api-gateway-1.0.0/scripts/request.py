@@ -63,7 +63,7 @@ def main() -> int:
     if not key:
         print(
             "Error: Maton API key not set. Set MATON_API_KEY in env or maton_api_key in "
-            "config/skills/maton-api-gateway-1.0.0/config.yml. Get key at https://www.maton.ai/settings",
+            "skills/maton-api-gateway-1.0.0/config.yml. Get key at https://www.maton.ai/settings",
             file=sys.stderr,
         )
         return 1

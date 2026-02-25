@@ -1,0 +1,271 @@
+# =============================================================================
+# Skills and plugins configuration
+# =============================================================================
+# This file is loaded by Core when core.yml sets:
+#   skills_and_plugins_config_file: skills_and_plugins.yml
+# Path is relative to the directory containing core.yml (config/).
+# Only keys starting with skills_, plugins_, system_plugins_, or the key "tools"
+# are read from this file; they override or supply values merged into the main config.
+# Edit this file for all skill/plugin/tools settings; core.yml stays short.
+#
+# Optional keys (code defaults if omitted): skills_dir (default: skills),
+# skills_extra_dirs ([]), skills_disabled ([]), skills_include_body_max_chars (0),
+# plugins_extra_dirs ([]), system_plugins_start_delay (2.0). Add them here to override.
+# =============================================================================
+
+# --- Plugin list / routing block ---
+# Max characters per plugin description in the routing block. 0 = no truncation (default).
+# When using RAG or plugins_max_in_prompt, this only caps per-item length; set 512 or 300 to shrink prompt.
+plugins_description_max_chars: 0
+
+# --- Skills: vector search (RAG) ---
+# When false (default): include ALL skills in the prompt. When true: create vector store, sync skills_dir, retrieve by query similarity.
+# See docs_design/SkillsAndPluginsSamePolicy.md.
+skills_use_vector_search: false
+skills_vector_collection: homeclaw_skills   # Chroma collection name (default: homeclaw_skills)
+skills_max_retrieved: 10                     # When using vector search: max skills from RAG before threshold + cap (default: 10)
+skills_max_in_prompt: 5                      # When skills_use_vector_search=true: cap skills in prompt (default: 5); ignored when false
+# Min similarity (0..1) to keep a skill; below this, RAG drops it. 0.5 helps cross-lingual/short queries (e.g. Chinese "创建图片").
+# Code default is 0.0; 0.3–0.5 improves selection for mixed-language prompts.
+skills_similarity_threshold: 0.5
+skills_refresh_on_startup: true              # When skills_use_vector_search: resync skills_dir → vector DB on Core startup (default: true)
+skills_test_dir: ""                          # Optional: test folder for full sync every time (id = test__<folder>); default ""
+skills_incremental_sync: false               # When true: only process skill folders not already in vector store (default: false)
+
+# --- Skills: body in prompt ---
+# For these skill folders only, include SKILL.md body (and USAGE.md) in the prompt so the model can answer "how do I use this?".
+# Set skills_include_body_max_chars > 0 (e.g. 8000) in core.yml or below to cap body length; 0 = no truncation (default).
+skills_include_body_for: [maton-api-gateway-1.0.0, x-api-1.0.0, meta-social-1.0.0]
+
+# --- Skills / plugins: force-include rules ---
+# When the user query matches a rule pattern, Core adds the rule's instruction and (for skills) optional skill folders or plugin list.
+# Rules with folders: [] and optional plugins: [id] + auto_invoke run that tool when the model returns no tool_calls (helps local models).
+# Plugin capabilities (e.g. homeclaw-browser) are invoked via route_to_plugin(plugin_id=..., capability_id=..., parameters=...).
+skills_force_include_rules:
+  # --- Tool-only fallbacks (folders: [], auto_invoke when no tool_calls) ---
+  - patterns:
+    - "list\\s+(file|files|directory|folder|content)|列出|目录|哪些文件|文件列表|我的文件|看看文件|显示文件|目录下|有什么文件"
+    - "show\\s+(file|files|directory|folder)|view\\s+(file|directory)|folder\\s+(list|content)|file\\s+list"
+    folders: []
+    auto_invoke:
+      tool: folder_list
+      arguments: { path: "." }
+  - patterns:
+    - "find\\s+(file|files)|search\\s+(for\\s+)?file|file_find|查找文件|搜索文件|找文件"
+    folders: []
+    auto_invoke:
+      tool: file_find
+      arguments: { path: ".", pattern: "*" }
+  - patterns:
+    - "search\\s+(the\\s+)?web|search\\s+for\\s+.+|google\\s+.+|网上搜|搜索一下|查一下|搜一下|search\\s+online"
+    folders: []
+    auto_invoke:
+      tool: web_search
+      arguments: { query: "{{query}}", count: 5 }
+  # --- homeclaw-browser plugin: open URL / navigate / open browser (one rule, one fallback) ---
+  - patterns:
+    - "open\\s+https?://|navigate\\s+to\\s+https?://|go\\s+to\\s+https?://|open\\s+[a-zA-Z0-9][-a-zA-Z0-9.]*\\.[a-zA-Z]{2,}|打开.*http|访问.*http|打开.*\\.(com|cn|org|net)|访问.*\\.(com|cn|org|net)"
+    - "open\\s+(the\\s+)?browser|打开.*浏览器|打开.*网页|browser_navigate"
+    - "navigate\\s+to"
+    folders: []
+    plugins: [homeclaw-browser]
+    instruction: "Use route_to_plugin(plugin_id='homeclaw-browser', capability_id='browser_navigate', parameters={\"url\": \"<URL or from user>\"}). Do not say you have no browser."
+    auto_invoke:
+      tool: route_to_plugin
+      arguments:
+        plugin_id: homeclaw-browser
+        capability_id: browser_navigate
+        parameters: { url: "{{query}}" }
+  # --- homeclaw-browser: list nodes ---
+  - patterns:
+    - "list\\s+node|node\\s+list|what\\s+node|节点列表|有哪些节点|connected\\s+node"
+    folders: []
+    plugins: [homeclaw-browser]
+    instruction: "Use route_to_plugin(plugin_id='homeclaw-browser', capability_id='node_list'). Do not say you have no browser."
+    auto_invoke:
+      tool: route_to_plugin
+      arguments:
+        plugin_id: homeclaw-browser
+        capability_id: node_list
+        parameters: {}
+  # --- homeclaw-browser: page snapshot / take photo / 拍照 / 截图 ---
+  - patterns:
+    - "take\\s+(a\\s+)?(photo|picture|snapshot)|拍.*照|截图"
+    folders: []
+    plugins: [homeclaw-browser]
+    instruction: "Use route_to_plugin(plugin_id='homeclaw-browser', capability_id='browser_snapshot' for page, or 'node_camera_snap'/'node_camera_clip' for a node; pass node_id when needed). Do not say you have no browser."
+    auto_invoke:
+      tool: route_to_plugin
+      arguments:
+        plugin_id: homeclaw-browser
+        capability_id: browser_snapshot
+        parameters: {}
+  # --- homeclaw-browser: click, type, fill, scroll (instruction only; needs ref/selector from browser_snapshot) ---
+  - patterns:
+    - "click\\s+(the\\s+)?(button|link|element)|browser_click|点击|点一下"
+    - "type\\s+(into|in)\\s+|fill\\s+(the\\s+)?(input|field)|browser_type|browser_fill|输入|填写"
+    - "scroll\\s+(down|up)?|browser_scroll|滚动"
+    folders: []
+    plugins: [homeclaw-browser]
+    instruction: "Use route_to_plugin(plugin_id='homeclaw-browser'): browser_click (ref or selector from browser_snapshot), browser_type/browser_fill (ref/selector, text), browser_scroll (direction). Call browser_snapshot first to get refs. Do not say you have no browser."
+  # --- homeclaw-browser: close session ---
+  - patterns:
+    - "close\\s+(browser|session)|browser_close_session|关闭.*浏览器|关闭.*会话"
+    folders: []
+    plugins: [homeclaw-browser]
+    instruction: "Use route_to_plugin(plugin_id='homeclaw-browser', capability_id='browser_close_session'). Do not say you have no browser."
+    auto_invoke:
+      tool: route_to_plugin
+      arguments:
+        plugin_id: homeclaw-browser
+        capability_id: browser_close_session
+        parameters: {}
+  # --- homeclaw-browser: settings (color scheme, geolocation, timezone, locale, device, offline, headers, credentials) ---
+  - patterns:
+    - "dark\\s+mode|light\\s+mode|color\\s+scheme|browser_set_color_scheme|深色|浅色"
+    - "geolocation|set\\s+location|browser_set_geolocation|地理位置|定位"
+    - "timezone|browser_set_timezone|时区"
+    - "locale|browser_set_locale|语言.*设置"
+    - "viewport|device\\s+emulation|browser_set_device|iPhone|iPad|Pixel"
+    - "offline\\s+mode|browser_set_offline|离线"
+    - "extra\\s+headers|browser_set_extra_headers"
+    - "credentials|basic\\s+auth|browser_set_credentials"
+    folders: []
+    plugins: [homeclaw-browser]
+    instruction: "Use route_to_plugin(plugin_id='homeclaw-browser'): browser_set_color_scheme (dark/light), browser_set_geolocation, browser_set_timezone, browser_set_locale, browser_set_device, browser_set_offline, browser_set_extra_headers, browser_set_credentials. Pass required parameters. Do not say you have no browser."
+  # --- homeclaw-browser: canvas update ---
+  - patterns:
+    - "update\\s+(the\\s+)?canvas|show\\s+on\\s+canvas|canvas_update|更新.*画布|画布.*显示|推到画布"
+    folders: []
+    plugins: [homeclaw-browser]
+    instruction: "Use route_to_plugin(plugin_id='homeclaw-browser', capability_id='canvas_update', parameters with document/title/blocks). Do not say you have no browser."
+    auto_invoke:
+      tool: route_to_plugin
+      arguments:
+        plugin_id: homeclaw-browser
+        capability_id: canvas_update
+        parameters: {}
+  # --- homeclaw-browser: node actions (command, notify, camera_snap/clip, screen_record, location; pass node_id from user) ---
+  - patterns:
+    - "node_command|send\\s+command\\s+to\\s+node|节点.*命令"
+    - "node_notify|notify\\s+node|notification\\s+on\\s+node|节点.*通知"
+    - "take\\s+photo\\s+on\\s+node|node_camera_snap|节点.*拍照|camera\\s+snap"
+    - "record\\s+video\\s+on\\s+node|node_camera_clip|节点.*录像|camera\\s+clip"
+    - "node_screen_record|screen\\s+record\\s+on\\s+node|节点.*录屏"
+    - "node_location_get|node\\s+location|location\\s+of\\s+node|节点.*位置"
+    folders: []
+    plugins: [homeclaw-browser]
+    instruction: "Use route_to_plugin(plugin_id='homeclaw-browser'): node_command (node_id, command, params), node_notify (node_id, title, body), node_camera_snap (node_id), node_camera_clip (node_id, duration, includeAudio), node_screen_record (node_id), node_location_get (node_id). Get node_id from node_list. Do not say you have no browser."
+  # --- PPT / PowerPoint plugin ---
+  - pattern: "生成.*PPT|做个PPT|做.*PPT|生成.*演示|create.*ppt|make.*presentation|powerpoint|幻灯片.*生成"
+    folders: []
+    plugins: [ppt-generation]
+    instruction: "The user asked to create a PPT or PowerPoint presentation. Use route_to_plugin(plugin_id='ppt-generation', capability_id='create_from_outline' or 'create_from_source', parameters with outline/source and optional title). The plugin saves to the user's output folder and returns a link; include that link in your reply so the user can open the file."
+  # --- Skills: Maton, HTML slides, X, Meta, image, summarize (force-include so local model gets strong instruction) ---
+  - patterns:
+    - "slack|send.*slack|slack.*(message|channel)"
+    - "linkedin|领英|发.*linkedin|post.*linkedin|发送.*linkedin"
+    - "outlook|(outlook|microsoft).*(email|mail|calendar|contact)"
+    - "hubspot|(hubspot).*(contact|deal|company)"
+    - "notion|(notion).*(database|page|block)"
+    - "gmail|google.*mail|(gmail).*(send|list|search)"
+    - "stripe|(stripe).*(customer|payment|charge|invoice)"
+    - "google.*calendar|calendar.*event|(google).*(calendar)"
+    - "google.*(sheet|spreadsheet)|(sheet|spreadsheet).*row"
+    - "salesforce|(salesforce).*(contact|opportunity|soql)"
+    - "airtable|(airtable).*(base|record|table)"
+    - "calendly|(calendly).*(event|availability|schedule)"
+    - "github|(github).*(repo|issue|pr|pull.*request)"
+    - "maton|api gateway|gateway\\.maton|maton\\.ai"
+    folders: [maton-api-gateway-1.0.0]
+    instruction: "User asked to use an external service (Slack, LinkedIn, Outlook, HubSpot, Notion, Gmail, Stripe, Google Calendar/Sheets, Salesforce, Airtable, Calendly, GitHub, etc.). Use run_skill(skill_name='maton-api-gateway-1.0.0', script='request.py') with app and path from the maton skill body (Supported Services table and references/). Do not claim the action was done without calling the skill. For LinkedIn post: GET linkedin/rest/me then POST linkedin/rest/posts with commentary."
+  - patterns:
+    - "乔布斯|极简.*演示|HTML\\s*slides|html\\s*slides|幻灯片|生成.*HTML|做.*幻灯片"
+    folders: [html-slides-1.0.0]
+    instruction: "User asked for 乔布斯-style or HTML slides. You have the html-slides skill: follow its steps, then file_write or save_result_page to output/ and return the link. Do not say you have no skill."
+  - patterns:
+    - "发.*[Xx]|发推|发一条.*[Xx]|post.*tweet|tweet.*post|发.*twitter"
+    folders: [x-api-1.0.0, social-media-agent-1.0.0]
+    instruction: "User asked to post to X/Twitter. Use x-api-1.0.0 (run_skill with request.py) if you have X_ACCESS_TOKEN, else social-media-agent-1.0.0 (browser). Do not say you have no skill."
+  - patterns:
+    - "facebook|instagram|meta\\s+post|发.*facebook|发.*instagram|post.*(facebook|instagram)"
+    folders: [meta-social-1.0.0]
+    instruction: "User asked to post to Facebook or Instagram. Use run_skill(skill_name='meta-social-1.0.0', ...) per the skill body. Do not say you have no skill."
+  - patterns:
+    - "generate.*image|create.*image|画.*图|生成.*图|来一张图|做.*图|创建图片|画一张"
+    folders: [image-generation-1.0.0]
+    instruction: "User asked to generate or create an image. Call run_skill(skill_name='image-generation-1.0.0', script='generate_image.py', args=['--prompt', '<description>']). Do not say no image tool."
+  - patterns:
+    - "summarize|总结|摘要|概括|summarise|概括一下"
+    folders: [summarize-1.0.0]
+    instruction: "User asked to summarize. Use run_skill(skill_name='summarize-1.0.0', ...) or the summarize CLI / web_search as needed. Do not say you have no skill."
+
+# --- Plugins: vector search (RAG) ---
+# When false (default): include ALL plugins in the routing block. When true: vector store + RAG to pick top-N.
+plugins_use_vector_search: false
+plugins_vector_collection: homeclaw_plugins   # Chroma collection (default: homeclaw_plugins)
+plugins_max_retrieved: 10                     # When using vector search: max plugins from RAG (default: 10)
+plugins_max_in_prompt: 15                     # When plugins_use_vector_search=true: cap plugins in prompt (default in code: 5); ignored when false
+plugins_similarity_threshold: 0.0            # Min similarity to keep a plugin (0..1); default 0.0
+plugins_refresh_on_startup: true             # When plugins_use_vector_search: resync plugin list to vector DB on startup (default: true)
+# Legacy plugin force-include by pattern; definitions moved to skills_force_include_rules (folders: [] + plugins: [id]) so one place controls both.
+plugins_force_include_rules: []
+
+# --- System plugins (system_plugins/) ---
+# When true, Core starts and registers plugins in system_plugins/ (e.g. node server.js, register.js) so one command runs Core + plugins.
+# See system_plugins/README.md. Code default: false.
+system_plugins_auto_start: true
+# Optional allowlist by plugin id (folder name under system_plugins/). Empty = start all discovered. Default: [].
+system_plugins: [homeclaw-browser]
+# Per-plugin env vars (plugin_id → { VAR: "value" }). Values are stringified (true→"true", false→"false").
+# Code default: {}. system_plugins_start_delay (default 2.0 sec) can be set in core.yml if needed.
+system_plugins_env:
+  homeclaw-browser:
+    BROWSER_HEADLESS: false
+
+# --- Tool layer (used when use_tools: true) ---
+# Built-in tools: time, cron_*, sessions_*, memory_*, file_*, folder_list, fetch_url, web_search, browser_*,
+# exec, process_*, run_skill, run_plugin, image, channel_send, etc. Only keys below are read by the tool layer.
+# tool_timeout_seconds: per-tool execution timeout (seconds); 0 = no timeout. Core reads it into CoreMetadata.tool_timeout_seconds.
+tools:
+  # exec: allowed command names. Empty = platform default (Unix: ls, cat, pwd; Windows: dir, type, cd).
+  exec_allowlist: []
+  exec_timeout: 30   # seconds
+  # Max characters returned by file_read when the tool does not pass max_chars. Increase for long PDFs/documents.
+  file_read_max_chars: 5000000
+  # run_skill: if set, only these script names under skill/scripts/ are allowed. [] = allow all.
+  run_skill_allowlist: []
+  # run_skill: .py scripts run in subprocess by default; list skill folder names here to run those .py in Core's process.
+  run_skill_py_in_process_skills: []
+  run_skill_timeout: 300   # seconds
+  # run_plugin: list plugin_ids to run in Core's process (default: subprocess).
+  run_plugin_in_process_plugins: []
+  run_plugin_timeout: 300   # seconds
+  # web_search: provider (tavily, duckduckgo, google_cse, bing, brave, serpapi). Tavily/brave need api_key here or env.
+  web:
+    search:
+      provider: tavily   # duckduckgo (no key) | google_cse | bing | brave | serpapi | tavily
+      duckduckgo: {}
+      google_cse:
+        api_key: ""
+        cx: ""
+      bing:
+        api_key: ""
+      brave:
+        api_key: ""
+        search_type: web   # web | news | video | image
+      serpapi:
+        api_key: ""
+        engine: google   # google | bing | baidu
+      tavily:
+        api_key: "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"   # or TAVILY_API_KEY
+        search_depth: basic   # basic | fast | advanced | ultra-fast
+        topic: general        # general | news | finance
+        time_range: ""        # day | week | month | year (empty = no filter)
+      fallback_no_key: true   # use DuckDuckGo when primary provider has no key or fails
+      fallback_max_results: 5
+  # true = use system plugin homeclaw-browser (route_to_plugin); false = register built-in browser_* tools (Playwright).
+  browser_use_plugin: true
+  browser_enabled: true   # when browser_use_plugin false: built-in tools only if true
+  browser_headless: false # when using built-in tools: false to show window (local testing)
+  tool_timeout_seconds: 0   # per-tool timeout (seconds); 0 = no timeout. For long PDF/summarize use 300–600.

@@ -79,7 +79,7 @@ def main() -> int:
     if not token:
         print(
             "Error: Meta access token not set. Set META_ACCESS_TOKEN in env or meta_access_token in "
-            "config/skills/meta-social-1.0.0/config.yml. Get token at https://developers.facebook.com",
+            "skills/meta-social-1.0.0/config.yml. Get token at https://developers.facebook.com",
             file=sys.stderr,
         )
         return 1

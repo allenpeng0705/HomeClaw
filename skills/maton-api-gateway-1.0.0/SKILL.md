@@ -77,7 +77,7 @@ Example: Gmail path is `gmail/v1/users/me/messages` → full URL: `https://gatew
 All requests: `Authorization: Bearer $MATON_API_KEY`. Set the key either:
 
 - **Environment:** `export MATON_API_KEY="YOUR_KEY"` where Core runs, or
-- **Skill config:** In `config/skills/maton-api-gateway-1.0.0/config.yml` set `maton_api_key: "YOUR_KEY"` (env overrides config).
+- **Skill config:** In `skills/maton-api-gateway-1.0.0/config.yml` set `maton_api_key: "YOUR_KEY"` (env overrides config).
 
 Get key at [maton.ai/settings](https://www.maton.ai/settings).
 
@@ -388,4 +388,4 @@ print(json.dumps(json.load(urllib.request.urlopen(req)), indent=2))
 - [Maton API Reference](https://www.maton.ai/docs/api-reference)
 - [Maton Community](https://discord.com/invite/dBfFAcefs2)
 - [Maton Support](mailto:support@maton.ai)
-- HomeClaw Outlook-only skill: `config/skills/outlook-api-1.0.3` (same gateway, app=`outlook`)
+- HomeClaw Outlook-only skill: `skills/outlook-api-1.0.3` (same gateway, app=`outlook`)

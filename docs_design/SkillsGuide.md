@@ -39,20 +39,20 @@ Skills are **tool-bound**: they describe workflows using existing tools. Plugins
 
 1. Open **config/core.yml**.
 2. Set **use_skills: true**.
-3. Set **skills_dir** to the folder that contains your skill folders (default: **config/skills**).
+3. Set **skills_dir** to the folder that contains your skill folders (default: **skills**).
 
 Example:
 
 ```yaml
 use_skills: true
-skills_dir: config/skills
+skills_dir: skills
 ```
 
 4. Restart Core (or send a new message). The assistant will see an “Available skills” block in its system prompt and can use those skills when they match the user’s request.
 
 ### 2.2 Add or remove skills
 
-- **Add a skill:** Put a new **folder** under **skills_dir** (e.g. `config/skills/my-skill/`) with a **SKILL.md** file inside (see §3). No code change needed.
+- **Add a skill:** Put a new **folder** under **skills_dir** (e.g. `skills/my-skill/`) with a **SKILL.md** file inside (see §3). No code change needed.
 - **Remove a skill:** Delete or move that folder out of **skills_dir**. If you use vector search (§2.4), stale entries are cleaned up when you load that skill (lazy delete) or when you run a full sync.
 
 ### 2.3 Limit how many skills are in the prompt (no vector search)
@@ -87,13 +87,13 @@ skills_refresh_on_startup: true
 
 ### 2.5 Optional: test folder and incremental sync
 
-- **skills_test_dir:** Optional path (e.g. `config/skills_test`). Skills in this folder are **fully synced every time** (all re-embedded and upserted with id `test__<folder>`). Use this to **test** new or updated skills; see §4.
+- **skills_test_dir:** Optional path (e.g. `skills_test`). Skills in this folder are **fully synced every time** (all re-embedded and upserted with id `test__<folder>`). Use this to **test** new or updated skills; see §4.
 - **skills_incremental_sync:** When **true**, only **new** skills in **skills_dir** (not already in the vector store) are embedded and inserted. Existing skills are **not** re-processed. Use this in production to avoid re-embedding many skills on every restart. To **update** an existing skill’s embedding after you changed SKILL.md, set this to **false** once, restart, then set it back to **true** if you want.
 
 Example:
 
 ```yaml
-skills_test_dir: config/skills_test
+skills_test_dir: skills_test
 skills_incremental_sync: false
 ```
 
@@ -103,7 +103,7 @@ skills_incremental_sync: false
 
 ### 3.1 Folder structure
 
-A **skill** is a **folder** under **skills_dir** (e.g. `config/skills/`). The **folder name** is the **skill id** used by the system and by the **run_skill** tool (e.g. `example`, `social-media-agent-1.0.0`).
+A **skill** is a **folder** under **skills_dir** (e.g. `skills/`). The **folder name** is the **skill id** used by the system and by the **run_skill** tool (e.g. `example`, `social-media-agent-1.0.0`).
 
 Required:
 
@@ -117,7 +117,7 @@ Optional:
 Example layout:
 
 ```
-config/skills/
+skills/
   example/
     SKILL.md
   my-weather-skill/
@@ -205,11 +205,11 @@ When you write instructions in the body, use the **tool names** that HomeClaw ac
 | sessions_spawn | sessions_spawn |
 | memory_search / files | memory_search, memory_get, file_read, folder_list |
 
-See **config/workspace/TOOLS.md** and **config/skills/README.md** for the full list and compatibility notes.
+See **config/workspace/TOOLS.md** and **skills/README.md** for the full list and compatibility notes.
 
 ### 3.6 Summary for implementers
 
-1. Create a **folder** under **skills_dir** (e.g. `config/skills/my-skill/`).
+1. Create a **folder** under **skills_dir** (e.g. `skills/my-skill/`).
 2. Add **SKILL.md** with **name** and **description** in the frontmatter, and optional body with tool workflows.
 3. Optionally add **scripts/** and list allowed script names in **tools.run_skill_allowlist**.
 4. No code change is required; the next sync or request will pick up the skill.
@@ -220,14 +220,14 @@ See **config/workspace/TOOLS.md** and **config/skills/README.md** for the full l
 
 ### 4.1 Use the test folder (recommended for new or changed skills)
 
-1. **Create a test directory** (e.g. `config/skills_test/`) and set it in config:
+1. **Create a test directory** (e.g. `skills_test/`) and set it in config:
    ```yaml
-   skills_test_dir: config/skills_test
+   skills_test_dir: skills_test
    ```
-2. **Put the skill there** with the **same structure** as in production (e.g. `config/skills_test/my-skill/SKILL.md`). You do **not** need to rename the folder to `test_xxx`; the system automatically stores test skills with id **test__&lt;folder_name&gt;** (e.g. `test__my-skill`).
+2. **Put the skill there** with the **same structure** as in production (e.g. `skills_test/my-skill/SKILL.md`). You do **not** need to rename the folder to `test_xxx`; the system automatically stores test skills with id **test__&lt;folder_name&gt;** (e.g. `test__my-skill`).
 3. Set **skills_use_vector_search: true** and **skills_refresh_on_startup: true**. On each startup, the **test folder is fully synced**: all skills in it are re-embedded and upserted, so any change to SKILL.md is reflected immediately.
 4. **Test** by chatting with the assistant; it will retrieve test skills (ids starting with `test__`) when they match the query and load their content from **skills_test_dir**.
-5. When the skill is ready, **move** the folder from **skills_test_dir** to **skills_dir** (e.g. `config/skills/my-skill/`). On the next startup:
+5. When the skill is ready, **move** the folder from **skills_test_dir** to **skills_dir** (e.g. `skills/my-skill/`). On the next startup:
    - The **test__my-skill** entry is **removed** from the vector store (cleanup: test ids whose folder is no longer in the test dir are deleted).
    - The skill in **skills_dir** is either added (if incremental) or upserted (if full sync). With **skills_incremental_sync: true**, it will be added as a new skill; with **false**, all skills in skills_dir are re-synced.
 
@@ -255,15 +255,15 @@ All skills-related options in **config/core.yml**:
 
 | Option | Default | Meaning |
 |--------|--------|---------|
-| **use_skills** | false | If true, skills are loaded and injected into the system prompt. |
-| **skills_dir** | config/skills | Directory scanned for skill folders (each with SKILL.md). |
+| **use_skills** | true | If true, skills are loaded and injected into the system prompt. |
+| **skills_dir** | skills | Directory scanned for skill folders (each with SKILL.md). |
 | **skills_max_in_prompt** | 0 | When not using vector search: max number of skills to inject (0 = no limit). |
 | **skills_use_vector_search** | false | When true, skills are retrieved by similarity to the user query instead of listing all (or first N). |
 | **skills_vector_collection** | homeclaw_skills | Chroma collection name for skill embeddings (separate from memory). |
 | **skills_max_retrieved** | 10 | Max skills to retrieve and inject per request when vector search is on. |
 | **skills_similarity_threshold** | 0.0 | Min similarity (0–1); skills below this are not injected. |
 | **skills_refresh_on_startup** | true | If true, sync skills_dir (and optional skills_test_dir) to the vector store on startup when vector search is on. |
-| **skills_test_dir** | "" | Optional. If set (e.g. config/skills_test), this dir is fully synced every time; ids are stored as test__&lt;folder&gt;. |
+| **skills_test_dir** | "" | Optional. If set (e.g. skills_test), this dir is fully synced every time; ids are stored as test__&lt;folder&gt;. |
 | **skills_incremental_sync** | false | When true, only skills **not** already in the vector store are embedded and inserted for **skills_dir**; existing skills are skipped. |
 
 **Tools config** (for run_skill):
@@ -275,10 +275,10 @@ All skills-related options in **config/core.yml**:
 
 ## 6. Examples in this repo
 
-- **config/skills/example/** — Minimal skill: SKILL.md with name, description, and a short body. No scripts.
-- **config/skills/social-media-agent-1.0.0/** — Richer example: frontmatter + long body describing tools and workflows (browser, cron, memory, etc.). Good reference for writing workflow-style skills.
+- **skills/example/** — Minimal skill: SKILL.md with name, description, and a short body. No scripts.
+- **skills/social-media-agent-1.0.0/** — Richer example: frontmatter + long body describing tools and workflows (browser, cron, memory, etc.). Good reference for writing workflow-style skills.
 
-See also **config/skills/README.md** for tool compatibility (e.g. web_fetch → fetch_url, cron, sessions_spawn) and **docs/ToolsSkillsPlugins.md** for how skills relate to tools and plugins.
+See also **skills/README.md** for tool compatibility (e.g. web_fetch → fetch_url, cron, sessions_spawn) and **docs/ToolsSkillsPlugins.md** for how skills relate to tools and plugins.
 
 ---
 

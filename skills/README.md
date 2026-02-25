@@ -44,11 +44,11 @@ You do **not** need to add a matching entry to `skills_force_include_rules` in c
 
 ## Adding skills
 
-1. Create a subfolder under `config/skills/`, e.g. `config/skills/weather-help/`.
+1. Create a subfolder under `skills/` (project root), e.g. `skills/weather-help/`.
 2. Add **SKILL.md** with `name`, `description`, and optional body.
 3. (Optional) Add **USAGE.md** in the same folder: user-facing "how to ask" examples. When the skill is loaded with body (see **skills_include_body_for** in core.yml), USAGE.md is appended to the skill body so the model can answer "how do I use this?".
 4. (Optional) Add **scripts/** with runnable scripts; the agent can call **run_skill**(skill_name, script, args).
-5. Set **use_skills: true** and **skills_dir: config/skills** in `config/core.yml`. To include full skill body (and USAGE.md) for specific skills so the model can answer "how do I use this?", set **skills_include_body_for: [folder-name]** (e.g. `[maton-api-gateway-1.0.0]`).
+5. Set **use_skills: true** and **skills_dir: skills** in `config/core.yml`. To include full skill body (and USAGE.md) for specific skills so the model can answer "how do I use this?", set **skills_include_body_for: [folder-name]** (e.g. `[maton-api-gateway-1.0.0]`).
 6. Restart or send a new message; the model will see "Available skills" in its context.
 
 ## Prefer LLM selection; no per-skill config rules

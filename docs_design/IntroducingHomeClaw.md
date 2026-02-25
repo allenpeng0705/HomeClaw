@@ -38,7 +38,7 @@ HomeClaw is a **local- and cloud-LLM supported, multi-user, memory-based, self-h
 
 ## 6. Learning from OpenClaw and Extending HomeClaw
 
-We learned from **OpenClaw** and made it easy to **reuse Skills** from OpenClaw directly. HomeClaw skills live under `config/skills/` with a **SKILL.md** (name, description, workflow). If a skill can be described as “use these tools in this way,” you can often drop it in without code changes.
+We learned from **OpenClaw** and made it easy to **reuse Skills** from OpenClaw directly. HomeClaw skills live under `skills/` with a **SKILL.md** (name, description, workflow). If a skill can be described as “use these tools in this way,” you can often drop it in without code changes.
 
 We also support **extending** HomeClaw in two ways:
 

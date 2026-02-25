@@ -170,7 +170,7 @@ Reset KB via **POST/GET** `http://<core>:<port>/knowledge_base/reset`.
 | Setting | Meaning |
 |--------|--------|
 | **`use_skills`** | Enable skills (folders under **`skills_dir`** with SKILL.md). The model sees “Available skills” and can call **run_skill** or use tools per skill. |
-| **`skills_dir`** | Directory for skill folders (default `config/skills`). |
+| **`skills_dir`** | Directory for skill folders (default `skills` (project root)). |
 | **`skills_use_vector_search`** | Retrieve skills by similarity to user query instead of loading all; reduces prompt size. |
 | **`skills_similarity_threshold`** | Min score to keep a skill in the prompt. |
 | **`skills_force_include_rules`** | When user query matches a pattern, always include listed skill folders (and optional instruction). |

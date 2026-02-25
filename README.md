@@ -11,7 +11,7 @@
 - **Companion app** — Flutter-based app for **Mac, Windows, iPhone, and Android**: chat, voice, attachments, and **Manage Core** (edit core.yml and user.yml) from your phone or desktop. One app, all platforms.
 - **Memory** — **RAG** (vector + relational + optional graph) and **agent memory** (AGENT_MEMORY.md, daily memory). Cognee (default) or in-house Chroma backend.
 - **Plugins** — **Built-in** (Python in `plugins/`) and **external** (any language: Node.js, Go, Java, Python, etc.). The **system plugin** (e.g. **homeclaw-browser**) is one external plugin written in **Node.js**; you can write plugins in any language and register them with Core.
-- **Skills** — Full support for **OpenClaw-style skillset**: workflows in `config/skills/` (SKILL.md); LLM uses tools and optional `run_skill` to accomplish tasks.
+- **Skills** — Full support for **OpenClaw-style skillset**: workflows in `skills/` (SKILL.md); LLM uses tools and optional `run_skill` to accomplish tasks.
 - **Multi-agent** — Run **multiple HomeClaw instances** (e.g. one per user or use case); each instance is one agent with its own memory and config.
 - **Cloud & multimodal** — **Gemini** and other cloud models work well. **Multimodal** (images, audio, video) is supported with both **local models** (e.g. Qwen2-VL with mmproj) and **cloud** (e.g. Gemini, GPT-4o).
 
@@ -249,7 +249,7 @@ The app only needs **Core URL** and optional **API key**; no Tailscale or Cloudf
 
 ## 9. Skills: Extend HomeClaw with Workflows
 
-**Skills** are folders under `config/skills/` with **SKILL.md** (name, description, workflow). The LLM sees "Available skills" and uses tools (or **run_skill** for scripts) to accomplish them. Set `use_skills: true` in `config/core.yml`. [SkillsGuide.md](docs_design/SkillsGuide.md) · [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
+**Skills** are folders under `skills/` with **SKILL.md** (name, description, workflow). The LLM sees "Available skills" and uses tools (or **run_skill** for scripts) to accomplish them. Set `use_skills: true` in `config/core.yml`. [SkillsGuide.md](docs_design/SkillsGuide.md) · [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
 
 ---
 

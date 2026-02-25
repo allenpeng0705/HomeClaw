@@ -16,7 +16,7 @@
 - **ローカル LLM**（llama.cpp サーバ経由）と**クラウド AI**（OpenAI 互換 API、**LiteLLM** 使用）をサポートする。
 - **複数チャネル**（メール、IM、CLI）でアシスタントを公開し、どこからでも（例：スマートフォンから）自宅インスタンスとやり取りできる。
 - **RAG 型メモリ**を使用：**Cognee**（デフォルト）または自前 SQLite + Chroma；オプションでユーザーごとの**プロフィール**と**ナレッジベース**。docs_design/MemoryAndDatabase.md 参照。
-- **プラグイン**（plugin.yaml + config.yml + plugin.py；route_to_plugin または orchestrator）、**スキル**（config/skills/ 下の SKILL.md；オプションでベクトル検索；run_skill ツール）、**ツール層**（use_tools: true — exec、browser、cron、sessions_*、memory_*、file_* など）で振る舞いを拡張。docs_design/ToolsSkillsPlugins.md 参照。
+- **プラグイン**（plugin.yaml + config.yml + plugin.py；route_to_plugin または orchestrator）、**スキル**（skills/ 下の SKILL.md；オプションでベクトル検索；run_skill ツール）、**ツール層**（use_tools: true — exec、browser、cron、sessions_*、memory_*、file_* など）で振る舞いを拡張。docs_design/ToolsSkillsPlugins.md 参照。
 
 ### 1.2 設計目標
 
@@ -131,7 +131,7 @@ Core は core.yml から main_llm、embedding_llm（id）を読み、**local_mod
 - **メモリ/RAG**：デフォルトは Cognee；代替は memory_backend: chroma。docs_design/MemoryAndDatabase.md 参照。
 - **プラグイン**：plugins/ 下にフォルダを追加し plugin.yaml、config.yml、plugin.py（組み込み）または type: http + エンドポイント（外部）；外部は POST /api/plugins/register も可。docs_design/PluginsGuide.md、docs_design/PluginStandard.md、docs_design/RunAndTestPlugins.md 参照。
 - **ツール層**：§3.6 参照；組み込みツールは実装済み；オプションでプラグインが get_tools()/run_tool() でツールを公開可能。
-- **スキル（SKILL.md）**：実装済み；base/skills.py が config/skills/ から読み込み；use_skills、skills_dir、skills_use_vector_search；run_skill ツール。docs_design/SkillsGuide.md、docs_design/ToolsSkillsPlugins.md 参照。
+- **スキル（SKILL.md）**：実装済み；base/skills.py が skills/ から読み込み；use_skills、skills_dir、skills_use_vector_search；run_skill ツール。docs_design/SkillsGuide.md、docs_design/ToolsSkillsPlugins.md 参照。
 - **TAM**：時間意図は分類済み；スケジューリング/リマインダーの拡張が可能。
 
 ---
@@ -143,7 +143,7 @@ Core は core.yml から main_llm、embedding_llm（id）を読み、**local_mod
 | Core | core/core.py、core/coreInterface.py、core/orchestrator.py、core/tam.py |
 | Channels | base/BaseChannel.py、base/base.py（InboundRequest）、channels/、main.py。実行：`python -m channels.run <name>`。 |
 | LLM | llm/llmService.py、llm/litellmService.py |
-| Memory | memory/base.py、memory/mem.py、memory/chroma.py、memory/storage.py、memory/embedding.py、memory/chat/chat.py；memory/graph/（chroma 時）；memory/cognee_adapter.py（cognee 時）；base/profile_store.py、database/profiles/；ナレッジベースは core.yml 参照。ワークスペース：base/workspace.py、config/workspace/。スキル：base/skills.py、config/skills/；run_skill は tools/builtin.py。docs_design/MemoryAndDatabase.md、docs_design/SkillsGuide.md 参照。 |
+| Memory | memory/base.py、memory/mem.py、memory/chroma.py、memory/storage.py、memory/embedding.py、memory/chat/chat.py；memory/graph/（chroma 時）；memory/cognee_adapter.py（cognee 時）；base/profile_store.py、database/profiles/；ナレッジベースは core.yml 参照。ワークスペース：base/workspace.py、config/workspace/。スキル：base/skills.py、skills/；run_skill は tools/builtin.py。docs_design/MemoryAndDatabase.md、docs_design/SkillsGuide.md 参照。 |
 | Tools | base/tools.py、tools/builtin.py；設定は core.yml tools:。docs_design/ToolsDesign.md、docs_design/ToolsAndSkillsTesting.md 参照。 |
 | Plugins | base/BasePlugin.py、base/PluginManager.py、plugins/Weather/（plugin.yaml、config.yml、plugin.py）；外部：POST /api/plugins/register。docs_design/PluginsGuide.md、docs_design/PluginStandard.md 参照。 |
 | Shared | base/base.py（PromptRequest、AsyncResponse、列挙、設定データクラス）、base/util.py |

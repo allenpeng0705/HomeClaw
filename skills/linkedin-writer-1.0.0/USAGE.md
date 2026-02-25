@@ -10,7 +10,7 @@ In **config/core.yml**:
 
 ```yaml
 use_skills: true
-skills_dir: config/skills
+skills_dir: skills
 skills_max_in_prompt: 5   # enough to include linkedin-writer-1.0.0
 ```
 
@@ -53,7 +53,7 @@ If you enable **skills_use_vector_search** in core.yml, the model retrieves skil
 
 | What you do | Example |
 |-------------|--------|
-| Enable skills | `use_skills: true`, `skills_dir: config/skills` in core.yml |
+| Enable skills | `use_skills: true`, `skills_dir: skills` in core.yml |
 | Ask for a post | “Write a LinkedIn post about [topic]” or “Use LinkedIn Writer to write…” |
 | No run_skill | This skill has no script; the model uses its description (and optionally full SKILL.md) to write the post |
 

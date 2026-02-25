@@ -182,8 +182,17 @@ def _run_py_script_in_process(
     return out_io.getvalue(), err_io.getvalue()
 
 
-# Optional: load tool config from core config (exec allowlist, file_read_shared_dir, etc.)
+# Optional: load tool config from core config (exec allowlist, file_read_shared_dir, etc.).
+# Prefer CoreMetadata.tools_config (merged from core.yml + skills_and_plugins when set) so config in external file is used.
 def _get_tools_config() -> Dict[str, Any]:
+    try:
+        from base.util import Util
+        meta = Util().get_core_metadata()
+        cfg = getattr(meta, "tools_config", None)
+        if isinstance(cfg, dict):
+            return cfg
+    except Exception:
+        pass
     try:
         from base.util import Util
         root = Util().root_path()
@@ -2141,7 +2150,7 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
         meta = Util().get_core_metadata()
         if meta is None:
             return "Error: Core config not available"
-        skills_dir_str = str(getattr(meta, "skills_dir", None) or "config/skills").strip() or "config/skills"
+        skills_dir_str = str(getattr(meta, "skills_dir", None) or "skills").strip() or "skills"
         root = Path(Util().root_path())
         skills_base = get_skills_dir(skills_dir_str, root=root)
         resolved_folder = resolve_skill_folder_name(skills_base, skill_name)
@@ -4155,18 +4164,21 @@ async def _usage_report_executor(arguments: Dict[str, Any], context: ToolContext
 
 
 def _register_browser_tools_if_available(registry: ToolRegistry) -> None:
-    """Register browser_* tools only if tools.browser_enabled and Playwright is installed. Otherwise skip so the model uses fetch_url only (no Chromium required)."""
+    """Register built-in browser_* tools only when tools.browser_use_plugin is false and tools.browser_enabled is true and Playwright is installed. By default browser_use_plugin is true, so the plugin (homeclaw-browser) is used via route_to_plugin and built-in tools are not registered. Set browser_use_plugin: false (and browser_enabled: true) to use built-in tools when the plugin cannot run."""
     config = _get_tools_config()
+    browser_use_plugin = config.get("browser_use_plugin", True)
     browser_enabled = config.get("browser_enabled", True)
+    if browser_use_plugin:
+        logger.debug("Browser tools skipped (tools.browser_use_plugin=true). Use route_to_plugin(homeclaw-browser, ...) for browser actions.")
+        return
     if not browser_enabled:
-        logger.debug("Browser tools skipped (tools.browser_enabled=false). Use fetch_url for web content.")
+        logger.debug("Browser tools skipped (tools.browser_enabled=false).")
         return
     try:
         from playwright.async_api import async_playwright  # noqa: F401
     except ImportError:
         logger.info(
-            "Browser tools skipped (Playwright not installed). Use fetch_url for web content. "
-            "To enable browser: pip install playwright && python -m playwright install chromium"
+            "Browser tools skipped (Playwright not installed). Use route_to_plugin(homeclaw-browser) or: pip install playwright && python -m playwright install chromium"
         )
         return
     registry.register(

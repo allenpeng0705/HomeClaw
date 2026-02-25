@@ -72,7 +72,7 @@ The main config files are **`config/core.yml`** (Core behavior, LLM, memory, too
 ### 3.1 core.yml (overview)
 
 - **Core server:** `host`, `port` (default 9000), `mode`.
-- **Paths:** `model_path` (base dir for GGUF files), `workspace_dir` (default `config/workspace`), `skills_dir` (default `config/skills`).
+- **Paths:** `model_path` (base dir for GGUF files), `workspace_dir` (default `config/workspace`), `skills_dir` (default `skills`).
 - **Features:** `use_memory`, `use_tools`, `use_skills`, `use_workspace_bootstrap`, `memory_backend` (e.g. `cognee` or `chroma`).
 - **LLM:** `local_models`, `cloud_models`, `main_llm`, `embedding_llm` (see [§4](#4-local-gguf-models) and [§5](#5-cloud-mode-and-api-keys)).
 - **Memory:** `memory_backend`, `cognee:` (when using Cognee), or `database`, `vectorDB`, `graphDB` (when `memory_backend: chroma`). See [§6](#6-memory-system).
@@ -288,9 +288,9 @@ Plugins add **focused features** (e.g. Weather, News, Mail). They can be **built
 
 **Skills** are task-oriented instruction packages (SKILL.md + optional scripts) that tell the assistant *how* to accomplish goals using **tools**. They are “workflows” implemented by the LLM following instructions, not by separate plugin code.
 
-- **Enable:** In **`config/core.yml`**, set **`use_skills: true`** and **`skills_dir`** (default `config/skills`). Restart Core.
+- **Enable:** In **`config/core.yml`**, set **`use_skills: true`** and **`skills_dir`** (default `skills`). Restart Core.
 - **Add a skill:** Put a folder under `skills_dir` with a **SKILL.md** (name, description, body). Optionally add scripts under `scripts/` and reference them via **run_skill**.
 - **Vector search:** With many skills, set **`skills_use_vector_search: true`** so only relevant skills are injected per query. See **docs/SkillsGuide.md** for options.
-- **Reusing skills from OpenClaw:** OpenClaw uses a different extension model (channels/providers/skills in one manifest). HomeClaw skills are **SKILL.md + scripts** under `config/skills/`. To reuse an OpenClaw “skill” in HomeClaw, adapt the instructions into a **SKILL.md** (name, description, step-by-step body) and place it in `config/skills/<skill-name>/`. No code port is required if the behavior can be expressed as tool-using steps. See **docs/ToolsSkillsPlugins.md** §2.7 for OpenClaw vs HomeClaw.
+- **Reusing skills from OpenClaw:** OpenClaw uses a different extension model (channels/providers/skills in one manifest). HomeClaw skills are **SKILL.md + scripts** under `skills/`. To reuse an OpenClaw “skill” in HomeClaw, adapt the instructions into a **SKILL.md** (name, description, step-by-step body) and place it in `skills/<skill-name>/`. No code port is required if the behavior can be expressed as tool-using steps. See **docs/ToolsSkillsPlugins.md** §2.7 for OpenClaw vs HomeClaw.
 
 **Full skills guide:** **docs/SkillsGuide.md** (structure, use, implement, test). **docs/ToolsSkillsPlugins.md** for the overall tools/skills/plugins design.

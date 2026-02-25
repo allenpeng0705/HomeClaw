@@ -20,7 +20,7 @@ API reference: [智能搜索生成](https://cloud.baidu.com/doc/qianfan-api/s/Hm
 
 **The key is configured with the skill**, not in core.yml. Set one of:
 
-1. **Skill config (recommended):** In this skill's folder edit `config/skills/baidu-search-1.1.0/config.yml` and set:
+1. **Skill config (recommended):** In this skill's folder edit `skills/baidu-search-1.1.0/config.yml` and set:
    ```yaml
    api_key: "your-baidu-qianfan-api-key"
    ```

@@ -61,4 +61,4 @@ See [PluginsGuide.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_d
 
 ## Skills
 
-**Skills** (SKILL.md under `config/skills/`) describe workflows; the LLM uses **tools** to accomplish them or calls **`run_skill`** to run a script. OpenClaw-style skills can be reused. See [SkillsGuide.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/SkillsGuide.md) and [ToolsSkillsPlugins.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/ToolsSkillsPlugins.md) in the repo.
+**Skills** (SKILL.md under `skills/`) describe workflows; the LLM uses **tools** to accomplish them or calls **`run_skill`** to run a script. OpenClaw-style skills can be reused. See [SkillsGuide.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/SkillsGuide.md) and [ToolsSkillsPlugins.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/ToolsSkillsPlugins.md) in the repo.

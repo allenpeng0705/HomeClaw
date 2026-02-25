@@ -93,7 +93,7 @@ If no backend is available (no keys/config), the script exits with a clear messa
 Install in the same Python used by run_skill:
 
 ```bash
-pip install -r config/skills/image-generation-1.0.0/scripts/requirements.txt
+pip install -r skills/image-generation-1.0.0/scripts/requirements.txt
 ```
 
 Or: `pip install requests pillow pyyaml`. REST only—no vendor SDKs.

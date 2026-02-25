@@ -11,7 +11,7 @@
 - **コンパニオンアプリ** — Flutter ベースで **Mac、Windows、iPhone、Android** 対応：チャット、音声、添付、**Manage Core**（core.yml と user.yml をアプリから編集）。1 アプリで全プラットフォーム。
 - **メモリ** — **RAG**（ベクトル + リレーショナル + オプションでグラフ）と**エージェントメモリ**（AGENT_MEMORY.md、日次メモリ）。デフォルトは Cognee または自前 Chroma バックエンド。
 - **プラグイン** — **組み込み**（Python、`plugins/`）と**外部**（任意の言語：Node.js、Go、Java、Python など）。**システムプラグイン**（例：**homeclaw-browser**）は Node.js 製；任意の言語でプラグインを書いて Core に登録できます。
-- **スキル** — **OpenClaw スタイルのスキルセット**を完全サポート：`config/skills/`（SKILL.md）のワークフロー；LLM がツールとオプションの `run_skill` でタスクを実行。
+- **スキル** — **OpenClaw スタイルのスキルセット**を完全サポート：`skills/`（SKILL.md）のワークフロー；LLM がツールとオプションの `run_skill` でタスクを実行。
 - **マルチエージェント** — **複数 HomeClaw インスタンス**を起動（ユーザーやユースケースごとなど）；各インスタンスは 1 エージェントで、独自のメモリと設定を持ちます。
 - **クラウド・マルチモーダル** — **Gemini** などのクラウドモデルがよく動作。**マルチモーダル**（画像・音声・動画）は**ローカルモデル**（例：Qwen2-VL + mmproj）と**クラウド**（例：Gemini、GPT-4o）の両方でサポート。
 
@@ -244,7 +244,7 @@ HomeClaw は **macOS**、**Windows**、**Linux** で動作。必要環境：
 
 ## 9. スキル：ワークフローで HomeClaw を拡張
 
-**スキル**は `config/skills/` 下のフォルダで **SKILL.md**（名前、説明、ワークフロー）を含みます。LLM は「利用可能なスキル」を見て、ツール（または **run_skill** でスクリプト）で実行。`config/core.yml` で `use_skills: true` を設定。[SkillsGuide.md](docs_design/SkillsGuide.md) · [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
+**スキル**は `skills/` 下のフォルダで **SKILL.md**（名前、説明、ワークフロー）を含みます。LLM は「利用可能なスキル」を見て、ツール（または **run_skill** でスクリプト）で実行。`config/core.yml` で `use_skills: true` を設定。[SkillsGuide.md](docs_design/SkillsGuide.md) · [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
 
 ---
 
