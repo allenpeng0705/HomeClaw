@@ -2654,11 +2654,7 @@ async def _knowledge_base_list_executor(arguments: Dict[str, Any], context: Tool
 async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Save a result page as HTML or Markdown. format=markdown: returns markdown content + link so reply can show it in chat. format=html: returns link only (open in browser)."""
     try:
-        from core.result_viewer import (
-            get_result_link_base_url,
-            create_file_access_token,
-            generate_result_html,
-        )
+        from core.result_viewer import build_file_view_link, generate_result_html
         title = (arguments.get("title") or "").strip() or "Result"
         content = arguments.get("content") or ""
         fmt = (arguments.get("format") or "markdown").strip().lower() or "markdown"
@@ -2707,22 +2703,20 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
         except Exception as e:
             logger.debug("save_result_page write failed: {}", e)
             return "Failed to save the result page to your output folder."
-        token = create_file_access_token(scope, path_arg)
-        base_url = get_result_link_base_url()
-        link = f"{base_url}/files/out?path={quote(path_arg)}&token={token}" if (base_url and token) else None
+        link, link_err = build_file_view_link(scope, path_arg)
 
         if is_md:
             # Return markdown so the model can include it in the reply → channel/companion/web chat display it in the chat view. Cap length for the reply.
             max_in_chat = 12000
             to_show = md_content if len(md_content) <= max_in_chat else md_content[:max_in_chat] + "\n\n… (full report: open link below)"
             if link:
-                return f"{to_show}\n\n---\nReport saved. You MUST share this link with the user: {link}"
-            return f"{to_show}\n\n---\nReport saved to your output folder. Set auth_api_key in config for a shareable link."
+                return f"{to_show}\n\n---\nReport saved. You MUST share this link with the user (use the full link in one line; do not break or truncate): {link}"
+            return f"{to_show}\n\n---\nReport saved to your output folder. {link_err or 'Set auth_api_key in config for a shareable link.'}"
 
         # HTML: return the link — you MUST include this link in your reply to the user so they can view the report.
         if link:
-            return f"SUCCESS. You MUST share this link with the user in your reply so they can view the report: {link}"
-        return "Report saved to your output folder. Set core_public_url and auth_api_key in config for shareable links."
+            return f"SUCCESS. You MUST share this link with the user in your reply so they can view the report (use the full link in one line; do not break or truncate): {link}"
+        return f"Report saved to your output folder. {link_err or 'Set core_public_url and auth_api_key in config for shareable links.'}"
     except Exception as e:
         logger.debug("save_result_page failed: {}", e)
         return f"Failed to save result page: {e!s}"
@@ -2746,21 +2740,14 @@ async def _file_write_executor(arguments: Dict[str, Any], context: ToolContext) 
         out = json.dumps({"written": True, "path": path_arg})
         # When writing to output/, provide a view link so the user can open the file (same as save_result_page).
         if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
-            link_added = False
-            try:
-                from core.result_viewer import get_result_link_base_url, create_file_access_token
-                scope = _get_file_workspace_subdir(context)
-                if scope:
-                    token = create_file_access_token(scope, path_arg)
-                    base_url = get_result_link_base_url()
-                    if base_url and token:
-                        link = f"{base_url}/files/out?path={quote(path_arg)}&token={token}"
-                        out = f"File saved. View: {link}\n{out}"
-                        link_added = True
-            except Exception:
-                pass
-            if not link_added:
-                out = f"{out}\nPath: {path_arg}. To get a view link, set core_public_url and auth_api_key in config/core.yml."
+            scope = _get_file_workspace_subdir(context)
+            if scope:
+                from core.result_viewer import build_file_view_link
+                link, _ = build_file_view_link(scope, path_arg)
+                if link:
+                    out = f"File saved. View (use full link in one line): {link}\n{out}"
+                else:
+                    out = f"{out}\nPath: {path_arg}. To get a view link, set core_public_url and auth_api_key in config/core.yml."
         return out
     except Exception as e:
         logger.debug("file_write failed: %s", e)
@@ -2775,16 +2762,14 @@ async def _get_file_view_link_executor(arguments: Dict[str, Any], context: ToolC
     if not (path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR):
         return f"Only paths under {FILE_OUTPUT_SUBDIR}/ can have view links (e.g. output/allen_resume_slides.html)."
     try:
-        from core.result_viewer import get_result_link_base_url, create_file_access_token
+        from core.result_viewer import build_file_view_link
         scope = _get_file_workspace_subdir(context)
         if not scope:
             return "Could not determine user/companion scope. Use the path from the previous file save (e.g. output/allen_resume_slides.html)."
-        token = create_file_access_token(scope, path_arg)
-        base_url = get_result_link_base_url()
-        if base_url and token:
-            link = f"{base_url}/files/out?path={quote(path_arg)}&token={token}"
-            return f"View link (share this with the user): {link}"
-        return "View link is not available: set core_public_url and auth_api_key in config/core.yml, then the user can get a link for files in output/."
+        link, link_err = build_file_view_link(scope, path_arg)
+        if link:
+            return f"View link (share this with the user; use the full link in one line): {link}"
+        return f"View link is not available: {link_err or 'set core_public_url and auth_api_key in config/core.yml.'}"
     except Exception as e:
         logger.debug("get_file_view_link failed: %s", e)
         return f"Could not generate link: {e!s}"
@@ -3876,15 +3861,12 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
         try:
             parsed = json.loads(result_text.strip()) if isinstance(result_text, str) else None
             if isinstance(parsed, dict) and parsed.get("success") and parsed.get("output_rel_path"):
-                from urllib.parse import quote
-                from core.result_viewer import get_result_link_base_url, create_file_access_token
+                from core.result_viewer import build_file_view_link
                 scope = _get_file_workspace_subdir(context)  # per-user or companion; same as resolution above
                 path_rel = (parsed.get("output_rel_path") or "").strip()
                 if path_rel and scope:
-                    token = create_file_access_token(scope, path_rel)
-                    base_url = get_result_link_base_url()
-                    if base_url and token:
-                        link = f"{base_url}/files/out?path={quote(path_rel)}&token={token}"
+                    link, _ = build_file_view_link(scope, path_rel)
+                    if link:
                         msg = (parsed.get("message") or "File saved.").strip()
                         result_text = f"{msg} Open: {link}"
         except (json.JSONDecodeError, TypeError):

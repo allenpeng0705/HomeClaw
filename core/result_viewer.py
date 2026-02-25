@@ -3,6 +3,7 @@ File serving and HTML generation for Core.
 
 - Core serves files from the sandbox at GET /files/out?path=...&token=...
   Links use core_public_url (top-level in config). Tokens are signed with auth_api_key.
+- build_file_view_link(): single place to build file view URLs; use it everywhere for stable, consistent links (token-first, 7-day expiry).
 - generate_result_html(): build HTML from title/content for save_result_page tool (saves to user output folder).
 - When a path is a directory, /files/out returns an HTML listing with links to files/subdirs.
 
@@ -15,8 +16,12 @@ import hashlib
 import re
 import time
 from typing import Optional, Tuple
+from urllib.parse import quote, unquote
 
 from loguru import logger
+
+# Default expiry for file view links (7 days) so shared links stay valid for a stable UX.
+DEFAULT_FILE_VIEW_LINK_EXPIRY_SEC = 7 * 86400
 
 DEFAULT_MAX_RESULT_HTML_BYTES = 500 * 1024  # 500 KB for generated report HTML
 
@@ -42,11 +47,12 @@ def _get_file_token_secret() -> Optional[bytes]:
     return None
 
 
-def create_file_access_token(scope: str, path: str, expiry_sec: int = 86400) -> Optional[str]:
+def create_file_access_token(scope: str, path: str, expiry_sec: int = DEFAULT_FILE_VIEW_LINK_EXPIRY_SEC) -> Optional[str]:
     """
     Create a signed token for GET /files/out (open link in browser without API key).
     scope = workspace subdir (user id, 'companion', or 'default'). path = relative path under that (e.g. output/report_xxx.html).
     Returns None if auth_api_key is not set in config or path/scope are invalid.
+    Token is signed with auth_api_key from config only; restarting Core does not invalidate links (same config = same key).
     """
     if not scope or not path or ".." in path or path.startswith("/") or "/" in scope or ".." in scope:
         return None
@@ -56,15 +62,22 @@ def create_file_access_token(scope: str, path: str, expiry_sec: int = 86400) -> 
     logger.debug("files/out token created (secret_len={})", len(secret))
     expiry = int(time.time()) + max(1, min(expiry_sec, 7 * 86400))
     payload = f"{scope}\0{path}\0{expiry}"
-    sig = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    full_sig = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    sig = full_sig[:32]  # shorter link, less likely to be truncated; 16 hex bytes = 64 bits
     b64 = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
     return f"{b64}.{sig}"
 
 
 def verify_file_access_token(token: str) -> Optional[Tuple[str, str]]:
     """Verify token and return (scope, path) if valid and not expired. Otherwise None. Logs reason for failure at debug level."""
-    if not token or "." not in token:
-        logger.debug("files/out token: missing or invalid format (no dot)")
+    raw = (token or "").strip()
+    if not raw:
+        logger.debug("files/out token: empty")
+        return None
+    # Accept both raw and percent-encoded token (e.g. from proxies or copied links).
+    token = unquote(raw) if "%" in raw else raw
+    if "." not in token:
+        logger.debug("files/out token: missing or invalid format (no dot) token_len={}", len(raw))
         return None
     secret = _get_file_token_secret()
     if not secret:
@@ -82,8 +95,9 @@ def verify_file_access_token(token: str) -> Optional[Tuple[str, str]]:
     except Exception:
         logger.debug("files/out token: payload decode failed (malformed or corrupted)")
         return None
-    expected_sig = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected_sig, sig):
+    expected_full = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    expected_sig = expected_full[:32]  # accept 32-char (short) or 64-char (legacy) signature
+    if not (hmac.compare_digest(expected_sig, sig) or hmac.compare_digest(expected_full, sig)):
         logger.debug("files/out token: signature mismatch (verify secret_len={}) — auth_api_key on this server differs from the one that signed the link", len(secret))
         return None
     chunks = payload.split("\0", 2)
@@ -104,6 +118,28 @@ def verify_file_access_token(token: str) -> Optional[Tuple[str, str]]:
     return (scope, path)
 
 
+def build_file_view_link(scope: str, path: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Build a stable file view URL for GET /files/out. Single place for link generation so format and config checks are consistent.
+    Returns (url, None) on success, or (None, error_message) when link cannot be generated (caller should show error_message to user).
+    Uses token-first query order and 7-day expiry for stable UX. Never raises.
+    """
+    try:
+        if not scope or not path or ".." in path or path.startswith("/"):
+            return (None, "Invalid scope or path for file link.")
+        base_url = get_result_link_base_url()
+        if not base_url:
+            return (None, "Set core_public_url in config (e.g. your tunnel or public URL) for shareable file links.")
+        token = create_file_access_token(scope, path)
+        if not token:
+            return (None, "Set auth_api_key in config for shareable file links.")
+        url = f"{base_url}/files/out?token={token}&path={quote(path)}"
+        return (url, None)
+    except Exception as e:
+        logger.debug("build_file_view_link failed: {}", e)
+        return (None, "Could not generate file link; check core_public_url and auth_api_key in config.")
+
+
 # When a tunnel (e.g. Pinggy) provides a URL at runtime, Core sets it here so file/report/folder links use it when core_public_url is not in config.
 _runtime_public_url: Optional[str] = None
 
@@ -118,7 +154,7 @@ def get_core_public_url() -> str:
     """
     Public URL that reaches Core. Used for file/report links and folder listing links.
     Returns, in order: (1) core_public_url from config if set, (2) runtime URL (e.g. from Pinggy), (3) http://127.0.0.1:<port> for local use.
-    Link format: get_core_public_url() + "/files/out?path=" + quote(path) + "&token=" + create_file_access_token(...)
+    Link format: get_core_public_url() + "/files/out?token=" + create_file_access_token(...) + "&path=" + quote(path). Server accepts either order (token first preferred so truncated URLs still have a valid token).
     """
     base = get_result_link_base_url()
     if base:

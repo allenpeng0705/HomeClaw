@@ -1297,15 +1297,16 @@ class Core(CoreInterface):
             For a directory, returns an HTML listing with links to files and subdirs (each link has its own token).
             """
             try:
-                from core.result_viewer import verify_file_access_token, create_file_access_token, get_core_public_url
+                from core.result_viewer import verify_file_access_token, build_file_view_link, get_core_public_url
                 from urllib.parse import quote
                 payload = verify_file_access_token(token)
                 if not payload:
+                    logger.debug("files_out: token verification failed (token_len={})", len((token or "").strip()))
                     return JSONResponse(status_code=403, content={"error": "Invalid or expired link"})
                 scope, rel_path = payload
                 path_arg = (path or "").replace("\\", "/").strip()
                 if not path_arg:
-                    return JSONResponse(status_code=400, content={"error": "Path required"})
+                    path_arg = rel_path  # use path from token when param missing (e.g. truncated URL)
                 if path_arg != rel_path:
                     return JSONResponse(status_code=400, content={"error": "Path mismatch"})
                 try:
@@ -1341,8 +1342,8 @@ class Core(CoreInterface):
                         except Exception:
                             continue
                         child_rel = f"{path_arg}/{name}".lstrip("/") if path_arg else name
-                        child_token = create_file_access_token(scope, child_rel) if base_url else ""
-                        href = f"{base_url}/files/out?path={quote(child_rel)}&token={child_token}" if child_token else "#"
+                        child_link, _ = build_file_view_link(scope, child_rel)
+                        href = child_link if child_link else "#"
                         entries.append((name, "dir" if p.is_dir() else "file", href))
                     html_parts = [
                         "<!DOCTYPE html><html><head><meta charset='utf-8'><title>",
