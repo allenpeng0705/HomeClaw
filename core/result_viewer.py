@@ -129,12 +129,9 @@ def verify_file_access_token(token: str) -> Optional[Tuple[str, str]]:
             return (scope, path)
 
         # Token format: b64 + sig (no separator). Last 32 chars = hex signature, rest = base64 payload.
-        if len(token) < 33:
-            logger.debug("files/out token: too short token_len={}", token_len)
-            return None
-        sig = token[-32:]
+        sig = token[-32:].lower()  # normalize so uppercase hex (e.g. from URL) is accepted
         if len(sig) != 32 or not all(c in "0123456789abcdef" for c in sig):
-            logger.debug("files/out token: invalid signature suffix token_len={}", token_len)
+            logger.debug("files/out token: invalid signature suffix token_len={}", len(token))
             return None
         b64 = token[:-32]
         result = _verify_b64_sig(b64, sig)
@@ -162,7 +159,11 @@ def build_file_view_link(scope: str, path: str) -> Tuple[Optional[str], Optional
         token = create_file_access_token(scope, path)
         if not token:
             return (None, "Set auth_api_key in config for shareable file links.")
-        url = f"{base_url}/files/out?token={token}&path={quote(path)}"
+        # Emit only token alphabet so link is stable (no accidental chars)
+        token_safe = "".join(c for c in token if c in _TOKEN_ALPHABET)
+        if len(token_safe) < 33:
+            return (None, "Could not generate file link (token invalid).")
+        url = f"{base_url}/files/out?token={token_safe}&path={quote(path)}"
         return (url, None)
     except Exception as e:
         logger.debug("build_file_view_link failed: {}", e)
