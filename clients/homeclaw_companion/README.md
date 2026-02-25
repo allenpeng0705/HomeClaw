@@ -48,7 +48,7 @@ To list devices: `flutter devices`.
 ```bash
 ./scripts/build_companion_dmg.sh
 ```
-Output: `clients/homeclaw_companion/homeclaw_companion.dmg`. Optional: `--output /path/to/Companion.dmg`.
+Output: `dist/homeclaw_companion.dmg`. Optional: `--output /path/to/Companion.dmg`.
 
 To produce a **standalone macOS app** manually (or just the .app without DMG):
 

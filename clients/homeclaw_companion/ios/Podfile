@@ -42,10 +42,8 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
-    # permission_handler: enable only the permissions we request (camera, notifications, microphone, speech).
-    # Without these, the iOS permission dialogs never appear. See:
-    # https://github.com/Baseflow/flutter-permission-handler/blob/main/permission_handler_apple/ios/Classes/PermissionHandlerEnums.h
     target.build_configurations.each do |config|
+      # permission_handler: enable only the permissions we request (camera, notifications, microphone, speech).
       config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
         '$(inherited)',
         'PERMISSION_CAMERA=1',
@@ -53,6 +51,18 @@ post_install do |installer|
         'PERMISSION_MICROPHONE=1',
         'PERMISSION_SPEECH_RECOGNIZER=1',
       ]
+      # Bump deployment target for pods that set it below supported minimum (12.0)
+      deployment_target = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_s
+      if deployment_target.to_f > 0 && deployment_target.to_f < 12.0
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
+      end
+      # Silence deprecation warnings from geolocator_apple (CLLocationManager authorizationStatus etc.)
+      if target.name.include?('geolocator_apple')
+        config.build_settings['GCC_WARN_DEPRECATED_FUNCTIONS'] = 'NO'
+        flags = config.build_settings['OTHER_CFLAGS'] || []
+        flags = [flags] unless flags.is_a?(Array)
+        config.build_settings['OTHER_CFLAGS'] = flags + ['-Wno-deprecated-declarations', '-Wno-deprecated-implementations']
+      end
     end
   end
 end

@@ -38,11 +38,22 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_macos_build_settings(target)
-    # Remove invalid Metal toolchain search path to silence ld warnings
     target.build_configurations.each do |config|
+      # Remove invalid Metal toolchain search path to silence ld warnings
       paths = config.build_settings['LIBRARY_SEARCH_PATHS'] || []
       if paths.is_a?(Array)
         config.build_settings['LIBRARY_SEARCH_PATHS'] = paths.reject { |p| p.to_s.include?('Metal.xctoolchain') || p.to_s.include?('cryptexd') }
+      end
+      # Bump deployment target for pods that set it below supported minimum (10.13)
+      if config.build_settings['MACOSX_DEPLOYMENT_TARGET'].to_f < 10.13
+        config.build_settings['MACOSX_DEPLOYMENT_TARGET'] = '10.13'
+      end
+      # Silence deprecation warnings from geolocator_apple (CLLocationManager authorizationStatus etc.)
+      if target.name.include?('geolocator_apple')
+        config.build_settings['GCC_WARN_DEPRECATED_FUNCTIONS'] = 'NO'
+        flags = config.build_settings['OTHER_CFLAGS'] || []
+        flags = [flags] unless flags.is_a?(Array)
+        config.build_settings['OTHER_CFLAGS'] = flags + ['-Wno-deprecated-declarations', '-Wno-deprecated-implementations']
       end
     end
   end

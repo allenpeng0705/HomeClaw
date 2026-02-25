@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Build the HomeClaw Companion app for macOS and create a single DMG file.
 # Usage: ./scripts/build_companion_dmg.sh [--output /path/to/Companion.dmg]
-# Default output: clients/homeclaw_companion/homeclaw_companion.dmg
+# Default output: dist/homeclaw_companion.dmg (same pattern as build_companion_windows.bat using dist/)
 
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPANION_DIR="$REPO_ROOT/clients/homeclaw_companion"
+DIST_DIR="$REPO_ROOT/dist"
 OUTPUT_DMG=""
 
 while [[ $# -gt 0 ]]; do
@@ -24,7 +25,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$OUTPUT_DMG" ]]; then
-  OUTPUT_DMG="$COMPANION_DIR/homeclaw_companion.dmg"
+  mkdir -p "$DIST_DIR"
+  OUTPUT_DMG="$DIST_DIR/homeclaw_companion.dmg"
 fi
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -45,12 +47,12 @@ fi
 
 echo "Creating DMG..."
 DMG_DIR=$(mktemp -d)
+trap 'rm -rf "$DMG_DIR"' EXIT
 cp -R "$APP_PATH" "$DMG_DIR/"
 ln -s /Applications "$DMG_DIR/Applications"
 
 # Create DMG (may need full disk access for hdiutil on some systems)
 hdiutil create -volname "HomeClaw Companion" -srcfolder "$DMG_DIR" -ov -format UDZO "$OUTPUT_DMG"
-rm -rf "$DMG_DIR"
 
 echo "Done. DMG: $OUTPUT_DMG"
 ls -la "$OUTPUT_DMG"

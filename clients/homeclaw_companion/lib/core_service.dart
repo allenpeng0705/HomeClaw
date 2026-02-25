@@ -402,10 +402,10 @@ class CoreService {
           Duration(seconds: sendMessageTimeoutSeconds),
           onTimeout: () {
             _pendingInboundResult.remove(requestId);
-            return null;
+            throw TimeoutException('Inbound request timed out', Duration(seconds: sendMessageTimeoutSeconds));
           },
         );
-        if (result != null) return result;
+        return result;
       } catch (_) {
         _pendingInboundResult.remove(requestId);
       }
