@@ -11,9 +11,8 @@ dependencies:
     sdk: flutter
   speech_to_text: ^7.0.0
 
-flutter:
-  assets:
-    - assets/vosk_listen.py
+# Vosk script is embedded in lib/vosk_script.dart (Linux only), not as an asset,
+# so no .py file is shipped in the app bundle (iOS/App Store code signing rejects it).
 
 dev_dependencies:
   flutter_test:

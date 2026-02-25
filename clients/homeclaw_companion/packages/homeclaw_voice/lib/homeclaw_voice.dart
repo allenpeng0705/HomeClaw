@@ -2,8 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/services.dart';
 import 'package:speech_to_text/speech_to_text.dart';
+
+import 'vosk_script.dart';
 
 /// Voice input for HomeClaw companion.
 ///
@@ -116,15 +117,8 @@ class HomeclawVoice {
       ));
       return;
     }
-    String scriptContent;
-    try {
-      scriptContent = await rootBundle.loadString(
-        'packages/homeclaw_voice/assets/vosk_listen.py',
-      );
-    } catch (e) {
-      _eventController.addError(Exception('Failed to load Vosk script: $e'));
-      return;
-    }
+    // Use embedded script (not an asset) so .py is never in the app bundle (iOS signing).
+    const scriptContent = voskListenScript;
     try {
       _voskTempDir = Directory.systemTemp.createTempSync('vosk_');
       _voskScriptFile = File('${_voskTempDir!.path}/vosk_listen.py');

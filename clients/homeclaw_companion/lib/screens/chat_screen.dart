@@ -208,12 +208,17 @@ class _ChatScreenState extends State<ChatScreen> {
     final hasAttachments = _pendingImagePaths.isNotEmpty || _pendingVideoPaths.isNotEmpty || _pendingFilePaths.isNotEmpty;
     if ((text.isEmpty && !hasAttachments) || _loading) return;
     if (!mounted) return;
+    // Claim sending immediately so a concurrent "final" voice event or double tap cannot trigger a second send.
+    setState(() => _loading = true);
     if (_voiceListening) {
       // Cancel subscription first so no more "final" events can trigger _send() and cause double send.
       _voiceSubscription?.cancel();
       _voiceSubscription = null;
       await _voice.stopVoiceListening();
-      if (!mounted) return;
+      if (!mounted) {
+        setState(() => _loading = false);
+        return;
+      }
       setState(() {
         _voiceListening = false;
         _voiceTranscript = '';
@@ -229,7 +234,10 @@ class _ChatScreenState extends State<ChatScreen> {
     final userImageDataUrls = imagesToSend.isNotEmpty
         ? await _filePathsToImageDataUrls(imagesToSend)
         : <String>[];
-    if (!mounted) return;
+    if (!mounted) {
+      setState(() => _loading = false);
+      return;
+    }
     setState(() {
       _pendingImagePaths.clear();
       _pendingVideoPaths.clear();
