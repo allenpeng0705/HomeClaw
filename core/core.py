@@ -85,6 +85,20 @@ from core.emailChannel import channel
 
 logging.basicConfig(level=logging.CRITICAL)
 
+
+class _SuppressConfigCoreAccessFilter(logging.Filter):
+    """Filter out uvicorn access log lines for GET /api/config/core (Companion connection checks)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage() if hasattr(record, "getMessage") else (getattr(record, "msg", "") or "")
+            if "/api/config/core" in str(msg) and " 200 " in str(msg):
+                return False
+        except Exception:
+            pass
+        return True
+
+
 # Pinggy tunnel state: set by _start_pinggy_and_open_browser when tunnel is ready. Read by GET /pinggy.
 _pinggy_state: Dict[str, Any] = {"public_url": None, "connect_url": None, "qr_base64": None, "error": None}
 
@@ -3907,6 +3921,10 @@ class Core(CoreInterface):
             _loop.call_later(_wakeup_interval, _wakeup)
             core_metadata: CoreMetadata = Util().get_core_metadata()
             logger.debug(f"Running core on {core_metadata.host}:{core_metadata.port}")
+            # Suppress access log for GET /api/config/core (Companion connection checks every 30s)
+            _uvicorn_access = logging.getLogger("uvicorn.access")
+            if not any(isinstance(f, _SuppressConfigCoreAccessFilter) for f in _uvicorn_access.filters):
+                _uvicorn_access.addFilter(_SuppressConfigCoreAccessFilter())
             config = uvicorn.Config(self.app, host=core_metadata.host, port=core_metadata.port, log_level="critical", access_log=False)
             self.server = Server(config=config)
             self.initialize()
