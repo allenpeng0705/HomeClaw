@@ -253,7 +253,7 @@ class Util:
         if mode == "production":
             file_name = module_name + '_production.log'
             log_file = os.path.join(log_path, file_name)
-            logger.add(log_file, format="{time} {level} {message}", filter=filter_production, level="INFO")
+            logger.add(log_file, format="{time} {level} {message}", filter=filter_production, level="INFO", encoding="utf-8")
             if log_to_console:
                 logger.add(sys.stdout, format="{time} {level} {message}", filter=filter_production, level="INFO")
         else:
@@ -264,8 +264,8 @@ class Util:
                     logger.add(sys.stdout, format=log_format, level="INFO")
                 else:
                     logger.add(sys.stdout, format=log_format, level="DEBUG")
-            # The filter is to avoid to record long text into file
-            logger.add(log_file, format=log_format, filter=filter_debug, level="DEBUG")
+            # The filter is to avoid to record long text into file. UTF-8 so Chinese/special chars display when tailing on Windows (use -Encoding UTF8).
+            logger.add(log_file, format=log_format, filter=filter_debug, level="DEBUG", encoding="utf-8")
    
               
     @staticmethod

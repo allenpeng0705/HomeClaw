@@ -3800,7 +3800,7 @@ class Core(CoreInterface):
             _loop.call_later(_wakeup_interval, _wakeup)
             core_metadata: CoreMetadata = Util().get_core_metadata()
             logger.debug(f"Running core on {core_metadata.host}:{core_metadata.port}")
-            config = uvicorn.Config(self.app, host=core_metadata.host, port=core_metadata.port, log_level="critical")
+            config = uvicorn.Config(self.app, host=core_metadata.host, port=core_metadata.port, log_level="critical", access_log=False)
             self.server = Server(config=config)
             self.initialize()
             self.start_email_channel()
@@ -5136,13 +5136,13 @@ class Core(CoreInterface):
                         if base_str and llm_input and llm_input[0].get("role") == "system":
                             block = (
                                 "\n\n## File tools base path\n"
-                                "The user can access two root folders: (1) their private folder homeclaw_root/{user_id}/, (2) the shared folder homeclaw_root/share/. "
-                                "For file_read, file_write, document_read, folder_list, file_find use path=\".\" for the user's private folder (their default root), path=\"share\" or \"share/\" for the shared folder, or path=\"subdir\" (relative to private folder). "
-                                "When the user asks what files are in their directory, or to list their files (e.g. 你的目录下都有哪些文件, 列出文件, what's in my folder), call folder_list with path=\".\" to list their private folder, or path=\"share\" to list the shared folder, then report the result. "
-                                "To find files by type: call file_find with pattern (e.g. pattern=\"*.docx\", pattern=\"*.pdf\"). "
-                                "When the user asks to summarize or read a document (e.g. a PDF or a filename in quotes) without giving a path: search both roots—call file_find with path=\".\" and path=\"share\" (each with a pattern matching the filename, e.g. pattern=\"*Transformer*.pdf\"), then call document_read(path=<path from file_find; use \"share/\" prefix for results from path=\"share\">) to get the content, then summarize or answer. "
+                                "Default base for all file search, read, and write is the user's private folder: homeclaw_root/{user_id}. Use path=\".\" (or omit path where the tool allows) for this default. "
+                                "Only when the user explicitly says \"share\" or \"share folder\" use path=\"share\" (or path=\"share/...\") to access homeclaw_root/share. "
+                                "For file_read, file_write, document_read, folder_list, file_find: path=\".\" or omitted = user's private folder; path=\"share\" or \"share/...\" = shared folder; path=\"subdir\" = relative to private folder. "
+                                "When the user asks what files are in their directory, or to list their files (e.g. 你的目录下都有哪些文件, 列出文件, what's in my folder), call folder_list with path=\".\" for private folder, or path=\"share\" for shared folder, then report the result. "
+                                "To find files by type: call file_find with pattern (e.g. pattern=\"*.pdf\"); default path=\".\" searches the user's private folder. "
+                                "When the user asks to summarize or read a document (e.g. a PDF or a filename in quotes) without giving a path: search the user's private folder first (file_find path=\".\"), then if needed the share folder (path=\"share\"); use document_read(path=<path from file_find; prefix \"share/\" for results from path=\"share\">), then summarize or answer. "
                                 "Report only paths returned by file_find or folder_list; do not invent or guess paths. "
-                                "To read Word/PDF content use document_read(path=<relative path from tool result>). "
                                 f"Current homeclaw_root: {base_str}"
                             )
                             llm_input[0]["content"] = (llm_input[0].get("content") or "") + block
@@ -5285,13 +5285,16 @@ class Core(CoreInterface):
                                         and "summarize" in (query or "").lower()
                                         and (".pdf" in (query or "") or ".docx" in (query or ""))
                                     ):
-                                        # Fallback: user asked to summarize a document but model didn't call file_find/document_read. Search both user folder and share folder.
+                                        # Fallback: user asked to summarize a document but model didn't call file_find/document_read. Default: search user's private folder only; if user said "share", also search share folder.
                                         try:
                                             _component_log("tools", "fallback summarize document (model did not call tool)")
                                             ext = ".pdf" if ".pdf" in (query or "") else ".docx"
                                             pattern = "*" + ext
+                                            roots = [(".", "")]
+                                            if "share" in (query or "").lower():
+                                                roots.append(("share", "share/"))
                                             files = []
-                                            for path_arg, prefix in ((".", ""), ("share", "share/")):
+                                            for path_arg, prefix in roots:
                                                 find_result = await registry.execute_async("file_find", {"path": path_arg, "pattern": pattern}, context)
                                                 if isinstance(find_result, str) and find_result.strip():
                                                     try:
@@ -5330,7 +5333,7 @@ class Core(CoreInterface):
                                                 else:
                                                     response = content_str or "Could not read the document. It may be empty or in an unsupported format."
                                             else:
-                                                response = content_str or "No matching PDF or document found in your private or share folder. Try listing files with folder_list or use a more specific filename."
+                                                response = content_str or "No matching PDF or document found in your private folder. Try listing files with folder_list or use a more specific filename. Say 'share folder' if the file is in the shared folder."
                                         except Exception as e:
                                             logger.debug("Fallback summarize document failed: {}", e)
                                             response = content_str or "Could not find or summarize the document. Please try again."

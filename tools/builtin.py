@@ -2806,10 +2806,9 @@ def _resolve_file_path(
 ) -> Optional[Tuple[Path, Optional[Path]]]:
     """
     Resolve a file path for file tools. Returns (full_path, base_for_validation) or None on error (caller should return polite message).
-    - When homeclaw_root is SET: base = that path. Paths starting with "share/" go under base/share (all users + companion).
-      Other paths go under base/{user_id} or base/companion (companion app when not tied to a user). Use "output/<filename>" for
-      generated files (see FILE_OUTPUT_SUBDIR and docs_design/FileSandboxDesign.md). Folders created automatically.
-    - When homeclaw_root is NOT SET (empty = workspace_dir): path_arg can be absolute (whole machine). base_for_validation = None.
+    - When homeclaw_root is SET: default base is user's private folder (base/{user_id} or base/companion). Empty path or "." resolves to that.
+      Only when path is "share" or starts with "share/" go under base/share. Use "output/<filename>" for generated files (see FILE_OUTPUT_SUBDIR).
+    - When homeclaw_root is NOT SET: path_arg can be absolute. base_for_validation = None.
     Never raises; returns None on any exception.
     """
     try:
@@ -2817,7 +2816,9 @@ def _resolve_file_path(
         base_str = _get_homeclaw_root()
         path_arg = (path_arg or "").strip()
         if not path_arg:
-            return (Path("."), None)
+            if not base_str or base_str == ".":
+                return (Path("."), None)
+            path_arg = "."  # default to user's private folder (homeclaw_root/{user_id}) when homeclaw_root is set
 
         if not base_str or base_str == ".":
             full = Path(path_arg).resolve()
@@ -4600,11 +4601,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_read",
-            description="Read contents of a file. Path is relative to config tools.file_read_base (default: project root). For safety, only reads under that base.",
+            description="Read contents of a file. Default base: user's private folder (homeclaw_root/{user_id}). Use path '.' or a path under it; use path 'share/...' only when the user says share folder.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path to the file."},
+                    "path": {"type": "string", "description": "Path relative to user's private folder (e.g. 'file.txt', 'subdir/file.txt'). Use 'share/filename' when user says share."},
                     "max_chars": {"type": "integer", "description": "Max characters to return (default from config tools.file_read_max_chars, or 32000).", "default": 32000},
                 },
                 "required": ["path"],
@@ -4615,11 +4616,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="document_read",
-            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. Uses Unstructured when installed (pip install 'unstructured[all-docs]') for one powerful tool; falls back to pypdf for PDF and plain text for others. Path relative to tools.file_read_base (default: project root). For long files, increase max_chars or ask for section-by-section summary.",
+            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. Uses Unstructured when installed (pip install 'unstructured[all-docs]'); falls back to pypdf for PDF. Default base: user's private folder (homeclaw_root/{user_id}); use path 'share/...' only when the user says share folder. For long files, increase max_chars or ask for section-by-section summary.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path to the file (e.g. report.pdf, slides.pptx, notes.docx, readme.md, data.json)."},
+                    "path": {"type": "string", "description": "Path relative to user's private folder (e.g. report.pdf). Use 'share/filename' when user says share."},
                     "max_chars": {"type": "integer", "description": "Max characters to return (default from config tools.file_read_max_chars, or 64000).", "default": 64000},
                 },
                 "required": ["path"],
@@ -4630,11 +4631,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_understand",
-            description="Classify a file as image, audio, video, or document and return type + path. For documents, returns extracted text (same as document_read). For image/audio/video, returns type and path so you know what the file is; use image_analyze(path) for images if the user asks to describe. Path relative to tools.file_read_base (default: project root).",
+            description="Classify a file as image, audio, video, or document and return type + path. For documents, returns extracted text (same as document_read). For image/audio/video, returns type and path; use image_analyze(path) for images if the user asks to describe. Default base: user's private folder; use path 'share/...' only when the user says share folder.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path to the file (e.g. report.pdf, photo.jpg, recording.mp3)."},
+                    "path": {"type": "string", "description": "Path relative to user's private folder. Use 'share/filename' when user says share."},
                     "max_chars": {"type": "integer", "description": "Max characters to extract for documents (default from config).", "default": 64000},
                 },
                 "required": ["path"],
@@ -4645,11 +4646,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_write",
-            description="Write content to a file. Path is relative to config tools.file_read_base (default: project root). Only writes under that base.",
+            description="Write content to a file. Default base: user's private folder (homeclaw_root/{user_id}). Use path '.' or a path under it; use path 'share/...' only when the user says share folder.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path to the file."},
+                    "path": {"type": "string", "description": "Path relative to user's private folder. Use 'share/filename' when user says share."},
                     "content": {"type": "string", "description": "Content to write."},
                 },
                 "required": ["path", "content"],
@@ -4660,11 +4661,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_edit",
-            description="Replace old_string with new_string in a file. Path relative to tools.file_read_base. Use replace_all=true to replace all occurrences.",
+            description="Replace old_string with new_string in a file. Default base: user's private folder; use path 'share/...' only when the user says share folder. Use replace_all=true to replace all occurrences.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path to the file."},
+                    "path": {"type": "string", "description": "Path relative to user's private folder. Use 'share/filename' when user says share."},
                     "old_string": {"type": "string", "description": "String to replace."},
                     "new_string": {"type": "string", "description": "Replacement string."},
                     "replace_all": {"type": "boolean", "description": "If true, replace all occurrences; else first only.", "default": False},
@@ -4677,7 +4678,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="apply_patch",
-            description="Apply a unified diff patch to a file. Patch should be a single-file unified diff (---/+++ and @@ hunks). Path in patch is relative to tools.file_read_base. Provide patch or content.",
+            description="Apply a unified diff patch to a file. Patch should be a single-file unified diff (---/+++ and @@ hunks). Path in patch is relative to user's private folder; use 'share/...' when user says share folder. Provide patch or content.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -4709,12 +4710,12 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_find",
-            description="Find files or folders by name pattern (glob) under config tools.file_read_base (default: project root). E.g. pattern '*.py' or '*config*'. Returns list of path, type (file/dir), name.",
+            description="Find files or folders by name pattern (glob). Default base: user's private folder (homeclaw_root/{user_id}); use path 'share' only when the user says share folder. E.g. pattern '*.pdf', '*config*'. Returns list of path, type (file/dir), name.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "pattern": {"type": "string", "description": "Glob pattern for name (e.g. '*.py', '*notes*', '*.md'). Default '*' lists all.", "default": "*"},
-                    "path": {"type": "string", "description": "Directory under file_read_base to search (default '.' = base).", "default": "."},
+                    "pattern": {"type": "string", "description": "Glob pattern for name (e.g. '*.pdf', '*notes*'). Default '*' lists all.", "default": "*"},
+                    "path": {"type": "string", "description": "Directory to search: '.' = user's private folder (default); 'share' = shared folder when user says share.", "default": "."},
                     "max_results": {"type": "integer", "description": "Max results to return (default 200).", "default": 200},
                 },
                 "required": [],

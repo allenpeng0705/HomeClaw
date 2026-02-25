@@ -1,6 +1,6 @@
 ---
 name: baidu-search
-description: Baidu-only: use Baidu Qianfan 智能搜索生成 to search and get an AI-written summary in one call. Use only when the user explicitly asks for Baidu or 百度搜索. For generic web search (Tavily, DuckDuckGo, etc.) use the web_search tool instead, not this skill.
+description: "Baidu-only: use Baidu Qianfan 智能搜索生成 to search and get an AI-written summary in one call. Use only when the user explicitly asks for Baidu or 百度搜索. For generic web search (Tavily, DuckDuckGo, etc.) use the web_search tool instead, not this skill."
 trigger:
   patterns: ["百度搜索|百度.*搜|Baidu\\s+search|智能搜索|用百度搜|baidu\\s+搜"]
   instruction: "The user asked for Baidu search or 百度/智能搜索. Use run_skill(skill_name='baidu-search-1.1.0', script='search.py', args=['{\"query\": \"<search terms>\"}']). For plain 'search the web' or 'search for X' without mentioning Baidu, use the web_search tool instead."
