@@ -62,6 +62,20 @@ class DatabaseManager:
 
     def create_tables(self):
         Base.metadata.create_all(self.engine)
+        # Migration: add user_id and channel_key to one-shot reminders (for deliver_to_user)
+        try:
+            if self.engine and "sqlite" in (self.engine.url.drivername or ""):
+                from sqlalchemy import text
+                for col in ("user_id", "channel_key"):
+                    try:
+                        with self.engine.begin() as conn:
+                            conn.execute(text(
+                                f"ALTER TABLE homeclaw_tam_one_shot_reminders ADD COLUMN {col} VARCHAR"
+                            ))
+                    except Exception:
+                        pass  # column may already exist
+        except Exception as e:
+            logger.debug("TAM one_shot migration (user_id/channel_key): {}", e)
         logger.debug("All the tables created successfully.")
 
 

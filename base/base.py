@@ -81,6 +81,10 @@ class InboundRequest(BaseModel):
     location: Optional[str] = None
     # When true, POST /inbound returns Server-Sent Events (SSE) with progress messages during long tasks (e.g. "Generating your PPT...") then a final event with the result. Clients can show progress instead of a static loading state.
     stream: Optional[bool] = False
+    # When true, POST /inbound returns immediately with 202 and request_id; Core processes in background. Client polls GET /inbound/result?request_id=... until status is "done". Use when proxy (e.g. Cloudflare) closes the connection before the response completes.
+    async_mode: Optional[bool] = Field(False, alias="async")
+    # When set with async: true, Core pushes the result to the WebSocket that registered this session_id (see /ws "connected" event). Companion opens /ws, gets session_id, then POST /inbound with async + push_ws_session_id so Core can push the reply directly instead of polling.
+    push_ws_session_id: Optional[str] = None
 
 class IntentType(Enum):
     TIME = "TIME"

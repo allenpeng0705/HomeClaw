@@ -98,4 +98,6 @@ class TamOneShotReminderModel(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     run_at = Column(DateTime, nullable=False, index=True)  # when to send the reminder
     message = Column(Text, nullable=False)
+    user_id = Column(String, nullable=True)  # for deliver_to_user (Companion push)
+    channel_key = Column(String, nullable=True)  # for channel delivery (per-session cron)
     created_at = Column(TIMESTAMP, default=func.current_timestamp(), index=True)

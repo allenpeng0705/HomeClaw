@@ -259,6 +259,10 @@ class Core(CoreInterface):
             self.memory_queue_task = None
             self._system_plugin_processes: List[asyncio.subprocess.Process] = []
             self._pending_plugin_calls: Dict[str, Dict[str, Any]] = {}  # session_key -> {plugin_id, capability_id, params, missing, ...}
+            self._inbound_async_results: Dict[str, dict] = {}  # request_id -> {status, ok?, text?, images?, error?, created_at}; TTL 5 min
+            self._inbound_async_results_ttl_sec = 300
+            self._ws_sessions: Dict[str, WebSocket] = {}  # session_id -> WebSocket for push (Companion/channel holds /ws open; Core pushes async result and proactive messages)
+            self._ws_user_by_session: Dict[str, str] = {}  # session_id -> user_id (so we can deliver_to_user for cron/reminder)
             #self.active_plugin = None
             logger.debug("Before initialize orchestrator")
             self.orchestratorInst = Orchestrator(self)
@@ -1222,7 +1226,7 @@ class Core(CoreInterface):
                 raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
         def _ws_auth_ok(websocket: WebSocket) -> bool:
-            """Check API key from WebSocket handshake headers; return True if auth disabled or key valid. Never raises (returns False on any error)."""
+            """Check API key from WebSocket handshake headers or query (?api_key= or ?X-API-Key=). Return True if auth disabled or key valid. Query param needed for clients that cannot set headers (e.g. Dart WebSocket)."""
             try:
                 meta = Util().get_core_metadata()
                 if not getattr(meta, 'auth_enabled', False):
@@ -1230,10 +1234,15 @@ class Core(CoreInterface):
                 expected = (getattr(meta, 'auth_api_key', '') or '').strip()
                 if not expected:
                     return True
+                key = ""
                 headers = dict((k.decode().lower(), v.decode()) for k, v in websocket.scope.get("headers", []))
                 key = (headers.get("x-api-key") or "").strip()
                 if not key and (headers.get("authorization") or "").strip().startswith("Bearer "):
                     key = (headers.get("authorization") or "").strip().split(" ", 1)[1].strip()
+                if not key and websocket.scope.get("query_string"):
+                    from urllib.parse import parse_qs
+                    qs = parse_qs(websocket.scope["query_string"].decode())
+                    key = (qs.get("api_key") or qs.get("x-api-key") or [""])[0].strip()
                 return key == expected
             except Exception:
                 return False
@@ -1244,9 +1253,19 @@ class Core(CoreInterface):
             Minimal API for any bot: POST {"user_id": "...", "text": "..."} and get {"text": "..."} back.
             No channel process needed; add user_id to config/user.yml allowlist. Use channel_name to tag the source (e.g. telegram, discord).
             When auth_enabled and auth_api_key are set in config, require X-API-Key or Authorization: Bearer.
-            Optional stream: true — returns Server-Sent Events (text/event-stream): progress messages during long tasks (e.g. "Generating your presentation…") then a final event with event "done" and the result (same shape as non-stream).
+            Optional stream: true — returns Server-Sent Events (text/event-stream): progress messages during long tasks (e.g. "Generating your presentation…") then a final event with event "done" and the result (same shape as non-stream). Use stream: true for long requests (e.g. HTML slides, document_read) to avoid "Connection closed while receiving data" from client/proxy timeouts.
+            Optional async: true — returns immediately with 202 and request_id; Core processes in background. Poll GET /inbound/result?request_id=... until status is "done". Use when proxy (e.g. Cloudflare) closes the connection before the response completes; each poll is a short request so it won't time out.
+            Long requests (e.g. 2+ minutes): set proxy read_timeout and client timeout >= 300s, or use stream: true (with heartbeat), or async: true + poll.
             """
             try:
+                if getattr(request, "async_mode", False):
+                    request_id = str(uuid.uuid4())
+                    self._inbound_async_results[request_id] = {"status": "pending", "created_at": time.time()}
+                    asyncio.create_task(self._run_async_inbound(request_id, request))
+                    return JSONResponse(
+                        status_code=202,
+                        content={"request_id": request_id, "status": "accepted", "message": "Processing in background. Poll GET /inbound/result?request_id=" + request_id},
+                    )
                 if getattr(request, "stream", False):
                     progress_queue = asyncio.Queue()
                     try:
@@ -1303,6 +1322,33 @@ class Core(CoreInterface):
             except Exception as e:
                 logger.exception(e)
                 return JSONResponse(status_code=500, content={"error": str(e), "text": ""})
+
+        @self.app.get("/inbound/result", dependencies=[Depends(_verify_inbound_auth)])
+        async def inbound_result(request_id: str = ""):
+            """
+            Poll result of an async POST /inbound (when async: true). Query: request_id=... from the 202 response.
+            Returns 202 + {status: "pending"} while processing; 200 + {status: "done", text, format, images?, error?} when done; 404 when request_id unknown or expired (TTL 5 min).
+            """
+            request_id = (request_id or "").strip()
+            if not request_id:
+                return JSONResponse(status_code=400, content={"error": "Missing request_id"})
+            now = time.time()
+            ttl = getattr(self, "_inbound_async_results_ttl_sec", 300)
+            expired = [rid for rid, v in self._inbound_async_results.items() if (now - v.get("created_at", 0)) > ttl]
+            for rid in expired:
+                self._inbound_async_results.pop(rid, None)
+            entry = self._inbound_async_results.get(request_id)
+            if not entry:
+                return JSONResponse(status_code=404, content={"error": "Unknown or expired request_id", "status": "gone"})
+            if entry.get("status") == "pending":
+                return JSONResponse(status_code=202, content={"status": "pending", "request_id": request_id})
+            body = {"status": "done", "text": entry.get("text", ""), "format": entry.get("format", "plain")}
+            if entry.get("error"):
+                body["error"] = entry["error"]
+            if entry.get("images"):
+                body["images"] = entry["images"]
+                body["image"] = entry.get("image") or entry["images"][0]
+            return JSONResponse(content=body)
 
         @self.app.get("/files/out")
         async def files_out(path: str = "", token: str = ""):
@@ -2246,13 +2292,20 @@ class Core(CoreInterface):
         async def websocket_chat(websocket: WebSocket):
             """
             WebSocket for our own clients (e.g. WebChat). Send JSON {"user_id": "...", "text": "..."}; receive {"text": "..."}.
-            Same permission as /inbound (user_id in config/user.yml). When auth_enabled, send X-API-Key or Authorization: Bearer in handshake headers.
+            On accept, server sends {"event": "connected", "session_id": "..."}. Client should send {"event": "register", "user_id": "..."} so Core can push proactive messages (cron, reminders) to this connection. Use session_id as push_ws_session_id in POST /inbound with async: true for async result push.
+            Same permission as /inbound (user_id in config/user.yml). When auth_enabled, send X-API-Key or Authorization: Bearer in handshake headers (or ?api_key= in query).
             """
+            session_id = str(uuid.uuid4())
             try:
                 if not _ws_auth_ok(websocket):
                     await websocket.close(code=1008, reason="Unauthorized: invalid or missing API key")
                     return
                 await websocket.accept()
+                self._ws_sessions[session_id] = websocket
+                try:
+                    await websocket.send_json({"event": "connected", "session_id": session_id})
+                except Exception:
+                    pass
                 while True:
                     # Receive handles both text and binary frames (e.g. from plugin proxy); Starlette receive_text() expects "text" key and can KeyError when frame has "bytes".
                     msg = await websocket.receive()
@@ -2266,6 +2319,21 @@ class Core(CoreInterface):
                         continue
                     try:
                         data = json.loads(raw)
+                    except Exception as e:
+                        await websocket.send_json({"error": str(e), "text": ""})
+                        continue
+                    if not isinstance(data, dict):
+                        await websocket.send_json({"error": "Expected JSON object", "text": ""})
+                        continue
+                    if data.get("event") == "register":
+                        uid = (str(data.get("user_id") or "").strip() or "companion")
+                        self._ws_user_by_session[session_id] = uid
+                        try:
+                            await websocket.send_json({"event": "registered", "user_id": uid})
+                        except Exception:
+                            pass
+                        continue
+                    try:
                         # Log media counts for vision debugging (no payload content)
                         _ni = len(data.get("images") or [])
                         _nf = len(data.get("files") or [])
@@ -2334,6 +2402,9 @@ class Core(CoreInterface):
                     await websocket.send_json({"error": str(e), "text": ""})
                 except Exception:
                     pass
+            finally:
+                self._ws_sessions.pop(session_id, None)
+                self._ws_user_by_session.pop(session_id, None)
 
         # add more endpoints here
         logger.debug("core initialized and all the endpoints are registered!")
@@ -2347,6 +2418,68 @@ class Core(CoreInterface):
             logger.exception(e)
             msg = (str(e) or "Internal error").strip()[:500]
             return False, msg or "Internal error", 500, None
+
+    async def _run_async_inbound(self, request_id: str, request: InboundRequest) -> None:
+        """Background task for async /inbound: run the request and store result for GET /inbound/result. Same response shape as sync /inbound."""
+        try:
+            ok, text, status, image_paths = await self._handle_inbound_request(request)
+            try:
+                out_text, out_fmt = self._outbound_text_and_format(text) if text else ("", "plain")
+            except Exception:
+                out_text, out_fmt = (str(text)[:50000] if text else "", "plain")
+            data_urls = []
+            if image_paths:
+                for image_path in image_paths:
+                    if not isinstance(image_path, str) or not os.path.isfile(image_path):
+                        continue
+                    try:
+                        with open(image_path, "rb") as f:
+                            b64 = base64.b64encode(f.read()).decode("ascii")
+                        ext = (image_path.lower().split(".")[-1] if "." in image_path else "png") or "png"
+                        mime = "image/png" if ext == "png" else ("image/jpeg" if ext in ("jpg", "jpeg") else "image/" + ext)
+                        if mime == "image/jpg":
+                            mime = "image/jpeg"
+                        data_urls.append(f"data:{mime};base64,{b64}")
+                    except Exception:
+                        pass
+            entry = {"status": "done", "ok": ok, "text": out_text, "format": out_fmt, "created_at": time.time()}
+            if not ok:
+                entry["error"] = (text or "")[:2000]
+            if data_urls:
+                entry["images"] = data_urls
+                entry["image"] = data_urls[0]
+            self._inbound_async_results[request_id] = entry
+        except Exception as e:
+            logger.exception(e)
+            self._inbound_async_results[request_id] = {
+                "status": "done",
+                "ok": False,
+                "text": "",
+                "format": "plain",
+                "error": (str(e) or "Internal error")[:2000],
+                "created_at": time.time(),
+            }
+        # If client passed push_ws_session_id, push the result to that WebSocket so Companion gets it without polling.
+        try:
+            push_sid = getattr(request, "push_ws_session_id", None)
+            if isinstance(push_sid, str) and push_sid.strip():
+                ws = self._ws_sessions.get(push_sid.strip())
+                if ws is not None:
+                    entry = self._inbound_async_results.get(request_id)
+                    if entry and entry.get("status") == "done":
+                        push_payload = {"event": "inbound_result", "request_id": request_id, "status": "done", "text": entry.get("text", ""), "format": entry.get("format", "plain"), "ok": entry.get("ok", True)}
+                        if entry.get("error"):
+                            push_payload["error"] = entry["error"]
+                        imgs = entry.get("images") or []
+                        if imgs:
+                            push_payload["images"] = imgs
+                            push_payload["image"] = imgs[0] if imgs else None
+                        try:
+                            await ws.send_json(push_payload)
+                        except Exception as push_err:
+                            logger.debug("Push to WebSocket session {} failed: {}", (push_sid or "")[:8], push_err)
+        except Exception as e:
+            logger.debug("push_ws_session_id delivery failed: {}", e)
 
     async def _handle_inbound_request_impl(self, request: InboundRequest, progress_queue: Optional[asyncio.Queue] = None) -> Tuple[bool, str, int, Optional[List[str]]]:
         """Implementation of _handle_inbound_request. Do not call directly; use _handle_inbound_request for crash-safe handling. When progress_queue is set, progress events are put on it during long-running tools so stream=true clients can show status."""
@@ -2455,7 +2588,8 @@ class Core(CoreInterface):
         return True, resp_text, 200, img_paths
 
     async def _inbound_sse_generator(self, progress_queue: asyncio.Queue, task: asyncio.Task) -> Any:
-        """Yield Server-Sent Events: progress messages from the queue, then a final 'done' event with the result (same shape as non-stream /inbound). Used when POST /inbound has stream=true. Never raises; on any error yields a 'done' event with ok=False."""
+        """Yield Server-Sent Events: progress messages from the queue, then a final 'done' event with the result (same shape as non-stream /inbound). Used when POST /inbound has stream=true. Sends a heartbeat (comment or progress) every 40s so proxies (e.g. Cloudflare) do not close the connection. Never raises; on any error yields a 'done' event with ok=False."""
+        _INBOUND_SSE_HEARTBEAT_INTERVAL = 40.0  # seconds; send something so proxy read timeout does not close the connection
         def _yield_done(ok: bool, text: str = "", error: str = "", status: int = 200, data_urls: Optional[List[str]] = None) -> str:
             """Build and return one SSE line for event 'done'. Never raises."""
             payload = {"event": "done", "ok": ok, "text": (text or "")[:50000], "format": "plain", "status": status}
@@ -2469,16 +2603,26 @@ class Core(CoreInterface):
             except Exception:
                 return f"data: {json.dumps({'event': 'done', 'ok': False, 'error': 'Serialization error', 'text': ''})}\n\n"
 
+        last_yield_time = time.time()
         try:
             while not task.done():
                 try:
                     msg = await asyncio.wait_for(progress_queue.get(), timeout=0.4)
                     if isinstance(msg, dict):
                         try:
-                            yield f"data: {json.dumps(msg)}\n\n"
+                            out = f"data: {json.dumps(msg)}\n\n"
+                            yield out
+                            last_yield_time = time.time()
                         except Exception:
                             pass
                 except asyncio.TimeoutError:
+                    if time.time() - last_yield_time >= _INBOUND_SSE_HEARTBEAT_INTERVAL:
+                        try:
+                            yield f"data: {json.dumps({'event': 'progress', 'message': 'Still working…', 'tool': ''})}\n\n"
+                            last_yield_time = time.time()
+                        except Exception:
+                            yield ": heartbeat\n\n"
+                            last_yield_time = time.time()
                     continue
                 except Exception:
                     continue
@@ -3021,6 +3165,55 @@ class Core(CoreInterface):
         except Exception as e:
             logger.warning("send_response_to_channel_by_key failed: {}", e)
 
+    async def deliver_to_user(
+        self,
+        user_id: str,
+        text: str,
+        images: Optional[List[str]] = None,
+        channel_key: Optional[str] = None,
+        source: str = "push",
+    ) -> None:
+        """Push a message to a user: (1) to all WebSocket sessions registered for this user_id (Companion/channel), (2) to the channel identified by channel_key if provided, else to latest channel. Used by cron, reminders, record_date follow-ups, and any proactive delivery. Never raises (logs and returns)."""
+        try:
+            user_id = (user_id or "").strip() or "companion"
+            try:
+                out_text = self._format_outbound_text(text) if text else ""
+            except Exception:
+                out_text = str(text)[:50000] if text else ""
+            payload = {"event": "push", "source": source, "text": out_text, "format": "plain"}
+            data_urls = []
+            if images:
+                for image_path in images:
+                    if not isinstance(image_path, str) or not os.path.isfile(image_path):
+                        continue
+                    try:
+                        with open(image_path, "rb") as f:
+                            b64 = base64.b64encode(f.read()).decode("ascii")
+                        ext = (image_path.lower().split(".")[-1] if "." in image_path else "png") or "png"
+                        mime = "image/png" if ext == "png" else ("image/jpeg" if ext in ("jpg", "jpeg") else "image/" + ext)
+                        if mime == "image/jpg":
+                            mime = "image/jpeg"
+                        data_urls.append(f"data:{mime};base64,{b64}")
+                    except Exception:
+                        pass
+            if data_urls:
+                payload["images"] = data_urls
+                payload["image"] = data_urls[0]
+            for sid, uid in list(self._ws_user_by_session.items()):
+                if uid != user_id:
+                    continue
+                ws = self._ws_sessions.get(sid)
+                if ws is not None:
+                    try:
+                        await ws.send_json(payload)
+                    except Exception as e:
+                        logger.debug("deliver_to_user: push to session {} failed: {}", (sid or "")[:8], e)
+            if channel_key:
+                await self.send_response_to_channel_by_key(channel_key, text)
+            else:
+                await self.send_response_to_latest_channel(text)
+        except Exception as e:
+            logger.warning("deliver_to_user failed: {}", e)
 
     async def send_response_to_request_channel(
         self,
@@ -3797,8 +3990,14 @@ class Core(CoreInterface):
             start = time.time()
             answer = await self.answer_from_memory(query=human_message, messages=messages, app_id=app_id, user_name=user_name, user_id=user_id, agent_id=app_id, session_id=session_id, run_id=run_id, request=request)
             end = time.time()
-            logger.info(f"Core: response generated in {end - start:.1f}s for user={user_id}")
-            logger.debug(f"LLM handling time: {end - start} seconds")
+            elapsed = end - start
+            logger.info("Core: response generated in {:.1f}s for user={}", elapsed, user_id)
+            logger.debug("LLM handling time: {} seconds", elapsed)
+            if elapsed > 90:
+                logger.warning(
+                    "Inbound request took {:.0f}s. If the client sees 'Connection closed while receiving data', use POST /inbound with stream: true (SSE) or set proxy/client read_timeout >= {:.0f}s (e.g. inbound_request_timeout_seconds in config).",
+                    elapsed, max(300, elapsed + 60),
+                )
             if answer is None:
                 answer = "I'm sorry, I don't have the answer to that question. Please try asking a different question or restart your system."
             return answer

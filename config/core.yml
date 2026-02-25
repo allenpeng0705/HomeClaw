@@ -184,7 +184,7 @@ system_plugins_env:
 # orchestrator_unified_with_tools: true
 # Timeout for orchestrator intent/plugin LLM call and plugin.run() when unified is false. Unit: seconds. 0 = no timeout.
 # orchestrator_timeout_seconds: 60
-# Recommended max time (seconds) for clients/proxies waiting for Core to respond (e.g. /inbound). 0 = unlimited (no recommended limit). Long tasks (document_read, summarization, video) may need several minutes; set >0 (e.g. 300) if you want a cap, or 0 so clients/proxies can wait as long as needed. Proxies (nginx, Cloudflare) should set read_timeout >= this when >0.
+# Recommended max time (seconds) for clients/proxies waiting for Core to respond (e.g. /inbound). 0 = unlimited (no recommended limit). Long tasks (document_read, HTML slides, summarization) may take 2+ minutes; "Connection closed while receiving data" usually means proxy/client read_timeout was exceeded. Fix: use POST /inbound with stream: true (SSE) and/or set proxy read_timeout >= 300. Proxies (nginx, Cloudflare) should set read_timeout >= this when >0.
 # inbound_request_timeout_seconds: 0
 # Prompt manager: load prompts from config/prompts with language/model overrides. See docs/PromptManagement.md.
 use_prompt_manager: true
@@ -458,7 +458,7 @@ cloud_models:
     host: 127.0.0.1
     port: 4005
     api_key_name: DEEPSEEK_API_KEY
-    api_key: sk-eb1f151236524086a0967357233b9c88
+    api_key: 
     capabilities: [Chat]
   # Alibaba Qwen (Dashscope)
   # - id: Qwen-Turbo

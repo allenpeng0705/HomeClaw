@@ -156,7 +156,7 @@ def cleanup_expired_one_shot_reminders(before: Optional[datetime] = None) -> int
 
 
 def load_one_shot_reminders(after: Optional[datetime] = None) -> List[Dict[str, Any]]:
-    """Load one-shot reminders with run_at > after (default: now). Returns list of {id, run_at, message}."""
+    """Load one-shot reminders with run_at > after (default: now). Returns list of {id, run_at, message, user_id, channel_key}."""
     session = _get_session()
     try:
         q = session.query(TamOneShotReminderModel)
@@ -164,7 +164,13 @@ def load_one_shot_reminders(after: Optional[datetime] = None) -> List[Dict[str, 
             q = q.filter(TamOneShotReminderModel.run_at > after)
         rows = q.all()
         return [
-            {"id": r.id, "run_at": r.run_at, "message": r.message or ""}
+            {
+                "id": r.id,
+                "run_at": r.run_at,
+                "message": r.message or "",
+                "user_id": getattr(r, "user_id", None),
+                "channel_key": getattr(r, "channel_key", None),
+            }
             for r in rows
         ]
     except Exception as e:
@@ -177,11 +183,21 @@ def load_one_shot_reminders(after: Optional[datetime] = None) -> List[Dict[str, 
             pass
 
 
-def add_one_shot_reminder(run_at: datetime, message: str) -> Optional[str]:
-    """Persist a one-shot reminder. Returns reminder id on success, None on failure."""
+def add_one_shot_reminder(
+    run_at: datetime,
+    message: str,
+    user_id: Optional[str] = None,
+    channel_key: Optional[str] = None,
+) -> Optional[str]:
+    """Persist a one-shot reminder. Returns reminder id on success, None on failure. user_id/channel_key used by deliver_to_user when reminder fires."""
     session = _get_session()
     try:
-        row = TamOneShotReminderModel(run_at=run_at, message=message)
+        row = TamOneShotReminderModel(
+            run_at=run_at,
+            message=message,
+            user_id=user_id or None,
+            channel_key=channel_key or None,
+        )
         session.add(row)
         session.flush()
         rid = row.id

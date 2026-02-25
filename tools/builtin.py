@@ -405,13 +405,15 @@ async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContex
     params: Dict[str, Any] = {}
     if tz:
         params["tz"] = tz
-    # Companion user (uncombined): one special user "companion"; deliver to key "companion" so any connected Companion app receives
-    companion_user_id = (getattr(context, "system_user_id", None) or context.user_id or "").strip().lower()
+    # user_id for deliver_to_user (Companion push); channel_key for channel delivery
+    user_id = (getattr(context, "system_user_id", None) or getattr(context, "user_id", None) or "").strip() or "companion"
+    params["user_id"] = user_id
     if delivery_target == "session":
-        if companion_user_id in ("companion", "system"):
+        if user_id.lower() in ("companion", "system"):
             params["channel_key"] = "companion"
-        elif context.app_id and context.user_id and context.session_id:
+        elif getattr(context, "app_id", None) and getattr(context, "user_id", None) and getattr(context, "session_id", None):
             params["channel_key"] = f"{context.app_id}:{context.user_id}:{context.session_id}"
+    params["_cron"] = True
     hint = "\n(To cancel this recurring reminder, say 'list my recurring reminders' and ask to remove it.)"
 
     if task_type == "run_skill":
@@ -832,8 +834,14 @@ async def _remind_me_executor(arguments: Dict[str, Any], context: ToolContext) -
             return f"Error: at_time must be YYYY-MM-DD HH:MM:SS or YYYY-MM-DD (got: {at_time!r})"
     else:
         return "Error: provide either minutes (e.g. 5 for 'in 5 minutes') or at_time (e.g. '2025-02-16 09:00:00')"
+    user_id = (getattr(context, "system_user_id", None) or getattr(context, "user_id", None) or "").strip() or "companion"
+    channel_key = None
+    if getattr(context, "app_id", None) and getattr(context, "user_id", None) and getattr(context, "session_id", None):
+        channel_key = f"{context.app_id}:{context.user_id}:{context.session_id}"
+    elif user_id.lower() in ("companion", "system"):
+        channel_key = "companion"
     try:
-        tam.schedule_one_shot(message, run_time_str)
+        tam.schedule_one_shot(message, run_time_str, user_id=user_id, channel_key=channel_key)
         return json.dumps({"scheduled": True, "message": message, "run_at": run_time_str})
     except Exception as e:
         return f"Error: {e!s}"

@@ -79,6 +79,17 @@
         ws.onmessage = function(ev) {
           try {
             const data = JSON.parse(ev.data);
+            if (data.event === 'connected' && data.session_id) {
+              var uid = (userIdInput && userIdInput.value ? userIdInput.value : config.user_id || 'webchat_user').trim();
+              if (uid) try { ws.send(JSON.stringify({ event: 'register', user_id: uid })); } catch (_) {}
+              return;
+            }
+            if (data.event === 'push') {
+              var t = data.text || 'Notification';
+              if (data.source) t = '[' + data.source + '] ' + t;
+              addLog('bot', t);
+              return;
+            }
             if (data.error) addLog('error', 'Error: ' + data.error);
             else if (data.text) addLog('bot', data.text);
           } catch (e) {
@@ -237,6 +248,10 @@
           config = cfg;
           if (userIdInput) userIdInput.value = cfg.user_id || 'webchat_user';
           connect(cfg.ws_url);
+          userIdInput.addEventListener('change', function() {
+            var uid = (userIdInput.value || '').trim();
+            if (ws && ws.readyState === WebSocket.OPEN && uid) try { ws.send(JSON.stringify({ event: 'register', user_id: uid })); } catch (_) {}
+          });
         })
         .catch(function() {
           statusEl.textContent = 'Could not load config. Set core_host/core_port or CORE_URL in channels/.env.';

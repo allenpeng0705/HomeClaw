@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'node_service.dart';
 
@@ -38,6 +39,16 @@ class CoreService {
 
   NodeService? _nodeService;
   NodeService? get nodeService => _nodeService;
+
+  /// WebSocket to Core /ws for push: when open, Core can push async inbound results and proactive messages (cron, reminders).
+  WebSocketChannel? _coreWsChannel;
+  StreamSubscription? _coreWsSubscription;
+  String? _coreWsSessionId;
+  String? _coreWsBaseUrl; // base URL we connected to; reconnect if _baseUrl changed
+  final Map<String, Completer<Map<String, dynamic>>> _pendingInboundResult = {};
+  final StreamController<Map<String, dynamic>> _pushMessageController = StreamController<Map<String, dynamic>>.broadcast();
+  /// Stream of proactive push messages from Core (cron, reminders, record_date). UI can listen and show in chat or as notification.
+  Stream<Map<String, dynamic>> get pushMessageStream => _pushMessageController.stream;
 
   /// True if [fullCommand] is allowed by the exec allowlist.
   /// Each entry is either an exact executable name (e.g. "ls") or a regex pattern (e.g. "^/usr/bin/.*").
@@ -185,11 +196,23 @@ class CoreService {
     return paths?.map((e) => e.toString()).toList() ?? [];
   }
 
+  /// True if Core URL is remote (not localhost). Used to prefer SSE for long requests and avoid "Connection closed while receiving data" from proxy timeouts.
+  bool get _isRemoteCore {
+    try {
+      final uri = Uri.parse(_baseUrl);
+      final host = uri.host.toLowerCase();
+      return host != 'localhost' && host != '127.0.0.1' && host.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Send a message to Core and return the reply: { "text": String, "image": String? (data URL) }.
   /// [userId] must be the id of the user in user.yml (the chat owner). Same payload shape as WebChat: text, images, videos, audios, files, location.
   /// [images], [videos], [audios], [files] are paths (e.g. from upload) or data URLs Core can read.
   /// [location]: optional "lat,lng" or address string; Core stores it as latest location (per user) and uses it in system context.
   /// [useStream]: when true and [onProgress] is set, sends stream: true and parses SSE; progress events are reported via [onProgress], final result returned as usual. When false or [onProgress] null, uses single-JSON response (no streaming).
+  /// For remote Core: uses async: true so the initial POST returns 202 immediately (no long-held connection for proxies like Cloudflare); then polls GET /inbound/result until done. Use [onProgress] to show "Processing…" while polling.
   /// Throws on network or API error.
   Future<Map<String, dynamic>> sendMessage(
     String text, {
@@ -204,7 +227,10 @@ class CoreService {
     void Function(String message)? onProgress,
   }) async {
     final url = Uri.parse('$_baseUrl/inbound');
-    final useStreamPath = (useStream ?? _showProgressDuringLongTasks) && onProgress != null;
+    final useAsyncForRemote = _isRemoteCore;
+    final useStreamPath = !useAsyncForRemote &&
+        ((useStream ?? _showProgressDuringLongTasks) && onProgress != null);
+
     final body = <String, dynamic>{
       'user_id': userId,
       'text': text,
@@ -217,8 +243,12 @@ class CoreService {
     if (videos != null && videos.isNotEmpty) body['videos'] = videos;
     if (audios != null && audios.isNotEmpty) body['audios'] = audios;
     if (files != null && files.isNotEmpty) body['files'] = files;
+    if (useAsyncForRemote) body['async'] = true;
     if (useStreamPath) body['stream'] = true;
 
+    if (useAsyncForRemote) {
+      return _sendMessageAsync(url, body, onProgress ?? (_) {});
+    }
     if (useStreamPath) {
       return _sendMessageStream(url, body, onProgress!);
     }
@@ -243,6 +273,183 @@ class CoreService {
           ? responseImages.map((e) => e as String).toList()
           : (responseImage != null ? [responseImage as String] : null),
     };
+  }
+
+  /// Ensure WebSocket to Core /ws is connected (for push). When connected, Core sends {"event": "connected", "session_id": "..."}; we send {"event": "register", "user_id": userId} so Core can push proactive messages (cron, reminders) to this connection. [userId] from the message being sent (e.g. body['user_id']).
+  Future<void> _ensureCoreWsConnected([String? userId]) async {
+    if (!_isRemoteCore) return;
+    if (_coreWsChannel != null && _coreWsSessionId != null && _coreWsBaseUrl == _baseUrl) return;
+    _coreWsChannel?.sink.close();
+    _coreWsSubscription?.cancel();
+    _coreWsChannel = null;
+    _coreWsSessionId = null;
+    _coreWsBaseUrl = null;
+    try {
+      _coreWsBaseUrl = _baseUrl;
+      var wsUrl = _baseUrl.replaceFirst(RegExp(r'^http'), 'ws').replaceFirst(RegExp(r'/$'), '');
+      if (_apiKey != null && _apiKey!.isNotEmpty) {
+        wsUrl += (wsUrl.contains('?') ? '&' : '?') + 'api_key=${Uri.encodeComponent(_apiKey!)}';
+      }
+      final uri = Uri.parse('$wsUrl/ws');
+      _coreWsChannel = WebSocketChannel.connect(uri);
+      final completer = Completer<void>();
+      final registerUserId = userId?.trim().isEmpty != true ? userId!.trim() : 'companion';
+      _coreWsSubscription = _coreWsChannel!.stream.listen(
+        (data) {
+          if (!completer.isCompleted) {
+            try {
+              final msg = jsonDecode(data as String) as Map<String, dynamic>?;
+              if (msg != null && msg['event'] == 'connected') {
+                _coreWsSessionId = msg['session_id'] as String?;
+                if (!completer.isCompleted) completer.complete();
+                _coreWsChannel?.sink.add(jsonEncode({'event': 'register', 'user_id': registerUserId}));
+              }
+            } catch (_) {}
+          }
+          _onCoreWsMessage(data);
+        },
+        onError: (_) => _coreWsSessionId = null,
+        onDone: () => _coreWsSessionId = null,
+        cancelOnError: false,
+      );
+      await completer.future.timeout(Duration(seconds: 10), onTimeout: () {
+        _coreWsSessionId = null;
+        _coreWsBaseUrl = null;
+      });
+    } catch (_) {
+      _coreWsSessionId = null;
+      _coreWsBaseUrl = null;
+    }
+  }
+
+  void _onCoreWsMessage(dynamic data) {
+    Map<String, dynamic>? msg;
+    try {
+      msg = jsonDecode(data as String) as Map<String, dynamic>?;
+    } catch (_) {
+      return;
+    }
+    if (msg == null) return;
+    if (msg['event'] == 'push') {
+      final text = msg['text'] as String? ?? '';
+      final source = msg['source'] as String? ?? 'push';
+      final responseImages = msg['images'];
+      final responseImage = msg['image'];
+      final imageList = responseImages is List
+          ? (responseImages as List<dynamic>).whereType<String>().toList()
+          : (responseImage is String ? <String>[responseImage as String] : null);
+      try {
+        _pushMessageController.add({
+          'text': text,
+          'source': source,
+          'images': imageList != null && imageList.isNotEmpty ? imageList : null,
+        });
+      } catch (_) {}
+      return;
+    }
+    if (msg['event'] != 'inbound_result') return;
+    final requestId = msg['request_id'] as String?;
+    if (requestId == null || requestId.isEmpty) return;
+    final completer = _pendingInboundResult.remove(requestId);
+    if (completer == null || completer.isCompleted) return;
+    final ok = msg['ok'] as bool? ?? true;
+    final text = (msg['text'] as String?) ?? '';
+    final err = msg['error'] as String?;
+    final responseImages = msg['images'];
+    final responseImage = msg['image'];
+    final imageList = responseImages is List
+        ? (responseImages as List<dynamic>).whereType<String>().toList()
+        : (responseImage is String ? <String>[responseImage as String] : null);
+    completer.complete({
+      'text': ok ? text : (err ?? text),
+      'images': imageList != null && imageList.isNotEmpty ? imageList : null,
+    });
+  }
+
+  /// POST /inbound with async: true; get 202 + request_id. If we have a WebSocket session (push_ws_session_id), Core will push the result to us; else we poll. Used for remote Core so proxies do not close the connection.
+  Future<Map<String, dynamic>> _sendMessageAsync(
+    Uri inboundUrl,
+    Map<String, dynamic> body,
+    void Function(String message) onProgress,
+  ) async {
+    final userId = body['user_id'] as String?;
+    await _ensureCoreWsConnected(userId);
+    if (_coreWsSessionId != null && _coreWsSessionId!.isNotEmpty) {
+      body['push_ws_session_id'] = _coreWsSessionId;
+    }
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      ..._authHeaders(),
+    };
+    final response = await http
+        .post(inboundUrl, headers: headers, body: jsonEncode(body))
+        .timeout(Duration(seconds: 30));
+    if (response.statusCode != 202) {
+      final err = response.body;
+      throw Exception('Core returned ${response.statusCode}: $err');
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>?;
+    final requestId = map?['request_id'] as String?;
+    if (requestId == null || requestId.isEmpty) {
+      throw Exception('Core 202 response missing request_id');
+    }
+    onProgress('Processing your request…');
+    if (_coreWsSessionId != null) {
+      final completer = Completer<Map<String, dynamic>>();
+      _pendingInboundResult[requestId] = completer;
+      try {
+        final result = await completer.future.timeout(
+          Duration(seconds: sendMessageTimeoutSeconds),
+          onTimeout: () {
+            _pendingInboundResult.remove(requestId);
+            return null;
+          },
+        );
+        if (result != null) return result;
+      } catch (_) {
+        _pendingInboundResult.remove(requestId);
+      }
+    }
+    return _pollInboundResult(requestId, onProgress);
+  }
+
+  /// Poll GET /inbound/result?request_id=... until status is "done" or error. Same auth as /inbound.
+  Future<Map<String, dynamic>> _pollInboundResult(
+    String requestId,
+    void Function(String message) onProgress,
+  ) async {
+    final resultUrl = Uri.parse('$_baseUrl/inbound/result').replace(queryParameters: {'request_id': requestId});
+    final headers = _authHeaders();
+    final deadline = DateTime.now().add(Duration(seconds: sendMessageTimeoutSeconds));
+    while (DateTime.now().isBefore(deadline)) {
+      final response = await http.get(resultUrl, headers: headers).timeout(Duration(seconds: 15));
+      if (response.statusCode == 404) {
+        throw Exception('Request expired or not found (request_id=$requestId)');
+      }
+      final map = jsonDecode(response.body) as Map<String, dynamic>?;
+      final status = map?['status'] as String?;
+      if (response.statusCode == 202 && status == 'pending') {
+        onProgress('Still working…');
+        await Future<void>.delayed(Duration(seconds: 2));
+        continue;
+      }
+      if (response.statusCode == 200 && status == 'done') {
+        final ok = map?['ok'] as bool? ?? true;
+        final text = (map?['text'] as String?) ?? '';
+        final err = map?['error'] as String?;
+        final responseImages = map?['images'];
+        final responseImage = map?['image'];
+        final imageList = responseImages is List
+            ? (responseImages as List<dynamic>).whereType<String>().toList()
+            : (responseImage is String ? <String>[responseImage as String] : null);
+        return {
+          'text': ok ? text : (err ?? text),
+          'images': imageList != null && imageList.isNotEmpty ? imageList : null,
+        };
+      }
+      await Future<void>.delayed(Duration(seconds: 2));
+    }
+    throw TimeoutException('Inbound async result timed out');
   }
 
   /// POST /inbound with stream: true; parses SSE and calls [onProgress] for progress events, returns final result from "done" event.

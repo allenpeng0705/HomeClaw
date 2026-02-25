@@ -511,13 +511,24 @@ class TAM:
         await self.coreInst.send_response_to_latest_channel(response=message)
 
     async def send_reminder_to_channel(self, message: str, params: Optional[Dict[str, Any]] = None):
-        """Send reminder to latest channel or to the channel identified by params['channel_key'] (for per-session cron)."""
-        params = params or {}
-        channel_key = params.get("channel_key")
-        if channel_key and hasattr(self.coreInst, "send_response_to_channel_by_key"):
-            await self.coreInst.send_response_to_channel_by_key(channel_key, message)
-        else:
-            await self.send_reminder_to_latest_channel(message)
+        """Send reminder: if core has deliver_to_user, push to user (Companion + channel); else to channel by channel_key or latest. Never raises (logs and continues)."""
+        try:
+            params = params or {}
+            user_id = params.get("user_id")
+            channel_key = params.get("channel_key")
+            if hasattr(self.coreInst, "deliver_to_user"):
+                await self.coreInst.deliver_to_user(
+                    user_id or "companion",
+                    message or "Reminder",
+                    channel_key=channel_key,
+                    source="cron" if params.get("_cron") else "reminder",
+                )
+            elif channel_key and hasattr(self.coreInst, "send_response_to_channel_by_key"):
+                await self.coreInst.send_response_to_channel_by_key(channel_key, message or "Reminder")
+            else:
+                await self.send_reminder_to_latest_channel(message or "Reminder")
+        except Exception as e:
+            logger.exception("TAM: send_reminder_to_channel failed: {}", e)
 
     async def _send_reminder_to_channel_safe(self, message: str, params: Optional[Dict[str, Any]] = None) -> None:
         """Like send_reminder_to_channel but never raises (logs and continues). Used by cron tasks so Core does not crash."""
@@ -579,22 +590,33 @@ class TAM:
         threading.Timer(delay, lambda: asyncio.run(task())).start()
         logger.debug(f"Task scheduled to run at {run_time}")
 
-    def schedule_one_shot(self, message: str, run_time_str: str) -> bool:
-        """Schedule a one-shot reminder at the given time (YYYY-MM-DD HH:MM:SS). Persisted to DB so it survives Core restart."""
+    def schedule_one_shot(
+        self,
+        message: str,
+        run_time_str: str,
+        user_id: Optional[str] = None,
+        channel_key: Optional[str] = None,
+    ) -> bool:
+        """Schedule a one-shot reminder at the given time (YYYY-MM-DD HH:MM:SS). Persisted to DB so it survives Core restart. user_id/channel_key used by deliver_to_user when reminder fires."""
         try:
             run_time = datetime.strptime(run_time_str, "%Y-%m-%d %H:%M:%S")
         except ValueError:
             logger.warning("TAM: invalid run_time_str {}; scheduling in memory only", run_time_str)
             async def task():
-                await self.send_reminder_to_latest_channel(message)
+                if hasattr(self.coreInst, "deliver_to_user"):
+                    await self.coreInst.deliver_to_user(user_id or "companion", message, channel_key=channel_key, source="reminder")
+                else:
+                    await self.send_reminder_to_latest_channel(message)
             self.schedule_fixed_task(task, run_time_str)
             return True
         if run_time <= datetime.now():
             logger.debug("TAM: run_time is in the past; not scheduling")
             return False
-        reminder_id = tam_storage.add_one_shot_reminder(run_time, message)
+        reminder_id = tam_storage.add_one_shot_reminder(run_time, message, user_id=user_id, channel_key=channel_key)
         if reminder_id:
-            task = (lambda rid, msg: lambda: asyncio.run(self._run_one_shot_and_remove(rid, msg)))(reminder_id, message)
+            task = (
+                lambda rid, msg, uid, ck: lambda: asyncio.run(self._run_one_shot_and_remove(rid, msg, user_id=uid, channel_key=ck))
+            )(reminder_id, message, user_id, channel_key)
             self.schedule_fixed_task(task, run_time_str)
         else:
             async def fallback():
@@ -1158,17 +1180,43 @@ class TAM:
                 run_time_str = run_at.strftime("%Y-%m-%d %H:%M:%S") if hasattr(run_at, "strftime") else str(run_at)
                 rid = row.get("id", "")
                 msg = row.get("message", "")
-                task = (lambda reminder_id, message: lambda: asyncio.run(self._run_one_shot_and_remove(reminder_id, message)))(rid, msg)
+                uid = row.get("user_id")
+                ck = row.get("channel_key")
+                task = (
+                    lambda reminder_id, message, u, c: lambda: asyncio.run(
+                        self._run_one_shot_and_remove(reminder_id, message, user_id=u, channel_key=c)
+                    )
+                )(rid, msg, uid, ck)
                 self.schedule_fixed_task(task, run_time_str)
             if rows:
                 logger.debug("TAM: Loaded {} one-shot reminder(s) from DB", len(rows))
         except Exception as e:
             logger.debug("TAM: Could not load one-shot reminders from DB: {}", e)
 
-    async def _run_one_shot_and_remove(self, reminder_id: str, message: str) -> None:
-        """Send reminder to latest channel and remove from DB (called when one-shot fires)."""
-        await self.send_reminder_to_latest_channel(message)
-        tam_storage.delete_one_shot_reminder(reminder_id)
+    async def _run_one_shot_and_remove(
+        self,
+        reminder_id: str,
+        message: str,
+        user_id: Optional[str] = None,
+        channel_key: Optional[str] = None,
+    ) -> None:
+        """Deliver reminder to user (Companion push + channel) and remove from DB (called when one-shot fires). Never raises (logs and continues)."""
+        try:
+            if hasattr(self.coreInst, "deliver_to_user"):
+                await self.coreInst.deliver_to_user(
+                    user_id or "companion",
+                    message or "Reminder",
+                    channel_key=channel_key,
+                    source="reminder",
+                )
+            else:
+                await self.send_reminder_to_channel(message or "Reminder", {"channel_key": channel_key} if channel_key else None)
+        except Exception as e:
+            logger.exception("TAM: _run_one_shot_and_remove deliver failed: {}", e)
+        try:
+            tam_storage.delete_one_shot_reminder(reminder_id or "")
+        except Exception as e:
+            logger.debug("TAM: delete_one_shot_reminder failed: {}", e)
 
     def record_event(
         self,
@@ -1208,15 +1256,16 @@ class TAM:
                     logger.warning("TAM: Invalid event_date {}; skipping reminder", entry["event_date"])
                 else:
                     msg = entry["remind_message"] or f"Reminder: {entry['event_name']} is today!"
+                    uid = system_user_id or "companion"
                     if entry["remind_on"] == "day_before":
                         run_date = ev_date - timedelta(days=1)
                         run_time_str = run_date.strftime("%Y-%m-%d 09:00:00")
                         day_before_msg = entry["remind_message"] or f"Reminder: {entry['event_name']} is tomorrow!"
-                        self.schedule_one_shot(day_before_msg, run_time_str)
+                        self.schedule_one_shot(day_before_msg, run_time_str, user_id=uid)
                         reminders_scheduled.append(f"day before ({run_time_str})")
                     elif entry["remind_on"] == "on_day":
                         run_time_str = ev_date.strftime("%Y-%m-%d 09:00:00")
-                        self.schedule_one_shot(msg, run_time_str)
+                        self.schedule_one_shot(msg, run_time_str, user_id=uid)
                         reminders_scheduled.append(f"on day ({run_time_str})")
                     if reminders_scheduled:
                         result["reminders_scheduled"] = reminders_scheduled

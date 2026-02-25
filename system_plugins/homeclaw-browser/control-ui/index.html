@@ -118,6 +118,16 @@
       ws.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
+          if (data.event === 'connected' && data.session_id) {
+            const uid = (userIdEl.value || 'webchat_user').trim();
+            if (uid) try { ws.send(JSON.stringify({ event: 'register', user_id: uid })); } catch (_) {}
+            return;
+          }
+          if (data.event === 'push') {
+            const t = data.text || 'Notification';
+            addLog((data.source ? '[' + data.source + '] ' : '') + t, 'assistant');
+            return;
+          }
           if (data.error) {
             addLog('Error: ' + data.error, 'error');
           } else if (data.text) {
@@ -261,6 +271,11 @@
 
     textEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') sendBtn.click();
+    });
+
+    userIdEl.addEventListener('change', () => {
+      const uid = (userIdEl.value || '').trim();
+      if (ws && ws.readyState === WebSocket.OPEN && uid) try { ws.send(JSON.stringify({ event: 'register', user_id: uid })); } catch (_) {}
     });
 
     loadUsers();

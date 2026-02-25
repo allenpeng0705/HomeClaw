@@ -47,6 +47,17 @@ class CoreInterface(ABC):
         """Send response to channel identified by key ('default' or 'app_id:user_id:session_id' for per-session cron)."""
         pass
 
+    async def deliver_to_user(
+        self,
+        user_id: str,
+        text: str,
+        images: Optional[List[str]] = None,
+        channel_key: Optional[str] = None,
+        source: str = "push",
+    ) -> None:
+        """Push a message to a user: to WebSocket(s) registered for this user_id (Companion/channel) and/or to channel by channel_key. Used by cron, reminders, record_date. Default: fall back to send_response_to_latest_channel."""
+        await self.send_response_to_latest_channel(text)
+
     @abstractmethod
     async def send_response_to_request_channel(self, response: str, request: PromptRequest):
         pass
