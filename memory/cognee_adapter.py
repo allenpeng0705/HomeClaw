@@ -79,17 +79,7 @@ def apply_cognee_config(config: Dict[str, Any]) -> None:
     # Embedding -> EMBEDDING_*
     emb = config.get("embedding") or {}
     if isinstance(emb, dict):
-        for key, env_key in (
-            ("provider", "EMBEDDING_PROVIDER"), ("model", "EMBEDDING_MODEL"), ("endpoint", "EMBEDDING_ENDPOINT"), ("api_key", "EMBEDDING_API_KEY"),
-            ("max_tokens", "EMBEDDING_MAX_TOKENS"), ("dimensions", "EMBEDDING_DIMENSIONS"),
-        ):
-            val = emb.get(key)
-            if val is not None and str(val).strip() != "":
-                os.environ[env_key] = str(val)
-        if "EMBEDDING_API_KEY" not in os.environ and emb.get("endpoint"):
-            os.environ["EMBEDDING_API_KEY"] = "local"
-        # Tokenizer for token counting: Cognee maps embedding model to tiktoken; for custom/local models set tokenizer to a local path or HuggingFace model id (avoids "Could not automatically map ... to a tokeniser").
-        # Value: local path (e.g. "./models/tokenizer/Qwen3_0.6B") resolved to absolute, or HuggingFace model id. No default is set; configure explicitly for local embedding models.
+        # Set HUGGINGFACE_TOKENIZER first so Cognee/litellm see it before trying tiktoken mapping from EMBEDDING_MODEL (avoids "Could not automatically map ... to a tokeniser").
         for key, env_key in (("tokenizer", "HUGGINGFACE_TOKENIZER"), ("huggingface_tokenizer", "HUGGINGFACE_TOKENIZER")):
             val = emb.get(key)
             if val is not None and str(val).strip() != "":
@@ -103,7 +93,17 @@ def apply_cognee_config(config: Dict[str, Any]) -> None:
                     except Exception:
                         pass
                 os.environ[env_key] = s
+                logger.debug("Cognee embedding tokenizer set: {} -> {}", key, s)
                 break
+        for key, env_key in (
+            ("provider", "EMBEDDING_PROVIDER"), ("model", "EMBEDDING_MODEL"), ("endpoint", "EMBEDDING_ENDPOINT"), ("api_key", "EMBEDDING_API_KEY"),
+            ("max_tokens", "EMBEDDING_MAX_TOKENS"), ("dimensions", "EMBEDDING_DIMENSIONS"),
+        ):
+            val = emb.get(key)
+            if val is not None and str(val).strip() != "":
+                os.environ[env_key] = str(val)
+        if "EMBEDDING_API_KEY" not in os.environ and emb.get("endpoint"):
+            os.environ["EMBEDDING_API_KEY"] = "local"
     # Raw env passthrough
     env = config.get("env")
     if isinstance(env, dict):
@@ -136,8 +136,24 @@ class CogneeMemory(MemoryBase):
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self._huggingface_tokenizer = None  # re-apply before add() so Cognee sees it at call time
         if config:
             apply_cognee_config(config)
+            emb = config.get("embedding") or {}
+            if isinstance(emb, dict):
+                for key in ("tokenizer", "huggingface_tokenizer"):
+                    val = (emb.get(key) or "").strip()
+                    if val:
+                        if val.startswith(".") or val.startswith("/") or "\\" in val:
+                            try:
+                                from base.util import Util
+                                root = Path(Util().root_path()).resolve()
+                                p = (root / val).resolve() if not Path(val).is_absolute() else Path(val).resolve()
+                                val = str(p)
+                            except Exception:
+                                pass
+                        self._huggingface_tokenizer = val
+                        break
         try:
             import cognee  # noqa: F401
             self._cognee = cognee
@@ -146,6 +162,22 @@ class CogneeMemory(MemoryBase):
                 "Cognee memory backend requires: pip install cognee. "
                 "Configure via .env (LLM_*, EMBEDDING_*, DB_*, etc.). See docs.cognee.ai."
             ) from e
+        # When using a custom embedding model (tokenizer set), Cognee/litellm may call tiktoken.encoding_for_model(embedding_model) which throws for unknown models. Fall back to cl100k_base so add/cognify does not fail.
+        if self._huggingface_tokenizer:
+            try:
+                import tiktoken
+                _orig_encoding_for_model = getattr(tiktoken, "encoding_for_model", None)
+                if _orig_encoding_for_model and not getattr(tiktoken, "_homeclaw_patched", False):
+                    def _encoding_for_model_fallback(model: str):
+                        try:
+                            return _orig_encoding_for_model(model)
+                        except Exception:
+                            return tiktoken.get_encoding("cl100k_base")
+                    tiktoken.encoding_for_model = _encoding_for_model_fallback
+                    tiktoken._homeclaw_patched = True
+                    logger.debug("Cognee: tiktoken.encoding_for_model fallback to cl100k_base for unknown models")
+            except Exception as e:
+                logger.debug("Cognee tiktoken fallback not applied: {}", e)
 
     async def add(
         self,
@@ -160,6 +192,8 @@ class CogneeMemory(MemoryBase):
     ) -> List[Dict[str, Any]]:
         memory_id = str(uuid.uuid4())
         dataset = _dataset_name(user_id=user_id, agent_id=agent_id)
+        if self._huggingface_tokenizer:
+            os.environ["HUGGINGFACE_TOKENIZER"] = self._huggingface_tokenizer
         try:
             await self._cognee.add(data, dataset_name=dataset)
             await self._cognee.cognify(datasets=[dataset])

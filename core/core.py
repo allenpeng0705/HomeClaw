@@ -1116,12 +1116,16 @@ class Core(CoreInterface):
                             model_id = (_model_id or "local").strip() or "local"
                             model = f"openai/{model_id}"
                             provider = "openai"
-                        cognee_config["embedding"] = {
+                        _emb = {
                             **emb_cfg,
                             "provider": (emb_cfg.get("provider") or provider).strip() or provider,
                             "endpoint": f"http://{host}:{port}/v1",
                             "model": (emb_cfg.get("model") or model).strip() or model,
                         }
+                        for _tk in ("tokenizer", "huggingface_tokenizer"):
+                            if (emb_cfg.get(_tk) or "").strip():
+                                _emb[_tk] = (emb_cfg.get(_tk) or "").strip()
+                        cognee_config["embedding"] = _emb
                         cognee_config["embedding"]["api_key"] = (getattr(meta, "main_llm_api_key", "") or "").strip() or "local"
                     else:
                         host = getattr(meta, "embedding_host", "127.0.0.1") or "127.0.0.1"
@@ -1131,12 +1135,16 @@ class Core(CoreInterface):
                         if not model_id:
                             model_id = "local"
                         model = f"openai/{model_id}"
-                        cognee_config["embedding"] = {
+                        _emb = {
                             **emb_cfg,
                             "provider": (emb_cfg.get("provider") or "openai").strip() or "openai",
                             "endpoint": f"http://{host}:{port}/v1",
                             "model": (emb_cfg.get("model") or model).strip() or model,
                         }
+                        for _tk in ("tokenizer", "huggingface_tokenizer"):
+                            if (emb_cfg.get(_tk) or "").strip():
+                                _emb[_tk] = (emb_cfg.get(_tk) or "").strip()
+                        cognee_config["embedding"] = _emb
                         cognee_config["embedding"]["api_key"] = (getattr(meta, "main_llm_api_key", "") or "").strip() or "local"
                 self.mem_instance = CogneeMemory(config=cognee_config if cognee_config else None)
                 logger.debug("core init: Cognee memory done")
@@ -3819,7 +3827,8 @@ class Core(CoreInterface):
                 date_str = now.strftime("%Y-%m-%d")
                 time_24 = now.strftime("%H:%M")  # 24-hour, no AM/PM ambiguity
                 dow = now.strftime("%A")
-                ctx_line = f"Current date: {date_str}. Day of week: {dow}. Current time: {time_24} (24-hour, system local)."
+                datetime_line = f"{date_str} {time_24}"  # single canonical form so model does not invent 26号 15:49 or 2026-1月 3号
+                ctx_line = f"Current date: {date_str}. Day of week: {dow}. Current time: {time_24} (24-hour, system local). Current datetime (use this only, never invent): {datetime_line}."
                 self._request_current_time_24 = time_24  # so routing block can inject it; model must use this, not invent 2:49 etc.
                 loc_str = None
                 try:
@@ -3848,7 +3857,7 @@ class Core(CoreInterface):
                         ctx_line += f" User location: {loc_str[:500]}."
                 except Exception as e:
                     logger.debug("System context location resolve: {}", e)
-                ctx_line += "\nCritical for cron jobs and reminders: this current datetime is the single source of truth. The server uses it when scheduling; you must use it for all time calculations. Do not use any other time (e.g. from memory or prior turns—they may be outdated). Use this block only when the user explicitly asks (e.g. \"what day is it?\", \"what time is it?\", scheduling with remind_me, record_date, cron_schedule). Do not volunteer date/time in greetings. For reminders and cron: use ONLY the Current time above; do not invent or guess any time. If the user says \"in N minutes\", reminder time = Current time + N minutes (e.g. Current time 17:58 + 30 min = 18:28)."
+                ctx_line += "\nCritical for cron jobs and reminders: this current datetime is the single source of truth. The server uses it when scheduling; you must use it for all time calculations. Do not use any other time (e.g. from memory or prior turns—they may be outdated). Use this block only when the user explicitly asks (e.g. \"what day is it?\", \"what time is it?\", scheduling with remind_me, record_date, cron_schedule). Do not volunteer date/time in greetings. For reminders and cron: use ONLY the Current time above; do not invent or guess any time (e.g. never output 26号 15:49, 明天下午7点, 2026-1月 3号, or 2:49 PM). If the user says \"in N minutes\", reminder time = Current time + N minutes (e.g. Current time 17:58 + 30 min = 18:28). For remind_me(message=...): do NOT put any date or time inside the message; use a short label only (e.g. 会议提醒, Reminder: meeting)."
                 system_parts.append("## System context (date/time and location)\n" + ctx_line + "\n\n")
             except Exception as e:
                 logger.debug("System context block failed: {}", e)
@@ -4374,7 +4383,7 @@ class Core(CoreInterface):
                     "Listing connected nodes or \"what nodes are connected\" -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_list).\n"
                     "If the request clearly matches one of the available plugins below, call route_to_plugin with that plugin_id (and capability_id/parameters when relevant).\n"
                     "For time-related requests only: one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only when the user clearly asks to schedule or remind (e.g. \"remind me in 5 minutes\", \"every day at 9am\").\n"
-                    f"When the user asks to be reminded in N minutes (e.g. \"30分钟后提醒我\", \"remind me in 30 minutes\", \"我30分钟后有个会能提醒一下吗\"), you MUST call the remind_me tool with minutes=N (use the number from the user's message; 30分钟后 = 30 minutes) and message= a short reminder text. Do NOT reply with text-only or fake JSON; always call remind_me so the reminder is actually scheduled. The current time for this request is {_req_time_24}. Use only this time in your reply; never output 2:49 PM or any other invented time—if current time is {_req_time_24} and user says 15 minutes, add 15 to the minutes part and say that time or \"in 15 minutes\".\n"
+                    f"When the user asks to be reminded in N minutes (e.g. \"30分钟后提醒我\", \"remind me in 30 minutes\", \"我30分钟后有个会能提醒一下吗\"), you MUST call the remind_me tool with minutes=N (use the number from the user's message; 30分钟后 = 30 minutes) and message= a short reminder text WITHOUT any date or time (e.g. \"会议提醒\" or \"Reminder: meeting\"; do NOT put \"26号 15:49\" or \"7pm\" in message). Do NOT reply with text-only or fake JSON; always call remind_me so the reminder is actually scheduled. The current time for this request is {_req_time_24}. Use only this time in your reply; never invent times (e.g. never 2:49 PM, 明天下午7点, 2026-1月 3号)—if current time is {_req_time_24} and user says 15 minutes, say that time or \"in 15 minutes\".\n"
                     "For script-based workflows use run_skill(skill_name, script, ...). For instruction-only skills (no scripts/) use run_skill(skill_name) with no script—then you MUST continue in the same turn (document_read, generate content, file_write or save_result_page, return link); do not reply with only the confirmation. skill_name can be folder or short name (e.g. html-slides).\n"
                     "When the user asks to generate an HTML slide or report from a document/file: (1) call document_read(path) to get the file content, (2) use that returned text as the source and generate the full HTML yourself, (3) call save_result_page(title=..., content=<your generated full HTML>, format='html'). For HTML slides do NOT use format='markdown'—use format='html'. Never pass empty or minimal content; content must be the full slide deck/report HTML.\n"
                     "Using an external service (Slack, LinkedIn, Outlook, HubSpot, Notion, Gmail, Stripe, Google Calendar, Salesforce, Airtable, etc.) -> use run_skill(skill_name='maton-api-gateway-1.0.0', script='request.py') with app and path from the maton skill body (Supported Services table and references/). Do not claim the action was done without calling the skill. For LinkedIn post: GET linkedin/rest/me then POST linkedin/rest/posts with commentary.\n"
@@ -4602,6 +4611,7 @@ class Core(CoreInterface):
                 current_messages = list(llm_input)
                 max_tool_rounds = 10
                 use_other_model_next_turn = False  # mix mode: when last tool result was error-like, use cloud (or local) for next turn
+                last_tool_name = None  # so "no tool_calls" branch can skip remind_me clarifier when we already ran remind_me this turn
                 for _ in range(max_tool_rounds):
                     llm_name_this_turn = effective_llm_name
                     if use_other_model_next_turn and mix_route_this_request:
@@ -4755,7 +4765,8 @@ class Core(CoreInterface):
                                     except Exception as e:
                                         logger.debug("Fallback remind_me failed: {}", e)
                                         response = _remind_me_ask_message()
-                                elif _has_remind_me:
+                                elif _has_remind_me and last_tool_name != "remind_me":
+                                    # Only ask for clarification when we did not already run remind_me this turn (otherwise use LLM's reply)
                                     try:
                                         if _remind_me_needs_clarification(query):
                                             response = _remind_me_ask_message()
