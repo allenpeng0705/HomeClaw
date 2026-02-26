@@ -67,6 +67,15 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _connectionChecking = false;
   Timer? _connectionCheckTimer;
 
+  /// Rotating status messages when waiting for reply (when no progress from Core).
+  static const List<String> _loadingStatusMessages = [
+    'Still working…',
+    'Thinking…',
+    'Almost there…',
+  ];
+  int _loadingStatusIndex = 0;
+  Timer? _loadingStatusTimer;
+
   @override
   void initState() {
     super.initState();
@@ -215,13 +224,16 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _loading = true;
       _loadingMessage = null;
+      _loadingStatusIndex = 0;
     });
+    _startLoadingStatusTimer();
     if (_voiceListening) {
       // Cancel subscription first so no more "final" events can trigger _send() and cause double send.
       _voiceSubscription?.cancel();
       _voiceSubscription = null;
       await _voice.stopVoiceListening();
       if (!mounted) {
+        _stopLoadingStatusTimer();
         setState(() => _loading = false);
         return;
       }
@@ -241,6 +253,7 @@ class _ChatScreenState extends State<ChatScreen> {
         ? await _filePathsToImageDataUrls(imagesToSend)
         : <String>[];
     if (!mounted) {
+      _stopLoadingStatusTimer();
       setState(() => _loading = false);
       return;
     }
@@ -251,7 +264,9 @@ class _ChatScreenState extends State<ChatScreen> {
       _messages.add(MapEntry(text.isEmpty ? '(attachment)' : text, true));
       _messageImages.add(userImageDataUrls.isEmpty ? null : userImageDataUrls);
       _loading = true;
+      _loadingStatusIndex = 0;
     });
+    _startLoadingStatusTimer();
     _scrollToBottom();
     _persistChatHistory();
     try {
@@ -300,6 +315,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ? imageList.whereType<String>().where((s) => s.startsWith('data:image/')).toList()
             : <String>[];
         _lastReply = reply;
+        _stopLoadingStatusTimer();
         setState(() {
           _messages.add(MapEntry(reply.isEmpty ? '(no reply)' : reply, false));
           _messageImages.add(imageDataUrls.isEmpty ? null : imageDataUrls);
@@ -314,6 +330,7 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     } catch (e) {
       if (mounted) {
+        _stopLoadingStatusTimer();
         setState(() {
           _messages.add(MapEntry('Error: $e', false));
           _messageImages.add(null);
@@ -1072,9 +1089,24 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void _startLoadingStatusTimer() {
+    _loadingStatusTimer?.cancel();
+    _loadingStatusTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) {
+        setState(() => _loadingStatusIndex = (_loadingStatusIndex + 1) % _loadingStatusMessages.length);
+      }
+    });
+  }
+
+  void _stopLoadingStatusTimer() {
+    _loadingStatusTimer?.cancel();
+    _loadingStatusTimer = null;
+  }
+
   @override
   void dispose() {
     _connectionCheckTimer?.cancel();
+    _loadingStatusTimer?.cancel();
     _voiceSubscription?.cancel();
     _voice.dispose();
     _inputController.dispose();
@@ -1295,22 +1327,33 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           if (_loading)
             Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Column(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const LinearProgressIndicator(),
-                  if (_loadingMessage != null && _loadingMessage!.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6.0),
-                      child: Text(
-                        _loadingMessage!,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    child: Text(
+                      _loadingMessage != null && _loadingMessage!.isNotEmpty
+                          ? _loadingMessage!
+                          : _loadingStatusMessages[_loadingStatusIndex],
+                      key: ValueKey<String>(
+                        _loadingMessage ?? _loadingStatusMessages[_loadingStatusIndex],
+                      ),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
+                  ),
                 ],
               ),
             ),
