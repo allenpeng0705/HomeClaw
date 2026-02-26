@@ -4948,7 +4948,7 @@ class Core(CoreInterface):
                         ctx_line += f" User location: {loc_str[:500]}."
                 except Exception as e:
                     logger.debug("System context location resolve: {}", e)
-                ctx_line += "\nUse this when answering questions about age, \"what day is it?\", \"how many days until X?\", or when scheduling (remind_me, record_date, cron_schedule). Scheduling execution uses system time."
+                ctx_line += "\nUse this only when the user explicitly asks (e.g. \"what day is it?\", \"what time is it?\", \"where am I?\", age, \"how many days until X?\", or scheduling with remind_me, record_date, cron_schedule). Do not volunteer date, time, or location in greetings or general replies—that often leads to wrong or invented values. When you do need it, use the date and time in this block exactly; ignore any date or time in prior turns (they may be outdated)."
                 system_parts.append("## System context (date/time and location)\n" + ctx_line + "\n\n")
             except Exception as e:
                 logger.debug("System context block failed: {}", e)
