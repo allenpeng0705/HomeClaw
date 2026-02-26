@@ -94,6 +94,8 @@ try:
         parse_raw_tool_calls_from_content as _parse_raw_tool_calls_from_content,
         infer_route_to_plugin_fallback as _infer_route_to_plugin_fallback,
         infer_remind_me_fallback as _infer_remind_me_fallback,
+        remind_me_needs_clarification as _remind_me_needs_clarification,
+        remind_me_clarification_question as _remind_me_clarification_question,
     )
 except Exception:
     # Inline fallback: same logic as core/services/tool_helpers.py (compare with original single core.py).
@@ -209,13 +211,45 @@ except Exception:
         if not query or not isinstance(query, str):
             return None
         try:
-            m = re.search(r"(\d+)\s*分钟后", query.strip())
+            q = query.strip()
+            # "15分钟后有个会，请提前5分钟提醒我" → remind in (15-5)=10 min (base = event time, minus advance)
+            m_ev = re.search(r"(\d+)\s*分钟(?:后|以后|之后)?", q)
+            m_bef = re.search(r"提前\s*(\d+)\s*分钟", q)
+            if m_ev and m_bef:
+                ev, bef = int(m_ev.group(1)), int(m_bef.group(1))
+                if 1 <= ev <= 43200 and 0 <= bef <= ev:
+                    n = max(1, ev - bef)
+                    return {"tool": "remind_me", "arguments": {"minutes": n, "message": q[:120] or "Reminder"}}
+            m = re.search(r"(\d+)\s*分钟后", q)
             if m:
                 n = int(m.group(1))
                 if 0 < n <= 43200:
-                    return {"tool": "remind_me", "arguments": {"minutes": n, "message": query.strip()[:120] or "Reminder"}}
+                    # Don't guess: if user said event time (有个会, etc.) but no "提前Y分钟", ask instead
+                    event_kw = ("有个会", "开会", "meeting", "会议")
+                    if not m_bef and any(k in q for k in event_kw):
+                        return None
+                    return {"tool": "remind_me", "arguments": {"minutes": n, "message": q[:120] or "Reminder"}}
         except Exception:
             pass
+        return None
+
+    def _remind_me_needs_clarification(query: str) -> bool:
+        if not query or not isinstance(query, str):
+            return False
+        q = query.strip()
+        reminder_kw = ("remind", "提醒", "闹钟", "定时", "有个会", "开会", "meeting", "提前提醒", "到点提醒")
+        if not any(kw in q.lower() if kw.isascii() else kw in q for kw in reminder_kw):
+            return False
+        return _infer_remind_me_fallback(query) is None
+
+    def _remind_me_clarification_question(query: str):
+        if not query or not isinstance(query, str):
+            return None
+        q = query.strip()
+        if ("有个会" in q or "开会" in q or "meeting" in q) and re.search(r"\d+\s*分钟", q) and not re.search(r"提前\s*\d+\s*分钟", q):
+            return "提前几分钟提醒你啊？ How many minutes before should I remind you?"
+        if ("生日" in q or "月" in q) and ("提前" in q or "提醒" in q) and not re.search(r"提前\s*(?:一周|几天|\d+\s*天)", q):
+            return "提前一周提醒你可以吗？或者提前几天？ Remind you one week before, or how many days before?"
         return None
 
     def _infer_route_to_plugin_fallback(query: str) -> Optional[Dict[str, Any]]:
@@ -4681,22 +4715,50 @@ class Core(CoreInterface):
                                     response = content_str
                             else:
                                 # Fallback: model didn't call a tool. Check remind_me first (e.g. "15分钟后有个会能提醒一下吗") so we set the reminder and return a clean response instead of messy 2:49 text.
-                                remind_fallback = _infer_remind_me_fallback(query) if query else None
-                                if remind_fallback and registry and any(t.name == "remind_me" for t in (registry.list_tools() or [])):
+                                try:
+                                    remind_fallback = _infer_remind_me_fallback(query) if query else None
+                                except Exception:
+                                    remind_fallback = None
+                                _remind_me_ask_generic = "您希望什么时候提醒？例如：「15分钟后」或「下午3点」。 When would you like to be reminded? E.g. in 15 minutes or at 3:00 PM."
+                                def _remind_me_ask_message():
+                                    try:
+                                        q = _remind_me_clarification_question(query) if query else None
+                                        out = (q or _remind_me_ask_generic) or ""
+                                        return str(out).strip()
+                                    except Exception:
+                                        return str(_remind_me_ask_generic).strip()
+                                _has_remind_me = False
+                                try:
+                                    if registry:
+                                        _tools = registry.list_tools() or []
+                                        _has_remind_me = any(getattr(t, "name", None) == "remind_me" for t in _tools)
+                                except Exception:
+                                    pass
+                                if remind_fallback and isinstance(remind_fallback, dict) and _has_remind_me:
                                     try:
                                         _component_log("tools", "fallback remind_me (model did not call tool)")
-                                        result = await registry.execute_async("remind_me", remind_fallback.get("arguments") or {}, context)
+                                        _args = remind_fallback.get("arguments") if isinstance(remind_fallback.get("arguments"), dict) else {}
+                                        result = await registry.execute_async("remind_me", _args, context)
                                         if isinstance(result, str) and result.strip():
-                                            response = result
-                                            if mix_route_this_request and mix_show_route_label:
-                                                layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
-                                                label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
-                                                response = label + (_strip_leading_route_label(response or "") or "")
+                                            if "provide either minutes" in result or "at_time" in result:
+                                                response = _remind_me_ask_message()
+                                            else:
+                                                response = result
+                                                if mix_route_this_request and mix_show_route_label:
+                                                    layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
+                                                    label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
+                                                    response = label + (_strip_leading_route_label(response or "") or "")
                                         else:
                                             response = content_str or "Reminder set."
                                     except Exception as e:
                                         logger.debug("Fallback remind_me failed: {}", e)
-                                        response = content_str or "Reminder could not be set. Please try again."
+                                        response = _remind_me_ask_message()
+                                elif _has_remind_me:
+                                    try:
+                                        if _remind_me_needs_clarification(query):
+                                            response = _remind_me_ask_message()
+                                    except Exception:
+                                        pass
                                 else:
                                     # Fallback: model didn't call a tool (e.g. replied "No"). If user intent is clear, run plugin anyway.
                                     unhelpful = not content_str or len(content_str) < 80 or content_str.strip().lower() in ("no", "i can't", "i cannot", "sorry", "nope")

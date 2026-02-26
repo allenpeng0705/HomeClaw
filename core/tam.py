@@ -17,6 +17,7 @@ import asyncio
 from datetime import datetime, timedelta
 import json
 import random
+import re
 import signal
 import sys
 import threading
@@ -130,71 +131,103 @@ class TAM:
     '''
 
     async def process_intent(self, intent: Intent, request: PromptRequest) -> Optional[str]:
-        """Process time/scheduling intent. Returns the message sent to the user (if any) so sync inbound can return it; otherwise None."""
+        """Process time/scheduling intent. Returns the message to show the user (friendly confirmation or clarifier question); None when nothing to show or on error. Never raises."""
         if intent is None:
             return None
         try:
             logger.debug(f"TAM process_intent: {intent}")
-            # Analyze the intent using LLM and create a data object
-            data_object = await self.analyze_intent_with_llm(intent)
-            logger.debug(f"TAM got data_object: {data_object}")
-            if data_object is None or not isinstance(data_object, dict):
+            result = await self.analyze_intent_with_llm(intent)
+            if not isinstance(result, dict):
+                result = {"data": None, "friendly": None, "clarifier": False}
+            logger.debug(f"TAM got result: data={result.get('data')} friendly={result.get('friendly')} clarifier={result.get('clarifier')}")
+            data_object = result.get("data")
+            friendly = result.get("friendly")
+            is_clarifier = result.get("clarifier") is True
+            if data_object is None:
+                if is_clarifier and friendly:
+                    return str(friendly).strip() if friendly else None
                 logger.warning("TAM: No valid scheduling data from LLM; cannot schedule.")
-                # Return as tool result only (do not send to channel). Model will see it and can call route_to_plugin or other tools; user never sees this internal message.
-                msg = (
-                    "That request was not a scheduling intent. Use route_to_plugin for: list nodes (plugin homeclaw-browser, capability node_list), open URL (browser_navigate), canvas (canvas_update), or other plugins. Use remind_me/record_date/cron_schedule only for time-related requests. Do not repeat this message to the user; call the appropriate tool or reply naturally."
+                return (
+                    "That request was not a scheduling intent. Use route_to_plugin for plugins; remind_me/record_date/cron_schedule for time-related requests. Do not repeat this to the user; call the appropriate tool or reply naturally."
                 )
-                return msg
-            # Use the data object to schedule a job
             self.schedule_job_from_intent(data_object, request)
-            return None
+            return (str(friendly).strip() if friendly else None)
         except Exception as e:
             logger.exception(f"TAM: Error processing intent: {e}")
-            msg = "Something went wrong setting the reminder. Please try again with a clear time (e.g. \"remind me in 5 minutes\")."
-            try:
-                await self.coreInst.send_response_to_request_channel(response=msg, request=request)
-            except Exception:
-                pass
-            return msg
+            return "Something went wrong setting the reminder. Please try again with a clear time (e.g. \"remind me in 5 minutes\")."
 
+
+    def _parse_tam_delimited_response(self, response_str: str) -> tuple:
+        """Parse [CRON: '...' / MSG: '...'] or [EXECUTE_NOW: '...'] from LLM response.
+        Returns (data_object, friendly_text, is_clarifier). Never raises.
+        """
+        try:
+            if not response_str or not isinstance(response_str, str):
+                return (None, None, False)
+            s = response_str.strip()
+        except Exception:
+            return (None, None, False)
+        try:
+            m_cron = re.search(r"\[CRON:\s*'([^']*)'\s*/\s*MSG:\s*'([^']*)'\]", s, re.IGNORECASE)
+            if m_cron:
+                cron_expr = (m_cron.group(1) or "").strip()
+                msg = (m_cron.group(2) or "").strip() or "Reminder"
+                if cron_expr:
+                    friendly = s[: m_cron.start()].strip() if m_cron.start() > 0 else None
+                    return ({"type": "cron", "cron_expr": cron_expr, "params": {"message": msg}}, friendly, False)
+            m_cron2 = re.search(r'\[CRON:\s*"([^"]*)"\s*/\s*MSG:\s*"([^"]*)"\]', s)
+            if m_cron2:
+                cron_expr = (m_cron2.group(1) or "").strip()
+                msg = (m_cron2.group(2) or "").strip() or "Reminder"
+                if cron_expr:
+                    friendly = s[: m_cron2.start()].strip() if m_cron2.start() > 0 else None
+                    return ({"type": "cron", "cron_expr": cron_expr, "params": {"message": msg}}, friendly, False)
+            m_now = re.search(r"\[EXECUTE_NOW:\s*'([^']*)'\]", s, re.IGNORECASE)
+            if not m_now:
+                m_now = re.search(r'\[EXECUTE_NOW:\s*"([^"]*)"\]', s, re.IGNORECASE)
+            if m_now:
+                msg = (m_now.group(1) or "").strip() or "Reminder"
+                friendly = s[: m_now.start()].strip() if m_now.start() > 0 else None
+                return ({"type": "execute_now", "params": {"message": msg}}, friendly, False)
+            if "?" in s and "[CRON:" not in s and "[EXECUTE_NOW:" not in s:
+                return (None, s, True)
+            return (None, None, False)
+        except Exception:
+            return (None, None, False)
 
     async def analyze_intent_with_llm(self, intent: Intent) -> Dict:
-        # Combine the input text and chat history into a single context
-        text = intent.text
-        hist = intent.chatHistory
-        
-        # Create the prompt
-        prompt = self.create_prompt(text, hist)
-        logger.debug(f'TAM Prompt: {prompt}')
-        
-        # Prepare messages for the language model
-        messages = [{"role": "system", "content": prompt}]
-        
-        # Get the response from the language model
-        response_str = await Util().openai_chat_completion(messages)
-        response_str = response_str.strip()
-        if not response_str:
-            logger.error('TAM: LLM response is empty')
-            return None
-        logger.debug(f'TAM got response: {response_str}')
-        
-        # Parse the response into a JSON object
+        """Parse LLM response into scheduling data. Never raises; always returns a dict with data, friendly, clarifier."""
+        fallback = {"data": None, "friendly": None, "clarifier": False}
         try:
+            text = getattr(intent, "text", None) or ""
+            hist = getattr(intent, "chatHistory", None) or ""
+            prompt = self.create_prompt(text, hist)
+            logger.debug(f'TAM Prompt: {prompt}')
+            messages = [{"role": "system", "content": prompt}]
+            response_str = await Util().openai_chat_completion(messages)
+            response_str = (response_str or "").strip()
+            if not response_str:
+                logger.error('TAM: LLM response is empty')
+                return fallback
+            logger.debug(f'TAM got response: {response_str}')
+            data_object, friendly, is_clarifier = self._parse_tam_delimited_response(response_str)
+            if data_object is not None or is_clarifier:
+                return {"data": data_object, "friendly": friendly, "clarifier": is_clarifier}
             extracted = Util().extract_json_str(response_str)
             if extracted is None or (isinstance(extracted, str) and not extracted.strip()):
                 logger.error('TAM: No JSON object found in LLM response')
-                return None
-            response_str = extracted if isinstance(extracted, str) else str(extracted)
-            logger.debug(response_str)
-            response_json = json.loads(response_str)
+                return fallback
+            response_json = json.loads(extracted)
             if not isinstance(response_json, dict):
                 logger.error('TAM: LLM response JSON is not an object')
-                return None
+                return fallback
+            return {"data": response_json, "friendly": None, "clarifier": False}
         except (json.JSONDecodeError, TypeError, ValueError) as e:
             logger.error('TAM: Failed to decode LLM response JSON: {}', e)
-            return None
-
-        return response_json
+            return fallback
+        except Exception as e:
+            logger.exception('TAM: analyze_intent_with_llm failed: {}', e)
+            return fallback
 
     '''
     def create_prompt(self, text: str, chat_history: str) -> str:
@@ -435,10 +468,12 @@ class TAM:
         """Fallback when use_prompt_manager is false or config/prompts/tam/scheduling not found."""
         current_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         return (
-            "You are an expert at understanding user intentions for scheduling. Use the chat history, user input, and current datetime to create a JSON object for a reminder or cron job.\n\n"
-            f"Current datetime: {current_datetime}\n\n"
-            "Guidelines: Use chat history and user input. For cron use type \"cron\" with cron_expr; for intervals use type \"reminder\" with sub_type repeated/fixed/random. Use current datetime if no start time.\n\n"
-            f"Chat History:\n{chat_history}\n\nUser Input:\n{text}\n\nDetermine the user's intent and create a JSON object:"
+            "You are a Python Time-Parsing Agent. Convert user intent into a friendly reply plus one of: [CRON: 'min hour day month dow' / MSG: 'message'] or [EXECUTE_NOW: 'message']. Use only the current datetime below.\n\n"
+            f"Reference Time: {current_datetime}\n\n"
+            "Cron: minute hour day month dow (0=Sun..6=Sat). Examples: daily 8am = 0 8 * * *; every 2h = 0 */2 * * *; every 45 min = */45 * * * *; Mon Wed Fri 6am = 0 6 * * 1,3,5.\n\n"
+            "Rules: (1) Under ~15 min → EXECUTE_NOW. (2) Meeting/appointment → reminder 5–15 min before. (3) No time given → ask, end with ?, no tag. (4) If requested time is already past → ask e.g. 'It\'s already X. Set for tomorrow instead?' and do NOT output a tag.\n\n"
+            "Examples: \"Meeting in 15 min, remind me\" → ... [EXECUTE_NOW: 'Meeting in 15 mins']. \"Every morning at 8\" → ... [CRON: '0 8 * * *' / MSG: '...']. \"Remind me to call X\" → When would you like me to remind you?\n\n"
+            f"Chat History:\n{chat_history}\n\nUser Input:\n{text}\n\nReply:"
         )
 
     def create_prompt(self, text: str, chat_history: str) -> str:
@@ -462,47 +497,65 @@ class TAM:
                 logger.debug("TAM prompt manager fallback: {}", e)
         return self._create_prompt_fallback(text, chat_history)    
 
-    def schedule_job_from_intent(self, data_object: Dict, request: PromptRequest):
+    def schedule_job_from_intent(self, data_object: Dict, request: Optional[PromptRequest] = None):
+        """Schedule from parsed intent. Never raises; logs and returns on any error."""
         if data_object is None or not isinstance(data_object, dict):
             logger.warning("TAM: schedule_job_from_intent called with invalid data_object; skipping.")
             return
-        logger.debug(f"Scheduling job with data: {data_object}")
+        _params = data_object.get('params')
+        params: Dict = _params if isinstance(_params, dict) else {}
         job_type = data_object.get('type')
-        params: Dict = data_object.get('params', {})
-
-        if job_type is None or job_type == "null":
-            logger.debug("TAM: intent is not scheduling (type is null); skip scheduling.")
-            return
-        if job_type == "cron":
-            cron_expr = data_object.get("cron_expr")
-            if not cron_expr:
-                logger.error("TAM: cron type requires cron_expr (e.g. '0 9 * * *' for daily at 9:00)")
+        try:
+            logger.debug(f"Scheduling job with data: {data_object}")
+            if job_type is None or job_type == "null":
+                logger.debug("TAM: intent is not scheduling (type is null); skip scheduling.")
                 return
-            async def cron_task():
-                await self.send_reminder_to_latest_channel(params.get("message", ""))
+            if job_type == "execute_now":
+                message = (params.get("message") or "").strip() or "Reminder"
+                run_time = datetime.now() + timedelta(minutes=1)
+                run_time_str = run_time.strftime("%Y-%m-%d %H:%M:%S")
+                user_id = "companion"
+                channel_key = None
+                if request:
+                    user_id = (getattr(request, "system_user_id", None) or getattr(request, "user_id", None) or "").strip() or "companion"
+                    if getattr(request, "app_id", None) and getattr(request, "user_id", None) and getattr(request, "session_id", None):
+                        channel_key = f"{request.app_id}:{request.user_id}:{request.session_id}"
+                    elif (user_id or "").lower() in ("companion", "system"):
+                        channel_key = "companion"
+                self.schedule_one_shot(message, run_time_str, user_id=user_id, channel_key=channel_key)
+                return
+            if job_type == "cron":
+                cron_expr = data_object.get("cron_expr")
+                if not cron_expr:
+                    logger.error("TAM: cron type requires cron_expr (e.g. '0 9 * * *' for daily at 9:00)")
+                    return
+                async def cron_task():
+                    await self.send_reminder_to_latest_channel(params.get("message", ""))
 
-            self.schedule_cron_task(cron_task, cron_expr, params=params)
-            return
+                self.schedule_cron_task(cron_task, cron_expr, params=params)
+                return
 
-        sub_type = data_object.get('sub_type')
-        interval_unit = data_object.get('interval_unit')
-        interval = data_object.get('interval')
-        start_time = data_object.get('start_time')
+            sub_type = data_object.get('sub_type')
+            interval_unit = data_object.get('interval_unit')
+            interval = data_object.get('interval')
+            start_time = data_object.get('start_time')
 
-        if job_type == "reminder":
-            async def task():
-                await self.send_reminder_to_latest_channel(params.get("message"))
-        else:
-            logger.error(f'TAM: Unsupported job type: {job_type}')
-            return
-        if sub_type == "repeated":
-            self.schedule_repeated_task(task, interval_unit, interval, start_time)
-        elif sub_type == "fixed":
-            self.schedule_fixed_task(task, start_time)
-        elif sub_type == "random":
-            self.schedule_random_task(task, interval_unit, interval, start_time)
-        else:
-            logger.error(f'TAM: Unsupported sub-type: {sub_type}')
+            if job_type == "reminder":
+                async def task():
+                    await self.send_reminder_to_latest_channel(params.get("message", ""))
+
+                if sub_type == "repeated":
+                    self.schedule_repeated_task(task, interval_unit, interval, start_time)
+                elif sub_type == "fixed":
+                    self.schedule_fixed_task(task, start_time)
+                elif sub_type == "random":
+                    self.schedule_random_task(task, interval_unit, interval, start_time)
+                else:
+                    logger.error('TAM: Unsupported sub-type: %s', sub_type)
+            else:
+                logger.error('TAM: Unsupported job type: %s', job_type)
+        except Exception as e:
+            logger.warning("TAM: schedule_job_from_intent failed: {}", e)
 
     async def send_reminder(self, message: str, request: PromptRequest):
         await self.coreInst.send_response_to_request_channel(response=message, request=request)

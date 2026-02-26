@@ -6,6 +6,8 @@ Stateless tool helpers used by Core (orchestrator / inbound flow).
 - parse_raw_tool_calls_from_content: parse <tool_call>...</tool_call> from LLM content.
 - infer_route_to_plugin_fallback: infer route_to_plugin from user query when LLM returns no tool call.
 - infer_remind_me_fallback: infer remind_me(minutes, message) from "N分钟后提醒" / "remind me in N minutes" when LLM returns no tool call.
+- remind_me_needs_clarification: True when user wants a reminder but we couldn't extract when (so Core can ask).
+- remind_me_clarification_question: Contextual question when we can't infer (e.g. "提前几分钟提醒你啊？" for event-in-N-min).
 
 Never raises; never imports from core.core to avoid circular imports.
 See docs_design/CoreRefactoringModularCore.md and CoreRefactorPhaseSummary.md.
@@ -291,7 +293,8 @@ def infer_remind_me_fallback(query: str) -> Optional[Dict[str, Any]]:
     When the LLM returns no tool call but the user clearly asked for a reminder in N minutes,
     return remind_me arguments so Core can auto-invoke. Extracts minutes from patterns like
     "30分钟后提醒", "remind me in 30 minutes", "我30分钟后有个会能提醒一下".
-    Returns {"minutes": N, "message": "..."} or None.
+    Returns {"tool": "remind_me", "arguments": {"minutes": N, "message": "..."}} or None.
+    Never raises.
     """
     if not query or not isinstance(query, str):
         return None
@@ -305,27 +308,123 @@ def infer_remind_me_fallback(query: str) -> Optional[Dict[str, Any]]:
     )
     if not any(kw in q.lower() if kw.isascii() else kw in q for kw in reminder_kw):
         return None
-    # Extract number: "30分钟后", "in 30 minutes", "5 minutes", "30 分钟"
+    # Base = "when" from user; we schedule reminder at (base - advance) from now.
+    # E.g. "15分钟后有个会，请提前5分钟提醒我" → event in 15 min, remind 5 min before → remind in 10 min.
     minutes = None
-    for pat in [
-        r"(\d+)\s*分钟后",  # 30分钟后
-        r"(\d+)\s*分钟",   # 30 分钟
-        r"in\s+(\d+)\s+minutes?",
-        r"(\d+)\s+minutes?\s+(?:from now|later|remind)?",
-        r"(\d+)\s*min\b",
-    ]:
-        m = re.search(pat, q, re.IGNORECASE)
-        if m:
+    event_min = None  # event in N minutes
+    before_min = None  # remind M minutes before
+    # Chinese: "X分钟后...提前Y分钟" or "提前Y分钟...X分钟后"
+    m_event_cn = re.search(r"(\d+)\s*分钟(?:后|以后|之后)?", q)
+    m_before_cn = re.search(r"提前\s*(\d+)\s*分钟", q)
+    if m_event_cn and m_before_cn:
+        try:
+            event_min = int(m_event_cn.group(1))
+            before_min = int(m_before_cn.group(1))
+            if 1 <= event_min <= 40320 and 0 <= before_min <= event_min:
+                minutes = max(1, event_min - before_min)
+        except (ValueError, IndexError, TypeError):
+            pass
+    if minutes is None:
+        # English: "meeting in 15 minutes, remind me 5 minutes before" / "in 15 min, 5 min before"
+        m_event_en = re.search(r"(?:meeting|remind|event)\s+in\s+(\d+)\s*(?:min|minutes?)", q, re.IGNORECASE)
+        if not m_event_en:
+            m_event_en = re.search(r"in\s+(\d+)\s+(?:min|minutes?)", q, re.IGNORECASE)
+        m_before_en = re.search(r"(\d+)\s*(?:min|minutes?)\s+(?:before|in advance|ahead)", q, re.IGNORECASE)
+        if m_event_en and m_before_en:
             try:
-                minutes = int(m.group(1))
-                if 1 <= minutes <= 40320:  # cap ~4 weeks in minutes
-                    break
-            except (ValueError, IndexError):
+                event_min = int(m_event_en.group(1))
+                before_min = int(m_before_en.group(1))
+                if 1 <= event_min <= 40320 and 0 <= before_min <= event_min:
+                    minutes = max(1, event_min - before_min)
+            except (ValueError, IndexError, TypeError):
                 pass
+    got_advance = m_before_cn is not None or (
+        re.search(r"(\d+)\s*(?:min|minutes?)\s+(?:before|in advance|ahead)", q, re.IGNORECASE) is not None
+    )
+    if minutes is None:
+        # Single number: "30分钟后提醒我", "in 30 minutes", etc. Do NOT use when user said an event time but not "when to remind".
+        event_keywords = ("有个会", "开会", "meeting", "会议")
+        has_event = any(kw in q if kw.isascii() else kw in q for kw in event_keywords)
+        for pat in [
+            r"(\d+)\s*分钟后",           # 30分钟后
+            r"(\d+)\s*分钟(?:后|以后|之后)?",  # 30分钟 / 30分钟后 / 30分钟以后
+            r"(\d+)\s*分钟",             # 30 分钟 (space)
+            r"in\s+(\d+)\s+minutes?",
+            r"in\s+(\d+)\s*min\b",
+            r"(\d+)\s+minutes?\s+(?:from now|later|remind)?",
+            r"(\d+)\s*min\b",
+            r"(\d+)\s*mins?\b",
+            r"meeting\s+in\s+(\d+)\s*(?:min|minutes?)",  # meeting in 15 minutes
+            r"(?:有个会|开会).*?(\d+)\s*分钟",  # 有个会...15分钟 (flexible order)
+            r"(\d+)\s*分钟.*?(?:会|提醒)",      # 15分钟...会/提醒
+        ]:
+            m = re.search(pat, q, re.IGNORECASE)
+            if m:
+                try:
+                    minutes = int(m.group(1))
+                    if 1 <= minutes <= 40320:  # cap ~4 weeks in minutes
+                        # If user gave an event time (e.g. "15分钟后有个会") but no "提前Y分钟", don't guess — ask instead.
+                        if has_event and not got_advance:
+                            minutes = None
+                        break
+                except (ValueError, IndexError):
+                    pass
     if minutes is None:
         return None
     message = (q[:200] + "…") if len(q) > 200 else q
-    return {"minutes": minutes, "message": message}
+    if not isinstance(message, str):
+        message = str(message) if message is not None else "Reminder"
+    # Core expects {"tool": "remind_me", "arguments": {...}} and uses .get("arguments") for execute_async.
+    return {"tool": "remind_me", "arguments": {"minutes": minutes, "message": message}}
+
+
+def remind_me_needs_clarification(query: str) -> bool:
+    """
+    True when the user clearly wants a reminder but we couldn't extract when (minutes/at_time).
+    Core can then ask e.g. "When would you like to be reminded? (e.g. in 15 minutes or at 3:00 PM)"
+    or use remind_me_clarification_question() for a contextual prompt.
+    """
+    if not query or not isinstance(query, str):
+        return False
+    q = query.strip()
+    if not q:
+        return False
+    reminder_kw = (
+        "remind", "提醒", "闹钟", "定时", "分钟后", "minutes", "minute",
+        "有个会", "开会", "meeting", "提前提醒", "到点提醒",
+    )
+    if not any(kw in q.lower() if kw.isascii() else kw in q for kw in reminder_kw):
+        return False
+    # If we could infer arguments, no need to ask.
+    return infer_remind_me_fallback(query) is None
+
+
+def remind_me_clarification_question(query: str) -> Optional[str]:
+    """
+    When we can't infer when to remind, return a contextual question instead of a generic one.
+    E.g. "15分钟后有个会，能提醒我一下吗" → "提前几分钟提醒你啊？"
+    E.g. "儿子生日8月19号，提前提醒我" → "提前一周提醒你可以吗？" or "提前几天提醒你？"
+    Returns None if no contextual question fits (Core can use generic "When would you like to be reminded?").
+    """
+    if not query or not isinstance(query, str):
+        return None
+    q = query.strip()
+    if not q:
+        return None
+    # Event in N minutes but no "提前Y分钟" given → ask how many minutes before
+    event_min_keywords = ("有个会", "开会", "meeting", "会议")
+    has_min_event = any(kw in q if kw.isascii() else kw in q for kw in event_min_keywords)
+    has_minutes = re.search(r"\d+\s*分钟", q) is not None
+    has_before_min = re.search(r"提前\s*\d+\s*分钟", q) or re.search(r"\d+\s*(?:min|minutes?)\s+(?:before|in advance)", q, re.IGNORECASE)
+    if has_min_event and has_minutes and not has_before_min:
+        return "提前几分钟提醒你啊？ How many minutes before should I remind you?"
+    # Date-like event (生日, 8月19号, etc.) + 提前提醒 but no "提前多久"
+    date_keywords = ("生日", "月", "号", "日", "纪念日")
+    has_date = any(kw in q for kw in date_keywords) and re.search(r"\d{1,2}\s*[月/]\s*\d{1,2}|生日|纪念", q)
+    has_advance_days = re.search(r"提前\s*(?:一周|几天|\d+\s*天)", q)
+    if has_date and ("提前" in q or "提醒" in q) and not has_advance_days:
+        return "提前一周提醒你可以吗？或者提前几天？ Remind you one week before, or how many days before?"
+    return None
 
 
 def parse_raw_tool_calls_from_content(content: str):
