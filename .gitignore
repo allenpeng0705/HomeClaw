@@ -39,3 +39,5 @@
 /config/workspace/agent_memory
 /config/workspace/memory
 /plugins/ppt-generation/__pycache__
+/tests/__pycache__
+/core/routes/__pycache__
