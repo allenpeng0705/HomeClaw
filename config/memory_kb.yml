@@ -140,6 +140,7 @@ cognee:
     url: ""
     username: ""
     password: ""
+  # Local-first: Core patches Instructor so cognify works with local LLMs. If you still see "Instructor does not support multiple tool calls", set llm to a cloud endpoint (e.g. OpenAI/OpenRouter).
   llm:
     provider: ""
     model: ""

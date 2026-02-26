@@ -587,7 +587,7 @@ cognee:
     url: ""
     username: ""
     password: ""
-  # LLM for Cognee: leave empty to use Core's main_llm (main_llm_host, main_llm_port). Else set provider (e.g. custom), model, endpoint, api_key.
+  # LLM for Cognee (graph completion / search): leave empty to use Core's main_llm. Core patches Instructor for local LLMs; if you still see "Instructor does not support multiple tool calls", set cognee.llm to a cloud endpoint (e.g. OpenAI, OpenRouter).
   llm:
     provider: ""
     model: ""

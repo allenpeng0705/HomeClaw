@@ -4,9 +4,14 @@ Use when memory_backend=cognee. Requires: pip install cognee and Cognee env conf
 or cognee section in core.yml (we convert it to env vars before Cognee loads).
 Dataset scope: (user_id, agent_id) -> dataset name for add/search.
 Summarization: get_all_async / delete_async use datasets list + get_data + delete_data when available.
+
+Local LLMs: we apply a runtime patch (memory/instructor_patch.py) so Instructor accepts 0 or
+multiple tool_calls; cognify then works with local models. If you still see "Instructor does not
+support multiple tool calls", set cognee.llm to a cloud endpoint in memory_kb.yml as fallback.
 """
 import asyncio
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -91,12 +96,14 @@ def apply_cognee_config(config: Dict[str, Any]) -> None:
             logger.debug("Cognee: litellm.drop_params = True")
         except Exception:
             pass
-        # Local/custom models (Qwen, etc.) often don't support dimensions; avoid setting EMBEDDING_DIMENSIONS so Cognee/litellm don't send it.
+        # Local/custom models (Qwen, Ollama, etc.) often don't support dimensions; avoid sending EMBEDDING_DIMENSIONS so Cognee/litellm don't get 422. Local-first safe.
         emb_endpoint = (emb.get("endpoint") or "").strip().lower()
         emb_model = (emb.get("model") or "").strip().lower()
+        emb_provider = (emb.get("provider") or "").strip().lower()
         is_local_embedding = (
             "127.0.0.1" in emb_endpoint or "localhost" in emb_endpoint
             or any(x in emb_model for x in ("qwen", "embedding_text_model", "0.6b", "nomic", "ollama", "openai/"))
+            or any(x in emb_provider for x in ("ollama", "local", "openai/"))
         )
         if is_local_embedding and "EMBEDDING_DIMENSIONS" in os.environ:
             del os.environ["EMBEDDING_DIMENSIONS"]
@@ -180,6 +187,12 @@ class CogneeMemory(MemoryBase):
                         self._huggingface_tokenizer = val
                         break
         try:
+            # Patch Instructor so cognify works with local LLMs (0 or multiple tool_calls). Never crash if patch fails.
+            try:
+                from memory.instructor_patch import apply_instructor_patch_for_local_llm
+                apply_instructor_patch_for_local_llm()
+            except Exception:
+                pass
             import cognee  # noqa: F401
             self._cognee = cognee
         except ImportError as e:
@@ -223,7 +236,18 @@ class CogneeMemory(MemoryBase):
             await self._cognee.add(data, dataset_name=dataset)
             await self._cognee.cognify(datasets=[dataset])
         except Exception as e:
-            logger.debug("Cognee add/cognify: {}", e)
+            msg = str(e).strip()
+            # Never log the full Cognee/Instructor failed_attempts XML (can be huge)
+            if len(msg) > 400 or "<failed_attempts>" in msg:
+                if "<last_exception>" in msg:
+                    m = re.search(r"<last_exception>\s*(.+?)\s*</last_exception>", msg, re.DOTALL)
+                    summary = (m.group(1).strip()[:300] if m else None) or "Instructor/cognify error"
+                else:
+                    first = msg.split("\n")[0].strip()
+                    summary = first[:300] if first else "Cognify failed"
+                logger.debug("Cognee add/cognify failed: {}", summary)
+            else:
+                logger.debug("Cognee add/cognify: {}", msg)
         return [{"id": memory_id, "event": "add", "data": data}]
 
     async def search(

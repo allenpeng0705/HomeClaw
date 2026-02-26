@@ -208,6 +208,11 @@ class CogneeKnowledgeBase:
         if config:
             apply_cognee_config(config)
         try:
+            try:
+                from memory.instructor_patch import apply_instructor_patch_for_local_llm
+                apply_instructor_patch_for_local_llm()
+            except Exception:
+                pass
             import cognee  # noqa: F401
             self._cognee = cognee
         except ImportError as e:
