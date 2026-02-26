@@ -45,6 +45,9 @@ class CoreService {
   StreamSubscription? _coreWsSubscription;
   String? _coreWsSessionId;
   String? _coreWsBaseUrl; // base URL we connected to; reconnect if _baseUrl changed
+  String? _coreWsRegisteredUserId; // user_id we last sent in register; re-register when current message's userId differs
+  Timer? _coreWsPingTimer; // keepalive: send ping so proxies don't close the connection
+  static const Duration _coreWsPingInterval = Duration(seconds: 30);
   final Map<String, Completer<Map<String, dynamic>>> _pendingInboundResult = {};
   final StreamController<Map<String, dynamic>> _pushMessageController = StreamController<Map<String, dynamic>>.broadcast();
   /// Stream of proactive push messages from Core (cron, reminders, record_date). UI can listen and show in chat or as notification.
@@ -246,6 +249,9 @@ class CoreService {
     if (useAsyncForRemote) body['async'] = true;
     if (useStreamPath) body['stream'] = true;
 
+    // Establish WebSocket for push (reminders, cron) for both local and remote Core.
+    await _ensureCoreWsConnected(userId);
+
     if (useAsyncForRemote) {
       return _sendMessageAsync(url, body, onProgress ?? (_) {});
     }
@@ -275,15 +281,25 @@ class CoreService {
     };
   }
 
-  /// Ensure WebSocket to Core /ws is connected (for push). When connected, Core sends {"event": "connected", "session_id": "..."}; we send {"event": "register", "user_id": userId} so Core can push proactive messages (cron, reminders) to this connection. [userId] from the message being sent (e.g. body['user_id']).
+  /// Ensure WebSocket to Core /ws is connected (for push). When connected, Core sends {"event": "connected", "session_id": "..."}; we send {"event": "register", "user_id": userId} so Core can push proactive messages (cron, reminders) to this connection. [userId] from the message being sent (e.g. body['user_id']). Open WS for both local and remote Core so reminders/cron are delivered. Re-registers when userId changes so reminders for the current chat user are delivered.
   Future<void> _ensureCoreWsConnected([String? userId]) async {
-    if (!_isRemoteCore) return;
-    if (_coreWsChannel != null && _coreWsSessionId != null && _coreWsBaseUrl == _baseUrl) return;
+    final registerUserId = userId?.trim().isEmpty != true ? userId!.trim() : 'companion';
+    if (_coreWsChannel != null && _coreWsSessionId != null && _coreWsBaseUrl == _baseUrl) {
+      if (_coreWsRegisteredUserId == registerUserId) return;
+      _coreWsRegisteredUserId = registerUserId;
+      try {
+        _coreWsChannel?.sink.add(jsonEncode({'event': 'register', 'user_id': registerUserId}));
+      } catch (_) {}
+      return;
+    }
+    _coreWsPingTimer?.cancel();
+    _coreWsPingTimer = null;
     _coreWsChannel?.sink.close();
     _coreWsSubscription?.cancel();
     _coreWsChannel = null;
     _coreWsSessionId = null;
     _coreWsBaseUrl = null;
+    _coreWsRegisteredUserId = null;
     try {
       _coreWsBaseUrl = _baseUrl;
       final baseWs = _baseUrl.replaceFirst(RegExp(r'^http'), 'ws').replaceFirst(RegExp(r'/$'), '');
@@ -294,7 +310,6 @@ class CoreService {
       final uri = Uri.parse('$baseWs$pathAndQuery');
       _coreWsChannel = WebSocketChannel.connect(uri);
       final completer = Completer<void>();
-      final registerUserId = userId?.trim().isEmpty != true ? userId!.trim() : 'companion';
       _coreWsSubscription = _coreWsChannel!.stream.listen(
         (data) {
           if (!completer.isCompleted) {
@@ -303,24 +318,52 @@ class CoreService {
               if (msg != null && msg['event'] == 'connected') {
                 _coreWsSessionId = msg['session_id'] as String?;
                 if (!completer.isCompleted) completer.complete();
+                _coreWsRegisteredUserId = registerUserId;
                 _coreWsChannel?.sink.add(jsonEncode({'event': 'register', 'user_id': registerUserId}));
+                _startCoreWsPingTimer();
               }
             } catch (_) {}
           }
           _onCoreWsMessage(data);
         },
-        onError: (_) => _coreWsSessionId = null,
-        onDone: () => _coreWsSessionId = null,
+        onError: (_) {
+          _coreWsPingTimer?.cancel();
+          _coreWsPingTimer = null;
+          _coreWsSessionId = null;
+          _coreWsRegisteredUserId = null;
+        },
+        onDone: () {
+          _coreWsPingTimer?.cancel();
+          _coreWsPingTimer = null;
+          _coreWsSessionId = null;
+          _coreWsRegisteredUserId = null;
+        },
         cancelOnError: false,
       );
       await completer.future.timeout(Duration(seconds: 10), onTimeout: () {
+        _coreWsPingTimer?.cancel();
+        _coreWsPingTimer = null;
         _coreWsSessionId = null;
         _coreWsBaseUrl = null;
+        _coreWsRegisteredUserId = null;
       });
     } catch (_) {
+      _coreWsPingTimer?.cancel();
+      _coreWsPingTimer = null;
       _coreWsSessionId = null;
       _coreWsBaseUrl = null;
+      _coreWsRegisteredUserId = null;
     }
+  }
+
+  void _startCoreWsPingTimer() {
+    _coreWsPingTimer?.cancel();
+    _coreWsPingTimer = Timer.periodic(_coreWsPingInterval, (_) {
+      if (_coreWsChannel == null || _coreWsSessionId == null) return;
+      try {
+        _coreWsChannel?.sink.add(jsonEncode({'event': 'ping'}));
+      } catch (_) {}
+    });
   }
 
   void _onCoreWsMessage(dynamic data) {
@@ -331,6 +374,7 @@ class CoreService {
       return;
     }
     if (msg == null) return;
+    if (msg['event'] == 'pong') return; // keepalive response; no-op
     if (msg['event'] == 'push') {
       final text = msg['text'] as String? ?? '';
       final source = msg['source'] as String? ?? 'push';

@@ -55,6 +55,12 @@ def get_websocket_handler(core):
                     except Exception:
                         pass
                     continue
+                if data.get("event") == "ping":
+                    try:
+                        await websocket.send_json({"event": "pong"})
+                    except Exception:
+                        pass
+                    continue
                 try:
                     _ni = len(data.get("images") or [])
                     _nf = len(data.get("files") or [])

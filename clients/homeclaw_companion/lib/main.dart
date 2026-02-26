@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
+import 'package:homeclaw_native/homeclaw_native.dart';
 import 'chat_history_store.dart';
 import 'core_service.dart';
 import 'screens/friend_list_screen.dart';
@@ -61,11 +64,26 @@ class _InitialScreen extends StatefulWidget {
 
 class _InitialScreenState extends State<_InitialScreen> {
   Future<Widget>? _homeFuture;
+  StreamSubscription<Map<String, dynamic>>? _pushSubscription;
 
   @override
   void initState() {
     super.initState();
     _homeFuture = _resolveHome();
+    _pushSubscription = widget.coreService.pushMessageStream.listen((push) {
+      final text = push['text'] as String? ?? '';
+      if (text.isEmpty) return;
+      final source = push['source'] as String? ?? 'push';
+      final title = source == 'reminder' ? 'Reminder' : 'HomeClaw';
+      final body = text.length > 80 ? '${text.substring(0, 80)}…' : text;
+      HomeclawNative().showNotification(title: title, body: body);
+    });
+  }
+
+  @override
+  void dispose() {
+    _pushSubscription?.cancel();
+    super.dispose();
   }
 
   Future<Widget> _resolveHome() async {

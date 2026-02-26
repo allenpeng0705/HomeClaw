@@ -2139,6 +2139,8 @@ class Core(CoreInterface):
             request: Optional[PromptRequest] = self.latestPromptRequest
             if key != last_channel_store._DEFAULT_KEY or request is None:
                 stored = last_channel_store.get_last_channel(key)
+                if stored is None and key == "companion":
+                    stored = last_channel_store.get_last_channel(last_channel_store._DEFAULT_KEY)
                 if stored is None:
                     if key != last_channel_store._DEFAULT_KEY:
                         logger.warning("send_response_to_channel_by_key: no channel for key={}", key)
@@ -2209,6 +2211,7 @@ class Core(CoreInterface):
             if data_urls:
                 payload["images"] = data_urls
                 payload["image"] = data_urls[0]
+            ws_count = 0
             for sid, uid in list(self._ws_user_by_session.items()):
                 if uid != user_id:
                     continue
@@ -2216,8 +2219,13 @@ class Core(CoreInterface):
                 if ws is not None:
                     try:
                         await ws.send_json(payload)
+                        ws_count += 1
                     except Exception as e:
                         logger.debug("deliver_to_user: push to session {} failed: {}", (sid or "")[:8], e)
+            if ws_count == 0:
+                logger.info("deliver_to_user: no WebSocket session for user_id={} (reminder/push may not reach app; ensure Companion opens /ws and sends register with this user_id)", user_id)
+            else:
+                logger.info("deliver_to_user: pushed to {} WebSocket session(s) for user_id={} source={}", ws_count, user_id, source)
             if channel_key:
                 await self.send_response_to_channel_by_key(channel_key, text)
             else:

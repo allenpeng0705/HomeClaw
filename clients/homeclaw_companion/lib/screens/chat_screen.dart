@@ -68,6 +68,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool? _coreConnected;
   bool _connectionChecking = false;
   Timer? _connectionCheckTimer;
+  StreamSubscription<Map<String, dynamic>>? _pushMessageSubscription;
 
   /// Rotating status messages when waiting for reply (when no progress from Core).
   static const List<String> _loadingStatusMessages = [
@@ -86,6 +87,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _loadChatHistory();
     _checkCoreConnection();
     _connectionCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkCoreConnection());
+    _pushMessageSubscription = widget.coreService.pushMessageStream.listen(_onPushMessage);
     if (widget.initialMessage != null && widget.initialMessage!.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _inputController.text = widget.initialMessage!;
@@ -186,6 +188,30 @@ class _ChatScreenState extends State<ChatScreen> {
       _coreConnected = connected;
       _connectionChecking = false;
     });
+  }
+
+  void _onPushMessage(Map<String, dynamic> push) {
+    final text = push['text'] as String? ?? '';
+    if (text.isEmpty) return;
+    final source = push['source'] as String? ?? 'push';
+    final imageList = push['images'] as List<dynamic>?;
+    final images = imageList != null
+        ? imageList.whereType<String>().toList()
+        : (push['image'] is String ? <String>[push['image'] as String] : null);
+    if (!mounted) return;
+    setState(() {
+      _messages.add(MapEntry(text, false));
+      _messageImages.add(images != null && images.isNotEmpty ? images : null);
+    });
+    _scrollToBottom();
+    _persistChatHistory();
+    if (!mounted) return;
+    final title = source == 'reminder' ? 'Reminder' : 'HomeClaw';
+    final preview = text.length > 80 ? '${text.substring(0, 80)}…' : text;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(content: Text('$title: $preview')),
+    );
+    // System notification is shown by global listener in main.dart
   }
 
   Future<void> _loadTtsAutoSpeak() async {
@@ -1113,6 +1139,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void dispose() {
     _connectionCheckTimer?.cancel();
     _loadingStatusTimer?.cancel();
+    _pushMessageSubscription?.cancel();
     _voiceSubscription?.cancel();
     _voice.dispose();
     _inputController.dispose();
