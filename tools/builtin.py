@@ -3366,6 +3366,8 @@ async def _folder_list_executor(arguments: Dict[str, Any], context: ToolContext)
                 "type": "dir" if p.is_dir() else "file",
                 "path": rel,
             })
+        if not entries:
+            return "No entries (directory is empty). Use path '' or '.' for user sandbox root; path 'share' for shared folder. Then use document_read(path='exact_filename') with a path from this list."
         return json.dumps(entries, ensure_ascii=False, indent=0)
     except Exception as e:
         logger.debug("folder_list failed: %s", e)
@@ -3403,6 +3405,8 @@ async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -
                 "type": "dir" if p.is_dir() else "file",
                 "name": p.name,
             })
+        if not results:
+            return "No files or folders matched the pattern. Try file_find(pattern='*') to list all files in the sandbox, or folder_list() to see the directory. Then use document_read(path='exact_path') with a path from the result."
         return json.dumps(results, ensure_ascii=False, indent=0)
     except Exception as e:
         logger.debug("file_find failed: %s", e)

@@ -130,6 +130,36 @@ def _strip_leading_route_label(s: str) -> str:
     return s
 
 
+def _tool_result_looks_like_error(result: Any) -> bool:
+    """True if the tool result is an error or not-found message; we should not use it as final response (do 2nd LLM round instead). Never raises."""
+    try:
+        if result is None or not isinstance(result, str):
+            return False
+        if len(result) > 2000:
+            return False
+        r = result.strip().lower()
+        if not r:
+            return False
+        if r == "[]":
+            return True
+        # File/path errors (directory may not be empty; model used wrong path)
+        if "wasn't found" in r or "was not found" in r or "couldn't find" in r or "could not find" in r:
+            return True
+        if "no entries" in r and "directory" in r:
+            return True
+        if "no files or folders matched" in r or "no files matched" in r:
+            return True
+        if "path is required" in r or "that path is outside" in r or "path wasn't found" in r:
+            return True
+        if "file not found" in r or "not readable" in r or "not found or not readable" in r:
+            return True
+        if r.startswith("error:") or "error: " in r[:200]:
+            return True
+    except Exception:
+        return False
+    return False
+
+
 def _tool_result_usable_as_final_response(
     tool_name: str,
     tool_result: str,
@@ -143,11 +173,14 @@ def _tool_result_usable_as_final_response(
     - Skills: By default use result for all skills (run_skill); list skills in skills_results_need_llm to force a second LLM call.
     - Config: tools.use_result_as_response (self_contained_tools, needs_llm_tools, max_self_contained_length, skills_results_need_llm).
     - No response: Empty or "(no output)" returns False so we do a second LLM round; the model can reply "Done." or we keep prior content (e.g. auto_invoke).
+    - Error-like result: If the result looks like "not found" / error, return False so we do the 2nd LLM round (model can rephrase or suggest listing files).
     """
     if not tool_name or not isinstance(tool_result, str):
         return False
     result = tool_result.strip()
     if not result or result == "(no output)":
+        return False
+    if _tool_result_looks_like_error(result):
         return False
     cfg = config if isinstance(config, dict) else {}
     enabled = cfg.get("enabled", True)
@@ -4948,7 +4981,7 @@ class Core(CoreInterface):
                         ctx_line += f" User location: {loc_str[:500]}."
                 except Exception as e:
                     logger.debug("System context location resolve: {}", e)
-                ctx_line += "\nUse this when answering questions about age, \"what day is it?\", \"how many days until X?\", or when scheduling (remind_me, record_date, cron_schedule). Scheduling execution uses system time."
+                ctx_line += "\nUse this only when the user explicitly asks (e.g. \"what day is it?\", \"what time is it?\", \"where am I?\", age, \"how many days until X?\", or scheduling with remind_me, record_date, cron_schedule). Do not volunteer date, time, or location in greetings or general replies—that often leads to wrong or invented values. When you do need it, use the date and time in this block exactly; ignore any date or time in prior turns (they may be outdated)."
                 system_parts.append("## System context (date/time and location)\n" + ctx_line + "\n\n")
             except Exception as e:
                 logger.debug("System context block failed: {}", e)
@@ -5699,11 +5732,29 @@ class Core(CoreInterface):
                 )
                 current_messages = list(llm_input)
                 max_tool_rounds = 10
+                use_other_model_next_turn = False  # mix mode: when last tool result was error-like, use cloud (or local) for next turn
                 for _ in range(max_tool_rounds):
+                    llm_name_this_turn = effective_llm_name
+                    if use_other_model_next_turn and mix_route_this_request:
+                        try:
+                            meta_hr = Util().get_core_metadata()
+                            main_local = (getattr(meta_hr, "main_llm_local", None) or "").strip()
+                            main_cloud = (getattr(meta_hr, "main_llm_cloud", None) or "").strip()
+                            if main_local and main_cloud:
+                                other_route = "cloud" if (mix_route_this_request == "local") else "local"
+                                other_llm = main_cloud if other_route == "cloud" else main_local
+                                if other_llm:
+                                    llm_name_this_turn = other_llm
+                                    mix_route_this_request = other_route
+                                    mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_error_retry" if mix_route_layer_this_request else "error_retry"
+                                    _component_log("mix", f"tool result was error-like, retrying with {other_route} ({other_llm})")
+                        except Exception as e:
+                            logger.debug("mix error_retry resolve failed: {}", e)
+                        use_other_model_next_turn = False
                     _t0 = time.time()
                     logger.debug("LLM call started (tools={})", "yes" if openai_tools else "no")
                     msg = await Util().openai_chat_completion_message(
-                        current_messages, tools=openai_tools, tool_choice="auto", llm_name=effective_llm_name
+                        current_messages, tools=openai_tools, tool_choice="auto", llm_name=llm_name_this_turn
                     )
                     logger.debug("LLM call returned in {:.1f}s", time.time() - _t0)
                     if msg is None:
@@ -6015,6 +6066,9 @@ class Core(CoreInterface):
                                 out = label + (_strip_leading_route_label(out or "") or "")
                             response = out
                             break
+                        elif last_tool_name and last_tool_result_raw and _tool_result_looks_like_error(last_tool_result_raw) and mix_route_this_request:
+                            # Don't use error-like result; in mix mode use the other model for the next turn
+                            use_other_model_next_turn = True
                     except Exception as e:
                         logger.debug("use_result_as_response check failed (continuing to second LLM): {}", e)
                 else:
@@ -6039,6 +6093,9 @@ class Core(CoreInterface):
 
             if response is None or (isinstance(response, str) and len(response.strip()) == 0):
                 return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
+            # If the model echoed raw "[]" (e.g. from empty folder_list/file_find), show a friendly message instead
+            if isinstance(response, str) and response.strip() == "[]":
+                response = "I couldn't find that file or path. Try asking me to list your files (e.g. 'list my files' or 'what files do I have'), then use the exact filename (e.g. 1.pdf) when you ask about a document."
             # If the model echoed the internal file_write/save_result_page empty-content message, show a short user-facing message instead
             if isinstance(response, str) and ("Do NOT share this link" in response or ("empty or too small" in response and '"written"' in response)):
                 response = "The slide wasn’t generated yet because the content was empty. Please try again; I’ll generate the HTML from the document and then save it. （幻灯片尚未生成，请再试一次。）"
