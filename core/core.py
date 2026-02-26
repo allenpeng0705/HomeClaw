@@ -1341,7 +1341,7 @@ class Core(CoreInterface):
                 return Response(content="Server Internal Error", status_code=500)
 
         @self.app.post("/inbound")
-        async def inbound_post_handler(request: InboundRequest, _: None = Depends(auth.verify_inbound_auth)):
+        async def inbound_post_handler(request: InboundRequest, raw_request: Request, _: None = Depends(auth.verify_inbound_auth)):
             """
             Minimal API for any bot: POST {"user_id": "...", "text": "..."} and get {"text": "..."} back.
             No channel process needed; add user_id to config/user.yml allowlist. Use channel_name to tag the source (e.g. telegram, discord).
@@ -1411,6 +1411,44 @@ class Core(CoreInterface):
                     if data_urls:
                         content["images"] = data_urls
                         content["image"] = data_urls[0]
+                # When HTTP connection is closed (e.g. client timeout), deliver via WebSocket first, then push. Never raises.
+                try:
+                    raw_req = raw_request
+                    disconnected = getattr(raw_req, "is_disconnected", None) if raw_req is not None else None
+                    if callable(disconnected):
+                        try:
+                            is_disc = await disconnected()
+                        except Exception:
+                            is_disc = False
+                        if is_disc:
+                            inbound_uid = str(getattr(request, "user_id", None) or "").strip() or "companion"
+                            body_text = str(content.get("text") if isinstance(content, dict) else "")[:1024]
+                            ws_sent = 0
+                            _ws_by_user = getattr(self, "_ws_user_by_session", None)
+                            _ws_sessions = getattr(self, "_ws_sessions", None)
+                            if isinstance(_ws_by_user, dict) and isinstance(_ws_sessions, dict):
+                                for sid, uid in list(_ws_by_user.items()):
+                                    if not isinstance(uid, str) or uid != inbound_uid:
+                                        continue
+                                    ws = _ws_sessions.get(sid) if isinstance(sid, str) else None
+                                    if ws is not None:
+                                        try:
+                                            payload = {"event": "push", "source": "inbound", "text": body_text, "format": str(content.get("format", "plain") or "plain")}
+                                            if isinstance(content.get("images"), list) and content["images"]:
+                                                payload["images"] = content["images"]
+                                                payload["image"] = content.get("image")
+                                            await ws.send_json(payload)
+                                            ws_sent += 1
+                                        except Exception as ws_e:
+                                            logger.debug("inbound: WS fallback send failed: {}", ws_e)
+                            if ws_sent == 0:
+                                try:
+                                    from base import push_send
+                                    push_send.send_push_to_user(inbound_uid, title="HomeClaw", body=body_text, source="inbound")
+                                except Exception as push_e:
+                                    logger.debug("inbound: push fallback failed: {}", push_e)
+                except Exception as fallback_e:
+                    logger.debug("inbound: connection-check/fallback failed: {}", fallback_e)
                 return JSONResponse(content=content)
             except Exception as e:
                 logger.exception(e)
