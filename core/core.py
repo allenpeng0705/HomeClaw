@@ -4714,36 +4714,6 @@ class Core(CoreInterface):
                                         except Exception as e:
                                             logger.debug("Fallback route_to_plugin failed: {}", e)
                                             response = content_str or "The action could not be completed. Try a model that supports tool calling."
-                                else:
-                                    # Fallback: user may have asked to list directory (e.g. 你的目录下都有哪些文件) but model didn't call folder_list (common when local model returns no tool_calls)
-                                    list_dir_phrases = (
-                                        "目录", "哪些文件", "列出文件", "目录下", "列出", "有什么文件", "文件列表", "我的文件", "看看文件", "显示文件",
-                                        "list file", "list files", "list directory", "list folder", "list content", "what file", "what's in my", "files in my",
-                                        "folder content", "folder list", "file list", "show file", "show files", "show directory", "show folder", "view file", "view directory",
-                                    )
-                                    _query_lower = (query or "").lower()
-                                    _query_raw = query or ""
-                                    if registry and any(t.name == "folder_list" for t in (registry.list_tools() or [])) and any(
-                                        (p in _query_lower if p.isascii() else p in _query_raw) for p in list_dir_phrases
-                                    ):
-                                        try:
-                                            _component_log("tools", "fallback folder_list (model did not call tool)")
-                                            result = await registry.execute_async("folder_list", {"path": "."}, context)
-                                            if isinstance(result, str) and result.strip():
-                                                try:
-                                                    entries = json.loads(result)
-                                                    if isinstance(entries, list) and entries:
-                                                        lines = [f"- {e.get('name', '?')} ({e.get('type', '?')})" for e in entries if isinstance(e, dict)]
-                                                        response = "目录下的内容：\n" + "\n".join(lines) if lines else result
-                                                    else:
-                                                        response = "目录为空。" if isinstance(entries, list) else result
-                                                except (json.JSONDecodeError, TypeError):
-                                                    response = result
-                                            else:
-                                                response = content_str or "Directory is empty or could not be listed."
-                                        except Exception as e:
-                                            logger.debug("Fallback folder_list failed: {}", e)
-                                            response = content_str or "Could not list directory. Please try again."
                                     elif (
                                         registry
                                         and any(t.name == "file_find" for t in (registry.list_tools() or []))
@@ -4805,7 +4775,37 @@ class Core(CoreInterface):
                                             logger.debug("Fallback summarize document failed: {}", e)
                                             response = content_str or "Could not find or summarize the document. Please try again."
                                     else:
-                                        response = content_str
+                                        # Fallback: user may have asked to list directory (e.g. 你的目录下都有哪些文件) but model didn't call folder_list (common when local model returns no tool_calls)
+                                        list_dir_phrases = (
+                                            "目录", "哪些文件", "列出文件", "目录下", "列出", "有什么文件", "文件列表", "我的文件", "看看文件", "显示文件",
+                                            "list file", "list files", "list directory", "list folder", "list content", "what file", "what's in my", "files in my",
+                                            "folder content", "folder list", "file list", "show file", "show files", "show directory", "show folder", "view file", "view directory",
+                                        )
+                                        _query_lower = (query or "").lower()
+                                        _query_raw = query or ""
+                                        if registry and any(t.name == "folder_list" for t in (registry.list_tools() or [])) and any(
+                                            (p in _query_lower if p.isascii() else p in _query_raw) for p in list_dir_phrases
+                                        ):
+                                            try:
+                                                _component_log("tools", "fallback folder_list (model did not call tool)")
+                                                result = await registry.execute_async("folder_list", {"path": "."}, context)
+                                                if isinstance(result, str) and result.strip():
+                                                    try:
+                                                        entries = json.loads(result)
+                                                        if isinstance(entries, list) and entries:
+                                                            lines = [f"- {e.get('name', '?')} ({e.get('type', '?')})" for e in entries if isinstance(e, dict)]
+                                                            response = "目录下的内容：\n" + "\n".join(lines) if lines else result
+                                                        else:
+                                                            response = "目录为空。" if isinstance(entries, list) else result
+                                                    except (json.JSONDecodeError, TypeError):
+                                                        response = result
+                                                else:
+                                                    response = content_str or "Directory is empty or could not be listed."
+                                            except Exception as e:
+                                                logger.debug("Fallback folder_list failed: {}", e)
+                                                response = content_str or "Could not list directory. Please try again."
+                                        else:
+                                            response = content_str
                         break
                     routing_sent = False
                     routing_response_text = None  # when route_to_plugin/route_to_tam return text (sync inbound/ws), use as final response
