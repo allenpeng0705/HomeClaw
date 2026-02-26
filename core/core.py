@@ -4702,18 +4702,18 @@ class Core(CoreInterface):
                                     unhelpful = not content_str or len(content_str) < 80 or content_str.strip().lower() in ("no", "i can't", "i cannot", "sorry", "nope")
                                     fallback_route = _infer_route_to_plugin_fallback(query) if unhelpful else None
                                     if fallback_route and registry and any(t.name == "route_to_plugin" for t in (registry.list_tools() or [])):
-                                    try:
-                                        _component_log("tools", "fallback route_to_plugin (model did not call tool)")
-                                        result = await registry.execute_async("route_to_plugin", fallback_route, context)
-                                        if result == ROUTING_RESPONSE_ALREADY_SENT:
-                                            return ROUTING_RESPONSE_ALREADY_SENT
-                                        if isinstance(result, str) and result.strip():
-                                            response = result
-                                        else:
-                                            response = content_str or "Done."
-                                    except Exception as e:
-                                        logger.debug("Fallback route_to_plugin failed: {}", e)
-                                        response = content_str or "The action could not be completed. Try a model that supports tool calling."
+                                        try:
+                                            _component_log("tools", "fallback route_to_plugin (model did not call tool)")
+                                            result = await registry.execute_async("route_to_plugin", fallback_route, context)
+                                            if result == ROUTING_RESPONSE_ALREADY_SENT:
+                                                return ROUTING_RESPONSE_ALREADY_SENT
+                                            if isinstance(result, str) and result.strip():
+                                                response = result
+                                            else:
+                                                response = content_str or "Done."
+                                        except Exception as e:
+                                            logger.debug("Fallback route_to_plugin failed: {}", e)
+                                            response = content_str or "The action could not be completed. Try a model that supports tool calling."
                                 else:
                                     # Fallback: user may have asked to list directory (e.g. 你的目录下都有哪些文件) but model didn't call folder_list (common when local model returns no tool_calls)
                                     list_dir_phrases = (
