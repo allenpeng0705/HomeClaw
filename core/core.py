@@ -155,6 +155,9 @@ def _tool_result_looks_like_error(result: Any) -> bool:
             return True
         if r.startswith("error:") or "error: " in r[:200]:
             return True
+        # Results that are instructions to the model (not user-facing) should not be used as final response
+        if "do not reply with only this line" in r or "you must in this turn" in r:
+            return True
     except Exception:
         return False
     return False
@@ -186,6 +189,14 @@ def _tool_result_usable_as_final_response(
     enabled = cfg.get("enabled", True)
     if not enabled:
         return False
+    # Default: run_skill for instruction-only skills (no script) returns instructions to the model, not a user-facing answer. Always do another LLM round so the model continues with document_read / save_result_page etc. No config needed.
+    if tool_name == "run_skill":
+        try:
+            r = (result if isinstance(result, str) else str(result or "")).lower()
+            if "instruction-only skill confirmed" in r or "you must in this turn" in r:
+                return False
+        except Exception:
+            pass
     _need_llm_raw = cfg.get("needs_llm_tools")
     needs_llm = tuple(_need_llm_raw) if isinstance(_need_llm_raw, (list, tuple)) else (
         "document_read", "file_read", "file_understand",
@@ -196,7 +207,7 @@ def _tool_result_usable_as_final_response(
     )
     if tool_name in needs_llm:
         return False
-    # Per-skill: skills in skills_results_need_llm always get a second LLM call (e.g. maton-api-gateway for richer reply).
+    # Per-skill: skills in skills_results_need_llm always get a second LLM call (e.g. maton-api-gateway for richer reply). Instruction-only skills are already handled above by default.
     if tool_name == "run_skill" and isinstance(tool_args, dict):
         try:
             skill_name = str(tool_args.get("skill_name") or tool_args.get("skill") or "").strip()

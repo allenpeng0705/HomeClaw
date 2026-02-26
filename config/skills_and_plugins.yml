@@ -274,6 +274,7 @@ tools:
   use_result_as_response:
     enabled: true
     # Skills in this list always get a second LLM call (e.g. to confirm in natural language). Empty = use result for all skills.
+    # Skills that always get a second LLM round (never use raw tool result as final response). Instruction-only skills (no script) are handled by default in Core; list here only when you need a second LLM for other reasons (e.g. richer reply).
     skills_results_need_llm: [maton-api-gateway-1.0.0, x-api-1.0.0, meta-social-1.0.0]
     # Tools whose result is raw content; always run second LLM to synthesize.
     needs_llm_tools:
