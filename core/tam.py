@@ -1264,10 +1264,9 @@ class TAM:
                 msg = row.get("message", "")
                 uid = row.get("user_id")
                 ck = row.get("channel_key")
+                # task must be a no-arg callable that returns a coroutine (schedule_fixed_task does asyncio.run(task()))
                 task = (
-                    lambda reminder_id, message, u, c: lambda: asyncio.run(
-                        self._run_one_shot_and_remove(reminder_id, message, user_id=u, channel_key=c)
-                    )
+                    lambda reminder_id, message, u, c: lambda: self._run_one_shot_and_remove(reminder_id, message, user_id=u, channel_key=c)
                 )(rid, msg, uid, ck)
                 self.schedule_fixed_task(task, run_time_str)
             if rows:
