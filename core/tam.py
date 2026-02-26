@@ -672,10 +672,13 @@ class TAM:
                 lambda rid, msg, uid, ck: lambda: self._run_one_shot_and_remove(rid, msg, user_id=uid, channel_key=ck)
             )(reminder_id, message, user_id, channel_key)
             self.schedule_fixed_task(task, run_time_str)
+            msg_preview = (message or "")[:50] + ("..." if len(message or "") > 50 else "")
+            logger.info("TAM: One-shot reminder scheduled: run_at={!r} user_id={} message={!r}", run_time_str, user_id or "companion", msg_preview)
         else:
             async def fallback():
                 await self.send_reminder_to_latest_channel(message)
             self.schedule_fixed_task(fallback, run_time_str)
+            logger.info("TAM: One-shot reminder scheduled (in-memory): run_at={!r} message={!r}", run_time_str, (message or "")[:50])
         return True
 
     def random_time_within_range(self, min_interval, max_interval):
@@ -1283,6 +1286,8 @@ class TAM:
         channel_key: Optional[str] = None,
     ) -> None:
         """Deliver reminder to user (Companion push + channel) and remove from DB (called when one-shot fires). Never raises (logs and continues)."""
+        msg_preview = (message or "")[:50] + ("..." if len(message or "") > 50 else "")
+        logger.info("TAM: One-shot reminder triggered: delivering to user_id={} message={!r}", user_id or "companion", msg_preview)
         try:
             if hasattr(self.coreInst, "deliver_to_user"):
                 await self.coreInst.deliver_to_user(
