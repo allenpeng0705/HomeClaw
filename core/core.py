@@ -2233,6 +2233,8 @@ class Core(CoreInterface):
                 out_fmt = "plain"
             if not text:
                 out_text, out_fmt = "", "plain"
+            out_text = out_text if out_text is not None else ""
+            out_fmt = out_fmt if out_fmt is not None else "plain"
             payload = {"event": "push", "source": source, "text": out_text, "format": out_fmt}
             data_urls = []
             if images:
@@ -2253,32 +2255,45 @@ class Core(CoreInterface):
                 payload["images"] = data_urls
                 payload["image"] = data_urls[0]
             ws_count = 0
-            for sid, uid in list(self._ws_user_by_session.items()):
-                if uid != user_id:
-                    continue
-                ws = self._ws_sessions.get(sid)
-                if ws is not None:
-                    try:
-                        await ws.send_json(payload)
-                        ws_count += 1
-                    except Exception as e:
-                        logger.debug("deliver_to_user: push to session {} failed: {}", (sid or "")[:8], e)
+            _ws_by_session = getattr(self, "_ws_user_by_session", None)
+            _ws_sessions = getattr(self, "_ws_sessions", None)
+            if isinstance(_ws_by_session, dict) and isinstance(_ws_sessions, dict):
+                for sid, uid in list(_ws_by_session.items()):
+                    if uid != user_id:
+                        continue
+                    ws = _ws_sessions.get(sid) if sid is not None else None
+                    if ws is not None:
+                        try:
+                            await ws.send_json(payload)
+                            ws_count += 1
+                        except Exception as e:
+                            logger.debug("deliver_to_user: push to session {} failed: {}", (str(sid or "")[:8]), e)
+                            try:
+                                self._ws_sessions.pop(sid, None)
+                                self._ws_user_by_session.pop(sid, None)
+                            except Exception:
+                                pass
             if ws_count == 0:
                 logger.info("deliver_to_user: no WebSocket session for user_id={} (reminder/push may not reach app; ensure Companion opens /ws and sends register with this user_id)", user_id)
-                try:
-                    from base import push_send
-                    title = "Reminder" if source == "reminder" else "HomeClaw"
-                    push_sent = push_send.send_push_to_user(user_id, title=title, body=out_text[:1024] if out_text else "", source=source)
-                    if push_sent:
-                        logger.info("deliver_to_user: sent {} push(es) (APNs/FCM) for user_id={} source={}", push_sent, user_id, source)
-                except Exception as push_e:
-                    logger.debug("deliver_to_user: push send failed: {}", push_e)
             else:
                 logger.info("deliver_to_user: pushed to {} WebSocket session(s) for user_id={} source={}", ws_count, user_id, source)
-            if channel_key:
-                await self.send_response_to_channel_by_key(channel_key, text)
-            else:
-                await self.send_response_to_latest_channel(text)
+            # Always try push so user gets notification when app is backgrounded (WS may be stale and message lost).
+            try:
+                from base import push_send
+                title = "Reminder" if source == "reminder" else "HomeClaw"
+                body_safe = (out_text if out_text is not None else "")[:1024]
+                push_sent = push_send.send_push_to_user(user_id, title=title, body=body_safe, source=source)
+                if push_sent:
+                    logger.info("deliver_to_user: sent {} push(es) (APNs/FCM) for user_id={} source={}", push_sent, user_id, source)
+            except Exception as push_e:
+                logger.debug("deliver_to_user: push send failed: {}", push_e)
+            try:
+                if channel_key:
+                    await self.send_response_to_channel_by_key(channel_key, text)
+                else:
+                    await self.send_response_to_latest_channel(text)
+            except Exception as ch_e:
+                logger.debug("deliver_to_user: send_response_to_channel failed: {}", ch_e)
         except Exception as e:
             logger.warning("deliver_to_user failed: {}", e)
 

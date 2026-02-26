@@ -1098,13 +1098,11 @@ class TAM:
                                     except Exception:
                                         pass
                                 await self._send_reminder_to_channel_safe(text, prms)
-                            return lambda: asyncio.run(_run())
+                            return lambda: _run()
                         task = make_run_skill_task(params)
                     else:
                         task = (
-                            lambda m, p: lambda: asyncio.run(
-                                self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
-                            )
+                            lambda m, p: lambda: self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
                         )(params.get("message", ""), params)
                 elif params.get("task_type") == "run_plugin":
                     plugin_id = params.get("plugin_id") or ""
@@ -1173,13 +1171,11 @@ class TAM:
                                     except Exception:
                                         pass
                                 await self._send_reminder_to_channel_safe(text, prms)
-                            return lambda: asyncio.run(_run())
+                            return lambda: _run()
                         task = make_run_plugin_task(params)
                     else:
                         task = (
-                            lambda m, p: lambda: asyncio.run(
-                                self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
-                            )
+                            lambda m, p: lambda: self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
                         )(params.get("message", ""), params)
                 elif params.get("task_type") == "run_tool":
                     tool_name = params.get("tool_name") or ""
@@ -1215,20 +1211,16 @@ class TAM:
                                     except Exception:
                                         pass
                                 await self._send_reminder_to_channel_safe(text, prms)
-                            return lambda: asyncio.run(_run())
+                            return lambda: _run()
                         task = make_run_tool_task(params)
                     else:
                         task = (
-                            lambda m, p: lambda: asyncio.run(
-                                self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
-                            )
+                            lambda m, p: lambda: self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
                         )(params.get("message", ""), params)
                 else:
                     msg = params.get("message", "")
                     task = (
-                        lambda m, p: lambda: asyncio.run(
-                            self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
-                        )
+                        lambda m, p: lambda: self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
                     )(msg, params)
                 jid = self.schedule_cron_task(
                     task,
@@ -1466,8 +1458,12 @@ class TAM:
         logger.info("TAM: Cron job triggered: job_id={} cron_expr={!r}", jid, cron_expr)
         started_at = time.perf_counter()
         try:
-            if task:
-                asyncio.run(task())
+            if task and callable(task):
+                coro = task()
+                if coro is not None and asyncio.iscoroutine(coro):
+                    asyncio.run(coro)
+                elif coro is not None:
+                    logger.warning("TAM: Cron job {} task did not return a coroutine", jid)
             status, err = "ok", None
         except Exception as e:
             logger.exception("TAM: Cron job {} failed: {}", jid, e)
