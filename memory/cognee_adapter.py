@@ -84,6 +84,22 @@ def apply_cognee_config(config: Dict[str, Any]) -> None:
     # Embedding -> EMBEDDING_*
     emb = config.get("embedding") or {}
     if isinstance(emb, dict):
+        # LiteLLM: drop unsupported params (e.g. dimensions) so local/custom embedding models don't get 422. Set before any Cognee/LiteLLM embedding call (KB and Memory both call apply_cognee_config).
+        try:
+            import litellm
+            litellm.drop_params = True
+            logger.debug("Cognee: litellm.drop_params = True")
+        except Exception:
+            pass
+        # Local/custom models (Qwen, etc.) often don't support dimensions; avoid setting EMBEDDING_DIMENSIONS so Cognee/litellm don't send it.
+        emb_endpoint = (emb.get("endpoint") or "").strip().lower()
+        emb_model = (emb.get("model") or "").strip().lower()
+        is_local_embedding = (
+            "127.0.0.1" in emb_endpoint or "localhost" in emb_endpoint
+            or any(x in emb_model for x in ("qwen", "embedding_text_model", "0.6b", "nomic", "ollama", "openai/"))
+        )
+        if is_local_embedding and "EMBEDDING_DIMENSIONS" in os.environ:
+            del os.environ["EMBEDDING_DIMENSIONS"]
         # Set HUGGINGFACE_TOKENIZER first so Cognee/litellm see it before trying tiktoken mapping from EMBEDDING_MODEL (avoids "Could not automatically map ... to a tokeniser").
         for key, env_key in (("tokenizer", "HUGGINGFACE_TOKENIZER"), ("huggingface_tokenizer", "HUGGINGFACE_TOKENIZER")):
             val = emb.get(key)
@@ -102,23 +118,17 @@ def apply_cognee_config(config: Dict[str, Any]) -> None:
                 break
         for key, env_key in (
             ("provider", "EMBEDDING_PROVIDER"), ("model", "EMBEDDING_MODEL"), ("endpoint", "EMBEDDING_ENDPOINT"), ("api_key", "EMBEDDING_API_KEY"),
-            ("max_tokens", "EMBEDDING_MAX_TOKENS"), ("dimensions", "EMBEDDING_DIMENSIONS"),
+            ("max_tokens", "EMBEDDING_MAX_TOKENS"),
         ):
             val = emb.get(key)
             if val is not None and str(val).strip() != "":
                 os.environ[env_key] = str(val)
+        if not is_local_embedding:
+            val = emb.get("dimensions")
+            if val is not None and str(val).strip() != "":
+                os.environ["EMBEDDING_DIMENSIONS"] = str(val)
         if "EMBEDDING_API_KEY" not in os.environ and emb.get("endpoint"):
             os.environ["EMBEDDING_API_KEY"] = "local"
-        # Local/custom embedding models (Qwen, llama.cpp, etc.) often do not support the dimensions parameter; LiteLLM then raises UnsupportedParamsError. Unset EMBEDDING_DIMENSIONS for local endpoints so Cognee/litellm do not send it.
-        emb_endpoint = (emb.get("endpoint") or os.environ.get("EMBEDDING_ENDPOINT") or "").strip().lower()
-        emb_model = (emb.get("model") or os.environ.get("EMBEDDING_MODEL") or "").strip().lower()
-        is_local_embedding = (
-            "127.0.0.1" in emb_endpoint or "localhost" in emb_endpoint
-            or any(x in emb_model for x in ("qwen", "embedding_text_model", "0.6b", "nomic", "ollama", "openai/"))
-        )
-        if is_local_embedding and os.environ.get("EMBEDDING_DIMENSIONS"):
-            del os.environ["EMBEDDING_DIMENSIONS"]
-            logger.debug("Cognee: unset EMBEDDING_DIMENSIONS for local embedding model (dimensions not supported)")
     # Raw env passthrough
     env = config.get("env")
     if isinstance(env, dict):
@@ -177,13 +187,6 @@ class CogneeMemory(MemoryBase):
                 "Cognee memory backend requires: pip install cognee. "
                 "Configure via .env (LLM_*, EMBEDDING_*, DB_*, etc.). See docs.cognee.ai."
             ) from e
-        # So LiteLLM drops unsupported params (e.g. dimensions) for local/custom embedding models and avoids UnsupportedParamsError / 422.
-        try:
-            import litellm
-            litellm.drop_params = True
-            logger.debug("Cognee: litellm.drop_params = True (drop unsupported embedding params e.g. dimensions)")
-        except Exception as e:
-            logger.debug("Cognee litellm.drop_params not set: {}", e)
         # When using a custom embedding model (tokenizer set), Cognee/litellm may call tiktoken.encoding_for_model(embedding_model) which throws for unknown models. Fall back to cl100k_base so add/cognify does not fail.
         if self._huggingface_tokenizer:
             try:
