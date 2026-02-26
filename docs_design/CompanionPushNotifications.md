@@ -29,7 +29,22 @@ When the Companion app is **killed or in the background**, the system may not ke
   - **APNs** for `platform` in (ios, macos, tvos, ipados, watchos): send via APNs HTTP/2 API (JWT auth with .p8 key).
   - **FCM** for android and others: send via Firebase Admin SDK (service account JSON).
 
-### 2.3 Config
+### 2.3 Push payload format (multi-user on one device)
+
+Core adds **user_id** and **source** to every push so the Companion can show which user the notification is for.
+
+- **APNs (iOS/macOS):** Custom keys at root level (outside `aps`):
+  - `user_id` (string): target user (e.g. `"alice"`, `"companion"`).
+  - `source` (string): e.g. `"reminder"`, `"push"`.
+  - Standard: `aps.alert.title`, `aps.alert.body`, `aps.sound`.
+- **FCM (Android):** `data` map (all values strings):
+  - `user_id`: target user.
+  - `source`: e.g. `"reminder"`, `"push"`.
+  - `text`: body text (same as notification body).
+
+**Companion behaviour:** When the app receives a push (foreground handler or when the user taps the notification), read `user_id` and `source` from the payload. Use them to e.g. show “Reminder for Alice: …” or open that user’s chat. One device can receive push for many users; the payload identifies which user each notification is for.
+
+### 2.4 Config (core.yml)
 
 Add to **config/core.yml** (optional):
 

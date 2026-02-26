@@ -82,39 +82,56 @@ def _make_apns_jwt(config: dict) -> Optional[str]:
     return None
 
 
-def send_apns_one(token: str, title: str, body: str) -> bool:
+def send_apns_one(
+    token: str,
+    title: str,
+    body: str,
+    user_id: Optional[str] = None,
+    source: Optional[str] = None,
+) -> bool:
     """
     Send one APNs notification to one device token.
+    Custom keys user_id and source are included so the app can show which user the push is for (multi-user on one device).
     Returns True if sent successfully. Never raises.
     """
-    config = _get_apns_config()
-    if not config:
-        return False
-    jwt_token = _make_apns_jwt(config)
-    if not jwt_token:
-        return False
-    base_url = "https://api.sandbox.push.apple.com" if config["sandbox"] else "https://api.push.apple.com"
-    url = f"{base_url}/3/device/{token}"
-    payload = {
-        "aps": {
-            "alert": {"title": (title or "HomeClaw")[:50], "body": (body or "")[:1024]},
-            "sound": "default",
-        },
-    }
-    headers = {
-        "authorization": f"bearer {jwt_token}",
-        "apns-topic": config["bundle_id"],
-        "apns-push-type": "alert",
-        "apns-priority": "10",
-        "content-type": "application/json",
-    }
     try:
+        token = (token or "").strip() if isinstance(token, str) else ""
+        if not token:
+            return False
+        config = _get_apns_config()
+        if not config or not isinstance(config, dict):
+            return False
+        jwt_token = _make_apns_jwt(config)
+        if not jwt_token:
+            return False
+        base_url = "https://api.sandbox.push.apple.com" if config.get("sandbox", True) else "https://api.push.apple.com"
+        url = f"{base_url}/3/device/{token}"
+        title_s = str(title or "HomeClaw")[:50]
+        body_s = str(body or "")[:1024]
+        payload = {
+            "aps": {
+                "alert": {"title": title_s, "body": body_s},
+                "sound": "default",
+            },
+        }
+        if user_id is not None and str(user_id).strip():
+            payload["user_id"] = str(user_id).strip()[:256]
+        if source is not None and str(source).strip():
+            payload["source"] = str(source).strip()[:64]
+        headers = {
+            "authorization": f"bearer {jwt_token}",
+            "apns-topic": str(config.get("bundle_id", "")),
+            "apns-push-type": "alert",
+            "apns-priority": "10",
+            "content-type": "application/json",
+        }
         import httpx
         with httpx.Client(http2=True) as client:
             resp = client.post(url, json=payload, headers=headers, timeout=10.0)
         if resp.status_code == 200:
             return True
-        logger.debug("APNs send to ...{} failed: {} {}", token[-8:] if len(token) > 8 else token, resp.status_code, resp.text[:200])
+        resp_text = getattr(resp, "text", None) or ""
+        logger.debug("APNs send to ...{} failed: {} {}", token[-8:] if len(token) > 8 else token, resp.status_code, resp_text[:200])
         if resp.status_code in (400, 410, 404):  # bad token / unregistered
             return False
     except Exception as e:

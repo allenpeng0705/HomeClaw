@@ -16,14 +16,16 @@ class PushTokenRegister(BaseModel):
 
 
 def get_api_companion_push_token_register_handler(core):  # noqa: ARG001
-    """Return handler for POST /api/companion/push-token."""
+    """Return handler for POST /api/companion/push-token. Never raises; returns 500 only on unexpected error."""
     async def api_companion_push_token_register(body: PushTokenRegister):
         try:
-            push_tokens_store.register_push_token(
-                body.user_id or "companion",
-                body.token or "",
-                (body.platform or "android").strip().lower() or "android",
-            )
+            uid = (getattr(body, "user_id", None) or "companion")
+            uid = uid.strip() if isinstance(uid, str) else "companion"
+            tok = getattr(body, "token", None) or ""
+            tok = str(tok).strip() if tok is not None else ""
+            plat = getattr(body, "platform", None) or "android"
+            plat = str(plat).strip().lower() or "android"
+            push_tokens_store.register_push_token(uid, tok, plat)
             return JSONResponse(content={"ok": True})
         except Exception as e:
             logger.warning("push-token register failed: {}", e)
@@ -32,10 +34,11 @@ def get_api_companion_push_token_register_handler(core):  # noqa: ARG001
 
 
 def get_api_companion_push_token_unregister_handler(core):  # noqa: ARG001
-    """Return handler for DELETE /api/companion/push-token. Query: user_id, token (optional; omit to remove all for user)."""
+    """Return handler for DELETE /api/companion/push-token. Query: user_id, token (optional). Never raises."""
     async def api_companion_push_token_unregister(user_id: str = "", token: str | None = None):
         try:
-            push_tokens_store.unregister_push_token(user_id or "companion", token)
+            uid = (user_id or "companion").strip() if isinstance(user_id, str) else "companion"
+            push_tokens_store.unregister_push_token(uid, token)
             return JSONResponse(content={"ok": True})
         except Exception as e:
             logger.warning("push-token unregister failed: {}", e)

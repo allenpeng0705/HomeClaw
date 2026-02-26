@@ -68,63 +68,94 @@ def _ensure_fcm_initialized() -> bool:
     return True
 
 
-def send_fcm_one(token: str, title: str, body: str) -> bool:
+def send_fcm_one(
+    token: str,
+    title: str,
+    body: str,
+    user_id: Optional[str] = None,
+    source: Optional[str] = None,
+) -> bool:
     """
     Send one FCM notification to one device token (Android or other non-Apple).
+    data payload includes user_id and source so the app can show which user the push is for (multi-user on one device).
     Returns True if sent successfully. Never raises.
     """
-    if not _ensure_fcm_initialized():
-        return False
     try:
+        token = (token or "").strip() if isinstance(token, str) else ""
+        if not token:
+            return False
+        if not _ensure_fcm_initialized():
+            return False
         from firebase_admin import messaging
+        title_s = str(title or "HomeClaw")[:50]
+        body_s = str(body or "")[:1024]
+        source_s = str(source or "reminder").strip()[:64]
+        data = {"source": source_s, "text": body_s}
+        if user_id is not None and str(user_id).strip():
+            data["user_id"] = str(user_id).strip()[:256]
         msg = messaging.Message(
-            notification=messaging.Notification(title=title or "HomeClaw", body=(body or "")[:1024]),
-            data={"source": "reminder", "text": (body or "")[:1024]},
+            notification=messaging.Notification(title=title_s, body=body_s),
+            data=data,
             token=token,
         )
         messaging.send(msg)
         return True
     except Exception as e:
-        logger.debug("FCM send to token ...{} failed: {}", token[-8:] if len(token) > 8 else token, e)
+        t = (token or "") if isinstance(token, str) else ""
+        logger.debug("FCM send to token ...{} failed: {}", t[-8:] if len(t) > 8 else t, e)
     return False
 
 
-def send_push_to_user(user_id: str, title: str, body: str) -> int:
+def send_push_to_user(user_id: str, title: str, body: str, source: str = "push") -> int:
     """
     Send FCM notification to all non-Apple tokens registered for user_id.
     For APNs (iOS/Apple) use base.push_send.send_push_to_user which routes by platform.
-    title/body are used for the notification payload.
-    Returns number of messages successfully sent. Never raises.
+    Returns number sent. Never raises.
     """
-    if not _ensure_fcm_initialized():
-        return 0
     try:
-        from base import push_tokens as push_tokens_store
-        from firebase_admin import messaging
-    except ImportError:
-        return 0
-    user_id = (user_id or "").strip() or "companion"
-    entries = push_tokens_store.get_tokens_for_user(user_id)
-    if not entries:
-        return 0
-    sent = 0
-    for entry in entries:
-        platform = (entry.get("platform") or "android").strip().lower()
-        if platform in ("ios", "macos", "tvos", "ipados", "watchos"):
-            continue
-        token = (entry.get("token") or "").strip()
-        if not token:
-            continue
+        if not _ensure_fcm_initialized():
+            return 0
         try:
-            msg = messaging.Message(
-                notification=messaging.Notification(title=title or "HomeClaw", body=(body or "")[:1024]),
-                data={"source": "reminder", "text": (body or "")[:1024]},
-                token=token,
-            )
-            messaging.send(msg)
-            sent += 1
-        except Exception as e:
-            logger.debug("FCM send to token ...{} failed: {}", token[-8:] if len(token) > 8 else token, e)
-            if "not a valid FCM registration token" in str(e).lower() or "unregistered" in str(e).lower():
-                push_tokens_store.unregister_push_token(user_id, token)
-    return sent
+            from base import push_tokens as push_tokens_store
+            from firebase_admin import messaging
+        except ImportError:
+            return 0
+        user_id = (user_id or "").strip() or "companion"
+        source_s = str(source or "reminder").strip()[:64]
+        title_s = str(title or "HomeClaw")[:50]
+        body_s = str(body or "")[:1024]
+        entries = push_tokens_store.get_tokens_for_user(user_id)
+        if not entries or not isinstance(entries, list):
+            return 0
+        sent = 0
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            platform = str(entry.get("platform") or "android").strip().lower()
+            if platform in ("ios", "macos", "tvos", "ipados", "watchos"):
+                continue
+            token = str(entry.get("token") or "").strip()
+            if not token:
+                continue
+            try:
+                data = {"source": source_s, "text": body_s}
+                if user_id:
+                    data["user_id"] = user_id[:256]
+                msg = messaging.Message(
+                    notification=messaging.Notification(title=title_s, body=body_s),
+                    data=data,
+                    token=token,
+                )
+                messaging.send(msg)
+                sent += 1
+            except Exception as e:
+                logger.debug("FCM send to token ...{} failed: {}", token[-8:] if len(token) > 8 else token, e)
+                if "not a valid FCM registration token" in str(e).lower() or "unregistered" in str(e).lower():
+                    try:
+                        push_tokens_store.unregister_push_token(user_id, token)
+                    except Exception:
+                        pass
+        return sent
+    except Exception as e:
+        logger.debug("fcm_send.send_push_to_user failed: {}", e)
+        return 0

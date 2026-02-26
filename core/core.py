@@ -2230,7 +2230,7 @@ class Core(CoreInterface):
                 try:
                     from base import push_send
                     title = "Reminder" if source == "reminder" else "HomeClaw"
-                    push_sent = push_send.send_push_to_user(user_id, title=title, body=out_text[:1024] if out_text else "")
+                    push_sent = push_send.send_push_to_user(user_id, title=title, body=out_text[:1024] if out_text else "", source=source)
                     if push_sent:
                         logger.info("deliver_to_user: sent {} push(es) (APNs/FCM) for user_id={} source={}", push_sent, user_id, source)
                 except Exception as push_e:
