@@ -1,5 +1,6 @@
 import Cocoa
 import FlutterMacOS
+import homeclaw_native
 
 @main
 class AppDelegate: FlutterAppDelegate {
@@ -9,5 +10,12 @@ class AppDelegate: FlutterAppDelegate {
 
   override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
     return true
+  }
+
+  override func application(
+    _ application: NSApplication,
+    didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+  ) {
+    HomeclawNativePlugin.receiveApnsToken(deviceToken)
   }
 }

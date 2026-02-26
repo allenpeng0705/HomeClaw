@@ -71,4 +71,9 @@ abstract class HomeclawNativePlatform extends PlatformInterface {
   Future<void> setTrayIcon({String? iconPath, String? tooltip}) {
     throw UnimplementedError('setTrayIcon() has not been implemented.');
   }
+
+  /// Get APNs device token (iOS/macOS only, no Firebase). Returns null if not supported or permission denied.
+  Future<String?> getApnsToken() {
+    throw UnimplementedError('getApnsToken() has not been implemented.');
+  }
 }

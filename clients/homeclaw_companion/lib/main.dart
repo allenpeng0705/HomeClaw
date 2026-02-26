@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:app_links/app_links.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
 import 'chat_history_store.dart';
@@ -15,12 +17,22 @@ void main() async {
   } catch (_) {
     // Hive init failed (e.g. storage permission); app still runs, chat history won't persist.
   }
+  // Firebase only on Android (FCM). iOS/macOS use native APNs only (no Firebase, works in China).
+  if (Platform.isAndroid) {
+    try {
+      await Firebase.initializeApp();
+    } catch (_) {
+      // Firebase not configured; push notifications disabled on Android.
+    }
+  }
   final coreService = CoreService();
   try {
     await coreService.loadSettings();
   } catch (_) {
     // Settings load failed; app uses defaults.
   }
+  // Register push token with Core on app start (iOS: APNs, Android: FCM) so reminders can be delivered when app is killed/background.
+  coreService.registerPushTokenWithCore('companion');
   String? initialMessage;
   try {
     final appLinks = AppLinks();

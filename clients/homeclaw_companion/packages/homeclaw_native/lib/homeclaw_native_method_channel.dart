@@ -94,4 +94,10 @@ class MethodChannelHomeclawNative extends HomeclawNativePlatform {
     };
     await methodChannel.invokeMethod<void>('setTrayIcon', args);
   }
+
+  @override
+  Future<String?> getApnsToken() async {
+    final result = await methodChannel.invokeMethod<String?>('getApnsToken');
+    return result;
+  }
 }

@@ -55,6 +55,11 @@ protego>=0.1
 # Hybrid router Layer 2: semantic routing (mix mode). Uses existing embedding via custom encoder.
 semantic-router>=0.0.20
 
+# Optional: push notifications so Core can send reminders when Companion app is killed/background.
+# APNs (iOS/Apple): pyjwt cryptography; FCM (Android): firebase-admin
+# pyjwt[crypto]>=2.0.0
+# firebase-admin>=6.0.0
+
 # Optional (uncomment if needed):
 # document_read tool: PDF, PPT, Word, MD, HTML, XML, JSON, etc. (one powerful tool)
 # numba>=0.59 required for Python 3.12 (unstructured[all-docs] pulls numba)

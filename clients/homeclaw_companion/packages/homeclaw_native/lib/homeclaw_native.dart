@@ -96,4 +96,13 @@ class HomeclawNative {
       // Not implemented
     }
   }
+
+  /// Get APNs device token (iOS/macOS only, no Firebase). Returns null if not supported or permission denied.
+  Future<String?> getApnsToken() async {
+    try {
+      return await _platform.getApnsToken();
+    } on PlatformException {
+      return null;
+    }
+  }
 }

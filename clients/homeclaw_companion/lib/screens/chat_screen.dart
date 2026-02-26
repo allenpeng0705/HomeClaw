@@ -88,6 +88,8 @@ class _ChatScreenState extends State<ChatScreen> {
     _checkCoreConnection();
     _connectionCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkCoreConnection());
     _pushMessageSubscription = widget.coreService.pushMessageStream.listen(_onPushMessage);
+    // Register push token for this chat user (iOS: APNs, Android: FCM) so reminders for this user can be delivered when app is killed.
+    widget.coreService.registerPushTokenWithCore(widget.userId);
     if (widget.initialMessage != null && widget.initialMessage!.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _inputController.text = widget.initialMessage!;

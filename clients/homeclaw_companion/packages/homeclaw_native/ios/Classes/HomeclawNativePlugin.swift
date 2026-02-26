@@ -3,10 +3,21 @@ import UIKit
 import UserNotifications
 
 public class HomeclawNativePlugin: NSObject, FlutterPlugin {
+  private static var pendingApnsResult: FlutterResult?
+
   public static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "homeclaw_native", binaryMessenger: registrar.messenger())
     let instance = HomeclawNativePlugin()
     registrar.addMethodCallDelegate(instance, channel: channel)
+  }
+
+  /// Call this from AppDelegate.didRegisterForRemoteNotificationsWithDeviceToken to pass the APNs token to Flutter.
+  public static func receiveApnsToken(_ deviceToken: Data) {
+    let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
+    if let result = pendingApnsResult {
+      DispatchQueue.main.async { result(token) }
+      pendingApnsResult = nil
+    }
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -21,10 +32,26 @@ public class HomeclawNativePlugin: NSObject, FlutterPlugin {
         return
       }
       showNotification(title: title, body: body, result: result)
+    case "getApnsToken":
+      requestApnsToken(result: result)
     case "startScreenRecord":
       result(nil)
     default:
       result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func requestApnsToken(result: @escaping FlutterResult) {
+    let center = UNUserNotificationCenter.current()
+    center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+      guard granted else {
+        DispatchQueue.main.async { result(nil) }
+        return
+      }
+      Self.pendingApnsResult = result
+      DispatchQueue.main.async {
+        UIApplication.shared.registerForRemoteNotifications()
+      }
     }
   }
 

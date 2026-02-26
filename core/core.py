@@ -84,7 +84,7 @@ from core.coreInterface import CoreInterface
 from core.emailChannel import channel
 from core.routes import (
     auth, lifecycle, inbound as inbound_routes, config_api, files, memory_routes, knowledge_base_routes,
-    plugins_api, misc_api, ui_routes, websocket_routes,
+    plugins_api, misc_api, ui_routes, websocket_routes, companion_push_api,
 )
 # Tool helpers: prefer core.services.tool_helpers; fallback to inline definitions so Core never crashes if the module is missing or broken.
 try:
@@ -1237,6 +1237,9 @@ class Core(CoreInterface):
         self.app.add_api_route("/api/testing/clear-all", misc_api.get_api_testing_clear_all_handler(self), methods=["POST"], dependencies=[Depends(auth.verify_inbound_auth)])
         self.app.add_api_route("/api/sessions", misc_api.get_api_sessions_list_handler(self), methods=["GET"], dependencies=[Depends(auth.verify_inbound_auth)])
         self.app.add_api_route("/api/reports/usage", misc_api.get_api_reports_usage_handler(self), methods=["GET"], dependencies=[Depends(auth.verify_inbound_auth)])
+        # Companion push (FCM token register so Core can send when app is killed/background)
+        self.app.add_api_route("/api/companion/push-token", companion_push_api.get_api_companion_push_token_register_handler(self), methods=["POST"], dependencies=[Depends(auth.verify_inbound_auth)])
+        self.app.add_api_route("/api/companion/push-token", companion_push_api.get_api_companion_push_token_unregister_handler(self), methods=["DELETE"], dependencies=[Depends(auth.verify_inbound_auth)])
         # UI and WebSocket
         self.app.add_api_route("/ui", ui_routes.get_ui_launcher_handler(self), methods=["GET"])
         self.app.add_websocket_route("/ws", websocket_routes.get_websocket_handler(self))
@@ -2224,6 +2227,14 @@ class Core(CoreInterface):
                         logger.debug("deliver_to_user: push to session {} failed: {}", (sid or "")[:8], e)
             if ws_count == 0:
                 logger.info("deliver_to_user: no WebSocket session for user_id={} (reminder/push may not reach app; ensure Companion opens /ws and sends register with this user_id)", user_id)
+                try:
+                    from base import push_send
+                    title = "Reminder" if source == "reminder" else "HomeClaw"
+                    push_sent = push_send.send_push_to_user(user_id, title=title, body=out_text[:1024] if out_text else "")
+                    if push_sent:
+                        logger.info("deliver_to_user: sent {} push(es) (APNs/FCM) for user_id={} source={}", push_sent, user_id, source)
+                except Exception as push_e:
+                    logger.debug("deliver_to_user: push send failed: {}", push_e)
             else:
                 logger.info("deliver_to_user: pushed to {} WebSocket session(s) for user_id={} source={}", ws_count, user_id, source)
             if channel_key:

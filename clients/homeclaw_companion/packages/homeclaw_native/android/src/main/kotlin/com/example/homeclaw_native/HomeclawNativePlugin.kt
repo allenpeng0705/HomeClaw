@@ -37,6 +37,7 @@ class HomeclawNativePlugin :
                 result.success(null)
             }
             "startScreenRecord" -> result.success(null)
+            "getApnsToken" -> result.success(null)  // APNs is iOS/macOS only; Android uses FCM
             else -> result.notImplemented()
         }
     }

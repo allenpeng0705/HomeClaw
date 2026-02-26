@@ -69,6 +69,22 @@ core_public_url: "https://homeclaw.gpt4people.online"
 pinggy:
   token: ""        # empty = do not start Pinggy; set to your Pinggy token to enable
   open_browser: true   # when true, open default browser to http://127.0.0.1:<port>/pinggy when tunnel is ready
+
+# Push notifications: APNs for iOS/macOS, FCM for Android (Companion reminders when app is backgrounded/killed).
+# APNs: pip install pyjwt cryptography "httpx[http2]". Use .p8 key from Apple Developer → Keys (not .p12 cert).
+# FCM: pip install firebase-admin; use a Firebase service account JSON key.
+push_notifications:
+  enabled: true
+  ios:  # also used for macOS (same bundle_id for Companion iOS/macOS app)
+    key_path: "config/AuthKey_4S2J822AM4.p8"   # path to .p8 file (relative to project root)
+    key_id: "4S2J822AM4"      # Key ID from Apple Developer (e.g. ABC123XYZ)
+    team_id: "VW379TB6DM"     # Team ID (10 chars, from Apple Developer membership)
+    bundle_id: "com.homeclaw.homeclawApp"   # Companion app bundle ID (iOS + macOS)
+    sandbox: true   # true for development/TestFlight, false for App Store
+  # FCM (Android and other non-Apple). Optional: set GOOGLE_APPLICATION_CREDENTIALS env instead.
+  fcm:
+    credentials_path: ""   # path to serviceAccountKey.json (relative to project root), or leave empty to use env
+
 # Tool layer (use_tools: true): tools section is in skills_and_plugins.yml. Edit config/skills_and_plugins.yml under "tools:".
 # Knowledge base and memory/DB blocks are in memory_kb.yml (see memory_kb_config_file above).
 # File-understanding (request.files from channels): always inject short notice with paths so the model uses document_read / knowledge_base_add. When user sends file(s) only (no text) and doc is not too big, add to KB directly. See docs_design/FileUnderstandingDesign.md.

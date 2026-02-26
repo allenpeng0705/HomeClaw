@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -165,6 +167,28 @@ class CoreService {
     return headers;
   }
 
+  /// Register push token with Core so Core can send reminders when app is killed/background. iOS/macOS: native APNs only (no Firebase). Android: FCM. No-op on Windows/Linux or if unavailable.
+  Future<void> registerPushTokenWithCore(String userId) async {
+    if (!Platform.isAndroid && !Platform.isIOS && !Platform.isMacOS) return;
+    try {
+      String? token;
+      final String platform;
+      if (Platform.isIOS || Platform.isMacOS) {
+        token = await HomeclawNative().getApnsToken();
+        platform = Platform.isMacOS ? 'macos' : 'ios';
+      } else {
+        final settings = await FirebaseMessaging.instance.requestPermission(alert: true, badge: true, sound: true);
+        if (settings.authorizationStatus != AuthorizationStatus.authorized && settings.authorizationStatus != AuthorizationStatus.provisional) return;
+        token = await FirebaseMessaging.instance.getToken();
+        platform = 'android';
+      }
+      if (token == null || token.isEmpty) return;
+      final url = Uri.parse('$_baseUrl/api/companion/push-token');
+      final body = jsonEncode({'user_id': userId.trim().isEmpty ? 'companion' : userId.trim(), 'token': token, 'platform': platform});
+      await http.post(url, headers: {'Content-Type': 'application/json', ..._authHeaders()}, body: body).timeout(const Duration(seconds: 10));
+    } catch (_) {}
+  }
+
   /// Check if Core is reachable. Returns true if we get any HTTP response (200, 401, 404, etc.), false on timeout/connection error.
   Future<bool> checkConnection() async {
     try {
@@ -251,6 +275,8 @@ class CoreService {
 
     // Establish WebSocket for push (reminders, cron) for both local and remote Core.
     await _ensureCoreWsConnected(userId);
+    // Register FCM token with Core so reminders can be sent when app is killed/background (iOS/Android only).
+    registerPushTokenWithCore(userId);
 
     if (useAsyncForRemote) {
       return _sendMessageAsync(url, body, onProgress ?? (_) {});

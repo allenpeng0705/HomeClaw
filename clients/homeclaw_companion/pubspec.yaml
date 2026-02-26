@@ -32,6 +32,9 @@ dependencies:
   geolocator_linux: ^0.2.0   # Linux location; 0.2.x required for Position.altitudeAccuracy (geolocator_platform_interface 4.x)
   flutter_markdown: ^0.7.4+1
   url_launcher: ^6.2.5
+  # Push notifications (FCM): so Core can send reminders when app is killed/background. Requires Firebase config (google-services.json, GoogleService-Info.plist).
+  firebase_core: ^3.8.1
+  firebase_messaging: ^15.1.6
 
 dev_dependencies:
   flutter_test:
