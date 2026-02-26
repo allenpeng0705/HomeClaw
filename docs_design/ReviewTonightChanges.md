@@ -65,9 +65,9 @@ This document summarizes the changes made in this session and the review applied
 
 ---
 
-### 2.2 LLM concurrency (llm_max_concurrent)
+### 2.2 LLM concurrency (llm_max_concurrent_local, llm_max_concurrent_cloud)
 
-- **Config:** `core.yml` and `CoreMetadata`: `llm_max_concurrent` (default 1); clamped 1–32 in `from_yaml`.
+- **Config:** `core.yml` and `CoreMetadata`: `llm_max_concurrent_local` (default 1), `llm_max_concurrent_cloud` (default 4); clamped 1–32 in `from_yaml`.
 - **Util** (`base/util.py`): `_get_llm_semaphore()` lazy-creates `asyncio.Semaphore(n)`. **Thread-safe creation:** class-level `Util._llm_semaphore_creation_lock` (threading.Lock); double-check inside lock so only one semaphore is created.
 - **openai_chat_completion:** Acquires semaphore then calls `_openai_chat_completion_impl`. **openai_chat_completion_message:** Acquires same semaphore then calls `_openai_chat_completion_message_impl`. REST handler uses Core’s `openai_chat_completion`, so it shares the semaphore.
 
@@ -103,7 +103,7 @@ This document summarizes the changes made in this session and the review applied
 | Channels (Telegram, Discord, Slack, Teams, etc.) | ✓ Same payload shape; text default | ✓ Optional fields; try/except download | ✓ Attachment limits; skip bad data |
 | Email attachments | ✓ MIME walk; temp files; skip bad fetch | ✓ Guards; try/except decode/extract | ✓ Skip invalid email; no crash on bad part |
 | Plugin LLM API    | ✓ One API; semaphore shared | ✓ Auth; validation; exception handling | ✓ Any for messages; JSON parse safe |
-| llm_max_concurrent | ✓ One semaphore; all paths use it | ✓ Locked lazy init; n clamped | ✓ Local 1, cloud 2–10 documented |
+| llm_max_concurrent_local / _cloud | ✓ Two semaphores (local vs cloud); resolve then acquire | ✓ Locked lazy init; n clamped | ✓ Local 1, cloud 4 defaults |
 | **Session**        | ✓ dm_scope; per-session key; cron delivery | ✓ session_cfg.get() with defaults; api_enabled | ✓ No crash on missing config |
 | **File-understanding** | ✓ request.files; data-URL → temp; process_files; add_to_kb | ✓ try/except; _safe_list; empty result fallback | ✓ Never crash on bad file or missing lib |
 | **system_plugins/homeclaw-browser** | ✓ WebChat, browser, canvas, nodes; session per user | ✓ Errors as success: false; Core handles non-2xx | ✓ Plugin never throws to Core |

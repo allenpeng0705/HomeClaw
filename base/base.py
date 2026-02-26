@@ -623,6 +623,17 @@ class Endpoint:
     output: Dict[str, Any]
 
 
+def _normalize_llm_max_concurrent(raw: Any) -> int:
+    """Normalize llm_max_concurrent_local/cloud: clamp to 1–32; invalid/missing → default from caller."""
+    try:
+        v = int(raw) if raw is not None else 1
+    except (TypeError, ValueError):
+        return 1
+    if v == 0:
+        return 0
+    return max(1, min(32, v))
+
+
 def _normalize_main_llm_language(raw: Union[str, List[str], None]) -> List[str]:
     """Normalize main_llm_language config to List[str]. Accepts string (e.g. 'en') or list (e.g. [zh, en]). Default ['en']."""
     if raw is None:
@@ -730,7 +741,8 @@ class CoreMetadata:
     auth_enabled: bool = False  # when True, require API key for /inbound and /ws; see RemoteAccess.md
     auth_api_key: str = ""  # key to require (X-API-Key header or Authorization: Bearer <key>); also used to sign file links when core_public_url is set
     core_public_url: str = ""  # public URL that reaches Core (e.g. https://homeclaw.example.com). Used for file/report links: core_public_url/files/out?path=...&token=...
-    llm_max_concurrent: int = 1  # max concurrent LLM calls (channel + plugin API); 1 = serialize, avoid backend overload; see PluginLLMAndQueueDesign.md
+    llm_max_concurrent_local: int = 1   # max concurrent local (llama.cpp) calls; 1 = typical for single GPU/process; see PluginLLMAndQueueDesign.md
+    llm_max_concurrent_cloud: int = 4   # max concurrent cloud (LiteLLM) calls; 2–10 for parallel channel + plugin under provider RPM/TPM
     knowledge_base: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, collection_name, chunk_size, unused_ttl_days, folder_sync (enabled, folder_name, schedule, allowed_extensions, max_file_size_bytes, resync_on_mtime_change); see docs/MemoryAndDatabase.md and PerUserKnowledgeBaseFolder.md
     profile: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, dir (base path for profiles); see docs/UserProfileDesign.md
     result_viewer: Dict[str, Any] = field(default_factory=dict)  # deprecated; kept for backward compat when loading old config. File serving uses core_public_url + GET /files/out.
@@ -1140,7 +1152,8 @@ class CoreMetadata:
             auth_enabled=data.get('auth_enabled', False),
             auth_api_key=(data.get('auth_api_key') or '').strip(),
             core_public_url=(data.get('core_public_url') or '').strip(),
-            llm_max_concurrent=max(1, min(32, int(data.get('llm_max_concurrent', 1) or 1))),
+            llm_max_concurrent_local=_normalize_llm_max_concurrent(data.get('llm_max_concurrent_local', 1)),
+            llm_max_concurrent_cloud=_normalize_llm_max_concurrent(data.get('llm_max_concurrent_cloud', 4)),
             knowledge_base=data.get('knowledge_base') if isinstance(data.get('knowledge_base'), dict) else {},
             profile=data.get('profile') if isinstance(data.get('profile'), dict) else {},
             result_viewer=data.get('result_viewer') if isinstance(data.get('result_viewer'), dict) else {},
@@ -1227,7 +1240,8 @@ class CoreMetadata:
                 'auth_enabled': getattr(core, 'auth_enabled', False),
                 'auth_api_key': getattr(core, 'auth_api_key', '') or '',
                 'core_public_url': getattr(core, 'core_public_url', '') or '',
-                'llm_max_concurrent': getattr(core, 'llm_max_concurrent', 1),
+                'llm_max_concurrent_local': getattr(core, 'llm_max_concurrent_local', 1),
+                'llm_max_concurrent_cloud': getattr(core, 'llm_max_concurrent_cloud', 4),
                 'embedding_llm': core.embedding_llm,
                 'llama_cpp': core.llama_cpp or {},
                 'completion': getattr(core, 'completion', {}) or {},

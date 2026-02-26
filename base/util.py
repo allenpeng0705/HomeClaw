@@ -920,19 +920,26 @@ class Util:
             return extra_body_params
         return {k: v for k, v in extra_body_params.items() if k not in self._GEMINI_UNSUPPORTED_EXTRA_KEYS}
 
-    def _get_llm_semaphore(self):
-        """Lazy-create a semaphore to limit concurrent LLM calls (channel + plugin API). Config: llm_max_concurrent (default 1). Thread-safe creation."""
-        if getattr(self, '_llm_semaphore', None) is None:
-            lock = getattr(Util, '_llm_semaphore_creation_lock', None)
-            if lock is None:
-                Util._llm_semaphore_creation_lock = threading.Lock()
-                lock = Util._llm_semaphore_creation_lock
-            with lock:
-                if getattr(self, '_llm_semaphore', None) is None:
+    def _get_llm_semaphore(self, mtype: str):
+        """Lazy-create semaphores for local (llama.cpp) and cloud (LiteLLM). mtype is 'local' or 'litellm'. Config: llm_max_concurrent_local (default 1), llm_max_concurrent_cloud (default 4). Thread-safe creation. Never raises: uses defaults on bad config."""
+        lock = getattr(Util, '_llm_semaphore_creation_lock', None)
+        if lock is None:
+            Util._llm_semaphore_creation_lock = threading.Lock()
+            lock = Util._llm_semaphore_creation_lock
+        with lock:
+            if getattr(self, '_llm_semaphore_local', None) is None or getattr(self, '_llm_semaphore_cloud', None) is None:
+                n_local, n_cloud = 1, 4
+                try:
                     meta = self.get_core_metadata()
-                    n = max(1, min(32, int(getattr(meta, 'llm_max_concurrent', 1) or 1)))
-                    self._llm_semaphore = asyncio.Semaphore(n)
-        return self._llm_semaphore
+                    n_local_raw = int(getattr(meta, 'llm_max_concurrent_local', 1) or 1)
+                    n_cloud_raw = int(getattr(meta, 'llm_max_concurrent_cloud', 4) or 4)
+                    n_local = max(1, min(32, n_local_raw))
+                    n_cloud = max(1, min(32, n_cloud_raw))
+                except (TypeError, ValueError, AttributeError, Exception):
+                    pass
+                self._llm_semaphore_local = asyncio.Semaphore(n_local)
+                self._llm_semaphore_cloud = asyncio.Semaphore(n_cloud)
+        return self._llm_semaphore_local if (mtype == 'local') else self._llm_semaphore_cloud
 
     async def openai_chat_completion(self, messages: list[dict], 
                                      grammar: str=None,
@@ -941,8 +948,10 @@ class Util:
                                      functions: Optional[List] = None,
                                      function_call: Optional[str] = None,
                                      llm_name: Optional[str] = None,
-                                     ) -> str | None:    
-        sem = self._get_llm_semaphore()
+                                     ) -> str | None:
+        resolved = self._resolve_llm(llm_name) or self.main_llm()
+        mtype = resolved[2] if (resolved and len(resolved) > 2) else 'local'
+        sem = self._get_llm_semaphore(mtype)
         async with sem:
             return await self._openai_chat_completion_impl(
                 messages, grammar=grammar, tools=tools, tool_choice=tool_choice,
@@ -1084,10 +1093,12 @@ class Util:
         Same as openai_chat_completion but returns the full assistant message dict for tool loop.
         Returns: {"role": "assistant", "content": str or None, "tool_calls": [...] or None}.
         Caller can append to messages and, if tool_calls present, execute tools and call again.
-        Uses same llm_max_concurrent semaphore as openai_chat_completion.
+        Uses same llm_max_concurrent_local / llm_max_concurrent_cloud semaphores as openai_chat_completion.
         When llm_name is set (e.g. mix-mode route ref), uses that model for this call.
         """
-        sem = self._get_llm_semaphore()
+        resolved = self._resolve_llm(llm_name) or self.main_llm()
+        mtype = resolved[2] if (resolved and len(resolved) > 2) else 'local'
+        sem = self._get_llm_semaphore(mtype)
         async with sem:
             return await self._openai_chat_completion_message_impl(
                 messages, tools=tools, tool_choice=tool_choice, grammar=grammar, llm_name=llm_name,
@@ -1282,18 +1293,28 @@ class Util:
         - Cloud: LiteLLM proxy at the model's host/port, with API key from env if set.
         RAG splits content before embedding; Cognee handles its own embedding. No summarization here.
         """
+        if text is None:
+            return None
         text = text.replace("\n", " ")
         logger.debug(f"LlamaCppEmbedding.embed: text: {text}")
 
         # Resolve host/port (and optional model + api_key) from configured embedding model (local or cloud)
         resolved = self.embedding_llm()
-        if resolved is None:
-            host = self.core_metadata.embedding_host
-            port = self.core_metadata.embedding_port
+        if resolved is None or not isinstance(resolved, (list, tuple)) or len(resolved) < 5:
+            try:
+                host = getattr(self.core_metadata, 'embedding_host', None) or '127.0.0.1'
+                port = getattr(self.core_metadata, 'embedding_port', None) or 5066
+            except Exception:
+                host, port = '127.0.0.1', 5066
+            if host is None or port is None:
+                return None
             model_for_body = None
             api_key = None
+            mtype = "local"
         else:
-            path_or_name, _, mtype, host, port = resolved
+            path_or_name, _, mtype, host, port = resolved[0], resolved[1], resolved[2] if len(resolved) > 2 else "local", resolved[3], resolved[4]
+            if host is None or port is None:
+                return None
             model_for_body = path_or_name if mtype == "litellm" else None
             api_key = None
             if mtype == "litellm":
@@ -1311,16 +1332,22 @@ class Util:
         body = {"input": text}
         if model_for_body:
             body["model"] = model_for_body
+        sem = self._get_llm_semaphore(mtype)
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    embedding_url,
-                    headers=headers,
-                    data=json.dumps(body),
-                ) as response:
-                    response_json = await response.json()
-                    ret = response_json["data"][0]["embedding"]
-                    return ret
+            async with sem:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        embedding_url,
+                        headers=headers,
+                        data=json.dumps(body),
+                    ) as response:
+                        response_json = await response.json()
+                        if not isinstance(response_json, dict) or "data" not in response_json or not response_json["data"]:
+                            return None
+                        first = response_json["data"][0]
+                        if not isinstance(first, dict) or "embedding" not in first:
+                            return None
+                        return first["embedding"]
         except Exception as e:
             logger.debug("Embedding error:Failed to get embedding from LLM")
             logger.debug(e)

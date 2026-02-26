@@ -269,3 +269,78 @@ tools:
   browser_enabled: true   # when browser_use_plugin false: built-in tools only if true
   browser_headless: false # when using built-in tools: false to show window (local testing)
   tool_timeout_seconds: 0   # per-tool timeout (seconds); 0 = no timeout. For long PDF/summarize use 300–600.
+  # Use tool result as final response and skip the second LLM call. These are the default lists (Core uses same if omitted).
+  # Plugins (homeclaw-browser, ppt-generation, etc.): invoked via route_to_plugin; result is always used as final response (no second LLM). homeclaw-browser is a system plugin (camera, browser); same rule applies.
+  use_result_as_response:
+    enabled: true
+    # Skills in this list always get a second LLM call (e.g. to confirm in natural language). Empty = use result for all skills.
+    skills_results_need_llm: [maton-api-gateway-1.0.0, x-api-1.0.0, meta-social-1.0.0]
+    # Tools whose result is raw content; always run second LLM to synthesize.
+    needs_llm_tools:
+      - document_read
+      - file_read
+      - file_understand
+      - web_search
+      - tavily_extract
+      - tavily_crawl
+      - tavily_research
+      - memory_search
+      - memory_get
+      - agent_memory_search
+      - agent_memory_get
+      - knowledge_base_search
+      - fetch_url
+      - web_extract
+      - web_crawl
+      - browser_navigate
+      - web_search_browser
+      - image
+      - sessions_transcript
+    # Tools whose result can be the final reply when short (length <= max_self_contained_length). save_result_page/get_file_view_link use result when it contains /files/out?token=.
+    self_contained_tools:
+      - run_skill
+      - echo
+      - time
+      - profile_get
+      - profile_list
+      - models_list
+      - agents_list
+      - platform_info
+      - cwd
+      - env
+      - session_status
+      - sessions_list
+      - sessions_send
+      - sessions_spawn
+      - cron_list
+      - cron_status
+      - cron_schedule
+      - cron_remove
+      - cron_update
+      - cron_run
+      - remind_me
+      - record_date
+      - recorded_events_list
+      - profile_update
+      - append_agent_memory
+      - append_daily_memory
+      - usage_report
+      - channel_send
+      - exec
+      - process_list
+      - process_poll
+      - process_kill
+      - file_write
+      - file_edit
+      - apply_patch
+      - folder_list
+      - file_find
+      - http_request
+      - webhook_trigger
+      - knowledge_base_add
+      - knowledge_base_remove
+      - knowledge_base_list
+      - browser_snapshot
+      - browser_click
+      - browser_type
+    max_self_contained_length: 2000

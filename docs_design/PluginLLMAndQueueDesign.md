@@ -23,8 +23,8 @@ This document describes how plugins (built-in and external) use Core’s LLM fea
 ### 1.3 Concurrency: channel queue vs plugin API
 
 - **Issue:** The channel request queue processes one message at a time, but the plugin LLM API is a normal HTTP endpoint. So we can have: (1) a channel request being processed (calling the LLM), and (2) a plugin (external or built-in via helper) calling the API at the same time → two concurrent LLM calls.
-- **Control:** Core limits concurrent LLM calls with a **global semaphore** (`llm_max_concurrent`, config in `core.yml`, default **1**). All LLM use goes through `Util().openai_chat_completion` or `openai_chat_completion_message` (channel path, post_process, tool loop) or through the REST handler (plugin API); every path acquires the semaphore before calling the backend. So with default 1, only one LLM request runs at a time (channel or plugin API); no overload.
-- **Tuning:** Set `llm_max_concurrent: 2` (or more) in config if your LLM backend supports multiple concurrent requests and you want to allow overlap (e.g. channel + plugin API in parallel).
+- **Control:** Core limits concurrent LLM calls with **two semaphores** (local vs cloud). Config in `core.yml`: **`llm_max_concurrent_local`** (default **1**), **`llm_max_concurrent_cloud`** (default **4**). All LLM use goes through `Util().openai_chat_completion` or `openai_chat_completion_message`; each call acquires the semaphore for the resolved backend (local/llama.cpp or cloud/LiteLLM). So local stays at 1 (single GPU/process); cloud can run several in parallel (channel + plugin API).
+- **Tuning:** Set `llm_max_concurrent_cloud: 2`–`10` for more parallel cloud calls; keep `llm_max_concurrent_local: 1` for single local GPU/process.
 
 ### 1.4 Channel request queue (multi-channel)
 
@@ -35,7 +35,7 @@ This document describes how plugins (built-in and external) use Core’s LLM fea
 ### 1.5 Plugin-originated LLM requests
 
 - **Built-in:** Plugin calls `await Util().plugin_llm_generate(messages, llm_name=None)`, which POSTs to Core’s `/api/plugins/llm/generate`. Same API contract as external; result returned from the helper.
-- **External:** Plugin sends HTTP `POST /api/plugins/llm/generate` to Core. Core runs LLM, returns JSON. **Synchronous** from the plugin’s perspective (request in → response back). Core does **not** put these on the channel `request_queue`; they are normal HTTP requests. The **semaphore** (`llm_max_concurrent`) ensures channel work and plugin API don’t overload the LLM backend when they happen concurrently.
+- **External:** Plugin sends HTTP `POST /api/plugins/llm/generate` to Core. Core runs LLM, returns JSON. **Synchronous** from the plugin’s perspective (request in → response back). Core does **not** put these on the channel `request_queue`; they are normal HTTP requests. The **semaphores** (`llm_max_concurrent_local` / `llm_max_concurrent_cloud`) ensure channel work and plugin API don’t overload the LLM backend when they happen concurrently.
 
 ## 2. Core APIs for plugins
 
@@ -51,13 +51,43 @@ This document describes how plugins (built-in and external) use Core’s LLM fea
 
 File understanding (multimodal documents) is currently applied inside Core for **channel** requests (e.g. `/inbound` with `files`). Exposing a dedicated “understand file” API for plugins can be added later if needed; plugins can already use `generate` with messages that include content produced elsewhere.
 
-## 3. Concurrency (llm_max_concurrent)
+## 3. Concurrency (llm_max_concurrent_local, llm_max_concurrent_cloud)
 
-- **Config:** `core.yml` → `llm_max_concurrent` (default **1**). Max number of concurrent LLM calls (channel processing, post_process, tool loop, and plugin API combined).
-- **Mechanism:** `Util().openai_chat_completion` and `openai_chat_completion_message` acquire an asyncio semaphore of size `llm_max_concurrent` before calling the LLM backend. The REST handler for `/api/plugins/llm/generate` calls Core’s `openai_chat_completion`, so it uses the same semaphore. So queue work and plugin API requests are serialized (when default 1) and don’t overload the backend.
+- **Config:** `core.yml` → **`llm_max_concurrent_local`** (default **1**), **`llm_max_concurrent_cloud`** (default **4**). Separate limits for local (llama.cpp) and cloud (LiteLLM).
+- **Mechanism:** `Util().openai_chat_completion` and `openai_chat_completion_message` acquire an asyncio semaphore for the resolved backend (local or cloud) before calling the LLM backend. The REST handler for `/api/plugins/llm/generate` calls Core’s `openai_chat_completion`, so it uses the same semaphores. So queue work and plugin API requests are serialized (when default 1) and don’t overload the backend.
 - **Recommendation — local model:** Use **1** (default). Keeps at most one request in flight to your local server (e.g. one GPU) and avoids overloading the process.
 - **Recommendation — cloud model:** May use **2–10** (or per-provider limit) so channel and plugin API can run in parallel. Stay under provider rate limits (RPM/TPM) and cost; adjust per provider.
-- **Tuning:** Set `llm_max_concurrent: 2` or more only when your backend supports it (cloud) or you run multiple local workers.
+- **Tuning:** Set `llm_max_concurrent_cloud: 2` or more for parallel cloud calls; keep `llm_max_concurrent_local: 1` unless you run multiple local workers.
+
+### 3.1 Logic in detail
+
+The two flags limit concurrency **by backend type** (local vs cloud), not by “role” (main vs embedding vs classifier).
+
+**Step-by-step (chat completion path):**
+
+1. Caller invokes `Util().openai_chat_completion(messages, llm_name=...)` or `openai_chat_completion_message(...)`.
+2. **Resolve backend:** Core resolves `llm_name` (or main_llm when omitted) via `_resolve_llm(llm_name)` or `main_llm()`. The result includes **mtype**: `'local'` (llama.cpp) or `'litellm'` (cloud).
+3. **Acquire semaphore:** Core calls `_get_llm_semaphore(mtype)` and gets the **local** or **cloud** semaphore. It then does `async with sem:` so only `llm_max_concurrent_local` concurrent local calls and `llm_max_concurrent_cloud` concurrent cloud calls run at once.
+4. **Call backend:** Inside the semaphore, Core sends the request to the resolved host:port (local server or LiteLLM proxy).
+
+So **every call that goes through `openai_chat_completion` / `openai_chat_completion_message`** is counted against either the local or the cloud limit, depending only on whether the **resolved model** is local or cloud. Main chat, plugin generate, post_process, TAM/cron LLM, memory summarization, etc. all use this path and share the same two semaphores.
+
+### 3.2 What is controlled: main, embedding, classifier, per-user
+
+| Use | Goes through openai_chat_completion? | Controlled by the two flags? |
+|-----|--------------------------------------|-------------------------------|
+| **Main model (chat)** | Yes | Yes — resolved to local or cloud → uses that semaphore. |
+| **Plugin generate / post_process** | Yes | Yes — same path. |
+| **Classifier (routing SLM)** | No — direct HTTP to classifier host:port | **Yes** — acquires the **local** semaphore before the HTTP call (classifier is always local). |
+| **Embedding model** | No — direct HTTP to embedding host:port | **Yes** — acquires the semaphore for the embedding backend type (local or cloud) before the HTTP call. |
+| **Per-user different models (future)** | Yes, if invoked via openai_chat_completion with that user’s llm_name | Yes — each user’s model resolves to local or cloud, so they share the same two semaphores. |
+
+**Summary:**
+
+- The two flags control **all chat completion traffic** that goes through `Util().openai_chat_completion` or `openai_chat_completion_message`. That includes: main chat, plugin API generate, post_process, TAM/cron LLM, memory summarization, and any future per-user chat model invoked via that path.
+- Control is **by backend type (local vs cloud)**, not by role. So if main_llm is local and a plugin calls with a cloud model, one request uses the local semaphore and another the cloud semaphore; they do not block each other.
+- **Embedding** and **classifier** use **direct** HTTP to their host:port but **do** acquire the same two semaphores before calling: embedding uses the semaphore for its resolved backend type (local or cloud); classifier always uses the **local** semaphore. So `llm_max_concurrent_local` / `llm_max_concurrent_cloud` limit main chat, plugin chat, embedding, and classifier together. If you run main + embedding + classifier all on the same machine/GPU, total concurrent local work is bounded by `llm_max_concurrent_local` (e.g. 1).
+- **Per-user different models:** If in the future different users use different models (e.g. user A → local_models/A, user B → cloud_models/B), each request still resolves to local or cloud and uses the corresponding semaphore. So the same two flags still apply: local concurrency and cloud concurrency are shared across all users and all roles that use the chat completion path.
 
 ## 4. Summary
 
@@ -69,6 +99,6 @@ File understanding (multimodal documents) is currently applied inside Core for *
 | Post-process       | Core runs LLM on plugin output           | `send_response_to_request_channel` (with markdown) |
 
 - **Same API:** Built-in and external plugins both use the same REST API; built-in via `Util().plugin_llm_generate()`.
-- **Concurrency:** `llm_max_concurrent` (default 1) limits concurrent LLM use so queue + plugin API don’t overload the backend.
+- **Concurrency:** `llm_max_concurrent_local` (default 1) and `llm_max_concurrent_cloud` (default 4) limit concurrent LLM use so queue + plugin API don’t overload the backend.
 - **Post-process:** Only the capability’s `post_process_prompt` and plugin output are used; markdown outbound is applied when sending to the channel.
 - **Multi-channel:** One `request_queue` and one consumer; no extra handling for “multiple channels at once.”

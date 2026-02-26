@@ -2,6 +2,7 @@
 Layer 3: Small local classifier (llama.cpp on a separate port).
 Calls the classifier model's /v1/chat/completions with a short judge prompt;
 parses "Local" or "Cloud" from the response. Reuses existing llama.cpp server mechanism.
+Classifier uses the same local semaphore as main/embedding so concurrent local calls are bounded.
 """
 import re
 from typing import Optional, Tuple
@@ -48,13 +49,17 @@ async def run_slm_layer_async(
         "max_tokens": 16,
         "temperature": 0.0,
     }
+    data = None
     try:
-        timeout = aiohttp.ClientTimeout(total=timeout_sec)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, json=body) as resp:
-                if resp.status != 200:
-                    return (0.0, None)
-                data = await resp.json()
+        from base.util import Util
+        sem = Util()._get_llm_semaphore("local")
+        async with sem:
+            timeout = aiohttp.ClientTimeout(total=timeout_sec)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=body) as resp:
+                    if resp.status != 200:
+                        return (0.0, None)
+                    data = await resp.json()
     except Exception:
         return (0.0, None)
     content = None

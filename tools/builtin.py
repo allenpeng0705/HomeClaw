@@ -2201,15 +2201,28 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
         full_out, base_for_validation = r_out
         if base_for_validation is not None:
             skill_env["HOMECLAW_OUTPUT_DIR"] = str(full_out)
-    # Inject user's location from profile so skills (e.g. weather) can use it when the query has no location.
+    # Inject user's location so skills (e.g. weather) can use it when the query has no location.
+    # Latest location (from client, e.g. Companion) has higher priority than profile.
+    # For "System" / "companion" user, latest location is stored under shared key so check both uid and shared key.
     try:
         req = getattr(context, "request", None)
         uid = (getattr(context, "system_user_id", None) or (getattr(req, "user_id", None) if req else None)) or ""
-        if (uid or "").strip() and _profile_base_dir() != "__disabled__":
+        uid = (uid or "").strip()
+        loc = None
+        if uid and hasattr(core, "_get_latest_location"):
+            latest = core._get_latest_location(uid)
+            if latest and isinstance(latest, str) and latest.strip():
+                loc = latest.strip()
+        if not loc and uid and (uid.lower() in ("system", "companion")) and hasattr(core, "_get_latest_location"):
+            shared_key = getattr(core, "_LATEST_LOCATION_SHARED_KEY", "companion")
+            latest = core._get_latest_location(shared_key)
+            if latest and isinstance(latest, str) and latest.strip():
+                loc = latest.strip()
+        if not loc and uid and _profile_base_dir() != "__disabled__":
             from base.profile_store import get_profile
             base_dir = _profile_base_dir()
             base_dir = None if base_dir == "__disabled__" else base_dir
-            profile = get_profile((uid or "").strip(), base_dir=base_dir)
+            profile = get_profile(uid, base_dir=base_dir)
             if isinstance(profile, dict):
                 loc = profile.get("location") or profile.get("city")
                 loc = (loc if isinstance(loc, str) else "").strip()
@@ -2217,8 +2230,8 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
                     addr = (profile.get("address") or "").strip()
                     if addr:
                         loc = addr.split(",")[0].strip() or addr[:80].strip()
-                if loc and isinstance(loc, str):
-                    skill_env["HOMECLAW_USER_LOCATION"] = loc
+        if loc and isinstance(loc, str):
+            skill_env["HOMECLAW_USER_LOCATION"] = loc
     except Exception:
         pass
     # Keyed skills: inject per-user API keys from user.yml, or use skill config/env when Companion without user.
@@ -2364,6 +2377,10 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
         err = stderr.decode("utf-8", errors="replace").strip()
         if err:
             out = out + "\nstderr:\n" + err if out else "stderr:\n" + err
+        # When script produced no stdout/stderr but exited with error, surface return code so user sees something
+        rc = getattr(proc, "returncode", None)
+        if not out and rc is not None and rc != 0:
+            out = f"Script exited with code {rc}. No output captured." + ("\nstderr:\n" + err if err else "")
         # If .py script failed with ModuleNotFoundError, optionally try auto-install and retry once
         if script_path.suffix.lower() in (".py", ".pyw") and "ModuleNotFoundError" in err:
             auto_install = config.get("run_skill_auto_install_missing") or {}
@@ -4161,8 +4178,10 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
                         result_text = f"{msg}\n\nCRITICAL: Use ONLY the URL on the next line. Copy it exactly—do not modify, truncate, or append anything.\n{link}"
         except (json.JSONDecodeError, TypeError):
             pass
-        # Post-process with LLM if capability has post_process and post_process_prompt (only prompt + plugin output; no extra info)
-        if capability and capability.get("post_process") and capability.get("post_process_prompt"):
+        # Post-process with LLM if capability has post_process and post_process_prompt (only prompt + plugin output; no extra info).
+        # Skip post_process when result contains a file view link: the LLM often corrupts the URL (spaces, truncation). Send the exact link instead.
+        has_file_view_link = isinstance(result_text, str) and "/files/out" in result_text and "token=" in result_text
+        if capability and capability.get("post_process") and capability.get("post_process_prompt") and not has_file_view_link:
             try:
                 messages = [
                     {"role": "system", "content": (capability.get("post_process_prompt") or "").strip()},

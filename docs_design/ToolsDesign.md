@@ -201,3 +201,42 @@ The system is designed to run **cross-platform (Mac, Linux, Windows)**. Code use
 - **run_skill .sh:** On Windows, `.sh` scripts run via Git Bash or WSL when available; otherwise use `.py` or `.bat`.
 
 **Summary:** One config (e.g. empty `exec_allowlist`, `file_read_base: "."`) works on Mac, Linux, and Windows. Override in config when you need a fixed allowlist or base path.
+
+---
+
+## 6. Use tool result as final response (skip second LLM)
+
+Core can use a tool’s result as the **final user response** and skip a second LLM call when the result is self-contained. Config: **`config/skills_and_plugins.yml`** under **`tools.use_result_as_response`**.
+
+- **needs_llm_tools:** Tools that return raw content (e.g. document_read, web_search, fetch_url, image). We always run a second LLM to synthesize a reply.
+- **self_contained_tools:** Tools whose result can be shown as-is when short (e.g. run_skill, time, profile_get, cron_list). We use the result as the final response when length ≤ max_self_contained_length (default 2000). save_result_page / get_file_view_link are special: we use the result when it contains a file view link (`/files/out?token=`).
+- **skills_results_need_llm:** By default all skills (run_skill) use their result as the final response. List skill names (e.g. `maton-api-gateway-1.0.0`) here to **force** a second LLM call for those skills (e.g. to confirm in natural language or explain API responses).
+- **Plugins (e.g. homeclaw-browser, ppt-generation):** Invoked via **route_to_plugin**. The plugin’s result is **always** used as the final response; there is no second LLM in Core for plugins. **homeclaw-browser** is a system plugin (camera, browser); same rule applies. When the plugin result contains a file view link, we skip the plugin’s own post_process LLM so the URL is not corrupted.
+
+### 6.1 Response with link (no second/third LLM) — review
+
+We **use the tool result as the final response** when it contains a file view link (`/files/out` and `token=`), and **do not** call the LLM again. This avoids the model truncating or corrupting the URL.
+
+**Flow**
+
+1. **Tool path (save_result_page / get_file_view_link):** After the tool loop, if `last_file_link_result` is set (tool was save_result_page or get_file_view_link and result contains `/files/out` and `token=`), we set `response = last_file_link_result` and **break** — no second LLM.
+2. **Plugin path (e.g. ppt-generation):** route_to_plugin runs; when the plugin returns a link (e.g. JSON with output_rel_path), we build the link, set result_text, and **skip post_process LLM** when the result already contains a file view link, then send that text to the user.
+
+**Why it's reasonable**
+
+- Links are built in one place (`build_file_view_link` in result_viewer.py) and always use the form `…/files/out?token=…&path=…`. Requiring both `/files/out` and `token=` in the result matches that format and avoids false positives (e.g. "Report saved to your output folder" has no link).
+- The **full** tool result is used as the response (including lines like "SUCCESS. CRITICAL: Use ONLY the URL…"), so the user gets the instruction and the exact URL; we do not strip or rephrase.
+
+**Edge cases (robust)**
+
+| Case | Behavior |
+|------|----------|
+| save_result_page format=html returns link | Result contains `/files/out` and `token=` → we use it as final response. ✓ |
+| save_result_page format=markdown with link | Same; user gets markdown preview + link. ✓ |
+| save_result_page returns no link (auth not set) | Result is e.g. "Report saved… Set auth_api_key…" — no `token=` → we do **not** set last_file_link_result; we fall through to self-contained check. save_result_page is only "use as final" when link present, so we do a second LLM. ✓ |
+| get_file_view_link returns error | No `/files/out` or `token=` → no last_file_link_result → second LLM can explain. ✓ |
+| Multiple tools in one round; last is save_result_page | last_file_link_result is set; we use it (checked first after loop). ✓ |
+| Multiple tools; save_result_page then echo | last_file_link_result set by save_result_page, not cleared by echo → we still use the link. ✓ |
+| Plugin (ppt) returns JSON with output_rel_path | We build link, set result_text, skip post_process, send exact text. ✓ |
+
+**Detection:** We require both substrings (`"/files/out" in result and "token=" in result`) so that only real file-view URLs trigger the "use as final response" and "skip post_process" behavior. All links produced by `build_file_view_link` include both.

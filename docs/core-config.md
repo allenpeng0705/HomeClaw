@@ -241,7 +241,8 @@ Use **core_public_url** when you expose Core yourself (e.g. Cloudflare Tunnel, T
 | **`graphDB`** | Used when memory_backend is chroma; backend (kuzu, neo4j) for entity/relationship graph. |
 | **`cognee`** | Used when **memory_backend: cognee**; relational, vector, graph providers and optional LLM/embedding overrides. |
 | **`silent`** | If true, reduce logging for memory/tools/skills/plugin/orchestrator. |
-| **`llm_max_concurrent`** | Max concurrent LLM calls (e.g. 1 for single local GPU; 2–10 for cloud). |
+| **`llm_max_concurrent_local`** | Max concurrent local (llama.cpp) calls; default 1. |
+| **`llm_max_concurrent_cloud`** | Max concurrent cloud (LiteLLM) calls; default 4; 2–10 under provider RPM/TPM. |
 | **`compaction`** | When context approaches model limit: trim or summarize messages; **reserve_tokens** for reply. |
 
 ---

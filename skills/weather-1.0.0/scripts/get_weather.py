@@ -142,16 +142,27 @@ def main() -> None:
             if core_loc:
                 location = core_loc
         if not location:
-            print("Usage: python get_weather.py <location>   e.g.  python get_weather.py London", file=sys.stderr)
-            print("If the user did not give a location, set it in profile (profile_update with location or city) so Core can pass it here.", file=sys.stderr)
+            msg = (
+                "Error: location is required. Usage: python get_weather.py <location> (e.g. London, Beijing). "
+                "If the user did not give a location, set it in profile (profile_update with location or city) so Core can pass it here."
+            )
+            print(msg, file=sys.stderr)
+            print(msg)  # Also stdout so Core always gets output
+            sys.stdout.flush()
+            sys.stderr.flush()
             sys.exit(1)
         result = fetch_weather(location, compact=not getattr(args, "full", False))
         if result:
             print(result)
+            sys.stdout.flush()
     except SystemExit:
         raise
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        err_msg = f"Error: {e}"
+        print(err_msg, file=sys.stderr)
+        print(err_msg)  # Also stdout so Core always gets output
+        sys.stdout.flush()
+        sys.stderr.flush()
         sys.exit(1)
 
 

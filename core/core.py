@@ -130,6 +130,78 @@ def _strip_leading_route_label(s: str) -> str:
     return s
 
 
+def _tool_result_usable_as_final_response(
+    tool_name: str,
+    tool_result: str,
+    config: Optional[Dict[str, Any]] = None,
+    tool_args: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """
+    Deterministic (no LLM) check: whether we can use the tool result as the final user response
+    and skip the second LLM call.
+    - Plugins: Handled by route_to_plugin (returns immediately with plugin result; no second LLM).
+    - Skills: By default use result for all skills (run_skill); list skills in skills_results_need_llm to force a second LLM call.
+    - Config: tools.use_result_as_response (self_contained_tools, needs_llm_tools, max_self_contained_length, skills_results_need_llm).
+    - No response: Empty or "(no output)" returns False so we do a second LLM round; the model can reply "Done." or we keep prior content (e.g. auto_invoke).
+    """
+    if not tool_name or not isinstance(tool_result, str):
+        return False
+    result = tool_result.strip()
+    if not result or result == "(no output)":
+        return False
+    cfg = config if isinstance(config, dict) else {}
+    enabled = cfg.get("enabled", True)
+    if not enabled:
+        return False
+    _need_llm_raw = cfg.get("needs_llm_tools")
+    needs_llm = tuple(_need_llm_raw) if isinstance(_need_llm_raw, (list, tuple)) else (
+        "document_read", "file_read", "file_understand",
+        "web_search", "tavily_extract", "tavily_crawl", "tavily_research",
+        "memory_search", "memory_get", "agent_memory_search", "agent_memory_get",
+        "knowledge_base_search", "fetch_url", "web_extract", "web_crawl",
+        "browser_navigate", "web_search_browser", "image", "sessions_transcript",
+    )
+    if tool_name in needs_llm:
+        return False
+    # Per-skill: skills in skills_results_need_llm always get a second LLM call (e.g. maton-api-gateway for richer reply).
+    if tool_name == "run_skill" and isinstance(tool_args, dict):
+        try:
+            skill_name = str(tool_args.get("skill_name") or tool_args.get("skill") or "").strip()
+        except (TypeError, ValueError):
+            skill_name = ""
+        if skill_name:
+            need_llm_skills = cfg.get("skills_results_need_llm")
+            if isinstance(need_llm_skills, (list, tuple)):
+                need_llm_set = {str(s).strip() for s in need_llm_skills if isinstance(s, str) and str(s).strip()}
+                if skill_name in need_llm_set:
+                    return False
+    # save_result_page / get_file_view_link: use when result contains the link (also handled by last_file_link_result)
+    if tool_name in ("save_result_page", "get_file_view_link"):
+        return "/files/out" in result and "token=" in result
+    _self_raw = cfg.get("self_contained_tools")
+    self_contained = tuple(_self_raw) if isinstance(_self_raw, (list, tuple)) else (
+        "run_skill", "echo", "time", "profile_get", "profile_list", "models_list", "agents_list",
+        "platform_info", "cwd", "env", "session_status", "sessions_list", "sessions_send", "sessions_spawn",
+        "cron_list", "cron_status", "cron_schedule", "cron_remove", "cron_update", "cron_run",
+        "remind_me", "record_date", "recorded_events_list", "profile_update",
+        "append_agent_memory", "append_daily_memory", "usage_report", "channel_send",
+        "exec", "process_list", "process_poll", "process_kill",
+        "file_write", "file_edit", "apply_patch", "folder_list", "file_find",
+        "http_request", "webhook_trigger",
+        "knowledge_base_add", "knowledge_base_remove", "knowledge_base_list",
+        "browser_snapshot", "browser_click", "browser_type",
+    )
+    try:
+        _max = cfg.get("max_self_contained_length", 2000)
+        max_len = int(_max) if isinstance(_max, (int, float)) else 2000
+    except (TypeError, ValueError):
+        max_len = 2000
+    max_len = max(100, min(max_len, 50000))  # clamp so bad config never breaks
+    if tool_name in self_contained:
+        return len(result) <= max_len
+    return False
+
+
 def _infer_route_to_plugin_fallback(query: str) -> Optional[Dict[str, Any]]:
     """
     When the LLM returns no tool call (e.g. model doesn't support tools or replied "No"), infer route_to_plugin
@@ -645,22 +717,31 @@ class Core(CoreInterface):
     async def get_embedding(self, request: EmbeddingRequest)-> List[List[float]]:
         # Initialize the embedder, now it is using one existing llama_cpp server with local LLM model
         try:
-            _, _, _, host, port = Util().embedding_llm()
+            resolved = Util().embedding_llm()
+            if not resolved or len(resolved) < 5:
+                logger.error("Embedding LLM not configured.")
+                return {}
+            mtype = resolved[2] if len(resolved) > 2 else "local"
+            host, port = resolved[3], resolved[4]
+            sem = Util()._get_llm_semaphore(mtype)
             embedding_url = "http://" + host + ":" + str(port) + "/v1/embeddings"
-            text = text.replace("\n", " ")
             request_json = request.model_dump_json()
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    embedding_url,
-                    headers={"accept": "application/json", "Content-Type": "application/json"},
-                    data=request_json,
-                ) as response:
-                    response_json = await response.json()
-                    # Extract embeddings from the response
-                    embeddings = [item["embedding"] for item in response_json["data"]]
-                    return embeddings
+            async with sem:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        embedding_url,
+                        headers={"accept": "application/json", "Content-Type": "application/json"},
+                        data=request_json,
+                    ) as response:
+                        response_json = await response.json()
+                        # Extract embeddings from the response; guard malformed response
+                        if not isinstance(response_json, dict) or "data" not in response_json or not isinstance(response_json["data"], list):
+                            return []
+                        embeddings = [item["embedding"] for item in response_json["data"] if isinstance(item, dict) and "embedding" in item]
+                        return embeddings
         except asyncio.CancelledError:
             logger.debug("Embedding request was cancelled.")
+            raise
         except Exception as e:
             logger.error(f"Unexpected error in embedding: {e}")
             return {}
@@ -1573,7 +1654,7 @@ class Core(CoreInterface):
             "agent_memory_max_chars", "use_agent_memory_search", "agent_memory_vector_collection",
             "agent_memory_bootstrap_max_chars", "agent_memory_bootstrap_max_chars_local",
             "use_daily_memory", "daily_memory_dir", "session", "notify_unknown_request", "outbound_markdown_format",
-            "llm_max_concurrent", "compaction", "use_tools", "use_skills", "skills_dir",
+            "llm_max_concurrent_local", "llm_max_concurrent_cloud", "compaction", "use_tools", "use_skills", "skills_dir",
             "skills_max_in_prompt", "plugins_max_in_prompt",
             "plugins_description_max_chars", "skills_use_vector_search", "skills_vector_collection",
             "skills_max_retrieved", "skills_similarity_threshold", "skills_refresh_on_startup", "skills_test_dir",
@@ -5701,6 +5782,9 @@ class Core(CoreInterface):
                                                         response = result
                                                 except (json.JSONDecodeError, TypeError):
                                                     response = result
+                                            elif (result.strip() == "(no output)" or not result.strip()) and (content_str or "").strip():
+                                                # General rule: auto_invoke tool returned empty/placeholder; keep model's existing reply instead of replacing with "(no output)"
+                                                response = content_str.strip()
                                             else:
                                                 response = result
                                             ran = True
@@ -5821,6 +5905,10 @@ class Core(CoreInterface):
                         break
                     routing_sent = False
                     routing_response_text = None  # when route_to_plugin/route_to_tam return text (sync inbound/ws), use as final response
+                    last_file_link_result = None  # when save_result_page/get_file_view_link return a link, use as final response so model cannot corrupt it
+                    last_tool_name = None  # for _tool_result_usable_as_final_response: skip second LLM when tool result is self-contained
+                    last_tool_result_raw = None
+                    last_tool_args = None  # for run_skill: skills_results_need_llm per-skill override
                     meta = Util().get_core_metadata()
                     tool_timeout_sec = max(0, int(getattr(meta, "tool_timeout_seconds", 120) or 0))
                     for tc in tool_calls:
@@ -5888,6 +5976,11 @@ class Core(CoreInterface):
                                     routing_sent = True
                                     routing_response_text = result
                                 # route_to_tam: fallback string means TAM couldn't parse as scheduling; don't set routing_sent so the tool result is appended and the loop continues — model can then try route_to_plugin or other tools
+                        if name in ("save_result_page", "get_file_view_link") and isinstance(result, str) and "/files/out" in result and "token=" in result:
+                            last_file_link_result = result
+                        last_tool_name = name
+                        last_tool_result_raw = result if isinstance(result, str) else None
+                        last_tool_args = args if isinstance(args, dict) else None
                         tool_content = result
                         if compaction_cfg.get("compact_tool_results") and isinstance(tool_content, str):
                             # document_read: keep more context so the model can generate HTML/summary from it; other tools: 4000
@@ -5902,6 +5995,28 @@ class Core(CoreInterface):
                             label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
                             out = label + (_strip_leading_route_label(out or "") or "")
                         return out
+                    # Use exact tool result as response when it contains a file view link, so the model cannot corrupt the URL in a follow-up reply
+                    if last_file_link_result:
+                        out = last_file_link_result
+                        if mix_route_this_request and mix_show_route_label and isinstance(out, str):
+                            layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
+                            label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
+                            out = label + (_strip_leading_route_label(out or "") or "")
+                        response = out
+                        break
+                    # Skip second LLM when tool result is self-contained (deterministic check, no LLM). Config: tools.use_result_as_response.
+                    try:
+                        use_result_config = (getattr(meta, "tools_config", None) or {}).get("use_result_as_response") if meta else None
+                        if last_tool_name and last_tool_result_raw and _tool_result_usable_as_final_response(last_tool_name, last_tool_result_raw, use_result_config, last_tool_args):
+                            out = last_tool_result_raw
+                            if mix_route_this_request and mix_show_route_label and isinstance(out, str):
+                                layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
+                                label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
+                                out = label + (_strip_leading_route_label(out or "") or "")
+                            response = out
+                            break
+                    except Exception as e:
+                        logger.debug("use_result_as_response check failed (continuing to second LLM): {}", e)
                 else:
                     response = (current_messages[-1].get("content") or "").strip() if current_messages else None
                 await close_browser_session(context)

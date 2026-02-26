@@ -26,10 +26,9 @@ homeclaw_root: "D:/homeclaw"
 notify_unknown_request: false
 # Outbound reply: only when the result looks like Markdown, Core converts it before sending; otherwise original text is sent. whatsapp (default) = *bold* _italic_ ~strikethrough~ (most IMs); plain = strip to plaintext (use if channel doesn't support whatsapp format); none = no conversion. See docs_design/OutboundMarkdownAndUnknownRequest.md.
 outbound_markdown_format: whatsapp
-# Max concurrent LLM calls (channel queue + plugin API /api/plugins/llm/generate).
-# Local model: use 1 (default) to avoid overloading one GPU/process.
-# Cloud model: may use 2–10 (or per-provider limit) for parallel channel + plugin API; stay under provider RPM/TPM. See docs_design/PluginLLMAndQueueDesign.md.
-llm_max_concurrent: 1
+# Max concurrent LLM calls (channel queue + plugin API /api/plugins/llm/generate). Separate limits for local (llama.cpp) and cloud (LiteLLM). See docs_design/PluginLLMAndQueueDesign.md.
+llm_max_concurrent_local: 1   # local (llama.cpp): 1 = typical for single GPU/process
+llm_max_concurrent_cloud: 4   # cloud (LiteLLM): 2–10 for parallel channel + plugin; stay under provider RPM/TPM
 # Compaction: trim or summarize context when approaching model limit. Reduces token use and avoids overflows.
 compaction:
   enabled: false              # when true, trim/summarize messages before LLM when over limit
