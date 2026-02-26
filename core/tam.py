@@ -614,8 +614,9 @@ class TAM:
             return False
         reminder_id = tam_storage.add_one_shot_reminder(run_time, message, user_id=user_id, channel_key=channel_key)
         if reminder_id:
+            # task must be a no-arg callable that returns a coroutine; schedule_fixed_task does asyncio.run(task())
             task = (
-                lambda rid, msg, uid, ck: lambda: asyncio.run(self._run_one_shot_and_remove(rid, msg, user_id=uid, channel_key=ck))
+                lambda rid, msg, uid, ck: lambda: self._run_one_shot_and_remove(rid, msg, user_id=uid, channel_key=ck)
             )(reminder_id, message, user_id, channel_key)
             self.schedule_fixed_task(task, run_time_str)
         else:

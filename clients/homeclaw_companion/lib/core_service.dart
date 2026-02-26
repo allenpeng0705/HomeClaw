@@ -286,11 +286,12 @@ class CoreService {
     _coreWsBaseUrl = null;
     try {
       _coreWsBaseUrl = _baseUrl;
-      var wsUrl = _baseUrl.replaceFirst(RegExp(r'^http'), 'ws').replaceFirst(RegExp(r'/$'), '');
-      if (_apiKey != null && _apiKey!.isNotEmpty) {
-        wsUrl += (wsUrl.contains('?') ? '&' : '?') + 'api_key=${Uri.encodeComponent(_apiKey!)}';
-      }
-      final uri = Uri.parse('$wsUrl/ws');
+      final baseWs = _baseUrl.replaceFirst(RegExp(r'^http'), 'ws').replaceFirst(RegExp(r'/$'), '');
+      // Path must be /ws; query ?api_key=... separate (was: base?api_key=.../ws → path became ?api_key=.../ws → 403)
+      final pathAndQuery = (_apiKey != null && _apiKey!.isNotEmpty)
+          ? '/ws?api_key=${Uri.encodeComponent(_apiKey!)}'
+          : '/ws';
+      final uri = Uri.parse('$baseWs$pathAndQuery');
       _coreWsChannel = WebSocketChannel.connect(uri);
       final completer = Completer<void>();
       final registerUserId = userId?.trim().isEmpty != true ? userId!.trim() : 'companion';

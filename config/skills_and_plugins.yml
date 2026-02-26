@@ -297,6 +297,13 @@ tools:
       - web_search_browser
       - image
       - sessions_transcript
+      - cron_list
+      - cron_status
+      - cron_schedule
+      - cron_remove
+      - cron_update
+      - cron_run
+      - remind_me
     # Tools whose result can be the final reply when short (length <= max_self_contained_length). save_result_page/get_file_view_link use result when it contains /files/out?token=.
     self_contained_tools:
       - run_skill
@@ -313,13 +320,6 @@ tools:
       - sessions_list
       - sessions_send
       - sessions_spawn
-      - cron_list
-      - cron_status
-      - cron_schedule
-      - cron_remove
-      - cron_update
-      - cron_run
-      - remind_me
       - record_date
       - recorded_events_list
       - profile_update

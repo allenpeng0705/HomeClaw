@@ -83,9 +83,221 @@ from tools.builtin import register_builtin_tools, register_routing_tools, close_
 from core.coreInterface import CoreInterface
 from core.emailChannel import channel
 from core.routes import (
-    auth, lifecycle, inbound, config_api, files, memory_routes, knowledge_base_routes,
+    auth, lifecycle, inbound as inbound_routes, config_api, files, memory_routes, knowledge_base_routes,
     plugins_api, misc_api, ui_routes, websocket_routes,
 )
+# Tool helpers: prefer core.services.tool_helpers; fallback to inline definitions so Core never crashes if the module is missing or broken.
+try:
+    from core.services.tool_helpers import (
+        tool_result_looks_like_error as _tool_result_looks_like_error,
+        tool_result_usable_as_final_response as _tool_result_usable_as_final_response,
+        parse_raw_tool_calls_from_content as _parse_raw_tool_calls_from_content,
+        infer_route_to_plugin_fallback as _infer_route_to_plugin_fallback,
+        infer_remind_me_fallback as _infer_remind_me_fallback,
+    )
+except Exception:
+    # Inline fallback: same logic as core/services/tool_helpers.py (compare with original single core.py).
+    def _tool_result_looks_like_error(result: Any) -> bool:
+        try:
+            if result is None or not isinstance(result, str):
+                return False
+            if len(result) > 2000:
+                return False
+            r = result.strip().lower()
+            if not r:
+                return False
+            if r == "[]":
+                return True
+            if "wasn't found" in r or "was not found" in r or "couldn't find" in r or "could not find" in r:
+                return True
+            if "no entries" in r and "directory" in r:
+                return True
+            if "no files or folders matched" in r or "no files matched" in r:
+                return True
+            if "path is required" in r or "that path is outside" in r or "path wasn't found" in r:
+                return True
+            if "file not found" in r or "not readable" in r or "not found or not readable" in r:
+                return True
+            if r.startswith("error:") or "error: " in r[:200]:
+                return True
+            if "do not reply with only this line" in r or "you must in this turn" in r:
+                return True
+        except Exception:
+            return False
+        return False
+
+    def _tool_result_usable_as_final_response(
+        tool_name: str,
+        tool_result: str,
+        config: Optional[Dict[str, Any]] = None,
+        tool_args: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        try:
+            if not isinstance(tool_name, str) or not tool_name.strip():
+                return False
+            if not isinstance(tool_result, str):
+                return False
+        except Exception:
+            return False
+        try:
+            result = tool_result.strip()
+            if not result or result == "(no output)":
+                return False
+            if _tool_result_looks_like_error(result):
+                return False
+            cfg = config if isinstance(config, dict) else {}
+            enabled = cfg.get("enabled", True)
+            if not enabled:
+                return False
+            if isinstance(tool_name, str) and tool_name.strip() == "run_skill":
+                try:
+                    r = (result if isinstance(result, str) else str(result or "")).lower()
+                    if "instruction-only skill confirmed" in r or "do not reply with only this line" in r or "you must in this turn" in r:
+                        logger.debug("run_skill instruction-only result: skipping use as final response (will do second LLM round)")
+                        return False
+                except Exception:
+                    pass
+            _need_llm_raw = cfg.get("needs_llm_tools")
+            needs_llm = tuple(_need_llm_raw) if isinstance(_need_llm_raw, (list, tuple)) else (
+                "document_read", "file_read", "file_understand",
+                "web_search", "tavily_extract", "tavily_crawl", "tavily_research",
+                "memory_search", "memory_get", "agent_memory_search", "agent_memory_get",
+                "knowledge_base_search", "fetch_url", "web_extract", "web_crawl",
+                "browser_navigate", "web_search_browser", "image", "sessions_transcript",
+            )
+            if tool_name in needs_llm:
+                return False
+            if tool_name == "run_skill" and isinstance(tool_args, dict):
+                try:
+                    skill_name = str(tool_args.get("skill_name") or tool_args.get("skill") or "").strip()
+                except (TypeError, ValueError):
+                    skill_name = ""
+                if skill_name:
+                    need_llm_skills = cfg.get("skills_results_need_llm")
+                    if isinstance(need_llm_skills, (list, tuple)):
+                        need_llm_set = {str(s).strip() for s in need_llm_skills if isinstance(s, str) and str(s).strip()}
+                        if skill_name in need_llm_set:
+                            return False
+            if tool_name in ("save_result_page", "get_file_view_link"):
+                return "/files/out" in result and "token=" in result
+            _self_raw = cfg.get("self_contained_tools")
+            self_contained = tuple(_self_raw) if isinstance(_self_raw, (list, tuple)) else (
+                "run_skill", "echo", "time", "profile_get", "profile_list", "models_list", "agents_list",
+                "platform_info", "cwd", "env", "session_status", "sessions_list", "sessions_send", "sessions_spawn",
+                "cron_list", "cron_status", "cron_schedule", "cron_remove", "cron_update", "cron_run",
+                "remind_me", "record_date", "recorded_events_list", "profile_update",
+                "append_agent_memory", "append_daily_memory", "usage_report", "channel_send",
+                "exec", "process_list", "process_poll", "process_kill",
+                "file_write", "file_edit", "apply_patch", "folder_list", "file_find",
+                "http_request", "webhook_trigger",
+                "knowledge_base_add", "knowledge_base_remove", "knowledge_base_list",
+                "browser_snapshot", "browser_click", "browser_type",
+            )
+            try:
+                _max = cfg.get("max_self_contained_length", 2000)
+                max_len = int(_max) if isinstance(_max, (int, float)) else 2000
+            except (TypeError, ValueError):
+                max_len = 2000
+            max_len = max(100, min(max_len, 50000))
+            if tool_name in self_contained:
+                return len(result) <= max_len
+            return False
+        except Exception:
+            return False
+
+    def _infer_remind_me_fallback(query: str) -> Optional[Dict[str, Any]]:
+        if not query or not isinstance(query, str):
+            return None
+        try:
+            m = re.search(r"(\d+)\s*分钟后", query.strip())
+            if m:
+                n = int(m.group(1))
+                if 0 < n <= 43200:
+                    return {"tool": "remind_me", "arguments": {"minutes": n, "message": query.strip()[:120] or "Reminder"}}
+        except Exception:
+            pass
+        return None
+
+    def _infer_route_to_plugin_fallback(query: str) -> Optional[Dict[str, Any]]:
+        if not query or not isinstance(query, str):
+            return None
+        q = query.strip().lower()
+        if "photo" in q or "snap" in q:
+            node_id = None
+            for m in re.finditer(r"(?:on\s+)([a-zA-Z0-9_-]+)", query, re.IGNORECASE):
+                node_id = m.group(1)
+            if not node_id:
+                m = re.search(r"([a-zA-Z0-9]+-node-[a-zA-Z0-9]+)", query, re.IGNORECASE)
+                node_id = m.group(1) if m else None
+            if node_id:
+                return {"plugin_id": "homeclaw-browser", "capability_id": "node_camera_snap", "parameters": {"node_id": node_id}}
+        if ("record" in q and "video" in q) or ("video" in q and "record" in q):
+            node_id = None
+            for m in re.finditer(r"(?:on\s+)([a-zA-Z0-9_-]+)", query, re.IGNORECASE):
+                node_id = m.group(1)
+            if not node_id:
+                m = re.search(r"([a-zA-Z0-9]+-node-[a-zA-Z0-9]+)", query, re.IGNORECASE)
+                node_id = m.group(1) if m else None
+            if node_id:
+                return {"plugin_id": "homeclaw-browser", "capability_id": "node_camera_clip", "parameters": {"node_id": node_id}}
+        if ("list" in q and "node" in q) or ("node" in q and ("connect" in q or "list" in q or "what" in q)):
+            return {"plugin_id": "homeclaw-browser", "capability_id": "node_list", "parameters": {}}
+        if any(kw in q for kw in ("open ", "navigate", "go to ", "打开", "访问", "浏览")) or re.search(r"https?://", query):
+            url = None
+            m = re.search(r"(https?://[^\s]+)", query)
+            if m:
+                url = m.group(1).strip().rstrip(".,;:)")
+            if not url and re.search(r"(?:open|navigate to|go to)\s+([a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,})", q):
+                m = re.search(r"(?:open|navigate to|go to)\s+([a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,})", q)
+                if m:
+                    url = "https://" + m.group(1).strip()
+            if not url:
+                for m in re.finditer(r"(?:打开|访问)\s*(\S+)", query):
+                    cand = m.group(1).strip()
+                    if cand.startswith(("http://", "https://")):
+                        url = cand
+                        break
+                    if "." in cand and len(cand) > 3:
+                        url = "https://" + cand
+                        break
+            if url:
+                return {"plugin_id": "homeclaw-browser", "capability_id": "browser_navigate", "parameters": {"url": url}}
+        if any(kw in q for kw in ("ppt", "powerpoint", "slides", "presentation", ".pptx", "幻灯片", "演示文稿")):
+            return {"plugin_id": "ppt-generation", "capability_id": "create_from_source", "parameters": {"source": query.strip()}}
+        return None
+
+    def _parse_raw_tool_calls_from_content(content: str):
+        if not content or not isinstance(content, str):
+            return None
+        text = content.strip()
+        if "<tool_call>" not in text and "</tool_call>" not in text:
+            return None
+        pattern = re.compile(r"<tool_call>\s*(\{[\s\S]*?\})\s*</tool_call>", re.IGNORECASE)
+        matches = pattern.findall(text)
+        if not matches:
+            return None
+        tool_calls = []
+        for i, raw_json in enumerate(matches):
+            try:
+                obj = json.loads(raw_json)
+                name = obj.get("name") or (obj.get("function") or {}).get("name")
+                args = obj.get("arguments")
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        args = {}
+                if not name:
+                    continue
+                if not isinstance(args, dict):
+                    args = {}
+                tool_calls.append({
+                    "id": f"raw_tool_{i}_{uuid.uuid4().hex[:8]}",
+                    "function": {"name": name, "arguments": json.dumps(args)},
+                })
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return tool_calls if tool_calls else None
 
 logging.basicConfig(level=logging.CRITICAL)
 
@@ -132,230 +344,6 @@ def _strip_leading_route_label(s: str) -> str:
     if re.match(r"^\[(?:Local|Cloud)(?:\s*·\s*[^\]]*)?\]\s*", t):
         return re.sub(r"^\[(?:Local|Cloud)(?:\s*·\s*[^\]]*)?\]\s*", "", t, count=1).strip()
     return s
-
-
-def _tool_result_looks_like_error(result: Any) -> bool:
-    """True if the tool result is an error or not-found message; we should not use it as final response (do 2nd LLM round instead). Never raises."""
-    try:
-        if result is None or not isinstance(result, str):
-            return False
-        if len(result) > 2000:
-            return False
-        r = result.strip().lower()
-        if not r:
-            return False
-        if r == "[]":
-            return True
-        # File/path errors (directory may not be empty; model used wrong path)
-        if "wasn't found" in r or "was not found" in r or "couldn't find" in r or "could not find" in r:
-            return True
-        if "no entries" in r and "directory" in r:
-            return True
-        if "no files or folders matched" in r or "no files matched" in r:
-            return True
-        if "path is required" in r or "that path is outside" in r or "path wasn't found" in r:
-            return True
-        if "file not found" in r or "not readable" in r or "not found or not readable" in r:
-            return True
-        if r.startswith("error:") or "error: " in r[:200]:
-            return True
-        # Results that are instructions to the model (not user-facing) should not be used as final response
-        if "do not reply with only this line" in r or "you must in this turn" in r:
-            return True
-    except Exception:
-        return False
-    return False
-
-
-def _tool_result_usable_as_final_response(
-    tool_name: str,
-    tool_result: str,
-    config: Optional[Dict[str, Any]] = None,
-    tool_args: Optional[Dict[str, Any]] = None,
-) -> bool:
-    """
-    Deterministic (no LLM) check: whether we can use the tool result as the final user response
-    and skip the second LLM call.
-    - Plugins: Handled by route_to_plugin (returns immediately with plugin result; no second LLM).
-    - Skills: By default use result for all skills (run_skill); list skills in skills_results_need_llm to force a second LLM call.
-    - Config: tools.use_result_as_response (self_contained_tools, needs_llm_tools, max_self_contained_length, skills_results_need_llm).
-    - No response: Empty or "(no output)" returns False so we do a second LLM round; the model can reply "Done." or we keep prior content (e.g. auto_invoke).
-    - Error-like result: If the result looks like "not found" / error, return False so we do the 2nd LLM round (model can rephrase or suggest listing files).
-    - Instruction-only run_skill: Skills without a script return instructions to the model; we never use that as final response (default in Core, no config).
-    """
-    try:
-        if not isinstance(tool_name, str) or not tool_name.strip():
-            return False
-        if not isinstance(tool_result, str):
-            return False
-    except Exception:
-        return False
-    try:
-        result = tool_result.strip()
-        if not result or result == "(no output)":
-            return False
-        if _tool_result_looks_like_error(result):
-            return False
-        cfg = config if isinstance(config, dict) else {}
-        enabled = cfg.get("enabled", True)
-        if not enabled:
-            return False
-        # Default: run_skill for instruction-only skills (no script) returns instructions to the model, not a user-facing answer. Always do another LLM round so the model continues with document_read / save_result_page etc. No config needed. Never raise.
-        if isinstance(tool_name, str) and tool_name.strip() == "run_skill":
-            try:
-                r = (result if isinstance(result, str) else str(result or "")).lower()
-                if "instruction-only skill confirmed" in r or "do not reply with only this line" in r or "you must in this turn" in r:
-                    logger.debug("run_skill instruction-only result: skipping use as final response (will do second LLM round)")
-                    return False
-            except Exception:
-                pass
-        _need_llm_raw = cfg.get("needs_llm_tools")
-        needs_llm = tuple(_need_llm_raw) if isinstance(_need_llm_raw, (list, tuple)) else (
-            "document_read", "file_read", "file_understand",
-            "web_search", "tavily_extract", "tavily_crawl", "tavily_research",
-            "memory_search", "memory_get", "agent_memory_search", "agent_memory_get",
-            "knowledge_base_search", "fetch_url", "web_extract", "web_crawl",
-            "browser_navigate", "web_search_browser", "image", "sessions_transcript",
-        )
-        if tool_name in needs_llm:
-            return False
-        # Per-skill: skills in skills_results_need_llm always get a second LLM call (e.g. maton-api-gateway for richer reply). Instruction-only skills are already handled above by default.
-        if tool_name == "run_skill" and isinstance(tool_args, dict):
-            try:
-                skill_name = str(tool_args.get("skill_name") or tool_args.get("skill") or "").strip()
-            except (TypeError, ValueError):
-                skill_name = ""
-            if skill_name:
-                need_llm_skills = cfg.get("skills_results_need_llm")
-                if isinstance(need_llm_skills, (list, tuple)):
-                    need_llm_set = {str(s).strip() for s in need_llm_skills if isinstance(s, str) and str(s).strip()}
-                    if skill_name in need_llm_set:
-                        return False
-        # save_result_page / get_file_view_link: use when result contains the link (also handled by last_file_link_result)
-        if tool_name in ("save_result_page", "get_file_view_link"):
-            return "/files/out" in result and "token=" in result
-        _self_raw = cfg.get("self_contained_tools")
-        self_contained = tuple(_self_raw) if isinstance(_self_raw, (list, tuple)) else (
-            "run_skill", "echo", "time", "profile_get", "profile_list", "models_list", "agents_list",
-            "platform_info", "cwd", "env", "session_status", "sessions_list", "sessions_send", "sessions_spawn",
-            "cron_list", "cron_status", "cron_schedule", "cron_remove", "cron_update", "cron_run",
-            "remind_me", "record_date", "recorded_events_list", "profile_update",
-            "append_agent_memory", "append_daily_memory", "usage_report", "channel_send",
-            "exec", "process_list", "process_poll", "process_kill",
-            "file_write", "file_edit", "apply_patch", "folder_list", "file_find",
-            "http_request", "webhook_trigger",
-            "knowledge_base_add", "knowledge_base_remove", "knowledge_base_list",
-            "browser_snapshot", "browser_click", "browser_type",
-        )
-        try:
-            _max = cfg.get("max_self_contained_length", 2000)
-            max_len = int(_max) if isinstance(_max, (int, float)) else 2000
-        except (TypeError, ValueError):
-            max_len = 2000
-        max_len = max(100, min(max_len, 50000))  # clamp so bad config never breaks
-        if tool_name in self_contained:
-            return len(result) <= max_len
-        return False
-    except Exception:
-        return False
-
-
-def _infer_route_to_plugin_fallback(query: str) -> Optional[Dict[str, Any]]:
-    """
-    When the LLM returns no tool call (e.g. model doesn't support tools or replied "No"), infer route_to_plugin
-    from clear user intent so the action still runs. Returns dict with plugin_id, capability_id, parameters or None.
-    """
-    if not query or not isinstance(query, str):
-        return None
-    q = query.strip().lower()
-    # "take a photo on test-node-1", "photo on X" -> node_camera_snap
-    if "photo" in q or "snap" in q:
-        node_id = None
-        for m in re.finditer(r"(?:on\s+)([a-zA-Z0-9_-]+)", query, re.IGNORECASE):
-            node_id = m.group(1)
-        if not node_id:
-            m = re.search(r"([a-zA-Z0-9]+-node-[a-zA-Z0-9]+)", query, re.IGNORECASE)
-            node_id = m.group(1) if m else None
-        if node_id:
-            return {"plugin_id": "homeclaw-browser", "capability_id": "node_camera_snap", "parameters": {"node_id": node_id}}
-    # "record video on X", "record a video on X"
-    if ("record" in q and "video" in q) or ("video" in q and "record" in q):
-        node_id = None
-        for m in re.finditer(r"(?:on\s+)([a-zA-Z0-9_-]+)", query, re.IGNORECASE):
-            node_id = m.group(1)
-        if not node_id:
-            m = re.search(r"([a-zA-Z0-9]+-node-[a-zA-Z0-9]+)", query, re.IGNORECASE)
-            node_id = m.group(1) if m else None
-        if node_id:
-            return {"plugin_id": "homeclaw-browser", "capability_id": "node_camera_clip", "parameters": {"node_id": node_id}}
-    # "list nodes", "what nodes are connected"
-    if ("list" in q and "node" in q) or ("node" in q and ("connect" in q or "list" in q or "what" in q)):
-        return {"plugin_id": "homeclaw-browser", "capability_id": "node_list", "parameters": {}}
-    # "open URL", "navigate to X", "go to https://..." — use homeclaw-browser (plugin or built-in tool path). Extract URL from query.
-    if any(kw in q for kw in ("open ", "navigate", "go to ", "打开", "访问", "浏览")) or re.search(r"https?://", query):
-        url = None
-        m = re.search(r"(https?://[^\s]+)", query)
-        if m:
-            url = m.group(1).strip().rstrip(".,;:)")
-        if not url and re.search(r"(?:open|navigate to|go to)\s+([a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,})", q):
-            m = re.search(r"(?:open|navigate to|go to)\s+([a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,})", q)
-            if m:
-                url = "https://" + m.group(1).strip()
-        if not url:
-            for m in re.finditer(r"(?:打开|访问)\s*(\S+)", query):
-                cand = m.group(1).strip()
-                if cand.startswith(("http://", "https://")):
-                    url = cand
-                    break
-                if "." in cand and len(cand) > 3:
-                    url = "https://" + cand
-                    break
-        if url:
-            return {"plugin_id": "homeclaw-browser", "capability_id": "browser_navigate", "parameters": {"url": url}}
-    # PPT / slides / presentation (avoids "I need some time" with no tool call — run plugin so user gets the file + link)
-    if any(kw in q for kw in ("ppt", "powerpoint", "slides", "presentation", ".pptx", "幻灯片", "演示文稿")):
-        return {"plugin_id": "ppt-generation", "capability_id": "create_from_source", "parameters": {"source": query.strip()}}
-    return None
-
-
-def _parse_raw_tool_calls_from_content(content: str):
-    """
-    If the LLM backend returned a raw tool_call in message content (e.g. <tool_call>{"name":..., "arguments":...}</tool_call>)
-    instead of structured tool_calls, parse it so we can execute and avoid sending that raw text to the user.
-    Returns list of OpenAI-style tool_call dicts (with id, function.name, function.arguments) or None if not detected / parse failed.
-    """
-    if not content or not isinstance(content, str):
-        return None
-    text = content.strip()
-    if "<tool_call>" not in text and "</tool_call>" not in text:
-        return None
-    # Extract all <tool_call>...</tool_call> blocks (non-greedy)
-    pattern = re.compile(r"<tool_call>\s*(\{[\s\S]*?\})\s*</tool_call>", re.IGNORECASE)
-    matches = pattern.findall(text)
-    if not matches:
-        return None
-    tool_calls = []
-    for i, raw_json in enumerate(matches):
-        try:
-            obj = json.loads(raw_json)
-            name = obj.get("name") or (obj.get("function") or {}).get("name")
-            args = obj.get("arguments")
-            if isinstance(args, str):
-                try:
-                    args = json.loads(args)
-                except json.JSONDecodeError:
-                    args = {}
-            if not name:
-                continue
-            if not isinstance(args, dict):
-                args = {}
-            tool_calls.append({
-                "id": f"raw_tool_{i}_{uuid.uuid4().hex[:8]}",
-                "function": {"name": name, "arguments": json.dumps(args)},
-            })
-        except (json.JSONDecodeError, TypeError):
-            continue
-    return tool_calls if tool_calls else None
 
 
 class Core(CoreInterface):
@@ -1024,17 +1012,22 @@ class Core(CoreInterface):
     def initialize(self):
         logger.debug("core initializing...")
         self.initialize_vector_store(collection_name="memory")
+        logger.debug("core init: vector_store done")
         self.embedder = LlamaCppEmbedding()
+        logger.debug("core init: embedder done")
         meta = Util().get_core_metadata()
         self._create_skills_vector_store()
         self._create_plugins_vector_store()
         self._create_agent_memory_vector_store()
+        logger.debug("core init: skills/plugins/agent_memory vector stores done")
         self.knowledge_base = None
         self._create_knowledge_base()
+        logger.debug("core init: knowledge_base done")
         memory_backend = (getattr(meta, "memory_backend", None) or "cognee").strip().lower()
 
         if memory_backend == "cognee" and Util().has_memory():
             try:
+                logger.debug("core init: creating Cognee memory (LLM/embedding must be reachable)...")
                 from memory.cognee_adapter import CogneeMemory
                 cognee_config = dict(getattr(meta, "cognee", None) or {})
                 # If cognee.llm / cognee.embedding endpoints are not set, use same resolved LLM/embedding as Core and chroma memory (OpenAI-compatible: base URL http://host:port/v1)
@@ -1112,7 +1105,7 @@ class Core(CoreInterface):
                         }
                         cognee_config["embedding"]["api_key"] = (getattr(meta, "main_llm_api_key", "") or "").strip() or "local"
                 self.mem_instance = CogneeMemory(config=cognee_config if cognee_config else None)
-                logger.debug("Memory backend: Cognee")
+                logger.debug("core init: Cognee memory done")
             except ImportError as e:
                 logger.warning("Cognee backend requested but cognee not installed: {}. Using chroma.", e)
                 memory_backend = "chroma"
@@ -1143,6 +1136,7 @@ class Core(CoreInterface):
                     llm=LlamaCppLLM(),
                     graph_store=graph_store,
                 )
+        logger.debug("core init: memory backend done")
 
         self.request_queue_task = asyncio.create_task(self.process_request_queue())
         self.response_queue_task = asyncio.create_task(self.process_response_queue())
@@ -1172,7 +1166,7 @@ class Core(CoreInterface):
         self.app.add_api_route("/ready", lifecycle.get_ready_handler(self), methods=["GET"])
         self.app.add_api_route("/pinggy", lifecycle.get_pinggy_handler(self, lambda: _pinggy_state), methods=["GET"], response_class=HTMLResponse)
         self.app.add_api_route("/shutdown", lifecycle.get_shutdown_handler(self), methods=["GET"])
-        self.app.add_api_route("/inbound/result", inbound.get_inbound_result_handler(self), methods=["GET"], dependencies=[Depends(auth.verify_inbound_auth)])
+        self.app.add_api_route("/inbound/result", inbound_routes.get_inbound_result_handler(self), methods=["GET"], dependencies=[Depends(auth.verify_inbound_auth)])
         self.app.add_api_route("/api/config/core", config_api.get_api_config_core_get_handler(self), methods=["GET"], dependencies=[Depends(auth.verify_inbound_auth)])
         self.app.add_api_route("/api/config/core", config_api.get_api_config_core_patch_handler(self), methods=["PATCH"], dependencies=[Depends(auth.verify_inbound_auth)])
         self.app.add_api_route("/api/config/users", config_api.get_api_config_users_get_handler(self), methods=["GET"], dependencies=[Depends(auth.verify_inbound_auth)])
@@ -1302,7 +1296,7 @@ class Core(CoreInterface):
                 return Response(content="Server Internal Error", status_code=500)
 
         @self.app.post("/inbound")
-        async def inbound(request: InboundRequest, _: None = Depends(auth.verify_inbound_auth)):
+        async def inbound_post_handler(request: InboundRequest, _: None = Depends(auth.verify_inbound_auth)):
             """
             Minimal API for any bot: POST {"user_id": "...", "text": "..."} and get {"text": "..."} back.
             No channel process needed; add user_id to config/user.yml allowlist. Use channel_name to tag the source (e.g. telegram, discord).
@@ -3115,6 +3109,7 @@ class Core(CoreInterface):
     async def run(self):
         """Run the core using uvicorn"""
         try:
+            # On Windows you may see "Task was destroyed but it is pending! task: ... IocpProactor.accept ..." at startup. This is a known asyncio/Proactor quirk: an accept coroutine can be reported as pending during init. It is harmless and the server runs normally; you can ignore it.
             logger.debug("core is running!")
             # Periodic wakeup so the event loop can process signals (e.g. Ctrl+C). Required on Windows;
             # harmless on macOS/Linux. Shorter interval (0.2s) improves responsiveness on Windows.
@@ -3134,27 +3129,29 @@ class Core(CoreInterface):
             # Start HTTP server early so GET /ready is served by this process (avoids 502 from another process on same port). /ready returns 503 until init done.
             server_task = asyncio.create_task(self.server.serve())
             await asyncio.sleep(0.5)
-            # Start embedding (and main LLM) server before initializing Cognee so the server is loading while we init; Cognee and syncs need the embedding server.
+            # Start embedding (and main LLM) server before initializing Cognee.
             logger.debug("Starting LLM manager (embedding + main LLM)...")
             self.llmManager.run()
             logger.debug("LLM manager started!")
-            self.initialize()
-            self.start_email_channel()
-            # When embedding is local, wait for the embedding server before Cognee or any sync uses it (Cognee add/cognify needs embedding; avoid "embedding server not connected").
+            # When embedding is local, wait for the embedding server BEFORE initialize() so Cognee (and other init) does not block waiting for embedding. Cognee may wait for embedding to be ready during CogneeMemory(config=...).
             need_embedder = (
                 (getattr(core_metadata, "memory_backend", None) or "cognee").strip().lower() == "cognee"
                 or getattr(core_metadata, "skills_use_vector_search", False)
                 or getattr(core_metadata, "plugins_use_vector_search", False)
                 or getattr(core_metadata, "use_agent_memory_search", True)
             )
-            if need_embedder and getattr(self, "embedder", None) and Util()._effective_embedding_llm_type() == "local":
+            if need_embedder and Util()._effective_embedding_llm_type() == "local":
                 try:
-                    # Timeout from config embedding_health_check_timeout_sec (default 120)
+                    logger.debug("Waiting for embedding server before init (Cognee/skills/plugins need it)...")
                     ready = await asyncio.to_thread(Util().check_embedding_model_server_health, None)
                     if not ready:
                         logger.warning("Embedding server did not become ready in time; Cognee memory and skills/plugins/agent_memory sync may fail.")
+                    else:
+                        logger.debug("Embedding server ready.")
                 except Exception as e:
                     logger.warning("Embedding server health check failed: {}; Cognee/sync may fail.", e)
+            self.initialize()
+            self.start_email_channel()
 
             # Sync skills to vector store when skills_use_vector_search and skills_refresh_on_startup
             if getattr(core_metadata, "skills_use_vector_search", False) and getattr(core_metadata, "skills_refresh_on_startup", True):
@@ -3786,9 +3783,10 @@ class Core(CoreInterface):
                 except Exception:
                     pass
                 date_str = now.strftime("%Y-%m-%d")
-                time_str = now.strftime("%H:%M")
+                time_24 = now.strftime("%H:%M")  # 24-hour, no AM/PM ambiguity
                 dow = now.strftime("%A")
-                ctx_line = f"Current date: {date_str}. Day of week: {dow}. Current time: {time_str} (system local)."
+                ctx_line = f"Current date: {date_str}. Day of week: {dow}. Current time: {time_24} (24-hour, system local)."
+                self._request_current_time_24 = time_24  # so routing block can inject it; model must use this, not invent 2:49 etc.
                 loc_str = None
                 try:
                     meta = request.request_metadata if getattr(request, "request_metadata", None) else {}
@@ -3816,7 +3814,7 @@ class Core(CoreInterface):
                         ctx_line += f" User location: {loc_str[:500]}."
                 except Exception as e:
                     logger.debug("System context location resolve: {}", e)
-                ctx_line += "\nUse this only when the user explicitly asks (e.g. \"what day is it?\", \"what time is it?\", \"where am I?\", age, \"how many days until X?\", or scheduling with remind_me, record_date, cron_schedule). Do not volunteer date, time, or location in greetings or general replies—that often leads to wrong or invented values. When you do need it, use the date and time in this block exactly; ignore any date or time in prior turns (they may be outdated)."
+                ctx_line += "\nCritical for cron jobs and reminders: this current datetime is the single source of truth. The server uses it when scheduling; you must use it for all time calculations. Do not use any other time (e.g. from memory or prior turns—they may be outdated). Use this block only when the user explicitly asks (e.g. \"what day is it?\", \"what time is it?\", scheduling with remind_me, record_date, cron_schedule). Do not volunteer date/time in greetings. For reminders and cron: use ONLY the Current time above; do not invent or guess any time. If the user says \"in N minutes\", reminder time = Current time + N minutes (e.g. Current time 17:58 + 30 min = 18:28)."
                 system_parts.append("## System context (date/time and location)\n" + ctx_line + "\n\n")
             except Exception as e:
                 logger.debug("System context block failed: {}", e)
@@ -4333,6 +4331,7 @@ class Core(CoreInterface):
                         s = d or ""
                         return s[:desc_max] if desc_max > 0 else s
                     plugin_lines = [f"  - {p.get('id', '') or 'plugin'}: {_desc(p.get('description'))}" for p in plugin_list]
+                _req_time_24 = getattr(self, "_request_current_time_24", "") or ""
                 routing_block = (
                     "## Routing (choose one)\n"
                     "Do NOT use route_to_tam for: opening URLs, listing nodes, canvas, camera/video on a node, or any non-scheduling request. Use route_to_plugin for those.\n"
@@ -4341,6 +4340,7 @@ class Core(CoreInterface):
                     "Listing connected nodes or \"what nodes are connected\" -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_list).\n"
                     "If the request clearly matches one of the available plugins below, call route_to_plugin with that plugin_id (and capability_id/parameters when relevant).\n"
                     "For time-related requests only: one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only when the user clearly asks to schedule or remind (e.g. \"remind me in 5 minutes\", \"every day at 9am\").\n"
+                    f"When the user asks to be reminded in N minutes (e.g. \"30分钟后提醒我\", \"remind me in 30 minutes\", \"我30分钟后有个会能提醒一下吗\"), you MUST call the remind_me tool with minutes=N (use the number from the user's message; 30分钟后 = 30 minutes) and message= a short reminder text. Do NOT reply with text-only or fake JSON; always call remind_me so the reminder is actually scheduled. The current time for this request is {_req_time_24}. Use only this time in your reply; never output 2:49 PM or any other invented time—if current time is {_req_time_24} and user says 15 minutes, add 15 to the minutes part and say that time or \"in 15 minutes\".\n"
                     "For script-based workflows use run_skill(skill_name, script, ...). For instruction-only skills (no scripts/) use run_skill(skill_name) with no script—then you MUST continue in the same turn (document_read, generate content, file_write or save_result_page, return link); do not reply with only the confirmation. skill_name can be folder or short name (e.g. html-slides).\n"
                     "When the user asks to generate an HTML slide or report from a document/file: (1) call document_read(path) to get the file content, (2) use that returned text as the source and generate the full HTML yourself, (3) call save_result_page(title=..., content=<your generated full HTML>, format='html'). For HTML slides do NOT use format='markdown'—use format='html'. Never pass empty or minimal content; content must be the full slide deck/report HTML.\n"
                     "Using an external service (Slack, LinkedIn, Outlook, HubSpot, Notion, Gmail, Stripe, Google Calendar, Salesforce, Airtable, etc.) -> use run_skill(skill_name='maton-api-gateway-1.0.0', script='request.py') with app and path from the maton skill body (Supported Services table and references/). Do not claim the action was done without calling the skill. For LinkedIn post: GET linkedin/rest/me then POST linkedin/rest/posts with commentary.\n"
@@ -4680,10 +4680,28 @@ class Core(CoreInterface):
                                 if not ran:
                                     response = content_str
                             else:
-                                # Fallback: model didn't call a tool (e.g. replied "No"). If user intent is clear, run plugin anyway.
-                                unhelpful = not content_str or len(content_str) < 80 or content_str.strip().lower() in ("no", "i can't", "i cannot", "sorry", "nope")
-                                fallback_route = _infer_route_to_plugin_fallback(query) if unhelpful else None
-                                if fallback_route and registry and any(t.name == "route_to_plugin" for t in (registry.list_tools() or [])):
+                                # Fallback: model didn't call a tool. Check remind_me first (e.g. "15分钟后有个会能提醒一下吗") so we set the reminder and return a clean response instead of messy 2:49 text.
+                                remind_fallback = _infer_remind_me_fallback(query) if query else None
+                                if remind_fallback and registry and any(t.name == "remind_me" for t in (registry.list_tools() or [])):
+                                    try:
+                                        _component_log("tools", "fallback remind_me (model did not call tool)")
+                                        result = await registry.execute_async("remind_me", remind_fallback.get("arguments") or {}, context)
+                                        if isinstance(result, str) and result.strip():
+                                            response = result
+                                            if mix_route_this_request and mix_show_route_label:
+                                                layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
+                                                label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
+                                                response = label + (_strip_leading_route_label(response or "") or "")
+                                        else:
+                                            response = content_str or "Reminder set."
+                                    except Exception as e:
+                                        logger.debug("Fallback remind_me failed: {}", e)
+                                        response = content_str or "Reminder could not be set. Please try again."
+                                else:
+                                    # Fallback: model didn't call a tool (e.g. replied "No"). If user intent is clear, run plugin anyway.
+                                    unhelpful = not content_str or len(content_str) < 80 or content_str.strip().lower() in ("no", "i can't", "i cannot", "sorry", "nope")
+                                    fallback_route = _infer_route_to_plugin_fallback(query) if unhelpful else None
+                                    if fallback_route and registry and any(t.name == "route_to_plugin" for t in (registry.list_tools() or [])):
                                     try:
                                         _component_log("tools", "fallback route_to_plugin (model did not call tool)")
                                         result = await registry.execute_async("route_to_plugin", fallback_route, context)
@@ -5824,13 +5842,18 @@ class Core(CoreInterface):
         os._exit(0 if not stop_thread.is_alive() else 1)
 
     def __enter__(self):
-        global _core_instance_for_ctrl_c
+        global _core_instance_for_ctrl_c, _core_ctrl_handler_ready_time
         _core_instance_for_ctrl_c = self
-        try:
-            signal.signal(signal.SIGINT, self.exit_gracefully)
-            signal.signal(signal.SIGTERM, self.exit_gracefully)
-        except Exception:
-            pass
+        _is_main = threading.current_thread() is threading.main_thread()
+        # Grace period for Windows: ignore CTRL_C_EVENT in first N seconds when Core runs in daemon thread (browser open can trigger spurious event).
+        _core_ctrl_handler_ready_time = time.time()
+        if _is_main:
+            try:
+                signal.signal(signal.SIGINT, self.exit_gracefully)
+                signal.signal(signal.SIGTERM, self.exit_gracefully)
+            except Exception:
+                pass
+        # On Windows, always register console Ctrl handler so Ctrl+C works (python -m main start runs Core in daemon thread; SIGINT may not be delivered). When daemon thread, handler ignores events in first _CORE_CTRL_GRACE_SEC.
         if sys.platform == "win32":
             try:
                 import ctypes
@@ -5846,8 +5869,9 @@ class Core(CoreInterface):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        global _core_instance_for_ctrl_c
+        global _core_instance_for_ctrl_c, _core_ctrl_handler_ready_time
         _core_instance_for_ctrl_c = None
+        _core_ctrl_handler_ready_time = None
         if sys.platform == "win32":
             try:
                 handler = getattr(_win_console_ctrl_handler, "_handler", None)
@@ -5884,18 +5908,57 @@ def main():
         logger.exception(e)
     finally:
         if loop is not None:
+            # Let the uvicorn server task see should_exit and exit before closing the loop, to avoid
+            # "Task was destroyed but it is pending! ... Server.serve()" on Windows.
+            if core is not None and getattr(core, "server", None) is not None:
+                try:
+                    core.server.should_exit = True
+                    core.server.force_exit = True
+                    loop.run_until_complete(asyncio.sleep(0.5))
+                except Exception:
+                    pass
             loop.close()
 
 # Set by Core.__enter__ so Windows console Ctrl handler can trigger shutdown when Python SIGINT is not delivered.
 _core_instance_for_ctrl_c = None
+# When Core runs in a daemon thread (python -m main start), ignore CTRL_C_EVENT in the first N seconds so opening the browser does not trigger shutdown.
+_core_ctrl_handler_ready_time = None
+_CORE_CTRL_GRACE_SEC = 5.0
 
 
 def _win_console_ctrl_handler(event):
-    """Windows-only: handle Ctrl+C so shutdown works when Python signal is not delivered."""
+    """Windows-only: handle Ctrl+C so shutdown works when Python signal is not delivered. Second Ctrl+C = force exit 100% (same as old Core)."""
     if event == 0:  # CTRL_C_EVENT
         core = globals().get("_core_instance_for_ctrl_c")
-        if core is not None:
-            core.exit_gracefully(signal.SIGINT, None)
+        if core is None:
+            return False
+        # Second Ctrl+C: force exit so user is not blocked by slow cleanup (same as old Core exit_gracefully).
+        if getattr(core, "_shutdown_started", False):
+            try:
+                print("\nForce exit (second Ctrl+C).", flush=True)
+            except Exception:
+                pass
+            os._exit(1)
+        # When Core runs in a daemon thread, ignore events in the first few seconds (browser open can trigger a spurious event).
+        global _core_ctrl_handler_ready_time
+        if _core_ctrl_handler_ready_time is not None:
+            try:
+                elapsed = time.time() - _core_ctrl_handler_ready_time
+                if elapsed < _CORE_CTRL_GRACE_SEC:
+                    return True  # ignore (don't shutdown)
+            except Exception:
+                pass
+        core._shutdown_started = True
+        try:
+            print("\nShutting down (press Ctrl+C again to force exit)... 正在关闭...", flush=True)
+            core.stop()
+            time.sleep(2.0)
+        except Exception:
+            pass
+        try:
+            os._exit(0)
+        except Exception:
+            sys.exit(0)
         return True
     return False
 

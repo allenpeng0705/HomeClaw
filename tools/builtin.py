@@ -852,7 +852,9 @@ async def _remind_me_executor(arguments: Dict[str, Any], context: ToolContext) -
         channel_key = "companion"
     try:
         tam.schedule_one_shot(message, run_time_str, user_id=user_id, channel_key=channel_key)
-        return json.dumps({"scheduled": True, "message": message, "run_at": run_time_str})
+        # User-friendly response (Core may use as final reply); avoid raw JSON
+        time_part = run_time_str.split()[-1] if " " in run_time_str else run_time_str
+        return f"Reminder set for {time_part}. I'll remind you: {message}"
     except Exception as e:
         return f"Error: {e!s}"
 

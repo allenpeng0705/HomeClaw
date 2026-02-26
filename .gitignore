@@ -41,3 +41,5 @@
 /plugins/ppt-generation/__pycache__
 /tests/__pycache__
 /core/routes/__pycache__
+/core/services/__pycache__
+/plugins/ppt-generation/__pycache__

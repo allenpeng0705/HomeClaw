@@ -121,7 +121,7 @@ This document is the **authoritative phase-by-phase log** of the Core route refa
 
 1. **Full reference (below):** Complete map of all route modules and what remains in core.py.
 2. **CoreRefactoringModularCore.md:** Updated to reflect the implemented layout (handler factories + `add_api_route` / `add_websocket_route`).
-3. **Services:** Inbound handler logic (`_handle_inbound_request`, `_handle_inbound_request_impl`, `_run_async_inbound`), outbound format (`_outbound_text_and_format`), location helpers, and tool_helpers **remain as Core methods** in core.py for stability. Optional future phase: extract these into `core/services/` when adding more tests or features.
+3. **Services:** Tool helpers are **extracted** to `core/services/tool_helpers.py` (`tool_result_looks_like_error`, `tool_result_usable_as_final_response`, `parse_raw_tool_calls_from_content`, `infer_route_to_plugin_fallback`). Core imports them and uses the same names (with leading underscore) so call sites are unchanged. Inbound handler logic (`_handle_inbound_request`, `_handle_inbound_request_impl`, `_run_async_inbound`), outbound format (`_outbound_text_and_format`), and location helpers remain in core.py; optional future phase: extract those into `core/services/` when adding more tests or features.
 4. **Tests:** `tests/test_core_routes.py` – smoke tests for the route layer (see **Tests for Core routes** below).
 
 ### Verification
@@ -149,11 +149,19 @@ This document is the **authoritative phase-by-phase log** of the Core route refa
 | **ui_routes.py** | `get_ui_launcher_handler` | — |
 | **websocket_routes.py** | `get_websocket_handler` | auth.ws_auth_ok inside handler |
 
+### Service modules (core/services/)
+
+| Module | Contents | Used by |
+|--------|----------|--------|
+| **tool_helpers.py** | `tool_result_looks_like_error`, `tool_result_usable_as_final_response`, `parse_raw_tool_calls_from_content`, `infer_route_to_plugin_fallback` | core.py (orchestrator / inbound flow) |
+
+Core imports these with underscore-prefixed aliases (e.g. `_tool_result_looks_like_error`) so existing call sites in core.py are unchanged.
+
 ### Still in core.py (not extracted)
 
 - **POST /inbound** (stream + async + sync) and **POST /process**, **POST /local_chat** (channel flow).
 - **Core state and init:** `self.app`, plugin_manager, orchestrator, chatDB, memory, knowledge_base, `_ws_sessions`, `_ws_user_by_session`, `_inbound_async_results`, etc.
-- **Core methods used by routes and flow:** `_handle_inbound_request`, `_handle_inbound_request_impl`, `_run_async_inbound`, `_outbound_text_and_format`, `run_memory_summarization`, `sync_user_kb_folder`, `get_sessions`, `openai_chat_completion`, `check_permission`, and all other CoreInterface / internal methods.
+- **Core methods used by routes and flow:** `_handle_inbound_request`, `_handle_inbound_request_impl`, `_run_async_inbound`, `_outbound_text_and_format`, `run_memory_summarization`, `sync_user_kb_folder`, `get_sessions`, `openai_chat_completion`, `check_permission`, and all other CoreInterface / internal methods. Tool helpers are imported from `core.services.tool_helpers`.
 - **Lifecycle:** `start_email_channel`, `stop`, `main()`, `initialize()` (which registers all routes from the modules above).
 
 ### How to add a new route group

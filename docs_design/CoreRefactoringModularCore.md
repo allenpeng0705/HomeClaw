@@ -51,7 +51,7 @@ Each module receives **Core instance** (or a narrow interface) so it can call `s
 | **core/services/inbound_handler.py** | Build PromptRequest from InboundRequest, run orchestrator, format response (sync/stream/async) | Extract from current `/inbound` and helpers |
 | **core/services/outbound_format.py** | `_format_outbound_text`, `_outbound_text_and_format`, `_safe_classify_format`; markdown_to_channel usage | Already has base.markdown_outbound |
 | **core/services/location.py** | `_latest_location_path`, `_normalize_location_to_address`, `_set_latest_location`, `_get_latest_location*` | Pure logic, easy to test |
-| **core/services/tool_helpers.py** | `_tool_result_looks_like_error`, `_tool_result_usable_as_final_response`, `_parse_raw_tool_calls_from_content`, `_infer_route_to_plugin_fallback` | Used by orchestrator/inbound |
+| **core/services/tool_helpers.py** | `tool_result_looks_like_error`, `tool_result_usable_as_final_response`, `parse_raw_tool_calls_from_content`, `infer_route_to_plugin_fallback` | **Implemented.** Used by core.py (orchestrator/inbound); Core imports with `_`-prefixed aliases. |
 
 These stay stateless or take Core (or a small interface) as argument; Core continues to own all state.
 
