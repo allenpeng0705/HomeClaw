@@ -124,7 +124,8 @@ def apply_instructor_patch_for_local_llm() -> bool:
                         mode="TOOLS",
                         raw_response=completion,
                     ) from e
-            return original_parse_tools(cls, completion, validation_context, strict)
+            # classmethod binds cls; only pass (completion, validation_context, strict)
+            return original_parse_tools(completion, validation_context, strict)
 
         OpenAISchema.parse_tools = _parse_tools_local_friendly
         _PATCHED = True

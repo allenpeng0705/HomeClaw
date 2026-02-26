@@ -10,6 +10,7 @@ multiple tool_calls; cognify then works with local models. If you still see "Ins
 support multiple tool calls", set cognee.llm to a cloud endpoint in memory_kb.yml as fallback.
 """
 import asyncio
+import logging
 import os
 import re
 import uuid
@@ -22,6 +23,36 @@ from memory.base import MemoryBase
 
 # Composite id for summarization: "dataset_id:data_id" so delete_async can resolve both
 COGNEE_ID_SEP = ":"
+COGNEE_GRAPH_DATASETS_FILE = "cognee_datasets_with_graph.txt"
+
+
+def _load_cognee_graph_datasets() -> set[str]:
+    """Load set of dataset names that have had at least one successful cognify (persisted so we skip search on empty graph after restart)."""
+    out: set[str] = set()
+    try:
+        from base.util import Util
+        path = os.path.join(Util().data_path(), COGNEE_GRAPH_DATASETS_FILE)
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    name = (line or "").strip()
+                    if name and name.startswith("memory_"):
+                        out.add(name)
+    except Exception:
+        pass
+    return out
+
+
+def _save_cognee_graph_dataset(dataset: str) -> None:
+    """Append a dataset name to the persisted list (called after successful cognify)."""
+    try:
+        from base.util import Util
+        path = os.path.join(Util().data_path(), COGNEE_GRAPH_DATASETS_FILE)
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(dataset + "\n")
+    except Exception:
+        pass
 
 
 def apply_cognee_config(config: Dict[str, Any]) -> None:
@@ -169,6 +200,7 @@ class CogneeMemory(MemoryBase):
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self._huggingface_tokenizer = None  # re-apply before add() so Cognee sees it at call time
+        self._datasets_with_graph = _load_cognee_graph_datasets()  # skip search when dataset never had successful cognify (avoids empty-graph warning)
         if config:
             apply_cognee_config(config)
             emb = config.get("embedding") or {}
@@ -195,6 +227,12 @@ class CogneeMemory(MemoryBase):
                 pass
             import cognee  # noqa: F401
             self._cognee = cognee
+            # Reduce Cognee log noise: empty-graph warnings and large failed_attempts dumps
+            for _log_name in ("cognee.shared.logging_utils", "cognee.shared", "GraphCompletionRetriever"):
+                try:
+                    logging.getLogger(_log_name).setLevel(logging.CRITICAL)
+                except Exception:
+                    pass
         except ImportError as e:
             raise ImportError(
                 "Cognee memory backend requires: pip install cognee. "
@@ -235,6 +273,8 @@ class CogneeMemory(MemoryBase):
         try:
             await self._cognee.add(data, dataset_name=dataset)
             await self._cognee.cognify(datasets=[dataset])
+            self._datasets_with_graph.add(dataset)
+            _save_cognee_graph_dataset(dataset)
         except Exception as e:
             msg = str(e).strip()
             # Never log the full Cognee/Instructor failed_attempts XML (can be huge)
@@ -261,7 +301,7 @@ class CogneeMemory(MemoryBase):
         filters: Optional[Dict] = None,
     ) -> List[Dict[str, Any]]:
         dataset = _dataset_name(user_id=user_id, agent_id=agent_id)
-        # Avoid calling Cognee search on a non-existent dataset (prevents DatasetNotFoundError 404 and its error log)
+        # Avoid calling Cognee search when dataset doesn't exist or has never had a successful cognify (avoids "Search attempt on an empty knowledge graph"). Persisted set so we skip correctly after restart.
         if hasattr(self._cognee, "datasets") and hasattr(self._cognee.datasets, "list_datasets"):
             try:
                 datasets_list = await asyncio.wait_for(
@@ -274,6 +314,8 @@ class CogneeMemory(MemoryBase):
                     if n:
                         names.append(n)
                 if dataset not in names:
+                    return []
+                if dataset not in self._datasets_with_graph:
                     return []
             except (asyncio.TimeoutError, Exception):
                 pass  # fall back to search (may 404 and log; we catch below)
