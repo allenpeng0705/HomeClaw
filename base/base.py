@@ -623,6 +623,37 @@ class Endpoint:
     output: Dict[str, Any]
 
 
+def _get_gpu_count() -> int:
+    """Return number of CUDA GPUs (0 if CPU-only or torch/cuda unavailable). Used only for default concurrency; never raises."""
+    try:
+        import torch
+        n = getattr(torch.cuda, 'device_count', lambda: 0)()
+        return int(n) if n is not None else 0
+    except Exception:
+        return 0
+
+
+def _default_llm_max_concurrent_local() -> int:
+    """Default for llm_max_concurrent_local when not in config: 1 for CPU or 1 GPU; min(gpu_count, 4) for 2+ GPUs."""
+    n = _get_gpu_count()
+    if n <= 1:
+        return 1
+    return min(n, 4)
+
+
+def _default_llm_max_concurrent_cloud(main_llm_mode: Any) -> int:
+    """Default for llm_max_concurrent_cloud when not in config: 4 for mix; 6 for cloud-only; 2 for local-only. Never raises."""
+    try:
+        mode = str(main_llm_mode or "").strip().lower()
+    except Exception:
+        return 4
+    if mode == "cloud":
+        return 6
+    if mode == "local":
+        return 2
+    return 4  # mix or empty
+
+
 def _normalize_llm_max_concurrent(raw: Any) -> int:
     """Normalize llm_max_concurrent_local/cloud: clamp to 1–32; invalid/missing → default from caller."""
     try:
@@ -1152,8 +1183,12 @@ class CoreMetadata:
             auth_enabled=data.get('auth_enabled', False),
             auth_api_key=(data.get('auth_api_key') or '').strip(),
             core_public_url=(data.get('core_public_url') or '').strip(),
-            llm_max_concurrent_local=_normalize_llm_max_concurrent(data.get('llm_max_concurrent_local', 1)),
-            llm_max_concurrent_cloud=_normalize_llm_max_concurrent(data.get('llm_max_concurrent_cloud', 4)),
+            llm_max_concurrent_local=_normalize_llm_max_concurrent(
+                data.get('llm_max_concurrent_local') if 'llm_max_concurrent_local' in data else _default_llm_max_concurrent_local()
+            ),
+            llm_max_concurrent_cloud=_normalize_llm_max_concurrent(
+                data.get('llm_max_concurrent_cloud') if 'llm_max_concurrent_cloud' in data else _default_llm_max_concurrent_cloud(main_llm_mode_val)
+            ),
             knowledge_base=data.get('knowledge_base') if isinstance(data.get('knowledge_base'), dict) else {},
             profile=data.get('profile') if isinstance(data.get('profile'), dict) else {},
             result_viewer=data.get('result_viewer') if isinstance(data.get('result_viewer'), dict) else {},
