@@ -69,8 +69,9 @@ def post_to_core_sync(
     if files:
         payload["files"] = files
     try:
+        headers = Util().get_channels_core_api_headers()
         with httpx.Client() as client:
-            r = client.post(INBOUND_URL, json=payload, timeout=120.0)
+            r = client.post(INBOUND_URL, json=payload, headers=headers, timeout=120.0)
         data = r.json()
         reply = data.get("text", "")
         if not reply and r.status_code != 200:

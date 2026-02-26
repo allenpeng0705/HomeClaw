@@ -14,9 +14,20 @@ function create(options) {
 
   function handleUpgrade(request, socket, head) {
     chatWss.handleUpgrade(request, socket, head, (clientWs) => {
+      let coreWsUrl = CORE_WS_URL;
       const headers = {};
-      if (CORE_API_KEY) headers['X-API-Key'] = CORE_API_KEY;
-      const coreWs = new WebSocket(CORE_WS_URL, { headers });
+      try {
+        const u = new URL((request.url || '/ws'), 'http://x');
+        const clientApiKey = u.searchParams.get('api_key') || u.searchParams.get('x-api-key');
+        if (clientApiKey) {
+          coreWsUrl += (coreWsUrl.includes('?') ? '&' : '?') + 'api_key=' + encodeURIComponent(clientApiKey);
+        } else if (CORE_API_KEY) {
+          headers['X-API-Key'] = CORE_API_KEY;
+        }
+      } catch (_) {
+        if (CORE_API_KEY) headers['X-API-Key'] = CORE_API_KEY;
+      }
+      const coreWs = new WebSocket(coreWsUrl, { headers });
       coreWs.on('open', () => {
         clientWs.on('message', (data) => {
           if (coreWs.readyState === WebSocket.OPEN) {

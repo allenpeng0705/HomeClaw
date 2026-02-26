@@ -44,14 +44,34 @@ def config():
     }
 
 
+def _core_auth_headers(request: Request) -> dict:
+    """Use client X-API-Key if present (from UI settings), else CORE_API_KEY from env. So WebChat/control-ui can set API key in UI. Never raises."""
+    try:
+        headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
+        key = (request.headers.get("x-api-key") or "").strip()
+        if not key:
+            auth = (request.headers.get("authorization") or "").strip()
+            if auth.lower().startswith("bearer "):
+                key = auth[7:].strip()
+        if key:
+            headers["x-api-key"] = key
+            headers["authorization"] = f"Bearer {key}"
+        else:
+            env_key = (os.getenv("CORE_API_KEY") or "").strip()
+            if env_key:
+                headers["x-api-key"] = env_key
+                headers["authorization"] = f"Bearer {env_key}"
+        return headers
+    except Exception:
+        return {}
+
+
 @app.post("/api/upload")
 async def api_upload_proxy(request: Request):
-    """Proxy upload to Core so the client can POST same-origin; Core saves to database/uploads/ and returns paths. Optional: set CORE_API_KEY in channels/.env if Core has auth_enabled."""
+    """Proxy upload to Core so the client can POST same-origin; Core saves to database/uploads/ and returns paths. Use API key from client X-API-Key (UI settings) or CORE_API_KEY in channels/.env."""
     import httpx
     upload_url = get_core_url() + "/api/upload"
-    headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
-    if os.getenv("CORE_API_KEY"):
-        headers["x-api-key"] = os.getenv("CORE_API_KEY", "").strip()
+    headers = _core_auth_headers(request)
     try:
         body = await request.body()
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -67,14 +87,12 @@ async def api_upload_proxy(request: Request):
 @app.get("/api/knowledge_base/sync_folder")
 @app.post("/api/knowledge_base/sync_folder")
 async def api_kb_sync_folder_proxy(request: Request):
-    """Proxy to Core GET/POST /knowledge_base/sync_folder so the client can trigger manual KB folder sync (same-origin). Pass user_id as query param or in POST body."""
+    """Proxy to Core GET/POST /knowledge_base/sync_folder so the client can trigger manual KB folder sync (same-origin). Pass user_id as query param or in POST body. Use API key from client X-API-Key or CORE_API_KEY in env."""
     import httpx
     sync_url = get_core_url() + "/knowledge_base/sync_folder"
     if request.method == "GET":
         sync_url = sync_url + "?" + request.url.query
-    headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
-    if os.getenv("CORE_API_KEY"):
-        headers["x-api-key"] = os.getenv("CORE_API_KEY", "").strip()
+    headers = _core_auth_headers(request)
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             if request.method == "GET":

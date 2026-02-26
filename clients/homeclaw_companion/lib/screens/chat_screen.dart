@@ -50,6 +50,8 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _voiceListening = false;
   String _voiceTranscript = '';
   StreamSubscription<Map<String, dynamic>>? _voiceSubscription;
+  /// Set true when user taps Cancel so a late "final" event does not trigger _send().
+  bool _voiceInputCancelled = false;
   final _native = HomeclawNative();
   final _voice = HomeclawVoice();
   final _tts = FlutterTts();
@@ -425,14 +427,17 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Stop voice listening and discard the transcript (do not send).
   Future<void> _cancelVoiceInput() async {
     if (!_voiceListening) return;
-    await _voice.stopVoiceListening();
+    _voiceInputCancelled = true;
     _voiceSubscription?.cancel();
     _voiceSubscription = null;
-    setState(() {
-      _voiceListening = false;
-      _voiceTranscript = '';
-      _inputController.text = '';
-    });
+    await _voice.stopVoiceListening();
+    if (mounted) {
+      setState(() {
+        _voiceListening = false;
+        _voiceTranscript = '';
+        _inputController.text = '';
+      });
+    }
   }
 
   Future<void> _toggleVoice() async {
@@ -440,6 +445,7 @@ class _ChatScreenState extends State<ChatScreen> {
       await _stopVoiceAndSend();
       return;
     }
+    _voiceInputCancelled = false;
     setState(() {
       _voiceTranscript = '';
       _inputController.clear();
@@ -455,8 +461,8 @@ class _ChatScreenState extends State<ChatScreen> {
             _inputController.text = finalText;
             _inputController.selection = TextSelection.collapsed(offset: finalText.length);
           });
-          // Only auto-send from "final" if we're not already sending (e.g. user didn't just tap Send).
-          if (!_loading) {
+          // Only auto-send from "final" if not cancelled and not already sending.
+          if (!_voiceInputCancelled && !_loading) {
             _send().then((_) {
               if (mounted) setState(() => _voiceTranscript = '');
             });
@@ -1345,9 +1351,9 @@ class _ChatScreenState extends State<ChatScreen> {
                     child: Text(
                       _loadingMessage != null && _loadingMessage!.isNotEmpty
                           ? _loadingMessage!
-                          : _loadingStatusMessages[_loadingStatusIndex],
+                          : (_loadingStatusMessages.isEmpty ? '…' : _loadingStatusMessages[_loadingStatusIndex % _loadingStatusMessages.length]),
                       key: ValueKey<String>(
-                        _loadingMessage ?? _loadingStatusMessages[_loadingStatusIndex],
+                        _loadingMessage ?? (_loadingStatusMessages.isEmpty ? '…' : _loadingStatusMessages[_loadingStatusIndex % _loadingStatusMessages.length]),
                       ),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,

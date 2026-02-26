@@ -64,9 +64,10 @@ async def webhook(body: WebhookMessage):
     url = f"{core_url()}/inbound"
     payload = body.model_dump(exclude_none=True)
     payload.setdefault("channel_name", "whatsappweb")
+    headers = Util().get_channels_core_api_headers()
     try:
         async with httpx.AsyncClient() as client:
-            r = await client.post(url, json=payload, timeout=120.0)
+            r = await client.post(url, json=payload, headers=headers, timeout=120.0)
         if r.status_code != 200:
             logger.warning(f"Core returned {r.status_code}: {r.text}")
             return JSONResponse(status_code=r.status_code, content={"error": r.text, "text": ""})
