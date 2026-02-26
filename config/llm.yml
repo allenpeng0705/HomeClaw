@@ -18,8 +18,8 @@
 #   Use supported_media to override (e.g. restrict cloud to [image] or enable image for a local model without mmproj).
 # Paths are relative to model_path (same as path).
 local_models:
-  - id: embedding_text_model
-    alias: embedding
+  - id: Qwen3-Embedding-0.6B
+    alias: Qwen3-Embedding-0.6B
     path: Qwen3-Embedding-0.6B-Q8_0.gguf  #Qwen3-Embedding-4B-Q4_K_M.gguf,  bge-m3-Q5_K_M.gguf
     host: 127.0.0.1
     port: 5066
@@ -170,7 +170,7 @@ hybrid_router:
 # main_llm_language: list of allowed/preferred response languages (e.g. [zh, en]). First = primary for prompt loading and default when user language unknown.
 main_llm_language: [en, zh]
 
-embedding_llm: local_models/embedding_text_model
+embedding_llm: local_models/Qwen3-Embedding-0.6B
 
 # Legacy fields (derived from model entry when using local_models/cloud_models)
 embedding_host: 127.0.0.1

@@ -88,8 +88,8 @@ def apply_cognee_config(config: Dict[str, Any]) -> None:
                 os.environ[env_key] = str(val)
         if "EMBEDDING_API_KEY" not in os.environ and emb.get("endpoint"):
             os.environ["EMBEDDING_API_KEY"] = "local"
-        # Tokenizer for token counting: Cognee maps embedding model to tiktoken; for custom/Ollama models set tokenizer to a local path so Cognee loads from disk (no HuggingFace at runtime).
-        # Value: local directory path. Use "./path" or "../path" or absolute path; resolved to absolute (pathlib.Path, works on Windows/Mac/Linux) before setting HUGGINGFACE_TOKENIZER.
+        # Tokenizer for token counting: Cognee maps embedding model to tiktoken; for custom/local models set tokenizer to a local path or HuggingFace model id (avoids "Could not automatically map ... to a tokeniser").
+        # Value: local path (e.g. "./models/tokenizer/Qwen3_0.6B") resolved to absolute, or HuggingFace model id. No default is set; configure explicitly for local embedding models.
         for key, env_key in (("tokenizer", "HUGGINGFACE_TOKENIZER"), ("huggingface_tokenizer", "HUGGINGFACE_TOKENIZER")):
             val = emb.get(key)
             if val is not None and str(val).strip() != "":

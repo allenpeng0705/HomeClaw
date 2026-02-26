@@ -4659,6 +4659,8 @@ class Core(CoreInterface):
                         if content_str and ("<tool_call>" in content_str or "</tool_call>" in content_str):
                             response = "The assistant tried to use a tool but the response format was not recognized. Please try again."
                         else:
+                            # Default: use LLM's reply so we never leave response unset (e.g. simple "你好" -> friendly reply)
+                            response = content_str if (content_str and content_str.strip()) else None
                             # Fallback: model didn't call a tool. When we have force_include_auto_invoke (user query matched a rule, e.g. "create an image"), always run it so the skill runs and we return real output instead of model hallucination (e.g. fake "Image saved"). Otherwise run only when the reply looks unhelpful (e.g. "no tool available").
                             content_lower = (content_str or "").strip().lower()
                             unhelpful_for_auto_invoke = (
