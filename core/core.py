@@ -186,71 +186,74 @@ def _tool_result_usable_as_final_response(
             return False
     except Exception:
         return False
-    result = tool_result.strip()
-    if not result or result == "(no output)":
-        return False
-    if _tool_result_looks_like_error(result):
-        return False
-    cfg = config if isinstance(config, dict) else {}
-    enabled = cfg.get("enabled", True)
-    if not enabled:
-        return False
-    # Default: run_skill for instruction-only skills (no script) returns instructions to the model, not a user-facing answer. Always do another LLM round so the model continues with document_read / save_result_page etc. No config needed. Never raise.
-    if isinstance(tool_name, str) and tool_name.strip() == "run_skill":
-        try:
-            r = (result if isinstance(result, str) else str(result or "")).lower()
-            if "instruction-only skill confirmed" in r or "do not reply with only this line" in r or "you must in this turn" in r:
-                logger.debug("run_skill instruction-only result: skipping use as final response (will do second LLM round)")
-                return False
-        except Exception:
-            pass
-    _need_llm_raw = cfg.get("needs_llm_tools")
-    needs_llm = tuple(_need_llm_raw) if isinstance(_need_llm_raw, (list, tuple)) else (
-        "document_read", "file_read", "file_understand",
-        "web_search", "tavily_extract", "tavily_crawl", "tavily_research",
-        "memory_search", "memory_get", "agent_memory_search", "agent_memory_get",
-        "knowledge_base_search", "fetch_url", "web_extract", "web_crawl",
-        "browser_navigate", "web_search_browser", "image", "sessions_transcript",
-    )
-    if tool_name in needs_llm:
-        return False
-    # Per-skill: skills in skills_results_need_llm always get a second LLM call (e.g. maton-api-gateway for richer reply). Instruction-only skills are already handled above by default.
-    if tool_name == "run_skill" and isinstance(tool_args, dict):
-        try:
-            skill_name = str(tool_args.get("skill_name") or tool_args.get("skill") or "").strip()
-        except (TypeError, ValueError):
-            skill_name = ""
-        if skill_name:
-            need_llm_skills = cfg.get("skills_results_need_llm")
-            if isinstance(need_llm_skills, (list, tuple)):
-                need_llm_set = {str(s).strip() for s in need_llm_skills if isinstance(s, str) and str(s).strip()}
-                if skill_name in need_llm_set:
-                    return False
-    # save_result_page / get_file_view_link: use when result contains the link (also handled by last_file_link_result)
-    if tool_name in ("save_result_page", "get_file_view_link"):
-        return "/files/out" in result and "token=" in result
-    _self_raw = cfg.get("self_contained_tools")
-    self_contained = tuple(_self_raw) if isinstance(_self_raw, (list, tuple)) else (
-        "run_skill", "echo", "time", "profile_get", "profile_list", "models_list", "agents_list",
-        "platform_info", "cwd", "env", "session_status", "sessions_list", "sessions_send", "sessions_spawn",
-        "cron_list", "cron_status", "cron_schedule", "cron_remove", "cron_update", "cron_run",
-        "remind_me", "record_date", "recorded_events_list", "profile_update",
-        "append_agent_memory", "append_daily_memory", "usage_report", "channel_send",
-        "exec", "process_list", "process_poll", "process_kill",
-        "file_write", "file_edit", "apply_patch", "folder_list", "file_find",
-        "http_request", "webhook_trigger",
-        "knowledge_base_add", "knowledge_base_remove", "knowledge_base_list",
-        "browser_snapshot", "browser_click", "browser_type",
-    )
     try:
-        _max = cfg.get("max_self_contained_length", 2000)
-        max_len = int(_max) if isinstance(_max, (int, float)) else 2000
-    except (TypeError, ValueError):
-        max_len = 2000
-    max_len = max(100, min(max_len, 50000))  # clamp so bad config never breaks
-    if tool_name in self_contained:
-        return len(result) <= max_len
-    return False
+        result = tool_result.strip()
+        if not result or result == "(no output)":
+            return False
+        if _tool_result_looks_like_error(result):
+            return False
+        cfg = config if isinstance(config, dict) else {}
+        enabled = cfg.get("enabled", True)
+        if not enabled:
+            return False
+        # Default: run_skill for instruction-only skills (no script) returns instructions to the model, not a user-facing answer. Always do another LLM round so the model continues with document_read / save_result_page etc. No config needed. Never raise.
+        if isinstance(tool_name, str) and tool_name.strip() == "run_skill":
+            try:
+                r = (result if isinstance(result, str) else str(result or "")).lower()
+                if "instruction-only skill confirmed" in r or "do not reply with only this line" in r or "you must in this turn" in r:
+                    logger.debug("run_skill instruction-only result: skipping use as final response (will do second LLM round)")
+                    return False
+            except Exception:
+                pass
+        _need_llm_raw = cfg.get("needs_llm_tools")
+        needs_llm = tuple(_need_llm_raw) if isinstance(_need_llm_raw, (list, tuple)) else (
+            "document_read", "file_read", "file_understand",
+            "web_search", "tavily_extract", "tavily_crawl", "tavily_research",
+            "memory_search", "memory_get", "agent_memory_search", "agent_memory_get",
+            "knowledge_base_search", "fetch_url", "web_extract", "web_crawl",
+            "browser_navigate", "web_search_browser", "image", "sessions_transcript",
+        )
+        if tool_name in needs_llm:
+            return False
+        # Per-skill: skills in skills_results_need_llm always get a second LLM call (e.g. maton-api-gateway for richer reply). Instruction-only skills are already handled above by default.
+        if tool_name == "run_skill" and isinstance(tool_args, dict):
+            try:
+                skill_name = str(tool_args.get("skill_name") or tool_args.get("skill") or "").strip()
+            except (TypeError, ValueError):
+                skill_name = ""
+            if skill_name:
+                need_llm_skills = cfg.get("skills_results_need_llm")
+                if isinstance(need_llm_skills, (list, tuple)):
+                    need_llm_set = {str(s).strip() for s in need_llm_skills if isinstance(s, str) and str(s).strip()}
+                    if skill_name in need_llm_set:
+                        return False
+        # save_result_page / get_file_view_link: use when result contains the link (also handled by last_file_link_result)
+        if tool_name in ("save_result_page", "get_file_view_link"):
+            return "/files/out" in result and "token=" in result
+        _self_raw = cfg.get("self_contained_tools")
+        self_contained = tuple(_self_raw) if isinstance(_self_raw, (list, tuple)) else (
+            "run_skill", "echo", "time", "profile_get", "profile_list", "models_list", "agents_list",
+            "platform_info", "cwd", "env", "session_status", "sessions_list", "sessions_send", "sessions_spawn",
+            "cron_list", "cron_status", "cron_schedule", "cron_remove", "cron_update", "cron_run",
+            "remind_me", "record_date", "recorded_events_list", "profile_update",
+            "append_agent_memory", "append_daily_memory", "usage_report", "channel_send",
+            "exec", "process_list", "process_poll", "process_kill",
+            "file_write", "file_edit", "apply_patch", "folder_list", "file_find",
+            "http_request", "webhook_trigger",
+            "knowledge_base_add", "knowledge_base_remove", "knowledge_base_list",
+            "browser_snapshot", "browser_click", "browser_type",
+        )
+        try:
+            _max = cfg.get("max_self_contained_length", 2000)
+            max_len = int(_max) if isinstance(_max, (int, float)) else 2000
+        except (TypeError, ValueError):
+            max_len = 2000
+        max_len = max(100, min(max_len, 50000))  # clamp so bad config never breaks
+        if tool_name in self_contained:
+            return len(result) <= max_len
+        return False
+    except Exception:
+        return False
 
 
 def _infer_route_to_plugin_fallback(query: str) -> Optional[Dict[str, Any]]:
