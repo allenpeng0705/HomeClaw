@@ -4759,6 +4759,25 @@ class Core(CoreInterface):
                                             if "provide either minutes" in result or "at_time" in result:
                                                 response = _remind_me_ask_message()
                                             else:
+                                                # If remind_me is in needs_llm_tools, do a second LLM round so the model synthesizes a proper reply (don't trust 1st LLM content when it didn't call the tool).
+                                                meta = Util().get_core_metadata()
+                                                use_result_config = (getattr(meta, "tools_config", None) or {}).get("use_result_as_response") if meta else None
+                                                if not _tool_result_usable_as_final_response("remind_me", result, use_result_config, _args):
+                                                    tcid = "fallback_remind_me_1"
+                                                    current_messages.append({
+                                                        "role": "assistant",
+                                                        "content": "",
+                                                        "tool_calls": [{
+                                                            "id": tcid,
+                                                            "type": "function",
+                                                            "function": {"name": "remind_me", "arguments": json.dumps(_args)},
+                                                        }],
+                                                    })
+                                                    current_messages.append({"role": "tool", "tool_call_id": tcid, "content": result})
+                                                    last_tool_name = "remind_me"
+                                                    last_tool_result_raw = result
+                                                    last_tool_args = _args
+                                                    continue
                                                 response = result
                                                 if mix_route_this_request and mix_show_route_label:
                                                     layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
