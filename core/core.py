@@ -177,8 +177,14 @@ def _tool_result_usable_as_final_response(
     - Config: tools.use_result_as_response (self_contained_tools, needs_llm_tools, max_self_contained_length, skills_results_need_llm).
     - No response: Empty or "(no output)" returns False so we do a second LLM round; the model can reply "Done." or we keep prior content (e.g. auto_invoke).
     - Error-like result: If the result looks like "not found" / error, return False so we do the 2nd LLM round (model can rephrase or suggest listing files).
+    - Instruction-only run_skill: Skills without a script return instructions to the model; we never use that as final response (default in Core, no config).
     """
-    if not tool_name or not isinstance(tool_result, str):
+    try:
+        if not isinstance(tool_name, str) or not tool_name.strip():
+            return False
+        if not isinstance(tool_result, str):
+            return False
+    except Exception:
         return False
     result = tool_result.strip()
     if not result or result == "(no output)":
@@ -189,11 +195,12 @@ def _tool_result_usable_as_final_response(
     enabled = cfg.get("enabled", True)
     if not enabled:
         return False
-    # Default: run_skill for instruction-only skills (no script) returns instructions to the model, not a user-facing answer. Always do another LLM round so the model continues with document_read / save_result_page etc. No config needed.
-    if tool_name == "run_skill":
+    # Default: run_skill for instruction-only skills (no script) returns instructions to the model, not a user-facing answer. Always do another LLM round so the model continues with document_read / save_result_page etc. No config needed. Never raise.
+    if isinstance(tool_name, str) and tool_name.strip() == "run_skill":
         try:
             r = (result if isinstance(result, str) else str(result or "")).lower()
-            if "instruction-only skill confirmed" in r or "you must in this turn" in r:
+            if "instruction-only skill confirmed" in r or "do not reply with only this line" in r or "you must in this turn" in r:
+                logger.debug("run_skill instruction-only result: skipping use as final response (will do second LLM round)")
                 return False
         except Exception:
             pass
