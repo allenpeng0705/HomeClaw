@@ -786,6 +786,7 @@ class TAM:
                 except Exception as e:
                     logger.debug("TAM: Could not persist cron job to DB: {}", e)
             logger.debug("TAM: Scheduled cron job {} '{}' next at {}", jid, cron_expr, next_run)
+            logger.info("TAM: Cron job created successfully: job_id={} cron_expr={!r} next_run={}", jid, cron_expr, next_run)
             return jid
         except Exception as e:
             logger.warning("TAM: schedule_cron_task failed: {}", e)
@@ -1455,7 +1456,9 @@ class TAM:
     def _run_one_cron_job(self, job: Dict[str, Any]) -> None:
         """Run a single cron job and persist run state. Never raises."""
         jid = job.get("job_id") or "unknown"
+        cron_expr = job.get("cron_expr") or ""
         task = job.get("task")
+        logger.info("TAM: Cron job triggered: job_id={} cron_expr={!r}", jid, cron_expr)
         started_at = time.perf_counter()
         try:
             if task:
