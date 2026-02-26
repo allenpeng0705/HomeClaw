@@ -899,6 +899,34 @@ class TAM:
             logger.warning("TAM: remove_cron_job failed: {}", e)
             return False
 
+    def clear_all_cron_jobs(self) -> int:
+        """Remove all cron jobs (memory and DB). Used on memory reset. Returns number removed. Never raises."""
+        try:
+            with self._cron_lock:
+                count = len(self.cron_jobs)
+                self.cron_jobs = []
+            if count > 0:
+                try:
+                    n_db = tam_storage.clear_all_cron_jobs()
+                    logger.debug("TAM: Cleared {} cron job(s) (memory), {} from DB", count, n_db)
+                except Exception as e:
+                    logger.debug("TAM: clear_all_cron_jobs DB failed: {}", e)
+            return count
+        except Exception as e:
+            logger.warning("TAM: clear_all_cron_jobs failed: {}", e)
+            return 0
+
+    def clear_all_one_shot_reminders(self) -> int:
+        """Remove all one-shot reminders from DB (e.g. on memory reset). In-memory scheduled timers may still fire until restart. Returns number removed from DB. Never raises."""
+        try:
+            n = tam_storage.clear_all_one_shot_reminders()
+            if n > 0:
+                logger.debug("TAM: Cleared {} one-shot reminder(s) from DB", n)
+            return n
+        except Exception as e:
+            logger.warning("TAM: clear_all_one_shot_reminders failed: {}", e)
+            return 0
+
     def _get_recorded_events_dir(self) -> Path:
         """Directory for per-user recorded event files: database/tam_recorded_events/. Never raises."""
         if self._recorded_events_dir is not None:

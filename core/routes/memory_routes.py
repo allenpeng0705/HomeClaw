@@ -33,7 +33,7 @@ def get_memory_reset_handler(core):
     """Return handler for GET/POST /memory/reset."""
     async def memory_reset():
         """
-        Empty the memory store (for testing). Also clears chat history; AGENT_MEMORY.md; daily memory; profiles; recorded events.
+        Empty the memory store (for testing). Also clears chat history; AGENT_MEMORY.md; daily memory; profiles; recorded events; cron jobs; one-shot reminders (remind_me).
         """
         mem = getattr(core, "mem_instance", None)
         if mem is None:
@@ -87,11 +87,22 @@ def get_memory_reset_handler(core):
                 try:
                     orch = getattr(core, "orchestratorInst", None)
                     tam = getattr(orch, "tam", None) if orch else None
-                    if tam is not None and hasattr(tam, "clear_recorded_events") and tam.clear_recorded_events():
-                        logger.info("Recorded events (record_date) cleared.")
-                        message = (message + " Recorded events cleared.") if message else "Recorded events cleared."
+                    if tam is not None:
+                        if hasattr(tam, "clear_recorded_events") and tam.clear_recorded_events():
+                            logger.info("Recorded events (record_date) cleared.")
+                            message = (message + " Recorded events cleared.") if message else "Recorded events cleared."
+                        if hasattr(tam, "clear_all_cron_jobs"):
+                            n_cron = tam.clear_all_cron_jobs()
+                            if n_cron > 0:
+                                logger.info("Cron jobs cleared ({}).", n_cron)
+                                message = (message + " Cron jobs cleared.") if message else "Cron jobs cleared."
+                        if hasattr(tam, "clear_all_one_shot_reminders"):
+                            n_oneshot = tam.clear_all_one_shot_reminders()
+                            if n_oneshot > 0:
+                                logger.info("One-shot reminders cleared from DB ({}).", n_oneshot)
+                                message = (message + " One-shot reminders cleared.") if message else "One-shot reminders cleared."
                 except Exception as e:
-                    logger.debug("clear_recorded_events during reset: {}", e)
+                    logger.debug("TAM clear during reset: {}", e)
             except Exception as e:
                 logger.debug("Memory reset agent/daily clear: {}", e)
             if chat_cleared:

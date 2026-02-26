@@ -3828,7 +3828,11 @@ class Core(CoreInterface):
                 time_24 = now.strftime("%H:%M")  # 24-hour, no AM/PM ambiguity
                 dow = now.strftime("%A")
                 datetime_line = f"{date_str} {time_24}"  # single canonical form so model does not invent 26号 15:49 or 2026-1月 3号
-                ctx_line = f"Current date: {date_str}. Day of week: {dow}. Current time: {time_24} (24-hour, system local). Current datetime (use this only, never invent): {datetime_line}."
+                # Chinese form so model uses correct day when saying "当前是X号" (e.g. 26号 not 19号)
+                m, d = int(now.strftime("%m")), int(now.strftime("%d"))
+                month_day_cn = f"{m}月{d}日"
+                day_num_cn = str(d)
+                ctx_line = f"Current date: {date_str}. Day of week: {dow}. Current time: {time_24} (24-hour, system local). Current datetime (use this only, never invent): {datetime_line}. 今日（中文）：{month_day_cn}，{day_num_cn}号。回复中提及「今天」「当前是」时只使用此日期（如 当前是{day_num_cn}号）。"
                 self._request_current_time_24 = time_24  # so routing block can inject it; model must use this, not invent 2:49 etc.
                 loc_str = None
                 try:

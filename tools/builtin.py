@@ -852,9 +852,11 @@ async def _remind_me_executor(arguments: Dict[str, Any], context: ToolContext) -
         channel_key = "companion"
     try:
         tam.schedule_one_shot(message, run_time_str, user_id=user_id, channel_key=channel_key)
-        # User-friendly response (Core may use as final reply); avoid raw JSON
+        # User-friendly response (Core may use as final reply); avoid raw JSON. Include current date so the follow-up LLM uses it (e.g. "当前是26号" not "19号").
         time_part = run_time_str.split()[-1] if " " in run_time_str else run_time_str
-        return f"Reminder set for {time_part}. I'll remind you: {message}"
+        today = datetime.now()
+        day_num = today.strftime("%d").lstrip("0") or today.strftime("%d")
+        return f"Reminder set for {time_part}. I'll remind you: {message}. (Current date: {today.strftime('%Y-%m-%d')}, {day_num}号. Use this when referring to today.)"
     except Exception as e:
         return f"Error: {e!s}"
 

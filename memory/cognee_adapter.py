@@ -44,12 +44,17 @@ def apply_cognee_config(config: Dict[str, Any]) -> None:
             val = rel.get(key)
             if val is not None and str(val).strip() != "":
                 os.environ[env_key] = str(val)
-    # Vector -> VECTOR_DB_* (Cognee vector store env)
+    # Vector -> VECTOR_DB_* (Cognee vector store env). Cognee expects exact names: ChromaDB, LanceDB, PGVector, neptune_analytics.
+    _vector_provider_map = {
+        "chroma": "ChromaDB", "chromadb": "ChromaDB",
+        "lancedb": "LanceDB", "pgvector": "PGVector",
+        "neptune_analytics": "neptune_analytics",
+    }
     vec = config.get("vector") or {}
     if isinstance(vec, dict):
         v = (vec.get("provider") or "").strip()
         if v:
-            os.environ["VECTOR_DB_PROVIDER"] = v
+            os.environ["VECTOR_DB_PROVIDER"] = _vector_provider_map.get(v.lower(), v)
         for key, env_key in (("url", "VECTOR_DB_URL"), ("port", "VECTOR_DB_PORT"), ("key", "VECTOR_DB_KEY")):
             val = vec.get(key)
             if val is not None and str(val).strip() != "":

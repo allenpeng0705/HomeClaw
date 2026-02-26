@@ -81,6 +81,42 @@ def remove_cron_job(job_id: str) -> bool:
             pass
 
 
+def clear_all_cron_jobs() -> int:
+    """Delete all persisted cron jobs (e.g. on memory reset). Returns number deleted."""
+    session = _get_session()
+    try:
+        n = session.query(TamCronJobModel).delete()
+        session.commit()
+        return n
+    except Exception as e:
+        logger.warning("TAM storage: clear_all_cron_jobs failed: {}", e)
+        session.rollback()
+        return 0
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+def clear_all_one_shot_reminders() -> int:
+    """Delete all one-shot reminders from DB (e.g. on memory reset). In-memory scheduled timers may still fire until restart. Returns number deleted."""
+    session = _get_session()
+    try:
+        n = session.query(TamOneShotReminderModel).delete()
+        session.commit()
+        return n
+    except Exception as e:
+        logger.warning("TAM storage: clear_all_one_shot_reminders failed: {}", e)
+        session.rollback()
+        return 0
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
 def update_cron_job(
     job_id: str,
     cron_expr: Optional[str] = None,
