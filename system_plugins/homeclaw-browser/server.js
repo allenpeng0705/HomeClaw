@@ -92,11 +92,25 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  function coreAuthHeaders(incomingHeaders) {
+    if (!incomingHeaders || typeof incomingHeaders !== 'object') incomingHeaders = {};
+    const h = { ...incomingHeaders, host: new URL(CORE_URL).host };
+    const key = (incomingHeaders['x-api-key'] || '').trim() || ((incomingHeaders['authorization'] || '').trim().match(/^Bearer\s+(.+)$/i) || [])[1]?.trim();
+    if (key) {
+      h['x-api-key'] = key;
+      h['authorization'] = 'Bearer ' + key;
+    } else if (CORE_API_KEY) {
+      h['x-api-key'] = CORE_API_KEY;
+      h['authorization'] = 'Bearer ' + CORE_API_KEY;
+    }
+    return h;
+  }
+
   if (method === 'POST' && (url === '/api/upload' || url.startsWith('/api/upload'))) {
     const coreUploadUrl = CORE_URL + '/api/upload';
     const parsed = new URL(coreUploadUrl);
-    const headers = { ...req.headers, host: parsed.host };
-    if (CORE_API_KEY) headers['x-api-key'] = CORE_API_KEY;
+    const headers = coreAuthHeaders(req.headers);
+    headers.host = parsed.host;
     const httpModule = parsed.protocol === 'https:' ? require('https') : require('http');
     const proxyReq = httpModule.request(
       coreUploadUrl,
@@ -117,11 +131,8 @@ const server = http.createServer((req, res) => {
   if (method === 'GET' && url === '/api/core/users') {
     const coreUsersUrl = CORE_URL + '/api/config/users';
     const parsed = new URL(coreUsersUrl);
-    const headers = { ...req.headers, host: parsed.host };
-    if (CORE_API_KEY) {
-      headers['x-api-key'] = CORE_API_KEY;
-      headers['Authorization'] = 'Bearer ' + CORE_API_KEY;
-    }
+    const headers = coreAuthHeaders(req.headers);
+    headers.host = parsed.host;
     const httpModule = parsed.protocol === 'https:' ? require('https') : require('http');
     const proxyReq = httpModule.request(
       coreUsersUrl,
@@ -144,12 +155,9 @@ const server = http.createServer((req, res) => {
     const q = url.includes('?') ? url.slice(url.indexOf('?')) : '';
     const coreSyncUrl = CORE_URL + '/knowledge_base/sync_folder' + q;
     const parsed = new URL(coreSyncUrl);
-    const headers = { ...req.headers, host: parsed.host };
+    const headers = coreAuthHeaders(req.headers);
+    headers.host = parsed.host;
     delete headers['content-length'];
-    if (CORE_API_KEY) {
-      headers['x-api-key'] = CORE_API_KEY;
-      headers['Authorization'] = 'Bearer ' + CORE_API_KEY;
-    }
     const httpModule = parsed.protocol === 'https:' ? require('https') : require('http');
     const proxyReq = httpModule.request(
       coreSyncUrl,

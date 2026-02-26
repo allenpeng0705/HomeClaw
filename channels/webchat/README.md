@@ -21,6 +21,12 @@ Then open **http://127.0.0.1:8014/** in your browser. The page fetches `/config`
 - **channels/.env**: Core URL (core_host, core_port or CORE_URL). Optional: `WEBCHAT_USER_ID` (default `webchat_user`), `WEBCHAT_HOST`, `WEBCHAT_PORT` (default 8014). If Core has **auth_enabled**, set **CORE_API_KEY** so the channel can proxy uploads to Core `/api/upload`.
 - **config/user.yml**: Ensure a user with id matching WEBCHAT_USER_ID exists (e.g. `id: webchat_user`, `type: companion`). Core matches by user id/name for WebSocket /inbound.
 
+## Settings (in-page, like Companion app)
+
+The WebChat page has a **Settings** section (expand "Settings (Core URL, API key)"):
+- **Core URL (optional override)**: Override the Core URL from channels/.env (e.g. `http://127.0.0.1:9000`). Leave empty to use the server default. Used for the WebSocket connection and for upload/KB sync (channel forwards your API key when proxying).
+- **API Key (optional)**: Set when Core has **auth_enabled**. Stored in the browser (localStorage) and sent as query param on WebSocket and as `X-API-Key` on proxy requests. The channel forwards the client’s API key when proxying to Core; if the client does not send one, the channel uses **CORE_API_KEY** from channels/.env.
+
 ## From anywhere
 
 Expose Core (or this WebChat server) via Tailscale or SSH tunnel, then open the WebChat URL in the browser.

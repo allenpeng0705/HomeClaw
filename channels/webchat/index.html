@@ -20,12 +20,29 @@
     #files { font-size: 0.85rem; }
     button { padding: 0.5rem 1rem; cursor: pointer; }
     .status { font-size: 0.85rem; color: #666; margin-bottom: 0.5rem; }
+    .settings-details { margin-bottom: 0.5rem; font-size: 0.9rem; }
+    .settings-details summary { cursor: pointer; color: #06c; }
+    .settings-fields { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.35rem; max-width: 400px; }
+    .settings-fields label { font-weight: 500; }
+    .settings-fields input { padding: 0.4rem; }
+    .settings-saved { color: #080; font-size: 0.85rem; margin-left: 0.5rem; }
   </style>
 </head>
 <body>
   <h1>HomeClaw WebChat</h1>
   <p class="meta">Chat with HomeClaw. Ensure <code>user_id</code> exists in <code>config/user.yml</code> (e.g. <code>webchat_user</code>).</p>
   <p class="status" id="status">Loading config…</p>
+  <details class="settings-details">
+    <summary>Settings (Core URL, API key)</summary>
+    <div class="settings-fields">
+      <label>Core URL (optional override)</label>
+      <input type="text" id="core_url" placeholder="e.g. http://127.0.0.1:9000" title="Leave empty to use server default from channels/.env">
+      <label>API Key (optional)</label>
+      <input type="password" id="api_key" placeholder="Leave empty if Core auth is disabled" autocomplete="off">
+      <button type="button" id="save_settings">Save</button>
+      <span id="settings_saved" class="settings-saved"></span>
+    </div>
+  </details>
   <div id="log"></div>
   <div id="input" class="input-row" style="display:none;">
     <select id="conversation_type" title="Assistant = main chat; Friend = Friends plugin (session_id=friend)">
@@ -59,11 +76,56 @@
 
       let ws = null;
       let config = { ws_url: '', user_id: 'webchat_user' };
+      const STORAGE_CORE_URL = 'homeclaw_webchat_core_url';
+      const STORAGE_API_KEY = 'homeclaw_webchat_api_key';
+
+      function getStoredCoreUrl() { try { return (localStorage.getItem(STORAGE_CORE_URL) || '').trim(); } catch (_) { return ''; } }
+      function getStoredApiKey() { try { return (localStorage.getItem(STORAGE_API_KEY) || '').trim(); } catch (_) { return ''; } }
+      function buildWsUrl() {
+        var base = getStoredCoreUrl();
+        var wsUrl;
+        if (base) {
+          var s = base.replace(/^https?:\/\//i, '').split('/')[0];
+          if (!s || s.length === 0) wsUrl = config.ws_url || '';
+          else {
+            var scheme = (base.toLowerCase().indexOf('https') === 0) ? 'wss' : 'ws';
+            wsUrl = scheme + '://' + s + '/ws';
+          }
+        } else {
+          wsUrl = config.ws_url || '';
+        }
+        if (!wsUrl) return '';
+        var key = getStoredApiKey();
+        if (key) wsUrl += (wsUrl.indexOf('?') >= 0 ? '&' : '?') + 'api_key=' + encodeURIComponent(key);
+        return wsUrl;
+      }
+      function authHeaders() {
+        var key = getStoredApiKey();
+        if (!key) return {};
+        return { 'X-API-Key': key, 'Authorization': 'Bearer ' + key };
+      }
+
+      (function initSettingsUi() {
+        var coreUrlEl = document.getElementById('core_url');
+        var apiKeyEl = document.getElementById('api_key');
+        var saveBtn = document.getElementById('save_settings');
+        var savedSpan = document.getElementById('settings_saved');
+        if (coreUrlEl) coreUrlEl.value = getStoredCoreUrl();
+        if (apiKeyEl) apiKeyEl.value = getStoredApiKey();
+        if (saveBtn) saveBtn.addEventListener('click', function() {
+          try {
+            localStorage.setItem(STORAGE_CORE_URL, (coreUrlEl && coreUrlEl.value) ? coreUrlEl.value.trim() : '');
+            localStorage.setItem(STORAGE_API_KEY, (apiKeyEl && apiKeyEl.value) ? apiKeyEl.value.trim() : '');
+            if (savedSpan) { savedSpan.textContent = 'Saved.'; setTimeout(function() { savedSpan.textContent = ''; }, 2000); }
+          } catch (_) {}
+        });
+      })();
 
       function connect() {
-        if (!config.ws_url) return;
+        var wsUrl = buildWsUrl();
+        if (!wsUrl) return;
         statusEl.textContent = 'Connecting…';
-        ws = new WebSocket(config.ws_url);
+        ws = new WebSocket(wsUrl);
         ws.onopen = function() {
           statusEl.textContent = 'Connected. Send a message.';
           inputWrap.style.display = 'flex';
@@ -121,7 +183,7 @@
           syncKbBtn.disabled = true;
           addLog('sys', 'Syncing knowledge base for ' + user_id + '…');
           try {
-            const r = await fetch(location.origin + '/api/knowledge_base/sync_folder?user_id=' + encodeURIComponent(user_id));
+            const r = await fetch(location.origin + '/api/knowledge_base/sync_folder?user_id=' + encodeURIComponent(user_id), { headers: authHeaders() });
             const data = await r.json().catch(function() { return {}; });
             if (r.ok && data.ok) {
               addLog('sys', 'KB sync: ' + (data.message || '') + ' (added: ' + (data.added || 0) + ', removed: ' + (data.removed || 0) + ')');
@@ -195,7 +257,7 @@
           try {
             var form = new FormData();
             imageFiles.forEach(function(f) { form.append('files', f); });
-            var r = await fetch(location.origin + '/api/upload', { method: 'POST', body: form });
+            var r = await fetch(location.origin + '/api/upload', { method: 'POST', body: form, headers: authHeaders() });
             var data = await r.json().catch(function() { return {}; });
             if (r.ok && Array.isArray(data.paths) && data.paths.length > 0) {
               payload.images = data.paths;
@@ -247,7 +309,7 @@
         .then(function(cfg) {
           config = cfg;
           if (userIdInput) userIdInput.value = cfg.user_id || 'webchat_user';
-          connect(cfg.ws_url);
+          connect();
           userIdInput.addEventListener('change', function() {
             var uid = (userIdInput.value || '').trim();
             if (ws && ws.readyState === WebSocket.OPEN && uid) try { ws.send(JSON.stringify({ event: 'register', user_id: uid })); } catch (_) {}

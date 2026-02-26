@@ -71,8 +71,9 @@ class HomeClawDingTalkHandler(ChatbotHandler):
         if files:
             payload["files"] = files
         try:
+            headers = Util().get_channels_core_api_headers()
             async with httpx.AsyncClient() as client:
-                r = await client.post(INBOUND_URL, json=payload, timeout=120.0)
+                r = await client.post(INBOUND_URL, json=payload, headers=headers, timeout=120.0)
             data = r.json() if r.content else {}
             reply = data.get("text", "")
             if not reply and r.status_code != 200:

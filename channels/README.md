@@ -82,6 +82,9 @@ Same as before: every channel is a separate process; the runner just gives one c
 
 ## Config
 
+**When Core has auth enabled** (`auth_enabled: true` in Core config): set **CORE_API_KEY** in `channels/.env` to the same value as Core's `auth_api_key`, so all channels that POST to Core can authenticate. See the CORE_API_KEY bullet below.
+
 - **channels/.env**: **Single source for Core connection.** All channels use this file only for connecting to the Core (no hardcoded URL, no config from other places). Set `core_host` and `core_port`, or `CORE_URL`. Copy from `channels/.env.example`. Optional: put bot tokens (TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, etc.) here or in each channel’s `.env`.
+- **CORE_API_KEY** (in **channels/.env**): You may need to set this when Core has **auth_enabled** (Core config: `auth_enabled: true` and `auth_api_key: "..."`). Set `CORE_API_KEY` in `channels/.env` to the same value as Core's `auth_api_key`. All channels that POST to Core (/inbound) use it: telegram, discord, slack, signal, imessage, bluebubbles, zalo, dingtalk, google_chat, teams, feishu, webhook, whatsappweb; WebChat proxy also uses it. If Core auth is disabled, leave `CORE_API_KEY` unset or empty.
 - **config/user.yml**: Allowlist: add `telegram_<id>`, `discord_<id>`, `slack_<id>`, etc. under `im` for a user with `IM` permission.
 - Per-channel: copy `.env.example` to `.env` in the channel folder only for bot tokens if you don’t put them in `channels/.env`.

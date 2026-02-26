@@ -220,6 +220,18 @@ class Util:
         port = env_vars.get('core_port', '9000')
         return f"http://{host}:{port}"
 
+    def get_channels_core_api_headers(self) -> dict:
+        """Headers for Core API when auth_enabled (X-API-Key, Authorization). From channels/.env CORE_API_KEY. Channels that POST to Core /inbound should use these. Never raises: returns {} on missing/empty key or any error (e.g. bad .env)."""
+        try:
+            env_path = os.path.join(self.channels_path(), '.env')
+            env_vars = dotenv_values(env_path) if os.path.exists(env_path) else {}
+            key = (env_vars.get('CORE_API_KEY') or os.getenv('CORE_API_KEY') or '').strip()
+            if not key:
+                return {}
+            return {'x-api-key': key, 'Authorization': f'Bearer {key}'}
+        except Exception:
+            return {}
+
     def get_core_url(self) -> str:
         """Core's own HTTP URL (from config core.yml host/port). For built-in plugins calling Core REST API (e.g. /api/plugins/llm/generate). 0.0.0.0 -> 127.0.0.1."""
         meta = self.get_core_metadata()
