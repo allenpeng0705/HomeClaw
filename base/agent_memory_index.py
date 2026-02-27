@@ -15,10 +15,11 @@ from base.workspace import (
     ensure_agent_memory_file_exists,
     _is_global_agent_memory_user,
     _sanitize_system_user_id,
+    _sanitize_friend_id,
 )
 from loguru import logger
 
-# Relative path strings for display (markdown files). Global: AGENT_MEMORY.md, memory/YYYY-MM-DD.md. Per-user: agent_memory/{user_id}.md, daily_memory/{user_id}/YYYY-MM-DD.md
+# Relative path strings for display. Global: AGENT_MEMORY.md, memory/YYYY-MM-DD.md. Per (user_id, friend_id): memories/{uid}/{fid}/agent_memory.md, memories/{uid}/{fid}/memory/YYYY-MM-DD.md
 AGENT_MEMORY_REL = "AGENT_MEMORY.md"
 
 
@@ -72,10 +73,11 @@ def get_agent_memory_files_to_index(
     daily_memory_dir: Optional[str],
     date_today: Optional[date] = None,
     system_user_id: Optional[str] = None,
+    friend_id: Optional[str] = None,
 ) -> List[Tuple[Path, str]]:
     """
     Return list of (absolute Path, relative_path_str) for markdown files to index.
-    Global: "AGENT_MEMORY.md", "memory/YYYY-MM-DD.md". Per-user: "agent_memory/{user_id}.md", "daily_memory/{user_id}/YYYY-MM-DD.md". Never raises.
+    Per (user_id, friend_id): memories/{uid}/{fid}/agent_memory.md, memories/{uid}/{fid}/memory/YYYY-MM-DD.md. Global: AGENT_MEMORY.md, memory/YYYY-MM-DD.md. Never raises.
     """
     out: List[Tuple[Path, str]] = []
     try:
@@ -88,15 +90,16 @@ def get_agent_memory_files_to_index(
         today = date_today or date.today()
     except Exception:
         return []
-    scope = "" if _is_global_agent_memory_user(system_user_id) else _sanitize_system_user_id(system_user_id)
+    uid = "" if _is_global_agent_memory_user(system_user_id) else _sanitize_system_user_id(system_user_id)
+    fid = _sanitize_friend_id(friend_id) if uid else ""
 
-    # AGENT_MEMORY (markdown): global AGENT_MEMORY.md or per-user agent_memory/{user_id}.md
+    # AGENT_MEMORY (markdown): global or memories/{uid}/{fid}/agent_memory.md
     try:
-        ensure_agent_memory_file_exists(workspace_dir=workspace_dir, agent_memory_path=agent_memory_path, system_user_id=system_user_id)
-        agent_path = get_agent_memory_file_path(workspace_dir=workspace_dir, agent_memory_path=agent_memory_path, system_user_id=system_user_id)
+        ensure_agent_memory_file_exists(workspace_dir=workspace_dir, agent_memory_path=agent_memory_path, system_user_id=system_user_id, friend_id=friend_id)
+        agent_path = get_agent_memory_file_path(workspace_dir=workspace_dir, agent_memory_path=agent_memory_path, system_user_id=system_user_id, friend_id=friend_id)
         if agent_path is not None and agent_path.is_file():
-            if scope:
-                rel = f"agent_memory/{scope}.md"
+            if uid and fid:
+                rel = f"memories/{uid}/{fid}/agent_memory.md"
             elif workspace_dir in agent_path.parents or agent_path == workspace_dir / AGENT_MEMORY_REL:
                 rel = AGENT_MEMORY_REL
             else:
@@ -105,20 +108,29 @@ def get_agent_memory_files_to_index(
     except Exception:
         pass
 
-    # Daily memory (markdown): global memory/YYYY-MM-DD.md or per-user daily_memory/{user_id}/YYYY-MM-DD.md
+    # Daily memory (markdown): global memory/YYYY-MM-DD.md or memories/{uid}/{fid}/memory/YYYY-MM-DD.md
     try:
-        ensure_daily_memory_file_exists(today, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
-        base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
+        ensure_daily_memory_file_exists(today, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id, friend_id=friend_id)
+        base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id, friend_id=friend_id)
         for d in (today - timedelta(days=1), today):
-            path = get_daily_memory_path_for_date(d, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
+            path = get_daily_memory_path_for_date(d, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id, friend_id=friend_id)
             if path.is_file():
-                if scope:
-                    out.append((path, f"daily_memory/{scope}/{d.isoformat()}.md"))
+                if uid and fid:
+                    out.append((path, f"memories/{uid}/{fid}/memory/{d.isoformat()}.md"))
                 else:
                     out.append((path, f"memory/{d.isoformat()}.md"))
     except Exception:
         pass
     return out
+
+
+def _scope_key_for_pair(uid: Optional[str], fid: str) -> str:
+    """Return vector store scope key for (user_id, friend_id). Global when uid is None/empty. Never raises."""
+    if _is_global_agent_memory_user(uid):
+        return ""
+    u = _sanitize_system_user_id(uid)
+    f = _sanitize_friend_id(fid)
+    return f"{u}|{f}" if u and f else ""
 
 
 async def sync_agent_memory_to_vector_store(
@@ -128,12 +140,12 @@ async def sync_agent_memory_to_vector_store(
     vector_store: Any,
     embedder: Any,
     date_today: Optional[date] = None,
-    system_user_ids: Optional[List[Optional[str]]] = None,
+    scope_pairs: Optional[List[Tuple[Optional[str], str]]] = None,
 ) -> int:
     """
     (Re)index AGENT_MEMORY and daily memory markdown (yesterday + today) into the vector store.
-    When system_user_ids is None: index global only (delete all, then insert). Backward compatible.
-    When system_user_ids is provided: for each id delete that scope's chunks (delete_where), then index that scope. Payload includes system_user_id ("" for global).
+    scope_pairs: list of (user_id, friend_id). When None: index global only (backward compatible).
+    When scope_pairs provided: for each (uid, fid) delete that scope's chunks (delete_where system_user_id=scope_key), then index. scope_key is "" for global else "uid|fid".
     Returns total number of chunks indexed. Never raises.
     """
     if not vector_store or not embedder:
@@ -145,13 +157,13 @@ async def sync_agent_memory_to_vector_store(
     if workspace_dir is None:
         return 0
 
-    # Default: index global only (company app / single-tenant)
-    scopes: List[Optional[str]] = list(system_user_ids) if system_user_ids is not None else [None]
+    # Default: index global only
+    pairs: List[Tuple[Optional[str], str]] = list(scope_pairs) if scope_pairs is not None else [(None, "HomeClaw")]
     total = 0
     prefix = "agent_mem_"
 
-    for system_user_id in scopes:
-        scope_key = "" if _is_global_agent_memory_user(system_user_id) else _sanitize_system_user_id(system_user_id)
+    for system_user_id, friend_id in pairs:
+        scope_key = _scope_key_for_pair(system_user_id, friend_id)
         scope_label = "global" if not scope_key else scope_key
 
         files = get_agent_memory_files_to_index(
@@ -160,11 +172,12 @@ async def sync_agent_memory_to_vector_store(
             daily_memory_dir=daily_memory_dir,
             date_today=date_today,
             system_user_id=system_user_id,
+            friend_id=friend_id,
         )
         if not files:
             continue
 
-        # Delete existing chunks for this scope only (so we can re-index this user without wiping others)
+        # Delete existing chunks for this scope only
         delete_where_fn = getattr(vector_store, "delete_where", None)
         if delete_where_fn:
             try:
@@ -172,9 +185,8 @@ async def sync_agent_memory_to_vector_store(
             except Exception as e:
                 logger.warning("Agent memory index: delete_where failed for scope {}: {}", scope_label, e)
         else:
-            # Fallback: delete all when re-syncing (single scope at a time) so we don't leave stale chunks
             list_ids_fn = getattr(vector_store, "list_ids", None)
-            if list_ids_fn and len(scopes) == 1:
+            if list_ids_fn and len(pairs) == 1:
                 try:
                     existing = list_ids_fn(limit=10000)
                     for eid in existing:

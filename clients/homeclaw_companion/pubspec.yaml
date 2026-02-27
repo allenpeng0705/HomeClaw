@@ -1,7 +1,7 @@
 name: homeclawApp
 description: HomeClaw companion app - chat with Core on Mac, Windows, Linux, Android, iOS.
 publish_to: 'none'
-version: 1.0.0+9
+version: 1.0.0+10
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

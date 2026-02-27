@@ -76,6 +76,29 @@ class DatabaseManager:
                         pass  # column may already exist
         except Exception as e:
             logger.debug("TAM one_shot migration (user_id/channel_key): {}", e)
+        # Migration: Step 8 — add friend_id to chat history and session tables (scope by user_id, friend_id)
+        try:
+            if self.engine and "sqlite" in (self.engine.url.drivername or ""):
+                from sqlalchemy import text
+                for table in ("homeclaw_chat_history", "homeclaw_session_history"):
+                    try:
+                        with self.engine.begin() as conn:
+                            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN friend_id VARCHAR"))
+                    except Exception:
+                        pass  # column may already exist
+        except Exception as e:
+            logger.debug("Step 8 friend_id migration: {}", e)
+        # Migration: Step 10 — add friend_id to one-shot reminders (from_friend when reminder fires)
+        try:
+            if self.engine and "sqlite" in (self.engine.url.drivername or ""):
+                from sqlalchemy import text
+                try:
+                    with self.engine.begin() as conn:
+                        conn.execute(text("ALTER TABLE homeclaw_tam_one_shot_reminders ADD COLUMN friend_id VARCHAR"))
+                except Exception:
+                    pass  # column may already exist
+        except Exception as e:
+            logger.debug("Step 10 friend_id (TAM one-shot) migration: {}", e)
         logger.debug("All the tables created successfully.")
 
 

@@ -1,0 +1,28 @@
+# user.yml.example — minimal example for user.yml (UserFriendsModelFullDesign, Step 15)
+# Copy to config/user.yml and adjust. Each user: id, name; optional username/password (Companion login); friends (HomeClaw first).
+#
+# Channels: match request identity to email/im/phone; set system_user_id and friend_id = HomeClaw.
+# Companion: login with username/password; gets only this user's data and friends (no full user list).
+#
+users:
+  - id: webchat_user
+    name: webchat_user
+  - id: Alice
+    name: Alice
+    username: alice
+    password: changeme
+    email: []
+    im: []
+    phone: []
+    permissions: []
+    friends:
+      - name: HomeClaw
+      - name: Sabrina
+        relation: girlfriend
+        who:
+          gender: female
+          roles: ['girlfriend']
+          personalities: [gentle, supportive]
+          language: en
+          response_length: medium
+        identity: identity.md

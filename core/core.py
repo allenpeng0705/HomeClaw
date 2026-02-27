@@ -74,6 +74,7 @@ from base.workspace import (
     load_daily_memory_for_dates,
     clear_daily_memory_for_dates,
     trim_content_bootstrap,
+    load_friend_identity_file,
 )
 from base.skills import get_skills_dir, load_skills, load_skills_from_dirs, load_skill_by_folder_from_dirs, build_skills_system_block
 from base.tools import ToolContext, get_tool_registry, ROUTING_RESPONSE_ALREADY_SENT
@@ -84,7 +85,7 @@ from core.coreInterface import CoreInterface
 from core.emailChannel import channel
 from core.routes import (
     auth, lifecycle, inbound as inbound_routes, config_api, files, memory_routes, knowledge_base_routes,
-    plugins_api, misc_api, ui_routes, websocket_routes, companion_push_api,
+    plugins_api, misc_api, ui_routes, websocket_routes, companion_push_api, companion_auth,
 )
 # Tool helpers: prefer core.services.tool_helpers; fallback to inline definitions so Core never crashes if the module is missing or broken.
 try:
@@ -1240,6 +1241,10 @@ class Core(CoreInterface):
         # Companion push (FCM token register so Core can send when app is killed/background)
         self.app.add_api_route("/api/companion/push-token", companion_push_api.get_api_companion_push_token_register_handler(self), methods=["POST"], dependencies=[Depends(auth.verify_inbound_auth)])
         self.app.add_api_route("/api/companion/push-token", companion_push_api.get_api_companion_push_token_unregister_handler(self), methods=["DELETE"], dependencies=[Depends(auth.verify_inbound_auth)])
+        # Step 12: Companion auth — login (username/password) and token-based me/friends (no full user list)
+        self.app.add_api_route("/api/auth/login", companion_auth.get_api_auth_login_handler(self), methods=["POST"], dependencies=[Depends(auth.verify_inbound_auth)])
+        self.app.add_api_route("/api/me", companion_auth.get_api_me_handler(self), methods=["GET"], dependencies=[Depends(companion_auth.get_companion_token_user)])
+        self.app.add_api_route("/api/me/friends", companion_auth.get_api_me_friends_handler(self), methods=["GET"], dependencies=[Depends(companion_auth.get_companion_token_user)])
         # UI and WebSocket
         self.app.add_api_route("/ui", ui_routes.get_ui_launcher_handler(self), methods=["GET"])
         self.app.add_websocket_route("/ws", websocket_routes.get_websocket_handler(self))
@@ -1287,13 +1292,26 @@ class Core(CoreInterface):
                     return Response(content="Permission denied", status_code=401)
 
                 if request is not None:
+                    try:
+                        if len(user.name) > 0:
+                            request.user_name = user.name
+                    except (TypeError, AttributeError):
+                        pass
+                    try:
+                        request.system_user_id = user.id or user.name
+                    except (TypeError, AttributeError):
+                        request.system_user_id = ""
+                    # Step 11: Set friend_id before persist so last_channel/session key use (user_id, HomeClaw)
+                    try:
+                        request.friend_id = "HomeClaw"
+                    except (TypeError, AttributeError):
+                        pass  # best-effort; request still processed
                     self.latestPromptRequest = copy.deepcopy(request)
                     logger.debug(f'latestPromptRequest set to: {self.latestPromptRequest}')
-                    self._persist_last_channel(request)
-                if len(user.name) > 0:
-                    request.user_name = user.name
-                request.system_user_id = user.id or user.name
-
+                    try:
+                        self._persist_last_channel(request)
+                    except Exception as pe:
+                        logger.debug("_persist_last_channel failed: {}", pe)
                 await self.request_queue.put(request)
 
                 return Response(content="Request received", status_code=200)
@@ -1315,13 +1333,27 @@ class Core(CoreInterface):
                 if not has_permission or user is None:
                     return Response(content="Permission denied", status_code=401)
 
-                if len(user.name) > 0:
-                    request.user_name = user.name
-                request.system_user_id = user.id or user.name
+                try:
+                    if len(user.name) > 0:
+                        request.user_name = user.name
+                except (TypeError, AttributeError):
+                    pass
+                try:
+                    request.system_user_id = user.id or user.name
+                except (TypeError, AttributeError):
+                    request.system_user_id = ""
+                # Step 11: Channel requests always use (user_id, HomeClaw)
+                try:
+                    request.friend_id = "HomeClaw"
+                except (TypeError, AttributeError):
+                    pass  # best-effort; request still processed
 
                 self.latestPromptRequest = copy.deepcopy(request)
                 logger.debug(f'latestPromptRequest set to: {self.latestPromptRequest}')
-                self._persist_last_channel(request)
+                try:
+                    self._persist_last_channel(request)
+                except Exception as pe:
+                    logger.debug("_persist_last_channel failed: {}", pe)
 
                 if not getattr(self, "orchestrator_unified_with_tools", True):
                     flag = await self.orchestrator_handler(request)
@@ -1433,7 +1465,7 @@ class Core(CoreInterface):
                                     ws = _ws_sessions.get(sid) if isinstance(sid, str) else None
                                     if ws is not None:
                                         try:
-                                            payload = {"event": "push", "source": "inbound", "text": body_text, "format": str(content.get("format", "plain") or "plain")}
+                                            payload = {"event": "push", "source": "inbound", "from_friend": content.get("from_friend") or "HomeClaw", "text": body_text, "format": str(content.get("format", "plain") or "plain")}
                                             if isinstance(content.get("images"), list) and content["images"]:
                                                 payload["images"] = content["images"]
                                                 payload["image"] = content.get("image")
@@ -1444,7 +1476,7 @@ class Core(CoreInterface):
                             if ws_sent == 0:
                                 try:
                                     from base import push_send
-                                    push_send.send_push_to_user(inbound_uid, title="HomeClaw", body=body_text, source="inbound")
+                                    push_send.send_push_to_user(inbound_uid, title="HomeClaw", body=body_text, source="inbound", from_friend=content.get("from_friend") or "HomeClaw")
                                 except Exception as push_e:
                                     logger.debug("inbound: push fallback failed: {}", push_e)
                 except Exception as fallback_e:
@@ -1571,6 +1603,8 @@ class Core(CoreInterface):
         # Memory/Cognee scope: user_id and app_id; companion often omits app_id, so default to homeclaw
         inbound_user_id = (getattr(request, "user_id", None) or "").strip() or "companion"
         inbound_app_id = getattr(request, "app_id", None) or "homeclaw"
+        _fid = getattr(request, "friend_id", None)
+        inbound_friend_id = ((str(_fid).strip() if _fid is not None else "") or "HomeClaw")
         pr = PromptRequest(
             request_id=req_id,
             channel_name=request.channel_name or "webhook",
@@ -1580,6 +1614,7 @@ class Core(CoreInterface):
             app_id=inbound_app_id,
             user_id=inbound_user_id,
             contentType=content_type_for_perm,
+            friend_id=inbound_friend_id,
             text=request.text,
             action=request.action or "respond",
             host="inbound",
@@ -1597,6 +1632,7 @@ class Core(CoreInterface):
             pr.user_name = user.name
         if user:
             pr.system_user_id = user.id or user.name
+        pr.friend_id = inbound_friend_id
         # Store latest location when client sends it (Companion, WebChat, browser). When app did not combine (system/companion), store under shared key so it can be used for all users.
         # If location is lat/lng (from mobile), convert to address (country, city, street) for display and plugins.
         try:
@@ -1740,6 +1776,7 @@ class Core(CoreInterface):
                     user_name=getattr(request, "user_name", None),
                     user_id=getattr(request, "user_id", None),
                     channel_name=getattr(request, "channel_name", None),
+                    friend_id=getattr(request, "friend_id", None),
                 )
                 if session_id and app_id and getattr(request, "user_id", None):
                     session_key = f"{app_id}:{request.user_id}:{session_id}"
@@ -2085,6 +2122,7 @@ class Core(CoreInterface):
                 if len(user.name) > 0:
                     request.user_name = user.name
                 request.system_user_id = user.id or user.name
+                request.friend_id = "HomeClaw"
 
                 #if intent is not None and (intent.type == IntentType.RESPOND or intent.type == IntentType.QUERY):
                 # Process all message content types (text, text+image, image, audio, video); process_text_message uses request.images/videos/audios/files
@@ -2222,10 +2260,12 @@ class Core(CoreInterface):
         images: Optional[List[str]] = None,
         channel_key: Optional[str] = None,
         source: str = "push",
+        from_friend: str = "HomeClaw",
     ) -> None:
-        """Push a message to a user: (1) to all WebSocket sessions registered for this user_id (Companion/channel), (2) to the channel identified by channel_key if provided, else to latest channel. Used by cron, reminders, record_date follow-ups, and any proactive delivery. Never raises (logs and returns)."""
+        """Push a message to a user: (1) to all WebSocket sessions registered for this user_id (Companion/channel), (2) to the channel identified by channel_key if provided, else to latest channel. from_friend: which friend the push is from (e.g. 'Sabrina' or 'HomeClaw' for system). Used by cron, reminders, record_date follow-ups, and any proactive delivery. Never raises (logs and returns)."""
         try:
-            user_id = (user_id or "").strip() or "companion"
+            user_id = (str(user_id or "").strip() or "companion")
+            from_friend = (str(from_friend or "HomeClaw").strip() or "HomeClaw")
             try:
                 out_text, out_fmt = self._outbound_text_and_format(text) if text else ("", "plain")
             except Exception:
@@ -2235,7 +2275,7 @@ class Core(CoreInterface):
                 out_text, out_fmt = "", "plain"
             out_text = out_text if out_text is not None else ""
             out_fmt = out_fmt if out_fmt is not None else "plain"
-            payload = {"event": "push", "source": source, "text": out_text, "format": out_fmt}
+            payload = {"event": "push", "source": source, "from_friend": from_friend, "text": out_text, "format": out_fmt}
             data_urls = []
             if images:
                 for image_path in images:
@@ -2280,11 +2320,11 @@ class Core(CoreInterface):
             # Always try push so user gets notification when app is backgrounded (WS may be stale and message lost).
             try:
                 from base import push_send
-                title = "Reminder" if source == "reminder" else "HomeClaw"
+                title = "Reminder" if source == "reminder" else from_friend
                 body_safe = (out_text if out_text is not None else "")[:1024]
-                push_sent = push_send.send_push_to_user(user_id, title=title, body=body_safe, source=source)
+                push_sent = push_send.send_push_to_user(user_id, title=title, body=body_safe, source=source, from_friend=from_friend)
                 if push_sent:
-                    logger.info("deliver_to_user: sent {} push(es) (APNs/FCM) for user_id={} source={}", push_sent, user_id, source)
+                    logger.info("deliver_to_user: sent {} push(es) (APNs/FCM) for user_id={} from_friend={}", push_sent, user_id, from_friend)
             except Exception as push_e:
                 logger.debug("deliver_to_user: push send failed: {}", push_e)
             try:
@@ -2379,7 +2419,8 @@ class Core(CoreInterface):
                         human_message = content
                     channel_name = getattr(request, "channel_name", None)
                     account_id = (request.request_metadata or {}).get("account_id") if getattr(request, "request_metadata", None) else None
-                    session_id = self.get_session_id(app_id=app_id, user_name=user_name, user_id=user_id, channel_name=channel_name, account_id=account_id)
+                    _fid = (str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw") if request else "HomeClaw"
+                    session_id = self.get_session_id(app_id=app_id, user_name=user_name, user_id=user_id, channel_name=channel_name, account_id=account_id, friend_id=_fid)
                     run_id = self.get_run_id(agent_id=app_id, user_name=user_name, user_id=user_id)
 
                     # When memory_check_before_add is True and model is small/local: run one LLM call to decide "should we store?"; else store every message (default).
@@ -2407,12 +2448,12 @@ class Core(CoreInterface):
                         if result is not None and len(result) > 0:
                             result = result.strip().lower()
                             if result.find("yes") != -1:
-                                await self.mem_instance.add(human_message, user_name=user_name, user_id=user_id, agent_id=app_id, run_id=run_id, metadata=None, filters=None)
-                                _component_log("memory", f"add (yes): user_id={user_id} text={human_message[:60]}...")
+                                await self.mem_instance.add(human_message, user_name=user_name, user_id=user_id, agent_id=_fid, run_id=run_id, metadata=None, filters=None)
+                                _component_log("memory", f"add (yes): user_id={user_id} friend_id={_fid} text={human_message[:60]}...")
                                 logger.debug(f"User input added to memory: {human_message}")
                     else:
-                        await self.mem_instance.add(human_message, user_name=user_name, user_id=user_id, agent_id=app_id, run_id=run_id, metadata=None, filters=None)
-                        _component_log("memory", f"add: user_id={user_id} text={(human_message or '')[:60]}...")
+                        await self.mem_instance.add(human_message, user_name=user_name, user_id=user_id, agent_id=_fid, run_id=run_id, metadata=None, filters=None)
+                        _component_log("memory", f"add: user_id={user_id} friend_id={_fid} text={(human_message or '')[:60]}...")
                         logger.debug(f"User input added to memory: {human_message}")
                 except Exception as e:
                     logger.exception(f"Error check whether to save to memory: {e}")
@@ -2611,6 +2652,7 @@ class Core(CoreInterface):
         user_id=None,
         channel_name: Optional[str] = None,
         account_id: Optional[str] = None,
+        friend_id: Optional[str] = None,
         validity_period=timedelta(hours=24),
     ):
         session_cfg = getattr(Util().get_core_metadata(), "session", None) or {}
@@ -2622,15 +2664,17 @@ class Core(CoreInterface):
                 channel_name=channel_name,
                 account_id=account_id,
             )
-        if user_id in self.session_ids:
-            session_id, timestamp = self.session_ids[user_id]
+        fid = (str(friend_id or "").strip() or "HomeClaw") if friend_id is not None else "HomeClaw"
+        cache_key = f"{user_id or ''}|{fid}"
+        if cache_key in self.session_ids:
+            session_id, timestamp = self.session_ids[cache_key]
             return session_id
 
-        current_time = datetime.now()
-        sessions: List[dict] = self.chatDB.get_sessions(app_id=app_id, user_name=user_name, user_id=user_id, num_rounds=1, fetch_all=False)
+        sessions: List[dict] = self.chatDB.get_sessions(app_id=app_id, user_name=user_name, user_id=user_id, friend_id=fid, num_rounds=1, fetch_all=False)
         for session in sessions:
-            session_id = session["session_id"]
-            return session_id
+            session_id = session.get("session_id")
+            if session_id:
+                return session_id
         return user_id
 
     def _resize_image_data_url_if_needed(self, data_url: str, max_dimension: int) -> str:
@@ -2802,9 +2846,10 @@ class Core(CoreInterface):
                 human_message = content
             channel_name = getattr(request, "channel_name", None)
             account_id = (request.request_metadata or {}).get("account_id") if getattr(request, "request_metadata", None) else None
-            session_id = self.get_session_id(app_id=app_id, user_name=user_name, user_id=user_id, channel_name=channel_name, account_id=account_id)
+            _fid = (str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw") if request else "HomeClaw"
+            session_id = self.get_session_id(app_id=app_id, user_name=user_name, user_id=user_id, channel_name=channel_name, account_id=account_id, friend_id=_fid)
             run_id = self.get_run_id(agent_id=app_id, user_name=user_name, user_id=user_id)
-            histories: List[ChatMessage] = self.chatDB.get(app_id=app_id, user_name=user_name, user_id=user_id, session_id=session_id, num_rounds=6, fetch_all=False, display_format=False)
+            histories: List[ChatMessage] = self.chatDB.get(app_id=app_id, user_name=user_name, user_id=user_id, session_id=session_id, friend_id=_fid, num_rounds=6, fetch_all=False, display_format=False)
             messages = []
 
             if histories is not None and len(histories) > 0:
@@ -3311,7 +3356,7 @@ class Core(CoreInterface):
                         except Exception as e:
                             logger.warning("Plugins vector sync failed: {}", e)
 
-            # Sync agent memory (AGENT_MEMORY + daily markdown) to vector store when use_agent_memory_search. Index global + per-user when multiple users.
+            # Sync agent memory (AGENT_MEMORY + daily markdown) to vector store when use_agent_memory_search. Index global + per (user_id, friend_id).
             if getattr(core_metadata, "use_agent_memory_search", True):
                 if getattr(self, "agent_memory_vector_store", None) and getattr(self, "embedder", None):
                     from base.workspace import get_workspace_dir
@@ -3319,13 +3364,25 @@ class Core(CoreInterface):
                     ws_dir = get_workspace_dir(getattr(core_metadata, "workspace_dir", None) or "config/workspace")
                     try:
                         users = Util().get_users() or []
-                        system_user_ids = [None] + [
-                            getattr(u, "id", None) or getattr(u, "name", None)
-                            for u in users
-                            if getattr(u, "id", None) or getattr(u, "name", None)
-                        ]
+                        scope_pairs: List[Tuple[Optional[str], str]] = [(None, "HomeClaw")]
+                        for u in users:
+                            uid = getattr(u, "id", None) or getattr(u, "name", None)
+                            if not uid:
+                                continue
+                            uid = str(uid).strip() or None
+                            if not uid:
+                                continue
+                            friends = getattr(u, "friends", None) or []
+                            if not friends:
+                                scope_pairs.append((uid, "HomeClaw"))
+                            else:
+                                for f in friends:
+                                    fid = getattr(f, "name", None) or "HomeClaw"
+                                    fid = (str(fid).strip() or "HomeClaw") if fid else "HomeClaw"
+                                    if fid:
+                                        scope_pairs.append((uid, fid))
                     except Exception:
-                        system_user_ids = [None]
+                        scope_pairs = [(None, "HomeClaw")]
                     try:
                         n = await sync_agent_memory_to_vector_store(
                             workspace_dir=Path(ws_dir),
@@ -3333,24 +3390,38 @@ class Core(CoreInterface):
                             daily_memory_dir=(getattr(core_metadata, "daily_memory_dir", None) or "").strip() or None,
                             vector_store=self.agent_memory_vector_store,
                             embedder=self.embedder,
-                            system_user_ids=system_user_ids,
+                            scope_pairs=scope_pairs,
                         )
                         _component_log("agent_memory", f"synced {n} chunk(s) to vector store")
                     except Exception as e:
                         logger.warning("Agent memory vector sync failed: {}", e)
 
-            # Create per-user and shared sandbox folders (private, output, knowledgebase, share, companion) when homeclaw_root is set in config
+            # Create per-user, per-friend, and shared sandbox folders when homeclaw_root is set (UserFriendsModelFullDesign.md Step 5)
             root_str = (getattr(core_metadata, "homeclaw_root", None) or "").strip() if core_metadata else ""
             if root_str:
                 try:
                     users = Util().get_users() or []
-                    user_ids = [
-                        (getattr(u, "id", None) or getattr(u, "name", None) or "")
-                        for u in users
-                        if getattr(u, "id", None) or getattr(u, "name", None)
-                    ]
-                    user_ids = [uid for uid in user_ids if str(uid).strip()]
-                    ensure_user_sandbox_folders(root_str, user_ids)
+                    user_ids = []
+                    friends_by_user: Dict[str, List[str]] = {}
+                    for u in users:
+                        uid = getattr(u, "id", None) or getattr(u, "name", None)
+                        if not uid:
+                            continue
+                        uid = str(uid).strip()
+                        if not uid:
+                            continue
+                        user_ids.append(uid)
+                        friends = getattr(u, "friends", None) or []
+                        if isinstance(friends, (list, tuple)):
+                            friend_names = []
+                            for f in friends:
+                                name = getattr(f, "name", None)
+                                name = (str(name).strip() or "HomeClaw") if name is not None else "HomeClaw"
+                                if name:
+                                    friend_names.append(name)
+                            if friend_names:
+                                friends_by_user[uid] = friend_names
+                    ensure_user_sandbox_folders(root_str, user_ids, friends_by_user=friends_by_user)
                     from tools.builtin import build_and_save_sandbox_paths_json
                     build_and_save_sandbox_paths_json()
                 except Exception as e:
@@ -3631,6 +3702,11 @@ class Core(CoreInterface):
                                  ):
         if not any([user_name, user_id, agent_id, run_id]):
             raise ValueError("One of user_name, user_id, agent_id, run_id must be provided")
+        # Step 9: RAG/Cognee memory scope by (user_id, friend_id). Use friend_id from request for add/search.
+        try:
+            _mem_scope = (str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw") if request else (str(agent_id or "").strip() or "HomeClaw")
+        except (TypeError, AttributeError):
+            _mem_scope = "HomeClaw"
         try:
             # If user is replying to a "missing parameters" question, fill and retry the pending plugin call
             app_id_val = app_id or "homeclaw"
@@ -3831,6 +3907,7 @@ class Core(CoreInterface):
             _sys_uid = getattr(request, "system_user_id", None) or user_id
             _companion_with_who = False
             _current_user_for_identity = None
+            _current_friend = None  # When set, identity block is built from friend (who + optional identity file)
             try:
                 if _sys_uid:
                     _users = Util().get_users() or []
@@ -3838,7 +3915,19 @@ class Core(CoreInterface):
                         (u for u in _users if (getattr(u, "id", None) or getattr(u, "name", "") or "").strip().lower() == str(_sys_uid or "").strip().lower()),
                         None,
                     )
-                    if _current_user_for_identity and str(getattr(_current_user_for_identity, "type", "normal") or "normal").strip().lower() == "companion":
+                    _req_fid = (str(getattr(request, "friend_id", None) or "").strip().lower()) or "homeclaw"
+                    _friends = getattr(_current_user_for_identity, "friends", None) if _current_user_for_identity else []
+                    if isinstance(_friends, list):
+                        _current_friend = next(
+                            (f for f in _friends if (getattr(f, "name", "") or "").strip().lower() == _req_fid),
+                            None,
+                        )
+                    if _current_friend and (getattr(_current_friend, "name", "") or "").strip().lower() != "homeclaw":
+                        _fwho = getattr(_current_friend, "who", None)
+                        _fident = getattr(_current_friend, "identity", None)
+                        if (isinstance(_fwho, dict) and _fwho) or _fident is not None:
+                            _companion_with_who = True
+                    elif _current_user_for_identity and str(getattr(_current_user_for_identity, "type", "normal") or "normal").strip().lower() == "companion":
                         _who = getattr(_current_user_for_identity, "who", None)
                         if isinstance(_who, dict) and _who:
                             _companion_with_who = True
@@ -3853,38 +3942,61 @@ class Core(CoreInterface):
                 if workspace_prefix:
                     system_parts.append(workspace_prefix)
 
-            # Companion identity (who): when companion-type user has "who", inject a single identity from who (pre-defined template; no LLM). Replaces default assistant description; all other behavior (memory, chat, KB) same as normal user.
+            # Companion identity (who): from friend (who + optional identity file) or legacy companion user who. Replaces default assistant description.
             if _companion_with_who and _current_user_for_identity:
                 try:
-                    _who = getattr(_current_user_for_identity, "who", None)
-                    if isinstance(_who, dict) and _who:
+                    _who = None
+                    _name = getattr(_current_user_for_identity, "name", "") or _sys_uid or ""
+                    if _current_friend and (getattr(_current_friend, "name", "") or "").strip().lower() != "homeclaw":
+                        _who = getattr(_current_friend, "who", None)
+                        _name = (getattr(_current_friend, "name", "") or "").strip() or _name
+                    if _who is None:
+                        _who = getattr(_current_user_for_identity, "who", None)
+                    _has_who = isinstance(_who, dict) and _who
+                    _friend_identity = _current_friend and getattr(_current_friend, "identity", None) is not None
+                    if _has_who or _friend_identity:
                         _lines = ["## Identity\n"]
-                        _desc = (_who.get("description") or "").strip() if isinstance(_who.get("description"), str) else ""
-                        if _desc:
-                            _lines.append(_desc)
-                        _name = getattr(_current_user_for_identity, "name", "") or _sys_uid or ""
-                        _lines.append(f"You are {_name}.")
-                        if _who.get("gender"):
-                            _lines.append(f"Gender: {_who.get('gender')}.")
-                        if _who.get("roles"):
-                            _roles = _who["roles"] if isinstance(_who["roles"], list) else [_who["roles"]] if _who.get("roles") else []
-                            if _roles:
-                                _lines.append(f"Roles: {', '.join(str(r) for r in _roles)}.")
-                        if _who.get("personalities"):
-                            _pers = _who["personalities"] if isinstance(_who["personalities"], list) else [_who["personalities"]] if _who.get("personalities") else []
-                            if _pers:
-                                _lines.append(f"Personalities: {', '.join(str(p) for p in _pers)}.")
-                        if _who.get("language"):
-                            _lines.append(f"Reply in language: {_who.get('language')}.")
-                        if _who.get("response_length"):
-                            _rl = str(_who.get("response_length", "")).strip().lower()
-                            if _rl == "short":
-                                _lines.append("Keep replies brief: one or two sentences unless the user asks for more.")
-                            elif _rl == "long":
-                                _lines.append("You may reply at length when the topic deserves it; be thorough but natural.")
-                            else:
-                                _lines.append("Keep replies to a short paragraph unless the user asks for more or less.")
+                        if _has_who:
+                            _desc = (_who.get("description") or "").strip() if isinstance(_who.get("description"), str) else ""
+                            if _desc:
+                                _lines.append(_desc)
+                            _lines.append(f"You are {_name}.")
+                            if _who.get("gender"):
+                                _lines.append(f"Gender: {_who.get('gender')}.")
+                            if _who.get("roles"):
+                                _roles = _who["roles"] if isinstance(_who["roles"], list) else [_who["roles"]] if _who.get("roles") else []
+                                if _roles:
+                                    _lines.append(f"Roles: {', '.join(str(r) for r in _roles)}.")
+                            if _who.get("personalities"):
+                                _pers = _who["personalities"] if isinstance(_who["personalities"], list) else [_who["personalities"]] if _who.get("personalities") else []
+                                if _pers:
+                                    _lines.append(f"Personalities: {', '.join(str(p) for p in _pers)}.")
+                            if _who.get("language"):
+                                _lines.append(f"Reply in language: {_who.get('language')}.")
+                            if _who.get("response_length"):
+                                _rl = str(_who.get("response_length", "")).strip().lower()
+                                if _rl == "short":
+                                    _lines.append("Keep replies brief: one or two sentences unless the user asks for more.")
+                                elif _rl == "long":
+                                    _lines.append("You may reply at length when the topic deserves it; be thorough but natural.")
+                                else:
+                                    _lines.append("Keep replies to a short paragraph unless the user asks for more or less.")
+                        else:
+                            _lines.append(f"You are {_name}.")
                         _lines.append("Stay in character and chat as a human would: natural, conversational, and in-person. Do not say you are an AI, assistant, or language model; do not break character to explain how you work. Reply only as this person would reply.")
+                        if _friend_identity:
+                            _hroot = (Util().get_core_metadata().get_homeclaw_root() or "").strip()
+                            if _hroot:
+                                _ident_content = load_friend_identity_file(
+                                    _hroot,
+                                    _sys_uid,
+                                    (getattr(_current_friend, "name", "") or "").strip() or "HomeClaw",
+                                    getattr(_current_friend, "identity", None),
+                                    max_chars=12000,
+                                )
+                                if _ident_content:
+                                    _lines.append("")
+                                    _lines.append(_ident_content)
                         system_parts.append("\n".join(_lines) + "\n\n")
                 except Exception as e:
                     logger.debug("Companion identity (who) inject failed: {}", e)
@@ -3997,6 +4109,7 @@ class Core(CoreInterface):
                             )
                             ws_dir = get_workspace_dir(getattr(meta_mem, "workspace_dir", None) or "config/workspace")
                             _sys_uid = getattr(request, "system_user_id", None) if request else None
+                            _fid = (str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw") if request else "HomeClaw"
                             parts_bootstrap = []
                             if use_agent_file:
                                 agent_raw = load_agent_memory_file(
@@ -4004,6 +4117,7 @@ class Core(CoreInterface):
                                     agent_memory_path=getattr(meta_mem, "agent_memory_path", None) or None,
                                     max_chars=0,
                                     system_user_id=_sys_uid,
+                                    friend_id=_fid,
                                 )
                                 if agent_raw and agent_raw.strip():
                                     parts_bootstrap.append("## Agent memory (bootstrap)\n\n" + agent_raw.strip())
@@ -4017,6 +4131,7 @@ class Core(CoreInterface):
                                     daily_memory_dir=daily_dir,
                                     max_chars=0,
                                     system_user_id=_sys_uid,
+                                    friend_id=_fid,
                                 )
                                 if daily_raw and daily_raw.strip():
                                     parts_bootstrap.append("## Daily memory (bootstrap)\n\n" + daily_raw.strip())
@@ -4038,8 +4153,9 @@ class Core(CoreInterface):
                         agent_path = getattr(Util().core_metadata, 'agent_memory_path', None) or ''
                         max_chars = max(0, int(getattr(Util().core_metadata, 'agent_memory_max_chars', 20000) or 0))
                         _sys_uid_legacy = getattr(request, "system_user_id", None) if request else None
+                        _fid_legacy = (str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw") if request else "HomeClaw"
                         agent_content = load_agent_memory_file(
-                            workspace_dir=ws_dir, agent_memory_path=agent_path or None, max_chars=max_chars, system_user_id=_sys_uid_legacy
+                            workspace_dir=ws_dir, agent_memory_path=agent_path or None, max_chars=max_chars, system_user_id=_sys_uid_legacy, friend_id=_fid_legacy
                         )
                         if agent_content:
                             system_parts.append(
@@ -4059,12 +4175,14 @@ class Core(CoreInterface):
                         ws_dir = get_workspace_dir(getattr(Util().core_metadata, 'workspace_dir', None) or 'config/workspace')
                         daily_dir = getattr(Util().core_metadata, 'daily_memory_dir', None) or ''
                         _sys_uid_daily = getattr(request, "system_user_id", None) if request else None
+                        _fid_daily = (str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw") if request else "HomeClaw"
                         daily_content = load_daily_memory_for_dates(
                             [yesterday, today],
                             workspace_dir=ws_dir,
                             daily_memory_dir=daily_dir if daily_dir else None,
                             max_chars=80_000,
                             system_user_id=_sys_uid_daily,
+                            friend_id=_fid_daily,
                         )
                         if daily_content:
                             system_parts.append("## Recent (daily memory)\n" + daily_content + "\n\n")
@@ -4258,14 +4376,17 @@ class Core(CoreInterface):
 
             if use_memory:
                 relevant_memories = await self._fetch_relevant_memories(query,
-                    messages, user_name, user_id, agent_id, run_id, filters, 10
+                    messages, user_name, user_id, _mem_scope, run_id, filters, 10
                 )
                 memories_text = ""
                 if relevant_memories:
                     i = 1
-                    for memory in relevant_memories:
-                        memories_text += (str(i) + ": " + memory["memory"] + " ")
-                        logger.debug(f"RelevantMemory: {str(i) } ': ' {memory['memory']}")
+                    for memory in (relevant_memories or []):
+                        if not isinstance(memory, dict):
+                            continue
+                        mem_text = memory.get("memory") or ""
+                        memories_text += (str(i) + ": " + str(mem_text) + " ")
+                        logger.debug("RelevantMemory: {} : {}", i, (str(mem_text)[:80] + "..." if len(str(mem_text)) > 80 else str(mem_text)))
                         i += 1
                 else:
                     memories_text = ""
@@ -4277,10 +4398,16 @@ class Core(CoreInterface):
                 if kb and (user_id or user_name):
                     try:
                         kb_timeout = 10
-                        kb_results = await asyncio.wait_for(
-                            kb.search(user_id=(user_id or user_name or ""), query=(query or ""), limit=5),
-                            timeout=kb_timeout,
-                        )
+                        try:
+                            kb_results = await asyncio.wait_for(
+                                kb.search(user_id=(user_id or user_name or ""), query=(query or ""), limit=5, friend_id=_mem_scope),
+                                timeout=kb_timeout,
+                            )
+                        except TypeError:
+                            kb_results = await asyncio.wait_for(
+                                kb.search(user_id=(user_id or user_name or ""), query=(query or ""), limit=5),
+                                timeout=kb_timeout,
+                            )
                         # Filter by similarity threshold (0-1, higher = more relevant); none left is fine
                         retrieval_min_score = kb_cfg.get("retrieval_min_score")
                         if retrieval_min_score is not None:
@@ -4296,10 +4423,11 @@ class Core(CoreInterface):
                         logger.debug("Knowledge base search timed out")
                     except Exception as e:
                         logger.debug("Knowledge base search failed: {}", e)
-                # Per-user profile: inject "About the user" when enabled (docs/UserProfileDesign.md)
+                # Per-user profile: inject "About the user" only when active friend is HomeClaw (UserFriendsModelFullDesign.md Step 4)
                 meta = Util().get_core_metadata()
                 profile_cfg = getattr(meta, "profile", None) or {}
-                if profile_cfg.get("enabled", True) and (user_id or user_name):
+                _fid_for_profile = (str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw") if request else "HomeClaw"
+                if profile_cfg.get("enabled", True) and (user_id or user_name) and _fid_for_profile == "HomeClaw":
                     try:
                         from base.profile_store import get_profile, format_profile_for_prompt
                         profile_base_dir = (profile_cfg.get("dir") or "").strip() or None
@@ -4524,6 +4652,7 @@ class Core(CoreInterface):
                                     user_name=user_name,
                                     user_id=user_id,
                                     system_user_id=getattr(request, "system_user_id", None) or user_id,
+                                    friend_id=(str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw"),
                                     session_id=session_id,
                                     run_id=run_id,
                                     request=request,
@@ -4680,6 +4809,7 @@ class Core(CoreInterface):
                     user_name=user_name,
                     user_id=user_id,
                     system_user_id=getattr(request, "system_user_id", None) or user_id,
+                    friend_id=(str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw"),
                     session_id=session_id,
                     run_id=run_id,
                     request=request,
@@ -5130,13 +5260,14 @@ class Core(CoreInterface):
             message: ChatMessage = ChatMessage()
             message.add_user_message(query)
             message.add_ai_message(response)
-            self.chatDB.add(app_id=app_id, user_name=user_name, user_id=user_id, session_id=session_id, chat_message=message)
+            _fid_add = (str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw") if request else "HomeClaw"
+            self.chatDB.add(app_id=app_id, user_name=user_name, user_id=user_id, session_id=session_id, friend_id=_fid_add, chat_message=message)
             # Session pruning: optionally keep only last N turns per session after each reply
             session_cfg = getattr(Util().get_core_metadata(), "session", None) or {}
             if session_cfg.get("prune_after_turn") and app_id and user_id and session_id:
                 keep_n = max(10, int(session_cfg.get("prune_keep_last_n", 50) or 50))
                 try:
-                    pruned = self.prune_session_transcript(app_id=app_id, user_name=user_name, user_id=user_id, session_id=session_id, keep_last_n=keep_n)
+                    pruned = self.prune_session_transcript(app_id=app_id, user_name=user_name, user_id=user_id, session_id=session_id, friend_id=_fid_add, keep_last_n=keep_n)
                     if pruned > 0:
                         _component_log("session", f"pruned {pruned} old turns, kept last {keep_n}")
                 except Exception as e:
@@ -5150,12 +5281,12 @@ class Core(CoreInterface):
             return None
 
 
-    def add_chat_history(self, user_message: str, ai_message: str, app_id: Optional[str] = None, user_name: Optional[str] = None, user_id: Optional[str] = None, session_id: Optional[str] = None):
+    def add_chat_history(self, user_message: str, ai_message: str, app_id: Optional[str] = None, user_name: Optional[str] = None, user_id: Optional[str] = None, session_id: Optional[str] = None, friend_id: Optional[str] = None):
         try:
             message: ChatMessage = ChatMessage()
             message.add_user_message(user_message)
             message.add_ai_message(ai_message)
-            self.chatDB.add(app_id=app_id, user_name=user_name, user_id=user_id, session_id=session_id, chat_message=message)
+            self.chatDB.add(app_id=app_id, user_name=user_name, user_id=user_id, session_id=session_id, friend_id=friend_id, chat_message=message)
         except Exception as e:
             logger.exception(e)
 
@@ -5165,15 +5296,17 @@ class Core(CoreInterface):
         user_name: Optional[str] = None,
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
+        friend_id: Optional[str] = None,
         num_rounds: int = 50,
         fetch_all: bool = False,
     ) -> list:
-        """Return list of sessions (app_id, user_name, user_id, session_id, created_at). For tools/sessions_list."""
+        """Return list of sessions (app_id, user_name, user_id, session_id, friend_id, created_at). For tools/sessions_list. Step 8: filter by friend_id when provided."""
         return self.chatDB.get_sessions(
             app_id=app_id,
             user_name=user_name,
             user_id=user_id,
             session_id=session_id,
+            friend_id=friend_id,
             num_rounds=num_rounds,
             fetch_all=fetch_all,
         )
@@ -5293,17 +5426,16 @@ class Core(CoreInterface):
         user_name: Optional[str] = None,
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
+        friend_id: Optional[str] = None,
         keep_last_n: int = 50,
     ) -> int:
-        """
-        Prune session transcript: delete old turns, keeping only the last keep_last_n turns.
-        Returns the number of rows deleted. See Comparison.md §7.6 — transcript may be pruned.
-        """
+        """Prune session transcript: keep last keep_last_n turns. Step 8: friend_id scopes the session."""
         return self.chatDB.prune_session(
             app_id=app_id,
             user_name=user_name,
             user_id=user_id,
             session_id=session_id,
+            friend_id=friend_id,
             keep_last_n=keep_last_n,
         )
 
@@ -5762,21 +5894,26 @@ class Core(CoreInterface):
         user_name: Optional[str] = None,
         user_id: Optional[str] = None,
         app_id: Optional[str] = None,
+        friend_id: Optional[str] = None,
         limit: int = 10,
     ) -> list:
-        """Search RAG memory (Chroma). For use by memory_search tool. Returns list of {memory, score} or [] if memory not enabled."""
+        """Search RAG memory. Step 9: scoped by (user_id, friend_id). For use by memory_search tool. Returns list of {memory, score} or [] if memory not enabled."""
         mem = getattr(self, "mem_instance", None)
         if mem is None:
             return []
+        try:
+            scope = (str(friend_id or "").strip() or "HomeClaw") if friend_id is not None else (str(app_id or "").strip() or "HomeClaw")
+        except (TypeError, AttributeError):
+            scope = "HomeClaw"
         filters = {}
-        if app_id:
-            filters["agent_id"] = app_id
+        if scope:
+            filters["agent_id"] = scope
         try:
             results = await mem.search(
                 query=query,
                 user_name=user_name,
                 user_id=user_id,
-                agent_id=app_id,
+                agent_id=scope,
                 run_id=None,
                 filters=filters,
                 limit=limit,
@@ -5795,8 +5932,8 @@ class Core(CoreInterface):
         except Exception:
             return None
 
-    async def re_sync_agent_memory(self, system_user_id: Optional[str] = None) -> int:
-        """Re-index AGENT_MEMORY + daily memory (markdown) into the vector store for the given user (or global when None). Call after append so new content is searchable. Returns number of chunks synced."""
+    async def re_sync_agent_memory(self, system_user_id: Optional[str] = None, friend_id: Optional[str] = None) -> int:
+        """Re-index AGENT_MEMORY + daily memory (markdown) into the vector store for the given (user_id, friend_id). Call after append so new content is searchable. Returns number of chunks synced."""
         if not getattr(Util().get_core_metadata(), "use_agent_memory_search", True):
             return 0
         store = getattr(self, "agent_memory_vector_store", None)
@@ -5808,13 +5945,15 @@ class Core(CoreInterface):
             from base.agent_memory_index import sync_agent_memory_to_vector_store
             meta = Util().get_core_metadata()
             ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
+            fid = (str(friend_id or "").strip() or "HomeClaw") if friend_id is not None else "HomeClaw"
+            scope_pairs = [(system_user_id, fid)]
             n = await sync_agent_memory_to_vector_store(
                 workspace_dir=Path(ws_dir),
                 agent_memory_path=(getattr(meta, "agent_memory_path", None) or "").strip() or None,
                 daily_memory_dir=(getattr(meta, "daily_memory_dir", None) or "").strip() or None,
                 vector_store=store,
                 embedder=embedder,
-                system_user_ids=[system_user_id],
+                scope_pairs=scope_pairs,
             )
             if n > 0:
                 _component_log("agent_memory", f"re-synced {n} chunk(s) after append")
@@ -5829,8 +5968,9 @@ class Core(CoreInterface):
         max_results: int = 10,
         min_score: Optional[float] = None,
         system_user_id: Optional[str] = None,
+        friend_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Search AGENT_MEMORY + daily memory (vector store). For agent_memory_search tool. Filters by system_user_id when set. Returns list of {path, start_line, end_line, snippet, score}. Never raises."""
+        """Search AGENT_MEMORY + daily memory (vector store). For agent_memory_search tool. Filters by (system_user_id, friend_id). Returns list of {path, start_line, end_line, snippet, score}. Never raises."""
         store = getattr(self, "agent_memory_vector_store", None)
         embedder = getattr(self, "embedder", None)
         if not store or not embedder:
@@ -5841,8 +5981,9 @@ class Core(CoreInterface):
             emb = await embedder.embed((query or "").strip())
             if not emb:
                 return []
-            from base.workspace import _is_global_agent_memory_user, _sanitize_system_user_id
-            scope_key = "" if _is_global_agent_memory_user(system_user_id) else _sanitize_system_user_id(system_user_id)
+            from base.agent_memory_index import _scope_key_for_pair
+            fid = (str(friend_id or "").strip() or "HomeClaw") if friend_id is not None else "HomeClaw"
+            scope_key = _scope_key_for_pair(system_user_id, fid)
             filters = {"system_user_id": scope_key}
             raw = store.search(query=[emb], limit=max(1, min(max_results, 50)), filters=filters)
         except Exception as e:
@@ -5880,8 +6021,9 @@ class Core(CoreInterface):
         from_line: Optional[int] = None,
         lines: Optional[int] = None,
         system_user_id: Optional[str] = None,
+        friend_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Read AGENT_MEMORY or daily memory markdown (by path). For agent_memory_get tool. Resolves per-user paths when system_user_id is set. Returns {path, text, start_line, end_line} or None. Never raises."""
+        """Read AGENT_MEMORY or daily memory markdown (by path). For agent_memory_get tool. Resolves per (user_id, friend_id) paths. Returns {path, text, start_line, end_line} or None. Never raises."""
         try:
             from base.workspace import get_workspace_dir, get_agent_memory_file_path, get_daily_memory_dir, get_daily_memory_path_for_date
             meta = Util().get_core_metadata()
@@ -5889,21 +6031,49 @@ class Core(CoreInterface):
             path = (path or "").strip()
             if not path:
                 return None
+            fid = (str(friend_id or "").strip() or "HomeClaw") if friend_id is not None else "HomeClaw"
             fp = None
             if path == "AGENT_MEMORY.md":
-                fp = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=getattr(meta, "agent_memory_path", None) or None, system_user_id=system_user_id)
+                fp = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=getattr(meta, "agent_memory_path", None) or None, system_user_id=system_user_id, friend_id=fid)
+            elif path.startswith("memories/") and "/agent_memory.md" in path:
+                try:
+                    rest = path.replace("memories/", "", 1).replace("/agent_memory.md", "")
+                    parts = rest.split("/", 1)
+                    if len(parts) >= 2:
+                        uid, f = parts[0], parts[1]
+                        fp = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=None, system_user_id=uid, friend_id=f)
+                    elif len(parts) == 1 and parts[0]:
+                        fp = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=None, system_user_id=parts[0], friend_id=fid)
+                except Exception:
+                    fp = Path(ws_dir) / path
             elif path.startswith("agent_memory/") and path.endswith(".md"):
                 try:
                     user_part = path.replace("agent_memory/", "").replace(".md", "").strip()
                     if user_part:
-                        fp = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=None, system_user_id=user_part)
+                        fp = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=None, system_user_id=user_part, friend_id=fid)
+                except Exception:
+                    fp = Path(ws_dir) / path
+            elif path.startswith("memories/") and "/memory/" in path and path.endswith(".md"):
+                try:
+                    rest = path.replace("memories/", "", 1)
+                    parts = rest.split("/memory/", 1)
+                    if len(parts) >= 2 and "/" in parts[0]:
+                        uid, f = parts[0].split("/", 1)[0], parts[0].split("/", 1)[1]
+                        date_str = parts[1].replace(".md", "")
+                        d = date.fromisoformat(date_str)
+                        fp = get_daily_memory_path_for_date(d, workspace_dir=ws_dir, daily_memory_dir=(getattr(meta, "daily_memory_dir", None) or "").strip() or None, system_user_id=uid, friend_id=f)
+                    else:
+                        date_str = parts[-1].replace(".md", "")
+                        d = date.fromisoformat(date_str)
+                        base = get_daily_memory_dir(workspace_dir=ws_dir, daily_memory_dir=(getattr(meta, "daily_memory_dir", None) or "").strip() or None, system_user_id=system_user_id, friend_id=fid)
+                        fp = base / f"{d.isoformat()}.md"
                 except Exception:
                     fp = Path(ws_dir) / path
             elif path.startswith("memory/") and path.endswith(".md"):
                 try:
                     date_str = path.replace("memory/", "").replace(".md", "")
                     d = date.fromisoformat(date_str)
-                    base = get_daily_memory_dir(workspace_dir=ws_dir, daily_memory_dir=(getattr(meta, "daily_memory_dir", None) or "").strip() or None, system_user_id=system_user_id)
+                    base = get_daily_memory_dir(workspace_dir=ws_dir, daily_memory_dir=(getattr(meta, "daily_memory_dir", None) or "").strip() or None, system_user_id=system_user_id, friend_id=fid)
                     fp = base / f"{d.isoformat()}.md"
                 except Exception:
                     fp = Path(ws_dir) / path
@@ -5913,7 +6083,7 @@ class Core(CoreInterface):
                     user_part, file_part = rest.split("/", 1)
                     date_str = file_part.replace(".md", "")
                     d = date.fromisoformat(date_str)
-                    fp = get_daily_memory_path_for_date(d, workspace_dir=ws_dir, daily_memory_dir=(getattr(meta, "daily_memory_dir", None) or "").strip() or None, system_user_id=user_part.strip() or system_user_id)
+                    fp = get_daily_memory_path_for_date(d, workspace_dir=ws_dir, daily_memory_dir=(getattr(meta, "daily_memory_dir", None) or "").strip() or None, system_user_id=user_part.strip() or system_user_id, friend_id=fid)
                 except Exception:
                     fp = Path(ws_dir) / path
             else:

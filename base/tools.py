@@ -27,6 +27,7 @@ class ToolContext:
     user_name: Optional[str] = None
     user_id: Optional[str] = None  # For storage (chat, KB, memory): system user id when set by Core; else channel identity
     system_user_id: Optional[str] = None  # Our system user id (from user.yml); use this or user_id for storage
+    friend_id: Optional[str] = None  # Which friend this conversation is with (e.g. "HomeClaw", "Sabrina"). Default "HomeClaw" when from request and not set.
     session_id: Optional[str] = None
     run_id: Optional[str] = None
     request: Optional[Any] = None  # PromptRequest if available

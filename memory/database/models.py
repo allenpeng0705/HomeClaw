@@ -27,6 +27,7 @@ class ChatHistoryModel(Base):
     user_name = Column(String, primary_key=True, index=True)
     user_id = Column(String, primary_key=True, index=True)
     session_id = Column(String, primary_key=True, index=True)
+    friend_id = Column(String, nullable=True, index=True)  # Step 8: scope by (user_id, friend_id); None/empty = HomeClaw
     question = Column(Text)
     answer = Column(Text)
     meta_data = Column(Text, name="metadata")
@@ -51,6 +52,7 @@ class ChatSessionModel(Base):
     user_name = Column(String, primary_key=True, index=True)
     user_id = Column(String, primary_key=True, index=True)
     session_id = Column(String, primary_key=True, index=True)
+    friend_id = Column(String, nullable=True, index=True)  # Step 8: scope by (user_id, friend_id); None/empty = HomeClaw
     meta_data = Column(Text, name="metadata")
     created_at = Column(TIMESTAMP, default=func.current_timestamp(), index=True)
 
@@ -92,7 +94,7 @@ class TamCronJobModel(Base):
 
 
 class TamOneShotReminderModel(Base):
-    """Persisted one-shot reminders (TAM). Survives Core restart; loaded and re-scheduled on TAM init. Deleted after firing."""
+    """Persisted one-shot reminders (TAM). Survives Core restart; loaded and re-scheduled on TAM init. Deleted after firing. Step 10: friend_id for from_friend on fire."""
     __tablename__ = "homeclaw_tam_one_shot_reminders"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -100,4 +102,5 @@ class TamOneShotReminderModel(Base):
     message = Column(Text, nullable=False)
     user_id = Column(String, nullable=True)  # for deliver_to_user (Companion push)
     channel_key = Column(String, nullable=True)  # for channel delivery (per-session cron)
+    friend_id = Column(String, nullable=True)  # Step 10: from_friend when reminder fires (e.g. "Sabrina" or "HomeClaw")
     created_at = Column(TIMESTAMP, default=func.current_timestamp(), index=True)

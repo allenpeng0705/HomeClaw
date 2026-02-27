@@ -1,6 +1,7 @@
 """
 Misc API routes: skills clear-vector-store, testing clear-all, sessions list, reports usage.
 """
+from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 from loguru import logger
 
@@ -69,15 +70,35 @@ def get_api_testing_clear_all_handler(core):
 
 
 def get_api_sessions_list_handler(core):
-    """Return handler for GET /api/sessions."""
-    async def api_sessions_list():
+    """Return handler for GET /api/sessions. Step 13: Requires user_id (query); optional friend_id. Returns only sessions for (user_id) or (user_id, friend_id)."""
+    async def api_sessions_list(request: Request):
         try:
-            session_cfg = getattr(Util().get_core_metadata(), "session", None) or {}
+            try:
+                uid = (request.query_params.get("user_id") or "").strip()
+                fid = (request.query_params.get("friend_id") or "").strip() or None
+            except Exception:
+                uid, fid = "", None
+            if not uid:
+                return JSONResponse(status_code=400, content={"detail": "user_id is required (query param)."})
+            try:
+                session_cfg = getattr(Util().get_core_metadata(), "session", None) or {}
+            except Exception:
+                session_cfg = {}
+            if not isinstance(session_cfg, dict):
+                session_cfg = {}
             if not session_cfg.get("api_enabled", True):
                 return JSONResponse(status_code=403, content={"detail": "Session API disabled"})
-            limit = max(1, min(500, int(session_cfg.get("sessions_list_limit", 100))))
-            sessions = core.get_sessions(num_rounds=limit, fetch_all=True)
-            return JSONResponse(content={"sessions": sessions})
+            try:
+                raw_limit = session_cfg.get("sessions_list_limit", 100)
+                limit = max(1, min(500, int(raw_limit) if raw_limit is not None else 100))
+            except (TypeError, ValueError):
+                limit = 100
+            try:
+                sessions = core.get_sessions(user_id=uid, friend_id=fid, num_rounds=limit, fetch_all=True)
+            except Exception as ge:
+                logger.debug("get_sessions failed: {}", ge)
+                sessions = []
+            return JSONResponse(content={"sessions": sessions if isinstance(sessions, list) else []})
         except Exception as e:
             logger.exception(e)
             return JSONResponse(status_code=500, content={"detail": str(e)})

@@ -13,8 +13,10 @@ from core.routes import plugins_api
 from core.routes import misc_api
 from core.routes import ui_routes
 from core.routes import websocket_routes
+from core.routes import companion_push_api
+from core.routes import companion_auth
 
 __all__ = [
     "auth", "lifecycle", "inbound", "config_api", "files", "memory_routes", "knowledge_base_routes",
-    "plugins_api", "misc_api", "ui_routes", "websocket_routes",
+    "plugins_api", "misc_api", "ui_routes", "websocket_routes", "companion_push_api", "companion_auth",
 ]

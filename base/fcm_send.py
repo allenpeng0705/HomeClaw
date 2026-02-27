@@ -74,10 +74,11 @@ def send_fcm_one(
     body: str,
     user_id: Optional[str] = None,
     source: Optional[str] = None,
+    from_friend: Optional[str] = None,
 ) -> bool:
     """
     Send one FCM notification to one device token (Android or other non-Apple).
-    data payload includes user_id and source so the app can show which user the push is for (multi-user on one device).
+    data payload includes user_id, source, and from_friend so the app can show which user the push is for and which friend it is from (e.g. "Sabrina" or "HomeClaw").
     Returns True if sent successfully. Never raises.
     """
     try:
@@ -93,6 +94,8 @@ def send_fcm_one(
         data = {"source": source_s, "text": body_s}
         if user_id is not None and str(user_id).strip():
             data["user_id"] = str(user_id).strip()[:256]
+        if from_friend is not None and str(from_friend).strip():
+            data["from_friend"] = str(from_friend).strip()[:128]
         msg = messaging.Message(
             notification=messaging.Notification(title=title_s, body=body_s),
             data=data,

@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from base.util import Util
-from base.base import User
+from base.base import User, Friend
 from base.workspace import ensure_user_sandbox_folders
 
 # All top-level keys in core.yml that are safe to read/write via API (nested sections merged on PATCH).
@@ -151,9 +151,17 @@ def get_api_config_users_get_handler(core):  # noqa: ARG001
                     "phone": list(getattr(u, "phone", []) or []),
                     "permissions": list(getattr(u, "permissions", []) or []),
                 }
+                if getattr(u, "username", None) and str(u.username).strip():
+                    entry["username"] = str(u.username).strip()
                 who = getattr(u, "who", None)
                 if isinstance(who, dict) and who:
                     entry["who"] = who
+                friends = getattr(u, "friends", None)
+                if isinstance(friends, list) and friends:
+                    entry["friends"] = [
+                        {"name": getattr(f, "name", ""), "relation": getattr(f, "relation", None), "who": getattr(f, "who", None), "identity": getattr(f, "identity", None)}
+                        for f in friends if hasattr(f, "name")
+                    ]
                 out.append(entry)
             return JSONResponse(content={"users": out})
         except Exception as e:
@@ -188,9 +196,18 @@ def get_api_config_users_post_handler(core):  # noqa: ARG001
             who = body.get("who")
             if not isinstance(who, dict):
                 who = None
+            username = (body.get("username") or "").strip() or None
+            password = body.get("password")
+            if password is not None and not isinstance(password, str):
+                password = str(password) if password else None
+            if password is not None and not (password or "").strip():
+                password = None
+            friends = User._parse_friends(body.get("friends")) if "friends" in body else None
+            if friends is None:
+                friends = [Friend(name="HomeClaw", relation=None, who=None, identity=None)]
             user = User(
                 name=name, id=uid, email=email, im=im, phone=phone, permissions=permissions,
-                skill_api_keys=skill_api_keys, type=user_type, who=who,
+                username=username, password=password, skill_api_keys=skill_api_keys, type=user_type, who=who, friends=friends,
             )
             Util().add_user(user)
             root_str = (getattr(Util().get_core_metadata(), "homeclaw_root", None) or "").strip()
@@ -245,9 +262,22 @@ def get_api_config_users_patch_handler(core):  # noqa: ARG001
             who = body.get("who") if "who" in body else getattr(found, "who", None)
             if not isinstance(who, dict):
                 who = None
+            username = (body.get("username") or "").strip() if "username" in body else getattr(found, "username", None)
+            if username is not None and not str(username).strip():
+                username = None
+            else:
+                username = str(username).strip() if username else None
+            password = body.get("password") if "password" in body else getattr(found, "password", None)
+            if password is not None and not isinstance(password, str):
+                password = str(password) if password else None
+            if password is not None and not (password or "").strip():
+                password = None
+            friends = User._parse_friends(body.get("friends")) if "friends" in body else getattr(found, "friends", None)
+            if friends is None:
+                friends = [Friend(name="HomeClaw", relation=None, who=None, identity=None)]
             updated = User(
                 name=name, id=uid, email=email, im=im, phone=phone, permissions=permissions,
-                skill_api_keys=skill_api_keys, type=user_type, who=who,
+                username=username, password=password, skill_api_keys=skill_api_keys, type=user_type, who=who, friends=friends,
             )
             idx = users.index(found)
             users[idx] = updated

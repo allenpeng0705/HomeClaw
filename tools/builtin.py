@@ -342,10 +342,12 @@ async def _sessions_list_executor(arguments: Dict[str, Any], context: ToolContex
     user_name = arguments.get("user_name") or context.user_name
     user_id = arguments.get("user_id") or context.user_id
     limit = int(arguments.get("limit", 20))
+    friend_id = arguments.get("friend_id") or getattr(context, "friend_id", None)
     sessions = core.get_sessions(
         app_id=app_id,
         user_name=user_name,
         user_id=user_id,
+        friend_id=friend_id,
         num_rounds=limit,
         fetch_all=False,
     )
@@ -850,8 +852,9 @@ async def _remind_me_executor(arguments: Dict[str, Any], context: ToolContext) -
         channel_key = f"{context.app_id}:{context.user_id}:{context.session_id}"
     elif user_id.lower() in ("companion", "system"):
         channel_key = "companion"
+    friend_id = getattr(context, "friend_id", None) or getattr(context, "app_id", None)
     try:
-        tam.schedule_one_shot(message, run_time_str, user_id=user_id, channel_key=channel_key)
+        tam.schedule_one_shot(message, run_time_str, user_id=user_id, channel_key=channel_key, friend_id=friend_id)
         # User-friendly response (Core may use as final reply); avoid raw JSON. Include current date so the follow-up LLM uses it (e.g. "当前是26号" not "19号").
         time_part = run_time_str.split()[-1] if " " in run_time_str else run_time_str
         today = datetime.now()
@@ -884,6 +887,7 @@ async def _record_date_executor(arguments: Dict[str, Any], context: ToolContext)
         return "Error: event_date (YYYY-MM-DD) is required when remind_on is set (compute from 'when')"
     try:
         system_user_id = getattr(context, "system_user_id", None) or getattr(context, "user_id", None)
+        friend_id = getattr(context, "friend_id", None) or getattr(context, "app_id", None)
         result = tam.record_event(
             event_name=event_name,
             when=when,
@@ -892,6 +896,7 @@ async def _record_date_executor(arguments: Dict[str, Any], context: ToolContext)
             remind_on=remind_on or None,
             remind_message=remind_message or None,
             system_user_id=system_user_id,
+            friend_id=friend_id,
         )
         return json.dumps(result)
     except Exception as e:
@@ -1015,11 +1020,13 @@ async def _memory_search_executor(arguments: Dict[str, Any], context: ToolContex
     limit = int(arguments.get("limit", 10))
     limit = min(max(1, limit), 50)
     try:
+        friend_id = getattr(context, "friend_id", None)
         results = await core.search_memory(
             query=query,
             user_name=context.user_name,
             user_id=context.user_id,
             app_id=context.app_id,
+            friend_id=friend_id,
             limit=limit,
         )
     except Exception as e:
@@ -1060,7 +1067,8 @@ async def _append_agent_memory_executor(arguments: Dict[str, Any], context: Tool
         ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
         agent_path = getattr(meta, "agent_memory_path", None) or ""
         sys_uid = getattr(context, "system_user_id", None) if context else None
-        path = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=agent_path or None, system_user_id=sys_uid)
+        fid = (str(getattr(context, "friend_id", None) or "").strip() or "HomeClaw") if context else "HomeClaw"
+        path = get_agent_memory_file_path(workspace_dir=ws_dir, agent_memory_path=agent_path or None, system_user_id=sys_uid, friend_id=fid)
         if path is None:
             return json.dumps({"ok": False, "message": "AGENT_MEMORY path not configured."})
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1074,7 +1082,7 @@ async def _append_agent_memory_executor(arguments: Dict[str, Any], context: Tool
             try:
                 re_sync = getattr(core, "re_sync_agent_memory", None)
                 if callable(re_sync):
-                    n = await re_sync(system_user_id=sys_uid)
+                    n = await re_sync(system_user_id=sys_uid, friend_id=fid)
                     return json.dumps({"ok": True, "message": f"Appended to {path.name}", "path": str(path), "chunks_indexed": n})
             except Exception:
                 pass
@@ -1096,7 +1104,8 @@ async def _append_daily_memory_executor(arguments: Dict[str, Any], context: Tool
         ws_dir = get_workspace_dir(getattr(meta, "workspace_dir", None) or "config/workspace")
         daily_dir = getattr(meta, "daily_memory_dir", None) or ""
         sys_uid = getattr(context, "system_user_id", None) if context else None
-        ok = append_daily_memory(content, d=None, workspace_dir=ws_dir, daily_memory_dir=daily_dir if daily_dir else None, system_user_id=sys_uid)
+        fid = (str(getattr(context, "friend_id", None) or "").strip() or "HomeClaw") if context else "HomeClaw"
+        ok = append_daily_memory(content, d=None, workspace_dir=ws_dir, daily_memory_dir=daily_dir if daily_dir else None, system_user_id=sys_uid, friend_id=fid)
         if ok:
             from datetime import date
             # Re-sync so agent_memory_search finds the new content without restarting Core
@@ -1105,7 +1114,7 @@ async def _append_daily_memory_executor(arguments: Dict[str, Any], context: Tool
                 try:
                     re_sync = getattr(core, "re_sync_agent_memory", None)
                     if callable(re_sync):
-                        n = await re_sync(system_user_id=sys_uid)
+                        n = await re_sync(system_user_id=sys_uid, friend_id=fid)
                         return json.dumps({"ok": True, "message": f"Appended to daily memory ({date.today().isoformat()}.md)", "chunks_indexed": n})
                 except Exception:
                     pass
@@ -1142,7 +1151,8 @@ async def _agent_memory_search_executor(arguments: Dict[str, Any], context: Tool
             min_score = None
     try:
         sys_uid = getattr(context, "system_user_id", None) if context else None
-        results = await core.search_agent_memory(query=query, max_results=max_results, min_score=min_score, system_user_id=sys_uid)
+        fid = (str(getattr(context, "friend_id", None) or "").strip() or "HomeClaw") if context else "HomeClaw"
+        results = await core.search_agent_memory(query=query, max_results=max_results, min_score=min_score, system_user_id=sys_uid, friend_id=fid)
     except Exception as e:
         return json.dumps({"results": [], "message": str(e)})
     return json.dumps({"results": results}, ensure_ascii=False, indent=0)
@@ -1176,7 +1186,8 @@ async def _agent_memory_get_executor(arguments: Dict[str, Any], context: ToolCon
             lines = None
     try:
         sys_uid = getattr(context, "system_user_id", None) if context else None
-        out = core.get_agent_memory_file(path=path, from_line=from_line, lines=lines, system_user_id=sys_uid)
+        fid = (str(getattr(context, "friend_id", None) or "").strip() or "HomeClaw") if context else "HomeClaw"
+        out = core.get_agent_memory_file(path=path, from_line=from_line, lines=lines, system_user_id=sys_uid, friend_id=fid)
     except Exception as e:
         return json.dumps({"path": path, "text": "", "message": str(e)})
     if out is None:
@@ -3115,6 +3126,11 @@ def _resolve_relative_to_absolute_via_sandbox_json(
         base_absolute = Path(base_str).resolve()
         rest = _normalize_relative_path(relative_path)
         full = (base_absolute / rest).resolve()
+        # Step 14: Reject path traversal (e.g. rest = "../../other" would escape sandbox)
+        try:
+            full.relative_to(base_absolute)
+        except ValueError:
+            return None
         return (full, base_absolute)
     except Exception:
         return None
@@ -3128,8 +3144,9 @@ def _resolve_file_path(
 ) -> Optional[Tuple[Path, Optional[Path]]]:
     """
     Resolve a file path for file tools. Returns (full_path, base_for_validation) or None on error (caller should return polite message).
-    Each user has two major folders: (1) their sandbox homeclaw_root/{user_id}/ (private), (2) the share folder homeclaw_root/share/ (accessible by all users). Paths must stay under one of these.
-    - When homeclaw_root is SET: path "." or "subdir" → homeclaw_root/{user_id}/; path "share" or "share/..." → homeclaw_root/share/. Use "output/<filename>" for generated files.
+    - When path is empty or omitted: base = user sandbox root (homeclaw_root/{user_id}/).
+    - When path starts with a friend name (e.g. "Sabrina/output/report.pdf"): resolved under user sandbox as {user_id}/Sabrina/output/report.pdf, so Core can access that friend's folder under the user.
+    - User sandbox contains: downloads/, documents/, output/, work/, share/, knowledgebase/, and per-friend {FriendName}/ with output/, knowledge/. Path "share" or "share/..." → homeclaw_root/share/ (global share for ALL users); when the user says "share" or "shared folder", use this path.
     - When homeclaw_root is NOT SET: path_arg can be absolute. base_for_validation = None.
     Never raises; returns None on any exception.
     """
@@ -3196,7 +3213,11 @@ def _resolve_file_path(
                 pass
         rest = _normalize_relative_path(rest)
         full = (effective_base / rest).resolve()
-        # Validate under the allowed sandbox root (user folder or share); reject escape (e.g. ../other_user)
+        # Step 14: Validate under the allowed sandbox root; reject path traversal (e.g. ../other_user)
+        try:
+            full.relative_to(effective_base.resolve())
+        except ValueError:
+            return None
         return (full, effective_base)
     except Exception as e:
         logger.debug("_resolve_file_path failed: %s", e)
@@ -4496,7 +4517,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="run_skill",
-            description="Run a script from a skill's scripts/ folder, or confirm an instruction-only skill. Use when a skill has a scripts/ directory: pass skill_name and script (e.g. run.sh, main.py). For instruction-only skills (no scripts/): call run_skill(skill_name=<name>) with no script; the tool will confirm the skill—then you MUST continue in the same turn: follow the skill's steps (e.g. document_read, generate content, file_write or save_result_page to output/) and return the link to the user. Do not reply with only the confirmation message. skill_name can be folder name (e.g. html-slides-1.0.0) or short name (html-slides, html slides).",
+            description="Run a script from a skill's scripts/ folder, or confirm an instruction-only skill. Use when a skill has a scripts/ directory: pass skill_name and script (e.g. run.sh, main.py). For instruction-only skills (no scripts/): call run_skill(skill_name=<name>) with no script; the tool will confirm the skill—then you MUST continue in the same turn: follow the skill's steps (e.g. document_read, generate content, file_write or save_result_page to output/ or {FriendName}/output/) and return the link to the user. Do not reply with only the confirmation message. skill_name can be folder name (e.g. html-slides-1.0.0) or short name (html-slides, html slides).",
             parameters={
                 "type": "object",
                 "properties": {
@@ -4985,11 +5006,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_read",
-            description="Read contents of a file. When the user asks about a file by name (e.g. 1.pdf), use path '1.pdf' only (filename or path from folder_list/file_find). Do not use absolute paths (e.g. /mnt/, C:\\) — they are rejected. Default base: user sandbox; use path 'share/...' when user says share.",
+            description="Read contents of a file. Paths relative to user sandbox. When path not given: use user sandbox root or infer (e.g. 'my documents' → documents/). When user mentions a friend: use path '{FriendName}/...'. When user says 'share' or 'shared folder (for all users)': use path 'share' or 'share/...' to access the global share (homeclaw_root/share/). User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/; per friend: {FriendName}/output/, {FriendName}/knowledge/.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path under user sandbox only (e.g. 1.pdf, output/report.txt). Do not use absolute paths. Use the path from folder_list or file_find, or the filename the user asked for."},
+                    "path": {"type": "string", "description": "Relative path. User sandbox: output/, documents/, etc. Friend: {FriendName}/output/.... For global share (all users): use 'share' or 'share/...'. Use exact path from folder_list or file_find."},
                     "max_chars": {"type": "integer", "description": "Max characters to return (default from config tools.file_read_max_chars, or 32000).", "default": 32000},
                 },
                 "required": ["path"],
@@ -5000,11 +5021,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="document_read",
-            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. When the user asks about a file by name (e.g. 1.pdf), use path '1.pdf' only (the filename or path from folder_list/file_find). Do not use absolute paths (e.g. /mnt/, C:\\) — they are rejected. Default base: user sandbox; use path 'share/...' when user says share. For long files, increase max_chars or ask for section-by-section summary.",
+            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. When path not given: use user sandbox root or infer (e.g. 'my documents' → documents/). When user mentions a friend (e.g. 'Sabrina\'s document'), use path '{FriendName}/...' or '{FriendName}/output/...'. User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/; per friend: {FriendName}/output/, {FriendName}/knowledge/. Use 'share/...' for global share. For long files, increase max_chars.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path under user sandbox only (e.g. 1.pdf, output/report.pdf). Do not use absolute paths (/mnt/, C:\\, /Users/). Use the path from folder_list or file_find, or the filename the user asked for."},
+                    "path": {"type": "string", "description": "Relative path under user sandbox (e.g. documents/1.pdf, output/report.pdf, HomeClaw/output/slides.pptx). Use 'share/...' for global share. Use exact path from folder_list or file_find."},
                     "max_chars": {"type": "integer", "description": "Max characters to return (default from config tools.file_read_max_chars, or 64000).", "default": 64000},
                 },
                 "required": ["path"],
@@ -5015,11 +5036,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_understand",
-            description="Classify a file as image, audio, video, or document and return type + path. For documents, returns extracted text (same as document_read). For image/audio/video, returns type and path; use image_analyze(path) for images if the user asks to describe. Default base: user's private folder; use path 'share/...' only when the user says share folder.",
+            description="Classify a file as image, audio, video, or document and return type + path. When path not given: use user sandbox root or infer. When user mentions a friend, use path '{FriendName}/...'. User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/; per friend: {FriendName}/output/, {FriendName}/knowledge/. Use 'share/...' for global share. For images, use image_analyze(path) if user asks to describe.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Path relative to user's private folder. Use 'share/filename' when user says share."},
+                    "path": {"type": "string", "description": "Relative path under user sandbox (e.g. output/file.pdf, documents/readme.md). Use 'share/...' for global share."},
                     "max_chars": {"type": "integer", "description": "Max characters to extract for documents (default from config).", "default": 64000},
                 },
                 "required": ["path"],
@@ -5030,11 +5051,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_write",
-            description="Write content to a file. Default base: user's private folder (homeclaw_root/{user_id}). Use path '.' or a path under it; use path 'share/...' only when the user says share folder.",
+            description="Write content to a file. When path not given: use user sandbox root, or infer (e.g. 'save to my output' → output/). When user mentions a friend (e.g. 'save for Sabrina'), use path '{FriendName}/output/...'. User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/; per friend: {FriendName}/output/, {FriendName}/knowledge/. Use 'share/...' only when user says share folder.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Path relative to user's private folder. Use 'share/filename' when user says share."},
+                    "path": {"type": "string", "description": "Relative path (e.g. output/report.md, documents/note.txt, HomeClaw/output/slides.html). Use 'share/...' for global share."},
                     "content": {"type": "string", "description": "Content to write."},
                 },
                 "required": ["path", "content"],
@@ -5045,11 +5066,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_edit",
-            description="Replace old_string with new_string in a file. Default base: user's private folder; use path 'share/...' only when the user says share folder. Use replace_all=true to replace all occurrences.",
+            description="Replace old_string with new_string in a file. When path not given: use user sandbox root or infer. When user mentions a friend, use path '{FriendName}/...' or '{FriendName}/output/...'. User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/; per friend: {FriendName}/output/. Use 'share/...' for global share. Use replace_all=true to replace all occurrences.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Path relative to user's private folder. Use 'share/filename' when user says share."},
+                    "path": {"type": "string", "description": "Relative path under user sandbox. Use 'share/...' for global share."},
                     "old_string": {"type": "string", "description": "String to replace."},
                     "new_string": {"type": "string", "description": "Replacement string."},
                     "replace_all": {"type": "boolean", "description": "If true, replace all occurrences; else first only.", "default": False},
@@ -5062,7 +5083,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="apply_patch",
-            description="Apply a unified diff patch to a file. Patch should be a single-file unified diff (---/+++ and @@ hunks). Path in patch is relative to user's private folder; use 'share/...' when user says share folder. Provide patch or content.",
+            description="Apply a unified diff patch to a file. Patch should be a single-file unified diff (---/+++ and @@ hunks). Path in patch is relative to user sandbox (e.g. output/file.txt, documents/readme.md); use 'share/...' when user says share folder. Provide patch or content.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -5079,11 +5100,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="folder_list",
-            description="List contents of a directory (files and subdirectories). Sandbox: (1) user sandbox root and subfolders — omit path or use subdir name; (2) share and subfolders — path 'share' or 'share/...'. Use when the user asks what files they have. The returned 'path' is the exact path to pass to document_read (e.g. 1.pdf); do not invent or guess paths.",
+            description="List contents of a directory. When path not given: lists user sandbox root. When user mentions a friend, use path '{FriendName}' or '{FriendName}/output'. User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/; per friend: {FriendName}/ (with output/, knowledge/). Use path 'share' or 'share/...' for global share. Returned 'path' is the exact path to pass to document_read/file_read.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Omit or leave empty for user sandbox root. For a subfolder use its name (e.g. output). For document_read use only the exact path from this tool's result (e.g. 1.pdf).", "default": ""},
+                    "path": {"type": "string", "description": "Omit or '' for user sandbox root. Subdir: output, documents, downloads, work, share, knowledgebase, or FriendName, FriendName/output, FriendName/knowledge. Use 'share' or 'share/...' for global share. Use exact path from result in document_read.", "default": ""},
                     "max_entries": {"type": "integer", "description": "Max entries to return (default 500).", "default": 500},
                 },
                 "required": [],
@@ -5094,12 +5115,12 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_find",
-            description="Find files or folders by name pattern (glob). Sandbox: (1) user sandbox root and subfolders — omit path; (2) share — path 'share'. E.g. file_find(pattern='*.pdf'). Use the **exact path** from the result in document_read (e.g. 1.pdf); do not use a different path like output/3.pdf.",
+            description="Find files by name pattern (glob). When path not given: search user sandbox root. When user mentions a friend, use path '{FriendName}' or '{FriendName}/output'. User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/, {FriendName}/output/, {FriendName}/knowledge/. Use path 'share' for global share. Use the **exact path** from the result in document_read.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "pattern": {"type": "string", "description": "Glob pattern for name (e.g. '*.pdf', '*1*.pdf*'). Default '*' lists all.", "default": "*"},
-                    "path": {"type": "string", "description": "Omit or empty = user sandbox root. Use 'share' only when user says share. For document_read use only the exact path from this tool's result.", "default": ""},
+                    "pattern": {"type": "string", "description": "Glob pattern (e.g. '*.pdf', '*1*.pdf*'). Default '*' lists all.", "default": "*"},
+                    "path": {"type": "string", "description": "Omit or '' = user sandbox root. Or subdir: output, documents, share, FriendName/output, etc. Use exact path from result in document_read.", "default": ""},
                     "max_results": {"type": "integer", "description": "Max results to return (default 200).", "default": 200},
                 },
                 "required": [],
@@ -5281,11 +5302,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="get_file_view_link",
-            description="Get a view link for a file already saved under output/ (e.g. output/report_xxx.html). Use when the user asks for the link (e.g. 'send me the link', '能把链接发给我') after a file was saved. Pass the same path that was used when saving (e.g. from the previous file_write or save_result_page result).",
+            description="Get a view link for a file already saved (e.g. output/report_xxx.html or HomeClaw/output/slides.html). Use when the user asks for the link after a file was saved. Pass the same path used when saving (from file_write or save_result_page).",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path under output/, e.g. output/allen_resume_slides.html (same as in the save result)."},
+                    "path": {"type": "string", "description": "Relative path to the saved file (e.g. output/report.html, HomeClaw/output/slides.html). Same path as in the save result."},
                 },
                 "required": ["path"],
             },

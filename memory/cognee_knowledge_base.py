@@ -179,16 +179,25 @@ def _sidecar_clear_all() -> None:
         logger.debug("Cognee KB sidecar clear failed: {}", e)
 
 
-def _safe(s: str, max_len: int = 100) -> str:
-    """Safe for Cognee dataset name: alphanumeric, underscore, hyphen, dot."""
-    s = (s or "").strip() or "default"
+def _safe(s: Any, max_len: int = 100) -> str:
+    """Safe for Cognee dataset name: alphanumeric, underscore, hyphen, dot. Never raises."""
+    try:
+        s = (str(s) if s is not None else "").strip() or "default"
+    except Exception:
+        s = "default"
     s = re.sub(r"[^\w\-.]", "_", s)[:max_len]
     return s or "default"
 
 
-def _kb_dataset_prefix(user_id: str) -> str:
-    """Prefix for all KB datasets of this user (e.g. kb_alice)."""
-    return f"kb_{_safe(user_id)}"
+def _kb_dataset_prefix(user_id: str, friend_id: Optional[str] = None) -> str:
+    """Prefix for KB datasets. Step 9: when friend_id is set, scope by (user_id, friend_id) e.g. kb_alice_Sabrina. Never raises."""
+    u = _safe(user_id)
+    try:
+        if friend_id and (str(friend_id).strip() if friend_id is not None else ""):
+            return f"kb_{u}_{_safe(str(friend_id).strip())}"
+    except Exception:
+        pass
+    return f"kb_{u}"
 
 
 def _kb_dataset_name_for_source(user_id: str, source_id: str) -> str:
@@ -227,9 +236,9 @@ class CogneeKnowledgeBase:
         self._search_timeout = 30
         self._list_timeout = 15
 
-    async def _list_user_kb_datasets_async(self, user_id: str) -> List[str]:
-        """List Cognee dataset names for this user's KB (prefix kb_{user}_)."""
-        prefix = _kb_dataset_prefix(user_id) + "_"
+    async def _list_user_kb_datasets_async(self, user_id: str, friend_id: Optional[str] = None) -> List[str]:
+        """List Cognee dataset names for this user's KB (and optional friend_id scope). Step 9: when friend_id set, prefix kb_{user}_{friend}_."""
+        prefix = _kb_dataset_prefix(user_id, friend_id) + "_"
         try:
             if not hasattr(self._cognee, "datasets") or not hasattr(self._cognee.datasets, "list_datasets"):
                 return []
@@ -314,11 +323,12 @@ class CogneeKnowledgeBase:
         user_id: str,
         query: str,
         limit: int = 10,
+        friend_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Search all KB datasets for this user. Returns list of {content, source_type, source_id, score}. Never raises."""
+        """Search KB datasets for this user (optional friend_id scope). Step 9: when friend_id set, only datasets with prefix kb_{user}_{friend}_. Returns list of {content, source_type, source_id, score}. Never raises."""
         if not (user_id or "").strip() or not (query or "").strip():
             return []
-        dataset_names = await self._list_user_kb_datasets_async(user_id)
+        dataset_names = await self._list_user_kb_datasets_async(user_id, friend_id=friend_id)
         if not dataset_names:
             return []
         try:

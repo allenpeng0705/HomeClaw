@@ -53,6 +53,71 @@ def _sanitize_system_user_id(system_user_id: Optional[str]) -> str:
         return ""
 
 
+def _sanitize_friend_id(friend_id: Optional[str]) -> str:
+    """Normalize friend_id for paths; default HomeClaw when empty/None. Sanitize for file paths. Never raises."""
+    try:
+        if friend_id is None:
+            return "HomeClaw"
+        s = str(friend_id).strip()
+        if not s:
+            return "HomeClaw"
+        for c in r'/\:*?"<>|':
+            s = s.replace(c, "_")
+        return s or "HomeClaw"
+    except Exception:
+        return "HomeClaw"
+
+
+def _sanitize_identity_filename(name: Optional[str]) -> str:
+    """Return a safe filename for identity file (no path separators). Default identity.md. Never raises."""
+    try:
+        if not name or not str(name).strip():
+            return "identity.md"
+        s = str(name).strip()
+        for c in r'/\:*?"<>|':
+            s = s.replace(c, "_")
+        return s if s else "identity.md"
+    except Exception:
+        return "identity.md"
+
+
+def load_friend_identity_file(
+    homeclaw_root: str,
+    user_id: str,
+    friend_id: str,
+    identity_filename: Optional[str] = None,
+    max_chars: int = 12000,
+) -> str:
+    """
+    Load the friend identity markdown file from homeclaw_root/{user_id}/{friend_id}/{identity_filename}.
+    Used for UserFriendsModelFullDesign.md Step 6 (friend identity). If file missing or error, returns "".
+    Content is capped at max_chars. Never raises.
+    """
+    try:
+        root = (homeclaw_root or "").strip()
+        if not root:
+            return ""
+        uid = _sanitize_system_user_id(user_id)
+        fid = _sanitize_friend_id(friend_id)
+        if not uid or not fid:
+            return ""
+        fname = _sanitize_identity_filename(identity_filename)
+        path = Path(root).resolve() / uid / fid / fname
+        if not path.is_file():
+            return ""
+        raw = path.read_text(encoding="utf-8", errors="replace").strip()
+        if not raw:
+            return ""
+        try:
+            cap = max(500, min(int(max_chars), 50000))
+        except (TypeError, ValueError):
+            cap = 12000
+        return raw[:cap] if len(raw) > cap else raw
+    except Exception as e:
+        logger.debug("load_friend_identity_file failed: {}", e)
+        return ""
+
+
 def get_user_knowledgebase_dir(homeclaw_root: str, user_id: str, folder_name: str = "knowledgebase") -> Optional[Path]:
     """
     Path to a user's knowledge base folder: {homeclaw_root}/{user_id}/{folder_name}/.
@@ -76,6 +141,17 @@ def get_user_knowledgebase_dir(homeclaw_root: str, user_id: str, folder_name: st
         return None
 
 
+def _sanitize_subdir(name: str, default: str) -> str:
+    """Sanitize a subdir name for path use. Never raises."""
+    try:
+        s = (str(name or "").strip() or default)[:100]
+        for c in r'/\:*?"<>|':
+            s = s.replace(c, "_")
+        return s or default
+    except Exception:
+        return default
+
+
 def ensure_user_sandbox_folders(
     homeclaw_root: str,
     user_ids: List[str],
@@ -84,12 +160,20 @@ def ensure_user_sandbox_folders(
     companion: bool = True,
     output_subdir: str = "output",
     knowledgebase_subdir: str = "knowledgebase",
+    downloads_subdir: str = "downloads",
+    documents_subdir: str = "documents",
+    work_subdir: str = "work",
+    user_share_subdir: str = "share",
+    friend_output_subdir: str = "output",
+    friend_knowledge_subdir: str = "knowledge",
+    friends_by_user: Optional[Dict[str, List[str]]] = None,
 ) -> None:
     """
-    Create per-user and shared sandbox folders under homeclaw_root so they exist for file tools and KB sync.
-    For each user_id: {homeclaw_root}/{user_id}, {user_id}/output, {user_id}/knowledgebase.
-    Also creates: {homeclaw_root}/share, and if companion: {homeclaw_root}/companion, companion/output.
-    Uses _sanitize_system_user_id for path segments. Never raises; logs on mkdir failure.
+    Create per-user, per-friend, and shared sandbox folders under homeclaw_root (UserFriendsModelFullDesign.md Step 5).
+    For each user_id: {user_id}, {user_id}/output, {user_id}/knowledgebase, {user_id}/downloads, {user_id}/documents, {user_id}/work, {user_id}/share.
+    For each (user_id, friend_id) when friends_by_user is set: {user_id}/{friend_id}, {friend_id}/output, {friend_id}/knowledge.
+    Also: {homeclaw_root}/share, and if companion: {homeclaw_root}/companion, companion/output.
+    Never raises; logs on mkdir failure.
     """
     try:
         root = (homeclaw_root or "").strip()
@@ -107,9 +191,7 @@ def ensure_user_sandbox_folders(
             logger.debug("ensure_user_sandbox_folders: mkdir root {} failed: {}", base, e)
             return
         # Share folder (all users + companion)
-        share_name = (share_dir or "share").strip() or "share"
-        for c in r'/\:*?"<>|':
-            share_name = share_name.replace(c, "_")
+        share_name = _sanitize_subdir(share_dir, "share")
         try:
             (base / share_name).mkdir(parents=True, exist_ok=True)
         except OSError as e:
@@ -119,14 +201,26 @@ def ensure_user_sandbox_folders(
             try:
                 comp = base / "companion"
                 comp.mkdir(parents=True, exist_ok=True)
-                (comp / (output_subdir or "output").strip() or "output").mkdir(parents=True, exist_ok=True)
+                (comp / _sanitize_subdir(output_subdir, "output")).mkdir(parents=True, exist_ok=True)
             except OSError as e:
                 logger.debug("ensure_user_sandbox_folders: mkdir companion failed: {}", e)
-        out_sub = (output_subdir or "output").strip() or "output"
-        kb_sub = (knowledgebase_subdir or "knowledgebase").strip() or "knowledgebase"
-        for c in r'/\:*?"<>|':
-            out_sub = out_sub.replace(c, "_")
-            kb_sub = kb_sub.replace(c, "_")
+        out_sub = _sanitize_subdir(output_subdir, "output")
+        kb_sub = _sanitize_subdir(knowledgebase_subdir, "knowledgebase")
+        dl_sub = _sanitize_subdir(downloads_subdir, "downloads")
+        doc_sub = _sanitize_subdir(documents_subdir, "documents")
+        work_sub = _sanitize_subdir(work_subdir, "work")
+        u_share_sub = _sanitize_subdir(user_share_subdir, "share")
+        f_out_sub = _sanitize_subdir(friend_output_subdir, "output")
+        f_kb_sub = _sanitize_subdir(friend_knowledge_subdir, "knowledge")
+        friends_map: Dict[str, List[str]] = {}
+        if isinstance(friends_by_user, dict):
+            for k, v in friends_by_user.items():
+                try:
+                    key = _sanitize_system_user_id(str(k) if k is not None else "")
+                    if key:
+                        friends_map[key] = list(v) if isinstance(v, (list, tuple)) else []
+                except Exception:
+                    pass
         for uid_raw in user_ids:
             uid = _sanitize_system_user_id(uid_raw)
             if not uid:
@@ -136,8 +230,24 @@ def ensure_user_sandbox_folders(
                 user_base.mkdir(parents=True, exist_ok=True)
                 (user_base / out_sub).mkdir(parents=True, exist_ok=True)
                 (user_base / kb_sub).mkdir(parents=True, exist_ok=True)
+                (user_base / dl_sub).mkdir(parents=True, exist_ok=True)
+                (user_base / doc_sub).mkdir(parents=True, exist_ok=True)
+                (user_base / work_sub).mkdir(parents=True, exist_ok=True)
+                (user_base / u_share_sub).mkdir(parents=True, exist_ok=True)
             except OSError as e:
                 logger.debug("ensure_user_sandbox_folders: mkdir user {} failed: {}", uid, e)
+                continue
+            for fid_raw in friends_map.get(uid) or []:
+                fid = _sanitize_friend_id(fid_raw)
+                if not fid:
+                    continue
+                try:
+                    friend_base = user_base / fid
+                    friend_base.mkdir(parents=True, exist_ok=True)
+                    (friend_base / f_out_sub).mkdir(parents=True, exist_ok=True)
+                    (friend_base / f_kb_sub).mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    logger.debug("ensure_user_sandbox_folders: mkdir user/friend {}/{} failed: {}", uid, fid, e)
     except Exception as e:
         logger.debug("ensure_user_sandbox_folders: {}", e)
 
@@ -201,14 +311,16 @@ def get_agent_memory_file_path(
     workspace_dir: Optional[Path] = None,
     agent_memory_path: Optional[str] = None,
     system_user_id: Optional[str] = None,
+    friend_id: Optional[str] = None,
 ) -> Optional[Path]:
-    """Return the Path for AGENT_MEMORY (markdown). When system_user_id is set (and not system/companion), uses workspace_dir/agent_memory/{user_id}.md; otherwise global path. Never raises."""
+    """Return the Path for AGENT_MEMORY (markdown). Per (user_id, friend_id): workspace_dir/memories/{user_id}/{friend_id}/agent_memory.md; global user (system/companion) or missing uid: global path. Never raises."""
     try:
         root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
         if not _is_global_agent_memory_user(system_user_id):
             uid = _sanitize_system_user_id(system_user_id)
-            if uid:
-                return root / "agent_memory" / f"{uid}.md"
+            fid = _sanitize_friend_id(friend_id)
+            if uid and fid:
+                return root / "memories" / uid / fid / "agent_memory.md"
         if agent_memory_path and str(agent_memory_path).strip():
             p = Path(str(agent_memory_path).strip())
             if not p.is_absolute():
@@ -219,15 +331,51 @@ def get_agent_memory_file_path(
         return _DEFAULT_WORKSPACE_DIR / AGENT_MEMORY_FILENAME
 
 
+def _migrate_agent_memory_to_memories(
+    root: Path,
+    uid: str,
+    fid: str,
+) -> bool:
+    """If memories/{uid}/{fid}/agent_memory.md does not exist but old agent_memory/{uid}.md exists, copy content. Returns True if migrated or nothing to do."""
+    try:
+        new_path = root / "memories" / uid / fid / "agent_memory.md"
+        if new_path.is_file():
+            return True
+        old_path = root / "agent_memory" / f"{uid}.md"
+        if not old_path.is_file():
+            return True
+        content = old_path.read_text(encoding="utf-8")
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        new_path.write_text(content, encoding="utf-8")
+        logger.debug("Migrated agent_memory {} -> {}", old_path, new_path)
+        return True
+    except Exception as e:
+        logger.debug("migrate agent_memory failed: {}", e)
+        return False
+
+
 def ensure_agent_memory_file_exists(
     workspace_dir: Optional[Path] = None,
     agent_memory_path: Optional[str] = None,
     system_user_id: Optional[str] = None,
+    friend_id: Optional[str] = None,
 ) -> bool:
-    """Create AGENT_MEMORY markdown file if it does not exist (empty). Returns True if created or already existed."""
-    path = get_agent_memory_file_path(workspace_dir=workspace_dir, agent_memory_path=agent_memory_path, system_user_id=system_user_id)
+    """Create AGENT_MEMORY markdown file if it does not exist (empty). Migrates from old agent_memory/{uid}.md if needed. Returns True if created or already existed."""
+    path = get_agent_memory_file_path(workspace_dir=workspace_dir, agent_memory_path=agent_memory_path, system_user_id=system_user_id, friend_id=friend_id)
     if path is None:
         return False
+    try:
+        root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
+        if not _is_global_agent_memory_user(system_user_id):
+            uid = _sanitize_system_user_id(system_user_id)
+            fid = _sanitize_friend_id(friend_id)
+            if uid and fid:
+                _migrate_agent_memory_to_memories(root, uid, fid)
+                path = get_agent_memory_file_path(workspace_dir=workspace_dir, agent_memory_path=agent_memory_path, system_user_id=system_user_id, friend_id=friend_id)
+                if path is None:
+                    return False
+    except Exception:
+        pass
     if path.is_file():
         return True
     try:
@@ -243,14 +391,23 @@ def load_agent_memory_file(
     agent_memory_path: Optional[str] = None,
     max_chars: int = 0,
     system_user_id: Optional[str] = None,
+    friend_id: Optional[str] = None,
 ) -> str:
     """
-    Load AGENT_MEMORY markdown (curated long-term memory). Per-user when system_user_id is set; otherwise global.
-    If max_chars > 0 and content is longer, returns only the last max_chars with an omission note.
+    Load AGENT_MEMORY markdown (curated long-term memory). Per (user_id, friend_id) when system_user_id is set; otherwise global.
+    Migrates from old agent_memory/{uid}.md if needed. If max_chars > 0 and content is longer, returns only the last max_chars with an omission note.
     Returns file content or empty string.
     """
     root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
-    path = get_agent_memory_file_path(workspace_dir=root, agent_memory_path=agent_memory_path, system_user_id=system_user_id)
+    try:
+        if not _is_global_agent_memory_user(system_user_id):
+            uid = _sanitize_system_user_id(system_user_id)
+            fid = _sanitize_friend_id(friend_id)
+            if uid and fid:
+                _migrate_agent_memory_to_memories(root, uid, fid)
+    except Exception:
+        pass
+    path = get_agent_memory_file_path(workspace_dir=root, agent_memory_path=agent_memory_path, system_user_id=system_user_id, friend_id=friend_id)
     if path is None or not path.is_file():
         return ""
     try:
@@ -288,13 +445,14 @@ def clear_agent_memory_file(
     workspace_dir: Optional[Path] = None,
     agent_memory_path: Optional[str] = None,
     system_user_id: Optional[str] = None,
+    friend_id: Optional[str] = None,
 ) -> bool:
     """
-    Clear AGENT_MEMORY markdown (write empty file). Per-user when system_user_id is set. Used when memory is reset.
+    Clear AGENT_MEMORY markdown (write empty file). Per (user_id, friend_id) when system_user_id is set. Used when memory is reset.
     Returns True if the file was cleared (or created empty), False if path is not configured.
     """
     root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
-    path = get_agent_memory_file_path(workspace_dir=root, agent_memory_path=agent_memory_path, system_user_id=system_user_id)
+    path = get_agent_memory_file_path(workspace_dir=root, agent_memory_path=agent_memory_path, system_user_id=system_user_id, friend_id=friend_id)
     if path is None:
         return False
     try:
@@ -307,18 +465,42 @@ def clear_agent_memory_file(
 
 # ---- Daily memory (memory/YYYY-MM-DD.md): short-term, load yesterday + today ----
 
+def _migrate_daily_memory_to_memories(root: Path, uid: str, fid: str) -> None:
+    """If memories/{uid}/{fid}/memory/ is empty but daily_memory/{uid}/ has files, copy YYYY-MM-DD.md files. Never raises."""
+    try:
+        new_base = root / "memories" / uid / fid / "memory"
+        if new_base.is_dir() and any(new_base.iterdir()):
+            return
+        old_base = root / "daily_memory" / uid
+        if not old_base.is_dir():
+            return
+        new_base.mkdir(parents=True, exist_ok=True)
+        for f in old_base.iterdir():
+            if f.suffix == ".md" and f.is_file():
+                try:
+                    content = f.read_text(encoding="utf-8")
+                    (new_base / f.name).write_text(content, encoding="utf-8")
+                    logger.debug("Migrated daily_memory {} -> {}", f, new_base / f.name)
+                except Exception:
+                    pass
+    except Exception as e:
+        logger.debug("migrate daily_memory failed: {}", e)
+
+
 def get_daily_memory_dir(
     workspace_dir: Optional[Path] = None,
     daily_memory_dir: Optional[str] = None,
     system_user_id: Optional[str] = None,
+    friend_id: Optional[str] = None,
 ) -> Path:
-    """Return the directory for daily memory markdown files (YYYY-MM-DD.md). Per-user when system_user_id is set: daily_memory/{user_id}/. Otherwise global: memory/ or daily_memory_dir. Never raises."""
+    """Return the directory for daily memory markdown files (YYYY-MM-DD.md). Per (user_id, friend_id): memories/{user_id}/{friend_id}/memory/; global: memory/ or daily_memory_dir. Never raises."""
     try:
         root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
         if not _is_global_agent_memory_user(system_user_id):
             uid = _sanitize_system_user_id(system_user_id)
-            if uid:
-                return root / "daily_memory" / uid
+            fid = _sanitize_friend_id(friend_id)
+            if uid and fid:
+                return root / "memories" / uid / fid / "memory"
         if daily_memory_dir and str(daily_memory_dir).strip():
             p = Path(str(daily_memory_dir).strip())
             if not p.is_absolute():
@@ -334,9 +516,10 @@ def get_daily_memory_path_for_date(
     workspace_dir: Optional[Path] = None,
     daily_memory_dir: Optional[str] = None,
     system_user_id: Optional[str] = None,
+    friend_id: Optional[str] = None,
 ) -> Path:
-    """Return the Path for the daily memory markdown file (YYYY-MM-DD.md) for the given date. Per-user when system_user_id is set."""
-    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
+    """Return the Path for the daily memory markdown file (YYYY-MM-DD.md) for the given date. Per (user_id, friend_id) when system_user_id is set."""
+    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id, friend_id=friend_id)
     return base / f"{d.isoformat()}.md"
 
 
@@ -345,9 +528,19 @@ def ensure_daily_memory_file_exists(
     workspace_dir: Optional[Path] = None,
     daily_memory_dir: Optional[str] = None,
     system_user_id: Optional[str] = None,
+    friend_id: Optional[str] = None,
 ) -> bool:
-    """Create the daily memory markdown file for date d if it does not exist (empty). Returns True if created or already existed."""
-    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
+    """Create the daily memory markdown file for date d if it does not exist (empty). Migrates from old daily_memory/{uid}/ if needed. Returns True if created or already existed."""
+    try:
+        root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
+        if not _is_global_agent_memory_user(system_user_id):
+            uid = _sanitize_system_user_id(system_user_id)
+            fid = _sanitize_friend_id(friend_id)
+            if uid and fid:
+                _migrate_daily_memory_to_memories(root, uid, fid)
+    except Exception:
+        pass
+    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id, friend_id=friend_id)
     path = base / f"{d.isoformat()}.md"
     if path.is_file():
         return True
@@ -365,21 +558,22 @@ def load_daily_memory_for_dates(
     daily_memory_dir: Optional[str] = None,
     max_chars: int = 0,
     system_user_id: Optional[str] = None,
+    friend_id: Optional[str] = None,
 ) -> str:
     """
-    Load and concatenate daily memory markdown files for the given dates (newest last). Per-user when system_user_id is set.
+    Load and concatenate daily memory markdown files for the given dates (newest last). Per (user_id, friend_id) when system_user_id is set.
     Returns a single string with optional "## YYYY-MM-DD" headers per file. If max_chars > 0, truncates with an omission note.
     Creates today's file if missing so the file exists for the model to append to later.
     """
     if not dates:
         return ""
-    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
+    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id, friend_id=friend_id)
     today = date.today()
     parts = []
     for d in sorted(dates):
         path = base / f"{d.isoformat()}.md"
         if d == today and not path.is_file():
-            ensure_daily_memory_file_exists(d, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
+            ensure_daily_memory_file_exists(d, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id, friend_id=friend_id)
         if path.is_file():
             try:
                 text = path.read_text(encoding="utf-8").strip()
@@ -402,15 +596,16 @@ def append_daily_memory(
     workspace_dir: Optional[Path] = None,
     daily_memory_dir: Optional[str] = None,
     system_user_id: Optional[str] = None,
+    friend_id: Optional[str] = None,
 ) -> bool:
     """
-    Append content to the daily memory markdown file for the given date (default: today). Per-user when system_user_id is set.
+    Append content to the daily memory markdown file for the given date (default: today). Per (user_id, friend_id) when system_user_id is set.
     Creates the file and parent dir if needed. Returns True on success.
     """
     if not content or not content.strip():
         return False
     day = d or date.today()
-    path = get_daily_memory_path_for_date(day, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
+    path = get_daily_memory_path_for_date(day, workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id, friend_id=friend_id)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         existing = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
@@ -426,11 +621,12 @@ def clear_daily_memory_for_dates(
     workspace_dir: Optional[Path] = None,
     daily_memory_dir: Optional[str] = None,
     system_user_id: Optional[str] = None,
+    friend_id: Optional[str] = None,
 ) -> int:
-    """Clear (truncate to empty) daily memory markdown files for the given dates. Per-user when system_user_id is set. Returns number of files cleared."""
+    """Clear (truncate to empty) daily memory markdown files for the given dates. Per (user_id, friend_id) when system_user_id is set. Returns number of files cleared."""
     if not dates:
         return 0
-    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id)
+    base = get_daily_memory_dir(workspace_dir=workspace_dir, daily_memory_dir=daily_memory_dir, system_user_id=system_user_id, friend_id=friend_id)
     cleared = 0
     for d in dates:
         path = base / f"{d.isoformat()}.md"

@@ -236,6 +236,7 @@ class CoreService {
 
   /// Send a message to Core and return the reply: { "text": String, "image": String? (data URL) }.
   /// [userId] must be the id of the user in user.yml (the chat owner). Same payload shape as WebChat: text, images, videos, audios, files, location.
+  /// [friendId] optional: which friend this conversation is with (e.g. "HomeClaw", "Sabrina"). Omitted or empty → Core uses "HomeClaw". Send when chat is per-friend so Core scopes memory/session correctly.
   /// [images], [videos], [audios], [files] are paths (e.g. from upload) or data URLs Core can read.
   /// [location]: optional "lat,lng" or address string; Core stores it as latest location (per user) and uses it in system context.
   /// [useStream]: when true and [onProgress] is set, sends stream: true and parses SSE; progress events are reported via [onProgress], final result returned as usual. When false or [onProgress] null, uses single-JSON response (no streaming).
@@ -245,6 +246,7 @@ class CoreService {
     String text, {
     required String userId,
     String? appId,
+    String? friendId,
     String? location,
     List<String>? images,
     List<String>? videos,
@@ -265,6 +267,7 @@ class CoreService {
       'channel_name': 'companion',
     };
     if (appId != null && appId.isNotEmpty) body['app_id'] = appId;
+    if (friendId != null && friendId.trim().isNotEmpty) body['friend_id'] = friendId.trim();
     if (location != null && location.trim().isNotEmpty) body['location'] = location.trim();
     if (images != null && images.isNotEmpty) body['images'] = images;
     if (videos != null && videos.isNotEmpty) body['videos'] = videos;
@@ -404,17 +407,22 @@ class CoreService {
     if (msg['event'] == 'push') {
       final text = msg['text'] as String? ?? '';
       final source = msg['source'] as String? ?? 'push';
+      final fromFriend = msg['from_friend'] as String?;
       final responseImages = msg['images'];
       final responseImage = msg['image'];
       final imageList = responseImages is List
           ? (responseImages as List<dynamic>).whereType<String>().toList()
           : (responseImage is String ? <String>[responseImage as String] : null);
       try {
-        _pushMessageController.add({
+        final map = <String, dynamic>{
           'text': text,
           'source': source,
           'images': imageList != null && imageList.isNotEmpty ? imageList : null,
-        });
+        };
+        if (fromFriend != null && fromFriend.toString().trim().isNotEmpty) {
+          map['from_friend'] = fromFriend.toString().trim();
+        }
+        _pushMessageController.add(map);
       } catch (_) {}
       return;
     }

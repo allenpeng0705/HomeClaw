@@ -1,6 +1,6 @@
 # Multi-user support: how it works today
 
-This doc explains **how multiple users are handled**: the allowlist in `config/user.yml`, how the Core matches requests to users, and which data is per-user vs global. No code changes here — confirmation and reference only.
+This doc explains **how multiple users and friends are handled**: the allowlist in `config/user.yml`, **friends list** and **identity** per friend, how the Core matches requests to users, and which data is per-user vs per-(user, friend) vs global. See also [UserFriendsModelFullDesign.md](UserFriendsModelFullDesign.md) and the implementation steps in `docs_design/implementation_steps/`.
 
 ---
 
@@ -10,9 +10,10 @@ This doc explains **how multiple users are handled**: the allowlist in `config/u
 - Channels send **email, IM id, or phone** as the request identifier (`user_id` in the request = channel identity).
 - We look up **which user** in `config/user.yml` by matching that value against each user’s `email` / `im` / `phone` and get that user’s **name** and **system user id** (and permissions).
 - **Different users must have different** email/im/phone: at load time we validate that no email/im/phone value is shared between two users (see **§1**).
-- **All data** (chat history, sessions, memory, KB) is keyed by our **system user id** (from user.yml `id` or `name`), not by the channel identity. Channel identity is only used for permission check and for sending the reply to the right channel.
+- **All data** (chat history, sessions, memory, KB, TAM one-shot reminders) is keyed by **system user id** and optionally **friend_id** (from the user’s **friends** list). **HomeClaw** is always the first friend; channel traffic uses `friend_id = HomeClaw`. Companion app can use any friend from the user’s list.
+- **Companion login:** Optional **username** / **password** in user.yml; Companion authenticates and gets only that user’s data and friends (no full user list).
 
-**Flow:** Channel sends email/im/phone → Core resolves to one user in user.yml → we set `request.system_user_id = user.id or user.name` → all storage (chatDB, memory, KB, tool context) uses that system user id.
+**Flow:** Channel sends email/im/phone → Core resolves to one user in user.yml → we set `request.system_user_id`, `request.friend_id` (e.g. HomeClaw for channels) → storage (chatDB, sessions, memory, TAM one-shot, file paths) uses (user_id, friend_id) where applicable.
 
 ---
 
@@ -24,13 +25,28 @@ This doc explains **how multiple users are handled**: the allowlist in `config/u
 
 ```yaml
 users:
-  - id: HomeClaw                      # Unique system user id (used for all storage); defaults to name if omitted
-    name: HomeClaw                    # Display name (used as user_name when this user is matched)
-    email: []                         # Channel identities for Email (must not overlap with other users)
-    im: ['matrix:@pengshilei:matrix.org']   # Channel identities for IM: "<channel>:<id>"
-    phone: []                         # Channel identities for Phone/SMS
-    permissions: []                   # e.g. [IM, EMAIL, PHONE]; empty = allow all channel types
+  - id: AllenPeng                     # Unique system user id (used for all storage); defaults to name if omitted
+    name: AllenPeng                   # Display name
+    username: pengshilei              # Optional: for Companion app login
+    password: secret                  # Optional: plain text; hashing can be added later
+    email: []
+    im: ['matrix:@pengshilei:matrix.org']
+    phone: []
+    permissions: []
+    friends:                          # Optional; if omitted, defaults to [HomeClaw]
+      - name: HomeClaw                # Always first; channel traffic uses this
+      - name: Sabrina
+        relation: girlfriend
+        who:                          # Injected into system prompt for this friend
+          gender: female
+          roles: ['girlfriend']
+          personalities: [gentle, supportive]
+          language: zh
+          response_length: medium
+        identity: identity.md         # Optional: markdown file in {user_id}/{friend_id}/identity.md
 ```
+
+- **friends:** List of companions; **HomeClaw** is always first. Each friend has `name` (friend_id), optional `relation`, `who` (dict for prompt), and optional `identity` (filename in that friend’s folder, e.g. `identity.md`). See [STEP6_friend_identity.md](implementation_steps/STEP6_friend_identity.md) and [config/examples/friend_identity.md](../../config/examples/friend_identity.md).
 
 **Validation:** On load, we require that no two users share the same email, im, or phone value (overlap would make “which user” ambiguous). If overlap is detected, `get_users()` raises `ValueError` with a clear message.
 
@@ -56,22 +72,25 @@ users:
 
 ---
 
-## 2. What is per-user (keyed by system user id and usually `app_id`)
+## 2. What is per-user and per-(user_id, friend_id)
 
-All of these scope data by **system user id** (from user.yml `id` or `name`) and where relevant by app/session, so multiple users each have their own data:
+Data is keyed by **system user id** and, where implemented, by **friend_id** (from the user’s friends list). Channels use `friend_id = HomeClaw`; Companion can select any friend.
 
 | Component | Scoping | Where |
 |-----------|---------|--------|
-| **Chat history** | `(app_id, system_user_id, session_id)` | DB table `homeclaw_chat_history`. |
-| **Sessions** | `(app_id, system_user_id, session_id)` | DB table `homeclaw_session_history`. |
-| **Runs** (memory runs) | `(agent_id, system_user_id, run_id)` | DB table `homeclaw_run_history`. |
-| **Memory (RAG)** | Keyed by `(system_user_id, agent_id)` | Each user has their own memory sandbox; add/search use system user id. |
-| **Knowledge base** | `system_user_id` | Each user has their own KB sandbox; builtin tools use context’s system user id. |
-| **User profile** | `system_user_id` | One JSON file per user under `database/profiles/` (or `profile.dir`); see docs/UserProfileDesign.md. |
-| **File workspace** | `tools.file_read_base` set | When set: one base folder; under it **share** (paths `share/...` for all users and companion), **per-user** folders (user id from user.yml), and **companion** folder (when companion app is not tied to a user). When not set, absolute paths allowed. |
-| **Tool context** | `ToolContext` has `app_id`, `user_id` (storage id), `system_user_id`, `user_name`, `session_id`, `run_id`, `request`. | Tools use these for per-user storage. |
+| **Chat history** | `(app_id, system_user_id, session_id, friend_id)` | DB: `homeclaw_chat_history`. |
+| **Sessions** | `(app_id, system_user_id, session_id, friend_id)` | DB: `homeclaw_session_history`. |
+| **Runs** (memory runs) | `(agent_id, system_user_id, run_id)` | DB: `homeclaw_run_history`. |
+| **Memory (RAG)** | Keyed by `(system_user_id, friend_id)` (Cognee namespace) | Per-user, per-friend memory. |
+| **Knowledge base** | `system_user_id` (friend_id in path optional) | Per-user KB; friend-specific path `{friend_id}/knowledge/` under user sandbox. |
+| **User profile** | `(system_user_id, friend_id)`; profile only for HomeClaw | See UserProfileDesign.md. |
+| **AGENT_MEMORY / daily** | `(system_user_id, friend_id)` | Paths: `memories/{user_id}/{friend_id}/agent_memory.md`, daily under same. |
+| **TAM one-shot reminders** | `(user_id, friend_id)` in DB | Stored and delivered per user/friend; push includes `from_friend`. |
+| **Last channel** | Per `(system_user_id)` (key in store) | So reminders/cron for that user go to that user’s last channel. |
+| **File workspace** | `homeclaw_root/{user_id}/` | Sandbox root per user; paths like `{friend_id}/output/`, `{friend_id}/knowledge/` under that root. `share` = global share. |
+| **Tool context** | `ToolContext`: `app_id`, `user_id`, `system_user_id`, `friend_id`, `user_name`, `session_id`, `run_id`, `request`. | Tools use these for scoped storage and paths. |
 
-So: **chat, sessions, runs, memory, and KB are all per-user.** File tools can be per-user by setting `tools.file_read_per_user: true` in `config/core.yml`. Multi-user is supported for storage and for the **direct reply** to a message (see below).
+So: **chat, sessions, memory (RAG + markdown), TAM one-shot, and file paths are per-user and per-friend where applicable.** Direct reply uses the request’s channel; TAM delivery uses the user’s last channel key.
 
 ---
 
@@ -87,59 +106,45 @@ So for normal chat, **multi-user is correct**: each user gets their own reply on
 
 ---
 
-## 4. What is not per-user today: “latest channel” and TAM
+## 4. Last channel and TAM (per-user / per-friend)
 
-**Last-channel store (`latest_channel.json` + DB `homeclaw_last_channel`):**
+**Last-channel store:** The store key is **per system_user_id** (and optionally session). Each user has their own last channel; reminders and cron for that user are delivered to that user's last channel.
 
-- There is a **single** “last channel” key: `_DEFAULT_KEY = "default"`.
-- On **every** incoming request, Core calls `save_last_channel(..., key=_DEFAULT_KEY, ...)`, so the stored “last channel” is **overwritten** by whoever sent the most recent message.
-- So at any time there is only **one** “latest” channel (one request_id, host, port, channel_name).
+**TAM one-shot reminders:** DB table `homeclaw_tam_one_shot_reminders` has **user_id** and **friend_id**. When a reminder fires, delivery uses the stored user and `from_friend` in the push payload.
 
-**Where “latest channel” is used:**
+**TAM cron jobs:** One-shot reminders are scoped per (user_id, friend_id); cron jobs may be global or per-user depending on implementation.
 
-- **`send_response_to_latest_channel(response)`** is used when we need to send a message **without** a specific `PromptRequest`, e.g.:
-  - TAM: when a **reminder** or **cron** job fires, it calls `send_reminder_to_latest_channel(message)` → `send_response_to_latest_channel(message)`.
-  - Plugins/orchestrator when they don’t have the request and fall back to “latest”.
-- So **reminders and cron messages** are sent to whichever channel was **last** to send a message to the Core — **not** to the user who created that reminder/cron.
-
-**TAM storage (cron and one-shot reminders):**
-
-- DB tables `homeclaw_tam_cron_jobs` and `homeclaw_tam_one_shot_reminders` do **not** have a `user_id` (or app_id) column.
-- So **reminders and cron jobs are global**: they are not associated with a specific user. When they run, they always use “latest channel.”
-
-**Summary:**
-
-- **Data** (chat, sessions, memory, KB): **per-user** — multi-user supported.
-- **Direct reply** to a user message: **per-request** — goes to the right user.
-- **Reminders and cron:** Stored globally; delivery is to **one** “latest” channel. So with multiple users, reminders/cron do **not** target a specific user; they go to whoever was last. If you need “User A’s reminders only to User A,” that would require adding `user_id` (and possibly per-user last-channel key) and changing TAM and last-channel logic.
-
-**AGENT_MEMORY and daily memory (markdown):**
-
-- **AGENT_MEMORY** and **daily memory** are **per-user** when a user is present: paths are `agent_memory/{user_id}.md` and `daily_memory/{user_id}/YYYY-MM-DD.md` (all markdown). When there is no user (company app / companion / system), global paths are used: `AGENT_MEMORY.md` and `memory/YYYY-MM-DD.md`.
-- So **user-specific content** stays in that user's markdown file(s); no leak between users. See **docs_design/AgentMemoryDailyMemoryPerUser.md** for details.
-
+**AGENT_MEMORY and daily memory:** Paths are **per (user_id, friend_id)** (e.g. `memories/{user_id}/{friend_id}/agent_memory.md`). When there is no user, global paths are used.
 ---
 
 ## 5. Summary table
 
-| Aspect | Per-user? | Notes |
-|--------|-----------|--------|
-| **Allowlist** | Yes (multiple users in `user.yml`) | Channel identity must match one user’s `email`/`im`/`phone`; each value must be unique across users. |
-| **Chat history** | Yes | `(app_id, system_user_id, session_id)`. |
-| **Sessions / runs** | Yes | Same. |
-| **Memory (RAG)** | Yes | Keyed by system user id (and agent_id). |
-| **Knowledge base** | Yes | System user id in builtin tools. |
-| **Direct reply** | Yes | Reply uses the request’s channel → correct user. |
-| **Last channel** | No (single “default”) | One global “latest”; overwritten on every request. |
-| **TAM reminders / cron** | No | No `user_id` in DB; delivery via “latest channel” only. |
-| **AGENT_MEMORY** | Yes (per-user when user present) | Markdown: per-user `agent_memory/{user_id}.md`; global `AGENT_MEMORY.md` for company app (no user). |
-| **Daily memory** | Yes (per-user when user present) | Markdown: per-user `daily_memory/{user_id}/YYYY-MM-DD.md`; global `memory/` for company app. |
+| Aspect | Per-user / per-friend? | Notes |
+|--------|-------------------------|--------|
+| **Allowlist** | Yes (multiple users in `user.yml`) | Channel identity must match one user's `email`/`im`/`phone`; each value unique. Optional `username`/`password`, **friends** list with **identity**. |
+| **Chat history** | Yes, per (user_id, friend_id) | DB includes friend_id. |
+| **Sessions / runs** | Yes | Sessions per (user_id, friend_id). |
+| **Memory (RAG)** | Yes | Keyed by (system_user_id, friend_id) where implemented. |
+| **Knowledge base** | Yes | Per user; friend path `{friend_id}/knowledge/` under user sandbox. |
+| **Direct reply** | Yes | Reply uses the request's channel. |
+| **Last channel** | Yes (per user) | Keyed by system_user_id so reminders go to that user's last channel. |
+| **TAM one-shot** | Yes | user_id and friend_id in DB; delivery and push include from_friend. |
+| **AGENT_MEMORY / daily** | Yes, per (user_id, friend_id) | Paths under `memories/{user_id}/{friend_id}/`. |
+| **File sandbox** | Yes | `homeclaw_root/{user_id}/`; friend paths `{friend_id}/output/`, `{friend_id}/knowledge/`. |
 
-So: **multi-user is supported for identity (user.yml), storage (chat/sessions/memory/KB), direct replies, AGENT_MEMORY, and daily memory** (all markdown; per-user when a user is present; global for company app). It is **not** supported for **reminder/cron delivery** and **last-channel** — those remain single-channel. User profile is **per-user** and fits this model.
+So: **multi-user and per-friend are supported** for identity (user.yml + friends), storage (chat/sessions/memory/KB), AGENT_MEMORY, daily memory, TAM one-shot, last-channel (per user), and file paths. User profile is per (user_id, HomeClaw).
 
 ---
 
-## 6. System user id (implemented)
+## 6. Migration from older config
+
+- **Existing `user.yml` without `friends`:** Each user gets a default `friends: [HomeClaw]`. No change required; behaviour stays correct (all traffic is treated as HomeClaw).
+- **Adding friends:** Add a `friends` list under any user; put **HomeClaw** first, then other companions with optional `relation`, `who`, and `identity`. See the format in **§1** and [STEP1_user_yml_schema_and_loading.md](implementation_steps/STEP1_user_yml_schema_and_loading.md).
+- **Companion login:** Add `username` and `password` (plain text) to a user to enable Companion app login for that user. Existing config without these fields continues to work (e.g. Control UI / API key only).
+
+---
+
+## 7. System user id (implemented)
 
 - **user.yml:** Each user has an optional **`id`** (unique system user id); if omitted, it defaults to **`name`**. Different users must have **distinct** email/im/phone (validated on load).
 - **After `check_permission`:** Core sets `request.system_user_id = user.id or user.name`. `request.user_id` stays as the channel identity (for reply delivery).

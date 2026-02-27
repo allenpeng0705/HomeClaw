@@ -102,7 +102,7 @@ flowchart TB
 
 ### Channels and multi-user
 
-Talk to HomeClaw via **WebChat**, **CLI**, **Telegram**, **Discord**, **Email**, and more—all use the same Core. Add users in `config/user.yml` (name, id, email, im, phone). [Channels →](https://allenpeng0705.github.io/HomeClaw/channels/) · [Multi-user →](docs_design/MultiUserSupport.md)
+Talk to HomeClaw via **WebChat**, **CLI**, **Telegram**, **Discord**, **Email**, and more—all use the same Core. Add users in `config/user.yml` (id, name, email, im, phone; optional **username**/ **password** for Companion login; **friends** list with optional **identity** file per friend). [Channels →](https://allenpeng0705.github.io/HomeClaw/channels/) · [Multi-user →](docs_design/MultiUserSupport.md)
 
 ### Cloud and local models
 

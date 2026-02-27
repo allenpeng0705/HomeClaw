@@ -1380,11 +1380,7 @@ class Util:
         return self.users[0]
     
     def create_default_user(self):
-        user: User = User()
-        user.name = 'HomeClaw'
-        user.email = []
-        user.phone = []
-        user.im = []
+        user = User(name="HomeClaw", email=[], phone=[], im=[])
         self.add_user(user)
 
     def change_user_name(self, old_name: str, new_name: str):

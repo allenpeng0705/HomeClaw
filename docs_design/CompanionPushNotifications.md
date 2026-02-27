@@ -25,24 +25,26 @@ When the Companion app is **killed or in the background**, the system may not ke
 
 ### 2.2 Sending push when delivering
 
-- In **deliver_to_user(user_id, text, ...)** (when no WebSocket session): **base.push_send.send_push_to_user** routes each token by `platform`:
+- **deliver_to_user(user_id, text, ..., from_friend="HomeClaw")** is used by Core for reminders, cron, inbound fallback, and any proactive delivery. When no WebSocket session is open, **base.push_send.send_push_to_user** is called with the same `from_friend`; it routes each token by `platform`:
   - **APNs** for `platform` in (ios, macos, tvos, ipados, watchos): send via APNs HTTP/2 API (JWT auth with .p8 key).
   - **FCM** for android and others: send via Firebase Admin SDK (service account JSON).
 
-### 2.3 Push payload format (multi-user on one device)
+### 2.3 Push payload format (multi-user, per-friend)
 
-Core adds **user_id** and **source** to every push so the Companion can show which user the notification is for.
+Core adds **user_id**, **source**, and **from_friend** to every push so the Companion can show which user the notification is for and which friend it is from (e.g. open the correct chat thread).
 
 - **APNs (iOS/macOS):** Custom keys at root level (outside `aps`):
   - `user_id` (string): target user (e.g. `"alice"`, `"companion"`).
-  - `source` (string): e.g. `"reminder"`, `"push"`.
+  - `source` (string): e.g. `"reminder"`, `"push"`, `"inbound"`.
+  - `from_friend` (string): which friend the message is from — `"HomeClaw"` (system) or a friend name (e.g. `"Sabrina"`). Used to route the notification to the correct friend chat.
   - Standard: `aps.alert.title`, `aps.alert.body`, `aps.sound`.
 - **FCM (Android):** `data` map (all values strings):
   - `user_id`: target user.
-  - `source`: e.g. `"reminder"`, `"push"`.
+  - `source`: e.g. `"reminder"`, `"push"`, `"inbound"`.
+  - `from_friend`: which friend the message is from (`"HomeClaw"` or friend name).
   - `text`: body text (same as notification body).
 
-**Companion behaviour:** When the app receives a push (foreground handler or when the user taps the notification), read `user_id` and `source` from the payload. Use them to e.g. show “Reminder for Alice: …” or open that user’s chat. One device can receive push for many users; the payload identifies which user each notification is for.
+**Companion behaviour:** When the app receives a push (foreground handler or when the user taps the notification), read `user_id`, `source`, and **from_friend** from the payload. Use `from_friend` to route to the correct friend chat (e.g. show “From Sabrina: …” or add the notification to Sabrina’s thread). One device can receive push for many users; the payload identifies which user and which friend each notification is for.
 
 ### 2.4 Config (core.yml)
 

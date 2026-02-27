@@ -10,16 +10,23 @@ from base import push_tokens as push_tokens_store
 _APPLE_PLATFORMS = frozenset(("ios", "macos", "tvos", "ipados", "watchos"))
 
 
-def send_push_to_user(user_id: str, title: str, body: str, source: str = "push") -> int:
+def send_push_to_user(
+    user_id: str,
+    title: str,
+    body: str,
+    source: str = "push",
+    from_friend: str = "HomeClaw",
+) -> int:
     """
     Send push to all tokens registered for user_id.
     APNs for iOS/macOS/tvOS/etc.; FCM for Android and other platforms.
-    Each payload includes user_id and source so the app can show which user the push is for (multi-user on one device).
+    Each payload includes user_id, source, and from_friend so the app can show which user the push is for and which friend it is from (e.g. "Sabrina" or "HomeClaw").
     Returns total number of messages successfully sent. Never raises.
     """
     try:
         user_id = (user_id or "").strip() or "companion"
         source = str(source or "push").strip() or "push"
+        from_friend = str(from_friend or "HomeClaw").strip() or "HomeClaw"
         entries = push_tokens_store.get_tokens_for_user(user_id)
         if not entries or not isinstance(entries, list):
             return 0
@@ -34,7 +41,7 @@ def send_push_to_user(user_id: str, title: str, body: str, source: str = "push")
             if platform in _APPLE_PLATFORMS:
                 try:
                     from base import apns_send
-                    if apns_send.send_apns_one(token, title or "HomeClaw", body or "", user_id=user_id, source=source):
+                    if apns_send.send_apns_one(token, title or "HomeClaw", body or "", user_id=user_id, source=source, from_friend=from_friend):
                         sent += 1
                     else:
                         logger.debug("APNs send to ...{} failed; token may be invalid", token[-8:] if len(token) > 8 else token)
@@ -43,7 +50,7 @@ def send_push_to_user(user_id: str, title: str, body: str, source: str = "push")
             else:
                 try:
                     from base import fcm_send
-                    if fcm_send.send_fcm_one(token, title or "HomeClaw", body or "", user_id=user_id, source=source):
+                    if fcm_send.send_fcm_one(token, title or "HomeClaw", body or "", user_id=user_id, source=source, from_friend=from_friend):
                         sent += 1
                     else:
                         logger.debug("FCM send to ...{} failed", token[-8:] if len(token) > 8 else token)

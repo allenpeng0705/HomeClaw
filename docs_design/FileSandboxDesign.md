@@ -57,6 +57,10 @@ This document defines how HomeClaw restricts file and folder access per user and
 - **Path traversal:** Resolved paths are checked with `_path_under(full, base)` so that paths like `../etc/passwd` or `output/../../../other` cannot escape the base. Cross-platform (Windows and Unix) via `Path.resolve()` and `relative_to()`.
 - **Resolution errors:** `_resolve_file_path()` never raises; it returns `None` on any exception. Callers treat `None` as “invalid path” and return a polite message.
 
+## Folder semantics and default path
+
+- **Default when nothing specified:** Use the **user's root folder**: `homeclaw_root/{user_id}/` (path `"."`). See [FolderSemanticsAndInference.md](FolderSemanticsAndInference.md) for exact semantics (downloads, documents, friend output), how Core resolves "my documents" vs "Sabrina's output", and inference rules.
+
 ## Future file/folder features
 
 - Any new file or folder feature (built-in tools, skills, plugins) must:

@@ -192,23 +192,27 @@ def cleanup_expired_one_shot_reminders(before: Optional[datetime] = None) -> int
 
 
 def load_one_shot_reminders(after: Optional[datetime] = None) -> List[Dict[str, Any]]:
-    """Load one-shot reminders with run_at > after (default: now). Returns list of {id, run_at, message, user_id, channel_key}."""
+    """Load one-shot reminders with run_at > after (default: now). Returns list of {id, run_at, message, user_id, channel_key, friend_id}. Step 10: friend_id for from_friend when fire."""
     session = _get_session()
     try:
         q = session.query(TamOneShotReminderModel)
         if after is not None:
             q = q.filter(TamOneShotReminderModel.run_at > after)
         rows = q.all()
-        return [
-            {
-                "id": r.id,
-                "run_at": r.run_at,
-                "message": r.message or "",
-                "user_id": getattr(r, "user_id", None),
-                "channel_key": getattr(r, "channel_key", None),
-            }
-            for r in rows
-        ]
+        out = []
+        for r in rows:
+            try:
+                out.append({
+                    "id": getattr(r, "id", None) or "",
+                    "run_at": getattr(r, "run_at", None),
+                    "message": (getattr(r, "message", None) or "") or "",
+                    "user_id": getattr(r, "user_id", None),
+                    "channel_key": getattr(r, "channel_key", None),
+                    "friend_id": getattr(r, "friend_id", None),
+                })
+            except Exception as e:
+                logger.debug("TAM storage: skip bad one-shot reminder row: {}", e)
+        return out
     except Exception as e:
         logger.warning("TAM storage: load_one_shot_reminders failed: {}", e)
         return []
@@ -224,15 +228,21 @@ def add_one_shot_reminder(
     message: str,
     user_id: Optional[str] = None,
     channel_key: Optional[str] = None,
+    friend_id: Optional[str] = None,
 ) -> Optional[str]:
-    """Persist a one-shot reminder. Returns reminder id on success, None on failure. user_id/channel_key used by deliver_to_user when reminder fires."""
+    """Persist a one-shot reminder. Returns reminder id on success, None on failure. Step 10: friend_id used as from_friend when reminder fires."""
     session = _get_session()
     try:
+        try:
+            fid = (str(friend_id).strip() or None) if friend_id is not None else None
+        except (TypeError, AttributeError):
+            fid = None
         row = TamOneShotReminderModel(
             run_at=run_at,
             message=message,
             user_id=user_id or None,
             channel_key=channel_key or None,
+            friend_id=fid,
         )
         session.add(row)
         session.flush()

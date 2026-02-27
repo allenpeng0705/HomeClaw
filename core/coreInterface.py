@@ -54,8 +54,9 @@ class CoreInterface(ABC):
         images: Optional[List[str]] = None,
         channel_key: Optional[str] = None,
         source: str = "push",
+        from_friend: str = "HomeClaw",
     ) -> None:
-        """Push a message to a user: to WebSocket(s) registered for this user_id (Companion/channel) and/or to channel by channel_key. Used by cron, reminders, record_date. Default: fall back to send_response_to_latest_channel."""
+        """Push a message to a user: to WebSocket(s) registered for this user_id (Companion/channel) and/or to channel by channel_key. from_friend: which friend the push is from (e.g. 'Sabrina' or 'HomeClaw' for system). Used by cron, reminders, record_date. Default: fall back to send_response_to_latest_channel."""
         await self.send_response_to_latest_channel(text)
 
     @abstractmethod

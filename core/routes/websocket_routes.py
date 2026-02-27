@@ -68,6 +68,7 @@ def get_websocket_handler(core):
                         logger.info("WS inbound: images={} files={} (client must send payload.images or data:image/ in payload.files)", _ni, _nf)
                     req = InboundRequest(
                         user_id=(data.get("user_id") or "").strip() or "companion",
+                        friend_id=(data.get("friend_id") or "").strip() or None,
                         text=data.get("text", ""),
                         channel_name=data.get("channel_name", "ws"),
                         user_name=data.get("user_name"),

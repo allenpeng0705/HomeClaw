@@ -50,6 +50,7 @@ class PromptRequest(BaseModel):
     user_id: str  # Channel identity: email, IM id, phone (used for permission match and reply delivery)
     contentType: ContentType
     system_user_id: Optional[str] = None  # Our system user id (from user.yml id/name); used for all storage when set
+    friend_id: Optional[str] = None  # Which friend this conversation is with (e.g. "HomeClaw", "Sabrina"). Channels use "HomeClaw"; Companion sends from client. Default "HomeClaw" when not set.
     text: str
     action: str
     host: str
@@ -64,6 +65,7 @@ class PromptRequest(BaseModel):
 class InboundRequest(BaseModel):
     """Minimal payload for POST /inbound so any bot can talk to the Core without building a full channel."""
     user_id: str = "companion"  # e.g. telegram chat_id, discord user id; default for companion/apps that don't send it
+    friend_id: Optional[str] = None  # Which friend this conversation is with (e.g. "HomeClaw", "Sabrina"). Omitted or empty → "HomeClaw".
     text: str  # required; use "See attached." etc. when sending only media
     channel_name: Optional[str] = "webhook"
     user_name: Optional[str] = None  # display name; defaults to user_id if omitted
@@ -241,6 +243,15 @@ class ExternalPluginRegisterRequest(BaseModel):
 
 
 @dataclass
+class Friend:
+    """One friend in a user's friends list. name = friend_id (used in paths and storage)."""
+    name: str  # required; display name and friend_id (sanitized for paths)
+    relation: Optional[Union[str, List[str]]] = None  # e.g. girlfriend, friend, or [friend]
+    who: Optional[Dict[str, Any]] = None  # persona: description, gender, roles, personalities, language, response_length
+    identity: Optional[str] = None  # None = do not read file; "" or "identity.md" = default file; "other.md" = that filename in friend root
+
+
+@dataclass
 class User:
     name: str
     email: List[str] = field(default_factory=list)
@@ -249,12 +260,17 @@ class User:
     permissions: List[str] = field(default_factory=list)
     # Unique system user id for all storage (chat, memory, KB, profile). If omitted in yaml, defaults to name.
     id: Optional[str] = None
+    # Optional: for Companion login. If present, used with password to authenticate.
+    username: Optional[str] = None
+    password: Optional[str] = None
     # Optional: API keys for keyed skills (maton-api-gateway, x-api, meta-social, hootsuite). If missing for a user, that skill is not available. Keys: maton_api_key, x_access_token, meta_access_token, hootsuite_access_token.
     skill_api_keys: Optional[Dict[str, str]] = None
     # User type: "normal" (can use channels, combine with companion app) or "companion" (dedicated to companion app / webchat / control UI only; no channels). Default "normal".
     type: str = "normal"
     # Optional identity/persona for companion-type users. Dict: description (free-text summary), gender, roles, personalities, language, response_length; idle_days_before_nudge is reserved for future proactive nudge (not injected). Used to build a system-prompt section so the model behaves as this identity; no LLM call for injection.
     who: Optional[Dict[str, Any]] = None
+    # Friends list for this user. First friend must be HomeClaw (system); then named friends. Loaded from user.yml; if missing, defaults to [HomeClaw].
+    friends: Optional[List['Friend']] = None
 
     @staticmethod
     def from_yaml(yaml_file: str) -> List['User']:
@@ -307,6 +323,15 @@ class User:
                 who = u.get('who')
                 if not isinstance(who, dict):
                     who = None
+                username = (u.get('username') or '').strip() or None
+                if not username:
+                    username = None
+                password = u.get('password')
+                if password is not None and not isinstance(password, str):
+                    password = str(password)
+                if password is not None and not (password or '').strip():
+                    password = None
+                friends = User._parse_friends(u.get('friends'))
                 users.append(User(
                     name=name,
                     email=email,
@@ -314,13 +339,74 @@ class User:
                     phone=phone,
                     permissions=permissions,
                     id=uid,
+                    username=username,
+                    password=password,
                     skill_api_keys=skill_api_keys,
                     type=user_type,
                     who=who,
+                    friends=friends,
                 ))
             except Exception:
                 continue
         return users
+
+    @staticmethod
+    def _parse_friends(raw: Any) -> List['Friend']:
+        """Parse friends list from user.yml. Never raises; returns at least [Friend(name='HomeClaw')] if empty/missing. Ensures HomeClaw is first."""
+        result: List[Friend] = []
+        if not isinstance(raw, list):
+            raw = []
+        for idx, f in enumerate(raw):
+            if not isinstance(f, dict):
+                continue
+            try:
+                fname = (f.get('name') or '').strip()
+                if not fname:
+                    continue
+                relation = f.get('relation')
+                fwho = f.get('who')
+                if not isinstance(fwho, dict):
+                    fwho = None
+                ident_raw = f.get('identity')
+                if ident_raw is None:
+                    identity = None
+                elif isinstance(ident_raw, bool):
+                    identity = 'identity.md' if ident_raw else None
+                elif isinstance(ident_raw, str):
+                    ident_s = ident_raw.strip()
+                    identity = ident_s if ident_s else 'identity.md'
+                else:
+                    identity = None
+                result.append(Friend(name=fname, relation=relation, who=fwho, identity=identity))
+            except Exception:
+                continue
+        if not result:
+            return [Friend(name='HomeClaw', relation=None, who=None, identity=None)]
+        first_name = (result[0].name or '').strip().lower()
+        if first_name != 'homeclaw':
+            result.insert(0, Friend(name='HomeClaw', relation=None, who=None, identity=None))
+        return result
+
+    @staticmethod
+    def _friends_to_dict_list(friends: List['Friend']) -> List[Dict[str, Any]]:
+        """Serialize friends to list of dicts for YAML. Never raises."""
+        out = []
+        for f in friends:
+            if not isinstance(f, Friend):
+                continue
+            try:
+                entry = {"name": (getattr(f, "name", None) or "").strip() or "Friend"}
+                if getattr(f, "relation", None) is not None:
+                    entry["relation"] = f.relation
+                if isinstance(getattr(f, "who", None), dict) and f.who:
+                    entry["who"] = f.who
+                ident = getattr(f, "identity", None)
+                if ident is not None and str(ident).strip():
+                    entry["identity"] = str(ident).strip()
+                out.append(entry)
+            except Exception:
+                continue
+        return out
 
     @staticmethod
     def to_yaml(users: List['User'], yaml_file: str) -> None:
@@ -337,12 +423,21 @@ class User:
                     "id": getattr(user, "id", None) or getattr(user, "name", ""),
                     "type": str(getattr(user, "type", None) or "normal").strip().lower() or "normal",
                 }
+                username = getattr(user, "username", None)
+                if username is not None and str(username).strip():
+                    d["username"] = str(username).strip()
+                password = getattr(user, "password", None)
+                if password is not None and str(password).strip():
+                    d["password"] = str(password)
                 keys = getattr(user, "skill_api_keys", None)
                 if isinstance(keys, dict) and keys:
                     d["skill_api_keys"] = {str(k): str(v) for k, v in keys.items() if k and v}
                 who = getattr(user, "who", None)
                 if isinstance(who, dict) and who:
                     d["who"] = who
+                friends = getattr(user, "friends", None)
+                if isinstance(friends, list) and friends:
+                    d["friends"] = User._friends_to_dict_list(friends)
                 users_data.append(d)
             except Exception:
                 continue

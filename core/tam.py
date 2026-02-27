@@ -516,13 +516,15 @@ class TAM:
                 run_time_str = run_time.strftime("%Y-%m-%d %H:%M:%S")
                 user_id = "companion"
                 channel_key = None
+                friend_id = None
                 if request:
                     user_id = (getattr(request, "system_user_id", None) or getattr(request, "user_id", None) or "").strip() or "companion"
                     if getattr(request, "app_id", None) and getattr(request, "user_id", None) and getattr(request, "session_id", None):
                         channel_key = f"{request.app_id}:{request.user_id}:{request.session_id}"
                     elif (user_id or "").lower() in ("companion", "system"):
                         channel_key = "companion"
-                self.schedule_one_shot(message, run_time_str, user_id=user_id, channel_key=channel_key)
+                    friend_id = getattr(request, "friend_id", None) or getattr(request, "app_id", None)
+                self.schedule_one_shot(message, run_time_str, user_id=user_id, channel_key=channel_key, friend_id=friend_id)
                 return
             if job_type == "cron":
                 cron_expr = data_object.get("cron_expr")
@@ -570,11 +572,14 @@ class TAM:
             user_id = params.get("user_id")
             channel_key = params.get("channel_key")
             if hasattr(self.coreInst, "deliver_to_user"):
+                _fid = params.get("friend_id")
+                from_friend = (str(_fid).strip() if _fid is not None else "") or "HomeClaw"
                 await self.coreInst.deliver_to_user(
                     user_id or "companion",
                     message or "Reminder",
                     channel_key=channel_key,
                     source="cron" if params.get("_cron") else "reminder",
+                    from_friend=from_friend,
                 )
             elif channel_key and hasattr(self.coreInst, "send_response_to_channel_by_key"):
                 await self.coreInst.send_response_to_channel_by_key(channel_key, message or "Reminder")
@@ -649,15 +654,20 @@ class TAM:
         run_time_str: str,
         user_id: Optional[str] = None,
         channel_key: Optional[str] = None,
+        friend_id: Optional[str] = None,
     ) -> bool:
-        """Schedule a one-shot reminder at the given time (YYYY-MM-DD HH:MM:SS). Persisted to DB so it survives Core restart. user_id/channel_key used by deliver_to_user when reminder fires."""
+        """Schedule a one-shot reminder at the given time (YYYY-MM-DD HH:MM:SS). Persisted to DB so it survives Core restart. Step 10: friend_id used as from_friend when reminder fires."""
+        try:
+            _fid = (str(friend_id).strip() or "HomeClaw") if friend_id is not None else "HomeClaw"
+        except (TypeError, AttributeError):
+            _fid = "HomeClaw"
         try:
             run_time = datetime.strptime(run_time_str, "%Y-%m-%d %H:%M:%S")
         except ValueError:
             logger.warning("TAM: invalid run_time_str {}; scheduling in memory only", run_time_str)
             async def task():
                 if hasattr(self.coreInst, "deliver_to_user"):
-                    await self.coreInst.deliver_to_user(user_id or "companion", message, channel_key=channel_key, source="reminder")
+                    await self.coreInst.deliver_to_user(user_id or "companion", message, channel_key=channel_key, source="reminder", from_friend=_fid)
                 else:
                     await self.send_reminder_to_latest_channel(message)
             self.schedule_fixed_task(task, run_time_str)
@@ -665,15 +675,14 @@ class TAM:
         if run_time <= datetime.now():
             logger.debug("TAM: run_time is in the past; not scheduling")
             return False
-        reminder_id = tam_storage.add_one_shot_reminder(run_time, message, user_id=user_id, channel_key=channel_key)
+        reminder_id = tam_storage.add_one_shot_reminder(run_time, message, user_id=user_id, channel_key=channel_key, friend_id=_fid if _fid != "HomeClaw" else None)
         if reminder_id:
-            # task must be a no-arg callable that returns a coroutine; schedule_fixed_task does asyncio.run(task())
             task = (
-                lambda rid, msg, uid, ck: lambda: self._run_one_shot_and_remove(rid, msg, user_id=uid, channel_key=ck)
-            )(reminder_id, message, user_id, channel_key)
+                lambda rid, msg, uid, ck, fid: lambda: self._run_one_shot_and_remove(rid, msg, user_id=uid, channel_key=ck, friend_id=fid)
+            )(reminder_id, message, user_id, channel_key, _fid)
             self.schedule_fixed_task(task, run_time_str)
             msg_preview = (message or "")[:50] + ("..." if len(message or "") > 50 else "")
-            logger.info("TAM: One-shot reminder scheduled: run_at={!r} user_id={} message={!r}", run_time_str, user_id or "companion", msg_preview)
+            logger.info("TAM: One-shot reminder scheduled: run_at={!r} user_id={} friend_id={} message={!r}", run_time_str, user_id or "companion", _fid, msg_preview)
         else:
             async def fallback():
                 await self.send_reminder_to_latest_channel(message)
@@ -1251,22 +1260,33 @@ class TAM:
             if deleted:
                 logger.debug("TAM: Cleaned {} expired one-shot reminder(s) from DB", deleted)
             rows = tam_storage.load_one_shot_reminders(after=datetime.now())
+            loaded = 0
             for row in rows:
-                run_at = row.get("run_at")
-                if run_at is None:
+                if not isinstance(row, dict):
                     continue
-                run_time_str = run_at.strftime("%Y-%m-%d %H:%M:%S") if hasattr(run_at, "strftime") else str(run_at)
-                rid = row.get("id", "")
-                msg = row.get("message", "")
-                uid = row.get("user_id")
-                ck = row.get("channel_key")
-                # task must be a no-arg callable that returns a coroutine (schedule_fixed_task does asyncio.run(task()))
-                task = (
-                    lambda reminder_id, message, u, c: lambda: self._run_one_shot_and_remove(reminder_id, message, user_id=u, channel_key=c)
-                )(rid, msg, uid, ck)
-                self.schedule_fixed_task(task, run_time_str)
-            if rows:
-                logger.debug("TAM: Loaded {} one-shot reminder(s) from DB", len(rows))
+                try:
+                    run_at = row.get("run_at")
+                    if run_at is None:
+                        continue
+                    run_time_str = run_at.strftime("%Y-%m-%d %H:%M:%S") if hasattr(run_at, "strftime") else str(run_at)
+                    rid = row.get("id", "")
+                    msg = row.get("message", "")
+                    uid = row.get("user_id")
+                    ck = row.get("channel_key")
+                    fid = row.get("friend_id")
+                    try:
+                        _fid = (str(fid).strip() or "HomeClaw") if fid is not None else "HomeClaw"
+                    except (TypeError, AttributeError):
+                        _fid = "HomeClaw"
+                    task = (
+                        lambda reminder_id, message, u, c, f: lambda: self._run_one_shot_and_remove(reminder_id, message, user_id=u, channel_key=c, friend_id=f)
+                    )(rid, msg, uid, ck, _fid)
+                    self.schedule_fixed_task(task, run_time_str)
+                    loaded += 1
+                except Exception as e:
+                    logger.debug("TAM: skip loading one-shot reminder row {}: {}", row.get("id"), e)
+            if loaded:
+                logger.debug("TAM: Loaded {} one-shot reminder(s) from DB", loaded)
         except Exception as e:
             logger.debug("TAM: Could not load one-shot reminders from DB: {}", e)
 
@@ -1276,10 +1296,15 @@ class TAM:
         message: str,
         user_id: Optional[str] = None,
         channel_key: Optional[str] = None,
+        friend_id: Optional[str] = None,
     ) -> None:
-        """Deliver reminder to user (Companion push + channel) and remove from DB (called when one-shot fires). Never raises (logs and continues)."""
+        """Deliver reminder to user (Companion push + channel) and remove from DB (called when one-shot fires). Step 10: from_friend=friend_id. Never raises."""
+        try:
+            from_friend = (str(friend_id or "").strip() or "HomeClaw") if friend_id is not None else "HomeClaw"
+        except (TypeError, AttributeError):
+            from_friend = "HomeClaw"
         msg_preview = (message or "")[:50] + ("..." if len(message or "") > 50 else "")
-        logger.info("TAM: One-shot reminder triggered: delivering to user_id={} message={!r}", user_id or "companion", msg_preview)
+        logger.info("TAM: One-shot reminder triggered: delivering to user_id={} from_friend={} message={!r}", user_id or "companion", from_friend, msg_preview)
         try:
             if hasattr(self.coreInst, "deliver_to_user"):
                 await self.coreInst.deliver_to_user(
@@ -1287,9 +1312,10 @@ class TAM:
                     message or "Reminder",
                     channel_key=channel_key,
                     source="reminder",
+                    from_friend=from_friend,
                 )
             else:
-                await self.send_reminder_to_channel(message or "Reminder", {"channel_key": channel_key} if channel_key else None)
+                await self.send_reminder_to_channel(message or "Reminder", {"channel_key": channel_key, "friend_id": from_friend} if channel_key else {"friend_id": from_friend})
         except Exception as e:
             logger.exception("TAM: _run_one_shot_and_remove deliver failed: {}", e)
         try:
@@ -1306,8 +1332,9 @@ class TAM:
         remind_on: Optional[str] = None,
         remind_message: Optional[str] = None,
         system_user_id: Optional[str] = None,
+        friend_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Record a date/event for future reference (no LLM; from record_date tool). Per-user. Never raises."""
+        """Record a date/event for future reference (no LLM; from record_date tool). Per-user. Step 10: friend_id used as from_friend when reminder fires. Never raises."""
         try:
             entry = {
                 "event_name": (event_name or "").strip() or "event",
@@ -1340,11 +1367,11 @@ class TAM:
                         run_date = ev_date - timedelta(days=1)
                         run_time_str = run_date.strftime("%Y-%m-%d 09:00:00")
                         day_before_msg = entry["remind_message"] or f"Reminder: {entry['event_name']} is tomorrow!"
-                        self.schedule_one_shot(day_before_msg, run_time_str, user_id=uid)
+                        self.schedule_one_shot(day_before_msg, run_time_str, user_id=uid, friend_id=friend_id)
                         reminders_scheduled.append(f"day before ({run_time_str})")
                     elif entry["remind_on"] == "on_day":
                         run_time_str = ev_date.strftime("%Y-%m-%d 09:00:00")
-                        self.schedule_one_shot(msg, run_time_str, user_id=uid)
+                        self.schedule_one_shot(msg, run_time_str, user_id=uid, friend_id=friend_id)
                         reminders_scheduled.append(f"on day ({run_time_str})")
                     if reminders_scheduled:
                         result["reminders_scheduled"] = reminders_scheduled

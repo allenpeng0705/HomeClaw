@@ -88,10 +88,11 @@ def send_apns_one(
     body: str,
     user_id: Optional[str] = None,
     source: Optional[str] = None,
+    from_friend: Optional[str] = None,
 ) -> bool:
     """
     Send one APNs notification to one device token.
-    Custom keys user_id and source are included so the app can show which user the push is for (multi-user on one device).
+    Custom keys user_id, source, and from_friend so the app can show which user the push is for and which friend it is from (e.g. "Sabrina" or "HomeClaw").
     Returns True if sent successfully. Never raises.
     """
     try:
@@ -118,6 +119,8 @@ def send_apns_one(
             payload["user_id"] = str(user_id).strip()[:256]
         if source is not None and str(source).strip():
             payload["source"] = str(source).strip()[:64]
+        if from_friend is not None and str(from_friend).strip():
+            payload["from_friend"] = str(from_friend).strip()[:128]
         headers = {
             "authorization": f"bearer {jwt_token}",
             "apns-topic": str(config.get("bundle_id", "")),
