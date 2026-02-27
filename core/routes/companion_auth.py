@@ -121,7 +121,7 @@ def get_api_auth_login_handler(core):  # noqa: ARG001
             if not isinstance(body, dict):
                 return JSONResponse(status_code=400, content={"detail": "JSON object required"})
             try:
-                username = (str(body.get("username") or "").strip()
+                username = (str(body.get("username") or "").strip())
             except (TypeError, ValueError):
                 username = ""
             try:

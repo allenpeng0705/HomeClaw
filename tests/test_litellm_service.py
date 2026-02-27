@@ -55,7 +55,7 @@ async def test_chat_completions_non_stream(app):
     with patch("llm.litellmService.acompletion", new_callable=AsyncMock) as m:
         m.return_value = mock_response
 
-        async with httpx.AsyncClient(app=app, base_url="http://test") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             r = await client.post(
                 "/v1/chat/completions",
                 json={
@@ -72,17 +72,40 @@ async def test_chat_completions_non_stream(app):
     assert data["choices"][0]["message"]["content"] == "Hello"
 
 
-@pytest.mark.asyncio
-async def test_chat_completions_stream(app):
-    """POST /v1/chat/completions with stream=True collects chunks and returns rebuilt JSON."""
-    # One chunk that stream_chunk_builder can turn into a full response
-    chunk = MagicMock()
-    chunk.model_dump.return_value = {
+def _make_stream_chunk():
+    """Build a chunk that litellm.stream_chunk_builder can process (expects dict-like: .get(), subscript, ._hidden_params)."""
+    # LiteLLM uses chunk.get("id"), chunk["created"], chunk["choices"][0], and chunk._hidden_params.
+    import time
+    chunk_data = {
         "id": "chunk-1",
         "object": "chat.completion.chunk",
         "model": "test",
-        "choices": [{"index": 0, "delta": {"content": "Hi"}, "finish_reason": None}],
+        "created": int(time.time()),
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"role": "assistant", "content": "Hi"},
+                "message": {"role": "assistant", "content": "Hi"},
+                "finish_reason": None,
+            }
+        ],
     }
+
+    class ChunkDict(dict):
+        """Dict subclass so stream_chunk_builder can use .get(), [key], and ._hidden_params."""
+        _hidden_params = {}
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+    chunk = ChunkDict(chunk_data)
+    return chunk
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_stream(app):
+    """POST /v1/chat/completions with stream=True collects chunks and returns rebuilt JSON."""
+    chunk = _make_stream_chunk()
 
     async def stream_chunks():
         yield chunk
@@ -90,7 +113,7 @@ async def test_chat_completions_stream(app):
     with patch("llm.litellmService.acompletion", new_callable=AsyncMock) as m:
         m.return_value = stream_chunks()
 
-        async with httpx.AsyncClient(app=app, base_url="http://test") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             r = await client.post(
                 "/v1/chat/completions",
                 json={
