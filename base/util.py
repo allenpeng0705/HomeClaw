@@ -663,7 +663,39 @@ class Util:
             return []
         except Exception:
             return []
-    
+
+    def main_llm_supported_media_for_ref(self, model_ref: str) -> List[str]:
+        """Return supported_media (image/audio/video) for a given model ref (e.g. main_llm_local or main_llm_cloud).
+        Used in mix mode to decide if we should force cloud when request has images and local does not support vision."""
+        try:
+            ref = (model_ref or "").strip()
+            if not ref:
+                return []
+            entry, mtype = self._get_model_entry(ref)
+            allowed = {"image", "audio", "video"}
+
+            def normalize(raw) -> List[str]:
+                if not raw:
+                    return []
+                if isinstance(raw, list):
+                    out = [str(x).strip().lower() for x in raw if x]
+                else:
+                    out = [str(raw).strip().lower()]
+                return [x for x in out if x in allowed]
+
+            if entry is not None:
+                explicit = entry.get("supported_media")
+                if explicit is not None:
+                    return normalize(explicit)
+                if mtype == "litellm":
+                    return ["image", "audio", "video"]
+                if mtype == "local":
+                    if entry.get("mmproj"):
+                        return ["image"]
+                    return []
+            return []
+        except Exception:
+            return []
 
     def get_ollama_supported_models(self):
         try:

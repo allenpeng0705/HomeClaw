@@ -1150,6 +1150,15 @@ class Core(CoreInterface):
                         "Vision fallback: main_llm_supported_media was empty but main_llm id looks like vision ({}); including image(s).",
                         raw_id,
                     )
+            # Mix mode: if request has images and cloud model supports image, include images in message (answer_from_memory will route to cloud when local does not support vision).
+            main_llm_mode = (getattr(Util().get_core_metadata(), "main_llm_mode", None) or "").strip().lower()
+            if images_list and "image" not in supported_media and main_llm_mode == "mix":
+                cloud_ref = (getattr(Util().get_core_metadata(), "main_llm_cloud", None) or "").strip()
+                if cloud_ref and "image" in (Util().main_llm_supported_media_for_ref(cloud_ref) or []):
+                    supported_media = list(supported_media) if supported_media else []
+                    if "image" not in supported_media:
+                        supported_media.append("image")
+                    logger.info("Mix mode: including image(s) in message; will use cloud for vision if local does not support.")
             text_only = human_message or ""
 
             # File-understanding: process request.files (detect type, handle image/audio/video/doc). Stable: catch all, merge results, never crash.
@@ -1321,6 +1330,47 @@ class Core(CoreInterface):
                     "For local vision: the llama.cpp server must be started with --mmproj (Core does this when it auto-starts the main LLM; if you start llama-server yourself, add --mmproj <path_to_mmproj.gguf>).",
                     main_llm_ref or "(empty)",
                 )
+                # Local-only mode: save images to user's images folder and return polite message (no LLM call).
+                if main_llm_mode != "mix" and Util()._effective_main_llm_type() == "local":
+                    try:
+                        try:
+                            root = str(Util().get_core_metadata().get_homeclaw_root() or "").strip()
+                        except Exception:
+                            root = (getattr(Util().get_core_metadata(), "homeclaw_root", None) or "").strip()
+                        if root and user_id:
+                            images_dir = Path(root) / str(user_id) / "images"
+                            images_dir.mkdir(parents=True, exist_ok=True)
+                            ts = int(time.time())
+                            saved = 0
+                            for i, img in enumerate(images_list):
+                                data_url = self._image_item_to_data_url(img) if getattr(self, "_image_item_to_data_url", None) else None
+                                if not data_url or not data_url.strip().lower().startswith("data:image/"):
+                                    if isinstance(img, str) and os.path.isfile(img):
+                                        import shutil
+                                        ext = (img.lower().split(".")[-1] if "." in img else "jpg") or "jpg"
+                                        dest = images_dir / f"{ts}_{i}.{ext}"
+                                        shutil.copy2(img, dest)
+                                        saved += 1
+                                    continue
+                                idx = data_url.find(";base64,")
+                                if idx > 0:
+                                    import base64
+                                    payload = data_url[idx + 8:]
+                                    try:
+                                        raw = base64.b64decode(payload)
+                                        ext = "jpg"
+                                        if "png" in data_url[:30]:
+                                            ext = "png"
+                                        dest = images_dir / f"{ts}_{i}.{ext}"
+                                        dest.write_bytes(raw)
+                                        saved += 1
+                                    except Exception:
+                                        pass
+                            if saved:
+                                polite = "I've saved your image(s) to your images folder. The current model doesn't support image understanding. You can switch to a vision-capable model (e.g. in mix mode or a local vision model) to ask about the image."
+                                return polite
+                    except Exception as e:
+                        logger.debug("vision save image to user folder failed: {}", e)
                 text_only = (text_only + " (Image(s) omitted - model does not support images.)").strip()
             elif images_list and "image" in supported_media:
                 logger.debug("Including {} image(s) in user message for vision model", len(images_list))

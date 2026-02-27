@@ -150,11 +150,22 @@ async def answer_from_memory(
                 default_route = "local"
             route = None
             route_layer = "default_route"
+            # Vision override: if request has images and local model does not support image but cloud does, use cloud so we can understand the image.
+            request_images = list(getattr(request, "images", None) or []) if request else []
+            if request_images:
+                local_ref = (getattr(Util().core_metadata, "main_llm_local", None) or "").strip()
+                cloud_ref = (getattr(Util().core_metadata, "main_llm_cloud", None) or "").strip()
+                local_media = Util().main_llm_supported_media_for_ref(local_ref) if local_ref else []
+                cloud_media = Util().main_llm_supported_media_for_ref(cloud_ref) if cloud_ref else []
+                if "image" not in local_media and "image" in cloud_media and cloud_ref:
+                    route = "cloud"
+                    route_layer = "vision_fallback"
+                    logger.info("Mix mode: request has images; local does not support vision, using cloud for this request.")
             route_score = 0.0
-            # Layer 1: heuristic (keywords, long-input); no threshold—first match wins when enabled
+            # Layer 1: heuristic (keywords, long-input); no threshold—first match wins when enabled (skip if already chose cloud for vision)
             heuristic_cfg = hr.get("heuristic") if isinstance(hr.get("heuristic"), dict) else {}
             h_enabled = bool(heuristic_cfg.get("enabled", False))
-            if h_enabled:
+            if h_enabled and route is None:
                 from hybrid_router.heuristic import load_heuristic_rules, run_heuristic_layer
                 root_dir = Path(__file__).resolve().parent.parent
                 rules_path = (heuristic_cfg.get("rules_path") or "").strip()
@@ -164,7 +175,7 @@ async def answer_from_memory(
                     route = selection
                     route_layer = "heuristic"
                     route_score = score
-            # Layer 2: semantic (aurelio-labs/semantic-router + existing embedding). Only accepts when similarity_score >= threshold; otherwise falls through to Layer 3.
+            # Layer 2: semantic (only when route not yet set, e.g. not overridden by vision_fallback).
             if route is None:
                 semantic_cfg = hr.get("semantic") if isinstance(hr.get("semantic"), dict) else {}
                 s_enabled = bool(semantic_cfg.get("enabled", False))
@@ -198,7 +209,7 @@ async def answer_from_memory(
                             route_score = score
                     except Exception as e:
                         logger.debug("Semantic router Layer 2 failed: {}", e)
-            # Optional: long queries use default_route and skip perplexity (avoids local overconfidence on complex prompts)
+            # Optional: long queries use default_route (only when route not yet set).
             if route is None:
                 prefer_long = hr.get("prefer_cloud_if_long_chars")
                 if prefer_long is not None and isinstance(prefer_long, (int, float)) and int(prefer_long) > 0:

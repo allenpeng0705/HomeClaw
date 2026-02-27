@@ -164,13 +164,14 @@ def ensure_user_sandbox_folders(
     documents_subdir: str = "documents",
     work_subdir: str = "work",
     user_share_subdir: str = "share",
+    images_subdir: str = "images",
     friend_output_subdir: str = "output",
     friend_knowledge_subdir: str = "knowledge",
     friends_by_user: Optional[Dict[str, List[str]]] = None,
 ) -> None:
     """
     Create per-user, per-friend, and shared sandbox folders under homeclaw_root (UserFriendsModelFullDesign.md Step 5).
-    For each user_id: {user_id}, {user_id}/output, {user_id}/knowledgebase, {user_id}/downloads, {user_id}/documents, {user_id}/work, {user_id}/share.
+    For each user_id: {user_id}, {user_id}/output, {user_id}/knowledgebase, {user_id}/images, {user_id}/downloads, {user_id}/documents, {user_id}/work, {user_id}/share.
     For each (user_id, friend_id) when friends_by_user is set: {user_id}/{friend_id}, {friend_id}/output, {friend_id}/knowledge.
     Also: {homeclaw_root}/share. If companion=True: {homeclaw_root}/companion, companion/output (not used when there is no companion user).
     Never raises; logs on mkdir failure.
@@ -206,6 +207,7 @@ def ensure_user_sandbox_folders(
                 logger.debug("ensure_user_sandbox_folders: mkdir companion failed: {}", e)
         out_sub = _sanitize_subdir(output_subdir, "output")
         kb_sub = _sanitize_subdir(knowledgebase_subdir, "knowledgebase")
+        img_sub = _sanitize_subdir(images_subdir, "images")
         dl_sub = _sanitize_subdir(downloads_subdir, "downloads")
         doc_sub = _sanitize_subdir(documents_subdir, "documents")
         work_sub = _sanitize_subdir(work_subdir, "work")
@@ -230,6 +232,7 @@ def ensure_user_sandbox_folders(
                 user_base.mkdir(parents=True, exist_ok=True)
                 (user_base / out_sub).mkdir(parents=True, exist_ok=True)
                 (user_base / kb_sub).mkdir(parents=True, exist_ok=True)
+                (user_base / img_sub).mkdir(parents=True, exist_ok=True)
                 (user_base / dl_sub).mkdir(parents=True, exist_ok=True)
                 (user_base / doc_sub).mkdir(parents=True, exist_ok=True)
                 (user_base / work_sub).mkdir(parents=True, exist_ok=True)
