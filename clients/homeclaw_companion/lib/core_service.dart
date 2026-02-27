@@ -9,6 +9,7 @@ import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'chat_history_store.dart';
 import 'node_service.dart';
 
 /// HomeClaw Core API client.
@@ -23,10 +24,16 @@ class CoreService {
   static const String _keyCanvasUrl = 'canvas_url';
   static const String _keyNodesUrl = 'nodes_url';
   static const String _keyShowProgress = 'show_progress_during_long_tasks';
+  static const String _keyCompanionToken = 'companion_session_token';
+  static const String _keyCompanionUserId = 'companion_session_user_id';
+  static const String _keyCompanionSavedUsername = 'companion_saved_username';
+  static const String _keyCompanionSavedPassword = 'companion_saved_password';
   static const String _defaultBaseUrl = 'http://127.0.0.1:9000';
 
   String _baseUrl = _defaultBaseUrl;
   String? _apiKey;
+  String? _sessionToken;
+  String? _sessionUserId;
   List<String> _execAllowlist = [];
   String? _canvasUrl;
   String? _nodesUrl;
@@ -35,6 +42,9 @@ class CoreService {
   String get baseUrl => _baseUrl;
   bool get showProgressDuringLongTasks => _showProgressDuringLongTasks;
   String? get apiKey => _apiKey;
+  String? get sessionToken => _sessionToken;
+  String? get sessionUserId => _sessionUserId;
+  bool get isLoggedIn => _sessionToken != null && _sessionToken!.isNotEmpty && _sessionUserId != null && _sessionUserId!.isNotEmpty;
   List<String> get execAllowlist => List.unmodifiable(_execAllowlist);
   String? get canvasUrl => _canvasUrl;
   String? get nodesUrl => _nodesUrl;
@@ -51,6 +61,8 @@ class CoreService {
   Timer? _coreWsPingTimer; // keepalive: send ping so proxies don't close the connection
   static const Duration _coreWsPingInterval = Duration(seconds: 30);
   final Map<String, Completer<Map<String, dynamic>>> _pendingInboundResult = {};
+  /// request_id -> (userId, friendId) so when inbound_result arrives we can route to the correct chat.
+  final Map<String, ({String userId, String friendId})> _pendingRequestMeta = {};
   final StreamController<Map<String, dynamic>> _pushMessageController = StreamController<Map<String, dynamic>>.broadcast();
   /// Stream of proactive push messages from Core (cron, reminders, record_date). UI can listen and show in chat or as notification.
   Stream<Map<String, dynamic>> get pushMessageStream => _pushMessageController.stream;
@@ -93,6 +105,111 @@ class CoreService {
     _nodesUrl = prefs.getString(_keyNodesUrl)?.trim();
     if (_nodesUrl != null && _nodesUrl!.isEmpty) _nodesUrl = null;
     _showProgressDuringLongTasks = prefs.getBool(_keyShowProgress) ?? true;
+    _sessionToken = prefs.getString(_keyCompanionToken)?.trim();
+    if (_sessionToken != null && _sessionToken!.isEmpty) _sessionToken = null;
+    _sessionUserId = prefs.getString(_keyCompanionUserId)?.trim();
+    if (_sessionUserId != null && _sessionUserId!.isEmpty) _sessionUserId = null;
+  }
+
+  /// Persist Core URL and API key (same as Settings). Call after editing on login screen.
+  Future<void> saveBaseUrlAndApiKey({required String baseUrl, String? apiKey}) async {
+    await saveSettings(baseUrl: baseUrl, apiKey: apiKey);
+  }
+
+  /// Save session after login. Persists token and user_id.
+  Future<void> saveSession({required String token, required String userId}) async {
+    _sessionToken = token.trim();
+    _sessionUserId = userId.trim();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyCompanionToken, _sessionToken!);
+    await prefs.setString(_keyCompanionUserId, _sessionUserId!);
+  }
+
+  /// Clear session and saved credentials (logout). Removes username and password from device.
+  Future<void> clearSession() async {
+    _sessionToken = null;
+    _sessionUserId = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyCompanionToken);
+    await prefs.remove(_keyCompanionUserId);
+    await prefs.remove(_keyCompanionSavedUsername);
+    await prefs.remove(_keyCompanionSavedPassword);
+  }
+
+  /// Save username and password for auto-login next time. Call after successful login.
+  Future<void> saveCredentials({required String username, required String password}) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyCompanionSavedUsername, username.trim());
+    await prefs.setString(_keyCompanionSavedPassword, password);
+  }
+
+  /// Load saved username and password (for auto-login). Returns null if either is missing.
+  Future<({String username, String password})?> getSavedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final username = prefs.getString(_keyCompanionSavedUsername)?.trim();
+    final password = prefs.getString(_keyCompanionSavedPassword);
+    if (username == null || username.isEmpty || password == null) return null;
+    return (username: username, password: password);
+  }
+
+  /// Remove saved username and password from device.
+  Future<void> clearCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyCompanionSavedUsername);
+    await prefs.remove(_keyCompanionSavedPassword);
+  }
+
+  /// POST /api/auth/login with username and password. Returns {user_id, token, name, friends}. Throws on failure.
+  Future<Map<String, dynamic>> login({required String username, required String password}) async {
+    final url = Uri.parse('$_baseUrl/api/auth/login');
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders()},
+          body: jsonEncode({'username': username.trim(), 'password': password}),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      final body = response.body;
+      throw Exception(response.statusCode == 401 ? 'Invalid username or password' : 'Login failed: $body');
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>?;
+    final userId = (map?['user_id'] as String?)?.trim() ?? '';
+    final token = (map?['token'] as String?)?.trim() ?? '';
+    if (userId.isEmpty || token.isEmpty) throw Exception('Login response missing user_id or token');
+    await saveSession(token: token, userId: userId);
+    await saveCredentials(username: username.trim(), password: password);
+    return map ?? {};
+  }
+
+  /// GET /api/me with Bearer token. Returns {user_id, name, friends}. 401 if token invalid.
+  Future<Map<String, dynamic>> getMe() async {
+    final url = Uri.parse('$_baseUrl/api/me');
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 10));
+    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+    if (response.statusCode != 200) throw Exception('GET /api/me failed: ${response.body}');
+    return jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+  }
+
+  /// GET /api/me/friends with Bearer token. Returns {friends: [...]}. 401 if token invalid.
+  Future<List<Map<String, dynamic>>> getFriends() async {
+    final url = Uri.parse('$_baseUrl/api/me/friends');
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 10));
+    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+    if (response.statusCode != 200) throw Exception('GET /api/me/friends failed: ${response.body}');
+    final map = jsonDecode(response.body) as Map<String, dynamic>?;
+    final list = map?['friends'];
+    if (list is! List<dynamic>) return [];
+    final out = <Map<String, dynamic>>[];
+    for (final e in list) {
+      if (e is Map<String, dynamic>) out.add(e);
+      else if (e is Map) out.add(Map<String, dynamic>.from(e));
+    }
+    return out;
   }
 
   Future<void> saveShowProgressDuringLongTasks(bool value) async {
@@ -102,7 +219,8 @@ class CoreService {
   }
 
   Future<void> saveSettings({required String baseUrl, String? apiKey}) async {
-    _baseUrl = baseUrl.trim().replaceFirst(RegExp(r'/$'), '');
+    final trimmed = baseUrl.trim().replaceFirst(RegExp(r'/$'), '');
+    _baseUrl = trimmed.isEmpty ? _defaultBaseUrl : trimmed;
     _apiKey = apiKey?.trim().isEmpty == true ? null : apiKey?.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyBaseUrl, _baseUrl);
@@ -158,11 +276,21 @@ class CoreService {
     _nodeService = null;
   }
 
-  Map<String, String> _authHeaders() {
+  /// Auth headers for requests. Use [forCompanionApi: true] only for /api/me and /api/me/friends (they require Bearer session token).
+  /// All other routes (/inbound, /api/config/*, /ws, etc.) use Core's verify_inbound_auth which expects the API key, so we pass API key when [forCompanionApi] is false.
+  Map<String, String> _authHeaders({bool forCompanionApi = false}) {
     final headers = <String, String>{};
+    if (forCompanionApi && _sessionToken != null && _sessionToken!.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $_sessionToken';
+      return headers;
+    }
     if (_apiKey != null && _apiKey!.isNotEmpty) {
       headers['X-API-Key'] = _apiKey!;
       headers['Authorization'] = 'Bearer $_apiKey';
+      return headers;
+    }
+    if (_sessionToken != null && _sessionToken!.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $_sessionToken';
     }
     return headers;
   }
@@ -285,7 +413,9 @@ class CoreService {
       return _sendMessageAsync(url, body, onProgress ?? (_) {});
     }
     if (useStreamPath) {
-      return _sendMessageStream(url, body, onProgress!);
+      final result = await _sendMessageStream(url, body, onProgress!);
+      _persistInboundResultToStore(userId, friendId, result);
+      return result;
     }
 
     final headers = <String, String>{
@@ -302,17 +432,34 @@ class CoreService {
     final map = jsonDecode(response.body) as Map<String, dynamic>?;
     final responseImages = map?['images'] as List<dynamic>?;
     final responseImage = map?['image'];
-    return {
+    final result = {
       'text': (map?['text'] as String?) ?? '',
       'images': responseImages != null
           ? responseImages.map((e) => e as String).toList()
           : (responseImage != null ? [responseImage as String] : null),
     };
+    _persistInboundResultToStore(userId, friendId, result);
+    return result;
+  }
+
+  /// Persist an inbound reply to the correct chat so it is not lost when the user has navigated away.
+  void _persistInboundResultToStore(String userId, String? friendId, Map<String, dynamic> result) {
+    try {
+      final text = (result['text'] as String?) ?? '';
+      if (text.isEmpty) return;
+      final images = result['images'];
+      final imageList = images is List<dynamic>
+          ? images.whereType<String>().toList()
+          : (images is List<String> ? images : null);
+      final effectiveFriendId = (friendId?.trim().isEmpty != false) ? 'HomeClaw' : friendId!.trim();
+      ChatHistoryStore().appendMessage(userId, effectiveFriendId, text, false, imageList);
+    } catch (_) {}
   }
 
   /// Ensure WebSocket to Core /ws is connected (for push). When connected, Core sends {"event": "connected", "session_id": "..."}; we send {"event": "register", "user_id": userId} so Core can push proactive messages (cron, reminders) to this connection. [userId] from the message being sent (e.g. body['user_id']). Open WS for both local and remote Core so reminders/cron are delivered. Re-registers when userId changes so reminders for the current chat user are delivered.
   Future<void> _ensureCoreWsConnected([String? userId]) async {
-    final registerUserId = userId?.trim().isEmpty != true ? userId!.trim() : 'companion';
+    final trimmed = userId?.trim() ?? '';
+    final registerUserId = trimmed.isNotEmpty ? trimmed : 'companion';
     if (_coreWsChannel != null && _coreWsSessionId != null && _coreWsBaseUrl == _baseUrl) {
       if (_coreWsRegisteredUserId == registerUserId) return;
       _coreWsRegisteredUserId = registerUserId;
@@ -422,6 +569,9 @@ class CoreService {
         if (fromFriend != null && fromFriend.toString().trim().isNotEmpty) {
           map['from_friend'] = fromFriend.toString().trim();
         }
+        if (_sessionUserId != null && _sessionUserId!.isNotEmpty) {
+          map['user_id'] = _sessionUserId!;
+        }
         _pushMessageController.add(map);
       } catch (_) {}
       return;
@@ -429,8 +579,8 @@ class CoreService {
     if (msg['event'] != 'inbound_result') return;
     final requestId = msg['request_id'] as String?;
     if (requestId == null || requestId.isEmpty) return;
+    final meta = _pendingRequestMeta.remove(requestId);
     final completer = _pendingInboundResult.remove(requestId);
-    if (completer == null || completer.isCompleted) return;
     final ok = msg['ok'] as bool? ?? true;
     final text = (msg['text'] as String?) ?? '';
     final err = msg['error'] as String?;
@@ -439,10 +589,24 @@ class CoreService {
     final imageList = responseImages is List
         ? (responseImages as List<dynamic>).whereType<String>().toList()
         : (responseImage is String ? <String>[responseImage as String] : null);
-    completer.complete({
+    final resultMap = {
       'text': ok ? text : (err ?? text),
       'images': imageList != null && imageList.isNotEmpty ? imageList : null,
-    });
+    };
+    if (meta != null) {
+      try {
+        _pushMessageController.add({
+          'event': 'inbound_result',
+          'user_id': meta.userId,
+          'friend_id': meta.friendId,
+          'text': resultMap['text'],
+          'images': resultMap['images'],
+        });
+      } catch (_) {}
+    }
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(resultMap);
+    }
   }
 
   /// POST /inbound with async: true; get 202 + request_id. If we have a WebSocket session (push_ws_session_id), Core will push the result to us; else we poll. Used for remote Core so proxies do not close the connection.
@@ -473,6 +637,9 @@ class CoreService {
       throw Exception('Core 202 response missing request_id');
     }
     onProgress('Processing your request…');
+    final friendId = (body['friend_id'] as String?)?.trim() ?? '';
+    final meta = (userId: userId ?? 'companion', friendId: friendId.isEmpty ? 'HomeClaw' : friendId);
+    _pendingRequestMeta[requestId] = meta;
     if (_coreWsSessionId != null) {
       final completer = Completer<Map<String, dynamic>>();
       _pendingInboundResult[requestId] = completer;
@@ -481,20 +648,25 @@ class CoreService {
           Duration(seconds: sendMessageTimeoutSeconds),
           onTimeout: () {
             _pendingInboundResult.remove(requestId);
+            _pendingRequestMeta.remove(requestId);
             throw TimeoutException('Inbound result push timed out', Duration(seconds: sendMessageTimeoutSeconds));
           },
         );
         return result;
       } catch (_) {
         _pendingInboundResult.remove(requestId);
+        _pendingRequestMeta.remove(requestId);
+        rethrow;
       }
     }
-    return _pollInboundResult(requestId, onProgress);
+    return _pollInboundResult(requestId, meta, onProgress);
   }
 
   /// Poll GET /inbound/result?request_id=... until status is "done" or error. Same auth as /inbound.
+  /// [meta] is used to emit result to push stream so the global listener persists to the correct chat when user has navigated away.
   Future<Map<String, dynamic>> _pollInboundResult(
     String requestId,
+    ({String userId, String friendId}) meta,
     void Function(String message) onProgress,
   ) async {
     final resultUrl = Uri.parse('$_baseUrl/inbound/result').replace(queryParameters: {'request_id': requestId});
@@ -503,6 +675,7 @@ class CoreService {
     while (DateTime.now().isBefore(deadline)) {
       final response = await http.get(resultUrl, headers: headers).timeout(Duration(seconds: 15));
       if (response.statusCode == 404) {
+        _pendingRequestMeta.remove(requestId);
         throw Exception('Request expired or not found (request_id=$requestId)');
       }
       final map = jsonDecode(response.body) as Map<String, dynamic>?;
@@ -513,6 +686,7 @@ class CoreService {
         continue;
       }
       if (response.statusCode == 200 && status == 'done') {
+        _pendingRequestMeta.remove(requestId);
         final ok = map?['ok'] as bool? ?? true;
         final text = (map?['text'] as String?) ?? '';
         final err = map?['error'] as String?;
@@ -521,10 +695,20 @@ class CoreService {
         final imageList = responseImages is List
             ? (responseImages as List<dynamic>).whereType<String>().toList()
             : (responseImage is String ? <String>[responseImage as String] : null);
-        return {
+        final result = {
           'text': ok ? text : (err ?? text),
           'images': imageList != null && imageList.isNotEmpty ? imageList : null,
         };
+        try {
+          _pushMessageController.add({
+            'event': 'inbound_result',
+            'user_id': meta.userId,
+            'friend_id': meta.friendId,
+            'text': result['text'],
+            'images': result['images'],
+          });
+        } catch (_) {}
+        return result;
       }
       await Future<void>.delayed(Duration(seconds: 2));
     }
@@ -660,8 +844,14 @@ class CoreService {
       throw Exception('Config users: ${response.statusCode} ${response.body}');
     }
     final map = jsonDecode(response.body) as Map<String, dynamic>?;
-    final list = map?['users'] as List<dynamic>?;
-    return list?.map((e) => Map<String, dynamic>.from(e as Map)).toList() ?? [];
+    final list = map?['users'];
+    if (list is! List<dynamic>) return [];
+    final out = <Map<String, dynamic>>[];
+    for (final e in list) {
+      if (e is Map<String, dynamic>) out.add(e);
+      else if (e is Map) out.add(Map<String, dynamic>.from(e));
+    }
+    return out;
   }
 
   /// POST /api/config/users — add user. Throws on error.

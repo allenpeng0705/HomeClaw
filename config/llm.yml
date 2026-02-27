@@ -44,6 +44,14 @@ local_models:
   #   capabilities: [Chat]
   # Multi-LoRA (if llama-server supports multiple --lora): use array
   #   lora: [adapters/a1.gguf, adapters/a2.gguf]
+  - id: main_vl_model_2B
+    alias: main_vl_model_2B
+    path: Qwen3VL-2B-Instruct-Q4_K_M.gguf
+    mmproj: mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf
+    host: 127.0.0.1
+    port: 5022
+    capabilities: [Chat]
+    supported_media: [image]
   - id: main_vl_model_4B
     alias: main_vl_model_4B
     path: Qwen3VL-4B-Instruct-Q4_K_M.gguf
@@ -146,7 +154,7 @@ cloud_models:
 # main_llm: optional when main_llm_mode is set. When mode is "local" we use main_llm_local; when "cloud" we use main_llm_cloud; when "mix" we use both per request.
 #main_llm: local_models/main_vl_model_4B
 main_llm_mode: mix
-main_llm_local: local_models/main_vl_model_4B
+main_llm_local: local_models/main_vl_model_2B
 main_llm_cloud: cloud_models/DeepSeek-Chat
 # Mix mode routing: heuristic (Layer 1), semantic (Layer 2), SLM (Layer 3: classifier or perplexity). See comments in hybrid_router.
 hybrid_router:

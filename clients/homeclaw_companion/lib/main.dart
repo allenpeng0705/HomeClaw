@@ -8,6 +8,7 @@ import 'package:homeclaw_native/homeclaw_native.dart';
 import 'chat_history_store.dart';
 import 'core_service.dart';
 import 'screens/friend_list_screen.dart';
+import 'screens/login_screen.dart';
 import 'screens/permissions_screen.dart';
 
 void main() async {
@@ -31,8 +32,10 @@ void main() async {
   } catch (_) {
     // Settings load failed; app uses defaults.
   }
-  // Register push token with Core on app start (iOS: APNs, Android: FCM) so reminders can be delivered when app is killed/background.
-  coreService.registerPushTokenWithCore('companion');
+  // Register push token with Core when we have a session user (done per-chat in ChatScreen).
+  if (coreService.isLoggedIn) {
+    coreService.registerPushTokenWithCore(coreService.sessionUserId!);
+  }
   String? initialMessage;
   try {
     final appLinks = AppLinks();
@@ -83,12 +86,29 @@ class _InitialScreenState extends State<_InitialScreen> {
     super.initState();
     _homeFuture = _resolveHome();
     _pushSubscription = widget.coreService.pushMessageStream.listen((push) {
-      final text = push['text'] as String? ?? '';
-      if (text.isEmpty) return;
-      final source = push['source'] as String? ?? 'push';
-      final title = source == 'reminder' ? 'Reminder' : 'HomeClaw';
-      final body = text.length > 80 ? '${text.substring(0, 80)}…' : text;
-      HomeclawNative().showNotification(title: title, body: body);
+      try {
+        final text = push['text'] as String? ?? '';
+        if (text.isEmpty) return;
+        final userId = push['user_id'] as String? ?? widget.coreService.sessionUserId;
+        final friendId = (push['friend_id'] ?? push['from_friend']) as String?;
+        final source = push['source'] as String? ?? 'push';
+        final images = push['images'] as List<dynamic>?;
+        final imageList = images != null ? images.whereType<String>().toList() : null;
+        if (userId != null && userId.isNotEmpty && friendId != null && friendId.toString().trim().isNotEmpty) {
+          ChatHistoryStore().appendMessage(
+            userId,
+            friendId.toString().trim(),
+            text,
+            false,
+            imageList != null && imageList.isNotEmpty ? imageList : null,
+          );
+        }
+        final title = source == 'reminder' ? 'Reminder' : (friendId?.toString() ?? 'HomeClaw');
+        final body = text.length > 80 ? '${text.substring(0, 80)}…' : text;
+        HomeclawNative().showNotification(title: title, body: body);
+      } catch (_) {
+        // Never let push handling crash the app (e.g. notification unsupported on platform).
+      }
     });
   }
 
@@ -105,6 +125,9 @@ class _InitialScreenState extends State<_InitialScreen> {
         coreService: widget.coreService,
         initialMessage: widget.initialMessage,
       );
+    }
+    if (!widget.coreService.isLoggedIn) {
+      return LoginScreen(coreService: widget.coreService);
     }
     return FriendListScreen(
       coreService: widget.coreService,

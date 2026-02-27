@@ -4,7 +4,17 @@
   <meta charset="UTF-8" />
   <title>HomeClaw Canvas</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 1rem auto; padding: 0 1rem; }
+    html, body { height: 100%; margin: 0; box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100%;
+    }
+    .canvas-inner { max-width: 640px; width: 100%; flex: 0 0 auto; }
     h1 { font-size: 1.25rem; }
     .session-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; }
     .session-row input { flex: 1; padding: 0.5rem; }
@@ -20,6 +30,7 @@
   </style>
 </head>
 <body>
+  <div class="canvas-inner">
   <h1>HomeClaw Canvas</h1>
   <div class="session-row">
     <label for="session">Session:</label>
@@ -30,6 +41,7 @@
   <div class="canvas-title" id="docTitle"></div>
   <div class="canvas-blocks" id="blocks">
     <span class="empty">No canvas content yet. The agent can push UI via canvas_update.</span>
+  </div>
   </div>
 
   <script>

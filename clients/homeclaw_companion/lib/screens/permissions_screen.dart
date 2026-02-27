@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core_service.dart';
 import 'friend_list_screen.dart';
+import 'login_screen.dart';
 
 /// Keys for [SharedPreferences] (caller must ensure shared_preferences is used).
 const String _keyPermissionsIntroShown = 'permissions_intro_shown';
@@ -133,13 +134,11 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     if (widget.fromSettings) {
       Navigator.of(context).pop();
     } else {
+      final next = widget.coreService.isLoggedIn
+          ? FriendListScreen(coreService: widget.coreService, initialMessage: widget.initialMessage)
+          : LoginScreen(coreService: widget.coreService);
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(
-          builder: (context) => FriendListScreen(
-            coreService: widget.coreService,
-            initialMessage: widget.initialMessage,
-          ),
-        ),
+        MaterialPageRoute<void>(builder: (context) => next),
       );
     }
   }

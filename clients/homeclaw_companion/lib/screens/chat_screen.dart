@@ -24,6 +24,8 @@ class ChatScreen extends StatefulWidget {
   final CoreService coreService;
   final String userId;
   final String userName;
+  /// Which friend this chat is with (e.g. "HomeClaw", "Sabrina"). Used for store key and to route incoming push/result to this chat.
+  final String? friendId;
   final String? initialMessage;
 
   const ChatScreen({
@@ -31,6 +33,7 @@ class ChatScreen extends StatefulWidget {
     required this.coreService,
     required this.userId,
     required this.userName,
+    this.friendId,
     this.initialMessage,
   });
 
@@ -78,6 +81,7 @@ class _ChatScreenState extends State<ChatScreen> {
   ];
   int _loadingStatusIndex = 0;
   Timer? _loadingStatusTimer;
+  bool _wasRouteCurrent = false;
 
   @override
   void initState() {
@@ -99,7 +103,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _loadChatHistory() {
     try {
-      final loaded = ChatHistoryStore().load(widget.userId);
+      final loaded = ChatHistoryStore().load(widget.userId, widget.friendId);
       if (loaded.isEmpty) return;
       _messages.clear();
       _messageImages.clear();
@@ -118,7 +122,7 @@ class _ChatScreenState extends State<ChatScreen> {
     for (var i = 0; i < _messages.length; i++) {
       list.add(MapEntry(_messages[i], i < _messageImages.length ? _messageImages[i] : null));
     }
-    await ChatHistoryStore().save(widget.userId, list);
+    await ChatHistoryStore().save(widget.userId, list, widget.friendId);
   }
 
   /// Get current position as "lat,lng" for Core. Returns null if unavailable or on error.
@@ -142,7 +146,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _clearChatHistory() async {
-    await ChatHistoryStore().clear(widget.userId);
+    await ChatHistoryStore().clear(widget.userId, widget.friendId);
     if (!mounted) return;
     setState(() {
       _messages.clear();
@@ -195,7 +199,11 @@ class _ChatScreenState extends State<ChatScreen> {
   void _onPushMessage(Map<String, dynamic> push) {
     final text = push['text'] as String? ?? '';
     if (text.isEmpty) return;
-    final source = push['source'] as String? ?? 'push';
+    final pushFriendId = (push['friend_id'] ?? push['from_friend']) as String?;
+    final pushFriend = (pushFriendId?.toString().trim() ?? '').isEmpty ? 'HomeClaw' : pushFriendId!.trim();
+    final thisFriend = (widget.friendId?.trim() ?? '').isEmpty ? 'HomeClaw' : widget.friendId!.trim();
+    if (pushFriend != thisFriend) return;
+    if (push['event'] == 'inbound_result') return;
     final imageList = push['images'] as List<dynamic>?;
     final images = imageList != null
         ? imageList.whereType<String>().toList()
@@ -208,7 +216,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _scrollToBottom();
     _persistChatHistory();
     if (!mounted) return;
-    final title = source == 'reminder' ? 'Reminder' : 'HomeClaw';
+    final title = push['source'] == 'reminder' ? 'Reminder' : thisFriend;
     final preview = text.length > 80 ? '${text.substring(0, 80)}…' : text;
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
       SnackBar(content: Text('$title: $preview')),
@@ -328,6 +336,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final result = await widget.coreService.sendMessage(
         text.isEmpty ? 'See attached.' : text,
         userId: widget.userId,
+        friendId: (widget.friendId?.trim().isEmpty != false) ? null : widget.friendId,
         location: locationStr,
         images: imagePaths.isEmpty ? null : imagePaths,
         videos: videoPaths.isEmpty ? null : videoPaths,
@@ -1151,6 +1160,18 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isCurrent = ModalRoute.of(context)?.isCurrent ?? false;
+    if (isCurrent && !_wasRouteCurrent) {
+      _wasRouteCurrent = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _loadChatHistory();
+          setState(() {});
+        }
+      });
+    } else if (!isCurrent) {
+      _wasRouteCurrent = false;
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.userName),

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../core_service.dart';
 import 'chat_screen.dart';
+import 'login_screen.dart';
 import 'settings_screen.dart';
 
-/// User list from Core (user.yml). One chat per user; tap to open chat and send that user's id with every message.
+/// Friends list for the logged-in user (from GET /api/me/friends).
+/// If not logged in, shows LoginScreen. Tap a friend to open chat with friendId.
 class FriendListScreen extends StatefulWidget {
   final CoreService coreService;
   final String? initialMessage;
@@ -19,26 +21,27 @@ class FriendListScreen extends StatefulWidget {
 }
 
 class _FriendListScreenState extends State<FriendListScreen> {
-  List<Map<String, dynamic>> _users = [];
+  List<Map<String, dynamic>> _friends = [];
   bool _loading = true;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadUsers();
+    _loadFriends();
   }
 
-  Future<void> _loadUsers() async {
+  Future<void> _loadFriends() async {
+    if (!widget.coreService.isLoggedIn) return;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final list = await widget.coreService.getConfigUsers();
+      final list = await widget.coreService.getFriends();
       if (mounted) {
         setState(() {
-          _users = list;
+          _friends = list;
           _loading = false;
         });
       }
@@ -47,22 +50,35 @@ class _FriendListScreenState extends State<FriendListScreen> {
         setState(() {
           _error = e.toString();
           _loading = false;
-          _users = [];
+          _friends = [];
         });
       }
     }
   }
 
+  Future<void> _logout() async {
+    await widget.coreService.clearSession();
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => LoginScreen(coreService: widget.coreService),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (!widget.coreService.isLoggedIn) {
+      return LoginScreen(coreService: widget.coreService);
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('HomeClaw'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _loading ? null : _loadUsers,
-            tooltip: 'Refresh user list',
+            onPressed: _loading ? null : _loadFriends,
+            tooltip: 'Refresh friends',
           ),
           IconButton(
             icon: const Icon(Icons.settings),
@@ -74,6 +90,11 @@ class _FriendListScreenState extends State<FriendListScreen> {
                 ),
               );
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: _logout,
+            tooltip: 'Log out',
           ),
         ],
       ),
@@ -88,24 +109,24 @@ class _FriendListScreenState extends State<FriendListScreen> {
                       children: [
                         Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
                         const SizedBox(height: 16),
-                        FilledButton(onPressed: _loadUsers, child: const Text('Retry')),
+                        FilledButton(onPressed: _loadFriends, child: const Text('Retry')),
                       ],
                     ),
                   ),
                 )
-              : _users.isEmpty
-                  ? const Center(child: Text('No users in config. Add users in Core (user.yml).'))
+              : _friends.isEmpty
+                  ? const Center(child: Text('No friends. Add friends in Core (config/user.yml).'))
                   : ListView.builder(
                       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                      itemCount: _users.length,
+                      itemCount: _friends.length,
                       itemBuilder: (context, index) {
-                        final u = _users[index];
-                        final userId = (u['id'] ?? u['name'] ?? '').toString();
-                        final name = (u['name'] ?? userId).toString();
-                        return _UserTile(
-                          userId: userId,
-                          userName: name,
-                          userType: (u['type'] ?? '').toString(),
+                        final f = _friends[index];
+                        final friendId = (f['name'] as String?)?.trim() ?? 'HomeClaw';
+                        final displayName = friendId;
+                        return _FriendTile(
+                          userId: widget.coreService.sessionUserId!,
+                          friendId: friendId,
+                          displayName: displayName,
                           coreService: widget.coreService,
                           initialMessage: index == 0 ? widget.initialMessage : null,
                         );
@@ -115,17 +136,17 @@ class _FriendListScreenState extends State<FriendListScreen> {
   }
 }
 
-class _UserTile extends StatelessWidget {
+class _FriendTile extends StatelessWidget {
   final String userId;
-  final String userName;
-  final String userType;
+  final String friendId;
+  final String displayName;
   final CoreService coreService;
   final String? initialMessage;
 
-  const _UserTile({
+  const _FriendTile({
     required this.userId,
-    required this.userName,
-    required this.userType,
+    required this.friendId,
+    required this.displayName,
     required this.coreService,
     this.initialMessage,
   });
@@ -140,8 +161,7 @@ class _UserTile extends StatelessWidget {
           backgroundColor: theme.colorScheme.primaryContainer,
           child: Icon(Icons.person, color: theme.colorScheme.onPrimaryContainer),
         ),
-        title: Text(userName),
-        subtitle: Text(userType.isNotEmpty ? 'type: $userType' : ''),
+        title: Text(displayName),
         onTap: () {
           Navigator.push(
             context,
@@ -149,7 +169,8 @@ class _UserTile extends StatelessWidget {
               builder: (context) => ChatScreen(
                 coreService: coreService,
                 userId: userId,
-                userName: userName,
+                userName: displayName,
+                friendId: friendId,
                 initialMessage: initialMessage,
               ),
             ),

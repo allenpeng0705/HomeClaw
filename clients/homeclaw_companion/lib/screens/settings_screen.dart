@@ -154,11 +154,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               autocorrect: false,
             ),
             const SizedBox(height: 24),
-            FilledButton(
-              onPressed: _save,
-              child: const Text('Save'),
-            ),
-            const SizedBox(height: 16),
             SwitchListTile(
               title: const Text('Show progress during long tasks'),
               subtitle: const Text(
@@ -348,10 +343,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 4),
+            const Text(
+              'Usually the homeclaw-browser plugin (different port than Core), e.g. http://host:3020/canvas. For remote access use a second tunnel or a reverse proxy; see docs/companion-app.md.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 8),
             TextField(
               controller: _canvasUrlController,
               decoration: const InputDecoration(
-                hintText: 'https://... or leave empty',
+                hintText: 'http://host:3020/canvas or leave empty',
                 border: OutlineInputBorder(),
               ),
               keyboardType: TextInputType.url,
@@ -394,6 +394,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: const Text('Add'),
                 ),
               ],
+            ),
+            const SizedBox(height: 32),
+            SafeArea(
+              top: false,
+              child: FilledButton(
+                onPressed: _save,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 48),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                child: const Text('Save'),
+              ),
             ),
           ],
         ),

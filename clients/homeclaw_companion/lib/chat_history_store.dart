@@ -11,7 +11,13 @@ class ChatHistoryStore {
   factory ChatHistoryStore() => _instance;
   ChatHistoryStore._();
 
-  static String _keyFor(String userId) => '$_keyPrefix${userId.replaceAll(RegExp(r'[^\w\-]'), '_')}';
+  static String _sanitize(String s) => s.replaceAll(RegExp(r'[^\w\-]'), '_');
+  /// Key for a chat. [friendId] null or empty → legacy key (chat_userId) for backward compatibility.
+  static String _keyFor(String userId, [String? friendId]) {
+    final u = _sanitize(userId);
+    if (friendId == null || friendId.trim().isEmpty) return '$_keyPrefix$u';
+    return '$_keyPrefix${u}_${_sanitize(friendId.trim())}';
+  }
 
   Box<String>? _box;
 
@@ -60,13 +66,13 @@ class ChatHistoryStore {
     return null;
   }
 
-  /// Load messages for [userId]. Returns list of (text, isUser, images?).
+  /// Load messages for [userId] and optional [friendId]. Returns list of (text, isUser, images?).
   /// Returns [] if Hive not initialized or on any error.
-  List<MapEntry<MapEntry<String, bool>, List<String>?>> load(String userId) {
+  List<MapEntry<MapEntry<String, bool>, List<String>?>> load(String userId, [String? friendId]) {
     try {
       final b = _boxSafe;
       if (b == null) return [];
-      final raw = b.get(_keyFor(userId));
+      final raw = b.get(_keyFor(userId, friendId));
       if (raw == null || raw.isEmpty) return [];
       final list = jsonDecode(raw) as List<dynamic>?;
       if (list == null) return [];
@@ -84,12 +90,13 @@ class ChatHistoryStore {
     }
   }
 
-  /// Save messages for [userId]. [messages] is same shape as ChatScreen: list of (MapEntry(text, isUser), images?).
+  /// Save messages for [userId] and optional [friendId]. [messages] is same shape as ChatScreen.
   /// No-op if Hive not initialized or on any error.
   Future<void> save(
     String userId,
-    List<MapEntry<MapEntry<String, bool>, List<String>?>> messages,
-  ) async {
+    List<MapEntry<MapEntry<String, bool>, List<String>?>> messages, [
+    String? friendId,
+  ]) async {
     try {
       final b = _boxSafe;
       if (b == null) return;
@@ -99,16 +106,27 @@ class ChatHistoryStore {
         final images = entry.value;
         return messageToMap(text, isUser, images);
       }).toList();
-      await b.put(_keyFor(userId), jsonEncode(list));
+      await b.put(_keyFor(userId, friendId), jsonEncode(list));
     } catch (_) {}
   }
 
-  /// Clear history for one user. No-op if Hive not initialized or on error.
-  Future<void> clear(String userId) async {
+  /// Clear history for one user (and optional friend). No-op if Hive not initialized or on error.
+  Future<void> clear(String userId, [String? friendId]) async {
     try {
       final b = _boxSafe;
       if (b == null) return;
-      await b.delete(_keyFor(userId));
+      await b.delete(_keyFor(userId, friendId));
+    } catch (_) {}
+  }
+
+  /// Append one message to a chat (for incoming push/result). No-op if Hive not initialized.
+  Future<void> appendMessage(String userId, String? friendId, String text, bool isUser, [List<String>? images]) async {
+    try {
+      final b = _boxSafe;
+      if (b == null) return;
+      final existing = load(userId, friendId);
+      existing.add(MapEntry(MapEntry(text, isUser), images));
+      await save(userId, existing, friendId);
     } catch (_) {}
   }
 
