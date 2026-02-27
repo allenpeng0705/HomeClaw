@@ -157,7 +157,7 @@ def ensure_user_sandbox_folders(
     user_ids: List[str],
     *,
     share_dir: str = "share",
-    companion: bool = True,
+    companion: bool = False,
     output_subdir: str = "output",
     knowledgebase_subdir: str = "knowledgebase",
     downloads_subdir: str = "downloads",
@@ -172,7 +172,7 @@ def ensure_user_sandbox_folders(
     Create per-user, per-friend, and shared sandbox folders under homeclaw_root (UserFriendsModelFullDesign.md Step 5).
     For each user_id: {user_id}, {user_id}/output, {user_id}/knowledgebase, {user_id}/downloads, {user_id}/documents, {user_id}/work, {user_id}/share.
     For each (user_id, friend_id) when friends_by_user is set: {user_id}/{friend_id}, {friend_id}/output, {friend_id}/knowledge.
-    Also: {homeclaw_root}/share, and if companion: {homeclaw_root}/companion, companion/output.
+    Also: {homeclaw_root}/share. If companion=True: {homeclaw_root}/companion, companion/output (not used when there is no companion user).
     Never raises; logs on mkdir failure.
     """
     try:

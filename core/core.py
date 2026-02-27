@@ -1690,7 +1690,7 @@ class Core(CoreInterface):
                                     friend_names.append(name)
                             if friend_names:
                                 friends_by_user[uid] = friend_names
-                    ensure_user_sandbox_folders(root_str, user_ids, friends_by_user=friends_by_user)
+                    ensure_user_sandbox_folders(root_str, user_ids, friends_by_user=friends_by_user, companion=False)
                     from tools.builtin import build_and_save_sandbox_paths_json
                     build_and_save_sandbox_paths_json()
                 except Exception as e:
@@ -2851,17 +2851,7 @@ class Core(CoreInterface):
             logger.exception(e)
             return f"Error: {e!s}"
 
-    def get_grammar(self, file: str, path: str = None) -> str | None:
-        try:
-            if not path:
-                config_path = Util().config_path()
-                path = os.path.join(config_path, "grammars")
-            file_path = os.path.join(path, file)
-            with open(file_path) as f:
-                return f.read()
-        except Exception as e:
-            logger.exception(e)
-            return None
+
 
     def exit_gracefully(self, signum, frame):
         if getattr(self, "_shutdown_started", False):
