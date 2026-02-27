@@ -93,7 +93,7 @@ pip install -r requirements.txt</code></pre>
           <ul>
             <li><strong>CLI</strong> — 在运行 <code>python -m main start</code> 的同一终端使用交互式聊天。</li>
             <li><strong>WebChat</strong> — 在另一终端运行 <code>python -m channels.run webchat</code>，然后打开 http://localhost:8014。</li>
-            <li><strong>伴侣应用</strong> — 从 <code>clients/homeclaw_companion/</code> 构建或安装；在设置中将 <strong>Core URL</strong> 设为 <code>http://127.0.0.1:9000</code>（远程则填 Tailscale/隧道 URL）。</li>
+            <li><strong>伴侣应用</strong> — 从 <code>clients/HomeClawApp/</code> 构建或安装；在设置中将 <strong>Core URL</strong> 设为 <code>http://127.0.0.1:9000</code>（远程则填 Tailscale/隧道 URL）。</li>
           </ul>
         </div>
         <p><strong>检查配置与 LLM：</strong><code>python -m main doctor</code>。</p>
@@ -225,7 +225,7 @@ pip install -r requirements.txt</code></pre>
 
         <h3>如何使用（按平台）</h3>
         <ul>
-          <li><strong>获取方式：</strong>从 <code>clients/homeclaw_companion/</code> 构建（见仓库 README）。</li>
+          <li><strong>获取方式：</strong>从 <code>clients/HomeClawApp/</code> 构建（见仓库 README）。</li>
           <li><strong>Mac / Windows（与 Core 同机）：</strong>将 <strong>Core URL</strong> 设为 <code>http://127.0.0.1:9000</code>。在 user.yml 或通过「管理 Core」→ 用户添加你的用户。</li>
           <li><strong>Mac / Windows（同 Wi‑Fi）：</strong>将 Core URL 设为本机 LAN IP（如 <code>http://192.168.1.10:9000</code>）。</li>
           <li><strong>iPhone / Android（外出）：</strong>使用 <strong>Tailscale</strong> 或 <strong>Cloudflare Tunnel</strong> 暴露 Core，然后将 Core URL 设为 Tailscale IP（如 <code>http://100.x.x.x:9000</code>）或隧道 URL（如 <code>https://xxx.trycloudflare.com</code>）。若 Core 启用了 <code>auth_enabled: true</code>，在应用设置中填写相同的 <strong>API Key</strong>。</li>

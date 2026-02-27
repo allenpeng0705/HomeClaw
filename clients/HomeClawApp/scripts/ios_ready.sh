@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run from clients/homeclaw_companion. Ensures iOS build can succeed:
+# Run from clients/HomeClawApp. Ensures iOS build can succeed:
 # - flutter pub get (creates ios/Flutter/Generated.xcconfig so FLUTTER_ROOT is set)
 # - pod install (syncs Podfile.lock with Pods)
 set -e

@@ -218,9 +218,9 @@ HomeClaw는 **macOS**, **Windows**, **Linux**에서 동작합니다. 필요 사�
 
 ## 5. 동반 앱(Flutter)
 
-**동반 앱**은 Flutter 기반 **Mac, Windows, iPhone, Android** 클라이언트: 채팅, 음성, 첨부, **Manage Core**(앱에서 core.yml, user.yml 편집). [동반 앱 문서](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [소스에서 빌드](clients/homeclaw_companion/README.md)
+**동반 앱**은 Flutter 기반 **Mac, Windows, iPhone, Android** 클라이언트: 채팅, 음성, 첨부, **Manage Core**(앱에서 core.yml, user.yml 편집). [동반 앱 문서](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [소스에서 빌드](clients/HomeClawApp/README.md)
 
-**빠른 사용**: (1) `clients/homeclaw_companion/` 또는 빌드에서 앱 가져오기. (2) **설정** → **Core URL** 설정(같은 기기면 `http://127.0.0.1:9000`, 원격이면 [Tailscale](#원격-액세스tailscale-cloudflare-tunnel) / [Cloudflare Tunnel](#원격-액세스tailscale-cloudflare-tunnel)). (3) **config/user.yml**에 사용자 추가(또는 **Manage Core** → 사용자). (4) 채팅; **Manage Core**로 설정 편집. 모든 채널과 앱이 같은 Core와 메모리를 사용합니다.
+**빠른 사용**: (1) `clients/HomeClawApp/` 또는 빌드에서 앱 가져오기. (2) **설정** → **Core URL** 설정(같은 기기면 `http://127.0.0.1:9000`, 원격이면 [Tailscale](#원격-액세스tailscale-cloudflare-tunnel) / [Cloudflare Tunnel](#원격-액세스tailscale-cloudflare-tunnel)). (3) **config/user.yml**에 사용자 추가(또는 **Manage Core** → 사용자). (4) 채팅; **Manage Core**로 설정 편집. 모든 채널과 앱이 같은 Core와 메모리를 사용합니다.
 
 ---
 

@@ -218,9 +218,9 @@ HomeClaw は **macOS**、**Windows**、**Linux** で動作。必要環境：
 
 ## 5. コンパニオンアプリ（Flutter）
 
-**コンパニオン**は Flutter 製の **Mac、Windows、iPhone、Android** 用アプリ：チャット、音声、添付、**Manage Core**（アプリから core.yml と user.yml を編集）。[コンパニオンアプリドキュメント](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [ソースからビルド](clients/homeclaw_companion/README.md)
+**コンパニオン**は Flutter 製の **Mac、Windows、iPhone、Android** 用アプリ：チャット、音声、添付、**Manage Core**（アプリから core.yml と user.yml を編集）。[コンパニオンアプリドキュメント](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [ソースからビルド](clients/HomeClawApp/README.md)
 
-**クイック利用**：（1）`clients/homeclaw_companion/` またはビルドからアプリを取得。（2）**設定** → **Core URL** を設定（同一マシンなら `http://127.0.0.1:9000`、リモートなら [Tailscale](#リモートアクセスtailscale-cloudflare-tunnel) / [Cloudflare Tunnel](#リモートアクセスtailscale-cloudflare-tunnel)）。（3）**config/user.yml** にユーザーを追加（または **Manage Core** → ユーザー）。（4）チャット；**Manage Core** で設定を編集。全チャネルとアプリが同じ Core とメモリを使用。
+**クイック利用**：（1）`clients/HomeClawApp/` またはビルドからアプリを取得。（2）**設定** → **Core URL** を設定（同一マシンなら `http://127.0.0.1:9000`、リモートなら [Tailscale](#リモートアクセスtailscale-cloudflare-tunnel) / [Cloudflare Tunnel](#リモートアクセスtailscale-cloudflare-tunnel)）。（3）**config/user.yml** にユーザーを追加（または **Manage Core** → ユーザー）。（4）チャット；**Manage Core** で設定を編集。全チャネルとアプリが同じ Core とメモリを使用。
 
 ---
 

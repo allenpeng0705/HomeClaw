@@ -141,12 +141,12 @@ fi
 # ---------- Companion app (macOS) ----------
 if [[ $BUILD_COMPANION -eq 1 ]]; then
   echo "Building Companion app (macOS)..."
-  COMPANION_DIR="$REPO_ROOT/clients/homeclaw_companion"
+  COMPANION_DIR="$REPO_ROOT/clients/HomeClawApp"
   if [[ ! -d "$COMPANION_DIR" ]]; then
     echo "Companion not found at $COMPANION_DIR, skipping." >&2
   else
     (cd "$COMPANION_DIR" && flutter pub get && flutter build macos --release)
-    COMPANION_APP="$COMPANION_DIR/build/macos/Build/Products/Release/homeclaw_companion.app"
+    COMPANION_APP="$COMPANION_DIR/build/macos/Build/Products/Release/HomeClawApp.app"
     if [[ -d "$COMPANION_APP" ]]; then
       mkdir -p "$OUTPUT_DIR/companion"
       cp -R "$COMPANION_APP" "$OUTPUT_DIR/companion/"
@@ -284,7 +284,7 @@ if [[ $BUILD_LAUNCHER -eq 1 ]]; then
   RESOURCES_REL="../Resources"
   CORE_REL="$RESOURCES_REL/core"
   PYTHON_REL="$RESOURCES_REL/../python"
-  COMPANION_REL="$RESOURCES_REL/companion/homeclaw_companion.app"
+  COMPANION_REL="$RESOURCES_REL/companion/HomeClawApp.app"
 
   # Python, companion, and optionally Node inside the .app so the bundle is self-contained
   cp -R "$OUTPUT_DIR/python" "$APP_DIR/Contents/Resources/"
@@ -305,7 +305,7 @@ RESOURCES="$SCRIPT_DIR/../Resources"
 CORE_ROOT="$RESOURCES"
 PYTHON_BIN="$RESOURCES/python/bin/python3"
 [[ -x "$RESOURCES/python/bin/python" ]] && PYTHON_BIN="$RESOURCES/python/bin/python"
-COMPANION_APP="$RESOURCES/companion/homeclaw_companion.app"
+COMPANION_APP="$RESOURCES/companion/HomeClawApp.app"
 # So Core can start system_plugins/homeclaw-browser (node server.js) without user-installed Node
 [[ -d "$RESOURCES/node/bin" ]] && export PATH="$RESOURCES/node/bin:$PATH"
 
@@ -397,7 +397,7 @@ RUN CORE
     python -m main start
 
 RUN COMPANION (macOS)
-  Open: companion/homeclaw_companion.app
+  Open: companion/HomeClawApp.app
   Set Core URL to http://127.0.0.1:9000 in Settings.
 
 HOMECLAW-BROWSER (system_plugins)

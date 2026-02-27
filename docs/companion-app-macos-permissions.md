@@ -50,7 +50,7 @@ If you later add features such as voice input, notifications, or screen capture,
 
 ## Flutter macOS entitlements (network)
 
-After you run `flutter create .` in `clients/homeclaw_companion/`, you get a `macos/` folder. To allow outgoing network when the app is sandboxed:
+After you run `flutter create .` in `clients/HomeClawApp/`, you get a `macos/` folder. To allow outgoing network when the app is sandboxed:
 
 1. Open **macos/Runner/Release.entitlements** (release) or **macos/Runner/DebugProfile.entitlements** (debug).
 2. Ensure **Outgoing Connections (Client)** is enabled:

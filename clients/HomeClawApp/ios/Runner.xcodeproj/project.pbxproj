@@ -288,7 +288,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Set FLUTTER_ROOT from Generated.xcconfig when building from Xcode (not \"flutter run\")\nif [ -z \"$FLUTTER_ROOT\" ] && [ -f \"${SRCROOT}/Flutter/Generated.xcconfig\" ]; then\n  export FLUTTER_ROOT=\"$(grep -E \"^FLUTTER_ROOT=\" \"${SRCROOT}/Flutter/Generated.xcconfig\" | head -1 | sed 's/^FLUTTER_ROOT=//')\"\nfi\nif [ -z \"$FLUTTER_ROOT\" ]; then\n  echo \"error: FLUTTER_ROOT not set. Run 'flutter pub get' in clients/homeclaw_companion.\" >&2\n  exit 1\nfi\n/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" embed_and_thin";
+			shellScript = "# Set FLUTTER_ROOT from Generated.xcconfig when building from Xcode (not \"flutter run\")\nif [ -z \"$FLUTTER_ROOT\" ] && [ -f \"${SRCROOT}/Flutter/Generated.xcconfig\" ]; then\n  export FLUTTER_ROOT=\"$(grep -E \"^FLUTTER_ROOT=\" \"${SRCROOT}/Flutter/Generated.xcconfig\" | head -1 | sed 's/^FLUTTER_ROOT=//')\"\nfi\nif [ -z \"$FLUTTER_ROOT\" ]; then\n  echo \"error: FLUTTER_ROOT not set. Run 'flutter pub get' in clients/HomeClawApp.\" >&2\n  exit 1\nfi\n/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" embed_and_thin";
 		};
 		4B17B4960AEEE6B85ACC3101 /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -320,7 +320,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# Set FLUTTER_ROOT from Generated.xcconfig when building from Xcode (not \"flutter run\")\nif [ -z \"$FLUTTER_ROOT\" ] && [ -f \"${SRCROOT}/Flutter/Generated.xcconfig\" ]; then\n  export FLUTTER_ROOT=\"$(grep -E \"^FLUTTER_ROOT=\" \"${SRCROOT}/Flutter/Generated.xcconfig\" | head -1 | sed 's/^FLUTTER_ROOT=//')\"\nfi\nif [ -z \"$FLUTTER_ROOT\" ]; then\n  echo \"error: FLUTTER_ROOT not set. Run 'flutter pub get' in clients/homeclaw_companion.\" >&2\n  exit 1\nfi\n/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" build";
+			shellScript = "# Set FLUTTER_ROOT from Generated.xcconfig when building from Xcode (not \"flutter run\")\nif [ -z \"$FLUTTER_ROOT\" ] && [ -f \"${SRCROOT}/Flutter/Generated.xcconfig\" ]; then\n  export FLUTTER_ROOT=\"$(grep -E \"^FLUTTER_ROOT=\" \"${SRCROOT}/Flutter/Generated.xcconfig\" | head -1 | sed 's/^FLUTTER_ROOT=//')\"\nfi\nif [ -z \"$FLUTTER_ROOT\" ]; then\n  echo \"error: FLUTTER_ROOT not set. Run 'flutter pub get' in clients/HomeClawApp.\" >&2\n  exit 1\nfi\n/bin/sh \"$FLUTTER_ROOT/packages/flutter_tools/bin/xcode_backend.sh\" build";
 		};
 		AE8DDF60052F43C4E4BD29BF /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;

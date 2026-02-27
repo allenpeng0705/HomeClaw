@@ -218,9 +218,9 @@ HomeClaw 支持 **macOS**、**Windows** 与 **Linux**。需要：
 
 ## 5. 伴侣应用（Flutter）
 
-**伴侣应用**是基于 Flutter 的 **Mac、Windows、iPhone、Android** 客户端：聊天、语音、附件，以及**管理 Core**（在应用中编辑 core.yml 和 user.yml）。[伴侣应用文档](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [从源码构建](clients/homeclaw_companion/README.md)
+**伴侣应用**是基于 Flutter 的 **Mac、Windows、iPhone、Android** 客户端：聊天、语音、附件，以及**管理 Core**（在应用中编辑 core.yml 和 user.yml）。[伴侣应用文档](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [从源码构建](clients/HomeClawApp/README.md)
 
-**快速使用**：（1）从 `clients/homeclaw_companion/` 或构建包获取应用。（2）**设置** → 设置 **Core URL**（本机 `http://127.0.0.1:9000`，远程用 [Tailscale](#远程访问tailscale-cloudflare-tunnel) / [Cloudflare Tunnel](#远程访问tailscale-cloudflare-tunnel)）。（3）在 **config/user.yml** 中添加您的用户（或通过 **管理 Core** → 用户）。（4）聊天；用 **管理 Core** 编辑配置。所有渠道与应用共用同一 Core 与记忆。
+**快速使用**：（1）从 `clients/HomeClawApp/` 或构建包获取应用。（2）**设置** → 设置 **Core URL**（本机 `http://127.0.0.1:9000`，远程用 [Tailscale](#远程访问tailscale-cloudflare-tunnel) / [Cloudflare Tunnel](#远程访问tailscale-cloudflare-tunnel)）。（3）在 **config/user.yml** 中添加您的用户（或通过 **管理 Core** → 用户）。（4）聊天；用 **管理 Core** 编辑配置。所有渠道与应用共用同一 Core 与记忆。
 
 ---
 

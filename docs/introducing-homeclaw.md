@@ -6,7 +6,7 @@ HomeClaw is an **AI assistant** that runs on your machine. One installation is o
 
 ## Highlights
 
-- **Companion app** — **Flutter-based** app for **Mac, Windows, iPhone, and Android** (`clients/homeclaw_companion/`): chat, voice, attachments, and **Manage Core** (edit core.yml and user.yml from the app). Makes HomeClaw much easier to use from any device.
+- **Companion app** — **Flutter-based** app for **Mac, Windows, iPhone, and Android** (`clients/HomeClawApp/`): chat, voice, attachments, and **Manage Core** (edit core.yml and user.yml from the app). Makes HomeClaw much easier to use from any device.
 - **Memory** — **RAG** (vector + relational + optional graph) and **agent memory**: AGENT_MEMORY.md (long-term), daily memory (short-term). Cognee (default) or Chroma backend.
 - **Plugins** — **Built-in** (Python in `plugins/`) and **external** (any language: **Node.js**, Go, Java, Python, etc.). The **system plugin** (e.g. homeclaw-browser) is one external plugin written in **Node.js**; you can write plugins in any language and register them with Core. There are many tools and ecosystems you can leverage.
 - **Skills** — Full support for **OpenClaw-style skillset**: workflows in `skills/` (SKILL.md); LLM uses tools and optional `run_skill` to accomplish tasks.

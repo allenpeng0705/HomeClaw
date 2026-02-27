@@ -77,7 +77,7 @@ Use a **single** Flutter plugin package (**homeclaw_native**) that exposes all n
 
 ## Where the plugin lives
 
-- **Option A:** Inside the app repo: `clients/homeclaw_companion/packages/homeclaw_native` (path dependency in `pubspec.yaml`: `homeclaw_native: path: packages/homeclaw_native`).
+- **Option A:** Inside the app repo: `clients/HomeClawApp/packages/homeclaw_native` (path dependency in `pubspec.yaml`: `homeclaw_native: path: packages/homeclaw_native`).
 - **Option B:** Top-level: `clients/packages/homeclaw_native` so other clients could use it later.
 
 Use **Option A** for simplicity; the app is the only consumer for now.

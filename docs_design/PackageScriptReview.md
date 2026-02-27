@@ -48,7 +48,7 @@ This doc confirms the packaging script and launcher behavior so the bundled app 
 
 ## 5. Companion app
 
-- Built with `flutter build macos --release`; copied to `OUTPUT_DIR/companion/homeclaw_companion.app`, then into `Contents/Resources/companion/`.
+- Built with `flutter build macos --release`; copied to `OUTPUT_DIR/companion/HomeClawApp.app`, then into `Contents/Resources/companion/`.
 - Launcher runs `open "$COMPANION_APP"` only if `[[ -d "$COMPANION_APP" ]]` (so `--no-companion` does not error).
 
 **Conclusion:** Companion is optional and opened when present.

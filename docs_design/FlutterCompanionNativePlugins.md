@@ -79,7 +79,7 @@ So **one Flutter codebase + one set of plugin APIs** can support **all four plat
 
 ## Summary
 
-- **One code, all platforms:** Flutter app in `clients/homeclaw_companion/` with shared UI and logic.
+- **One code, all platforms:** Flutter app in `clients/HomeClawApp/` with shared UI and logic.
 - **Native features via plugins:** Voice, screen record, camera, system.run, notifications, etc. implemented as Flutter plugins (method channels) with native code per platform.
 - **Mac/Windows:** Use the same plugin pattern (Swift for macOS, C++/C# for Windows) so we don’t need separate native Mac/Windows apps.
 - **iOS/Android:** Same Dart code and same plugin API; Android and iOS implement their side in Kotlin and Swift.

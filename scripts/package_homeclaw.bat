@@ -91,7 +91,7 @@ if %INCLUDE_LLAMA_CPP%==1 (
 REM ---------- Companion app (Windows) ----------
 if %BUILD_COMPANION%==1 (
   echo Building Companion app (Windows)...
-  set "COMPANION_DIR=%REPO_ROOT%\clients\homeclaw_companion"
+  set "COMPANION_DIR=%REPO_ROOT%\clients\HomeClawApp"
   if not exist "%COMPANION_DIR%" (
     echo Companion not found at %COMPANION_DIR%, skipping.
   ) else (

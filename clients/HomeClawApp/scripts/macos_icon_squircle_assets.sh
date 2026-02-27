@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bake Apple-style squircle (rounded corners) into macOS app icon assets.
-# Run from clients/homeclaw_companion. Run after: dart run flutter_launcher_icons
+# Run from clients/HomeClawApp. Run after: dart run flutter_launcher_icons
 # Requires: ImageMagick (brew install imagemagick)
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

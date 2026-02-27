@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Build the HomeClaw Companion app for macOS and create a single DMG file.
 # Usage: ./scripts/build_companion_dmg.sh [--output /path/to/Companion.dmg]
-# Default output: dist/homeclaw_companion.dmg (same pattern as build_companion_windows.bat using dist/)
+# Default output: dist/HomeClawApp.dmg (same pattern as build_companion_windows.bat using dist/)
 
 set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMPANION_DIR="$REPO_ROOT/clients/homeclaw_companion"
+COMPANION_DIR="$REPO_ROOT/clients/HomeClawApp"
 DIST_DIR="$REPO_ROOT/dist"
 OUTPUT_DMG=""
 
@@ -26,7 +26,7 @@ done
 
 if [[ -z "$OUTPUT_DMG" ]]; then
   mkdir -p "$DIST_DIR"
-  OUTPUT_DMG="$DIST_DIR/homeclaw_companion.dmg"
+  OUTPUT_DMG="$DIST_DIR/HomeClawApp.dmg"
 fi
 
 if [[ "$(uname -s)" != "Darwin" ]]; then

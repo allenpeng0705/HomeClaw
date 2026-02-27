@@ -8,7 +8,7 @@ This folder holds **clients** that connect to **HomeClaw Core**: companion apps 
 
 | Client | Description | Status |
 |--------|-------------|--------|
-| **Flutter** | Cross-platform companion app (iOS, Android, macOS, Windows, Linux). Chat with Core, settings for URL + API key, Scan QR to connect. | Implemented in `homeclaw_companion/`. Run `flutter run -d macos|windows|linux|android|ios`. |
+| **Flutter** | Cross-platform companion app (iOS, Android, macOS, Windows, Linux). Chat with Core, settings for URL + API key, Scan QR to connect. | Implemented in `HomeClawApp/`. Run `flutter run -d macos|windows|linux|android|ios`. |
 | **CLI** | Command-line tool to send messages to Core and print reply. | Implemented in `cli/`. Run `python homeclaw_cli.py chat "message"`. |
 
 ---
@@ -37,10 +37,10 @@ See **docs_design/HomeClawCompanionConnectivity.md** for a short comparison of o
 
 ## Flutter app
 
-- **Location:** `clients/homeclaw_companion/`
+- **Location:** `clients/HomeClawApp/`
 - **Targets:** macOS, Windows, Android, iOS (Linux can be added later).
 - **Features:** Settings (Core URL, API key); chat screen (send message, show reply via POST /inbound).
-- **Run:** See `homeclaw_companion/README.md`. One-time: `flutter create .` then `flutter pub get`; then `flutter run -d macos` (or windows/android/ios).
+- **Run:** See `HomeClawApp/README.md`. One-time: `flutter create .` then `flutter pub get`; then `flutter run -d macos` (or windows/android/ios).
 
 ---
 

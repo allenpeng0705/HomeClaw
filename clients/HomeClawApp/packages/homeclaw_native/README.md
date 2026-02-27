@@ -1,6 +1,6 @@
 # homeclaw_native
 
-Flutter plugin for HomeClaw companion: native features (notifications, screen record, camera, system run, tray). For **voice input** use the [homeclaw_voice](https://github.com/your-org/HomeClaw/tree/main/clients/homeclaw_companion/packages/homeclaw_voice) package.
+Flutter plugin for HomeClaw companion: native features (notifications, screen record, camera, system run, tray). For **voice input** use the [homeclaw_voice](https://github.com/your-org/HomeClaw/tree/main/clients/HomeClawApp/packages/homeclaw_voice) package.
 
 ## Usage
 

@@ -220,9 +220,9 @@ The app only needs **Core URL** and optional **API key**; no Tailscale or Cloudf
 
 ## 5. Companion app (Flutter)
 
-**Companion** is a Flutter app for **Mac, Windows, iPhone, and Android**: chat, voice, attachments, and **Manage Core** (edit core.yml and user.yml from the app). [Companion app doc](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [Build from source](clients/homeclaw_companion/README.md)
+**Companion** is a Flutter app for **Mac, Windows, iPhone, and Android**: chat, voice, attachments, and **Manage Core** (edit core.yml and user.yml from the app). [Companion app doc](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [Build from source](clients/HomeClawApp/README.md)
 
-**Quick use:** (1) Get the app from `clients/homeclaw_companion/` or a build. (2) **Settings** → set **Core URL** (`http://127.0.0.1:9000` same machine, or [Tailscale](#remote-access-tailscale-cloudflare-tunnel) / [Cloudflare Tunnel](#remote-access-tailscale-cloudflare-tunnel) for remote). (3) Add your user in **config/user.yml** (or via **Manage Core** → Users). (4) Chat; use **Manage Core** to edit config. All channels and the app talk to the same Core and memory.
+**Quick use:** (1) Get the app from `clients/HomeClawApp/` or a build. (2) **Settings** → set **Core URL** (`http://127.0.0.1:9000` same machine, or [Tailscale](#remote-access-tailscale-cloudflare-tunnel) / [Cloudflare Tunnel](#remote-access-tailscale-cloudflare-tunnel) for remote). (3) Add your user in **config/user.yml** (or via **Manage Core** → Users). (4) Chat; use **Manage Core** to edit config. All channels and the app talk to the same Core and memory.
 
 ---
 

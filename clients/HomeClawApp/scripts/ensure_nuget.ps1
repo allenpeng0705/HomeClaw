@@ -1,5 +1,5 @@
 # Download nuget.exe so flutter_tts can build on Windows.
-# Run from repo root or from clients/homeclaw_companion:
+# Run from repo root or from clients/HomeClawApp:
 #   .\scripts\ensure_nuget.ps1
 # Then (in the same session) run: flutter run -d windows
 # Or add the tools folder to your system PATH permanently.

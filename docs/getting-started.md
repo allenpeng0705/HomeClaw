@@ -21,6 +21,6 @@
 
    **Verify core is up:** In another terminal, run `curl -s http://127.0.0.1:9000/ready` — you should get a 200 response (and a short body). Core listens on the port set in `config/core.yml` (default 9000).
 
-4. **Run a channel** — e.g. `python -m channels.run webchat` and open http://localhost:8014, or use the **Companion app** (Flutter: Mac, Windows, iPhone, Android) from `clients/homeclaw_companion/` to chat and **Manage Core** (edit config from the app).
+4. **Run a channel** — e.g. `python -m channels.run webchat` and open http://localhost:8014, or use the **Companion app** (Flutter: Mac, Windows, iPhone, Android) from `clients/HomeClawApp/` to chat and **Manage Core** (edit config from the app).
 
 For full steps, see the main [README](https://github.com/allenpeng0705/HomeClaw/blob/main/README.md) and [HOW_TO_USE.md](https://github.com/allenpeng0705/HomeClaw/blob/main/HOW_TO_USE.md) in the repo.

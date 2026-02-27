@@ -93,7 +93,7 @@ pip install -r requirements.txt</code></pre>
           <ul>
             <li><strong>CLI</strong> — Use the interactive chat in the same terminal where you ran <code>python -m main start</code>.</li>
             <li><strong>WebChat</strong> — In another terminal: <code>python -m channels.run webchat</code>, then open http://localhost:8014.</li>
-            <li><strong>Companion app</strong> — Build or install from <code>clients/homeclaw_companion/</code>; in Settings set <strong>Core URL</strong> to <code>http://127.0.0.1:9000</code> (or your Tailscale/tunnel URL for remote).</li>
+            <li><strong>Companion app</strong> — Build or install from <code>clients/HomeClawApp/</code>; in Settings set <strong>Core URL</strong> to <code>http://127.0.0.1:9000</code> (or your Tailscale/tunnel URL for remote).</li>
           </ul>
         </div>
         <p><strong>Check config and LLM:</strong> <code>python -m main doctor</code>.</p>
@@ -225,7 +225,7 @@ pip install -r requirements.txt</code></pre>
 
         <h3>How to use (by platform)</h3>
         <ul>
-          <li><strong>Where to get it:</strong> Build from <code>clients/homeclaw_companion/</code> (see repo README).</li>
+          <li><strong>Where to get it:</strong> Build from <code>clients/HomeClawApp/</code> (see repo README).</li>
           <li><strong>Mac / Windows (same machine as Core):</strong> Set <strong>Core URL</strong> to <code>http://127.0.0.1:9000</code>. Add your user in user.yml or via Manage Core → Users.</li>
           <li><strong>Mac / Windows (same Wi‑Fi):</strong> Set Core URL to your machine’s LAN IP (e.g. <code>http://192.168.1.10:9000</code>).</li>
           <li><strong>iPhone / Android (away from home):</strong> Expose Core with <strong>Tailscale</strong> or <strong>Cloudflare Tunnel</strong>, then set Core URL to the Tailscale IP (e.g. <code>http://100.x.x.x:9000</code>) or tunnel URL (e.g. <code>https://xxx.trycloudflare.com</code>). If Core has <code>auth_enabled: true</code>, set the same <strong>API key</strong> in the app (Settings).</li>

@@ -3,13 +3,13 @@ setlocal
 REM Build the HomeClaw Companion app for Windows and create a distributable bundle (zip or folder).
 REM Windows counterpart to scripts/build_companion_dmg.sh (macOS DMG).
 REM Usage: scripts\build_companion_windows.bat [--output path\to\bundle.zip]
-REM   --output  .zip path = create zip (default: clients\homeclaw_companion\HomeClaw-Companion-windows.zip)
+REM   --output  .zip path = create zip (default: clients\HomeClawApp\HomeClaw-Companion-windows.zip)
 REM             folder path = copy Release files into that folder
 
 set "REPO_ROOT=%~dp0.."
 for %%A in ("%REPO_ROOT%") do set "REPO_ROOT=%%~fA"
 
-set "COMPANION_DIR=%REPO_ROOT%\clients\homeclaw_companion"
+set "COMPANION_DIR=%REPO_ROOT%\clients\HomeClawApp"
 set "OUTPUT_BUNDLE="
 
 REM Parse options

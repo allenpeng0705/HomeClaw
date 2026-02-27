@@ -27,7 +27,7 @@ Short summary of what was implemented and how to run it. **Follow-up / blockers*
 
 ## 2. Flutter companion app
 
-- **Where:** `clients/homeclaw_companion/`
+- **Where:** `clients/HomeClawApp/`
 - **What:** Chat UI + Settings (Core URL, API key). Sends message via `POST /inbound`, shows reply.
 - **Platforms:** Mac, Windows, Android, iOS (Flutter). Linux can be added later.
 
@@ -35,7 +35,7 @@ Short summary of what was implemented and how to run it. **Follow-up / blockers*
 
 1. **Generate platform projects** (required once; needs Flutter SDK):
    ```bash
-   cd clients/homeclaw_companion
+   cd clients/HomeClawApp
    flutter create .
    flutter pub get
    ```
@@ -46,7 +46,7 @@ Short summary of what was implemented and how to run it. **Follow-up / blockers*
    - iOS: `flutter run -d ios`
 3. In the app: open **Settings**, set **Core URL** (e.g. `http://127.0.0.1:9000`), save. Then use the chat screen.
 
-**Docs:** `clients/homeclaw_companion/README.md` (includes Android cleartext HTTP note and iOS/macOS signing hints).
+**Docs:** `clients/HomeClawApp/README.md` (includes Android cleartext HTTP note and iOS/macOS signing hints).
 
 ---
 
@@ -84,10 +84,10 @@ Short summary of what was implemented and how to run it. **Follow-up / blockers*
 Items that may need your attention or testing:
 
 1. **Flutter: platform folders**  
-   The Flutter app has `lib/` and `pubspec.yaml` only. You must run **`flutter create .`** inside `clients/homeclaw_companion/` once to generate `android/`, `ios/`, `macos/`, `windows/`. Without this, `flutter run` will fail.
+   The Flutter app has `lib/` and `pubspec.yaml` only. You must run **`flutter create .`** inside `clients/HomeClawApp/` once to generate `android/`, `ios/`, `macos/`, `windows/`. Without this, `flutter run` will fail.
 
 2. **Flutter: Android HTTP**  
-   If you use a non-HTTPS Core URL (e.g. `http://192.168.x.x:9000`) on Android, you may need to allow cleartext (see `clients/homeclaw_companion/README.md`). We didn’t add `network_security_config` or manifest changes so your project isn’t modified by default; add them if you need HTTP on Android.
+   If you use a non-HTTPS Core URL (e.g. `http://192.168.x.x:9000`) on Android, you may need to allow cleartext (see `clients/HomeClawApp/README.md`). We didn’t add `network_security_config` or manifest changes so your project isn’t modified by default; add them if you need HTTP on Android.
 
 3. **Flutter: iOS / macOS signing**  
    For real devices or release builds, configure signing in Xcode. macOS may need “Outgoing Connections” (or similar) in entitlements if the system blocks the app. We didn’t change entitlements; add if needed.

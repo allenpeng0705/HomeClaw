@@ -115,13 +115,13 @@ Choose one:
 
 1. On a Mac with **Xcode** and **Flutter** installed:
    ```bash
-   cd HomeClaw/clients/homeclaw_companion
+   cd HomeClaw/clients/HomeClawApp
    flutter pub get
    flutter run -d ios
    ```
    Or open the Xcode project under `ios/` and run on a connected iPhone or simulator.
 
-2. See **clients/homeclaw_companion/README.md** for full build and signing steps (e.g. development team, provisioning profile for a real device).
+2. See **clients/HomeClawApp/README.md** for full build and signing steps (e.g. development team, provisioning profile for a real device).
 
 ### Option B: Install from TestFlight or App Store
 

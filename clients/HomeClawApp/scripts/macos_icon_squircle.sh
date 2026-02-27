@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Apply Apple-style squircle icon to the macOS app using iconsur.
-# Run from clients/homeclaw_companion. Requires: brew install iconsur (or npm i -g iconsur)
+# Run from clients/HomeClawApp. Requires: brew install iconsur (or npm i -g iconsur)
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPANION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -10,7 +10,7 @@ CONFIG="${COMPANION_DIR}/macos/Runner/Configs/AppInfo.xcconfig"
 if [[ -f "$CONFIG" ]]; then
   PRODUCT_NAME=$(grep PRODUCT_NAME "$CONFIG" | head -1 | sed 's/.*= *//' | tr -d ' ')
 else
-  PRODUCT_NAME="homeclaw_companion"
+  PRODUCT_NAME="HomeClawApp"
 fi
 
 BUILD_TYPE="${1:-Release}"

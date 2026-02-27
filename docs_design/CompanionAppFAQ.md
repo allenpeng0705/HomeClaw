@@ -9,7 +9,7 @@ Answers to common questions about the Companion app and how it works with Core a
 **Current state: No.** The app does **not** send location to Core today.
 
 - **Core supports it:** The `/inbound` API and `InboundRequest` model include an optional `location` field. When present, Core stores it as the latest location for the user (or the shared "companion" key when not combined) and uses it in system context (e.g. for weather, scheduling). See `core/core.py` (e.g. `_handle_inbound_request`, `_set_latest_location`, `_normalize_location_to_address`).
-- **App does not send it:** In `clients/homeclaw_companion/lib/core_service.dart`, `sendMessage()` builds the request body with `user_id`, `text`, `channel_name`, `conversation_type`, `session_id`, `images`, `videos`, `audios`, `files` — but **no `location`**. The app also does not use a geolocation package (e.g. `geolocator`) or request location permission for this purpose.
+- **App does not send it:** In `clients/HomeClawApp/lib/core_service.dart`, `sendMessage()` builds the request body with `user_id`, `text`, `channel_name`, `conversation_type`, `session_id`, `images`, `videos`, `audios`, `files` — but **no `location`**. The app also does not use a geolocation package (e.g. `geolocator`) or request location permission for this purpose.
 - **To add it:** (1) Add a way in the app to get current location (e.g. `geolocator` + permission), (2) Add an optional `location` argument to `sendMessage()`, and (3) include it in the JSON body (e.g. `"location": "lat,lng"` or an address string). Core will then store and use it as above.
 
 ---

@@ -105,11 +105,11 @@ A **shell script** builds either a **single launcher app** (macOS) or a folder-o
    - `HomeClaw.app/Contents/MacOS/launcher` — small binary or script that starts Core then opens Companion.
    - `HomeClaw.app/Contents/Resources/python/` — embedded Python + venv with Core deps.
    - `HomeClaw.app/Contents/Resources/core/` — Core repo (main.py, core/, base/, llm/, config templates, etc.).
-   - `HomeClaw.app/Contents/Resources/companion/` — Flutter-built `homeclaw_companion.app` or the Companion binary.
+   - `HomeClaw.app/Contents/Resources/companion/` — Flutter-built `HomeClawApp.app` or the Companion binary.
 
 2. **Launcher logic:**
    - If Core not already running (e.g. GET http://127.0.0.1:9000/ready): run `Resources/python/bin/python -m main start` (or equivalent) in background with `PYTHONPATH=Resources/core` and config from `~/Library/Application Support/HomeClaw/config/`.
-   - Open Companion (e.g. `open Resources/companion/homeclaw_companion.app` or run the binary).
+   - Open Companion (e.g. `open Resources/companion/HomeClawApp.app` or run the binary).
 
 3. **Config and model path:** Launcher or first-run script writes default config under Application Support and sets `model_path` to `~/HomeClaw/models`; first-run UI or doc tells user to put model files there.
 

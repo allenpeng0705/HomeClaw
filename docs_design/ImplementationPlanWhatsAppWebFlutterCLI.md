@@ -75,6 +75,6 @@ All connect to **HomeClaw Core** (POST /inbound or WebSocket /ws). Core URL is c
 
 1. ✅ Plan (this doc)  
 2. ✅ WhatsApp Web bridge (Node.js) in `channels/whatsappweb/bridge/` — implemented (Baileys; see bridge/README.md)  
-3. ✅ Flutter app: `clients/homeclaw_companion/` — Core client, settings, chat UI, README (run `flutter create .` once to generate platform folders)  
+3. ✅ Flutter app: `clients/HomeClawApp/` — Core client, settings, chat UI, README (run `flutter create .` once to generate platform folders)  
 4. ✅ CLI: `clients/cli/homeclaw_cli.py` + requirements.txt + README  
 5. ✅ Summary + blocker doc: `docs_design/ImplementationSummaryAndFollowUp.md`  

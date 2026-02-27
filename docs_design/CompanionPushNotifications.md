@@ -85,8 +85,8 @@ push_notifications:
 
 **Android (FCM):**
 1. Create a [Firebase project](https://console.firebase.google.com/) and add an **Android** app (package name).
-2. Download **google-services.json** and place it in `clients/homeclaw_companion/android/app/google-services.json`.
-3. Run `flutter pub get` in `clients/homeclaw_companion`.
+2. Download **google-services.json** and place it in `clients/HomeClawApp/android/app/google-services.json`.
+3. Run `flutter pub get` in `clients/HomeClawApp`.
 
 ### 3.2 Flutter dependencies
 

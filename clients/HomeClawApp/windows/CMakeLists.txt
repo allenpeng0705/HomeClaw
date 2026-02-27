@@ -52,6 +52,9 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
+# Aliases so Firebase C++ SDK (firebase_core) can resolve $<TARGET_FILE_DIR:...> when it
+# uses the project/package name (e.g. home_claw_app or legacy homeclaw_companion).
+add_executable(home_claw_app ALIAS HomeClawApp)
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
