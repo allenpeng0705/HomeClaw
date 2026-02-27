@@ -3,13 +3,14 @@ setlocal
 REM Build the HomeClaw Companion app for Windows and create a distributable bundle (zip or folder).
 REM Windows counterpart to scripts/build_companion_dmg.sh (macOS DMG).
 REM Usage: scripts\build_companion_windows.bat [--output path\to\bundle.zip]
-REM   --output  .zip path = create zip (default: clients\HomeClawApp\HomeClaw-Companion-windows.zip)
+REM   --output  .zip path = create zip (default: dist\HomeClaw-Companion-windows.zip)
 REM             folder path = copy Release files into that folder
 
 set "REPO_ROOT=%~dp0.."
 for %%A in ("%REPO_ROOT%") do set "REPO_ROOT=%%~fA"
 
 set "COMPANION_DIR=%REPO_ROOT%\clients\HomeClawApp"
+set "DIST_DIR=%REPO_ROOT%\dist"
 set "OUTPUT_BUNDLE="
 
 REM Parse options
@@ -22,7 +23,8 @@ exit /b 1
 :done_parse
 
 if "%OUTPUT_BUNDLE%"=="" (
-  set "OUTPUT_BUNDLE=%COMPANION_DIR%\HomeClaw-Companion-windows.zip"
+  if not exist "%DIST_DIR%" mkdir "%DIST_DIR%"
+  set "OUTPUT_BUNDLE=%DIST_DIR%\HomeClaw-Companion-windows.zip"
 )
 
 echo Building Companion app (Windows release)...
@@ -42,8 +44,7 @@ if not exist "%RELEASE_DIR%\HomeClawApp.exe" (
 )
 
 echo Creating Windows bundle...
-set "BUNDLE_DIR=%~dp0..\dist"
-if not exist "%BUNDLE_DIR%" mkdir "%BUNDLE_DIR%"
+if not exist "%DIST_DIR%" mkdir "%DIST_DIR%"
 
 REM Output can be a .zip path or a folder path
 set "OUTPUT_ABS=%OUTPUT_BUNDLE%"
@@ -57,7 +58,7 @@ if /i "%OUTPUT_ABS:~-4%"==".zip" set "IS_ZIP=1"
 
 if %IS_ZIP%==1 (
   REM Create zip: compress Release contents into the zip (so unzip gives a single folder or flat files)
-  set "ZIP_DIR=%BUNDLE_DIR%\companion_release_temp"
+  set "ZIP_DIR=%DIST_DIR%\companion_release_temp"
   if exist "%ZIP_DIR%" rmdir /S /Q "%ZIP_DIR%"
   mkdir "%ZIP_DIR%\HomeClaw Companion"
   xcopy /E /I /Y "%RELEASE_DIR%\*" "%ZIP_DIR%\HomeClaw Companion\"
