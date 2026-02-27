@@ -134,7 +134,7 @@ cloud_models:
     host: 127.0.0.1
     port: 4005
     api_key_name: DEEPSEEK_API_KEY
-    api_key: 
+    api_key: sk-c2ee041134f64b5fb18ec9465b2c4c27
     capabilities: [Chat]
   # Alibaba Qwen (Dashscope), Groq, Mistral, xAI, OpenRouter, Cohere, Perplexity: uncomment and set api_key_name as needed.
 
@@ -146,7 +146,7 @@ cloud_models:
 # main_llm: optional when main_llm_mode is set. When mode is "local" we use main_llm_local; when "cloud" we use main_llm_cloud; when "mix" we use both per request.
 #main_llm: local_models/main_vl_model_4B
 main_llm_mode: mix
-main_llm_local: local_models/main_vl_model_8B
+main_llm_local: local_models/main_vl_model_4B
 main_llm_cloud: cloud_models/DeepSeek-Chat
 # Mix mode routing: heuristic (Layer 1), semantic (Layer 2), SLM (Layer 3: classifier or perplexity). See comments in hybrid_router.
 hybrid_router:
