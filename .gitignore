@@ -35,6 +35,7 @@
 /external_plugins/.run_logs
 /plugins/Headlines/__pycache__
 /examples/external_plugins/companion/__pycache__
+/config/portal_admin.yml
 /config/workspace/daily_memory
 /config/workspace/agent_memory
 /config/workspace/memory
