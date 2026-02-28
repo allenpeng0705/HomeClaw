@@ -33,10 +33,11 @@ class AppLocalizationsZh extends AppLocalizations {
   String get permissions => '权限';
 
   @override
-  String get permissionsIntro => 'HomeClaw 需要一些权限才能正常工作。您可以立即授权，或在首次使用相关功能时再授权。';
+  String get permissionsIntro =>
+      'HomeClaw 需要一些权限才能正常工作。您可以立即授权，或在首次使用相关功能时再授权。';
 
   @override
-  String get continue => '继续';
+  String get continueButton => '继续';
 
   @override
   String get allow => '允许';
@@ -72,7 +73,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get pleaseEnterPassword => '请输入密码';
 
   @override
-  String get noUsersInCore => 'Core 中暂无对应用户。请在 config/user.yml 中添加用户名，然后点击下方「刷新连接」。';
+  String get noUsersInCore =>
+      'Core 中暂无对应用户。请在 config/user.yml 中添加用户名，然后点击下方「刷新连接」。';
 
   @override
   String get reminder => '提醒';

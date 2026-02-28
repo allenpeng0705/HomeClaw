@@ -24,7 +24,8 @@ class AppLocalizationsDe extends AppLocalizations {
   String get retry => 'Erneut versuchen';
 
   @override
-  String get noFriends => 'Keine Freunde. Füge Freunde in Core (config/user.yml) hinzu.';
+  String get noFriends =>
+      'Keine Freunde. Füge Freunde in Core (config/user.yml) hinzu.';
 
   @override
   String get somethingWentWrong => 'Etwas ist schiefgelaufen';
@@ -33,10 +34,11 @@ class AppLocalizationsDe extends AppLocalizations {
   String get permissions => 'Berechtigungen';
 
   @override
-  String get permissionsIntro => 'HomeClaw benötigt einige Berechtigungen. Du kannst sie jetzt erteilen oder beim ersten Nutzen der jeweiligen Funktion.';
+  String get permissionsIntro =>
+      'HomeClaw benötigt einige Berechtigungen. Du kannst sie jetzt erteilen oder beim ersten Nutzen der jeweiligen Funktion.';
 
   @override
-  String get continue => 'Weiter';
+  String get continueButton => 'Weiter';
 
   @override
   String get allow => 'Erlauben';
@@ -60,7 +62,8 @@ class AppLocalizationsDe extends AppLocalizations {
   String get coreUrl => 'Core-URL';
 
   @override
-  String get apiKeyOptional => 'API-Schlüssel (optional; leer lassen, wenn Core-Authentifizierung deaktiviert ist)';
+  String get apiKeyOptional =>
+      'API-Schlüssel (optional; leer lassen, wenn Core-Authentifizierung deaktiviert ist)';
 
   @override
   String get refreshConnection => 'Verbindung aktualisieren';
@@ -72,7 +75,8 @@ class AppLocalizationsDe extends AppLocalizations {
   String get pleaseEnterPassword => 'Bitte Passwort eingeben';
 
   @override
-  String get noUsersInCore => 'Keine Benutzer in Core. Füge einen Benutzer in config/user.yml hinzu und tippe unten auf «Verbindung aktualisieren».';
+  String get noUsersInCore =>
+      'Keine Benutzer in Core. Füge einen Benutzer in config/user.yml hinzu und tippe unten auf «Verbindung aktualisieren».';
 
   @override
   String get reminder => 'Erinnerung';
@@ -81,7 +85,8 @@ class AppLocalizationsDe extends AppLocalizations {
   String get deleteMessage => 'Nachricht löschen?';
 
   @override
-  String get deleteMessageExplanation => 'Diese Nachricht wird aus dem Chat entfernt. Betrifft nur dieses Gerät; die Core-Sitzung bleibt unverändert.';
+  String get deleteMessageExplanation =>
+      'Diese Nachricht wird aus dem Chat entfernt. Betrifft nur dieses Gerät; die Core-Sitzung bleibt unverändert.';
 
   @override
   String get cancel => 'Abbrechen';
@@ -102,7 +107,8 @@ class AppLocalizationsDe extends AppLocalizations {
   String get takePhoto => 'Foto aufnehmen';
 
   @override
-  String get takePhotoContent => 'Neues Foto mit der Kamera aufnehmen oder vorhandenes Bild vom Gerät wählen.';
+  String get takePhotoContent =>
+      'Neues Foto mit der Kamera aufnehmen oder vorhandenes Bild vom Gerät wählen.';
 
   @override
   String get useCamera => 'Kamera verwenden';

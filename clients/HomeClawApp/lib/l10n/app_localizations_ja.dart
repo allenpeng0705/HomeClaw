@@ -33,10 +33,11 @@ class AppLocalizationsJa extends AppLocalizations {
   String get permissions => '権限';
 
   @override
-  String get permissionsIntro => 'HomeClaw はいくつかの権限が必要です。今許可するか、各機能を初めて使うときに許可できます。';
+  String get permissionsIntro =>
+      'HomeClaw はいくつかの権限が必要です。今許可するか、各機能を初めて使うときに許可できます。';
 
   @override
-  String get continue => '続ける';
+  String get continueButton => '続ける';
 
   @override
   String get allow => '許可';
@@ -72,7 +73,8 @@ class AppLocalizationsJa extends AppLocalizations {
   String get pleaseEnterPassword => 'パスワードを入力してください';
 
   @override
-  String get noUsersInCore => 'Core にユーザーがいません。config/user.yml でユーザーを追加し、下の「接続を更新」をタップしてください。';
+  String get noUsersInCore =>
+      'Core にユーザーがいません。config/user.yml でユーザーを追加し、下の「接続を更新」をタップしてください。';
 
   @override
   String get reminder => 'リマインダー';
@@ -81,7 +83,8 @@ class AppLocalizationsJa extends AppLocalizations {
   String get deleteMessage => 'メッセージを削除しますか？';
 
   @override
-  String get deleteMessageExplanation => 'このメッセージはチャットから削除されます。この端末のみに影響し、Core のセッションは変わりません。';
+  String get deleteMessageExplanation =>
+      'このメッセージはチャットから削除されます。この端末のみに影響し、Core のセッションは変わりません。';
 
   @override
   String get cancel => 'キャンセル';
