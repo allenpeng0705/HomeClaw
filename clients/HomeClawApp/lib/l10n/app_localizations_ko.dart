@@ -33,10 +33,11 @@ class AppLocalizationsKo extends AppLocalizations {
   String get permissions => '권한';
 
   @override
-  String get permissionsIntro => 'HomeClaw가 작동하려면 일부 권한이 필요합니다. 지금 허용하거나 각 기능을 처음 사용할 때 허용할 수 있습니다.';
+  String get permissionsIntro =>
+      'HomeClaw가 작동하려면 일부 권한이 필요합니다. 지금 허용하거나 각 기능을 처음 사용할 때 허용할 수 있습니다.';
 
   @override
-  String get continue => '계속';
+  String get continueButton => '계속';
 
   @override
   String get allow => '허용';
@@ -72,7 +73,8 @@ class AppLocalizationsKo extends AppLocalizations {
   String get pleaseEnterPassword => '비밀번호를 입력하세요';
 
   @override
-  String get noUsersInCore => 'Core에 사용자가 없습니다. config/user.yml에 사용자를 추가한 뒤 아래 \'연결 새로 고침\'을 탭하세요.';
+  String get noUsersInCore =>
+      'Core에 사용자가 없습니다. config/user.yml에 사용자를 추가한 뒤 아래 \'연결 새로 고침\'을 탭하세요.';
 
   @override
   String get reminder => '리마인더';
@@ -81,7 +83,8 @@ class AppLocalizationsKo extends AppLocalizations {
   String get deleteMessage => '메시지를 삭제할까요?';
 
   @override
-  String get deleteMessageExplanation => '이 메시지는 채팅에서 제거됩니다. 이 기기에만 적용되며 Core 세션은 변경되지 않습니다.';
+  String get deleteMessageExplanation =>
+      '이 메시지는 채팅에서 제거됩니다. 이 기기에만 적용되며 Core 세션은 변경되지 않습니다.';
 
   @override
   String get cancel => '취소';

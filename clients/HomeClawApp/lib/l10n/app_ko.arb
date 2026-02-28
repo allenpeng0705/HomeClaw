@@ -9,7 +9,7 @@
   "somethingWentWrong": "문제가 발생했습니다",
   "permissions": "권한",
   "permissionsIntro": "HomeClaw가 작동하려면 일부 권한이 필요합니다. 지금 허용하거나 각 기능을 처음 사용할 때 허용할 수 있습니다.",
-  "continue": "계속",
+  "continueButton": "계속",
   "allow": "허용",
   "openSettings": "설정 열기",
   "done": "완료",

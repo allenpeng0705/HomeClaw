@@ -33,10 +33,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get permissions => 'Permissions';
 
   @override
-  String get permissionsIntro => 'HomeClaw needs a few permissions to work. You can allow them now or when you first use each feature.';
+  String get permissionsIntro =>
+      'HomeClaw needs a few permissions to work. You can allow them now or when you first use each feature.';
 
   @override
-  String get continue => 'Continue';
+  String get continueButton => 'Continue';
 
   @override
   String get allow => 'Allow';
@@ -60,7 +61,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get coreUrl => 'Core URL';
 
   @override
-  String get apiKeyOptional => 'API key (optional; leave empty if Core auth is disabled)';
+  String get apiKeyOptional =>
+      'API key (optional; leave empty if Core auth is disabled)';
 
   @override
   String get refreshConnection => 'Refresh the connection';
@@ -72,7 +74,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pleaseEnterPassword => 'Please enter password';
 
   @override
-  String get noUsersInCore => 'No users with username in Core. Add username in config/user.yml, then tap Refresh the connection below.';
+  String get noUsersInCore =>
+      'No users with username in Core. Add username in config/user.yml, then tap Refresh the connection below.';
 
   @override
   String get reminder => 'Reminder';
@@ -81,7 +84,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get deleteMessage => 'Delete message?';
 
   @override
-  String get deleteMessageExplanation => 'This message will be removed from the chat. This only affects this device; it does not change Core\'s session.';
+  String get deleteMessageExplanation =>
+      'This message will be removed from the chat. This only affects this device; it does not change Core\'s session.';
 
   @override
   String get cancel => 'Cancel';
@@ -102,7 +106,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get takePhoto => 'Take photo';
 
   @override
-  String get takePhotoContent => 'Use camera to take a new photo, or choose an existing image from your device.';
+  String get takePhotoContent =>
+      'Use camera to take a new photo, or choose an existing image from your device.';
 
   @override
   String get useCamera => 'Use camera';

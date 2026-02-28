@@ -9,7 +9,7 @@
   "somethingWentWrong": "出错了",
   "permissions": "权限",
   "permissionsIntro": "HomeClaw 需要一些权限才能正常工作。您可以立即授权，或在首次使用相关功能时再授权。",
-  "continue": "继续",
+  "continueButton": "继续",
   "allow": "允许",
   "openSettings": "打开设置",
   "done": "完成",
