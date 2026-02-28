@@ -423,6 +423,47 @@ def run_core() -> threading.Thread:
     thread.start()
     return thread
 
+
+def run_portal(open_browser=True):
+    """Start the Portal server (config and onboarding). Bind 127.0.0.1 only. Optionally open browser when ready."""
+    try:
+        import uvicorn
+        from portal.app import app
+        from portal.config import get_host, get_port
+    except Exception as e:
+        logger.exception("Failed to load Portal: %s", e)
+        sys.exit(1)
+    host = get_host()
+    port = get_port()
+    base_url = "http://{}:{}".format(host, port)
+    ready_url = base_url + "/ready"
+    try:
+        print("Starting HomeClaw Portal at {}\n".format(base_url))
+        # Run uvicorn in a thread so we can wait for ready and open browser
+        def run_uvicorn():
+            uvicorn.run(app, host=host, port=port, log_level="info")
+        server_thread = threading.Thread(target=run_uvicorn, daemon=True)
+        server_thread.start()
+        if open_browser:
+            for _ in range(30):
+                try:
+                    r = httpx.get(ready_url, timeout=1.0)
+                    if r is not None and r.status_code == 200:
+                        try:
+                            webbrowser.open(base_url)
+                            print("Opened browser to {}\n".format(base_url))
+                        except Exception:
+                            print("Portal: {}\n".format(base_url))
+                        break
+                except Exception:
+                    pass
+                sleep(0.5)
+        server_thread.join()
+    except Exception as e:
+        logger.exception("Portal server error: %s", e)
+        sys.exit(1)
+
+
 def start(open_browser=True):
     """Start Core only. Optionally open the launcher page (/ui) with WebChat and Control UI links. Ctrl+C to stop.
     All logic is defensive: config/HTTP/browser failures never crash; shutdown is always attempted on exit."""
@@ -509,8 +550,8 @@ if __name__ == "__main__":
         "command",
         nargs="?",
         default="start",
-        choices=["start", "onboard", "doctor", "ollama"],
-        help="start (default): run Core; onboard: wizard; doctor: check config; ollama: list/pull/set-main Ollama models",
+        choices=["start", "onboard", "doctor", "ollama", "portal"],
+        help="start (default): run Core; onboard: wizard; doctor: check config; ollama: list/pull/set-main Ollama models; portal: run Portal server (config and onboarding)",
     )
     parser.add_argument(
         "ollama_action",
@@ -525,7 +566,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--no-open-browser",
         action="store_true",
-        help="do not open the launcher page (WebChat / Control UI) in the browser when starting Core",
+        help="do not open the browser when starting Core or Portal",
     )
     args = parser.parse_args()
     try:
@@ -551,6 +592,8 @@ if __name__ == "__main__":
                 run_ollama_set_main(name)
             else:
                 print("Usage: python -m main ollama {list|pull <name>|set-main <name>}")
+        elif args.command == "portal":
+            run_portal(open_browser=not args.no_open_browser)
         elif args.command == "onboard":
             run_onboard()
         elif args.command == "doctor":
