@@ -3,6 +3,7 @@ import '../chat_history_store.dart';
 import '../core_service.dart';
 import 'config_core_screen.dart';
 import 'permissions_screen.dart';
+import 'portal_login_screen.dart';
 import 'scan_connect_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -171,6 +172,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
             const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => PortalLoginScreen(coreService: widget.coreService),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.settings_applications),
+              label: const Text('Core setting (Portal)'),
+            ),
+            const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: () {
                 Navigator.of(context).push(

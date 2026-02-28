@@ -111,6 +111,25 @@ def run_doctor():
     # LLM connectivity (requires Util().get_core_metadata() to be loaded)
     try:
         meta = Util().get_core_metadata()
+        # If main or embedding is local (llama.cpp), check that llama-server binary is findable (project folder or PATH)
+        main_type = Util()._effective_main_llm_type()
+        emb_type = Util()._effective_embedding_llm_type()
+        if main_type == "local" or emb_type == "local":
+            try:
+                from llm.llama_cpp_platform import resolve_llama_server
+                exe_path, folder = resolve_llama_server(root)
+                if exe_path is not None:
+                    if folder == "path":
+                        ok.append("llama-server found on PATH (e.g. winget/brew/nix)")
+                    else:
+                        ok.append("llama-server found: llama.cpp-master/{}/".format(folder))
+                else:
+                    issues.append(
+                        "llama-server not found. Use Guide step 4: copy binary into llama.cpp-master/<platform>/ "
+                        "or install via winget/brew/nix so it is on PATH (see https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md)"
+                    )
+            except Exception as e:
+                issues.append("llama-server check failed: " + str(e))
         main_ok = Util().check_main_model_server_health(timeout=10)
         if main_ok:
             ok.append("main_llm reachable: " + (meta.main_llm or ""))

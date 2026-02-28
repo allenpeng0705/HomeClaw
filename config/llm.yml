@@ -8,7 +8,8 @@
 # the main config. Edit this file for all LLM/model settings.
 # =============================================================================
 
-# ——— 2. Local models (llama.cpp server per model; path relative to model_path) ———
+# ——— 2. Local models (llama.cpp server per model, or Ollama) ———
+# Default: llama.cpp — path = GGUF path relative to model_path; Core starts one server per model.
 # Optional per model: mmproj (vision), lora (adapter(s)), lora_base (optional base for LoRA).
 #   mmproj: path to projector .gguf; llama-server -m <path> --mmproj <mmproj>
 #   lora: single path or array of paths to LoRA adapter .gguf; each gets --lora <path> (multi-LoRA if supported)
@@ -85,6 +86,15 @@ local_models:
     path: Qwen3-0.6B-Q5_K_M.gguf
     host: 127.0.0.1
     port: 5089
+    capabilities: [Chat]
+
+# Ollama (local): type: ollama, path = Ollama model name (e.g. qwen2.5:7b). Core does not start a process; ensure Ollama server is running (default 127.0.0.1:11434). See docs_design/OllamaAsLocalModelAndCLI.md.
+  - id: Ollama-qwen2
+    type: ollama
+    alias: Ollama Qwen2
+    path: qwen2.5:7b
+    host: 127.0.0.1
+    port: 11434
     capabilities: [Chat]
 
 

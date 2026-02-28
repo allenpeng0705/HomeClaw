@@ -27,3 +27,16 @@ HomeClaw runs the **llama.cpp** HTTP server as the local LLM engine. Put the mat
 - **Linux**: uses `linux_cuda/` if CUDA is available, otherwise `linux_cpu/`.
 
 If the expected folder or binary is missing, the core will log an error and will not start the local LLM server.
+
+## Alternative: install via package managers
+
+You can install llama.cpp with your system package manager so `llama-server` is on PATH. HomeClaw will use it if no binary is found under `llama.cpp-master/<platform>/`.
+
+| Platform | Command |
+|----------|---------|
+| Windows  | `winget install llama.cpp` |
+| Mac / Linux | `brew install llama.cpp` |
+| Mac (MacPorts) | `sudo port install llama.cpp` |
+| Mac / Linux (Nix) | `nix profile install nixpkgs#llama-cpp` |
+
+See the [official install guide](https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md) for details.

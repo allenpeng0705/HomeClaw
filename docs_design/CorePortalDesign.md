@@ -11,7 +11,7 @@ This document designs a **Portal**: a small, stable local web server that provid
   - Manages all Core-related config: `core.yml`, `llm.yml`, `memory_kb.yml`, `skills_and_plugins.yml`, `user.yml`, `friend_presets.yml`.
   - Lets the user start Core and Channels from the UI.
 - **Stability**: When Core is running, the Portal web server **runs together** with Core and must remain stable (same machine, two processes).
-- **Local access**: User opens a browser on the machine → Portal web server (e.g. `http://127.0.0.1:8000`) to manage settings and launch Core/Channels.
+- **Local access**: User opens a browser on the machine → Portal web server (e.g. `http://127.0.0.1:18472`) to manage settings and launch Core/Channels.
 - **Remote access**: **Companion app** does not talk to the Portal directly. Instead, **Core** uses **REST API to access the Portal**. So: Companion → Core → (Core calls Portal REST API) → Portal. This way the Companion app can **manage settings remotely** (via Core), while the Portal stays local-only and does not need to be exposed to the internet.
 - **YAML safety**: only add / remove / edit **fields**; preserve file structure, key order, and **all comments** (ruamel; never full overwrite with `yaml.safe_dump`).
 
@@ -54,7 +54,7 @@ This document designs a **Portal**: a small, stable local web server that provid
 
 ### 3.3 Local access: manage settings via browser
 
-- **Locally**, the user opens a browser on the same machine and goes to the Portal (e.g. `http://127.0.0.1:8000`). No auth needed (localhost only). They can:
+- **Locally**, the user opens a browser on the same machine and goes to the Portal (e.g. `http://127.0.0.1:18472`). No auth needed (localhost only). They can:
   - Follow onboarding (install Python, requirements, etc.).
   - Edit all configs (Core, LLM, Memory/KB, Skills & Plugins, Users, Friend presets).
   - Start Core and Channels.
@@ -63,13 +63,13 @@ This document designs a **Portal**: a small, stable local web server that provid
 
 - The **Companion app** (phone/tablet, remote) should be able to **manage settings remotely**. The Portal is **not** exposed to the internet. Instead:
   - **Companion** talks only to **Core** (over the existing channel: Core’s public URL or Tailscale, with auth).
-  - **Core** talks to the **Portal** over REST (localhost, e.g. `http://127.0.0.1:8000`).
+  - **Core** talks to the **Portal** over REST (localhost, e.g. `http://127.0.0.1:18472`).
 - Flow:
   1. Companion calls Core: e.g. `GET /api/config/core` or `PATCH /api/config/core`.
-  2. Core **proxies** the request to the Portal: e.g. `GET http://127.0.0.1:8000/api/config/core`, or `PATCH http://127.0.0.1:8000/api/config/core` with body.
+  2. Core **proxies** the request to the Portal: e.g. `GET http://127.0.0.1:18472/api/config/core`, or `PATCH http://127.0.0.1:18472/api/config/core` with body.
   3. Portal reads or updates the YAML (merge, comment-preserving) and returns JSON.
   4. Core returns the result to the Companion.
-- So: **remote management of settings = Companion → Core → Portal**. The Portal stays local; only Core is exposed. Core needs a config key for the Portal base URL (e.g. `portal_url: http://127.0.0.1:8000` in `core.yml` or env). If `portal_url` is set, Core’s config (and optionally users, etc.) API can forward to the Portal; if not set, Core can keep current behavior (Core reads/writes files itself) for backward compatibility.
+- So: **remote management of settings = Companion → Core → Portal**. The Portal stays local; only Core is exposed. Core needs a config key for the Portal base URL (e.g. `portal_url: http://127.0.0.1:18472` in `core.yml` or env). If `portal_url` is set, Core’s config (and optionally users, etc.) API can forward to the Portal; if not set, Core can keep current behavior (Core reads/writes files itself) for backward compatibility.
 
 ### 3.5 Auth (detailed in Section 8)
 
@@ -139,7 +139,7 @@ Core’s existing `/api/config/core` and `/api/config/users` handlers can be upd
 ### 6.2 Portal process and entrypoint
 
 - The Portal is a **small web server** (e.g. FastAPI or FastAPI + Gradio). Entrypoint: **`python -m main portal`** (main.py adds a `portal` command). It only runs the portal server; no need for a separate runtime—Python runs the server. The emphasis is on “small and stable”: minimal dependencies, single responsibility (serve UI + REST API for config and launch).
-- Code can live in `ui/homeclaw.py` (extended) or a new `ui/portal/` module; the server binds to **127.0.0.1** and a configurable port (e.g. 8000). When Core is running, both processes run; Core knows Portal’s URL via `portal_url` in config and forwards Companion config requests to the Portal.
+- Code can live in `ui/homeclaw.py` (extended) or a new `ui/portal/` module; the server binds to **127.0.0.1** and a configurable port (e.g. 18472). When Core is running, both processes run; Core knows Portal’s URL via `portal_url` in config and forwards Companion config requests to the Portal.
 
 ### 6.3 Portal auth (see Section 8)
 
@@ -196,7 +196,7 @@ This section addresses: (1) Web UI structure and admin password, (2) guide to in
 **Design:**
 
 - **Shared secret between Core and Portal:** Add to `core.yml` (or env):
-  - `portal_url`: `http://127.0.0.1:8000` (or configurable port).
+  - `portal_url`: `http://127.0.0.1:18472` (or configurable port).
   - `portal_secret`: a random string (e.g. 32 chars). Same value is configured in the Portal (e.g. in `config/portal_admin.yml` or env `PORTAL_SECRET`). Core reads `portal_url` and `portal_secret` from config.
 - **Portal API protection:** Every request from Core to the Portal must include the secret. Options:
   - **Header:** `X-Portal-Secret: <portal_secret>` or `Authorization: Bearer <portal_secret>`.
@@ -271,3 +271,5 @@ These are the APIs the **Portal** exposes and **Core** calls when `portal_url` i
 - **YAML safety:** Portal is the single writer for config; all edits use ruamel merge (no full overwrite, no stripping comments).
 
 This design gives one local portal (admin-only, username+password) for setup and config, and remote management via Companion → login (username+password) → WebView of Portal through Core, with Core→Portal secret and admin-only access.
+
+**Usage:** For step-by-step instructions (web browser and Companion app), see [PortalUsage.md](PortalUsage.md).

@@ -30,6 +30,7 @@ class CoreService {
   static const String _keyCompanionSavedUsername = 'companion_saved_username';
   static const String _keyCompanionSavedPassword = 'companion_saved_password';
   static const String _keyCompanionDeviceId = 'companion_device_id';
+  static const String _keyPortalAdminToken = 'portal_admin_token';
   static const String _defaultBaseUrl = 'http://127.0.0.1:9000';
 
   String _baseUrl = _defaultBaseUrl;
@@ -40,8 +41,10 @@ class CoreService {
   String? _canvasUrl;
   String? _nodesUrl;
   bool _showProgressDuringLongTasks = true;
+  String? _portalAdminToken;
 
   String get baseUrl => _baseUrl;
+  String? get portalAdminToken => _portalAdminToken;
   bool get showProgressDuringLongTasks => _showProgressDuringLongTasks;
   String? get apiKey => _apiKey;
   String? get sessionToken => _sessionToken;
@@ -111,6 +114,42 @@ class CoreService {
     if (_sessionToken != null && _sessionToken!.isEmpty) _sessionToken = null;
     _sessionUserId = prefs.getString(_keyCompanionUserId)?.trim();
     if (_sessionUserId != null && _sessionUserId!.isEmpty) _sessionUserId = null;
+    _portalAdminToken = prefs.getString(_keyPortalAdminToken)?.trim();
+    if (_portalAdminToken != null && _portalAdminToken!.isEmpty) _portalAdminToken = null;
+  }
+
+  /// POST /api/portal/auth with Portal admin username/password. Returns token. Throws on 401/503/network.
+  Future<String> postPortalAuth({required String username, required String password}) async {
+    final url = Uri.parse('$_baseUrl/api/portal/auth');
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'username': username.trim(), 'password': password}),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 401) {
+      throw Exception('Invalid username or password');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(response.statusCode == 503
+          ? 'Portal admin auth not available'
+          : 'Login failed: ${response.body}');
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>?;
+    final token = (map?['token'] as String?)?.trim();
+    if (token == null || token.isEmpty) throw Exception('No token in response');
+    _portalAdminToken = token;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyPortalAdminToken, token);
+    return token;
+  }
+
+  /// Clear Portal admin token (e.g. when leaving Portal WebView or logging out).
+  Future<void> clearPortalAdminToken() async {
+    _portalAdminToken = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyPortalAdminToken);
   }
 
   /// Persist Core URL and API key (same as Settings). Call after editing on login screen.

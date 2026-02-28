@@ -88,3 +88,32 @@ def test_login_wrong_password_redirects_to_login_with_error(portal_temp_config):
     r = client.post("/login", data={"username": "u", "password": "wrong"}, follow_redirects=False)
     assert r.status_code == 302
     assert r.headers.get("location") == "/login?error=1"
+
+
+def test_settings_without_session_redirects_to_login(portal_temp_config):
+    client = TestClient(app)
+    client.post("/setup", data={"username": "u", "password": "p"})
+    r = client.get("/settings", follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers.get("location") == "/login"
+
+
+def test_settings_with_session_returns_200(portal_temp_config):
+    client = TestClient(app)
+    client.post("/setup", data={"username": "u", "password": "p"})
+    client.post("/login", data={"username": "u", "password": "p"})
+    r = client.get("/settings")
+    assert r.status_code == 200
+    assert "Manage settings" in (r.text or "")
+
+
+def test_logout_clears_cookie_and_redirects(portal_temp_config):
+    client = TestClient(app)
+    client.post("/setup", data={"username": "u", "password": "p"})
+    client.post("/login", data={"username": "u", "password": "p"})
+    r = client.get("/logout", follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers.get("location") == "/login"
+    # Cookie should be cleared (max-age=0 or missing)
+    set_cookie = r.headers.get("set-cookie") or ""
+    assert "portal_session" in set_cookie.lower() or "max-age=0" in set_cookie.lower()

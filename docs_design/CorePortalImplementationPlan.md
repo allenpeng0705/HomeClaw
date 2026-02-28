@@ -68,7 +68,7 @@ This plan breaks down the [CorePortalDesign.md](CorePortalDesign.md) into action
 
 **Tasks:**
 
-1. **Entrypoint:** In `main.py`, add command `portal` (e.g. `python -m main portal`). It starts the Portal app (FastAPI or Flask) on host 127.0.0.1 and port from env `PORTAL_PORT` or default 8000.
+1. **Entrypoint:** In `main.py`, add command `portal` (e.g. `python -m main portal`). It starts the Portal app (FastAPI or Flask) on host 127.0.0.1 and port from env `PORTAL_PORT` or default 18472.
 2. **App skeleton:** Create `ui/portal/app.py` (or extend `ui/homeclaw.py` with a clear “portal” mode). Minimal routes for Phase 1:
    - `GET /` → redirect to `/login` or, if no admin set, to `/setup`.
    - `GET /login` → login page (username + password form).
@@ -79,7 +79,7 @@ This plan breaks down the [CorePortalDesign.md](CorePortalDesign.md) into action
 
 **Files:** `main.py` (add `portal` command). New: `ui/portal/` — `app.py`, `auth.py`, templates or static for login/setup.
 
-**Acceptance:** `python -m main portal` starts server; opening http://127.0.0.1:8000 shows login or setup; after login, can reach a minimal dashboard (placeholder).
+**Acceptance:** `python -m main portal` starts server; opening http://127.0.0.1:18472 shows login or setup; after login, can reach a minimal dashboard (placeholder).
 
 ---
 
@@ -187,7 +187,7 @@ This plan breaks down the [CorePortalDesign.md](CorePortalDesign.md) into action
 
 **Tasks:**
 
-1. **core.yml (or env):** Add `portal_url: "http://127.0.0.1:8000"` and `portal_secret: "<random 32 chars>"`. Document: generate once, put same value in Portal config.
+1. **core.yml (or env):** Add `portal_url: "http://127.0.0.1:18472"` and `portal_secret: "<random 32 chars>"`. Document: generate once, put same value in Portal config.
 2. **Portal:** Read `portal_secret` from env `PORTAL_SECRET` or from a small config (e.g. `config/portal_admin.yml` or `config/portal_secret.txt`). Same value as in Core.
 
 **Files:** `config/core.yml` (optional keys; can be env-only). Portal: read secret in middleware or dependency.
@@ -366,5 +366,7 @@ Phase 6 (Companion) depends on Phase 5 (auth endpoint + protected /portal-ui).
 - [ ] Phase 6: Companion always prompts for username+password at “Core setting”; WebView receives auth and loads Portal UI correctly.
 
 ---
+
+**User documentation:** For how to use the Portal from a web browser and from the Companion app, see [PortalUsage.md](PortalUsage.md).
 
 *Ref: [CorePortalDesign.md](CorePortalDesign.md).*

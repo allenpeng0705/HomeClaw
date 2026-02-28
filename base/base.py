@@ -929,6 +929,9 @@ class CoreMetadata:
     companion: Dict[str, Any] = field(default_factory=dict)
     # RAG memory summarization: periodic summarization + TTL for originals; summaries kept forever. See docs_design/RAGMemorySummarizationDesign.md
     memory_summarization: Dict[str, Any] = field(default_factory=dict)  # enabled, schedule (daily|weekly|next_run), interval_days, keep_original_days, min_age_days, max_memories_per_batch
+    # Portal (Phase 4): when set, Core proxies /api/config/* and /portal-ui to Portal. Same secret as Portal's PORTAL_SECRET or portal_secret.txt.
+    portal_url: str = ""
+    portal_secret: str = ""
 
     @staticmethod
     def _safe_str_strip(val: Any) -> str:
@@ -1341,6 +1344,8 @@ class CoreMetadata:
             hybrid_router=hybrid_router_val,
             companion=data.get('companion') if isinstance(data.get('companion'), dict) else {},
             memory_summarization=data.get('memory_summarization') if isinstance(data.get('memory_summarization'), dict) else {},
+            portal_url=(data.get('portal_url') or os.environ.get('PORTAL_URL') or '').strip(),
+            portal_secret=(data.get('portal_secret') or os.environ.get('PORTAL_SECRET') or '').strip(),
         )
         except (KeyError, TypeError, ValueError) as e:
             raise RuntimeError(f"config/core.yml has invalid or missing content: {e}. Fix the file before starting Core.") from e
@@ -1489,6 +1494,10 @@ class CoreMetadata:
                 core_dict['main_llm_cloud'] = (core.main_llm_cloud or '').strip()
             if getattr(core, 'hybrid_router', None) and isinstance(core.hybrid_router, dict) and core.hybrid_router:
                 core_dict['hybrid_router'] = core.hybrid_router
+        if (getattr(core, 'portal_url', None) or '').strip():
+            core_dict['portal_url'] = (core.portal_url or '').strip()
+        if (getattr(core, 'portal_secret', None) or '').strip():
+            core_dict['portal_secret'] = (core.portal_secret or '').strip()
 
         def _deep_merge_into_existing(existing_node, updates):
             """Merge updates into existing_node in place. Keeps existing_node (and ruamel comments) when both are dicts."""

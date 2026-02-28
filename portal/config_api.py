@@ -25,6 +25,7 @@ WHITELIST_CORE = frozenset({
     "file_view_link_expiry_sec", "inbound_request_timeout_seconds",
     "pinggy", "push_notifications", "file_understanding", "llama_cpp", "completion",
     "llm_config_file", "endpoints",
+    "portal_url", "portal_secret",  # Phase 4: Core proxies config and /portal-ui to Portal
 })
 
 
@@ -42,6 +43,8 @@ def _redact_core(data: Dict[str, Any]) -> Dict[str, Any]:
     out = copy.deepcopy(data)
     if isinstance(out.get("auth_api_key"), str) and out["auth_api_key"]:
         out["auth_api_key"] = "***"
+    if isinstance(out.get("portal_secret"), str) and out["portal_secret"]:
+        out["portal_secret"] = "***"
     pinggy = out.get("pinggy")
     if isinstance(pinggy, dict) and isinstance(pinggy.get("token"), str) and pinggy["token"]:
         out["pinggy"] = copy.deepcopy(pinggy)
@@ -50,18 +53,24 @@ def _redact_core(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _redact_llm(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Redact api_key / api_key_name in cloud_models and local_models entries."""
+    """Redact api_key / api_key_name in cloud_models and local_models (list or dict)."""
     out = copy.deepcopy(data)
     for key in ("cloud_models", "local_models"):
         models = out.get(key)
-        if not isinstance(models, dict):
-            continue
-        for model_name, entry in models.items():
-            if isinstance(entry, dict):
-                if entry.get("api_key"):
-                    entry["api_key"] = "***"
-                if entry.get("api_key_name"):
-                    entry["api_key_name"] = "***"
+        if isinstance(models, list):
+            for entry in models:
+                if isinstance(entry, dict):
+                    if entry.get("api_key"):
+                        entry["api_key"] = "***"
+                    if entry.get("api_key_name"):
+                        entry["api_key_name"] = "***"
+        elif isinstance(models, dict):
+            for _model_name, entry in models.items():
+                if isinstance(entry, dict):
+                    if entry.get("api_key"):
+                        entry["api_key"] = "***"
+                    if entry.get("api_key_name"):
+                        entry["api_key_name"] = "***"
     return out
 
 

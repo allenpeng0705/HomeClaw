@@ -1,6 +1,6 @@
 """
 Config API routes: GET/PATCH /api/config/core, GET/POST/PATCH/DELETE /api/config/users.
-Same auth as /inbound (auth.verify_inbound_auth).
+Same auth as /inbound (auth.verify_inbound_auth). When portal_url is set, requests are forwarded to Portal (Phase 4.1).
 """
 from pathlib import Path
 from fastapi import Request
@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from base.util import Util
+from core.routes import portal_proxy
 from base.base import User, Friend
 from base.workspace import ensure_user_sandbox_folders
 
@@ -79,8 +80,12 @@ def _redact_config(obj, redact_keys: frozenset = frozenset({"auth_api_key", "api
 
 def get_api_config_core_get_handler(core):  # noqa: ARG001
     """Return handler for GET /api/config/core."""
-    async def api_config_core_get():
+    async def api_config_core_get(request: Request):
         """Return current core config (whitelisted keys only). auth_api_key and nested api_key redacted as '***'."""
+        if portal_proxy.should_proxy_config():
+            if portal_proxy.get_portal_admin_from_request(request) is None:
+                return JSONResponse(status_code=403, content={"detail": "Portal admin auth required for config proxy (Bearer token or Basic)"})
+            return await portal_proxy.proxy_request_to_portal(request)
         try:
             path = Path(Util().config_path()) / "core.yml"
             if not path.exists():
@@ -98,6 +103,10 @@ def get_api_config_core_patch_handler(core):  # noqa: ARG001
     """Return handler for PATCH /api/config/core."""
     async def api_config_core_patch(request: Request):
         """Update whitelisted keys in core.yml. Nested dicts are deep-merged; lists and scalars replace. Never overwrites if core.yml could not be loaded (avoids corrupting the file)."""
+        if portal_proxy.should_proxy_config():
+            if portal_proxy.get_portal_admin_from_request(request) is None:
+                return JSONResponse(status_code=403, content={"detail": "Portal admin auth required for config proxy (Bearer token or Basic)"})
+            return await portal_proxy.proxy_request_to_portal(request)
         try:
             body = await request.json()
             if not isinstance(body, dict):
@@ -136,8 +145,12 @@ def get_api_config_core_patch_handler(core):  # noqa: ARG001
 
 def get_api_config_users_get_handler(core):  # noqa: ARG001
     """Return handler for GET /api/config/users."""
-    async def api_config_users_get():
+    async def api_config_users_get(request: Request):
         """Return list of users from user.yml. Companion app / WebChat / control UI list all users and chat with each separately. Response: { \"users\": [ { \"id\", \"name\", \"type\", \"who\", \"email\", \"im\", \"phone\", \"permissions\" }, ... ] }."""
+        if portal_proxy.should_proxy_config():
+            if portal_proxy.get_portal_admin_from_request(request) is None:
+                return JSONResponse(status_code=403, content={"detail": "Portal admin auth required for config proxy (Bearer token or Basic)"})
+            return await portal_proxy.proxy_request_to_portal(request)
         try:
             users = Util().get_users() or []
             out = []
@@ -174,6 +187,10 @@ def get_api_config_users_post_handler(core):  # noqa: ARG001
     """Return handler for POST /api/config/users."""
     async def api_config_users_post(request: Request):
         """Add a user to user.yml."""
+        if portal_proxy.should_proxy_config():
+            if portal_proxy.get_portal_admin_from_request(request) is None:
+                return JSONResponse(status_code=403, content={"detail": "Portal admin auth required for config proxy (Bearer token or Basic)"})
+            return await portal_proxy.proxy_request_to_portal(request)
         try:
             body = await request.json()
             if not isinstance(body, dict) or not body.get("name"):
@@ -229,8 +246,12 @@ def get_api_config_users_post_handler(core):  # noqa: ARG001
 
 def get_api_config_users_patch_handler(core):  # noqa: ARG001
     """Return handler for PATCH /api/config/users/{user_name}."""
-    async def api_config_users_patch(user_name: str, request: Request):
+    async def api_config_users_patch(request: Request, user_name: str):
         """Update a user in user.yml by name. Body: name, id, email, im, phone, permissions."""
+        if portal_proxy.should_proxy_config():
+            if portal_proxy.get_portal_admin_from_request(request) is None:
+                return JSONResponse(status_code=403, content={"detail": "Portal admin auth required for config proxy (Bearer token or Basic)"})
+            return await portal_proxy.proxy_request_to_portal(request)
         try:
             body = await request.json()
             if not isinstance(body, dict):
@@ -294,8 +315,12 @@ def get_api_config_users_patch_handler(core):  # noqa: ARG001
 
 def get_api_config_users_delete_handler(core):  # noqa: ARG001
     """Return handler for DELETE /api/config/users/{user_name}."""
-    async def api_config_users_delete(user_name: str):
+    async def api_config_users_delete(request: Request, user_name: str):
         """Remove a user from user.yml by name."""
+        if portal_proxy.should_proxy_config():
+            if portal_proxy.get_portal_admin_from_request(request) is None:
+                return JSONResponse(status_code=403, content={"detail": "Portal admin auth required for config proxy (Bearer token or Basic)"})
+            return await portal_proxy.proxy_request_to_portal(request)
         try:
             users = Util().get_users() or []
             for u in users:

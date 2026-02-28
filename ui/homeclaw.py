@@ -157,7 +157,7 @@ def after_verification_callback(email, code):
     response = create_account(email, code)
     if "Account created successfully" in response:
         # Hide demo UI and show main UI
-        return "Account created successfully", 'Please click <a href="http://127.0.0.1:8000/portal" target="_blank">here</a> to go to the portal.'
+        return "Account created successfully", 'Please click <a href="http://127.0.0.1:18472/" target="_blank">here</a> to go to the portal.'
     return "Verification failed. Please check your details and try again.",  "Check the email address and verification code and try again."
 
 def render_login_ui():

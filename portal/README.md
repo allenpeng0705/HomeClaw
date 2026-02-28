@@ -19,7 +19,7 @@ python -c "import uvicorn; from portal.app import app; from portal.config import
 ```
 
 - **Host:** `127.0.0.1` (override: `PORTAL_HOST`)
-- **Port:** `8000` (override: `PORTAL_PORT`)
+- **Port:** `18472` (override: `PORTAL_PORT`)
 
 ## Step 1
 
@@ -47,6 +47,12 @@ python -c "import uvicorn; from portal.app import app; from portal.config import
 - **GET /api/config/{name}** — Return config (redacted). `name`: core, llm, memory_kb, skills_and_plugins, user, friend_presets. Requires session.
 - **PATCH /api/config/{name}** — Merge JSON body (whitelisted keys only); calls `prepare_for_update(name)` before write. Requires session.
 - **`portal/config_api.py`** — `load_config()`, `load_config_for_api()`, `update_config()`; redaction for core (auth_api_key, pinggy.token), llm (api_key), user (password).
+
+## Phase 2.1 (Manage settings UI)
+
+- **GET /dashboard** — Logged-in layout with nav: Dashboard | Manage settings | Log out. Link to **Manage settings**.
+- **GET /settings** — Manage settings page: tabs (Core, LLM, Memory & KB, Skills & Plugins, Users, Friend presets). Each tab loads config via GET /api/config/{name}, shows a form (scalars as inputs, objects/arrays as JSON textareas). Redacted values show as ••• and are not sent on save. **Save** sends only changed fields via PATCH. Requires session.
+- **GET /logout** — Clears session cookie and redirects to /login.
 
 All route handlers use a global exception handler so the server never crashes.
 

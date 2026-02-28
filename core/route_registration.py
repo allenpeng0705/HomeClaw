@@ -40,6 +40,7 @@ from core.routes import (
     memory_routes,
     misc_api,
     plugins_api,
+    portal_proxy,
     ui_routes,
     websocket_routes,
 )
@@ -127,6 +128,23 @@ def register_all_routes(core: Any) -> None:
         config_api.get_api_config_users_delete_handler(core),
         methods=["DELETE"],
         dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    # Portal auth (Phase 5): POST /api/portal/auth returns token for portal admin; no Core API key required.
+    app.add_api_route(
+        "/api/portal/auth",
+        portal_proxy.post_portal_auth_handler,
+        methods=["POST"],
+    )
+    # Portal UI reverse proxy (Phase 4.2): /portal-ui and /portal-ui/* -> Portal. Phase 5: require portal admin auth.
+    app.add_api_route(
+        "/portal-ui",
+        portal_proxy.get_portal_ui_handler(),
+        methods=["GET"],
+    )
+    app.add_api_route(
+        "/portal-ui/{path:path}",
+        portal_proxy.get_portal_ui_path_handler(),
+        methods=["GET"],
     )
     app.add_api_route(
         "/files/out",

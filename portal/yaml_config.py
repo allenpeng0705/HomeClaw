@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional, Set
 _log = logging.getLogger(__name__)
 
 # Top-level keys the Portal is allowed to merge (updates for other keys are ignored).
+# local_models entries may include type: "llama.cpp" (default) or "ollama"; other fields unchanged.
 WHITELIST_LLM = frozenset({
     "local_models", "cloud_models", "main_llm", "embedding_llm",
     "main_llm_mode", "main_llm_local", "main_llm_cloud", "main_llm_language",

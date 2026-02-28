@@ -1,17 +1,12 @@
 """
 Platform detection and path resolution for llama.cpp server binaries.
-HomeClaw expects llama.cpp release distributions in a single parent folder
-with one subfolder per platform. The core auto-selects the correct binary.
-
-Folder layout (under e.g. llama.cpp-master/):
-  mac/          - macOS (Apple Silicon or Intel), put llama-server here
-  win_cpu/      - Windows CPU build (llama-server.exe)
-  win_cuda/     - Windows CUDA build (llama-server.exe)
-  linux_cpu/    - Linux CPU build (llama-server)
-  linux_cuda/   - Linux CUDA build (llama-server)
+HomeClaw looks for llama-server in this order:
+  1. llama.cpp-master/<platform>/ under project root (see llama.cpp-master/README.md)
+  2. PATH (e.g. from winget install llama.cpp, brew install llama.cpp, nix, MacPorts)
+     See https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md
 """
-import os
 import platform
+import shutil
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -83,6 +78,7 @@ def get_llama_cpp_root(project_root: str) -> Path:
 def resolve_llama_server(project_root: str, subfolder_override: Optional[str] = None) -> Tuple[Optional[Path], Optional[str]]:
     """
     Resolve the llama-server executable for the current platform.
+    First checks llama.cpp-master/<platform>/; then falls back to PATH (winget, brew, nix, etc.).
 
     :param project_root: HomeClaw project root directory.
     :param subfolder_override: Optional subfolder name to use instead of auto-detection.
@@ -90,9 +86,13 @@ def resolve_llama_server(project_root: str, subfolder_override: Optional[str] = 
     """
     root = get_llama_cpp_root(project_root)
     folder = subfolder_override or get_platform_folder()
-    if not folder:
-        return None, None
-    exe = get_llama_server_executable(str(root), folder)
-    if exe is not None:
-        return exe, folder
+    if folder:
+        exe = get_llama_server_executable(str(root), folder)
+        if exe is not None:
+            return exe, folder
+    # Fallback: use llama-server from PATH (e.g. winget install llama.cpp, brew install llama.cpp)
+    exe_name = EXE_WINDOWS if platform.system() == "Windows" else EXE_UNIX
+    path_exe = shutil.which(exe_name)
+    if path_exe:
+        return Path(path_exe), "path"
     return None, None

@@ -11,7 +11,7 @@
 ### 1.1 `portal/` package (project root)
 
 - **`portal/__init__.py`** — Exposes `app` and `config`.
-- **`portal/config.py`** — No dependency on `base.util`. `ROOT_DIR` = parent of `portal/`; `get_host()` (default `127.0.0.1`, override `PORTAL_HOST`); `get_port()` (default `8000`, override `PORTAL_PORT`); `get_config_dir()` = `ROOT_DIR / "config"`.
+- **`portal/config.py`** — No dependency on `base.util`. `ROOT_DIR` = parent of `portal/`; `get_host()` (default `127.0.0.1`, override `PORTAL_HOST`); `get_port()` (default `18472`, override `PORTAL_PORT`); `get_config_dir()` = `ROOT_DIR / "config"`.
 - **`portal/app.py`** — FastAPI app:
   - **`GET /`** — Plain text `"HomeClaw Portal\n"`.
   - **`GET /ready`** — Plain text `"ok"` (readiness).
@@ -60,7 +60,7 @@
 
 - **Global exception handler:** Any unhandled exception in a route returns 500 JSON; process does not crash.
 - **run_portal():** Import or uvicorn failure logs and exits with code 1; no uncaught exception.
-- **config.py:** `get_port()` falls back to 8000 on invalid env; `get_config_dir()` uses `Path`; no I/O that can raise.
+- **config.py:** `get_port()` falls back to 18472 on invalid env; `get_config_dir()` uses `Path`; no I/O that can raise.
 
 ---
 
@@ -70,9 +70,9 @@
 # From project root, with venv activated (and pip install -r requirements.txt)
 python -m main portal
 # In another terminal:
-curl http://127.0.0.1:8000/
-curl http://127.0.0.1:8000/ready
-curl http://127.0.0.1:8000/api/portal/status
+curl http://127.0.0.1:18472/
+curl http://127.0.0.1:18472/ready
+curl http://127.0.0.1:18472/api/portal/status
 ```
 
 ```bash

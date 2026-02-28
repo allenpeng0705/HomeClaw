@@ -197,7 +197,7 @@ class LLMServiceManager:
         exe_path, folder = resolve_llama_server(root_path)
         if exe_path is None or folder is None:
             logger.error(
-                "llama-server not found. Put the binary in llama.cpp-master/<platform>/ (mac, win_cpu, win_cuda, linux_cpu, linux_cuda). See llama.cpp-master/README.md"
+                "llama-server not found. Put the binary in llama.cpp-master/<platform>/ (see llama.cpp-master/README.md), or install via winget/brew/nix so it is on PATH: https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md"
             )
             return
         use_gpu = folder in (FOLDER_WIN_CUDA, FOLDER_LINUX_CUDA)

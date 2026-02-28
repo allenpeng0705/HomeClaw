@@ -36,6 +36,7 @@
 /plugins/Headlines/__pycache__
 /examples/external_plugins/companion/__pycache__
 /config/portal_admin.yml
+/config/portal_secret.txt
 /config/workspace/daily_memory
 /config/workspace/agent_memory
 /config/workspace/memory
@@ -47,3 +48,5 @@
 /.venv
 /plugins/ppt-generation/__pycache__
 /config/workspace/memories
+/portal/__pycache__
+/portal/__pycache__
