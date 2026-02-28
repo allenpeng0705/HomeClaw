@@ -590,7 +590,6 @@ class Util:
             except Exception:
                 host = '127.0.0.1'
             if mtype == 'ollama':
-                logger.warning("Ollama as embedding_llm is not supported (Ollama uses /api/embed, not /v1/embeddings); requests may fail.")
                 path = (entry.get('path') or raw_id or '').strip() or raw_id
                 port = self._ollama_port(entry)
                 return path, raw_id, 'ollama', host, port
@@ -1446,18 +1445,31 @@ class Util:
                     if not api_key and entry.get("api_key_name"):
                         api_key = (os.environ.get(entry["api_key_name"].strip()) or "").strip() or None
 
-        embedding_url = "http://" + host + ":" + str(port) + "/v1/embeddings"
-        logger.debug(f"Embedding URL: {embedding_url}")
         headers = {"accept": "application/json", "Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = "Bearer " + api_key
-        body = {"input": text}
-        if model_for_body:
-            body["model"] = model_for_body
         sem = self._get_llm_semaphore(mtype)
         try:
             async with sem:
                 async with aiohttp.ClientSession() as session:
+                    if mtype == "ollama":
+                        embedding_url = "http://" + str(host) + ":" + str(port) + "/api/embed"
+                        body = {"model": path_or_name or "", "input": text if isinstance(text, str) else (text if isinstance(text, list) else [str(text)])}
+                        if isinstance(body["input"], str):
+                            body["input"] = [body["input"]]
+                        async with session.post(embedding_url, headers=headers, data=json.dumps(body)) as response:
+                            response_json = await response.json() if getattr(response, "content_type", None) and "json" in str(getattr(response, "content_type", "")) else {}
+                            if not isinstance(response_json, dict) or "embeddings" not in response_json:
+                                return None
+                            emb = response_json["embeddings"]
+                            if not isinstance(emb, list) or not emb:
+                                return None
+                            return emb[0] if isinstance(emb[0], list) else None
+                    embedding_url = "http://" + host + ":" + str(port) + "/v1/embeddings"
+                    logger.debug(f"Embedding URL: {embedding_url}")
+                    body = {"input": text}
+                    if model_for_body:
+                        body["model"] = model_for_body
                     async with session.post(
                         embedding_url,
                         headers=headers,

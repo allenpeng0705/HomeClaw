@@ -79,19 +79,34 @@ async def run_slm_layer_async(
 
 def resolve_slm_model_ref(slm_model_ref: str):
     """
-    Resolve hybrid_router.slm.model (e.g. local_models/classifier_0_5b) to (host, port, path_relative, raw_id).
-    path_relative is for starting the server (relative to models_path); raw_id is for the request body 'model' field.
-    Returns (host, port, path_relative, raw_id) or (None, None, None, None) if not found or not local.
+    Resolve hybrid_router.slm.model (e.g. local_models/classifier_0_5b or local_models/Ollama-qwen2) to (host, port, path_relative, model_for_request).
+    path_relative: for llama.cpp = path to GGUF; for ollama = model name (not used to start server).
+    model_for_request: value for the request body 'model' field (Ollama needs the model name; llama.cpp uses raw_id).
+    Returns (host, port, path_relative, model_for_request) or (None, None, None, None) if not found or not local/ollama.
     """
     from base.util import Util
     ref = (slm_model_ref or "").strip()
     if not ref:
         return (None, None, None, None)
     entry, mtype = Util()._get_model_entry(ref)
-    if entry is None or mtype != "local":
+    if entry is None:
+        return (None, None, None, None)
+    if mtype == "ollama":
+        try:
+            host = str(entry.get("host") or "127.0.0.1").strip() or "127.0.0.1"
+        except Exception:
+            host = "127.0.0.1"
+        port = Util()._ollama_port(entry)
+        path_rel = (entry.get("path") or "").strip()
+        model_for_request = path_rel or ref
+        return (host, port, path_rel, model_for_request)
+    if mtype != "local":
         return (None, None, None, None)
     host = entry.get("host", "127.0.0.1")
-    port = int(entry.get("port", 5089))
+    try:
+        port = max(1, min(65535, int(entry.get("port", 5089))))
+    except (TypeError, ValueError):
+        port = 5089
     path_rel = (entry.get("path") or "").strip()
     _, raw_id = Util()._parse_model_ref(ref)
     raw_id = raw_id or ref

@@ -445,26 +445,41 @@ class Core(CoreInterface):
     # try to reduce the misunderstanding. All the input tests in EmbeddingBase should be
     # in a list[str]. If you just want to embedding one string, ok, put into one list first.
     async def get_embedding(self, request: EmbeddingRequest)-> List[List[float]]:
-        # Initialize the embedder, now it is using one existing llama_cpp server with local LLM model
+        # Initialize the embedder: llama.cpp/cloud use /v1/embeddings; Ollama uses /api/embed (adapter below).
         try:
             resolved = Util().embedding_llm()
             if not resolved or len(resolved) < 5:
                 logger.error("Embedding LLM not configured.")
-                return {}
-            mtype = resolved[2] if len(resolved) > 2 else "local"
-            host, port = resolved[3], resolved[4]
+                return []
+            path_or_name, _, mtype, host, port = resolved[0], resolved[1], resolved[2] if len(resolved) > 2 else "local", resolved[3], resolved[4]
             sem = Util()._get_llm_semaphore(mtype)
-            embedding_url = "http://" + host + ":" + str(port) + "/v1/embeddings"
-            request_json = request.model_dump_json()
             async with sem:
                 async with aiohttp.ClientSession() as session:
+                    if mtype == "ollama":
+                        # Ollama: POST /api/embed with {"model": name, "input": list of strings}
+                        embedding_url = "http://" + str(host) + ":" + str(port) + "/api/embed"
+                        body = {"model": path_or_name or request.model, "input": getattr(request, "input", []) or []}
+                        if not body["input"]:
+                            return []
+                        async with session.post(
+                            embedding_url,
+                            headers={"accept": "application/json", "Content-Type": "application/json"},
+                            data=json.dumps(body),
+                        ) as response:
+                            response_json = await response.json() if response.content_type and "json" in response.content_type else {}
+                            if not isinstance(response_json, dict) or "embeddings" not in response_json:
+                                return []
+                            emb = response_json["embeddings"]
+                            return emb if isinstance(emb, list) else []
+                    # OpenAI-compatible /v1/embeddings (llama.cpp, LiteLLM)
+                    embedding_url = "http://" + str(host) + ":" + str(port) + "/v1/embeddings"
+                    request_json = request.model_dump_json()
                     async with session.post(
                         embedding_url,
                         headers={"accept": "application/json", "Content-Type": "application/json"},
                         data=request_json,
                     ) as response:
                         response_json = await response.json()
-                        # Extract embeddings from the response; guard malformed response
                         if not isinstance(response_json, dict) or "data" not in response_json or not isinstance(response_json["data"], list):
                             return []
                         embeddings = [item["embedding"] for item in response_json["data"] if isinstance(item, dict) and "embedding" in item]
@@ -474,7 +489,7 @@ class Core(CoreInterface):
             raise
         except Exception as e:
             logger.error(f"Unexpected error in embedding: {e}")
-            return {}
+            return []
 
 
     def initialize_vector_store(self, collection_name: str, client: Optional[chromadb.Client] = None,

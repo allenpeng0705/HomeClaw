@@ -393,13 +393,20 @@ class LLMServiceManager:
         if not model_ref:
             return
         entry, mtype = Util()._get_model_entry(model_ref)
-        if entry is None or mtype != "local":
-            logger.debug("Classifier LLM: model ref {} not found or not local, skipping.", model_ref)
+        if entry is None:
+            logger.debug("Classifier LLM: model ref {} not found, skipping.", model_ref)
             return
         _, raw_id = Util()._parse_model_ref(model_ref)
         name = raw_id or model_ref
         if name in self.llms:
             logger.debug("Classifier LLM {} is already running", name)
+            return
+        if mtype == "ollama":
+            self.llms.append(name)
+            logger.debug("Classifier LLM {} (Ollama) registered; no process started.", name)
+            return
+        if mtype != "local":
+            logger.debug("Classifier LLM: model ref {} is not local/ollama, skipping.", model_ref)
             return
         host = entry.get("host", "127.0.0.1")
         port = int(entry.get("port", 5089))
