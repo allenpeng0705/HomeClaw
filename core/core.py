@@ -1450,6 +1450,7 @@ class Core(CoreInterface):
             return answer
         except Exception as e:
             logger.exception(e)
+            return "Something went wrong on our side. Please try again. If it keeps happening, the service may be temporarily unavailable."
 
 
     def prompt_template(self, section: str, prompt_name: str) -> List[Dict] | None:

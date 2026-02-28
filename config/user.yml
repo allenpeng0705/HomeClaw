@@ -46,7 +46,14 @@ users:
           personalities: [gentle, smart, knowledge, common interrest, blues, guitar, rock, reading,sports, travel, cooking]   # gentle, funny, serious, sarcastic, humorous, knowledge, etc.
           language: zh        # en, zh, ja, ko, es, fr, de, pt, it, ... — reply language
           response_length: medium   # short, medium, long
-          idle_days_before_nudge: 1   # reserved: 0 = disabled; future proactive nudge after N days (not used in Core today) 
+          idle_days_before_nudge: 1   # reserved: 0 = disabled; future proactive nudge after N days (not used in Core today)
+      # System friends with presets: limited tools/context for specific tasks (see config/friend_presets.yml)
+      - name: Reminder
+        preset: reminder
+      - name: Note
+        preset: note
+      - name: Finder
+        preset: finder
 
   - id: PengXiaoFeng
     name: PengXiaoFeng

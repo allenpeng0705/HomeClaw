@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:home_claw_app/l10n/app_localizations.dart';
 import '../core_service.dart';
+import '../utils/friend_localization.dart';
 import 'chat_screen.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
@@ -39,9 +41,11 @@ class _FriendListScreenState extends State<FriendListScreen> {
     });
     try {
       final list = await widget.coreService.getFriends();
+      final sorted = List<Map<String, dynamic>>.from(list);
+      sortFriendsWithSystemFirst(sorted);
       if (mounted) {
         setState(() {
-          _friends = list;
+          _friends = sorted;
           _loading = false;
         });
       }
@@ -71,14 +75,15 @@ class _FriendListScreenState extends State<FriendListScreen> {
     if (!widget.coreService.isLoggedIn) {
       return LoginScreen(coreService: widget.coreService);
     }
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('HomeClaw'),
+        title: Text(l10n.homeClaw),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loading ? null : _loadFriends,
-            tooltip: 'Refresh friends',
+            tooltip: l10n.refreshFriends,
           ),
           IconButton(
             icon: const Icon(Icons.settings),
@@ -94,7 +99,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _logout,
-            tooltip: 'Log out',
+            tooltip: l10n.logOut,
           ),
         ],
       ),
@@ -109,20 +114,21 @@ class _FriendListScreenState extends State<FriendListScreen> {
                       children: [
                         Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
                         const SizedBox(height: 16),
-                        FilledButton(onPressed: _loadFriends, child: const Text('Retry')),
+                        FilledButton(onPressed: _loadFriends, child: Text(l10n.retry)),
                       ],
                     ),
                   ),
                 )
               : _friends.isEmpty
-                  ? const Center(child: Text('No friends. Add friends in Core (config/user.yml).'))
+                  ? Center(child: Text(l10n.noFriends))
                   : ListView.builder(
                       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                       itemCount: _friends.length,
                       itemBuilder: (context, index) {
                         final f = _friends[index];
                         final friendId = (f['name'] as String?)?.trim() ?? 'HomeClaw';
-                        final displayName = friendId;
+                        final locale = Localizations.localeOf(context);
+                        final displayName = localizedFriendDisplayName(friend: f, locale: locale);
                         return _FriendTile(
                           userId: widget.coreService.sessionUserId!,
                           friendId: friendId,

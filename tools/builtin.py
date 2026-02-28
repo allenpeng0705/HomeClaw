@@ -2151,6 +2151,32 @@ def _attach_run_skill_image_path(script_output: str, context: ToolContext) -> No
             core._response_image_paths_by_request_id[req_id] = paths
 
 
+def _append_file_link_to_run_skill_output(script_output: str, context: Optional[ToolContext]) -> str:
+    """If script printed JSON with success and output_rel_path (e.g. ppt-generation skill), append the file view link. Same behavior as route_to_plugin for file output. Never raises."""
+    if not script_output or not context:
+        return script_output
+    try:
+        # Script may print a single JSON line or JSON followed by other text; try first line or full strip
+        raw = script_output.strip()
+        for candidate in (raw, raw.split("\n")[0].strip() if "\n" in raw else raw):
+            if not candidate or not isinstance(candidate, str) or not candidate.strip().startswith("{"):
+                continue
+            parsed = json.loads(candidate) if candidate else None
+            if isinstance(parsed, dict) and parsed.get("success") and parsed.get("output_rel_path"):
+                from core.result_viewer import build_file_view_link
+                scope = _get_file_workspace_subdir(context)
+                path_rel = (parsed.get("output_rel_path") or "").strip()
+                if path_rel and scope:
+                    link, _ = build_file_view_link(scope, path_rel)
+                    if link:
+                        msg = (parsed.get("message") or "File saved.").strip()
+                        return f"{msg}\n\nCRITICAL: Use ONLY the URL on the next line. Copy it exactly—do not modify, truncate, or append anything.\n{link}"
+                break
+    except (json.JSONDecodeError, TypeError, Exception):
+        pass
+    return script_output
+
+
 async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Run a script from a loaded skill's scripts/ folder. Supports Python (.py), Node.js (.js, .mjs, .cjs), shell (.sh). Skill name = folder name under skills_dir; script = filename or path relative to scripts/. Optional args as list of strings. Sandboxed: only scripts under <skill>/scripts/; optional allowlist in config. Skills without scripts/ are instruction-only: omit script and use the skill's instructions in your response."""
     try:
@@ -2324,6 +2350,7 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
                     )
                 # Convention: script prints HOMECLAW_IMAGE_PATH=<path> so Core/channels can send image to companion/channel
                 _attach_run_skill_image_path(out, context)
+                out = _append_file_link_to_run_skill_output(out, context)
                 return out or "(no output)"
             # Default: subprocess with same Python and env as Core
             python_exe = sys.executable
@@ -2431,6 +2458,7 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
                 out = (out or "") + f"\n\n[Fix] Install in Core's Python: {sys.executable} -m pip install <missing-package>"
         # Convention: script prints HOMECLAW_IMAGE_PATH=<path> so Core/channels can send image to companion/channel
         _attach_run_skill_image_path(out, context)
+        out = _append_file_link_to_run_skill_output(out, context)
         return out or "(no output)"
     except asyncio.TimeoutError:
         return f"Error: script timed out after {timeout}s"
@@ -2595,6 +2623,18 @@ def _document_read_plain_text(full_path: Path, max_chars: int, suffix: str) -> s
     return content
 
 
+def _is_bare_filename(path_arg: Optional[str]) -> bool:
+    """True if path_arg looks like a single filename (no directory slashes, not Windows absolute). Never raises."""
+    if not path_arg or not isinstance(path_arg, str) or not path_arg.strip():
+        return False
+    p = path_arg.strip()
+    if "/" in p or "\\" in p:
+        return False
+    if len(p) > 1 and p[1] == ":":
+        return False
+    return True
+
+
 async def _document_read_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Read document content: PDF, PPT, Word, MD, HTML, XML, JSON, etc. Use 'share/...' or path in your user or companion folder. When base not set, absolute paths allowed."""
     config = _get_tools_config()
@@ -2605,6 +2645,20 @@ async def _document_read_executor(arguments: Dict[str, Any], context: ToolContex
     max_chars = int(arguments.get("max_chars", 0)) or default_max
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
+        if r is None and _is_bare_filename(path_arg):
+            matches = _search_sandbox_for_filename(context, path_arg)
+            if len(matches) == 1:
+                path_arg = matches[0]
+                r = _resolve_file_path(path_arg, context, for_write=False)
+            elif len(matches) > 1:
+                return (
+                    f"Found {len(matches)} files matching '{path_arg}'. Please specify which one: "
+                    + ", ".join(matches[:15])
+                    + (" ..." if len(matches) > 15 else "")
+                    + " — e.g. document_read(path='exact_path')."
+                )
+            elif len(matches) == 0:
+                return f"No file found matching '{path_arg}'. Use folder_list() or file_find(pattern='*') to see available files in your sandbox."
         if r is None:
             return _file_resolve_error_msg(path_arg)
         full, base = r
@@ -2678,6 +2732,20 @@ async def _file_understand_executor(arguments: Dict[str, Any], context: ToolCont
         except (TypeError, ValueError):
             max_chars = default_max
         r = _resolve_file_path(path_arg, context, for_write=False)
+        if r is None and _is_bare_filename(path_arg):
+            matches = _search_sandbox_for_filename(context, path_arg)
+            if len(matches) == 1:
+                path_arg = matches[0]
+                r = _resolve_file_path(path_arg, context, for_write=False)
+            elif len(matches) > 1:
+                return (
+                    f"Found {len(matches)} files matching '{path_arg}'. Please specify which one: "
+                    + ", ".join(matches[:15])
+                    + (" ..." if len(matches) > 15 else "")
+                    + " — e.g. file_understand(path='exact_path')."
+                )
+            elif len(matches) == 0:
+                return f"No file found matching '{path_arg}'. Use folder_list() or file_find(pattern='*') to see available files."
         if r is None:
             return _file_resolve_error_msg(path_arg)
         full, base = r
@@ -2831,15 +2899,25 @@ async def _knowledge_base_list_executor(arguments: Dict[str, Any], context: Tool
         return f"Failed to list knowledge base: {e!s}"
 
 
+def _normalize_format_arg(raw: Any) -> str:
+    """Normalize format for save_result_page: strip quotes so \"'HTML'\", 'html', html all become 'html'. Never raises."""
+    try:
+        s = (str(raw or "").strip().lower() or "markdown").strip()
+        # Strip one layer of surrounding quotes (LLMs sometimes send format="'HTML'" or format='"html"')
+        if (s.startswith("'") and s.endswith("'")) or (s.startswith('"') and s.endswith('"')):
+            s = s[1:-1].strip().lower() or "markdown"
+        return s if s in ("markdown", "md", "html") else "markdown"
+    except Exception:
+        return "markdown"
+
+
 async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Save a result page as HTML or Markdown. format=markdown: returns markdown content + link so reply can show it in chat. format=html: returns link only (open in browser)."""
     try:
         from core.result_viewer import build_file_view_link, generate_result_html
         title = (arguments.get("title") or "").strip() or "Result"
         content = arguments.get("content") or ""
-        fmt = (arguments.get("format") or "markdown").strip().lower() or "markdown"
-        if fmt not in ("markdown", "md", "html"):
-            fmt = "markdown"
+        fmt = _normalize_format_arg(arguments.get("format"))
         if fmt == "md":
             fmt = "markdown"
         content_str = str(content or "").strip()
@@ -2963,22 +3041,111 @@ async def _file_write_executor(arguments: Dict[str, Any], context: ToolContext) 
         return _file_not_found_msg(context)
 
 
+# Image extensions: when get_file_view_link serves these, we attach the image to the response so the client can show it inline.
+_FILE_VIEW_LINK_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico")
+
+
+# When user/model passes only a filename (no path), try these subdirs so we can still find the file (e.g. images/ID1.jpg).
+_GET_FILE_VIEW_LINK_FALLBACK_PREFIXES = ("images/", "documents/", "downloads/", "output/")
+
+# Max results when searching sandbox for a filename (avoid slow scans).
+_GET_FILE_VIEW_LINK_SEARCH_MAX = 25
+
+
 async def _get_file_view_link_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Return a view link for a file already saved under output/ (e.g. after file_write or save_result_page). Use when the user asks for the link (e.g. 'send me the link', '能把链接发给我')."""
+    """Return a view/download link for any file in the user sandbox or share (used in all chats that have this tool, not only Finder). When the file is an image, also attach it so the client can show it inline. If the path is not found, tries common subdirs and sandbox search by filename."""
     path_arg = (arguments.get("path") or "").strip()
-    if not path_arg or ".." in path_arg or path_arg.startswith("/"):
-        return "Path is required and must be a relative path under output/ (e.g. output/report_xxx.html)."
-    if not (path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR):
-        return f"Only paths under {FILE_OUTPUT_SUBDIR}/ can have view links (e.g. output/allen_resume_slides.html)."
+    if not path_arg or ".." in path_arg:
+        return "Path is required and must be a relative path (e.g. output/report.html, documents/1.pdf, images/photo.png)."
+    # Allow bare filename (e.g. "1.pdf"); we will search sandbox if resolve fails
+    if path_arg.startswith("/") and _is_bare_filename(path_arg.lstrip("/")):
+        path_arg = path_arg.lstrip("/")
     try:
+        r = _resolve_file_path(path_arg, context, for_write=False)
+        if not r:
+            # If only a filename was passed (no /), try common subdirs so "ID1.jpg" can resolve to images/ID1.jpg
+            if "/" not in path_arg and "\\" not in path_arg:
+                for prefix in _GET_FILE_VIEW_LINK_FALLBACK_PREFIXES:
+                    if not prefix:
+                        continue
+                    try_path = prefix + path_arg
+                    r = _resolve_file_path(try_path, context, for_write=False)
+                    if r:
+                        full, _ = r
+                        if isinstance(full, Path) and full.is_file():
+                            path_arg = try_path
+                            break
+                        r = None
+            if not r:
+                # Search sandbox by filename so "1.pdf" can be found
+                matches = _search_sandbox_for_filename(context, path_arg)
+                if len(matches) == 1:
+                    path_arg = matches[0]
+                    r = _resolve_file_path(path_arg, context, for_write=False)
+                elif len(matches) > 1:
+                    return (
+                        f"Found {len(matches)} files matching '{path_arg}'. Please specify which one: "
+                        + ", ".join(matches[:15])
+                        + (" ..." if len(matches) > 15 else "")
+                        + " — e.g. get_file_view_link(path='exact_path')."
+                    )
+                if not r:
+                    return _file_resolve_error_msg(path_arg) or _FILE_HOMECLAW_ROOT_NOT_SET_MSG
+        full, effective_base = r
+        if not isinstance(full, Path) or not full.is_file():
+            # Path resolved but is a dir or missing: search sandbox for the filename
+            filename = path_arg.split("/")[-1].split("\\")[-1].strip() if path_arg else ""
+            if filename:
+                matches = _search_sandbox_for_filename(context, filename)
+                if len(matches) == 1:
+                    path_arg = matches[0]
+                    r = _resolve_file_path(path_arg, context, for_write=False)
+                    if r:
+                        full, effective_base = r
+                if len(matches) > 1:
+                    return (
+                        f"Found {len(matches)} files matching '{filename}'. Please specify which one: "
+                        + ", ".join(matches[:15])
+                        + (" ..." if len(matches) > 15 else "")
+                    )
+                if not isinstance(full, Path) or not full.is_file():
+                    return "That path is a folder or does not exist. Use a file path (e.g. from file_find or folder_list)."
+            else:
+                return "That path is a folder or does not exist. Use a file path (e.g. from file_find or folder_list)."
+        try:
+            if not effective_base:
+                scope = _get_file_workspace_subdir(context) or "default"
+                path_for_link = path_arg.replace("\\", "/")
+            else:
+                base = Path(_get_homeclaw_root()).resolve()
+                scope = effective_base.name if effective_base != base else (_get_file_workspace_subdir(context) or "default")
+                path_for_link = str(full.relative_to(effective_base)).replace("\\", "/")
+        except (ValueError, OSError, AttributeError):
+            scope = _get_file_workspace_subdir(context)
+            if not scope:
+                return "Could not determine user/companion scope."
+            path_for_link = path_arg.replace("\\", "/")
         from core.result_viewer import build_file_view_link
-        scope = _get_file_workspace_subdir(context)
-        if not scope:
-            return "Could not determine user/companion scope. Use the path from the previous file save (e.g. output/allen_resume_slides.html)."
-        link, link_err = build_file_view_link(scope, path_arg)
-        if link:
-            return f"View link. CRITICAL: Use ONLY the URL on the next line; copy it exactly—do not modify, truncate, or append anything.\n{link}"
-        return f"View link is not available: {link_err or 'set core_public_url and auth_api_key in config/core.yml.'}"
+        link, link_err = build_file_view_link(scope, path_for_link)
+        if not link:
+            return f"View link is not available: {link_err or 'set core_public_url and auth_api_key in config/core.yml.'}"
+        # When the file is an image, attach it so the client can display it directly (Finder/any chat). Never crash; on failure we still return the link.
+        try:
+            if full.suffix and full.suffix.lower() in _FILE_VIEW_LINK_IMAGE_SUFFIXES:
+                req = getattr(context, "request", None)
+                core = getattr(context, "core", None)
+                req_id = getattr(req, "request_id", None) if req else None
+                abs_path = str(full.resolve())
+                meta = getattr(req, "request_metadata", None)
+                if isinstance(meta, dict):
+                    meta["response_image_paths"] = [abs_path]
+                if core and req_id:
+                    if not hasattr(core, "_response_image_paths_by_request_id"):
+                        core._response_image_paths_by_request_id = {}
+                    core._response_image_paths_by_request_id[req_id] = [abs_path]
+        except Exception as img_e:
+            logger.debug("get_file_view_link: image attach failed (link still returned): %s", img_e)
+        return f"View/download link. CRITICAL: Use ONLY the URL on the next line; copy it exactly—do not modify, truncate, or append anything.\n{link}"
     except Exception as e:
         logger.debug("get_file_view_link failed: %s", e)
         return f"Could not generate link: {e!s}"
@@ -3014,7 +3181,11 @@ _FILE_HOMECLAW_ROOT_NOT_SET_MSG = (
 
 def _file_resolve_error_msg(path_arg: Optional[str] = None) -> str:
     """When _resolve_file_path returned None: homeclaw_root not set vs invalid path. If path_arg looks absolute, say so. Never raises."""
-    if path_arg and (path_arg.strip().startswith("/") or (len(path_arg.strip()) > 1 and path_arg.strip()[1] == ":")):
+    try:
+        p = (path_arg or "").strip()
+    except Exception:
+        p = ""
+    if p and (p.startswith("/") or (len(p) > 1 and p[1] == ":")):
         return (
             "Absolute paths are not allowed. Use only the filename or path under the user sandbox (e.g. 1.pdf, output/report.pdf). "
             "Call folder_list() or file_find(pattern='*1.pdf*') to get the path, then use that exact path in document_read (e.g. path '1.pdf')."
@@ -3037,6 +3208,33 @@ def _path_under(full: Path, base: Optional[Path]) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _search_sandbox_for_filename(context: Optional[Any], filename: Optional[str], max_results: int = 50) -> List[str]:
+    """Search user sandbox for files whose path or name matches filename. Returns list of relative path strings (files only). Empty on error or no homeclaw_root. Never raises."""
+    try:
+        safe_name = (filename or "").strip() if isinstance(filename, str) else ""
+        r = _resolve_file_path(".", context, for_write=False)
+        if r is None:
+            return []
+        full_dir, base = r
+        if not full_dir.is_dir() or base is None:
+            return []
+        pattern = "*" + safe_name + "*" if safe_name else "*"
+        results: List[str] = []
+        for i, p in enumerate(full_dir.rglob(pattern)):
+            if i >= max_results:
+                break
+            if p.is_file():
+                try:
+                    rel = str(p.relative_to(base))
+                except ValueError:
+                    rel = p.name
+                if rel not in results:
+                    results.append(rel)
+        return results
+    except Exception:
+        return []
 
 
 def _safe_user_dir(user_id: Optional[str]) -> str:
@@ -3158,6 +3356,10 @@ def _resolve_file_path(
             if not base_str:
                 return None  # homeclaw_root not set; caller should return clear message
             path_arg = "."  # default to user's private folder (homeclaw_root/{user_id}) when homeclaw_root is set
+
+        # Leading slash with no drive letter (e.g. "/1.pdf", "/documents/Allen_Peng_resume_en.docx") is often meant as sandbox-relative; treat as relative so we don't reject it.
+        if base_str and path_arg.startswith("/") and (len(path_arg) <= 1 or path_arg[1] != ":"):
+            path_arg = path_arg.lstrip("/")
 
         # When homeclaw_root is set, absolute paths are not allowed (sandbox only). Reject so caller can return a clear message.
         if base_str and path_arg and (path_arg.startswith("/") or (len(path_arg) > 1 and path_arg[1] == ":")):
@@ -4281,7 +4483,7 @@ def register_routing_tools(registry: ToolRegistry, core: Any) -> None:
     registry.register(
         ToolDefinition(
             name="route_to_plugin",
-            description="Route this request to a specific plugin by plugin_id. Use when the user intent clearly matches one of the available plugins. You MUST call this tool (do not just reply 'I need some time' or 'working on it') — the user gets the result only when the plugin runs and returns. For PPT/slides/presentation: use plugin_id ppt-generation and capability create_from_source (parameters.source = user request or outline) or create_from_outline/create_presentation. For homeclaw-browser pass capability_id and parameters (e.g. node_id, url) when the user asks for photo, video, or browser.",
+            description="Route this request to a specific plugin by plugin_id. Use when the user intent clearly matches one of the available plugins. You MUST call this tool (do not just reply 'I need some time' or 'working on it') — the user gets the result only when the plugin runs and returns. For PPT/slides/presentation use run_skill(skill_name='ppt-generation-1.0.0', script='create_pptx.py', args=[...]) instead. For homeclaw-browser pass capability_id and parameters (e.g. node_id, url) when the user asks for photo, video, or browser.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -5302,11 +5504,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="get_file_view_link",
-            description="Get a view link for a file already saved (e.g. output/report_xxx.html or HomeClaw/output/slides.html). Use when the user asks for the link after a file was saved. Pass the same path used when saving (from file_write or save_result_page).",
+            description="Get a view/download link for any file in the user sandbox or share. Use when the user asks to send or get a file (e.g. 'send me that file', '发给我 ID1.jpg', '把XX发给我', 'give me the link to 1.pdf'). Pass the exact path from folder_list/file_find that matches the requested filename. For images, the image is also sent inline. Reply with only the URL from this tool.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path to the saved file (e.g. output/report.html, HomeClaw/output/slides.html). Same path as in the save result."},
+                    "path": {"type": "string", "description": "Relative path to the file (e.g. output/report.html, documents/1.pdf, images/photo.png). Use the path returned by file_find or folder_list."},
                 },
                 "required": ["path"],
             },

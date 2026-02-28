@@ -37,7 +37,7 @@ The assistant uses tools like **file_write** or **save_result_page** with path *
 
 ## Generate a link for the response
 
-When the assistant saves a report or file, it can return a **link** you can open in a browser or share (time-limited, signed).
+When the assistant saves a report or file, it can return a **link** you can open in a browser or share. By default links are **signed and time-limited** (token style). You can instead use **static** links so the URL points directly under your web server’s doc root — see [FileLinkStatic.md](FileLinkStatic.md) (www_root = homeclaw_root).
 
 ### Config (minimal for links)
 
@@ -61,7 +61,7 @@ In **config/core.yml** (top level):
 ### Safety
 
 - **No path escape:** Token path and scope are validated (no `..`, no `/` in scope). Resolved path must stay under **file_read_base**.
-- **Token:** Signed with **auth_api_key**; expired or invalid token returns 403.
+- **Token:** Signed with **auth_api_key**; expired or invalid token returns 403. Link validity is set in **config/core.yml** via **file_view_link_expiry_sec** (seconds or e.g. `"7d"`; default 7 days, max 365 days). See [FileLinkStatic.md](FileLinkStatic.md).
 - **Core never crashes:** File tools and **GET /files/out** return HTTP and messages on error; no uncaught exceptions.
 
 ---

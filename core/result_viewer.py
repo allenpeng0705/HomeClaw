@@ -20,8 +20,9 @@ from urllib.parse import quote, unquote
 
 from loguru import logger
 
-# Default expiry for file view links (7 days) so shared links stay valid for a stable UX.
+# Default expiry for file view links (7 days). Override via config: file_view_link_expiry_sec (seconds or e.g. "7d").
 DEFAULT_FILE_VIEW_LINK_EXPIRY_SEC = 7 * 86400
+MAX_FILE_VIEW_LINK_EXPIRY_SEC = 365 * 86400  # cap 1 year
 
 DEFAULT_MAX_RESULT_HTML_BYTES = 500 * 1024  # 500 KB for generated report HTML
 
@@ -60,7 +61,7 @@ def create_file_access_token(scope: str, path: str, expiry_sec: int = DEFAULT_FI
         if not secret:
             return None
         logger.debug("files/out token created (secret_len={})", len(secret))
-        expiry = int(time.time()) + max(1, min(expiry_sec, 7 * 86400))
+        expiry = int(time.time()) + max(1, min(int(expiry_sec) if isinstance(expiry_sec, (int, float)) else DEFAULT_FILE_VIEW_LINK_EXPIRY_SEC, MAX_FILE_VIEW_LINK_EXPIRY_SEC))
         payload = f"{scope}\0{path}\0{expiry}"
         full_sig = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
         sig = full_sig[:32]  # shorter link, less likely to be truncated; 16 hex bytes = 64 bits
@@ -149,9 +150,11 @@ def verify_file_access_token(token: str) -> Optional[Tuple[str, str]]:
 
 def build_file_view_link(scope: str, path: str) -> Tuple[Optional[str], Optional[str]]:
     """
-    Build a stable file view URL for GET /files/out. Single place for link generation so format and config checks are consistent.
+    Build a file view URL. Single place for link generation so format and config checks are consistent.
     Returns (url, None) on success, or (None, error_message) when link cannot be generated (caller should show error_message to user).
-    Uses token-first query order and 7-day expiry for stable UX. Never raises.
+    - file_link_style "token" (default): signed GET /files/out?token=... (7-day expiry). Requires auth_api_key.
+    - file_link_style "static": URL = base_url/ file_static_prefix /scope/path?token=... (e.g. /files/AllenPeng/images/ID1.jpg?token=...). The token is required so the link only accesses that user's sandbox (scope+path); Core serves the file after verifying the token.
+    Never raises.
     """
     try:
         if not scope or not path or ".." in path or path.startswith("/"):
@@ -159,7 +162,32 @@ def build_file_view_link(scope: str, path: str) -> Tuple[Optional[str], Optional
         base_url = get_result_link_base_url()
         if not base_url:
             return (None, "Set core_public_url in config (e.g. your tunnel or public URL) for shareable file links.")
-        token = create_file_access_token(scope, path)
+        try:
+            from base.util import Util
+            meta = Util().get_core_metadata()
+            link_style = (getattr(meta, "file_link_style", None) or "token").strip().lower()
+            static_prefix = (getattr(meta, "file_static_prefix", None) or "files").strip().strip("/") or "files"
+            expiry_sec = getattr(meta, "file_view_link_expiry_sec", None)
+            if expiry_sec is None or not isinstance(expiry_sec, (int, float)):
+                expiry_sec = DEFAULT_FILE_VIEW_LINK_EXPIRY_SEC
+            expiry_sec = max(1, min(int(expiry_sec), MAX_FILE_VIEW_LINK_EXPIRY_SEC))
+        except Exception:
+            link_style = "token"
+            static_prefix = "files"
+            expiry_sec = DEFAULT_FILE_VIEW_LINK_EXPIRY_SEC
+        if link_style == "static":
+            # URL path = prefix/scope/path; always add token so the link only accesses this user's sandbox (scope+path).
+            path_encoded = "/".join(quote(seg, safe="") for seg in path.replace("\\", "/").strip("/").split("/"))
+            scope_safe = quote(scope, safe="")
+            token = create_file_access_token(scope, path, expiry_sec=expiry_sec)
+            if not token:
+                return (None, "Set auth_api_key in config for shareable file links.")
+            token_safe = "".join(c for c in token if c in _TOKEN_ALPHABET)
+            if len(token_safe) < 33:
+                return (None, "Could not generate file link (token invalid).")
+            url = f"{base_url.rstrip('/')}/{static_prefix}/{scope_safe}/{path_encoded}?token={token_safe}"
+            return (url, None)
+        token = create_file_access_token(scope, path, expiry_sec=expiry_sec)
         if not token:
             return (None, "Set auth_api_key in config for shareable file links.")
         # Emit only token alphabet so link is stable (no accidental chars)

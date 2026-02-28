@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:app_links/app_links.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:home_claw_app/l10n/app_localizations.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
 import 'chat_history_store.dart';
 import 'core_service.dart';
@@ -61,6 +62,8 @@ class HomeClawCompanionApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       home: _InitialScreen(coreService: coreService, initialMessage: initialMessage),
     );
   }
@@ -146,21 +149,22 @@ class _InitialScreenState extends State<_InitialScreen> {
       builder: (context, snapshot) {
         if (snapshot.hasData && snapshot.data != null) return snapshot.data!;
         if (snapshot.hasError) {
+          final l10n = AppLocalizations.of(context)!;
           return Scaffold(
-            appBar: AppBar(title: const Text('HomeClaw')),
+            appBar: AppBar(title: Text(l10n.homeClaw)),
             body: Center(
               child: Padding(
                 padding: const EdgeInsets.all(24.0),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('Something went wrong: ${snapshot.error}'),
+                    Text('${l10n.somethingWentWrong}: ${snapshot.error}'),
                     const SizedBox(height: 16),
                     FilledButton(
                       onPressed: () => setState(() {
                         _homeFuture = _resolveHome();
                       }),
-                      child: const Text('Retry'),
+                      child: Text(l10n.retry),
                     ),
                   ],
                 ),

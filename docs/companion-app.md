@@ -12,6 +12,25 @@ The **HomeClaw Companion** app is a **Flutter-based** client for **Mac, Windows,
 
 ---
 
+## Friends and presets
+
+Each user has a **friends** list in `config/user.yml`. The Companion app shows these friends so you can chat with different “assistants” (e.g. HomeClaw, or custom friends with their own identity). You can also add **system friends** that use a **preset**: a limited set of tools and context for a specific task (e.g. Reminder for scheduling, Note for notes, Finder for file search). Presets are defined in `config/friend_presets.yml`.
+
+**Adding or removing friends (including system friends):** Edit `config/user.yml` for the user. Under that user’s `friends:` list, add or remove an entry. To use a preset, set `preset: <name>` (e.g. `preset: reminder`). Example:
+
+```yaml
+friends:
+  - name: HomeClaw
+  - name: Reminder
+    preset: reminder
+  - name: Note
+    preset: note
+```
+
+To remove a friend, delete that entry and restart Core. No code change is required. The list is returned by Core’s `/api/me/friends` and shown in the Companion app.
+
+---
+
 ## Where to get it
 
 - **Source:** `clients/HomeClawApp/` in the repo.

@@ -134,6 +134,11 @@ def register_all_routes(core: Any) -> None:
         methods=["GET"],
     )
     app.add_api_route(
+        "/files/{scope}/{path:path}",
+        files.get_files_static_handler(core),
+        methods=["GET"],
+    )
+    app.add_api_route(
         "/api/sandbox/list",
         files.get_api_sandbox_list_handler(core),
         methods=["GET"],

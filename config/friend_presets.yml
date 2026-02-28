@@ -1,0 +1,66 @@
+# Friend presets: named configs for limited context per friend.
+# Reference from user.yml with preset: <name> (e.g. preset: reminder).
+# See docs_design/FriendConfigFrameworkImplementation.md.
+# Omitted keys = use default (same as current behaviour).
+#
+# --- Available tools_preset (tool lists defined in base/friend_presets.py TOOL_PRESETS) ---
+#   reminder — remind_me, record_date, recorded_events_list, cron_schedule, cron_list, cron_remove, cron_update, cron_run, cron_status, route_to_tam
+#   note     — document_read, file_read, file_write, folder_list, file_find, save_result_page, get_file_view_link (Cognee only; no append_agent_memory/append_daily_memory)
+#   finder   — search/list (file_find, folder_list); read (document_read, file_read); view (get_file_view_link); edit (file_write); save_result_page (e.g. HTML slides from doc)
+# Use tools_preset so the friend only sees the tools it needs (saves tokens, clearer behavior). E.g. Note uses "note" to get save/query/file tools only, no reminder or routing tools.
+#
+# --- Field reference (each key) ---
+# tools_preset: One of the names above, or array for union (e.g. [reminder, finder]). Resolved in base/friend_presets.py.
+# skills: Which skills to inject. List of skill folder names; [] = none. Omit or "all" = all skills.
+# plugins: Which plugins to inject. List of plugin ids; [] = none. Omit or "all" = all plugins.
+# memory_sources: Which memory to inject. List: cognee (RAG), agent_memory, daily_memory, md (agent+daily).
+#   Only listed sources are used; e.g. [cognee] = RAG only (saves tokens).
+# history: "full" = full chat history. Or a number = last N turns (e.g. 10 = last 10 user turns + their replies; saves tokens).
+# model_routing: "any" = use configured LLM (local/cloud/mix). "local_only" = refuse in cloud-only mode; in mix, force local.
+# save_policy: "default" = normal. "full" = local model, data stored locally and private; user may store/query secret info (e.g. bank, passwords); do not block.
+# system_prompt: Text appended as "## Friend assistant" at end of system message. Does not replace workspace, identity, date/time, memory, routing.
+
+presets:
+  # Reminder: minimal context — cognee only; reminder + cron tools (see base/friend_presets.py).
+  reminder:
+    tools_preset: reminder   # remind_me, record_date, recorded_events_list, cron_*, route_to_tam
+    skills: []               # no skills
+    plugins: []              # no plugins
+    memory_sources: [cognee, agent_memory] # RAG only; no agent_memory or daily_memory (saves tokens)
+    history: 20              # last 10 turns (saves tokens; use "full" for no limit)
+    model_routing: any       # local, cloud, or mix
+    save_policy: default     # normal privacy
+    system_prompt: "You are the Reminder assistant. You only schedule and list reminders. Use only the provided tools. For all scheduling (remind_me, record_date, cron_schedule), use the current datetime and user location from the \"## System context (date/time and location)\" block in this message as the single source of truth; do not invent or guess times or locations."
+
+  note:
+    tools_preset: note       # file + save/query tools only; Cognee for memory (no append_agent_memory/append_daily_memory)
+    skills: []
+    plugins: []
+    memory_sources: [cognee] # RAG only
+    history: 20              # last 10 turns (saves tokens; use "full" for no limit)
+    model_routing: local_only  # no cloud-only; in mix, use local
+    save_policy: full        # local, private storage; user may store/query secrets; do not block
+    system_prompt: "You are the Note assistant. Data is stored locally and private. The user may save and later query any information (including secrets). Use Cognee memory and chat history to give the best answer for both conversation and query. Use only the provided tools (file read/write, save_result_page, etc.) and Cognee for storage and retrieval."
+
+  # Finder: short context (history: 10) so the model focuses on file + web. Tools: search/list files, read, view link, edit, save_result_page, run_skill (html-slides, ppt), web_search.
+  finder:
+    tools_preset: finder     # file_find, folder_list, document_read, file_read/write, save_result_page, get_file_view_link, run_skill, web_search
+    skills: [html-slides-1.0.0, ppt-generation-1.0.0, summarize-1.0.0, baidu-search-1.0.0]
+    plugins: []
+    memory_sources: [cognee]
+    history: 10              # short context = focus on file-related (and web search) tasks
+    model_routing: any
+    save_policy: default
+    # Same logic as any chat with the same tools: file/sandbox rules and skills are injected in core/llm_loop when file tools are present. Finder's benefit: short context so it stays focused.
+    system_prompt: "You are the Finder assistant. Help the user find files, read or summarize documents, get view links, generate HTML slides or PPT from documents, and search the web when needed. Use only the provided tools and skills."
+
+  # Example: combined preset (union of tool sets).
+  # reminder_and_finder:
+  #   tools_preset: [reminder, finder]  # reminder tools + finder tools
+  #   skills: []
+  #   plugins: []
+  #   memory_sources: [cognee]
+  #   history: 10
+  #   model_routing: any
+  #   save_policy: default
+  #   system_prompt: "You help with reminders and file search. Use only the provided tools."
