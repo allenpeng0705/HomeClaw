@@ -1,10 +1,11 @@
 """
-File and sandbox routes: /files/out, /api/sandbox/list, /api/upload.
+File and sandbox routes: /files/out, /files/{scope}/{path} (static with token), /api/sandbox/list, /api/upload.
 """
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import List
+from urllib.parse import unquote
 
 from fastapi import File, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -45,8 +46,7 @@ def get_files_out_handler(core):  # noqa: ARG001
                 return JSONResponse(status_code=400, content={"error": "Path mismatch"})
             try:
                 meta = Util().get_core_metadata()
-                base_str = (meta.get_homeclaw_root() or "")
-                base_str = str(base_str).strip() if base_str else ""
+                base_str = str(meta.get_homeclaw_root() or "").strip()
             except Exception:
                 base_str = ""
             if not base_str:
@@ -61,6 +61,18 @@ def get_files_out_handler(core):  # noqa: ARG001
                 full.relative_to(base)
             except ValueError:
                 return JSONResponse(status_code=403, content={"error": "Path not in sandbox"})
+            if not full.is_file():
+                # Case-insensitive fallback: on case-sensitive FS, file may be ID1.JPG vs images/ID1.jpg
+                parent = full.parent
+                if parent.is_dir():
+                    try:
+                        name_lower = full.name.lower()
+                        for sibling in parent.iterdir():
+                            if sibling.is_file() and sibling.name.lower() == name_lower:
+                                full = sibling
+                                break
+                    except OSError:
+                        pass
             if full.is_dir():
                 base_url = get_core_public_url() or ""
                 entries = []
@@ -95,7 +107,15 @@ def get_files_out_handler(core):  # noqa: ARG001
                 html_parts.append("</ul></body></html>")
                 return HTMLResponse(content="".join(html_parts))
             if not full.is_file():
-                return JSONResponse(status_code=404, content={"error": "File not found"})
+                attempted = str(full)
+                logger.info("files/out: file not found scope=%s path=%s resolved=%s", scope, path_arg, attempted)
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "error": "File not found",
+                        "detail": f"Server looked for: {scope}/{path_arg} (resolved to {attempted}). Check that the file exists there and that homeclaw_root in config points to the correct directory.",
+                    },
+                )
             media_type = None
             suf = full.suffix.lower()
             if suf in (".html", ".htm"):
@@ -109,6 +129,71 @@ def get_files_out_handler(core):  # noqa: ARG001
             logger.debug("files_out failed: {}", e)
             return JSONResponse(status_code=500, content={"error": "Failed to serve file"})
     return files_out
+
+
+def get_files_static_handler(core):  # noqa: ARG001
+    """
+    GET /files/{scope}/{path:path}?token=...
+    Serves a file only when the token matches (scope, path). So a link for one user only accesses that user's sandbox.
+    """
+    from core.result_viewer import verify_file_access_token
+
+    async def files_static(scope: str, path: str, token: str = ""):
+        try:
+            if not scope or scope.strip().lower() == "out":
+                return JSONResponse(status_code=404, content={"error": "Not found"})
+            path_arg = (path or "").replace("\\", "/").strip()
+            path_arg = unquote(path_arg)
+            payload = verify_file_access_token(token)
+            if not payload:
+                return JSONResponse(status_code=403, content={"error": "Invalid or expired link"})
+            token_scope, token_path = payload
+            scope_clean = unquote(scope).strip()
+            if token_scope != scope_clean or token_path != path_arg:
+                return JSONResponse(status_code=403, content={"error": "Link does not match requested path (access denied)"})
+            try:
+                meta = Util().get_core_metadata()
+                base_str = str(meta.get_homeclaw_root() or "").strip()
+            except Exception:
+                base_str = ""
+            if not base_str:
+                return JSONResponse(status_code=503, content={"error": "File serving not configured (homeclaw_root)"})
+            try:
+                base = Path(base_str).resolve()
+                full = (base / scope_clean / path_arg).resolve()
+            except (OSError, RuntimeError, ValueError):
+                return JSONResponse(status_code=400, content={"error": "Invalid path"})
+            try:
+                full.relative_to(base)
+            except ValueError:
+                return JSONResponse(status_code=403, content={"error": "Path not in sandbox"})
+            if not full.is_file():
+                parent = full.parent
+                if parent.is_dir():
+                    try:
+                        name_lower = full.name.lower()
+                        for sibling in parent.iterdir():
+                            if sibling.is_file() and sibling.name.lower() == name_lower:
+                                full = sibling
+                                break
+                    except OSError:
+                        pass
+            if not full.is_file():
+                return JSONResponse(status_code=404, content={"error": "File not found"})
+            suf = full.suffix.lower()
+            media_type = None
+            if suf in (".html", ".htm"):
+                media_type = "text/html; charset=utf-8"
+            elif suf == ".md":
+                media_type = "text/markdown; charset=utf-8"
+            elif suf in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+                media_type = "image/png" if suf == ".png" else "image/jpeg" if suf in (".jpg", ".jpeg") else "image/gif" if suf == ".gif" else "image/webp"
+            return FileResponse(str(full), media_type=media_type)
+        except Exception as e:
+            logger.debug("files_static failed: {}", e)
+            return JSONResponse(status_code=500, content={"error": "Failed to serve file"})
+
+    return files_static
 
 
 def get_api_sandbox_list_handler(core):  # noqa: ARG001

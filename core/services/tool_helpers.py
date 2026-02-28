@@ -118,9 +118,9 @@ def tool_result_usable_as_final_response(
                     need_llm_set = {str(s).strip() for s in need_llm_skills if isinstance(s, str) and str(s).strip()}
                     if skill_name in need_llm_set:
                         return False
-        # save_result_page / get_file_view_link: use when result contains the link (also handled by last_file_link_result)
+        # save_result_page / get_file_view_link: use when result contains the link (token-style or static www_root-style)
         if tool_name in ("save_result_page", "get_file_view_link"):
-            return "/files/out" in result and "token=" in result
+            return ("/files/out" in result and "token=" in result) or ("http" in result and "/files/" in result)
         # folder_list / file_find: excluded from self_contained so we always do a second LLM round.
         # Otherwise "what does 1.pdf say?" → file_find returns JSON list → user gets raw JSON instead of document_read + summary.
         _self_raw = cfg.get("self_contained_tools")
@@ -241,9 +241,9 @@ def infer_route_to_plugin_fallback(query: str) -> Optional[Dict[str, Any]]:
                     break
         if url:
             return {"plugin_id": "homeclaw-browser", "capability_id": "browser_navigate", "parameters": {"url": url}}
-    # PPT / slides / presentation (avoids "I need some time" with no tool call — run plugin so user gets the file + link)
+    # PPT / slides / presentation — use skill so user gets the file + link
     if any(kw in q for kw in ("ppt", "powerpoint", "slides", "presentation", ".pptx", "幻灯片", "演示文稿")):
-        return {"plugin_id": "ppt-generation", "capability_id": "create_from_source", "parameters": {"source": query.strip()}}
+        return {"tool": "run_skill", "arguments": {"skill_name": "ppt-generation-1.0.0", "script": "create_pptx.py", "args": ["--capability", "source", "--source", query.strip()]}}
     return None
 
 

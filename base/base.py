@@ -249,6 +249,7 @@ class Friend:
     relation: Optional[Union[str, List[str]]] = None  # e.g. girlfriend, friend, or [friend]
     who: Optional[Dict[str, Any]] = None  # persona: description, gender, roles, personalities, language, response_length
     identity: Optional[str] = None  # None = do not read file; "" or "identity.md" = default file; "other.md" = that filename in friend root
+    preset: Optional[str] = None  # optional: name of friend preset (e.g. "reminder", "note", "finder"); when set, Core applies preset config for tools/skills/plugins/memory. See docs_design/FriendConfigFrameworkImplementation.md.
 
 
 @dataclass
@@ -377,14 +378,19 @@ class User:
                     identity = ident_s if ident_s else 'identity.md'
                 else:
                     identity = None
-                result.append(Friend(name=fname, relation=relation, who=fwho, identity=identity))
+                preset_raw = f.get('preset')
+                if preset_raw is not None and isinstance(preset_raw, str):
+                    preset = (preset_raw or "").strip() or None
+                else:
+                    preset = None
+                result.append(Friend(name=fname, relation=relation, who=fwho, identity=identity, preset=preset))
             except Exception:
                 continue
         if not result:
-            return [Friend(name='HomeClaw', relation=None, who=None, identity=None)]
+            return [Friend(name='HomeClaw', relation=None, who=None, identity=None, preset=None)]
         first_name = (result[0].name or '').strip().lower()
         if first_name != 'homeclaw':
-            result.insert(0, Friend(name='HomeClaw', relation=None, who=None, identity=None))
+            result.insert(0, Friend(name='HomeClaw', relation=None, who=None, identity=None, preset=None))
         return result
 
     @staticmethod
@@ -403,6 +409,9 @@ class User:
                 ident = getattr(f, "identity", None)
                 if ident is not None and str(ident).strip():
                     entry["identity"] = str(ident).strip()
+                preset_val = getattr(f, "preset", None)
+                if preset_val is not None and str(preset_val).strip():
+                    entry["preset"] = str(preset_val).strip()
                 out.append(entry)
             except Exception:
                 continue
@@ -760,6 +769,32 @@ def _normalize_llm_max_concurrent(raw: Any) -> int:
     return max(1, min(32, v))
 
 
+def _normalize_file_view_link_expiry(raw: Any) -> int:
+    """Normalize file_view_link_expiry_sec: seconds (int or '7d' style); default 7 days; clamp 1 to 365 days."""
+    _default = 7 * 86400
+    _max_sec = 365 * 86400
+    if raw is None:
+        return _default
+    if isinstance(raw, str):
+        s = (raw or "").strip().lower()
+        if not s:
+            return _default
+        if s.endswith("d"):
+            try:
+                days = int(s[:-1])
+                return max(1, min(_max_sec, days * 86400))
+            except ValueError:
+                return _default
+        try:
+            return max(1, min(_max_sec, int(s)))
+        except ValueError:
+            return _default
+    try:
+        return max(1, min(_max_sec, int(raw)))
+    except (TypeError, ValueError):
+        return _default
+
+
 def _normalize_main_llm_language(raw: Union[str, List[str], None]) -> List[str]:
     """Normalize main_llm_language config to List[str]. Accepts string (e.g. 'en') or list (e.g. [zh, en]). Default ['en']."""
     if raw is None:
@@ -867,6 +902,10 @@ class CoreMetadata:
     auth_enabled: bool = False  # when True, require API key for /inbound and /ws; see RemoteAccess.md
     auth_api_key: str = ""  # key to require (X-API-Key header or Authorization: Bearer <key>); also used to sign file links when core_public_url is set
     core_public_url: str = ""  # public URL that reaches Core (e.g. https://homeclaw.example.com). Used for file/report links: core_public_url/files/out?path=...&token=...
+    # File link style: "token" = signed /files/out?token=... (default); "static" = direct URL under web server doc root so link = core_public_url/file_static_prefix/scope/path (e.g. /files/AllenPeng/images/ID1.jpg). When static, set web server doc root (www_root) to homeclaw_root and alias file_static_prefix to it so all sandbox files are served.
+    file_link_style: str = "token"  # "token" | "static"
+    file_static_prefix: str = "files"  # URL path prefix when file_link_style is static (e.g. "files" → /files/scope/path)
+    file_view_link_expiry_sec: int = 7 * 86400  # how long file/view links (token) are valid, in seconds; default 7 days; max 365 days
     llm_max_concurrent_local: int = 1   # max concurrent local (llama.cpp) calls; 1 = typical for single GPU/process; see PluginLLMAndQueueDesign.md
     llm_max_concurrent_cloud: int = 4   # max concurrent cloud (LiteLLM) calls; 2–10 for parallel channel + plugin under provider RPM/TPM
     knowledge_base: Dict[str, Any] = field(default_factory=dict)  # optional: enabled, collection_name, chunk_size, unused_ttl_days, folder_sync (enabled, folder_name, schedule, allowed_extensions, max_file_size_bytes, resync_on_mtime_change); see docs/MemoryAndDatabase.md and PerUserKnowledgeBaseFolder.md
@@ -1278,6 +1317,9 @@ class CoreMetadata:
             auth_enabled=data.get('auth_enabled', False),
             auth_api_key=(data.get('auth_api_key') or '').strip(),
             core_public_url=(data.get('core_public_url') or '').strip(),
+            file_link_style=(data.get('file_link_style') or 'token').strip().lower() or 'token',
+            file_static_prefix=(data.get('file_static_prefix') or 'files').strip().strip('/') or 'files',
+            file_view_link_expiry_sec=_normalize_file_view_link_expiry(data.get('file_view_link_expiry_sec')),
             llm_max_concurrent_local=_normalize_llm_max_concurrent(
                 data.get('llm_max_concurrent_local') if 'llm_max_concurrent_local' in data else _default_llm_max_concurrent_local()
             ),
@@ -1370,6 +1412,9 @@ class CoreMetadata:
                 'auth_enabled': getattr(core, 'auth_enabled', False),
                 'auth_api_key': getattr(core, 'auth_api_key', '') or '',
                 'core_public_url': getattr(core, 'core_public_url', '') or '',
+                'file_link_style': getattr(core, 'file_link_style', 'token') or 'token',
+                'file_static_prefix': getattr(core, 'file_static_prefix', 'files') or 'files',
+                'file_view_link_expiry_sec': getattr(core, 'file_view_link_expiry_sec', 7 * 86400),
                 'llm_max_concurrent_local': getattr(core, 'llm_max_concurrent_local', 1),
                 'llm_max_concurrent_cloud': getattr(core, 'llm_max_concurrent_cloud', 4),
                 'embedding_llm': core.embedding_llm,
