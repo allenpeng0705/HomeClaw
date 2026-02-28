@@ -4,6 +4,8 @@
 
 **Target:** When the user uses the **Reminder** friend, reminder/cron should **succeed much more easily**, even with a **small local model**. We achieve this by **not injecting too much** into the context — only reminder/cron tools and related bits — so the model has a small, focused set to choose from.
 
+**Creation and result:** How to create cron/reminder and how to show the result is **the same for all users and all friends**. The Reminder system friend only changes **context** (predefined tools/skills/plugins + optimized histories). Talk with Reminder about other things and it may not be so useful; it does a good job on scheduling.
+
 ---
 
 ## 1. The problem we’re solving
@@ -62,6 +64,12 @@ So:
 - **Delivery:** Keep current delivery path and logic. Send to the appropriate target (friend/HomeClaw/etc.). Use **Reminder only when we cannot find where to send** (fallback).
 - **Inbound:** When the user talks to the Reminder friend, Core injects only reminder/cron tools (and related skills/plugins) so the LLM selects the correct tool easily.
 
+### 3.4 Same creation and result logic for everyone; Reminder = context only
+
+- **How to create cron/reminder** and **how to show the result** is **the same for all users and all friends**. No different code path for the Reminder friend. TAM, cron, and delivery use the same logic whether the user is chatting with Reminder, HomeClaw, or any other friend.
+- The **Reminder system friend does one thing**: it only changes **context**. When you are in the Reminder chat we inject **predefined** (limited) skills, tools, and plugins, plus **optimized histories**. All of that is about context — we do not change how reminders are created or how results are delivered.
+- So: if you talk with Reminder about **other things** (e.g. weather, general chat), it may not be so useful (limited tools). But it **does a good job on scheduling** because the context is focused. Same creation and result behaviour everywhere; only the context in the Reminder chat is optimized for scheduling.
+
 ---
 
 ## 4. Would it make cron/reminder “much better”?
@@ -114,9 +122,10 @@ So: **yes, it can make the cron/reminder feature meaningfully better** — minim
 
 ## 6. Summary
 
-- **Idea:** One system friend “Reminder” per user. For this friend we **do not** inject all skills, tools, and plugins — **only** what is used for Reminder (cron + reminder).
+- **Idea:** One system friend “Reminder” per user. For this friend we **do not** inject all skills, tools, and plugins — **only** what is used for Reminder (cron + reminder). Creation and result use the same logic for all users/friends; Reminder only changes context (predefined tools/skills/plugins + optimized histories). Other topics in Reminder chat may not be so useful; it does a good job on scheduling.
 - **Benefits:** Minimal injected surface for the Reminder chat → correct tool easy to select → more stable cron/reminder behaviour; clear place to *talk about* reminders; delivery keeps current path (Reminder only as fallback when target unknown); reusable pattern for other system friends.
 - **Main decisions:** (1) How the friend appears in the list (injected vs configured), (2) fixed id (e.g. `"Reminder"`), (3) exact list of tools/skills/plugins to inject for Reminder only. **Delivery:** keep current path and logic; use Reminder only as fallback when the system cannot determine where to send.
+- **Framework (§10):** If limited tools/skills/plugins and optimized history are **configurable per friend**, we get a reusable framework; Reminder and Finder are examples, and **users can customize** their own friends with restricted context too.
 
 No code changes in this step — this doc is for discussion and design alignment. Once you’re happy with the direction, we can outline concrete steps (API shape, TAM/cron delivery, Companion changes) and then implement.
 
@@ -181,38 +190,83 @@ So: a **dedicated Reminder friend with restricted injection** is the option that
 4. **Clear UX** — “Use Reminder for reminders” is easy to explain; users get a reliable path without learning which friend “works” for reminders.
 5. **Delivery stays correct** — We keep current delivery logic (send to the friend/context the reminder belongs to); Reminder is only a fallback when the system cannot determine the target.
 
-So: **the idea is worth implementing.** We are not adding many system friends, but having **this kind of design** — a special system friend with limited, predefined tools/skills/plugins and possibly reduced memory injection — is a reusable pattern.
+So: **the idea is worth implementing.** Making **limited tools/skills/plugins and optimized history configurable per friend** gives a **framework** for this behaviour: Reminder and Finder are just examples; **users can customize** their own friends with restricted context too (§10).
 
 ---
 
-## 9. Reusable design: special system friends (e.g. Finder)
+## 9. Reusable design: special system friends (e.g. Reminder, Finder)
 
-The same pattern can be applied to other **special system friends** that are dedicated to specific tasks with **limited context** so they **succeed more easily** (including with small local models).
+The same pattern can be applied to other **special system friends** that are dedicated to specific tasks with **limited context** so they **succeed more easily** (including with small local models). Reminder and Finder are **examples**; the real goal is a **framework** where this behaviour is **configurable per friend** (see §10).
 
-### 9.1 The pattern
+### 9.1 The pattern (per-friend)
 
-For a **special system friend** (Reminder, Finder, or future ones):
+For a friend that uses **limited context** (Reminder, Finder, or any friend so configured):
 
 - **Limited, predefined tools** — Inject only the tools needed for that friend’s task (e.g. Reminder: cron + reminder tools; Finder: search + file-handling tools).
 - **Limited skills and plugins** — Only what’s needed for that task, or none. No full skill/plugin set.
-- **Possibly less memory** — They may not need a lot of long-term or cross-friend memory; inject only what's relevant (e.g. recent conversation, minimal RAG). That keeps context small and focused.
+- **Possibly less memory / optimized history** — They may not need a lot of long-term or cross-friend memory; inject only what's relevant (e.g. recent conversation, minimal RAG). That keeps context small and focused.
 - **Short, focused system prompt** — e.g. “You are the Reminder assistant. You only schedule and list reminders.” or “You are the Finder assistant. You search and handle files. Use only the provided tools.”
 - **Dedicated to one kind of task** — So the LLM has a small set of choices and is much more likely to pick the right tool and succeed.
 
-So: **special system friends = limited tools + limited skills/plugins + (optionally) limited memory + short prompt → limited context → easier to succeed**, especially with small local models.
+So: **limited tools + limited skills/plugins + (optionally) limited/optimized history + short prompt → limited context → easier to succeed**, especially with small local models.
 
-### 9.2 Example: a “Finder” friend
+### 9.2 Examples: Reminder and Finder
 
-- **Purpose:** Search and handle files. User talks to “Finder” when they want to find files, list dirs, open/move/copy files, etc.
-- **Injection:** Only file/search-related tools (and any file-related skills/plugins if needed). No reminder tools, no browser, no other domains. Optionally minimal memory (e.g. current session only).
-- **Benefit:** Same as Reminder — small context, correct tool easy to select, **succeeds much more easily** even with a small local model. User has a clear place for “file and search” tasks.
+- **Reminder:** Cron + reminder tools (and related skills/plugins), optimized history. Good at scheduling; other topics in that chat may not be so useful.
+- **Finder:** Search + file-handling tools (and related skills/plugins). User talks to Finder for find files, list dirs, open/move/copy files, etc. Same benefit: small context, correct tool easy to select.
 
-We are **not** committing to adding many system friends. The point is: **we should have this kind of design.** When we introduce a special system friend (Reminder first, maybe Finder or others later), we apply the same rules:
+Reminder and Finder are just **one example** of how the framework can be used. The important step is to make this **configurable** (§10) so users can customize it too.
 
-- Limited, predefined tools (and skills/plugins) for that friend.
-- Optionally reduced memory injection so context stays small.
-- Dedicated to specific tasks with limited context → easier to succeed.
+---
 
-### 9.3 Summary
+## 10. Configurable framework: limited tools/skills/plugins and optimized history per friend
 
-We are not intent on adding many system friends. The value is in **having this design**: special system friends that use **limited, predefined tools, skills, and plugins** and **optionally less memory**, so they are **dedicated to specific tasks with limited context** and **succeed more easily**, including with small local models. Reminder is the first instance; a Finder (search/files) or others could follow the same pattern if we choose to add them.
+If **limited tools, skills, plugins, and optimized history** are **configurable per friend**, we get a **framework** for this kind of behaviour. “Reminder” and “Finder” become **examples** (predefined or user-configured); **users can customize** their own friends with restricted context too.
+
+### 10.1 What is configurable (per friend)
+
+- **Tools** — Which tools to inject for this friend. Default: “all” (current behaviour). Option: a list of tool names (or a named preset like `reminder`, `finder`) so only those are injected.
+- **Skills** — Which skills to inject. Default: “all”. Option: a list or preset so only those are injected.
+- **Plugins** — Which plugins to inject. Default: “all”. Option: a list or preset.
+- **History / memory** — How much and what to inject (e.g. full history vs. optimized: recent turns only, or minimal RAG). Default: same as today. Option: “optimized” or a policy (e.g. last N turns, no cross-friend memory).
+- **System prompt** — Optional short, focused prompt for this friend (e.g. “You are the Reminder assistant. You only schedule and list reminders. Use only the provided tools.”).
+
+When a friend has such a configuration, Core uses it when building context for that conversation: inject only the listed (or preset) tools/skills/plugins and apply the history/prompt policy. No separate code path per friend type — one **framework** that reads config and restricts context accordingly. Additional **pluggable** options (model routing, save policy, memory sources) are described in §10.4 (e.g. Note friend).
+
+### 10.2 Where config can live
+
+- **System friends** — Reminder, Finder, etc. can be defined with a preset or explicit list (e.g. in Core config or a system-friend registry). Every user gets them with that config.
+- **User-defined friends** — In `user.yml`, Friends plugin, or a future “friend config” layer: per friend, optional fields such as `tools_preset: reminder`, or `tools: [remind_me, list_reminders]`, `history: optimized`, `system_prompt: "..."`. If present, Core uses them; otherwise “full” injection as today.
+
+So: **Reminder** and **Finder** are just examples of friends that have this config set (e.g. `tools_preset: reminder` or `finder`). A user could add a custom friend “Notes” with only note-taking tools and optimized history, or reuse the same framework for their own “Reminder”-style friend with a different name.
+
+### 10.3 Summary
+
+- **Framework:** Per-friend configuration for **limited tools, skills, plugins, and optimized history** (and optional system prompt). One code path in Core: read config for the friend → inject only what’s allowed → build context.
+- **Reminder and Finder:** Examples of friends that use this config (system-provided or user-configured). Not special-cased in logic; they just have a restricted injection config.
+- **User customization:** Users can define or customize friends with the same mechanism — restricted tools/skills/plugins and optimized history — so they get “dedicated, limited context” behaviour for any friend they want.
+
+### 10.4 Pluggable per-friend options (e.g. Note friend)
+
+The same framework can support **pluggable** behaviour beyond tools/skills/plugins and history. Different friends can have different **model routing**, **privacy/save policy**, and **memory source**. Example: a **"Note"** friend with special requirements:
+
+| Requirement | Meaning | Pluggable? |
+|-------------|---------|------------|
+| **1. Local model only** | This friend must use the local model; does not work in cloud-only mode. If the user is in cloud-only mode, Core can either refuse or show a message that "Note" requires local. | **Yes** — per-friend config e.g. `model_routing: local_only` (or `allowed_modes: [local, mix]`). Core reads it when handling this friend and routes/validates accordingly. |
+| **2. Can save anything, no privacy problem** | User is okay saving anything in this context; the LLM should be told so it can suggest saving freely (e.g. notes, drafts). | **Yes** — per-friend config e.g. `save_policy: full` or `privacy: allow_save_anything`, and a **system-prompt line** (or context injection) so the LLM knows: e.g. "In this conversation the user allows saving any content; no privacy restrictions." |
+| **3. Only Cognee/RAG memory, no MD memory** | This friend uses only Cognee (or RAG) memory for recall; do not use MD (markdown / long-term) memory. | **Yes** — per-friend config e.g. `memory_sources: [cognee]` or `memory_sources: [rag]` (and exclude `md`). Core, when building context for this friend, only injects from the allowed memory backends. |
+
+So: **model routing**, **privacy/save policy**, and **memory source** can all be **pluggable** per friend. Implementation is the same pattern: a per-friend config (or preset like `note`) that Core reads and applies when building the request and context for that friend.
+
+**Example "Note" friend config (conceptual):**
+
+```yaml
+# Example: Note friend
+model_routing: local_only          # or allowed_modes: [local, mix]
+save_policy: full                  # or privacy: allow_save_anything -> inject "user allows saving anything"
+memory_sources: [cognee]           # or [rag]; exclude md
+tools_preset: note                 # only note-related tools if desired
+system_prompt: "You are the Note assistant. The user allows saving any content here; no privacy restrictions. Use only the provided tools and Cognee memory."
+```
+
+If we design the Core pipeline to read these keys from a **friend config** (or preset), then Reminder, Finder, Note, and any custom friend can mix and match: limited tools, optimized history, local-only, save policy, memory sources, and system prompt. All **pluggable** and composable.

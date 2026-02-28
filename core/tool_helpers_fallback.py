@@ -97,7 +97,7 @@ def tool_result_usable_as_final_response(
                     if skill_name in need_llm_set:
                         return False
         if tool_name in ("save_result_page", "get_file_view_link"):
-            return "/files/out" in result and "token=" in result
+            return ("/files/out" in result and "token=" in result) or ("http" in result and "/files/" in result)
         _self_raw = cfg.get("self_contained_tools")
         self_contained = tuple(_self_raw) if isinstance(_self_raw, (list, tuple)) else (
             "run_skill", "echo", "time", "profile_get", "profile_list", "models_list", "agents_list",
@@ -219,7 +219,7 @@ def infer_route_to_plugin_fallback(query: str) -> Optional[Dict[str, Any]]:
         if url:
             return {"plugin_id": "homeclaw-browser", "capability_id": "browser_navigate", "parameters": {"url": url}}
     if any(kw in q for kw in ("ppt", "powerpoint", "slides", "presentation", ".pptx", "幻灯片", "演示文稿")):
-        return {"plugin_id": "ppt-generation", "capability_id": "create_from_source", "parameters": {"source": query.strip()}}
+        return {"tool": "run_skill", "arguments": {"skill_name": "ppt-generation-1.0.0", "script": "create_pptx.py", "args": ["--capability", "source", "--source", query.strip()]}}
     return None
 
 

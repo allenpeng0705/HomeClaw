@@ -38,7 +38,7 @@ def _clean_expired_tokens() -> None:
 
 
 def _user_to_friends_list(user: User) -> List[Dict[str, Any]]:
-    """Return list of { name (friend_id), relation?, who?, identity? } for user.friends. Never raises."""
+    """Return list of { name (friend_id), relation?, who?, identity?, preset? } for user.friends. Never raises."""
     try:
         friends = getattr(user, "friends", None)
         if not isinstance(friends, list) or not friends:
@@ -48,12 +48,16 @@ def _user_to_friends_list(user: User) -> List[Dict[str, Any]]:
             if not hasattr(f, "name"):
                 continue
             try:
-                out.append({
+                item = {
                     "name": (getattr(f, "name", "") or "").strip() or "HomeClaw",
                     "relation": getattr(f, "relation", None),
                     "who": getattr(f, "who", None),
                     "identity": getattr(f, "identity", None),
-                })
+                }
+                preset = getattr(f, "preset", None)
+                if preset is not None and str(preset).strip():
+                    item["preset"] = str(preset).strip()
+                out.append(item)
             except Exception:
                 continue
         return out if out else [{"name": "HomeClaw", "relation": None, "who": None, "identity": None}]

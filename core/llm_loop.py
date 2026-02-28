@@ -26,6 +26,12 @@ from base.workspace import (
     trim_content_bootstrap,
     load_friend_identity_file,
 )
+from base.friend_presets import (
+    get_tool_names_for_preset,
+    get_tool_names_for_preset_value,
+    get_friend_preset_config,
+    trim_messages_to_last_n_turns,
+)
 from base.skills import (
     get_skills_dir,
     load_skills_from_dirs,
@@ -331,6 +337,25 @@ async def answer_from_memory(
         except Exception:
             pass
 
+        # Friend preset (Step 5): model_routing local_only — in cloud-only mode refuse; in mix mode force local for this friend.
+        if _current_friend:
+            try:
+                preset_name = (getattr(_current_friend, "preset", None) or "").strip()
+                if preset_name:
+                    preset_cfg = get_friend_preset_config(preset_name)
+                    if isinstance(preset_cfg, dict) and str(preset_cfg.get("model_routing") or "").strip().lower() == "local_only":
+                        if main_llm_mode == "cloud":
+                            return "This friend is configured to use only a local model. Please switch to local or mix mode in Core settings to use it."
+                        if main_llm_mode == "mix" and effective_llm_name:
+                            main_llm_cloud = (getattr(Util().core_metadata, "main_llm_cloud", None) or "").strip()
+                            if main_llm_cloud and effective_llm_name == main_llm_cloud:
+                                main_llm_local = (getattr(Util().core_metadata, "main_llm_local", None) or "").strip()
+                                if main_llm_local:
+                                    effective_llm_name = main_llm_local
+                                    logger.debug("Friend preset local_only: forcing local model for this friend.")
+            except Exception:
+                pass
+
         # Workspace bootstrap (identity / agents / tools). When companion user has "who", skip workspace Identity so we inject only who-based identity below.
         if getattr(Util().core_metadata, 'use_workspace_bootstrap', True):
             ws_dir = get_workspace_dir(getattr(Util().core_metadata, 'workspace_dir', None) or 'config/workspace')
@@ -452,6 +477,25 @@ async def answer_from_memory(
             except Exception:
                 pass
 
+        # Friend preset (Step 4): resolve memory_sources so we can skip agent/daily/cognee when preset restricts.
+        _preset_allow_agent_memory = True
+        _preset_allow_daily_memory = True
+        _preset_allow_cognee = True
+        if _current_friend:
+            try:
+                preset_name = (getattr(_current_friend, "preset", None) or "").strip()
+                if preset_name:
+                    preset_cfg = get_friend_preset_config(preset_name)
+                    if isinstance(preset_cfg, dict) and "memory_sources" in preset_cfg:
+                        src = preset_cfg.get("memory_sources")
+                        if isinstance(src, (list, tuple)):
+                            src_set = {str(x).strip().lower() for x in src if x is not None}
+                            _preset_allow_agent_memory = "agent_memory" in src_set or "md" in src_set
+                            _preset_allow_daily_memory = "daily_memory" in src_set or "md" in src_set
+                            _preset_allow_cognee = "cognee" in src_set
+            except Exception:
+                pass
+
         # Agent memory: when use_agent_memory_search is true, leverage retrieval only (no bulk inject). Otherwise inject capped AGENT_MEMORY + optional daily block.
         # When memory_flush_primary is true (default), only the dedicated flush turn writes memory; main prompt does not ask the model to call append_*.
         try:
@@ -477,8 +521,8 @@ async def answer_from_memory(
                     "If low confidence after search, say you checked. "
                     "This curated agent memory is authoritative when it conflicts with RAG context below."
                 )
-                use_agent_file = getattr(Util().core_metadata, "use_agent_memory_file", True)
-                use_daily = getattr(Util().core_metadata, "use_daily_memory", True)
+                use_agent_file = getattr(Util().core_metadata, "use_agent_memory_file", True) and _preset_allow_agent_memory
+                use_daily = getattr(Util().core_metadata, "use_daily_memory", True) and _preset_allow_daily_memory
                 if _memory_flush_primary:
                     directive += " Durable and daily memory are written in a dedicated step; you do not need to call append_agent_memory or append_daily_memory in this conversation."
                 elif use_agent_file or use_daily:
@@ -544,7 +588,7 @@ async def answer_from_memory(
                 logger.warning("Skipping agent memory directive due to error: {}", e, exc_info=False)
         else:
             # Legacy: inject AGENT_MEMORY content (capped) and optionally daily memory.
-            if getattr(Util().core_metadata, 'use_agent_memory_file', True):
+            if _preset_allow_agent_memory and getattr(Util().core_metadata, 'use_agent_memory_file', True):
                 try:
                     ws_dir = get_workspace_dir(getattr(Util().core_metadata, 'workspace_dir', None) or 'config/workspace')
                     agent_path = getattr(Util().core_metadata, 'agent_memory_path', None) or ''
@@ -565,7 +609,7 @@ async def answer_from_memory(
                     logger.warning("Skipping AGENT_MEMORY.md injection due to error: {}", e, exc_info=False)
 
             # Daily memory (memory/YYYY-MM-DD.md): yesterday + today; only when not using retrieval-first.
-            if getattr(Util().core_metadata, 'use_daily_memory', True):
+            if _preset_allow_daily_memory and getattr(Util().core_metadata, 'use_daily_memory', True):
                 try:
                     today = date.today()
                     yesterday = today - timedelta(days=1)
@@ -748,6 +792,23 @@ async def answer_from_memory(
                     skills_max = max(0, int(getattr(meta_skills, "skills_max_in_prompt", 5) or 5))
                     if skills_max > 0 and len(skills_list) > skills_max:
                         skills_list = skills_list[:skills_max]
+                # Friend preset (Step 3): restrict skills to preset's list when preset has "skills" as list (including []).
+                if _current_friend and skills_list:
+                    try:
+                        preset_name = (getattr(_current_friend, "preset", None) or "").strip()
+                        if preset_name:
+                            preset_cfg = get_friend_preset_config(preset_name)
+                            if isinstance(preset_cfg, dict) and "skills" in preset_cfg:
+                                allowed = preset_cfg.get("skills")
+                                if isinstance(allowed, (list, tuple)):
+                                    allowed_set = {str(x).strip().lower() for x in allowed if x is not None and str(x).strip()}
+                                    skills_list = [
+                                        s for s in skills_list
+                                        if ((s.get("folder") or s.get("name") or "").strip().lower() in allowed_set)
+                                    ]
+                                    _component_log("friend_preset", f"filtered skills to preset list ({len(skills_list)} skills)")
+                    except Exception as e:
+                        logger.debug("Friend preset skills filter failed: {}", e)
                 if skills_list:
                     selected_names = [s.get("folder") or s.get("name") or "?" for s in skills_list]
                     _component_log("skills", f"selected: {', '.join(selected_names)}")
@@ -772,19 +833,22 @@ async def answer_from_memory(
                 logger.warning("Failed to load skills: {}", e)
 
         if use_memory:
-            relevant_memories = await core._fetch_relevant_memories(query,
-                messages, user_name, user_id, _mem_scope, run_id, filters, 10
-            )
-            memories_text = ""
-            if relevant_memories:
-                i = 1
-                for memory in (relevant_memories or []):
-                    if not isinstance(memory, dict):
-                        continue
-                    mem_text = memory.get("memory") or ""
-                    memories_text += (str(i) + ": " + str(mem_text) + " ")
-                    logger.debug("RelevantMemory: {} : {}", i, (str(mem_text)[:80] + "..." if len(str(mem_text)) > 80 else str(mem_text)))
-                    i += 1
+            if _preset_allow_cognee:
+                relevant_memories = await core._fetch_relevant_memories(query,
+                    messages, user_name, user_id, _mem_scope, run_id, filters, 10
+                )
+                memories_text = ""
+                if relevant_memories:
+                    i = 1
+                    for memory in (relevant_memories or []):
+                        if not isinstance(memory, dict):
+                            continue
+                        mem_text = memory.get("memory") or ""
+                        memories_text += (str(i) + ": " + str(mem_text) + " ")
+                        logger.debug("RelevantMemory: {} : {}", i, (str(mem_text)[:80] + "..." if len(str(mem_text)) > 80 else str(mem_text)))
+                        i += 1
+                else:
+                    memories_text = ""
             else:
                 memories_text = ""
             context_val = memories_text if memories_text else "None."
@@ -968,6 +1032,23 @@ async def answer_from_memory(
                     plugins_max = max(0, int(getattr(meta_plugins, "plugins_max_in_prompt", 5) or 5))
                     if plugins_max > 0 and len(plugin_list) > plugins_max:
                         plugin_list = plugin_list[:plugins_max]
+                # Friend preset (Step 3): restrict plugins to preset's list when preset has "plugins" as list (including []).
+                if _current_friend and plugin_list is not None:
+                    try:
+                        preset_name = (getattr(_current_friend, "preset", None) or "").strip()
+                        if preset_name:
+                            preset_cfg = get_friend_preset_config(preset_name)
+                            if isinstance(preset_cfg, dict) and "plugins" in preset_cfg:
+                                allowed = preset_cfg.get("plugins")
+                                if isinstance(allowed, (list, tuple)):
+                                    allowed_set = {str(x).strip().lower().replace(" ", "_") for x in allowed if x is not None and str(x).strip()}
+                                    plugin_list = [
+                                        p for p in plugin_list
+                                        if (p.get("id") or "").strip().lower().replace(" ", "_") in allowed_set
+                                    ]
+                                    _component_log("friend_preset", f"filtered plugins to preset list ({len(plugin_list)} plugins)")
+                    except Exception as e:
+                        logger.debug("Friend preset plugins filter failed: {}", e)
             plugin_lines = []
             if plugin_list:
                 desc_max = max(0, int(getattr(Util().get_core_metadata(), "plugins_description_max_chars", 0) or 0))
@@ -1008,6 +1089,31 @@ async def answer_from_memory(
             _component_log("skills", f"appended {len(force_include_instructions)} force-include instruction(s) at end of system prompt")
         for instr in force_include_instructions:
             system_parts.append("\n\n## Instruction for this request\n\n" + instr + "\n\n")
+
+        # Friend preset (Step 4 + Step 5): append preset system_prompt when set; append save_policy notice when full.
+        if _current_friend:
+            try:
+                preset_name = (getattr(_current_friend, "preset", None) or "").strip()
+                if preset_name:
+                    preset_cfg = get_friend_preset_config(preset_name)
+                    if isinstance(preset_cfg, dict):
+                        sp = preset_cfg.get("system_prompt")
+                        if isinstance(sp, str) and (sp or "").strip():
+                            system_parts.append("\n\n## Friend assistant\n\n" + sp.strip() + "\n\n")
+                            _component_log("friend_preset", "appended preset system_prompt")
+                        save_policy = str(preset_cfg.get("save_policy") or "").strip().lower()
+                        if save_policy == "full":
+                            system_parts.append(
+                                "\n\n## Save policy (full)\n\n"
+                                "This conversation uses a local model and all data are stored locally and kept private. "
+                                "The user may store very private or secret information here (e.g. bank details, passwords, confidential notes). "
+                                "When the user asks you to remember or save such information, do so. "
+                                "When the user later queries for that information (e.g. \"what was my bank number?\", \"what did I tell you about X?\"), "
+                                "answer from the stored data; do not refuse or block the query.\n\n"
+                            )
+                            _component_log("friend_preset", "appended save_policy full")
+            except Exception as e:
+                logger.debug("Friend preset system_prompt failed: {}", e)
 
         if system_parts:
             llm_input = [{"role": "system", "content": "\n".join(system_parts)}]
@@ -1121,6 +1227,20 @@ async def answer_from_memory(
                 messages = messages[-max_msg:]
                 _component_log("compaction", f"trimmed to last {max_msg} messages")
 
+        # Friend preset: limit chat history to last N turns when preset has history as number (saves context tokens).
+        if _current_friend and isinstance(messages, list) and messages:
+            try:
+                preset_name = (getattr(_current_friend, "preset", None) or "").strip()
+                if preset_name:
+                    preset_cfg = get_friend_preset_config(preset_name)
+                    if isinstance(preset_cfg, dict):
+                        hist = preset_cfg.get("history")
+                        if isinstance(hist, int) and hist > 0:
+                            messages = trim_messages_to_last_n_turns(messages, hist)
+                            _component_log("friend_preset", f"trimmed history to last {hist} turns")
+            except Exception as e:
+                logger.debug("Friend preset history trim failed: {}", e)
+
         llm_input += messages
         if llm_input:
             last_content = llm_input[-1].get("content")
@@ -1135,7 +1255,27 @@ async def answer_from_memory(
         use_tools = getattr(Util().get_core_metadata(), "use_tools", True)
         registry = get_tool_registry()
         all_tools = registry.get_openai_tools() if use_tools and registry.list_tools() else None
-        if all_tools and not unified:
+        _filtered_by_preset = False
+        # Friend preset: when current friend has a preset, restrict tools to that preset's list (Step 2).
+        # tools_preset in config can be a string (single preset) or array of preset names (union of tool sets).
+        if all_tools and request and _current_friend:
+            try:
+                preset_name = (getattr(_current_friend, "preset", None) or "").strip()
+                if preset_name:
+                    preset_cfg = get_friend_preset_config(preset_name)
+                    tools_preset_val = preset_cfg.get("tools_preset") if isinstance(preset_cfg, dict) else None
+                    if tools_preset_val is not None:
+                        allowed_names = get_tool_names_for_preset_value(tools_preset_val)
+                    else:
+                        allowed_names = get_tool_names_for_preset(preset_name)
+                    if allowed_names is not None:
+                        allowed_set = set(allowed_names)
+                        all_tools = [t for t in all_tools if ((t.get("function") or {}).get("name")) in allowed_set]
+                        _filtered_by_preset = True
+                        _component_log("friend_preset", f"filtered tools to preset '{preset_name}' ({len(all_tools)} tools)")
+            except Exception as e:
+                logger.debug("Friend preset tool filter failed: {}", e)
+        if all_tools and not unified and not _filtered_by_preset:
             all_tools = [t for t in all_tools if (t.get("function") or {}).get("name") not in ("route_to_tam", "route_to_plugin")]
         openai_tools = all_tools if (all_tools and (unified or len(all_tools) > 0)) else None
         tool_names = [((t or {}).get("function") or {}).get("name") for t in (openai_tools or []) if isinstance(t, dict)]
@@ -1146,7 +1286,8 @@ async def answer_from_memory(
 
         if openai_tools:
             logger.info("Tools available for this turn: {}", tool_names)
-            # Inject file/sandbox rules and per-user paths JSON so the model uses correct paths (avoids wrong base and "file not found")
+            # Inject file/sandbox rules and per-user paths for any chat that has file tools (all friends, not only Finder).
+            # Ensures send/get file, path-from-list, and sandbox rules apply everywhere file tools are available.
             _file_tool_names = {"file_read", "file_write", "document_read", "folder_list", "file_find"}
             if tool_names and _file_tool_names.intersection(set(tool_names)):
                 try:
@@ -1180,13 +1321,19 @@ async def answer_from_memory(
                                 "\n\n## File tools — sandbox (only two bases)\n"
                                 "Only these two bases are the search path and working area; their subfolders can be accessed. Any other folder cannot be accessed (sandbox). "
                                 "(1) User sandbox root — omit path or use subdir name; (2) share — path \"share\" or \"share/...\". "
+                                "**User sandbox has these standard folders:** output (generated files, reports, slides), documents, downloads, images, work, knowledgebase. Use path '' or '.' for root; folder_list(path='documents'), folder_list(path='output'), etc.; use the exact path from the result in document_read or get_file_view_link. "
                                 "**Do not invent or fabricate file names, file paths, or URLs** to complete tasks. Use only: (a) values returned by your tool calls (e.g. path from folder_list, file_find), (b) the exact filename or path the user mentioned (e.g. 1.pdf), (c) links returned by save_result_page or get_file_view_link. If you need a path or URL, call the appropriate tool first and use its result. "
                                 "**Never use absolute paths** (e.g. /mnt/, C:\\, /Users/). Use only relative paths under the sandbox: the filename (e.g. 1.pdf) or the path from folder_list/file_find. "
                                 "Do not use workspace, config, or paths outside these two trees. Put generated files in output/ (path \"output/filename\") and return the link. "
                                 "When the user asks about a **specific file by name** (e.g. \"能告诉我1.pdf都讲了什么吗\", \"what is in 1.pdf\"): (1) call folder_list() or file_find(pattern='*1.pdf*') to list/search user sandbox; (2) use the **exact path** from the result that matches the requested name in document_read — e.g. if the user asked for 1.pdf, use path \"1.pdf\" only. Do **not** use absolute paths or invent paths. "
+                                "When the user asks to **send or get a file** (e.g. \"发给我 ID1.jpg\", \"send me that file\", \"把XX发给我\"): call get_file_view_link(path=<exact path>) with the path from folder_list/file_find that matches the requested file, then output **only** the URL from the tool—do not ask for confirmation or give long explanations. "
                                 "When the user asks for file search, list, or read without a specific name: omit path for user sandbox; if user says \"share\", use path \"share\" or \"share/...\". "
+                                "**When folder_list or file_find returns a list,** reply with a short user-friendly numbered list (e.g. \"1. Allen_Peng_resume_en.docx, 2. other.docx\") so the user can say \"file 1\" or \"item 1\"; do not output raw JSON. "
                                 "folder_list() = list user sandbox; folder_list(path=\"share\") = list share; file_find(pattern=\"*.pdf\") = search user sandbox. "
                                 "To read a file, use **only** the exact path returned by folder_list or file_find in document_read (e.g. 1.pdf). "
+                                "**When the user gives an exact filename** (e.g. \"1.pdf\", \"2.pdf\", \"report.docx\"): use that file — document_read(path='1.pdf') or the path from file_find for that name; do not treat it as \"item 1\" or \"item 2\" from a list. "
+                                "**When the user refers to an item by ordinal** (e.g. \"file 1\", \"item 1\", \"the first one\", \"number 2\") after you listed files with folder_list or file_find: use the **path** of that position in the list (1 = first, 2 = second, …) in document_read or get_file_view_link — do not ask which file; map the ordinal to the path from your previous result. "
+                                "When the user asks for **HTML slides or PowerPoint/PPT** from a document: use document_read on the file first, then follow the skill instructions (e.g. html-slides or ppt-generation) to generate content and call save_result_page or run_skill; do not reply without calling the tools. "
                                 f"Current homeclaw_root: {base_str}.{paths_json}"
                             )
                         llm_input[0]["content"] = (llm_input[0].get("content") or "") + block
@@ -1235,12 +1382,16 @@ async def answer_from_memory(
                     use_other_model_next_turn = False
                 _t0 = time.time()
                 logger.debug("LLM call started (tools={})", "yes" if openai_tools else "no")
-                msg = await Util().openai_chat_completion_message(
-                    current_messages, tools=openai_tools, tool_choice="auto", llm_name=llm_name_this_turn
-                )
+                try:
+                    msg = await Util().openai_chat_completion_message(
+                        current_messages, tools=openai_tools, tool_choice="auto", llm_name=llm_name_this_turn
+                    )
+                except Exception as e:
+                    logger.warning("LLM call failed (will try fallback if available): {}", e)
+                    msg = None
                 logger.debug("LLM call returned in {:.1f}s", time.time() - _t0)
                 if msg is None:
-                    # Mix fallback: one model failed (timeout/error); retry once with the other route so the task is not blocked.
+                    # Mix fallback: one model failed (timeout/error/exception); retry once with the other route so the task is not blocked.
                     hr = getattr(Util().get_core_metadata(), "hybrid_router", None) or {}
                     fallback_ok = bool(hr.get("fallback_on_llm_error", True)) and mix_route_this_request
                     if fallback_ok and (getattr(Util().get_core_metadata(), "main_llm_local", None) or "").strip() and (getattr(Util().get_core_metadata(), "main_llm_cloud", None) or "").strip():
@@ -1248,12 +1399,16 @@ async def answer_from_memory(
                         other_llm = (getattr(Util().get_core_metadata(), "main_llm_cloud", None) or "").strip() if other_route == "cloud" else (getattr(Util().get_core_metadata(), "main_llm_local", None) or "").strip()
                         if other_llm:
                             _component_log("mix", f"first model failed, retrying with {other_route} ({other_llm})")
-                            msg = await Util().openai_chat_completion_message(
-                                current_messages, tools=openai_tools, tool_choice="auto", llm_name=other_llm
-                            )
-                            if msg is not None:
-                                mix_route_this_request = other_route
-                                mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_fallback" if mix_route_layer_this_request else "fallback"
+                            try:
+                                msg = await Util().openai_chat_completion_message(
+                                    current_messages, tools=openai_tools, tool_choice="auto", llm_name=other_llm
+                                )
+                                if msg is not None:
+                                    mix_route_this_request = other_route
+                                    mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_fallback" if mix_route_layer_this_request else "fallback"
+                            except Exception as e2:
+                                logger.warning("Fallback LLM call also failed: {}", e2)
+                                msg = None
                     if msg is None:
                         response = None
                         break
@@ -1310,7 +1465,16 @@ async def answer_from_memory(
                                             try:
                                                 entries = json.loads(result)
                                                 if isinstance(entries, list):
-                                                    lines = [f"- {e.get('name', '?')} ({e.get('type', '?')})" for e in entries if isinstance(e, dict) and e.get("path") != "(truncated)" and (e.get("name") or e.get("path"))]
+                                                    lines = []
+                                                    for e in entries:
+                                                        if not isinstance(e, dict) or e.get("path") == "(truncated)":
+                                                            continue
+                                                        name = e.get("name") or e.get("path") or "?"
+                                                        p = (e.get("path") or "").strip()
+                                                        if p and p != name and "/" in p:
+                                                            lines.append(f"- {name} ({e.get('type', '?')}) — path: {p}")
+                                                        else:
+                                                            lines.append(f"- {name} ({e.get('type', '?')})" + (f" — path: {p}" if p else ""))
                                                     header = "目录下的内容：\n" if tname == "folder_list" else "找到的文件：\n"
                                                     response = header + "\n".join(lines) if lines else ("目录为空。" if tname == "folder_list" else "无匹配文件。")
                                                 else:
@@ -1395,22 +1559,36 @@ async def answer_from_memory(
                                 except Exception:
                                     pass
                             else:
-                                # Fallback: model didn't call a tool (e.g. replied "No"). If user intent is clear, run plugin anyway.
+                                # Fallback: model didn't call a tool (e.g. replied "No"). If user intent is clear, run plugin or run_skill anyway.
                                 unhelpful = not content_str or len(content_str) < 80 or content_str.strip().lower() in ("no", "i can't", "i cannot", "sorry", "nope")
                                 fallback_route = _infer_route_to_plugin_fallback(query) if unhelpful else None
-                                if fallback_route and registry and any(t.name == "route_to_plugin" for t in (registry.list_tools() or [])):
-                                    try:
-                                        _component_log("tools", "fallback route_to_plugin (model did not call tool)")
-                                        result = await registry.execute_async("route_to_plugin", fallback_route, context)
-                                        if result == ROUTING_RESPONSE_ALREADY_SENT:
-                                            return ROUTING_RESPONSE_ALREADY_SENT
-                                        if isinstance(result, str) and result.strip():
-                                            response = result
-                                        else:
-                                            response = content_str or "Done."
-                                    except Exception as e:
-                                        logger.debug("Fallback route_to_plugin failed: {}", e)
-                                        response = content_str or "The action could not be completed. Try a model that supports tool calling."
+                                if fallback_route and registry:
+                                    tool_names = [t.name for t in (registry.list_tools() or [])]
+                                    if fallback_route.get("tool") == "run_skill" and "run_skill" in tool_names:
+                                        try:
+                                            _component_log("tools", "fallback run_skill (model did not call tool)")
+                                            args = fallback_route.get("arguments") if isinstance(fallback_route.get("arguments"), dict) else {}
+                                            result = await registry.execute_async("run_skill", args or {}, context)
+                                            if isinstance(result, str) and result.strip():
+                                                response = result
+                                            else:
+                                                response = content_str or "Done."
+                                        except Exception as e:
+                                            logger.debug("Fallback run_skill failed: {}", e)
+                                            response = content_str or "The action could not be completed. Try a model that supports tool calling."
+                                    elif "route_to_plugin" in tool_names:
+                                        try:
+                                            _component_log("tools", "fallback route_to_plugin (model did not call tool)")
+                                            result = await registry.execute_async("route_to_plugin", fallback_route, context)
+                                            if result == ROUTING_RESPONSE_ALREADY_SENT:
+                                                return ROUTING_RESPONSE_ALREADY_SENT
+                                            if isinstance(result, str) and result.strip():
+                                                response = result
+                                            else:
+                                                response = content_str or "Done."
+                                        except Exception as e:
+                                            logger.debug("Fallback route_to_plugin failed: {}", e)
+                                            response = content_str or "The action could not be completed. Try a model that supports tool calling."
                                 elif (
                                     registry
                                     and any(t.name == "file_find" for t in (registry.list_tools() or []))
@@ -1490,7 +1668,16 @@ async def answer_from_memory(
                                                 try:
                                                     entries = json.loads(result)
                                                     if isinstance(entries, list) and entries:
-                                                        lines = [f"- {e.get('name', '?')} ({e.get('type', '?')})" for e in entries if isinstance(e, dict)]
+                                                        lines = []
+                                                        for e in entries:
+                                                            if not isinstance(e, dict):
+                                                                continue
+                                                            name = e.get("name") or e.get("path") or "?"
+                                                            p = (e.get("path") or "").strip()
+                                                            if p and p != name and "/" in p:
+                                                                lines.append(f"- {name} ({e.get('type', '?')}) — path: {p}")
+                                                            else:
+                                                                lines.append(f"- {name} ({e.get('type', '?')})" + (f" — path: {p}" if p else ""))
                                                         response = "目录下的内容：\n" + "\n".join(lines) if lines else result
                                                     else:
                                                         response = "目录为空。" if isinstance(entries, list) else result
@@ -1577,7 +1764,9 @@ async def answer_from_memory(
                                 routing_sent = True
                                 routing_response_text = result
                             # route_to_tam: fallback string means TAM couldn't parse as scheduling; don't set routing_sent so the tool result is appended and the loop continues — model can then try route_to_plugin or other tools
-                    if name in ("save_result_page", "get_file_view_link") and isinstance(result, str) and "/files/out" in result and "token=" in result:
+                    if name in ("save_result_page", "get_file_view_link") and isinstance(result, str) and (
+                        ("/files/out" in result and "token=" in result) or ("http" in result and "/files/" in result)
+                    ):
                         last_file_link_result = result
                     last_tool_name = name
                     last_tool_result_raw = result if isinstance(result, str) else None
@@ -1625,10 +1814,14 @@ async def answer_from_memory(
                 response = (current_messages[-1].get("content") or "").strip() if current_messages else None
             await close_browser_session(context)
         else:
-            response = await core.openai_chat_completion(
-                messages=llm_input, llm_name=effective_llm_name
-            )
-            # Mix fallback: first model failed; retry once with the other route so the task is not blocked.
+            try:
+                response = await core.openai_chat_completion(
+                    messages=llm_input, llm_name=effective_llm_name
+                )
+            except Exception as e:
+                logger.warning("LLM call failed (no-tool path, will try fallback if available): {}", e)
+                response = None
+            # Mix fallback: first model failed (returned empty or raised); retry once with the other route so the task is not blocked.
             if (response is None or (isinstance(response, str) and len(response.strip()) == 0)) and mix_route_this_request:
                 hr = getattr(Util().get_core_metadata(), "hybrid_router", None) or {}
                 if bool(hr.get("fallback_on_llm_error", True)) and (getattr(Util().get_core_metadata(), "main_llm_local", None) or "").strip() and (getattr(Util().get_core_metadata(), "main_llm_cloud", None) or "").strip():
@@ -1636,16 +1829,47 @@ async def answer_from_memory(
                     other_llm = (getattr(Util().get_core_metadata(), "main_llm_cloud", None) or "").strip() if other_route == "cloud" else (getattr(Util().get_core_metadata(), "main_llm_local", None) or "").strip()
                     if other_llm:
                         _component_log("mix", f"first model failed (no-tool path), retrying with {other_route} ({other_llm})")
-                        response = await core.openai_chat_completion(messages=llm_input, llm_name=other_llm)
-                        if response and isinstance(response, str) and response.strip():
-                            mix_route_this_request = other_route
-                            mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_fallback" if mix_route_layer_this_request else "fallback"
+                        try:
+                            response = await core.openai_chat_completion(messages=llm_input, llm_name=other_llm)
+                            if response and isinstance(response, str) and response.strip():
+                                mix_route_this_request = other_route
+                                mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_fallback" if mix_route_layer_this_request else "fallback"
+                        except Exception as e2:
+                            logger.warning("Fallback LLM call (no-tool path) also failed: {}", e2)
+                            response = None
 
         if response is None or (isinstance(response, str) and len(response.strip()) == 0):
             return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
         # If the model echoed raw "[]" (e.g. from empty folder_list/file_find), show a friendly message instead
         if isinstance(response, str) and response.strip() == "[]":
             response = "I couldn't find that file or path. Try asking me to list your files (e.g. 'list my files' or 'what files do I have'), then use the exact filename (e.g. 1.pdf) when you ask about a document."
+        # If the model echoed raw folder_list/file_find JSON, format as user-friendly list so the user does not see raw JSON
+        if isinstance(response, str) and response.strip():
+            try:
+                body = response.strip()
+                label_prefix = ""
+                if body.startswith("[") and "]" in body and ("perplexity" in body.lower() or "local" in body.lower() or "cloud" in body.lower()):
+                    idx = body.find("]")
+                    if idx > 0 and idx < 30:
+                        label_prefix = body[: idx + 1].strip() + " "
+                        body = body[idx + 1 :].strip()
+                if body.startswith("[") and ("name" in body and "path" in body):
+                    parsed = json.loads(body)
+                    if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict) and ("name" in parsed[0] or "path" in parsed[0]):
+                        lines = []
+                        for e in parsed:
+                            if not isinstance(e, dict) or (e.get("path") or e.get("name")) == "(truncated)":
+                                continue
+                            name = e.get("name", e.get("path", "?"))
+                            p = (e.get("path") or "").strip()
+                            if p and p != name and "/" in p:
+                                lines.append(f"- {name} ({e.get('type', 'file')}) — path: {p}")
+                            else:
+                                lines.append(f"- {name} ({e.get('type', 'file')})" + (f" — path: {p}" if p else ""))
+                        if lines:
+                            response = label_prefix + "Here are the items:\n\n" + "\n".join(lines)
+            except (json.JSONDecodeError, TypeError):
+                pass
         # If the model echoed the internal file_write/save_result_page empty-content message, show a short user-facing message instead
         if isinstance(response, str) and ("Do NOT share this link" in response or ("empty or too small" in response and '"written"' in response)):
             response = "The slide wasn’t generated yet because the content was empty. Please try again; I’ll generate the HTML from the document and then save it. （幻灯片尚未生成，请再试一次。）"

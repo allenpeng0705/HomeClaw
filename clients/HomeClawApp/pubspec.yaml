@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   http: ^1.2.0
   shared_preferences: ^2.2.2
   hive: ^2.2.3
@@ -43,6 +45,7 @@ dev_dependencies:
   flutter_launcher_icons: ^0.14.4
 
 flutter:
+  generate: true
   uses-material-design: true
 
 # Generate app icon from assets/icon/app_icon.png (paw logo derived from social/HomeClaw_Promo_EN.jpg).

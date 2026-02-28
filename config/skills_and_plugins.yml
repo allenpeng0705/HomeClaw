@@ -33,9 +33,9 @@ skills_test_dir: ""                          # Optional: test folder for full sy
 skills_incremental_sync: false               # When true: only process skill folders not already in vector store (default: false)
 
 # --- Skills: body in prompt ---
-# For these skill folders only, include SKILL.md body (and USAGE.md) in the prompt so the model can answer "how do I use this?".
+# For these skill folders only, include SKILL.md body (and USAGE.md) in the prompt so the model can answer "how do I use this?" and follow the workflow (e.g. Finder uses html-slides and ppt-generation to complete tasks).
 # Set skills_include_body_max_chars > 0 (e.g. 8000) in core.yml or below to cap body length; 0 = no truncation (default).
-skills_include_body_for: [maton-api-gateway-1.0.0, x-api-1.0.0, meta-social-1.0.0]
+skills_include_body_for: [maton-api-gateway-1.0.0, x-api-1.0.0, meta-social-1.0.0, html-slides-1.0.0, ppt-generation-1.0.0]
 
 # --- Skills / plugins: force-include rules ---
 # When the user query matches a rule pattern, Core adds the rule's instruction and (for skills) optional skill folders or plugin list.
@@ -156,11 +156,11 @@ skills_force_include_rules:
     folders: []
     plugins: [homeclaw-browser]
     instruction: "Use route_to_plugin(plugin_id='homeclaw-browser'): node_command (node_id, command, params), node_notify (node_id, title, body), node_camera_snap (node_id), node_camera_clip (node_id, duration, includeAudio), node_screen_record (node_id), node_location_get (node_id). Get node_id from node_list. Do not say you have no browser."
-  # --- PPT / PowerPoint plugin ---
-  - pattern: "生成.*PPT|做个PPT|做.*PPT|生成.*演示|create.*ppt|make.*presentation|powerpoint|幻灯片.*生成"
-    folders: []
-    plugins: [ppt-generation]
-    instruction: "The user asked to create a PPT or PowerPoint presentation. Use route_to_plugin(plugin_id='ppt-generation', capability_id='create_from_outline' or 'create_from_source', parameters with outline/source and optional title). The plugin saves to the user's output folder and returns a link; include that link in your reply so the user can open the file."
+  # --- PPT / PowerPoint (skill with script create_pptx.py) ---
+  - patterns:
+    - "生成.*PPT|做个PPT|做.*PPT|生成.*演示|create.*ppt|make.*presentation|powerpoint|幻灯片.*生成|\\.pptx|做.*幻灯片|从.*做.*PPT"
+    folders: [ppt-generation-1.0.0]
+    instruction: "User asked for a PPT or PowerPoint. Use run_skill(skill_name='ppt-generation-1.0.0', script='create_pptx.py', args=['--capability', 'outline'|'source'|'presentation'|'documents', ...]). See skill body for args. Core appends the open link to the result; include it in your reply."
   # --- Skills: Maton, HTML slides, X, Meta, image, summarize (force-include so local model gets strong instruction) ---
   - patterns:
     - "slack|send.*slack|slack.*(message|channel)"
@@ -270,17 +270,19 @@ tools:
   browser_headless: false # when using built-in tools: false to show window (local testing)
   tool_timeout_seconds: 0   # per-tool timeout (seconds); 0 = no timeout. For long PDF/summarize use 300–600.
   # Use tool result as final response and skip the second LLM call. These are the default lists (Core uses same if omitted).
-  # Plugins (homeclaw-browser, ppt-generation, etc.): invoked via route_to_plugin; result is always used as final response (no second LLM). homeclaw-browser is a system plugin (camera, browser); same rule applies.
+  # Plugins (e.g. homeclaw-browser): invoked via route_to_plugin; result is always used as final response (no second LLM). PPT is now a skill (ppt-generation-1.0.0) invoked via run_skill.
   use_result_as_response:
     enabled: true
     # Skills in this list always get a second LLM call (e.g. to confirm in natural language). Empty = use result for all skills.
     # Skills that always get a second LLM round (never use raw tool result as final response). Instruction-only skills (no script) are handled by default in Core; list here only when you need a second LLM for other reasons (e.g. richer reply).
     skills_results_need_llm: [maton-api-gateway-1.0.0, x-api-1.0.0, meta-social-1.0.0]
-    # Tools whose result is raw content; always run second LLM to synthesize.
+    # Tools whose result is raw content; always run second LLM to synthesize. Include folder_list and file_find so their JSON is never used as final reply.
     needs_llm_tools:
       - document_read
       - file_read
       - file_understand
+      - folder_list
+      - file_find
       - web_search
       - tavily_extract
       - tavily_crawl
@@ -305,6 +307,7 @@ tools:
       - cron_run
       - remind_me
     # Tools whose result can be the final reply when short (length <= max_self_contained_length). save_result_page/get_file_view_link use result when it contains /files/out?token=.
+    # Exclude folder_list and file_find: they return JSON; we need a second LLM turn to format it (or post-process), so the user does not see raw JSON.
     self_contained_tools:
       - run_skill
       - echo
@@ -334,8 +337,8 @@ tools:
       - file_write
       - file_edit
       - apply_patch
-      - folder_list
-      - file_find
+      # - folder_list   # excluded: returns JSON list; keep second LLM turn to format
+      # - file_find     # excluded: returns JSON list; keep second LLM turn to format
       - http_request
       - webhook_trigger
       - knowledge_base_add

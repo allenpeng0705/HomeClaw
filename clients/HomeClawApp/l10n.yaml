@@ -1,0 +1,4 @@
+# Configuration for Flutter gen-l10n. Generates app_localizations in lib/l10n.
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-dir: lib/l10n

@@ -1,0 +1,3 @@
+# ppt-generation skill config (optional)
+# When run via run_skill, output is saved to the user's private output folder (HOMECLAW_OUTPUT_DIR).
+# default_language: en
