@@ -320,12 +320,14 @@ class Util:
         return (self.core_metadata.main_llm or "").strip()
 
     def _effective_main_llm_type(self) -> str:
-        """Derive main LLM type from effective main ref: cloud_models/ -> litellm, else local. Fallback to core_metadata for legacy."""
-        list_key, _ = self._parse_model_ref(self._effective_main_llm_ref())
+        """Derive main LLM type from effective main ref: cloud_models/ -> litellm; local_models/ with type ollama -> ollama, else local. Fallback to core_metadata for legacy."""
+        ref = self._effective_main_llm_ref()
+        list_key, _ = self._parse_model_ref(ref)
         if list_key == "cloud":
             return "litellm"
         if list_key == "local":
-            return "local"
+            _, mtype = self._get_model_entry(ref)
+            return mtype if mtype in ("local", "ollama") else "local"
         return self.core_metadata.main_llm_type or "local"
 
     def _effective_embedding_llm_type(self) -> str:
@@ -337,13 +339,29 @@ class Util:
             return "local"
         return self.core_metadata.embedding_llm_type or "local"
 
+    def _is_ollama_entry(self, entry: Any) -> bool:
+        """True if entry is a dict with type == 'ollama'. Safe when entry is None or not a dict."""
+        if not isinstance(entry, dict):
+            return False
+        t = entry.get("type")
+        return str(t or "").strip().lower() == "ollama"
+
+    def _ollama_port(self, entry: Any) -> int:
+        """Default Ollama port 11434, or entry['port'] if valid. Never raises."""
+        try:
+            if isinstance(entry, dict) and "port" in entry and entry["port"] is not None:
+                return max(1, min(65535, int(entry["port"])))
+        except (TypeError, ValueError):
+            pass
+        return 11434
+
     def _get_model_entry(self, model_id: str):
-        """Resolve model id to (entry_dict, 'local'|'litellm'). model_id can be 'local_models/<id>', 'cloud_models/<id>', or plain id. Returns (None, None) if not found."""
+        """Resolve model id to (entry_dict, 'local'|'ollama'|'litellm'). model_id can be 'local_models/<id>', 'cloud_models/<id>', or plain id. Returns (None, None) if not found."""
         list_key, raw_id = self._parse_model_ref(model_id)
         if list_key == "local":
             for m in (self.core_metadata.local_models or []):
                 if m.get('id') == raw_id:
-                    return m, 'local'
+                    return m, ('ollama' if self._is_ollama_entry(m) else 'local')
             return None, None
         if list_key == "cloud":
             for m in (self.core_metadata.cloud_models or []):
@@ -353,7 +371,7 @@ class Util:
         # No prefix: search local then cloud (backward compat)
         for m in (self.core_metadata.local_models or []):
             if m.get('id') == raw_id:
-                return m, 'local'
+                return m, ('ollama' if self._is_ollama_entry(m) else 'local')
         for m in (self.core_metadata.cloud_models or []):
             if m.get('id') == raw_id:
                 return m, 'litellm'
@@ -366,16 +384,31 @@ class Util:
             main_llm_name = (self.llms[0] if self.llms else "local_models/main_vl_model")
         entry, mtype = self._get_model_entry(main_llm_name)
         if entry is not None:
-            host = entry.get('host', '127.0.0.1')
-            port = int(entry.get('port', 5088))
+            _, raw_id = self._parse_model_ref(main_llm_name)
+            raw_id = raw_id or main_llm_name
+            try:
+                host = str(entry.get('host') or '127.0.0.1').strip() or '127.0.0.1'
+            except Exception:
+                host = '127.0.0.1'
+            if mtype == 'ollama':
+                path = (entry.get('path') or raw_id or '').strip() or raw_id
+                port = self._ollama_port(entry)
+                return path, raw_id, 'ollama', host, port
             if mtype == 'local':
+                port = int(entry.get('port', 5088)) if entry.get('port') is not None else 5088
+                try:
+                    port = max(1, min(65535, int(port)))
+                except (TypeError, ValueError):
+                    port = 5088
                 path = os.path.normpath(entry.get('path', ''))
                 full_path = os.path.join(self.models_path(), path)
-                _, raw_id = self._parse_model_ref(main_llm_name)
-                return full_path, raw_id or main_llm_name, 'local', host, port
-            else:
-                _, raw_id = self._parse_model_ref(main_llm_name)
-                return entry.get('path', main_llm_name), raw_id or main_llm_name, 'litellm', host, port
+                return full_path, raw_id, 'local', host, port
+            # litellm
+            try:
+                port = max(1, min(65535, int(entry.get('port', 5088))))
+            except (TypeError, ValueError):
+                port = 5088
+            return entry.get('path', main_llm_name), raw_id, 'litellm', host, port
         # Legacy: no local_models/cloud_models or id not found — return safe fallback so callers never get None
         eff_type = self._effective_main_llm_type()
         host = self.core_metadata.main_llm_host or '127.0.0.1'
@@ -408,23 +441,38 @@ class Util:
         main_llm_name = ref
         entry, mtype = self._get_model_entry(main_llm_name)
         if entry is not None:
-            host = entry.get('host', '127.0.0.1')
-            port = int(entry.get('port', 5088))
+            _, raw_id = self._parse_model_ref(main_llm_name)
+            raw_id = raw_id or main_llm_name
+            try:
+                host = str(entry.get('host') or '127.0.0.1').strip() or '127.0.0.1'
+            except Exception:
+                host = '127.0.0.1'
+            if mtype == 'ollama':
+                path = (entry.get('path') or raw_id or '').strip() or raw_id
+                port = self._ollama_port(entry)
+                return path, raw_id, 'ollama', host, port
             if mtype == 'local':
+                try:
+                    port = max(1, min(65535, int(entry.get('port', 5088))))
+                except (TypeError, ValueError):
+                    port = 5088
                 path = os.path.normpath(entry.get('path', ''))
                 full_path = os.path.join(self.models_path(), path)
-                _, raw_id = self._parse_model_ref(main_llm_name)
-                return full_path, raw_id or main_llm_name, 'local', host, port
-            _, raw_id = self._parse_model_ref(main_llm_name)
-            return entry.get('path', main_llm_name), raw_id or main_llm_name, 'litellm', host, port
+                return full_path, raw_id, 'local', host, port
+            try:
+                port = max(1, min(65535, int(entry.get('port', 5088))))
+            except (TypeError, ValueError):
+                port = 5088
+            return entry.get('path', main_llm_name), raw_id, 'litellm', host, port
         return self.main_llm()
 
     def _llm_request_model_and_headers(self, path_or_model: str, raw_id: str, mtype: str, llm_ref: Optional[str] = None) -> Tuple[str, dict]:
-        """Return (model string for request body, headers dict) for local (llama.cpp) or cloud (LiteLLM).
+        """Return (model string for request body, headers dict) for local (llama.cpp), ollama, or cloud (LiteLLM).
         When mtype is litellm, api_key is taken from the cloud model entry (llm_ref, e.g. cloud_models/Gemini-2.5-Flash)
-        so mix mode and per-model keys work; falls back to main_llm_api_key if no ref or entry has no key."""
-        # LiteLLM expects provider/model (e.g. gemini/gemini-2.5-flash); local servers expect model id (e.g. main_vl_model).
-        model_for_request = path_or_model if mtype == "litellm" else (raw_id or path_or_model)
+        so mix mode and per-model keys work; falls back to main_llm_api_key if no ref or entry has no key.
+        Ollama uses path_or_model as the model name (same as litellm); no API key."""
+        # LiteLLM/Ollama: use path_or_model (provider/model or ollama model name). Local llama.cpp: use raw_id.
+        model_for_request = path_or_model if mtype in ("litellm", "ollama") else (raw_id or path_or_model)
         headers = {"Content-Type": "application/json"}
         if mtype == "litellm":
             key = ""
@@ -441,6 +489,7 @@ class Util:
             else:
                 headers["Authorization"] = "Anything"
         else:
+            # local (llama.cpp) and ollama: no API key
             headers["Authorization"] = "Anything"
         return model_for_request, headers
 
@@ -450,14 +499,28 @@ class Util:
             name = str(llm_name).strip()
             entry, mtype = self._get_model_entry(name)
             if entry is not None:
-                host = entry.get('host', '127.0.0.1')
-                port = int(entry.get('port', 5088))
+                try:
+                    host = str(entry.get('host') or '127.0.0.1').strip() or '127.0.0.1'
+                except Exception:
+                    host = '127.0.0.1'
                 _, raw_id = self._parse_model_ref(name)
                 rid = raw_id or name
+                if mtype == 'ollama':
+                    path = (entry.get('path') or rid or '').strip() or rid
+                    port = self._ollama_port(entry)
+                    return path, rid, 'ollama', host, port
                 if mtype == 'local':
+                    try:
+                        port = max(1, min(65535, int(entry.get('port', 5088))))
+                    except (TypeError, ValueError):
+                        port = 5088
                     path = os.path.normpath(entry.get('path', ''))
                     full_path = os.path.join(self.models_path(), path)
                     return full_path, rid, 'local', host, port
+                try:
+                    port = max(1, min(65535, int(entry.get('port', 5088))))
+                except (TypeError, ValueError):
+                    port = 5088
                 return entry.get('path', name), rid, 'litellm', host, port
             return None
         return self.main_llm()
@@ -504,7 +567,7 @@ class Util:
         return main_llm_name
 
     def set_api_key_for_llm(self):
-        if self._effective_main_llm_type() == "local":
+        if self._effective_main_llm_type() in ("local", "ollama"):
             return
         # Derive api_key_name from selected cloud model entry when possible
         entry, _ = self._get_model_entry(self.core_metadata.main_llm)
@@ -520,15 +583,30 @@ class Util:
         embedding_llm_name = self.core_metadata.embedding_llm
         entry, mtype = self._get_model_entry(embedding_llm_name)
         if entry is not None:
-            host = entry.get('host', '127.0.0.1')
-            port = int(entry.get('port', 5066))
             _, raw_id = self._parse_model_ref(embedding_llm_name)
+            raw_id = raw_id or embedding_llm_name
+            try:
+                host = str(entry.get('host') or '127.0.0.1').strip() or '127.0.0.1'
+            except Exception:
+                host = '127.0.0.1'
+            if mtype == 'ollama':
+                logger.warning("Ollama as embedding_llm is not supported (Ollama uses /api/embed, not /v1/embeddings); requests may fail.")
+                path = (entry.get('path') or raw_id or '').strip() or raw_id
+                port = self._ollama_port(entry)
+                return path, raw_id, 'ollama', host, port
             if mtype == 'local':
+                try:
+                    port = max(1, min(65535, int(entry.get('port', 5066))))
+                except (TypeError, ValueError):
+                    port = 5066
                 path = os.path.normpath(entry.get('path', ''))
                 full_path = os.path.join(self.models_path(), path)
-                return full_path, raw_id or embedding_llm_name, 'local', host, port
-            else:
-                return entry.get('path', embedding_llm_name), raw_id or embedding_llm_name, 'litellm', host, port
+                return full_path, raw_id, 'local', host, port
+            try:
+                port = max(1, min(65535, int(entry.get('port', 5066))))
+            except (TypeError, ValueError):
+                port = 5066
+            return entry.get('path', embedding_llm_name), raw_id, 'litellm', host, port
         eff_type = self._effective_embedding_llm_type()
         if eff_type == "local":
             for llm_name in self.llms:
@@ -965,7 +1043,7 @@ class Util:
         return {k: v for k, v in extra_body_params.items() if k not in self._GEMINI_UNSUPPORTED_EXTRA_KEYS}
 
     def _get_llm_semaphore(self, mtype: str):
-        """Lazy-create semaphores for local (llama.cpp) and cloud (LiteLLM). mtype is 'local' or 'litellm'. Config: llm_max_concurrent_local (default 1), llm_max_concurrent_cloud (default 4). Thread-safe creation. Never raises: uses defaults on bad config."""
+        """Lazy-create semaphores for local (llama.cpp), ollama, and cloud (LiteLLM). mtype 'local' or 'ollama' use llm_max_concurrent_local; 'litellm' uses llm_max_concurrent_cloud. Never raises: uses defaults on bad config."""
         lock = getattr(Util, '_llm_semaphore_creation_lock', None)
         if lock is None:
             Util._llm_semaphore_creation_lock = threading.Lock()
@@ -983,7 +1061,7 @@ class Util:
                     pass
                 self._llm_semaphore_local = asyncio.Semaphore(n_local)
                 self._llm_semaphore_cloud = asyncio.Semaphore(n_cloud)
-        return self._llm_semaphore_local if (mtype == 'local') else self._llm_semaphore_cloud
+        return self._llm_semaphore_local if mtype in ('local', 'ollama') else self._llm_semaphore_cloud
 
     async def openai_chat_completion(self, messages: list[dict], 
                                      grammar: str=None,

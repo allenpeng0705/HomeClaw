@@ -349,13 +349,17 @@ class LLMServiceManager:
             logger.debug(f"LLM {llm_name} is already running")
             return
 
-        if llm_type == 'local':
+        if llm_type == 'ollama':
+            # Ollama runs externally; Core does not start a process. Just register so we consider it "running".
+            self.llms.append(llm_name)
+            logger.debug("Ollama model {} registered (no process started; ensure Ollama server is running on {}:{})", llm_name, host, port)
+        elif llm_type == 'local':
             main_ref = Util().get_core_metadata().main_llm
             if mode == "mix" and local_ref:
                 main_ref = local_ref
             entry, _ = Util()._get_model_entry(main_ref)
             mmproj_path, lora_paths, lora_base_path = (None, [], None)
-            if entry:
+            if entry and not Util()._is_ollama_entry(entry):
                 mmproj_path, lora_paths, lora_base_path = self._resolve_local_extra_paths(entry)
             self.start_llama_cpp_server(
                 llm_name, host, port, llm_path, pooling=pooling,

@@ -322,6 +322,100 @@ def create_account(email, code):
         return False, f"An error occurred(发生错误): {e}"
 
 
+def _ollama_llm_path():
+    """Path to llm config file (e.g. config/llm.yml). Uses core.yml llm_config_file if set."""
+    try:
+        core_cfg = read_config(core_config_file_path)
+        llm_file = (core_cfg.get("llm_config_file") or "").strip() or "llm.yml"
+        if os.path.isabs(llm_file):
+            return llm_file
+        return os.path.join(path, llm_file)
+    except Exception:
+        return os.path.join(path, "llm.yml")
+
+
+def run_ollama_list(host: str, port: int):
+    """Print Ollama models from GET /api/tags. Never raises."""
+    from llm import ollama_client
+    models = ollama_client.list_models(host=host, port=port)
+    if not models:
+        print("No models found (is Ollama running at {}:{}?).".format(host, port))
+        return
+    print("Ollama models ({}:{}):".format(host, port))
+    for m in models:
+        name = m.get("name") or m.get("model") or ""
+        size = m.get("size")
+        size_str = "{} MB".format(round(size / (1024 * 1024))) if isinstance(size, (int, float)) else ""
+        print("  {}  {}".format(name, size_str).strip())
+
+
+def run_ollama_pull(model_name: str, host: str, port: int):
+    """Pull model via POST /api/pull. Never raises."""
+    from llm import ollama_client
+    print("Pulling {} from {}:{}...".format(model_name, host, port))
+    def on_status(chunk):
+        s = chunk.get("status") or ""
+        if s:
+            print("  {}".format(s))
+    ok = ollama_client.pull_model(model_name, host=host, port=port, on_status=on_status)
+    if ok:
+        print("Done.")
+    else:
+        print("Pull failed or timed out (check Ollama is running).")
+
+
+def run_ollama_set_main(model_name: str):
+    """Ensure local_models has an Ollama entry for model_name, set main_llm_local and main_llm_mode to local. Never raises."""
+    from llm import ollama_client
+    model_name = (model_name or "").strip()
+    if not model_name:
+        print("Usage: python -m main ollama set-main <model_name>")
+        return
+    llm_path = _ollama_llm_path()
+    if not os.path.isfile(llm_path):
+        print("llm config not found: {} (create it or set main_llm in core.yml).".format(llm_path))
+        return
+    try:
+        meta = Util().get_core_metadata()
+        host, port = ollama_client.get_default_host_port(meta)
+    except Exception:
+        host, port = ollama_client.DEFAULT_OLLAMA_HOST, ollama_client.DEFAULT_OLLAMA_PORT
+    entry_id = ollama_client.sanitize_ollama_id(model_name)
+    entry = {
+        "id": entry_id,
+        "type": "ollama",
+        "alias": model_name,
+        "path": model_name,
+        "host": host,
+        "port": port,
+        "capabilities": ["Chat"],
+    }
+    try:
+        llm_data = read_config(llm_path)
+    except Exception:
+        llm_data = {}
+    local_models = list(llm_data.get("local_models") or [])
+    found = False
+    for i, m in enumerate(local_models):
+        if isinstance(m, dict) and m.get("id") == entry_id:
+            local_models[i] = entry
+            found = True
+            break
+    if not found:
+        local_models.append(entry)
+    updates = {
+        "local_models": local_models,
+        "main_llm_local": "local_models/{}".format(entry_id),
+        "main_llm_mode": "local",
+    }
+    try:
+        Util().update_yaml_preserving_comments(llm_path, updates)
+        print("Set main_llm_local to local_models/{} (Ollama {}). Restart Core to use.".format(entry_id, model_name))
+    except Exception as e:
+        logger.warning("Failed to write {}: {}", llm_path, e)
+        print("Failed to update config: {}.".format(e))
+
+
 def run_core() -> threading.Thread:
     """Start the same Core as core/core.py (core.main) in a background thread.
     So `python -m main start` and `python core/core.py` both run the same Core server."""
@@ -415,8 +509,18 @@ if __name__ == "__main__":
         "command",
         nargs="?",
         default="start",
-        choices=["start", "onboard", "doctor"],
-        help="start (default): run Core only; onboard: wizard to set workspace/LLM/skills/tools; doctor: check config and LLM connectivity",
+        choices=["start", "onboard", "doctor", "ollama"],
+        help="start (default): run Core; onboard: wizard; doctor: check config; ollama: list/pull/set-main Ollama models",
+    )
+    parser.add_argument(
+        "ollama_action",
+        nargs="?",
+        help="ollama subcommand: list, pull <name>, set-main <name>",
+    )
+    parser.add_argument(
+        "ollama_name",
+        nargs="?",
+        help="Ollama model name (for pull and set-main)",
     )
     parser.add_argument(
         "--no-open-browser",
@@ -425,7 +529,29 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     try:
-        if args.command == "onboard":
+        if args.command == "ollama":
+            from llm import ollama_client
+            action = (args.ollama_action or "list").strip().lower()
+            meta = None
+            try:
+                meta = Util().get_core_metadata()
+            except Exception:
+                pass
+            host, port = ollama_client.get_default_host_port(meta)
+            if action == "list":
+                run_ollama_list(host, port)
+            elif action == "pull":
+                name = (args.ollama_name or "").strip()
+                if not name:
+                    print("Usage: python -m main ollama pull <model_name>")
+                else:
+                    run_ollama_pull(name, host, port)
+            elif action == "set-main":
+                name = (args.ollama_name or "").strip()
+                run_ollama_set_main(name)
+            else:
+                print("Usage: python -m main ollama {list|pull <name>|set-main <name>}")
+        elif args.command == "onboard":
             run_onboard()
         elif args.command == "doctor":
             run_doctor()
