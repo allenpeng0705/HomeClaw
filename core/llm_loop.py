@@ -43,6 +43,56 @@ from memory.chat.message import ChatMessage
 from tools.builtin import close_browser_session
 from core.log_helpers import _component_log, _truncate_for_log, _strip_leading_route_label
 
+
+# Tokens that suggest scheduling/reminder intent across languages (for logging when model didn't call a tool).
+# Add tokens for new languages here; we only need a loose signal. Use lowercase for ASCII; CJK/others as-is.
+_SCHEDULING_INTENT_TOKENS = (
+    # Chinese
+    "提醒", "每隔", "每小时", "个小时", "小时", "早上", "点", "每天", "定时", "预约", "问候",
+    # English
+    "remind", "every", "hour", "schedule", "recurring", "cron", "wake", "greet", "check in",
+    # Korean (remind, hour, daily, etc.)
+    "알림", "알려", "시간", "매시간", "매일", "예약",
+    # Japanese
+    "リマインド", "毎時", "毎日", "予定", "予約", "通知",
+    # Spanish / Portuguese
+    "recordar", "recordarme", "cada hora", "recordar", "lembrar", "agendar",
+    # German / French
+    "erinnern", "stunde", "planen", "rappeler", "heure", "planifier",
+)
+
+
+def _query_looks_like_scheduling(q: Optional[str]) -> bool:
+    """
+    True if user message looks like a request for reminders or recurring schedule (for logging when model didn't call a tool).
+    Uses a multilingual token list so we don't depend on one language. Why no schedule? The model chose to reply in
+    text only instead of calling cron_schedule/remind_me/route_to_tam — often with soft phrasing ('可以嘛', '好呀')
+    or ambiguous timing; strengthening the prompt or asking the user to rephrase can help.
+    """
+    if not q or not isinstance(q, str):
+        return False
+    s = q.strip()
+    if len(s) < 3:
+        return False
+    s_lower = s.lower()
+    for tok in _SCHEDULING_INTENT_TOKENS:
+        if not tok:
+            continue
+        # ASCII tokens: case-insensitive; CJK/others: substring in original
+        if tok.isascii():
+            if tok in s_lower:
+                return True
+        else:
+            if tok in s:
+                return True
+    # Digit + time-like: e.g. "4 hours", "每4小时", "8点"
+    if re.search(r"\d+\s*(?:hours?|hour|小时|시간|時|点|點)", s, re.IGNORECASE):
+        return True
+    if re.search(r"(?:every|每|매)\s*\d+", s, re.IGNORECASE):
+        return True
+    return False
+
+
 try:
     from core.services.tool_helpers import (
         tool_result_looks_like_error as _tool_result_looks_like_error,
@@ -1064,7 +1114,7 @@ async def answer_from_memory(
                 "Opening a URL in a browser (real web URLs only, e.g. https://example.com) -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=browser_navigate, parameters={\"url\": \"<URL>\"}). Node ids like test-node-1 are NOT URLs.\n"
                 "Listing connected nodes or \"what nodes are connected\" -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_list).\n"
                 "If the request clearly matches one of the available plugins below, call route_to_plugin with that plugin_id (and capability_id/parameters when relevant).\n"
-                "For time-related requests only: one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only when the user clearly asks to schedule or remind (e.g. \"remind me in 5 minutes\", \"every day at 9am\").\n"
+                "For time-related requests only: one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only when the user clearly asks to schedule or remind (e.g. \"remind me in 5 minutes\", \"every day at 9am\"). When the user asks for periodic check-ins, recurring reminders, or \"every N hours\" / \"daily at X o'clock\" (in any language), you MUST call cron_schedule or remind_me so the schedule is actually created; replying with text only does NOT set any schedule.\n"
                 f"When the user asks to be reminded in N minutes (e.g. \"30分钟后提醒我\", \"remind me in 30 minutes\", \"我30分钟后有个会能提醒一下吗\"), you MUST call the remind_me tool with minutes=N (use the number from the user's message; 30分钟后 = 30 minutes) and message= a short reminder text WITHOUT any date or time (e.g. \"会议提醒\" or \"Reminder: meeting\"; do NOT put \"26号 15:49\" or \"7pm\" in message). Do NOT reply with text-only or fake JSON; always call remind_me so the reminder is actually scheduled. The current time for this request is {_req_time_24}. Use only this time in your reply; never invent times (e.g. never 2:49 PM, 明天下午7点, 2026-1月 3号)—if current time is {_req_time_24} and user says 15 minutes, say that time or \"in 15 minutes\".\n"
                 "For script-based workflows use run_skill(skill_name, script, ...). For instruction-only skills (no scripts/) use run_skill(skill_name) with no script—then you MUST continue in the same turn (document_read, generate content, file_write or save_result_page, return link); do not reply with only the confirmation. skill_name can be folder or short name (e.g. html-slides).\n"
                 "When the user asks to generate an HTML slide or report from a document/file: (1) call document_read(path) to get the file content, (2) use that returned text as the source and generate the full HTML yourself, (3) call save_result_page(title=..., content=<your generated full HTML>, format='html'). For HTML slides do NOT use format='markdown'—use format='html'. Never pass empty or minimal content; content must be the full slide deck/report HTML.\n"
@@ -1442,6 +1492,16 @@ async def answer_from_memory(
                         )
                         run_force_include = bool(force_include_auto_invoke and registry)
                         _component_log("tools", "model returned no tool_calls; unhelpful=%s auto_invoke_count=%s" % (unhelpful_for_auto_invoke, len(force_include_auto_invoke or [])))
+                        # Log when user clearly asked for scheduling but model didn't call any tool — so we can see TAM did not set a schedule (applies to all friends including Reminder).
+                        if _query_looks_like_scheduling(query) and registry:
+                            try:
+                                _tool_names = [getattr(t, "name", None) for t in (registry.list_tools() or []) if getattr(t, "name", None)]
+                                if any(n in _tool_names for n in ("cron_schedule", "remind_me", "route_to_tam")):
+                                    logger.info(
+                                        "TAM did not set schedule: user asked for scheduling/reminder but model returned no tool_calls (no cron_schedule/remind_me/route_to_tam invoked). Suggest user rephrase e.g. 'remind me at 8am' or 'every 4 hours remind me to chat'."
+                                    )
+                            except Exception:
+                                pass
                         # When we have force-include auto_invoke (e.g. image rule), always run it so the skill runs and we return real output instead of model hallucination
                         if run_force_include:
                             ran = False
@@ -1513,7 +1573,7 @@ async def answer_from_memory(
                                     _has_remind_me = any(getattr(t, "name", None) == "remind_me" for t in _tools)
                             except Exception:
                                 pass
-                            if remind_fallback and isinstance(remind_fallback, dict) and _has_remind_me:
+                            if remind_fallback and isinstance(remind_fallback, dict) and _has_remind_me and last_tool_name != "remind_me":
                                 try:
                                     _component_log("tools", "fallback remind_me (model did not call tool)")
                                     _args = remind_fallback.get("arguments") if isinstance(remind_fallback.get("arguments"), dict) else {}
