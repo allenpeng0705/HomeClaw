@@ -37,6 +37,7 @@ dependencies:
   # Push notifications (FCM): so Core can send reminders when app is killed/background. Requires Firebase config (google-services.json, GoogleService-Info.plist).
   firebase_core: ^3.8.1
   firebase_messaging: ^15.1.6
+  uuid: ^4.5.1
 
 dev_dependencies:
   flutter_test:

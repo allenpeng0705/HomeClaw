@@ -24,7 +24,8 @@ class AppLocalizationsFr extends AppLocalizations {
   String get retry => 'Réessayer';
 
   @override
-  String get noFriends => 'Aucun ami. Ajoutez des amis dans Core (config/user.yml).';
+  String get noFriends =>
+      'Aucun ami. Ajoutez des amis dans Core (config/user.yml).';
 
   @override
   String get somethingWentWrong => 'Une erreur s\'est produite';
@@ -33,10 +34,11 @@ class AppLocalizationsFr extends AppLocalizations {
   String get permissions => 'Autorisations';
 
   @override
-  String get permissionsIntro => 'HomeClaw a besoin de quelques autorisations. Vous pouvez les accorder maintenant ou à la première utilisation de chaque fonction.';
+  String get permissionsIntro =>
+      'HomeClaw a besoin de quelques autorisations. Vous pouvez les accorder maintenant ou à la première utilisation de chaque fonction.';
 
   @override
-  String get continue => 'Continuer';
+  String get continueButton => 'Continuer';
 
   @override
   String get allow => 'Autoriser';
@@ -60,7 +62,8 @@ class AppLocalizationsFr extends AppLocalizations {
   String get coreUrl => 'URL Core';
 
   @override
-  String get apiKeyOptional => 'Clé API (optionnelle ; laisser vide si l\'authentification Core est désactivée)';
+  String get apiKeyOptional =>
+      'Clé API (optionnelle ; laisser vide si l\'authentification Core est désactivée)';
 
   @override
   String get refreshConnection => 'Actualiser la connexion';
@@ -72,7 +75,8 @@ class AppLocalizationsFr extends AppLocalizations {
   String get pleaseEnterPassword => 'Veuillez entrer le mot de passe';
 
   @override
-  String get noUsersInCore => 'Aucun utilisateur dans Core. Ajoutez un utilisateur dans config/user.yml, puis appuyez sur « Actualiser la connexion » ci-dessous.';
+  String get noUsersInCore =>
+      'Aucun utilisateur dans Core. Ajoutez un utilisateur dans config/user.yml, puis appuyez sur « Actualiser la connexion » ci-dessous.';
 
   @override
   String get reminder => 'Rappel';
@@ -81,7 +85,8 @@ class AppLocalizationsFr extends AppLocalizations {
   String get deleteMessage => 'Supprimer le message ?';
 
   @override
-  String get deleteMessageExplanation => 'Ce message sera retiré du chat. Cela n\'affecte que cet appareil ; la session Core ne change pas.';
+  String get deleteMessageExplanation =>
+      'Ce message sera retiré du chat. Cela n\'affecte que cet appareil ; la session Core ne change pas.';
 
   @override
   String get cancel => 'Annuler';
@@ -102,7 +107,8 @@ class AppLocalizationsFr extends AppLocalizations {
   String get takePhoto => 'Prendre une photo';
 
   @override
-  String get takePhotoContent => 'Prendre une nouvelle photo avec l\'appareil photo ou choisir une image existante sur l\'appareil.';
+  String get takePhotoContent =>
+      'Prendre une nouvelle photo avec l\'appareil photo ou choisir une image existante sur l\'appareil.';
 
   @override
   String get useCamera => 'Utiliser l\'appareil photo';

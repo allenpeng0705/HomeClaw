@@ -176,7 +176,10 @@ async def deliver_to_user(
             from base import push_send
             title = "Reminder" if source == "reminder" else from_friend
             body_safe = (out_text if out_text is not None else "")[:1024]
-            push_sent = push_send.send_push_to_user(user_id, title=title, body=body_safe, source=source, from_friend=from_friend)
+            max_tokens = 1 if source == "reminder" else None
+            push_sent = push_send.send_push_to_user(
+                user_id, title=title, body=body_safe, source=source, from_friend=from_friend, max_tokens_per_user=max_tokens
+            )
             if push_sent:
                 logger.info("deliver_to_user: sent {} push(es) (APNs/FCM) for user_id={} from_friend={}", push_sent, user_id, from_friend)
         except Exception as push_e:

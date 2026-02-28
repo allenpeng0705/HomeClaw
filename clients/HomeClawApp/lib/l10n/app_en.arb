@@ -9,7 +9,7 @@
   "somethingWentWrong": "Something went wrong",
   "permissions": "Permissions",
   "permissionsIntro": "HomeClaw needs a few permissions to work. You can allow them now or when you first use each feature.",
-  "continue": "Continue",
+  "continueButton": "Continue",
   "allow": "Allow",
   "openSettings": "Open Settings",
   "done": "Done",

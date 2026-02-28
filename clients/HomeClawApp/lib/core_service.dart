@@ -7,6 +7,7 @@ import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as path;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'chat_history_store.dart';
@@ -28,6 +29,7 @@ class CoreService {
   static const String _keyCompanionUserId = 'companion_session_user_id';
   static const String _keyCompanionSavedUsername = 'companion_saved_username';
   static const String _keyCompanionSavedPassword = 'companion_saved_password';
+  static const String _keyCompanionDeviceId = 'companion_device_id';
   static const String _defaultBaseUrl = 'http://127.0.0.1:9000';
 
   String _baseUrl = _defaultBaseUrl;
@@ -295,7 +297,18 @@ class CoreService {
     return headers;
   }
 
-  /// Register push token with Core so Core can send reminders when app is killed/background. iOS/macOS: native APNs only (no Firebase). Android: FCM. No-op on Windows/Linux or if unavailable.
+  /// Persistent device ID for push registration (one per install; iOS, macOS, Android). Stored in SharedPreferences.
+  Future<String> getOrCreateDeviceId() async {
+    final prefs = await SharedPreferences.getInstance();
+    var id = prefs.getString(_keyCompanionDeviceId)?.trim();
+    if (id == null || id.isEmpty) {
+      id = const Uuid().v4();
+      await prefs.setString(_keyCompanionDeviceId, id);
+    }
+    return id;
+  }
+
+  /// Register push token with Core so Core can send reminders when app is killed/background. iOS/macOS: native APNs only (no Firebase). Android: FCM. No-op on Windows/Linux or if unavailable. Uses a unique device_id per install so re-registering updates the token for that device instead of adding duplicates.
   Future<void> registerPushTokenWithCore(String userId) async {
     if (!Platform.isAndroid && !Platform.isIOS && !Platform.isMacOS) return;
     try {
@@ -311,8 +324,14 @@ class CoreService {
         platform = 'android';
       }
       if (token == null || token.isEmpty) return;
+      final deviceId = await getOrCreateDeviceId();
       final url = Uri.parse('$_baseUrl/api/companion/push-token');
-      final body = jsonEncode({'user_id': userId.trim().isEmpty ? 'companion' : userId.trim(), 'token': token, 'platform': platform});
+      final body = jsonEncode({
+        'user_id': userId.trim().isEmpty ? 'companion' : userId.trim(),
+        'token': token,
+        'platform': platform,
+        'device_id': deviceId,
+      });
       await http.post(url, headers: {'Content-Type': 'application/json', ..._authHeaders()}, body: body).timeout(const Duration(seconds: 10));
     } catch (_) {}
   }

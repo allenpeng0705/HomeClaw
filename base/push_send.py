@@ -3,6 +3,8 @@ Push notification router: APNs for iOS/Apple devices, FCM for Android and other 
 Core calls send_push_to_user here; this routes each token by platform.
 Never raises: all errors are caught and logged; returns 0 on any failure.
 """
+from typing import Optional
+
 from loguru import logger
 
 from base import push_tokens as push_tokens_store
@@ -16,11 +18,13 @@ def send_push_to_user(
     body: str,
     source: str = "push",
     from_friend: str = "HomeClaw",
+    max_tokens_per_user: Optional[int] = None,
 ) -> int:
     """
-    Send push to all tokens registered for user_id.
+    Send push to tokens registered for user_id.
     APNs for iOS/macOS/tvOS/etc.; FCM for Android and other platforms.
     Each payload includes user_id, source, and from_friend so the app can show which user the push is for and which friend it is from (e.g. "Sabrina" or "HomeClaw").
+    When max_tokens_per_user is set (e.g. 1 for reminders), only the most recently updated token(s) are used so the user gets one notification per reminder even if multiple tokens are stored.
     Returns total number of messages successfully sent. Never raises.
     """
     try:
@@ -30,6 +34,12 @@ def send_push_to_user(
         entries = push_tokens_store.get_tokens_for_user(user_id)
         if not entries or not isinstance(entries, list):
             return 0
+        if max_tokens_per_user is not None and max_tokens_per_user >= 1:
+            entries = sorted(
+                entries,
+                key=lambda e: (e.get("updated_at") or ""),
+                reverse=True,
+            )[:max_tokens_per_user]
         sent = 0
         for entry in entries:
             if not isinstance(entry, dict):
