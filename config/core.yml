@@ -6,8 +6,11 @@ name: core
 host: 0.0.0.0
 port: 9000
 mode: dev
-# model_path: base path for local models (GGUF, etc.). Relative to project root; resolved on Windows, Mac, and Linux (use / in config; pathlib normalizes). Use ../models to put models outside the repo. Use ./models or leave empty for project_root/models.
-model_path: ../models/
+# Portal (Phase 3): when set, Core proxies config and portal APIs to Portal; Companion can load Portal UI via Core. Generate portal_secret once (e.g. 32 chars), set same in Portal: PORTAL_SECRET env or config/portal_secret.txt.
+# portal_url: "http://127.0.0.1:18472"
+# portal_secret: ""
+# model_path: base path for local models (GGUF, etc.). Relative to project root; resolved on Windows, Mac, and Linux (use / in config; pathlib normalizes). Default: models (project root). Use ../models to put models outside the repo.
+model_path: models
 # When false: log [memory], [tools], [skills], [plugin], [TAM], [orchestrator] activity at INFO (verbose). When true: only INFO to console (less noise). On Windows CMD, use true to avoid huge output and "Press Space to continue" blocking.
 silent: false
 # When false: all logs go only to the log file (logs/core_debug.log); nothing to console. To monitor: "Get-Content logs\core_debug.log -Wait -Tail 50 -Encoding UTF8" (PowerShell; -Encoding UTF8 needed for Chinese/special chars on Windows) or "tail -f logs/core_debug.log" (Unix). When true: logs also go to console.
@@ -20,7 +23,7 @@ use_workspace_bootstrap: true
 # Which workspace dir to load (e.g. config/workspace_day vs config/workspace_night for day/night agents)
 workspace_dir: config/workspace
 # Root for file/folder tools and links. Required for channel/companion file access. When empty, file tools return a clear error; do not use workspace for user files. Each user has two major folders: (1) their sandbox homeclaw_root/{user_id}/ (private), (2) the share folder homeclaw_root/share/ (accessible by all users). Companion app uses homeclaw_root/companion/. Subfolders: output/, knowledgebase/.
-homeclaw_root: "~/Documents/homeclawroot"
+homeclaw_root: "/Users/shileipeng/Documents/homeclawroot"
 # Session management: in config/memory_kb.yml (see memory_kb_config_file above).
 # When an unknown user (not in user.yml) tries to access, notify the owner via last-used channel so they can add to user.yml. See docs_design/OutboundMarkdownAndUnknownRequest.md.
 notify_unknown_request: false
@@ -63,8 +66,13 @@ prompt_cache_ttl_seconds: 0   # Unit: seconds. 0 = cache by file mtime; >0 = TTL
 # Optional: require API key for /inbound and /ws when exposing Core on the internet; see docs/RemoteAccess.md
 auth_enabled: true
 auth_api_key: "1234567890"   # when auth_enabled: true, require X-API-Key header or Authorization: Bearer <key>. Also used to sign file/report links (GET /files/out) when core_public_url is set.
-# Public URL that reaches this Core instance (e.g. https://homeclaw.example.com via Cloudflare Tunnel). Used for: (1) file/report links core_public_url/files/out?path=...&token=... (2) GET /pinggy scan-to-connect page and QR for Companion. Leave empty for local-only or if using pinggy.token for tunnel.
+# Public URL that reaches this Core instance (e.g. https://homeclaw.example.com via Cloudflare Tunnel). Used for: (1) file/report links (2) GET /pinggy scan-to-connect page and QR for Companion. Leave empty for local-only or if using pinggy.token for tunnel.
 core_public_url: "https://homeclaw.gpt4people.online"
+# File link style: "token" (default) = /files/out?token=... ; "static" = path in URL, link = core_public_url/file_static_prefix/scope/path?token=... (token still required so link only accesses that user's sandbox). See docs/FileLinkStatic.md.
+file_link_style: token
+file_static_prefix: files
+# How long file/view links (token) are valid. Seconds (e.g. 604800) or days (e.g. "7d"). Default 7 days; max 365 days.
+file_view_link_expiry_sec: 604800
 # Pinggy tunnel: when token is set, Core starts a tunnel to this port and serves /pinggy with public URL + QR for Companion. open_browser: true = open browser to /pinggy when tunnel is ready. See docs_design/PinggyIntegration.md.
 pinggy:
   token: ""        # empty = do not start Pinggy; set to your Pinggy token to enable

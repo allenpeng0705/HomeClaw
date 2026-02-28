@@ -47,3 +47,4 @@
 /.venv
 /plugins/ppt-generation/__pycache__
 /config/workspace/memories
+/portal/__pycache__
