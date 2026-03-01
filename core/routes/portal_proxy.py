@@ -214,10 +214,15 @@ async def _stream_portal_ui(request: Request, path: str) -> Response:
             # Read full body inside context so connection is released; avoids streaming after client close.
             content = r.content
     except httpx.ConnectError as e:
+        err_msg = str(e).strip() or "connection failed"
         logger.warning("Portal UI proxy: connection failed to {}: {}", base, e)
         return JSONResponse(
             status_code=502,
-            content={"detail": "Cannot reach Portal; is it running? Start with: python -m main portal", "portal_url": base},
+            content={
+                "detail": "Cannot reach Portal; is it running? Start with: python -m main portal",
+                "portal_url": base,
+                "error": err_msg,
+            },
         )
     except httpx.TimeoutException:
         logger.warning("Portal UI proxy: timeout to {}", url)
@@ -247,6 +252,31 @@ async def _stream_portal_ui(request: Request, path: str) -> Response:
         content=content,
         headers=out_headers,
         media_type=r.headers.get("content-type"),
+    )
+
+
+async def get_portal_proxy_status_handler(_request: Request) -> Response:
+    """GET /api/portal/proxy-status: diagnostic — portal_url Core uses and whether Portal is reachable. No portal admin auth required."""
+    base = _get_portal_url().rstrip("/")
+    if not base:
+        return JSONResponse(
+            status_code=200,
+            content={"portal_url": "", "portal_reachable": False, "detail": "portal_url not set in config/core.yml"},
+        )
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            r = await client.get(f"{base}/ready")
+            reachable = r.status_code == 200
+    except Exception as e:
+        reachable = False
+        logger.debug("Portal proxy status check failed: {}", e)
+    return JSONResponse(
+        status_code=200,
+        content={
+            "portal_url": base,
+            "portal_reachable": reachable,
+            "detail": "Portal reachable" if reachable else f"Cannot connect to {base} (is Portal running? python -m main portal)",
+        },
     )
 
 

@@ -135,6 +135,12 @@ def register_all_routes(core: Any) -> None:
         portal_proxy.post_portal_auth_handler,
         methods=["POST"],
     )
+    # Diagnostic: GET /api/portal/proxy-status returns portal_url and whether Portal is reachable (no auth).
+    app.add_api_route(
+        "/api/portal/proxy-status",
+        portal_proxy.get_portal_proxy_status_handler,
+        methods=["GET"],
+    )
     # Portal UI reverse proxy (Phase 4.2): /portal-ui and /portal-ui/* -> Portal. Phase 5: require portal admin auth.
     app.add_api_route(
         "/portal-ui",

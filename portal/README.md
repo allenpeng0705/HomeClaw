@@ -21,6 +21,58 @@ python -c "import uvicorn; from portal.app import app; from portal.config import
 - **Host:** `127.0.0.1` (override: `PORTAL_HOST`)
 - **Port:** `18472` (override: `PORTAL_PORT`)
 
+## Workflow: reaching Portal when only Core (9000) is exposed
+
+You expose **only** the machine’s **port 9000** (Core) to the internet — e.g. via Cloudflare Tunnel, reverse proxy, or port forward — and use your domain (e.g. `https://homeclaw.gpt4people.online`) to reach Core.
+
+**You do not expose Portal (18472).** Portal listens only on `127.0.0.1:18472` on the same machine. Nothing on the internet talks to port 18472.
+
+**How you reach the Portal UI (Core setting):**
+
+1. Use the **same** base URL and port as Core, with path **`/portal-ui`**:
+   - From Companion: the app already uses your Core URL and loads `.../portal-ui` (e.g. `https://homeclaw.gpt4people.online/portal-ui`).
+   - From a browser: open `https://your-domain/portal-ui` (same host as Core; if Core is on 443, no port; if Core is on 9000 and you proxy to it, still use the public URL + `/portal-ui`).
+
+2. **Request path:**  
+   **Client (Companion/browser)** → **Cloudflare** (or your proxy) → **Core :9000** → Core proxies the request to **Portal at `http://127.0.0.1:18472`** → Portal responds → Core sends the response back → client.
+
+3. So there is **one public entry point**: your domain (Core). Portal is only reached **by Core on localhost**. No need to open or expose port 18472.
+
+**If you get 502 (from Cloudflare or the client):**  
+That 502 is almost always **Core returning 502** because Core could not connect to Portal (e.g. Portal not running or wrong `portal_url`). Cloudflare then forwards that response. Fix: on the **same machine** where Core runs, start Portal (`python -m main portal`) and set `portal_url: "http://127.0.0.1:18472"` in `config/core.yml`.
+
+## Companion gets 502 when opening "Core setting"
+
+Companion loads Core’s `/portal-ui`; Core then **proxies** that request to the Portal at `portal_url`. A 502 means Core could not reach the Portal.
+
+**Portal must run on the same machine as Core.** `portal_url` is usually `http://127.0.0.1:18472` — that is Core’s **localhost**. If Core runs on a server (e.g. VPS or home machine behind Cloudflare), start Portal on that **same** server.
+
+**Checklist:**
+
+1. **Start Portal** on the host where Core runs:
+   ```bash
+   python -m main portal
+   ```
+   Leave it running (same terminal or run in background / as a service).
+
+2. **Confirm Portal is up** on that host:
+   ```bash
+   curl http://127.0.0.1:18472/ready
+   ```
+   Expect: `ok` and status 200.
+
+3. **Confirm `config/core.yml`** has `portal_url: "http://127.0.0.1:18472"` (or the port you use). Restart Core after changing it.
+
+4. **If you use a different port** for Portal (e.g. `PORTAL_PORT=9001`), set `portal_url: "http://127.0.0.1:9001"` in core.yml.
+
+5. **502 response body** from Core includes `detail` and sometimes `portal_url` — e.g. "Cannot reach Portal; is it running?" means Core tried `portal_url` and got connection refused (Portal not listening).
+
+6. **Diagnostic:** On the machine where Core runs, open or curl Core’s proxy-status (no auth):
+   ```bash
+   curl http://127.0.0.1:9000/api/portal/proxy-status
+   ```
+   Response: `portal_url`, `portal_reachable` (true/false), and `detail`. If `portal_reachable` is false, Core cannot reach Portal at that URL — fix the port or start Portal.
+
 ## portal_secret (Core → Portal API auth)
 
 When Core proxies requests to Portal (`/portal-ui`, `/api/config/*`), it can send a shared secret so Portal accepts only requests from Core.
