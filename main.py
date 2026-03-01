@@ -444,7 +444,7 @@ def run_core() -> threading.Thread:
 
 
 def run_portal(open_browser=True):
-    """Start the Portal server (config and onboarding). Bind 127.0.0.1 only. Optionally open browser when ready."""
+    """Start the Portal server (config and onboarding). Bind 127.0.0.1 only. Optionally open browser when ready. Ctrl+C to stop."""
     try:
         import uvicorn
         from portal.app import app
@@ -456,31 +456,31 @@ def run_portal(open_browser=True):
     port = get_port()
     base_url = "http://{}:{}".format(host, port)
     ready_url = base_url + "/ready"
+
+    def open_browser_when_ready():
+        if not open_browser:
+            return
+        for _ in range(30):
+            try:
+                r = httpx.get(ready_url, timeout=1.0)
+                if r is not None and r.status_code == 200:
+                    try:
+                        webbrowser.open(base_url)
+                        print("Opened browser to {}\n".format(base_url))
+                    except Exception:
+                        print("Portal: {}\n".format(base_url))
+                    break
+            except Exception:
+                pass
+            sleep(0.5)
+
+    print("Starting HomeClaw Portal at {}\n".format(base_url))
+    # Run uvicorn in main thread so Ctrl+C shuts down cleanly; browser opener in background.
+    threading.Thread(target=open_browser_when_ready, daemon=True).start()
     try:
-        print("Starting HomeClaw Portal at {}\n".format(base_url))
-        # Run uvicorn in a thread so we can wait for ready and open browser
-        def run_uvicorn():
-            uvicorn.run(app, host=host, port=port, log_level="info")
-        server_thread = threading.Thread(target=run_uvicorn, daemon=True)
-        server_thread.start()
-        if open_browser:
-            for _ in range(30):
-                try:
-                    r = httpx.get(ready_url, timeout=1.0)
-                    if r is not None and r.status_code == 200:
-                        try:
-                            webbrowser.open(base_url)
-                            print("Opened browser to {}\n".format(base_url))
-                        except Exception:
-                            print("Portal: {}\n".format(base_url))
-                        break
-                except Exception:
-                    pass
-                sleep(0.5)
-        server_thread.join()
-    except Exception as e:
-        logger.exception("Portal server error: %s", e)
-        sys.exit(1)
+        uvicorn.run(app, host=host, port=port, log_level="info")
+    except KeyboardInterrupt:
+        print("\nPortal stopped.")
 
 
 def start(open_browser=True):
