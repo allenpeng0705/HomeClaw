@@ -175,3 +175,5 @@ For **script or pip** installs, provide a single entrypoint and clear layout:
 | **Windows** | PowerShell install script (and optional pip); same docs. |
 
 This keeps Core distribution small and avoids shipping binaries/models while giving a single, clear place for models and one UI for configuration.
+
+**How to distribute via Homebrew, Winget, and similar tools:** see **[DistributionHowTo.md](DistributionHowTo.md)**.

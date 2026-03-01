@@ -20,9 +20,17 @@ import time
 import uuid
 import webbrowser
 
-# Reduce third-party FutureWarning noise (transformers, huggingface_hub); see docs/ResultViewerAndCommonLogs.md
-warnings.filterwarnings("ignore", category=FutureWarning, module="transformers.utils.generic")
-warnings.filterwarnings("ignore", category=FutureWarning, module="huggingface_hub.file_download")
+# Reduce third-party FutureWarning noise when those libs are present (optional deps; we use llama.cpp, not transformers)
+try:
+    import transformers  # noqa: F401
+    warnings.filterwarnings("ignore", category=FutureWarning, module="transformers.utils.generic")
+except ImportError:
+    pass
+try:
+    import huggingface_hub  # noqa: F401
+    warnings.filterwarnings("ignore", category=FutureWarning, module="huggingface_hub.file_download")
+except ImportError:
+    pass
 import chromadb
 import chromadb.config
 import aiohttp

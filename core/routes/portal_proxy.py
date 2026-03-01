@@ -127,7 +127,10 @@ async def proxy_request_to_portal(request: Request) -> Response:
     """Forward the current request to Portal (method, path, query, body, headers + X-Portal-Secret). Phase 5: callers must ensure portal admin auth already checked (403 if not). Return response or 502/503 on error."""
     base = _get_portal_url().rstrip("/")
     if not base:
-        return JSONResponse(status_code=502, content={"detail": "Portal URL not configured"})
+        return JSONResponse(
+            status_code=502,
+            content={"detail": "Portal URL not configured. Set portal_url in config/core.yml (e.g. http://127.0.0.1:18472) and start Portal: python -m main portal"},
+        )
     secret = _get_portal_secret()
     path = request.url.path
     query = str(request.url.query)
@@ -192,7 +195,10 @@ async def _stream_portal_ui(request: Request, path: str) -> Response:
     """Reverse-proxy GET to Portal and stream response. Rewrite Location and Set-Cookie path for /portal-ui. Phase 5: require portal admin auth when portal_url is set."""
     base = _get_portal_url().rstrip("/")
     if not base:
-        return JSONResponse(status_code=502, content={"detail": "Portal URL not configured"})
+        return JSONResponse(
+            status_code=502,
+            content={"detail": "Portal URL not configured. Set portal_url in config/core.yml (e.g. http://127.0.0.1:18472) and start Portal: python -m main portal"},
+        )
     if get_portal_admin_from_request(request) is None:
         return JSONResponse(status_code=401, content={"detail": "Portal admin auth required (Bearer token, Basic, or ?token=)"})
     secret = _get_portal_secret()
@@ -208,8 +214,11 @@ async def _stream_portal_ui(request: Request, path: str) -> Response:
             # Read full body inside context so connection is released; avoids streaming after client close.
             content = r.content
     except httpx.ConnectError as e:
-        logger.warning("Portal UI proxy: connection failed: {}", e)
-        return JSONResponse(status_code=502, content={"detail": "Cannot reach Portal; is it running?"})
+        logger.warning("Portal UI proxy: connection failed to {}: {}", base, e)
+        return JSONResponse(
+            status_code=502,
+            content={"detail": "Cannot reach Portal; is it running? Start with: python -m main portal", "portal_url": base},
+        )
     except httpx.TimeoutException:
         logger.warning("Portal UI proxy: timeout to {}", url)
         return JSONResponse(status_code=504, content={"detail": "Portal request timed out"})

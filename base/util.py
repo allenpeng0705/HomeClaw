@@ -28,7 +28,6 @@ from dotenv import dotenv_values
 from loguru import logger
 import watchdog.events
 import watchdog.observers
-import torch
 import requests
 
 
@@ -182,7 +181,21 @@ class Util:
         return config
     
     def has_gpu_cuda(self) -> bool:
-        return torch.cuda.is_available()
+        """Check if CUDA GPU is available. Uses torch if installed, else nvidia-smi (no torch required)."""
+        try:
+            import torch
+            return torch.cuda.is_available()
+        except Exception:
+            pass
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                capture_output=True,
+                timeout=5,
+            )
+            return result.returncode == 0 and bool(result.stdout.strip())
+        except Exception:
+            return False
 
 
     def root_path(self):
