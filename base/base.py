@@ -728,11 +728,24 @@ class Endpoint:
 
 
 def _get_gpu_count() -> int:
-    """Return number of CUDA GPUs (0 if CPU-only or torch/cuda unavailable). Used only for default concurrency; never raises."""
+    """Return number of CUDA GPUs (0 if CPU-only). Uses torch if installed, else nvidia-smi. Used only for default concurrency; never raises."""
     try:
         import torch
         n = getattr(torch.cuda, 'device_count', lambda: 0)()
         return int(n) if n is not None else 0
+    except Exception:
+        pass
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return 0
+        lines = (result.stdout or b"").decode().strip().splitlines()
+        return len([l for l in lines if l.strip()]) if lines else 0
     except Exception:
         return 0
 

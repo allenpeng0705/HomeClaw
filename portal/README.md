@@ -21,6 +21,27 @@ python -c "import uvicorn; from portal.app import app; from portal.config import
 - **Host:** `127.0.0.1` (override: `PORTAL_HOST`)
 - **Port:** `18472` (override: `PORTAL_PORT`)
 
+## portal_secret (Core → Portal API auth)
+
+When Core proxies requests to Portal (`/portal-ui`, `/api/config/*`), it can send a shared secret so Portal accepts only requests from Core.
+
+**1. Choose one secret** (e.g. 32 random characters). Use the same value in both places below.
+
+**2. Core** — set in `config/core.yml` or env:
+
+```yaml
+portal_secret: "your-secret-here"
+```
+
+Or: `PORTAL_SECRET=your-secret-here`
+
+**3. Portal** — set in one of:
+
+- **Env:** `PORTAL_SECRET=your-secret-here`
+- **File:** `config/portal_secret.txt` — first line = the secret (no quotes). File is in `.gitignore`.
+
+Core sends the secret in the `X-Portal-Secret` header on every proxied request. Portal’s middleware allows `/api/*` if the request has a valid session cookie **or** a matching `X-Portal-Secret` (or `Authorization: Bearer <secret>`). If you leave `portal_secret` empty on both sides, Portal still requires a session for `/api/*` (except GET status/guide); the secret is optional and adds protection when Core and Portal are on the same host.
+
 ## Step 1
 
 - `GET /ready` — readiness

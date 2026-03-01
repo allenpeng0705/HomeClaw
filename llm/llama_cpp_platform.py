@@ -10,11 +10,21 @@ import shutil
 from pathlib import Path
 from typing import Optional, Tuple
 
-# Optional: use torch to detect CUDA; fallback to env or nvidia-smi if needed
+# CUDA detection: try torch if installed, else nvidia-smi (no torch required)
 def _cuda_available() -> bool:
     try:
         import torch
         return torch.cuda.is_available()
+    except Exception:
+        pass
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True,
+            timeout=5,
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
     except Exception:
         return False
 

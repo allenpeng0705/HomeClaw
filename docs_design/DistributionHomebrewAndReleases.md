@@ -106,3 +106,5 @@ You’d need to **build and upload** that DMG (or a zip of the .app) on each rel
 - **Later:** If you package Core as a Python package (`pyproject.toml` for the main app), `pip install homeclaw` becomes another option.
 
 The sample formula in `scripts/homebrew/Homeclaw.rb` assumes installation from a **GitHub source tarball** and installs a `homeclaw` script that runs Core.
+
+**Concrete steps** to set up the tap, release tarball, and (optionally) Winget/Chocolatey: see **[DistributionHowTo.md](DistributionHowTo.md)**.

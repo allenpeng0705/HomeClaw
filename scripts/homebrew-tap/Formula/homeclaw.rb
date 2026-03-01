@@ -2,15 +2,18 @@
 # Install: brew tap allenpeng0705/homeclaw && brew install homeclaw
 # Run: homeclaw start   or   homeclaw portal
 #
-# The canonical copy for the tap repo is in scripts/homebrew-tap/Formula/homeclaw.rb.
-# Copy that file to your tap repo (github.com/allenpeng0705/homebrew-homeclaw).
+# This formula does NOT run install.sh. It installs from the release tarball (venv + pip).
+# Node.js and llama.cpp are handled by the install scripts (install.sh / install.ps1), not here.
+# See: scripts/install.sh, scripts/install.ps1, and docs_design/DistributionHowTo.md.
+#
+# Copy this file to Formula/homeclaw.rb in your tap repo: github.com/allenpeng0705/homebrew-homeclaw
 # On each release: update url, version, and sha256 (run scripts/homebrew/get-sha256.sh <version>).
 
 class Homeclaw < Formula
   desc "HomeClaw Core — local AI assistant server and API"
   homepage "https://github.com/allenpeng0705/HomeClaw"
   url "https://github.com/allenpeng0705/HomeClaw/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 "REPLACE_WITH_SHA256"
+  sha256 "b976ae47368f382834e1735addab927648c761f9de7f6dde10bc47ea31d41e93"
   license "MIT"
   version "1.0.0"
 
@@ -46,6 +49,10 @@ class Homeclaw < Formula
       Put GGUF models in ~/HomeClaw/models (or set model_path in config).
 
       Companion app: download from GitHub Releases or build from clients/HomeClawApp.
+
+      This formula does NOT run install.sh or install Node.js/llama.cpp.
+      For Node.js and llama.cpp: run install.sh (Mac/Linux) or install.ps1 (Windows), or install manually—
+      e.g. brew install node llama.cpp, or see https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md.
     EOS
   end
 

@@ -1,10 +1,11 @@
 # Version lower bounds reduce pip resolution depth and avoid resolution-too-deep (see https://pip.pypa.io/en/stable/topics/dependency-resolution/)
+# Core + Portal: all below are used by default. Optional features (plugins, channels, tools) have inline comments—comment out if not needed.
 loguru>=0.7.0
 PyYAML>=6.0
 ruamel.yaml>=0.18.0   # preserve comments when updating core.yml
 python-dotenv>=1.0.0
 tqdm>=4.65.0
-transformers>=4.30.0
+# transformers not required (we use llama.cpp); cognee/chromadb may pull it in optionally
 chromadb>=0.4.0
 numpy>=1.24.0,<3.0.0
 fastapi>=0.100.0
@@ -30,8 +31,8 @@ pydantic>=2.0.0
 python-pptx>=0.6.21
 # Constrain fsspec so datasets (transforms/cognee dep) is satisfied: datasets requires fsspec[http]<=2024.12.0
 fsspec[http]>=2023.1.0,<=2024.12.0
-# Full browser (navigate, snapshot, click, type). After pip install: playwright install chromium
-playwright>=1.40.0
+# Full browser: use homeclaw-browser Node.js plugin (default). For built-in Python browser tools, optional: pip install playwright && python -m playwright install chromium
+# playwright>=1.40.0
 # Pinggy tunnel (remote access): when pinggy.token set in core.yml, Core starts tunnel and serves /pinggy with QR for Companion.
 pinggy>=0.0.18
 # QR code for /pinggy page (Companion scan-to-connect)
@@ -75,23 +76,7 @@ duckduckgo-search>=4.0.0
 # pypdf   # fallback for PDF only if unstructured not installed
 # llama-cpp-python   # in-process LLM via LlamaCppPython (default is llama.cpp server subprocess or litellm)
 # simplematrixbotlib # Matrix channel (channels/matrix)
-# torch   # CUDA check in llama_cpp_platform; optional for GPU detection
-
-# Tests
+# torch optional: CUDA detection uses nvidia-smi when torch not installed
+# Tests (optional: install only for development)
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
-httpx>=0.24.0
-
-#litellm
-#tqdm==4.66.4
-#transformers==4.41.1
-#gradio==4.44.0
-#pytest==8.2.0
-#pytest-asyncio==0.24.0
-#alembic==1.13.1
-#loguru==0.7.3
-#PyYAML==6.0.2
-#python-dotenv==1.0.1
-#schedule==1.2.2
-#simplematrixbotlib==2.12.3
-#neonize==0.3.10
