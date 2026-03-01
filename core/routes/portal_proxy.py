@@ -195,9 +195,10 @@ async def _stream_portal_ui(request: Request, path: str) -> Response:
     """Reverse-proxy GET to Portal and stream response. Rewrite Location and Set-Cookie path for /portal-ui. Phase 5: require portal admin auth when portal_url is set."""
     base = _get_portal_url().rstrip("/")
     if not base:
+        logger.warning("Portal UI proxy: portal_url is empty — restart Core after editing config/core.yml")
         return JSONResponse(
             status_code=502,
-            content={"detail": "Portal URL not configured. Set portal_url in config/core.yml (e.g. http://127.0.0.1:18472) and start Portal: python -m main portal"},
+            content={"detail": "Portal URL not configured. Set portal_url in config/core.yml and restart Core."},
         )
     if get_portal_admin_from_request(request) is None:
         return JSONResponse(status_code=401, content={"detail": "Portal admin auth required (Bearer token, Basic, or ?token=)"})
