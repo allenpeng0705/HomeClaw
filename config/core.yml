@@ -7,7 +7,7 @@ host: 0.0.0.0
 port: 9000
 mode: dev
 # model_path: base path for local models (GGUF, etc.). Relative to project root; resolved on Windows, Mac, and Linux (use / in config; pathlib normalizes). Use ../models to put models outside the repo. Use ./models or leave empty for project_root/models.
-model_path: ../models/
+model_path: models
 # When false: log [memory], [tools], [skills], [plugin], [TAM], [orchestrator] activity at INFO (verbose). When true: only INFO to console (less noise). On Windows CMD, use true to avoid huge output and "Press Space to continue" blocking.
 silent: false
 # When false: all logs go only to the log file (logs/core_debug.log); nothing to console. To monitor: "Get-Content logs\core_debug.log -Wait -Tail 50 -Encoding UTF8" (PowerShell; -Encoding UTF8 needed for Chinese/special chars on Windows) or "tail -f logs/core_debug.log" (Unix). When true: logs also go to console.
@@ -86,7 +86,7 @@ push_notifications:
     key_id: "4S2J822AM4"      # Key ID from Apple Developer (e.g. ABC123XYZ)
     team_id: "VW379TB6DM"     # Team ID (10 chars, from Apple Developer membership)
     bundle_id: "com.homeclaw.homeclawApp"   # Companion app bundle ID (iOS + macOS)
-    sandbox: true   # true for development/TestFlight, false for App Store
+    sandbox: false   # true for development/TestFlight, false for App Store
   # FCM (Android and other non-Apple). Optional: set GOOGLE_APPLICATION_CREDENTIALS env instead.
   fcm:
     credentials_path: ""   # path to serviceAccountKey.json (relative to project root), or leave empty to use env
