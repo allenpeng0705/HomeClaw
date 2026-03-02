@@ -75,9 +75,11 @@ def _dedupe_then_process(source: str, msg_text: str, recipient: str, params: dic
     """Return True if we should process (not a duplicate). When True, caller must post and send reply."""
     key = (source, _envelope_timestamp(params))
     now = time.monotonic()
-    # Prune old entries
-    while _seen and next(iter(_seen.values()), 0) < now - DEDUPE_SECONDS:
-        _seen.popitem(last=False)
+    cutoff = now - DEDUPE_SECONDS
+    # Prune old entries by timestamp
+    for k in list(_seen.keys()):
+        if _seen[k] < cutoff:
+            del _seen[k]
     if len(_seen) > _MAX_SEEN:
         for _ in range(len(_seen) - _MAX_SEEN):
             _seen.popitem(last=False)
@@ -200,6 +202,8 @@ def run_bridge():
                                             if DEBUG:
                                                 print(f"[bridge] DEBUG receive ignored: msg_text={msg_text!r}", file=sys.stderr)
                                             continue
+                                        if not _dedupe_then_process(source, msg_text, recipient, params):
+                                            continue
                                         print(f"[bridge] from {source}: {msg_text[:80]}...", file=sys.stderr)
                                         user_id = f"signal_{source.replace('+', '')}"
                                         result = post_to_channel(user_id, msg_text, user_name=source)
@@ -247,6 +251,8 @@ def run_bridge():
                                 if DEBUG:
                                     print(f"[bridge] DEBUG receive event ignored: msg_text={msg_text!r}", file=sys.stderr)
                                 continue  # skip sync-only events for now
+                            if not _dedupe_then_process(source, msg_text, recipient, params):
+                                continue
                             print(f"[bridge] from {source}: {msg_text[:80]}...", file=sys.stderr)
                             user_id = f"signal_{source.replace('+', '')}"
                             result = post_to_channel(user_id, msg_text, user_name=source)
