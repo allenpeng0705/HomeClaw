@@ -7,9 +7,9 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from portal import config_backup
-from portal.config import get_config_dir
-from portal import yaml_config
+from core.portal import config_backup
+from core.portal.config import get_config_dir
+from core.portal import yaml_config
 
 _log = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ WHITELIST_CORE = frozenset({
     "file_view_link_expiry_sec", "inbound_request_timeout_seconds",
     "pinggy", "push_notifications", "file_understanding", "llama_cpp", "completion",
     "llm_config_file", "endpoints",
-    "portal_url", "portal_secret",  # Phase 4: Core proxies config and /portal-ui to Portal
+    "portal_url", "portal_secret",  # optional; Portal is in-process on Core or standalone (no proxy)
 })
 
 

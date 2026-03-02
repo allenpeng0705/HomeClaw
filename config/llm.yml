@@ -162,9 +162,10 @@ cloud_models:
 
 # ——— Selected main and embedding model: local_models/<id> or cloud_models/<id> ———
 # main_llm: optional when main_llm_mode is set. When mode is "local" we use main_llm_local; when "cloud" we use main_llm_cloud; when "mix" we use both per request.
+# If the local llama.cpp server is not running (e.g. connection refused to 127.0.0.1:5022), use main_llm_mode: cloud so only cloud is used, or start the local server.
 #main_llm: local_models/main_vl_model_4B
 main_llm_mode: mix
-main_llm_local: local_models/main_vl_model_2B
+main_llm_local: local_models/main_vl_model_8B
 main_llm_cloud: cloud_models/DeepSeek-Chat
 # Mix mode routing: heuristic (Layer 1), semantic (Layer 2), SLM (Layer 3: classifier or perplexity). See comments in hybrid_router.
 hybrid_router:

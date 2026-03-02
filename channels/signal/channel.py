@@ -51,6 +51,7 @@ async def message(body: SignalMessage):
         "text": body.text or "(no text)",
         "channel_name": "signal",
         "user_name": body.user_name or body.user_id,
+        "reply_accepts": ["text", "image"],
     }
     if getattr(body, "images", None):
         payload["images"] = body.images
@@ -62,17 +63,20 @@ async def message(body: SignalMessage):
         payload["files"] = body.files
     try:
         headers = Util().get_channels_core_api_headers()
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=False) as client:
             r = await client.post(INBOUND_URL, json=payload, headers=headers, timeout=120.0)
         data = r.json() if r.content else {}
         reply = data.get("text", "")
         if not reply and r.status_code != 200:
             reply = data.get("error", "Request failed")
+        out = {"text": reply or "(no reply)"}
+        if data.get("images"):
+            out["images"] = data["images"]
+        return out
     except httpx.ConnectError:
-        reply = "Core unreachable. Is HomeClaw running?"
+        return {"text": "Core unreachable. Is HomeClaw running?"}
     except Exception as e:
-        reply = f"Error: {e}"
-    return {"text": reply or "(no reply)"}
+        return {"text": f"Error: {e}"}
 
 
 def main():

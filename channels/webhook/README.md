@@ -49,7 +49,11 @@ Content-Type: application/json
 }
 ```
 
-Same response shape: `{ "text": "..." }`.
+Same response shape: `{ "text": "..." }`. You can also send **images**, **videos**, **audios**, and **files** (lists of data URLs or paths Core can read); see **Images and files** below.
+
+## Images and files
+
+The webhook accepts the **same payload as Core /inbound**: in addition to `user_id`, `text`, `channel_name`, `user_name`, you can send optional `images`, `videos`, `audios`, and `files` (each a list of data URLs like `data:image/jpeg;base64,...` or file paths). The webhook forwards them as-is to Core. Core stores **images** in the user's **images** folder when the model doesn't support vision; **files** are processed by file-understanding (documents can be added to Knowledge base). See **docs_design/ChannelImageAndFileInbound.md**.
 
 ## Minimal bot examples
 

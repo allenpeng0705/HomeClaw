@@ -28,6 +28,8 @@ from base.base import (
 from base.tools import ROUTING_RESPONSE_ALREADY_SENT
 from base.util import Util
 
+from core.result_viewer import build_image_view_links, get_result_link_base_url
+
 from core.routes import (
     auth,
     companion_auth,
@@ -141,17 +143,9 @@ def register_all_routes(core: Any) -> None:
         portal_proxy.get_portal_proxy_status_handler,
         methods=["GET"],
     )
-    # Portal UI reverse proxy (Phase 4.2): /portal-ui and /portal-ui/* -> Portal. Phase 5: require portal admin auth.
-    app.add_api_route(
-        "/portal-ui",
-        portal_proxy.get_portal_ui_handler(),
-        methods=["GET"],
-    )
-    app.add_api_route(
-        "/portal-ui/{path:path}",
-        portal_proxy.get_portal_ui_path_handler(),
-        methods=["GET"],
-    )
+    # Portal runs as its own web server (python -m main portal). Core does not serve Portal; /portal-ui points users there.
+    app.add_api_route("/portal-ui", portal_proxy.get_portal_ui_handler(), methods=["GET"])
+    app.add_api_route("/portal-ui/{path:path}", portal_proxy.get_portal_ui_path_handler(), methods=["GET"])
     app.add_api_route(
         "/files/out",
         files.get_files_out_handler(core),
@@ -304,7 +298,9 @@ def register_all_routes(core: Any) -> None:
         methods=["GET"],
         dependencies=[Depends(companion_auth.get_companion_token_user)],
     )
+    # /ui = launcher (sessions + plugin UIs), same as before. /launcher = alias. Portal at /portal-ui.
     app.add_api_route("/ui", ui_routes.get_ui_launcher_handler(core), methods=["GET"])
+    app.add_api_route("/launcher", ui_routes.get_ui_launcher_handler(core), methods=["GET"])
     app.add_websocket_route("/ws", websocket_routes.get_websocket_handler(core))
 
     @app.post("/process")
@@ -451,6 +447,11 @@ def register_all_routes(core: Any) -> None:
         raw_request: Request,
         _: None = Depends(auth.verify_inbound_auth),
     ):
+        logger.info(
+            "POST /inbound received: user_id={} channel_name={} (so request reached Core)",
+            getattr(request, "user_id", "") or "",
+            getattr(request, "channel_name", "") or "",
+        )
         try:
             if getattr(request, "async_mode", False):
                 request_id = str(uuid.uuid4())
@@ -524,42 +525,64 @@ def register_all_routes(core: Any) -> None:
                             except (OSError, RuntimeError):
                                 pass
             if image_paths:
-                data_urls = []
-                for image_path in image_paths:
-                    if not isinstance(image_path, str) or not os.path.isfile(
-                        image_path
-                    ):
-                        continue
-                    try:
-                        with open(image_path, "rb") as f:
-                            b64 = base64.b64encode(f.read()).decode("ascii")
-                        ext = (
-                            (
-                                image_path.lower().split(".")[-1]
-                                if "." in image_path
-                                else "png"
+                reply_accepts = getattr(request, "reply_accepts", None)
+                if not reply_accepts or not isinstance(reply_accepts, list):
+                    reply_accepts = ["text"]
+                accepts_image = "image" in reply_accepts
+                if accepts_image:
+                    data_urls = []
+                    for image_path in image_paths:
+                        if not isinstance(image_path, str) or not os.path.isfile(
+                            image_path
+                        ):
+                            continue
+                        try:
+                            with open(image_path, "rb") as f:
+                                b64 = base64.b64encode(f.read()).decode("ascii")
+                            ext = (
+                                (
+                                    image_path.lower().split(".")[-1]
+                                    if "." in image_path
+                                    else "png"
+                                )
+                                or "png"
                             )
-                            or "png"
-                        )
-                        mime = (
-                            "image/png"
-                            if ext == "png"
-                            else (
-                                "image/jpeg"
-                                if ext in ("jpg", "jpeg")
-                                else "image/" + ext
+                            mime = (
+                                "image/png"
+                                if ext == "png"
+                                else (
+                                    "image/jpeg"
+                                    if ext in ("jpg", "jpeg")
+                                    else "image/" + ext
+                                )
                             )
-                        )
-                        if mime == "image/jpg":
-                            mime = "image/jpeg"
-                        data_urls.append(f"data:{mime};base64,{b64}")
-                    except Exception as e:
-                        logger.debug(
-                            "inbound: could not attach image as data URL: {}", e
-                        )
-                if data_urls:
-                    content["images"] = data_urls
-                    content["image"] = data_urls[0]
+                            if mime == "image/jpg":
+                                mime = "image/jpeg"
+                            data_urls.append(f"data:{mime};base64,{b64}")
+                        except Exception as e:
+                            logger.debug(
+                                "inbound: could not attach image as data URL: {}", e
+                            )
+                    if data_urls:
+                        content["images"] = data_urls
+                        content["image"] = data_urls[0]
+                else:
+                    scope = (
+                        (getattr(request, "user_id", None) or "").strip()
+                        or "companion"
+                    )
+                    image_links = build_image_view_links(image_paths, scope)
+                    if image_links:
+                        content["image_links"] = image_links
+                        try:
+                            line = "\n".join(
+                                f"Image: {u}" for u in image_links[:10]
+                            )
+                            if line:
+                                existing = str(content.get("text") or "")
+                                content["text"] = (existing + "\n\n" + line) if existing else line
+                        except Exception:
+                            pass
             try:
                 raw_req = raw_request
                 disconnected = (

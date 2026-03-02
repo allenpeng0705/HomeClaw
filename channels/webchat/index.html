@@ -150,10 +150,42 @@
               var t = data.text || 'Notification';
               if (data.source) t = '[' + data.source + '] ' + t;
               addLog('bot', t);
+              if (data.images && Array.isArray(data.images)) {
+                data.images.forEach(function(url) {
+                  if (url && typeof url === 'string') {
+                    var p = document.createElement('p');
+                    p.className = 'bot';
+                    var img = document.createElement('img');
+                    img.src = url;
+                    img.alt = 'Image';
+                    img.style.maxWidth = '100%';
+                    img.style.maxHeight = '200px';
+                    p.appendChild(img);
+                    logEl.appendChild(p);
+                    logEl.scrollTop = logEl.scrollHeight;
+                  }
+                });
+              }
               return;
             }
             if (data.error) addLog('error', 'Error: ' + data.error);
             else if (data.text) addLog('bot', data.text);
+            if (data.images && Array.isArray(data.images)) {
+              data.images.forEach(function(url) {
+                if (url && typeof url === 'string') {
+                  var p = document.createElement('p');
+                  p.className = 'bot';
+                  var img = document.createElement('img');
+                  img.src = url;
+                  img.alt = 'Image';
+                  img.style.maxWidth = '100%';
+                  img.style.maxHeight = '200px';
+                  p.appendChild(img);
+                  logEl.appendChild(p);
+                  logEl.scrollTop = logEl.scrollHeight;
+                }
+              });
+            }
           } catch (e) {
             addLog('bot', ev.data);
           }

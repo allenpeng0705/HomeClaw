@@ -33,7 +33,7 @@ if not DISCORD_BOT_TOKEN:
 async def download_attachment_to_data_url(url: str, content_type: Optional[str] = None) -> Optional[str]:
     """Download Discord attachment URL and return data URL. Never raises."""
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=False) as client:
             r = await client.get(url, timeout=30.0)
         if r.status_code != 200 or not r.content:
             return None
@@ -53,12 +53,14 @@ async def post_to_core(
     videos: Optional[List[str]] = None,
     audios: Optional[List[str]] = None,
     files: Optional[List[str]] = None,
-) -> str:
+) -> dict:
+    """Returns {"text": str, "images": list} so caller can send response images (e.g. from image generation)."""
     payload = {
         "user_id": user_id,
         "text": text or "(no text)",
         "channel_name": channel_name,
         "user_name": user_name,
+        "reply_accepts": ["text", "image"],
     }
     if images:
         payload["images"] = images
@@ -70,17 +72,18 @@ async def post_to_core(
         payload["files"] = files
     try:
         headers = Util().get_channels_core_api_headers()
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=False) as client:
             r = await client.post(INBOUND_URL, json=payload, headers=headers, timeout=120.0)
-        data = r.json()
+        data = r.json() if r.content else {}
         reply = data.get("text", "")
         if not reply and r.status_code != 200:
             reply = data.get("error", "Request failed")
+        reply_images = data.get("images") or []
+        return {"text": reply or "(no reply)", "images": reply_images}
     except httpx.ConnectError:
-        reply = "Core unreachable. Is HomeClaw running?"
+        return {"text": "Core unreachable. Is HomeClaw running?", "images": []}
     except Exception as e:
-        reply = f"Error: {e}"
-    return reply or "(no reply)"
+        return {"text": f"Error: {e}", "images": []}
 
 
 def main():
@@ -129,7 +132,7 @@ def main():
             text = "Image" if images else "Video" if videos else "Audio" if audios else "File" if files else "(no text)"
 
         async with message.channel.typing():
-            reply = await post_to_core(
+            result = await post_to_core(
                 user_id,
                 user_name,
                 text,
@@ -138,10 +141,24 @@ def main():
                 audios=audios if audios else None,
                 files=files if files else None,
             )
+        reply_text = result.get("text", "") or "(no reply)"
+        reply_images = result.get("images") or []
+        from io import BytesIO
+        files_to_send = []
+        for i, data_url in enumerate(reply_images[:5]):
+            raw = Util.data_url_to_bytes(data_url)
+            if raw:
+                files_to_send.append(discord.File(BytesIO(raw), filename=f"image_{i}.png"))
         try:
-            await message.reply(reply[:2000] if len(reply) > 2000 else reply)
+            if files_to_send:
+                await message.reply(content=reply_text[:2000] if reply_text else None, files=files_to_send)
+            elif reply_text:
+                await message.reply(reply_text[:2000])
         except discord.HTTPException:
-            await message.channel.send(reply[:2000] if len(reply) > 2000 else reply)
+            if files_to_send:
+                await message.channel.send(content=reply_text[:2000] if reply_text else None, files=files_to_send)
+            elif reply_text:
+                await message.channel.send(reply_text[:2000])
 
     bot.run(DISCORD_BOT_TOKEN)
 

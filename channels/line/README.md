@@ -40,4 +40,4 @@ The channel listens on the host/port in **channels/line/config.yml** (default po
 ## Media
 
 - **Image / video / audio / file:** Downloaded via LINE Get content API and saved under **channels/line/docs/**. Paths are sent to Core; Core runs file-understanding and uses them in the message.
-- **Reply:** Core sends text back; the channel uses LINE reply (if we have a reply token) or push API.
+- **Reply:** Core sends text and optional images back. The channel sends text + images in one LINE reply or push (up to 5 items). **LINE requires HTTPS URLs for images.** Set **LINE_IMAGE_BASE_URL** (e.g. `https://yourserver.com/files`) in env so that image paths from Core are sent as `LINE_IMAGE_BASE_URL` + basename(path); your server must serve those files at that base. If Core returns image URLs that are already `https://`, they are used as-is. See **channels/CHANNEL_REVIEW.md** and **docs_design/ChannelImageAndFileInbound.md**.

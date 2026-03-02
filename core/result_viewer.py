@@ -15,7 +15,8 @@ import hmac
 import hashlib
 import re
 import time
-from typing import Optional, Tuple
+from pathlib import Path
+from typing import List, Optional, Tuple
 from urllib.parse import quote, unquote
 
 from loguru import logger
@@ -230,6 +231,48 @@ def get_core_public_url() -> str:
         return f"http://{host}:{port}"
     except Exception:
         return "http://127.0.0.1:9000"
+
+
+def build_image_view_links(
+    image_paths: Optional[List[str]],
+    scope: str,
+) -> List[str]:
+    """
+    Build list of view URLs for image paths under homeclaw_root/scope/.
+    Used when client does not accept inline images (reply_accepts text-only) and Core has a public URL.
+    Returns []. Never raises.
+    """
+    if not image_paths or not get_result_link_base_url():
+        return []
+    try:
+        from base.util import Util
+        meta = Util().get_core_metadata()
+        base = (getattr(meta, "homeclaw_root", None) or "").strip()
+        if not base:
+            return []
+    except Exception:
+        return []
+    scope = (scope or "companion").strip() or "companion"
+    try:
+        sandbox = Path(base).resolve() / scope
+    except (OSError, RuntimeError, ValueError):
+        return []
+    links: List[str] = []
+    for image_path in image_paths:
+        if not isinstance(image_path, str):
+            continue
+        try:
+            full = Path(image_path).resolve()
+            if not full.is_file():
+                continue
+            rel = full.relative_to(sandbox)
+            rel_str = str(rel).replace("\\", "/")
+            url, _ = build_file_view_link(scope, rel_str)
+            if url:
+                links.append(url)
+        except (ValueError, OSError, RuntimeError):
+            continue
+    return links
 
 
 def get_result_link_base_url() -> str:

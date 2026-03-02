@@ -15,7 +15,7 @@ The default browser opens automatically when the server is ready. To disable: `p
 Or run the app directly (same venv, no auto-open):
 
 ```bash
-python -c "import uvicorn; from portal.app import app; from portal.config import get_host, get_port; uvicorn.run(app, host=get_host(), port=get_port())"
+python -c "import uvicorn; from core.portal.app import app; from core.portal.config import get_host, get_port; uvicorn.run(app, host=get_host(), port=get_port())"
 ```
 
 - **Host:** `127.0.0.1` (override: `PORTAL_HOST`)
@@ -39,7 +39,10 @@ You expose **only** the machine’s **port 9000** (Core) to the internet — e.g
 3. So there is **one public entry point**: your domain (Core). Portal is only reached **by Core on localhost**. No need to open or expose port 18472.
 
 **If you get 502 (from Cloudflare or the client):**  
-That 502 is almost always **Core returning 502** because Core could not connect to Portal (e.g. Portal not running or wrong `portal_url`). Cloudflare then forwards that response. Fix: on the **same machine** where Core runs, start Portal (`python -m main portal`) and set `portal_url: "http://127.0.0.1:18472"` in `config/core.yml`.
+Two cases:
+
+1. **Request never reaches Core** (same as Slack/channels 502): something else is on port 9000 (e.g. a proxy or tunnel that took the port after a restart). You get 502 with an empty or proxy error body. Fix: shut down Core fully (Ctrl+C and wait for the process to exit), then start Core again so it binds to 9000; or use port 9001 for Core and point the tunnel and `channels/.env` to 9001.
+2. **Core is reached but cannot reach Portal**: Core returns 502 because it could not connect to Portal (Portal not running or wrong `portal_url`). Fix: on the **same machine** where Core runs, start Portal (`python -m main portal`) and set `portal_url: "http://127.0.0.1:18472"` in `config/core.yml`.
 
 ## Companion gets 502 when opening "Core setting"
 
@@ -67,7 +70,9 @@ Companion loads Core’s `/portal-ui`; Core then **proxies** that request to the
 
 5. **502 response body** from Core includes `detail` and sometimes `portal_url` — e.g. "Cannot reach Portal; is it running?" means Core tried `portal_url` and got connection refused (Portal not listening).
 
-6. **Diagnostic:** On the machine where Core runs, open or curl Core’s proxy-status (no auth):
+6. **502 but Portal works in browser:** If `curl http://127.0.0.1:18472/ready` returns 200 but Companion still gets 502, security software (antivirus/firewall) may be blocking requests **from the Core (Python) process** to localhost and returning 502. **Workaround:** Add an exclusion for your Python executable (e.g. `python.exe`, or the path to your venv) or for `127.0.0.1` / port 18472. On Windows: Windows Security → Virus & threat protection → Manage settings → Exclusions → Add exclusion (folder for your project or executable). Then restart Core.
+
+7. **Diagnostic:** On the machine where Core runs, open or curl Core’s proxy-status (no auth):
    ```bash
    curl http://127.0.0.1:9000/api/portal/proxy-status
    ```

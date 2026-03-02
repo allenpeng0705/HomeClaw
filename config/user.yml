@@ -22,7 +22,7 @@ users:
     username: pengshilei
     password: 123456
     email: []
-    im: ['matrix:@pengshilei:matrix.org']
+    im: ['matrix:@pengshilei:matrix.org', 'slack_U0AHT91TSRL', 'dingtalk_$:LWCP_v1:$PYr83ZBtc0VPbbkOaB1BNw==', 'feishu_unknown']
     phone: []
     permissions: []
     friends:
@@ -62,7 +62,7 @@ users:
     email: []
     im: ['matrix:@xiaofeng:matrix.org']
     phone: []
-    permissions: []
+    permissions: [im]
     friends:
       - name: HomeClaw
       - name: Emily

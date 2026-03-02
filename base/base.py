@@ -60,6 +60,8 @@ class PromptRequest(BaseModel):
     audios: List[str] # only for AUDIO, the value is path with the name of audios
     files: Optional[List[str]] = None  # optional: list of file paths; Core runs file-understanding (detect type, handle image/audio/video/doc)
     timestamp: float
+    # Reply-accepts: list of content types the channel can receive (e.g. ["text", "image"]). Omitted or ["text"] = text-only. See docs_design/ReplyAcceptsPattern.md.
+    reply_accepts: Optional[List[str]] = None
 
 
 class InboundRequest(BaseModel):
@@ -88,6 +90,8 @@ class InboundRequest(BaseModel):
     async_mode: Optional[bool] = Field(False, alias="async")
     # When set with async: true, Core pushes the result to the WebSocket that registered this session_id (see /ws "connected" event). Companion opens /ws, gets session_id, then POST /inbound with async + push_ws_session_id so Core can push the reply directly instead of polling.
     push_ws_session_id: Optional[str] = None
+    # Reply-accepts: list of content types the client can receive (e.g. ["text", "image", "file"]). Omitted or ["text"] = text-only; Core then sends only text (or text + image_links if core_public_url is set). See docs_design/ReplyAcceptsPattern.md.
+    reply_accepts: Optional[List[str]] = None
 
 class IntentType(Enum):
     TIME = "TIME"

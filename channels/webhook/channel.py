@@ -63,7 +63,7 @@ async def message(body: WebhookMessage):
     payload = body.model_dump(exclude_none=True)
     headers = Util().get_channels_core_api_headers()
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=False) as client:
             r = await client.post(url, json=payload, headers=headers, timeout=120.0)
         if r.status_code != 200:
             logger.warning(f"Core returned {r.status_code}: {r.text}")

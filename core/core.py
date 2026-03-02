@@ -52,6 +52,7 @@ from jinja2 import Template
 # Ensure the project root is in the PYTHONPATH
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from core.orchestrator import Orchestrator
+from core.result_viewer import build_image_view_links, get_result_link_base_url
 from base.PluginManager import PluginManager
 from base.util import Util, redact_params_for_log
 from base.base import (
@@ -788,14 +789,32 @@ class Core(CoreInterface):
                         continue
                     # Channel queue gets converted (channel-ready) text; format must be "plain" so it matches content (avoid markdown/link hint with whatsapp/plain text).
                     resp_data = {"text": self._format_outbound_text(resp_text), "format": "plain"}
-                    # Any skill/tool output that includes images: HOMECLAW_IMAGE_PATH=<path> → send to channel/companion
+                    # Any skill/tool output that includes images: HOMECLAW_IMAGE_PATH=<path> → send to channel/companion. Respect reply_accepts: if channel does not accept "image", send only text or image_links (when core has public URL).
                     img_paths = (request.request_metadata or {}).get("response_image_paths")
                     if not isinstance(img_paths, list):
                         img_paths = [(request.request_metadata or {}).get("response_image_path")] if (request.request_metadata or {}).get("response_image_path") else []
                     img_paths = [p for p in img_paths if isinstance(p, str) and os.path.isfile(p)]
                     if img_paths:
-                        resp_data["images"] = img_paths
-                        resp_data["image"] = img_paths[0]
+                        reply_accepts = getattr(request, "reply_accepts", None)
+                        if not reply_accepts or not isinstance(reply_accepts, list):
+                            reply_accepts = ["text"]
+                        if "image" in reply_accepts:
+                            resp_data["images"] = img_paths
+                            resp_data["image"] = img_paths[0]
+                        else:
+                            if get_result_link_base_url():
+                                scope = (getattr(request, "user_id", None) or getattr(request, "system_user_id", None) or "").strip() or "companion"
+                                image_links = build_image_view_links(img_paths, scope)
+                                if image_links:
+                                    resp_data["image_links"] = image_links
+                                    try:
+                                        line = "\n".join(f"Image: {u}" for u in image_links[:10])
+                                        if line:
+                                            existing = str(resp_data.get("text") or "")
+                                            resp_data["text"] = (existing + "\n\n" + line) if existing else line
+                                    except Exception:
+                                        pass
+                            # else: no public URL → text only (no images, no image_links)
                     async_resp: AsyncResponse = AsyncResponse(request_id=request.request_id, request_metadata=request.request_metadata, host=request.host, port=request.port, from_channel=request.channel_name, response_data=resp_data)
                     await self.response_queue.put(async_resp)
                 else:
@@ -1514,13 +1533,31 @@ class Core(CoreInterface):
                 if ((user_id in user.email) or (len(user.email) == 0)):
                     return (ChannelType.Email in user.permissions or len(user.permissions) == 0), user
             if channel_type == ChannelType.IM:
-                if ((user_id in user.im) or (len(user.im) == 0)):
+                # Match only when request user_id is in this user's im list. Do NOT treat empty im list as "match all"
+                # (otherwise the first user in user.yml with no im: would claim every IM request, e.g. webchat_user).
+                im_list = user.im or []
+                if len(im_list) == 0:
+                    continue  # No IM identities configured for this user; skip
+                uid_stripped = (user_id or "").strip()
+                uid_lower = uid_stripped.lower()
+                im_matches = (
+                    (user_id in im_list)
+                    or any(str(e or "").strip() == uid_stripped for e in im_list)
+                    or any(str(e or "").strip().lower() == uid_lower for e in im_list)
+                )
+                if im_matches:
                     return (ChannelType.IM in user.permissions or len(user.permissions) == 0), user
-                elif user_id  == 'homeclaw:local':
+                if (user_id or "").strip() == "homeclaw:local":
                     return True, user
             if channel_type == ChannelType.Phone:
                 if ((user_id in user.phone) or (len(user.phone) == 0)):
                     return (ChannelType.Phone in user.permissions or len(user.permissions) == 0), user
+        # No user matched (IM: add this id to config/user.yml im for the right user)
+        if channel_type == ChannelType.IM and (user_id or "").strip():
+            logger.info(
+                "IM permission denied: user_id={!r} not in any user's im list. Add this exact value to config/user.yml under the user's im: list (e.g. dingtalk_... or slack_...).",
+                user_id,
+            )
         return False, None
 
 
@@ -1774,9 +1811,8 @@ class Core(CoreInterface):
             if (getattr(core_metadata, "core_public_url", None) or "").strip():
                 _component_log("files", "serving sandbox files at GET /files/out (core_public_url set)")
             self._core_http_ready = True
-            # LLM manager (embedding + main LLM) was started earlier, before skills/plugins/agent_memory sync.
-            # Optionally start and register system_plugins (e.g. homeclaw-browser) so one command runs Core + plugins.
             # GET /ready now returns 200 so probe will succeed.
+            # Optionally start and register system_plugins (e.g. homeclaw-browser) so one command runs Core + plugins.
             if getattr(core_metadata, "system_plugins_auto_start", False):
                 asyncio.create_task(self._run_system_plugins_startup())
             # Pinggy: only when pinggy.token is set — start tunnel and optionally open browser to /pinggy (public URL + QR). If neither core_public_url nor token is set, we just run Core and do not pop up QR.
@@ -1826,10 +1862,8 @@ class Core(CoreInterface):
 
         def shutdown():
             try:
-                #asyncio.run(Util().stop_uvicorn_server(self.server))
                 Util().stop_uvicorn_server(self.server)
             except Exception as e:
-                #logger.exception(e)
                 pass
 
         thread = threading.Thread(target=shutdown)

@@ -9,6 +9,10 @@ HTTP endpoint that receives **Bot Framework** activities (e.g. from Teams). On m
 3. **channels/.env**: Set `TEAMS_APP_ID` and `TEAMS_APP_PASSWORD` (or `MICROSOFT_APP_ID`, `MICROSOFT_APP_PASSWORD`) so the channel can send replies via the Connector API.
 4. **config/user.yml**: Add `teams_<user_id>` under `im` for allowed users (use the `from.id` from the activity).
 
+## Images and files
+
+This channel uses the **same request as the Companion app**: **POST /inbound** with `text`, `images`, `videos`, `audios`, and `files`. Bot Framework attachments are downloaded to data URLs and sent to Core. Core stores **images** in the user's **images** folder when the model doesn't support vision; **files** are processed by file-understanding (documents can be added to Knowledge base). **Reply images:** When Core returns `images` (data URLs or file paths), the channel sends them as Bot Framework attachments (data URLs supported). See **docs_design/ChannelImageAndFileInbound.md** and **channels/CHANNEL_REVIEW.md**.
+
 ## Run
 
 ```bash

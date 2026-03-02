@@ -18,12 +18,12 @@ from fastapi import FastAPI, Request, Form
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from portal import config as portal_config
-from portal.config import get_config_dir, get_portal_secret
-from portal import auth
-from portal import config_api
-from portal import config_backup
-from portal.session import create_session_value, verify_session_value
+from core.portal import config as portal_config
+from core.portal.config import get_config_dir, get_portal_secret
+from core.portal import auth
+from core.portal import config_api
+from core.portal import config_backup
+from core.portal.session import create_session_value, verify_session_value
 
 app = FastAPI(
     title="HomeClaw Portal",
@@ -121,7 +121,7 @@ def status():
     })
 
 
-from portal import guide as guide_module
+from core.portal import guide as guide_module
 
 
 @app.get("/api/portal/guide/checks")
@@ -1587,7 +1587,7 @@ def _form_body_from_data(form_data: dict, original: Optional[Dict], keys: Option
     return body
 
 
-from portal.settings_routes import router as settings_router
+from core.portal.settings_routes import router as settings_router
 app.include_router(settings_router, prefix="/settings")
 
 

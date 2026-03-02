@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from portal.session import create_session_value, verify_session_value
+from core.portal.session import create_session_value, verify_session_value
 
 
 def test_create_and_verify_session():
@@ -14,7 +14,7 @@ def test_create_and_verify_session():
 
 
 def test_verify_expired_session():
-    import portal.session as mod
+    import core.portal.session as mod
     # Create with short TTL and expire
     old_ttl = mod.SESSION_TTL_SECONDS
     mod.SESSION_TTL_SECONDS = -1

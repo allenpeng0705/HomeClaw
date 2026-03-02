@@ -6,12 +6,12 @@ import os
 from pathlib import Path
 from typing import Optional
 
-# Project root: parent of portal package directory.
+# Project root: when portal lives under core/portal/, parent.parent = project root (core's parent).
 _PORTAL_DIR = Path(__file__).resolve().parent
-ROOT_DIR = _PORTAL_DIR.parent
+ROOT_DIR = _PORTAL_DIR.parent.parent
 
 def get_host() -> str:
-    """Bind host. Always 127.0.0.1 for local-only access."""
+    """Bind host. Default 127.0.0.1 (local only). Set PORTAL_HOST=0.0.0.0 to allow LAN/Core to reach Portal."""
     return os.environ.get("PORTAL_HOST", "127.0.0.1")
 
 def get_port() -> int:

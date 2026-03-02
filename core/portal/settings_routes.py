@@ -9,11 +9,11 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from portal import auth
-from portal import config_api
-from portal import config_backup
-from portal import yaml_config
-from portal.app import (
+from core.portal import auth
+from core.portal import config_api
+from core.portal import config_backup
+from core.portal import yaml_config
+from core.portal.app import (
     _logged_in_page,
     _render_advanced_form,
     _render_core_form_html,
@@ -33,7 +33,7 @@ router = APIRouter()
 
 def _get_session_username(request: Request) -> Optional[str]:
     """Session check; import from app to avoid circular import at load."""
-    from portal.app import _get_session_username as _get
+    from core.portal.app import _get_session_username as _get
     return _get(request)
 
 

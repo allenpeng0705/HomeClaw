@@ -28,6 +28,10 @@ See **ARCHITECTURE.md** in this folder for detailed flow and **CONFIG.md** for c
 ## Enabling and running
 
 - Add **whatsappweb** to the list of channels you run (e.g. `python -m channels.run whatsappweb`).
+
+## Images and files
+
+This channel uses the **same request as the Companion app**: the bridge POSTs to `/webhook` with `user_id`, `text`, and optionally `images`, `videos`, `audios`, and `files` (data URLs or paths). The channel forwards them as-is to Core `/inbound`. Core stores **images** in the user's **images** folder when the model doesn't support vision; **files** are processed by file-understanding (documents can be added to Knowledge base). See **docs_design/ChannelImageAndFileInbound.md**.
 - Ensure **Core** is running and reachable. Set `core_host`, `core_port`, or `CORE_URL` in `channels/.env`.
 - Ensure `user_id` values you send (e.g. WhatsApp JID or phone) are allowed in `config/user.yml` if you use permission checks.
 - A **Baileys bridge** is included in **`bridge/`**: run `cd bridge && npm install && node index.js`. Set `CHANNEL_URL` (default `http://127.0.0.1:8010`). See **bridge/README.md**.

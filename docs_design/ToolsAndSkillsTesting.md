@@ -89,7 +89,8 @@ If **browser_navigate** (or open baidu.com / any URL) fails with an error about 
 
 | Tool | Example messages that often trigger it |
 |------|----------------------------------------|
-| **folder_list** | "List files in the current directory", "What's in the config folder?", "Show contents of ." |
+| **folder_list** | "What folders do I have?", "Show folder structure", "What's in the sandbox root?" (one level; directories and files) |
+| **file_find** | "List all images", "List files in my images folder", "Search for PDFs", "Find *.png files" — use **files_only=true** to return only files (not folders). Use path='images' and pattern='*' for images in the images folder. |
 | **file_read** | "Read the file config/core.yml", "Show me the contents of README.md" |
 | **file_write** | "Write 'hello' to file test.txt", "Create a file notes.txt with content ..." |
 | **file_edit** | "In file X replace 'old' with 'new'", "Change the first occurrence of 'foo' to 'bar' in config.yml" |

@@ -202,7 +202,7 @@ def main():
 def suicide():
     try:
         global shutdown_url
-        httpx.get(shutdown_url)
+        httpx.get(shutdown_url, trust_env=False)
     except Exception as e:
         logger.exception(e)
 

@@ -74,7 +74,7 @@ async def api_upload_proxy(request: Request):
     headers = _core_auth_headers(request)
     try:
         body = await request.body()
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
             r = await client.post(upload_url, content=body, headers=headers)
         ct = r.headers.get("content-type", "")
         if "application/json" in ct:
@@ -94,7 +94,7 @@ async def api_kb_sync_folder_proxy(request: Request):
         sync_url = sync_url + "?" + request.url.query
     headers = _core_auth_headers(request)
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
             if request.method == "GET":
                 r = await client.get(sync_url, headers=headers)
             else:

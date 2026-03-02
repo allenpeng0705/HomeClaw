@@ -789,7 +789,12 @@ async def answer_from_memory(
                             return obj
 
                         args = _replace_query_in_obj(args)
-                        force_include_auto_invoke.append({"tool": str(auto_invoke["tool"]).strip(), "arguments": args})
+                        always_run = bool(rule.get("always_run", False))
+                        force_include_auto_invoke.append({
+                            "tool": str(auto_invoke["tool"]).strip(),
+                            "arguments": args,
+                            "always_run": always_run,
+                        })
                     # Optional: when this rule matches, also force-include these plugins in the plugin list (so model sees them for route_to_plugin)
                     plugins_in_rule = rule.get("plugins") if isinstance(rule, dict) else None
                     if isinstance(plugins_in_rule, (list, tuple)):
@@ -1455,6 +1460,7 @@ async def answer_from_memory(
                                 )
                                 if msg is not None:
                                     mix_route_this_request = other_route
+                                    effective_llm_name = other_llm  # use working model for rest of tool rounds
                                     mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_fallback" if mix_route_layer_this_request else "fallback"
                             except Exception as e2:
                                 logger.warning("Fallback LLM call also failed: {}", e2)
@@ -1490,8 +1496,10 @@ async def answer_from_memory(
                                 "error occurred while generating", "error while generating", "please try again",
                             ))
                         )
-                        run_force_include = bool(force_include_auto_invoke and registry)
-                        _component_log("tools", "model returned no tool_calls; unhelpful=%s auto_invoke_count=%s" % (unhelpful_for_auto_invoke, len(force_include_auto_invoke or [])))
+                        # Only run force_include when reply is unhelpful, or the rule has always_run (e.g. image generation). Otherwise we would overwrite a good answer (e.g. file_find image list) with web_search.
+                        any_always_run = any(inv.get("always_run") for inv in (force_include_auto_invoke or []) if isinstance(inv, dict))
+                        run_force_include = bool(force_include_auto_invoke and registry and (unhelpful_for_auto_invoke or any_always_run))
+                        _component_log("tools", "model returned no tool_calls; unhelpful=%s auto_invoke_count=%s run_force_include=%s" % (unhelpful_for_auto_invoke, len(force_include_auto_invoke or []), run_force_include))
                         # Log when user clearly asked for scheduling but model didn't call any tool — so we can see TAM did not set a schedule (applies to all friends including Reminder).
                         if _query_looks_like_scheduling(query) and registry:
                             try:

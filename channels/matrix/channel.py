@@ -125,7 +125,7 @@ class Channel(BaseChannel):
                                 server, media_id = server_media.split('/', 1)
                                 base = self._home_srv.replace('https://', '').replace('http://', '').rstrip('/')
                                 download_url = f"https://{base}/_matrix/media/r0/download/{server}/{media_id}"
-                                async with httpx.AsyncClient() as client:
+                                async with httpx.AsyncClient(trust_env=False) as client:
                                     r = await client.get(download_url, timeout=30.0)
                                     if r.status_code == 200:
                                         suffix = (content.get('info', {}).get('mimetype') or 'image/png').split('/')[-1] or 'png'
@@ -144,7 +144,7 @@ class Channel(BaseChannel):
                                 server, media_id = server_media.split('/', 1)
                                 base = self._home_srv.replace('https://', '').replace('http://', '').rstrip('/')
                                 download_url = f"https://{base}/_matrix/media/r0/download/{server}/{media_id}"
-                                async with httpx.AsyncClient() as client:
+                                async with httpx.AsyncClient(trust_env=False) as client:
                                     r = await client.get(download_url, timeout=60.0)
                                     if r.status_code == 200:
                                         mimetype = content.get('info', {}).get('mimetype') or 'application/octet-stream'
@@ -207,7 +207,8 @@ class Channel(BaseChannel):
                     videos=videos,
                     audios=audios,
                     files=files_list if files_list else None,
-                    timestamp=datetime.now().timestamp()
+                    timestamp=datetime.now().timestamp(),
+                    reply_accepts=["text", "image"],
                 )
 
                 await self.transferTocore(request=request)
@@ -241,13 +242,32 @@ class Channel(BaseChannel):
                             logger.error("Timeout sending message to room {}", room_id)
                         except Exception as e:
                             logger.error("Error sending message: {}", e)
-                if "image" in response_data:
-                    image_path = response_data.get("image")
-                    if isinstance(image_path, str) and os.path.isfile(image_path):
-                        try:
-                            await self.bot.api.send_image_message(room_id=room_id, image_filepath=image_path)
-                        except Exception as e:
-                            logger.error("Error sending image: {}", e)
+                # Outbound images: "images" (list) or "image" (single); each can be file path or data URL
+                images_list = response_data.get("images") or ([response_data["image"]] if response_data.get("image") else [])
+                for img_item in images_list[:5]:
+                    if not isinstance(img_item, str):
+                        continue
+                    path = None
+                    try:
+                        if img_item.strip().startswith("data:"):
+                            raw = Util.data_url_to_bytes(img_item)
+                            if raw:
+                                suffix = "png" if "png" in img_item[:50] else "jpg"
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=f".{suffix}") as f:
+                                    f.write(raw)
+                                    path = f.name
+                        elif os.path.isfile(img_item):
+                            path = img_item
+                        if path:
+                            await self.bot.api.send_image_message(room_id=room_id, image_filepath=path)
+                    except Exception as e:
+                        logger.error("Error sending image: {}", e)
+                    finally:
+                        if path and path != img_item and os.path.isfile(path):
+                            try:
+                                os.unlink(path)
+                            except Exception:
+                                pass
                 if "video" in response_data:
                     video_path = response_data.get("video")
                     if isinstance(video_path, str) and os.path.isfile(video_path):
@@ -327,7 +347,7 @@ def main():
 def suicide():
     try:
         global shutdown_url
-        httpx.get(shutdown_url)
+        httpx.get(shutdown_url, trust_env=False)
     except Exception as e:
         logger.exception(e)
             

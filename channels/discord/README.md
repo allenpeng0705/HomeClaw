@@ -11,6 +11,10 @@ Minimal Discord bot that forwards DMs/channel messages to Core **POST /inbound**
 5. **Configure**: Core connection: set `core_host` and `core_port` (or `CORE_URL`) in **channels/.env** only. Bot token: copy `.env.example` to `.env` here and set `DISCORD_BOT_TOKEN`, or set it in `channels/.env`.
 6. **Allow users**: In `config/user.yml`, add `discord_<user_id>` (e.g. `discord_123456789012345678`) to a user with `IM` permission. To get user ID: enable Developer Mode in Discord → right-click user → Copy User ID.
 
+## Images and files
+
+This channel uses the **same request as the Companion app**: **POST /inbound** with `text`, `images`, `videos`, `audios`, and `files`. Message attachments are downloaded to data URLs and sent to Core. Core stores **images** in the user's **images** folder when the model doesn't support vision; **files** are processed by file-understanding (documents can be added to Knowledge base). See **docs_design/ChannelImageAndFileInbound.md**.
+
 ## Run
 
 ```bash

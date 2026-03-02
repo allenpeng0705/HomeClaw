@@ -1,6 +1,6 @@
 """
 Config API routes: GET/PATCH /api/config/core, GET/POST/PATCH/DELETE /api/config/users.
-Same auth as /inbound (auth.verify_inbound_auth). When portal_url is set, requests are forwarded to Portal (Phase 4.1).
+Same auth as /inbound (auth.verify_inbound_auth). Config is served by Core; Portal is in-process or standalone (no proxy).
 """
 from pathlib import Path
 from fastapi import Request

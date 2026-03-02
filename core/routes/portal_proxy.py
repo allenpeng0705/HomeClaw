@@ -1,41 +1,61 @@
 """
-Portal proxy: when portal_url is set in Core config, forward /api/config/* to Portal (Phase 4.1)
-and reverse-proxy /portal-ui and /portal-ui/* to Portal's Web UI (Phase 4.2).
-Phase 5: Portal admin auth — POST /api/portal/auth issues token; /portal-ui and config proxy require token or Basic.
+Portal on Core: serve Portal in-process at /portal-ui (same web server as Core). No proxy; no portal_url.
+When Core runs from project root, Portal is mounted at /portal-ui. When Core is not running, run Portal standalone (python -m main portal) at http://127.0.0.1:18472 — two servers, same site.
+POST /api/portal/auth for token; Portal handles its own login/session.
 """
 import base64
 import os
+import re
 import secrets
+import sys
 import time
+from pathlib import Path
+
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 from loguru import logger
 
 from base.util import Util
-import httpx
 
-try:
-    from portal import auth as portal_auth
-except ImportError:
-    portal_auth = None  # Portal not on path; auth will fail
+
+def _ensure_core_importable():
+    """Ensure the directory containing the core package (project root) is first on sys.path so core.portal can be imported."""
+    try:
+        # This file is core/routes/portal_proxy.py -> parent.parent = project root (dir containing core/)
+        _here = Path(__file__).resolve().parent
+        _project_root = _here.parent.parent
+        _root_str = os.path.abspath(os.path.normpath(str(_project_root)))
+        if not sys.path or sys.path[0] != _root_str:
+            sys.path.insert(0, _root_str)
+    except Exception:
+        pass
+
+
+# Lazy-load core.portal.auth only when needed (after path is set in route_registration).
+_portal_auth_module = None
+
+def _get_portal_auth():
+    """Return core.portal.auth module or None if not loadable. Used for admin auth."""
+    global _portal_auth_module
+    if _portal_auth_module is not None:
+        return _portal_auth_module
+    _ensure_core_importable()
+    try:
+        from core.portal import auth as m
+        _portal_auth_module = m
+        return m
+    except ImportError:
+        return None
 
 # In-memory token store: token -> (username, expires_at). Purged on validation.
 _PORTAL_ADMIN_TOKENS: dict[str, tuple[str, float]] = {}
 _TOKEN_TTL_SEC = 3600  # 1 hour
-
-
-def _get_portal_url() -> str:
-    """Portal base URL from config or env. Empty if not configured."""
-    try:
-        meta = Util().get_core_metadata()
-        url = (getattr(meta, "portal_url", None) or os.environ.get("PORTAL_URL") or "").strip()
-        return url
-    except Exception:
-        return ""
-
+# Last ImportError message when portal.app failed to load (for fallback response).
+_portal_import_error: str | None = None
 
 def _get_portal_secret() -> str:
-    """Portal secret for X-Portal-Secret header. Empty if not configured."""
+    """Portal secret for API auth. Empty if not configured."""
     try:
         meta = Util().get_core_metadata()
         return (getattr(meta, "portal_secret", None) or os.environ.get("PORTAL_SECRET") or "").strip()
@@ -44,12 +64,115 @@ def _get_portal_secret() -> str:
 
 
 def should_proxy_config() -> bool:
-    """True when Core should forward /api/config/* requests to Portal."""
-    return bool(_get_portal_url())
+    """False: Core never proxies config; Portal is served in-process or run standalone."""
+    return False
+
+
+def should_use_portal_in_process() -> bool:
+    """True when Portal app can be imported (core.portal) and served at /portal-ui on Core."""
+    _ensure_core_importable()
+    try:
+        import core.portal.app  # noqa: F401
+        return True
+    except ImportError as e:
+        global _portal_import_error
+        _portal_import_error = str(e)
+        _root = (Path(__file__).resolve().parent.parent.parent)  # project root
+        logger.warning(
+            "Portal in-process not available (import core.portal.app failed): {} (sys.path[0]={!r}, project_root={!r})",
+            e, sys.path[0] if sys.path else None, str(_root),
+        )
+        return False
+
+
+def get_portal_app_for_mount():
+    """Return Portal's FastAPI app for mounting at /portal-ui. Use only when should_use_portal_in_process()."""
+    _ensure_core_importable()
+    from core.portal.app import app
+    return app
+
+
+PREFIX = "/portal-ui"
+
+
+def _rewrite_location_prefix(location: str) -> str:
+    """Rewrite Location so client sees /portal-ui/... (in-process mount; no portal_base)."""
+    if not location or not location.strip():
+        return location
+    loc = location.strip()
+    if loc.startswith(PREFIX):
+        return loc
+    if loc.startswith("/"):
+        return f"{PREFIX.rstrip('/')}{loc}"
+    return f"{PREFIX}/{loc}"
+
+
+# Root-relative URL attributes in HTML that must be prefixed when Portal is under /portal-ui
+_HTML_URL_ATTRS = re.compile(
+    r'\b(href|action|src)=["\']/(?!portal-ui/)',
+    re.IGNORECASE,
+)
+
+
+def _rewrite_html_prefix(html: str) -> str:
+    """Prefix root-relative URLs in HTML with /portal-ui so they work when mounted."""
+    return _HTML_URL_ATTRS.sub(r'\1="/portal-ui/', html)
+
+
+class _PortalUIInProcessMiddleware(BaseHTTPMiddleware):
+    """Rewrite response Location/Set-Cookie and HTML root-relative URLs for /portal-ui when Portal is mounted on Core."""
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if not path.startswith(PREFIX):
+            return await call_next(request)
+        response = await call_next(request)
+        if not hasattr(response, "headers") or not response.headers:
+            return response
+        # Rewrite Location and Set-Cookie so redirects and cookies work under /portal-ui
+        for k in list(response.headers.keys()):
+            k_lower = k.lower()
+            if k_lower == "location":
+                v = response.headers[k]
+                new_v = _rewrite_location_prefix(str(v) if v else "")
+                if new_v != v:
+                    response.headers[k] = new_v
+            elif k_lower == "set-cookie":
+                v = str(response.headers[k]) if response.headers[k] else ""
+                if "path=" in v.lower():
+                    v = v.replace("path=/", "path=/portal-ui/").replace("path=/portal-ui/", "path=/portal-ui")
+                else:
+                    v = (v.rstrip(";") + "; Path=/portal-ui") if v else "Path=/portal-ui"
+                response.headers[k] = v
+        # Rewrite root-relative URLs in HTML so links, forms, and static assets work under /portal-ui
+        ct = (response.headers.get("content-type") or "").lower()
+        if "text/html" in ct and getattr(response, "status_code", 0) == 200:
+            try:
+                raw = None
+                if hasattr(response, "body") and response.body is not None:
+                    raw = response.body
+                elif getattr(response, "body_iterator", None):
+                    raw = b"".join([chunk async for chunk in response.body_iterator])
+                if raw:
+                    text = raw.decode("utf-8", errors="replace")
+                    rewritten = _rewrite_html_prefix(text)
+                    if rewritten != text:
+                        return Response(
+                            content=rewritten.encode("utf-8"),
+                            status_code=200,
+                            media_type="text/html; charset=utf-8",
+                            headers=dict(response.headers),
+                        )
+                    if getattr(response, "body_iterator", None):
+                        return Response(content=raw, status_code=200, media_type=ct, headers=dict(response.headers))
+            except Exception as e:
+                logger.warning("Portal UI HTML rewrite failed: {}", e)
+        return response
 
 
 def _verify_portal_admin(username: str, password: str) -> bool:
     """True if username/password match Portal admin (same file/env)."""
+    portal_auth = _get_portal_auth()
     if not portal_auth:
         return False
     return portal_auth.verify_portal_admin(username, password)
@@ -100,7 +223,7 @@ def get_portal_admin_from_request(request: Request) -> str | None:
 
 async def post_portal_auth_handler(request: Request) -> Response:
     """POST /api/portal/auth: body { username, password }. If valid, return { token } (TTL 1h). Else 401. Never raises."""
-    if not portal_auth:
+    if not _get_portal_auth():
         return JSONResponse(status_code=503, content={"detail": "Portal admin auth not available"})
     try:
         body = await request.json()
@@ -124,172 +247,45 @@ async def post_portal_auth_handler(request: Request) -> Response:
 
 
 async def proxy_request_to_portal(request: Request) -> Response:
-    """Forward the current request to Portal (method, path, query, body, headers + X-Portal-Secret). Phase 5: callers must ensure portal admin auth already checked (403 if not). Return response or 502/503 on error."""
-    base = _get_portal_url().rstrip("/")
-    if not base:
-        return JSONResponse(
-            status_code=502,
-            content={"detail": "Portal URL not configured. Set portal_url in config/core.yml (e.g. http://127.0.0.1:18472) and start Portal: python -m main portal"},
-        )
-    secret = _get_portal_secret()
-    path = request.url.path
-    query = str(request.url.query)
-    url = f"{base}{path}" + ("?" + query if query else "")
-    headers = dict(request.headers)
-    # Drop headers that shouldn't be forwarded; drop client auth so Portal only sees X-Portal-Secret
-    drop_lower = frozenset(("host", "connection", "transfer-encoding", "authorization"))
-    for k in list(headers.keys()):
-        if k.lower() in drop_lower:
-            headers.pop(k, None)
-    if secret:
-        headers["X-Portal-Secret"] = secret
-    try:
-        body = await request.body()
-    except Exception as e:
-        logger.warning("Portal proxy: failed to read body: {}", e)
-        return JSONResponse(status_code=500, content={"detail": "Failed to read request body"})
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.request(
-                method=request.method,
-                url=url,
-                headers=headers,
-                content=body,
-            )
-        # Forward status and body; drop hop-by-hop headers
-        skip_headers = frozenset({"connection", "transfer-encoding", "keep-alive"})
-        response_headers = [(k, v) for k, v in r.headers.items() if k.lower() not in skip_headers]
-        return Response(
-            status_code=r.status_code,
-            content=r.content,
-            headers=dict(response_headers),
-        )
-    except httpx.ConnectError as e:
-        logger.warning("Portal proxy: connection failed to {}: {}", base, e)
-        return JSONResponse(status_code=502, content={"detail": "Cannot reach Portal; is it running?"})
-    except httpx.TimeoutException:
-        logger.warning("Portal proxy: timeout to {}", url)
-        return JSONResponse(status_code=504, content={"detail": "Portal request timed out"})
-    except Exception as e:
-        logger.exception("Portal proxy error: {}", e)
-        return JSONResponse(status_code=503, content={"detail": str(e)})
+    """No longer used: config is not proxied. Portal is in-process on Core or run standalone."""
+    return JSONResponse(status_code=503, content={"detail": "Config proxy disabled. Portal is served in-process on Core or run standalone (python -m main portal)."})
 
 
-def _rewrite_location_for_portal_ui(location: str, portal_base: str, portal_ui_prefix: str) -> str:
-    """Rewrite Location header so client sees /portal-ui/... instead of Portal's origin."""
-    if not location:
-        return location
-    location = location.strip()
-    try:
-        if location.startswith(portal_base):
-            path = location[len(portal_base):].lstrip("/")
-            return f"{portal_ui_prefix.rstrip('/')}/{path}" if path else portal_ui_prefix.rstrip("/") or "/portal-ui"
-        if location.startswith("/") and not location.startswith("/portal-ui"):
-            return f"{portal_ui_prefix.rstrip('/')}{location}"
-    except Exception:
-        pass
-    return location
-
-
-async def _stream_portal_ui(request: Request, path: str) -> Response:
-    """Reverse-proxy GET to Portal and stream response. Rewrite Location and Set-Cookie path for /portal-ui. Phase 5: require portal admin auth when portal_url is set."""
-    base = _get_portal_url().rstrip("/")
-    if not base:
-        logger.warning("Portal UI proxy: portal_url is empty — restart Core after editing config/core.yml")
-        return JSONResponse(
-            status_code=502,
-            content={"detail": "Portal URL not configured. Set portal_url in config/core.yml and restart Core."},
-        )
-    if get_portal_admin_from_request(request) is None:
-        return JSONResponse(status_code=401, content={"detail": "Portal admin auth required (Bearer token, Basic, or ?token=)"})
-    secret = _get_portal_secret()
-    upstream_path = path.strip("/") if path else ""
-    query = str(request.url.query)
-    url = f"{base}/{upstream_path}" + ("?" + query if query else "")
-    headers = {"Accept": request.headers.get("accept", "*/*")}
-    if secret:
-        headers["X-Portal-Secret"] = secret
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.get(url, headers=headers)
-            # Read full body inside context so connection is released; avoids streaming after client close.
-            content = r.content
-    except httpx.ConnectError as e:
-        err_msg = str(e).strip() or "connection failed"
-        logger.warning("Portal UI proxy: connection failed to {}: {}", base, e)
-        return JSONResponse(
-            status_code=502,
-            content={
-                "detail": "Cannot reach Portal; is it running? Start with: python -m main portal",
-                "portal_url": base,
-                "error": err_msg,
-            },
-        )
-    except httpx.TimeoutException:
-        logger.warning("Portal UI proxy: timeout to {}", url)
-        return JSONResponse(status_code=504, content={"detail": "Portal request timed out"})
-    except Exception as e:
-        logger.exception("Portal UI proxy error: {}", e)
-        return JSONResponse(status_code=503, content={"detail": str(e)})
-
-    skip_headers = frozenset({"connection", "transfer-encoding", "keep-alive"})
-    out_headers = {}
-    for k, v in r.headers.items():
-        k_lower = k.lower()
-        if k_lower in skip_headers:
-            continue
-        if k_lower == "location":
-            v = _rewrite_location_for_portal_ui(v, base, "/portal-ui")
-        if k_lower == "set-cookie":
-            # Rewrite path in Set-Cookie so cookie is sent for /portal-ui
-            if "path=" in v.lower():
-                v = v.replace("path=/", "path=/portal-ui/").replace("path=/portal-ui/", "path=/portal-ui")
-            else:
-                v = v.rstrip(";") + "; Path=/portal-ui"
-        out_headers[k] = v
-
-    return Response(
-        status_code=r.status_code,
-        content=content,
-        headers=out_headers,
-        media_type=r.headers.get("content-type"),
+def _portal_ui_fallback_detail() -> str:
+    return (
+        "Portal runs as its own web server. Run: python -m main portal — then open http://127.0.0.1:18472 "
+        "(or set PORTAL_PORT). Core does not serve Portal."
     )
 
 
 async def get_portal_proxy_status_handler(_request: Request) -> Response:
-    """GET /api/portal/proxy-status: diagnostic — portal_url Core uses and whether Portal is reachable. No portal admin auth required."""
-    base = _get_portal_url().rstrip("/")
-    if not base:
-        return JSONResponse(
-            status_code=200,
-            content={"portal_url": "", "portal_reachable": False, "detail": "portal_url not set in config/core.yml"},
-        )
-    try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            r = await client.get(f"{base}/ready")
-            reachable = r.status_code == 200
-    except Exception as e:
-        reachable = False
-        logger.debug("Portal proxy status check failed: {}", e)
+    """GET /api/portal/proxy-status: Portal runs as its own server; Core does not serve it."""
     return JSONResponse(
         status_code=200,
         content={
-            "portal_url": base,
-            "portal_reachable": reachable,
-            "detail": "Portal reachable" if reachable else f"Cannot connect to {base} (is Portal running? python -m main portal)",
+            "portal_reachable": False,
+            "detail": _portal_ui_fallback_detail(),
         },
     )
 
 
+def get_portal_ui_fallback_response() -> Response:
+    """Return 503 with message when Portal is not loadable (used instead of proxy)."""
+    content = {"detail": _portal_ui_fallback_detail()}
+    if _portal_import_error:
+        content["import_error"] = _portal_import_error
+    return JSONResponse(status_code=503, content=content)
+
+
 def get_portal_ui_handler():
-    """Handler for GET /portal-ui (exact)."""
-    async def handler(request: Request):
-        return await _stream_portal_ui(request, "")
+    """Fallback when Portal not loadable: GET /portal-ui returns 503 with instructions."""
+    async def handler(_request: Request):
+        return get_portal_ui_fallback_response()
     return handler
 
 
 def get_portal_ui_path_handler():
-    """Handler for GET /portal-ui/{path:path}."""
-    async def handler(request: Request, path: str):
-        return await _stream_portal_ui(request, path)
+    """Fallback when Portal not loadable: GET /portal-ui/{path} returns 503 with instructions."""
+    async def handler(_request: Request, path: str):
+        return get_portal_ui_fallback_response()
     return handler

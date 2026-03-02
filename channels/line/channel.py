@@ -25,7 +25,7 @@ from base.BaseChannel import ChannelMetadata, BaseChannel
 from base.base import PromptRequest, AsyncResponse, ChannelType, ContentType
 
 from .download import download_line_media
-from .send import send_line_text
+from .send import send_line_text, send_line_messages
 
 channel_app = FastAPI()
 LINE_MEDIA_MAX_BYTES = 10 * 1024 * 1024  # 10MB
@@ -99,6 +99,7 @@ class Channel(BaseChannel):
             audios=audios or [],
             files=files if files else None,
             timestamp=datetime.now().timestamp(),
+            reply_accepts=["text", "image"],
         )
 
     async def process_message_queue(self):
@@ -111,13 +112,33 @@ class Channel(BaseChannel):
                 request_meta = getattr(response, "request_metadata", None) or {}
                 to = request_meta.get("line_user_id") or request_meta.get("to")
                 reply_token = request_meta.get("reply_token")
-                if "text" in response_data and (to or reply_token):
-                    text = response_data.get("text")
-                    if isinstance(text, str) and text and token:
-                        if reply_token:
-                            send_line_text(reply_token, text, token, is_reply_token=True)
-                        elif to:
-                            send_line_text(to, text, token, is_reply_token=False)
+                if (to or reply_token) and token:
+                    messages = []
+                    if "text" in response_data:
+                        text = response_data.get("text")
+                        if isinstance(text, str) and text:
+                            messages.append({"type": "text", "text": text[:5000]})
+                    # Outbound images: LINE requires HTTPS URLs. Use response URLs or LINE_IMAGE_BASE_URL + basename(path).
+                    image_base = (os.getenv("LINE_IMAGE_BASE_URL") or "").strip().rstrip("/")
+                    images_list = response_data.get("images") or ([response_data["image"]] if response_data.get("image") else [])
+                    for img_item in images_list[:5]:
+                        if not isinstance(img_item, str):
+                            continue
+                        url = None
+                        if img_item.strip().lower().startswith("https://"):
+                            url = img_item.strip()
+                        elif image_base and os.path.isfile(img_item):
+                            import urllib.parse
+                            url = image_base + "/" + urllib.parse.quote(os.path.basename(img_item))
+                        if url and len(messages) < 5:
+                            messages.append({"type": "image", "originalContentUrl": url, "previewImageUrl": url})
+                    if messages:
+                        send_line_messages(
+                            reply_token if reply_token else to,
+                            messages,
+                            token,
+                            is_reply_token=bool(reply_token),
+                        )
                 self.message_queue.task_done()
             except asyncio.CancelledError:
                 break

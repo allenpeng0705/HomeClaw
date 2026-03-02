@@ -3607,6 +3607,7 @@ async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -
     pattern = (arguments.get("pattern") or arguments.get("name") or "*").strip()
     if not pattern:
         pattern = "*"
+    files_only = bool(arguments.get("files_only", False))
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
@@ -3619,8 +3620,10 @@ async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -
         max_results = int(arguments.get("max_results", 0)) or 200
         results = []
         base_for_rel = base if base is not None else full_dir
-        for i, p in enumerate(full_dir.rglob(pattern)):
-            if i >= max_results:
+        for p in full_dir.rglob(pattern):
+            if files_only and not p.is_file():
+                continue
+            if len(results) >= max_results:
                 results.append({"path": "(truncated)", "type": "", "name": ""})
                 break
             try:
@@ -5302,7 +5305,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="folder_list",
-            description="List contents of a directory. When path not given: lists user sandbox root. When user mentions a friend, use path '{FriendName}' or '{FriendName}/output'. User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/; per friend: {FriendName}/ (with output/, knowledge/). Use path 'share' or 'share/...' for global share. Returned 'path' is the exact path to pass to document_read/file_read.",
+            description="List one level of a directory (subfolders and files). Use when the user asks for **folder structure** or **what folders/directories exist** (e.g. 'what folders are in my sandbox'). When path not given: lists user sandbox root. To list **only files** (e.g. all images), use file_find with path and pattern and files_only=true instead. User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/; per friend: {FriendName}/. Use path 'share' for global share. Returned 'path' is the exact path to pass to document_read/file_read.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -5317,12 +5320,13 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_find",
-            description="Find files by name pattern (glob). When path not given: search user sandbox root. When user mentions a friend, use path '{FriendName}' or '{FriendName}/output'. User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/, {FriendName}/output/, {FriendName}/knowledge/. Use path 'share' for global share. Use the **exact path** from the result in document_read.",
+            description="Find or list files by name pattern (glob). Use when the user asks to **list files**, **list images**, **search for files**, or **list all images** — use path (e.g. 'images') and pattern (e.g. '*' or '*.png'), and set files_only=true to return only files (not folders). Use folder_list when they ask for **folder structure** or **what folders exist**. When path not given: search user sandbox root. User sandbox: downloads/, documents/, output/, images/, work/, share/, knowledgebase/. Use path 'share' for global share. Use the **exact path** from the result in document_read.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "pattern": {"type": "string", "description": "Glob pattern (e.g. '*.pdf', '*1*.pdf*'). Default '*' lists all.", "default": "*"},
-                    "path": {"type": "string", "description": "Omit or '' = user sandbox root. Or subdir: output, documents, share, FriendName/output, etc. Use exact path from result in document_read.", "default": ""},
+                    "pattern": {"type": "string", "description": "Glob pattern (e.g. '*.pdf', '*.png', '*'). Default '*' lists all. Use '*.jpg' or '*.png' for images.", "default": "*"},
+                    "path": {"type": "string", "description": "Omit or '' = user sandbox root. Or subdir: images, output, documents, share, FriendName/output, etc. Use 'images' to list image files in the images folder.", "default": ""},
+                    "files_only": {"type": "boolean", "description": "If true, return only files (exclude directories). Use for 'list all images' or 'list files' so the result is file paths only.", "default": False},
                     "max_results": {"type": "integer", "description": "Max results to return (default 200).", "default": 200},
                 },
                 "required": [],

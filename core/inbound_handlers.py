@@ -10,7 +10,7 @@ import json
 import os
 import time
 from datetime import datetime
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
@@ -33,15 +33,19 @@ async def handle_inbound_request(
 
 
 async def run_async_inbound(core: Any, request_id: str, request: InboundRequest) -> None:
-    """Background task for async /inbound: run the request and store result for GET /inbound/result. Same response shape as sync /inbound."""
+    """Background task for async /inbound: run the request and store result for GET /inbound/result. Same response shape as sync /inbound. Respects reply_accepts: text-only clients get only text or image_links."""
     try:
         ok, text, status, image_paths = await handle_inbound_request(core, request)
         try:
             out_text, out_fmt = core._outbound_text_and_format(text) if text else ("", "plain")
         except Exception:
             out_text, out_fmt = (str(text)[:50000] if text else "", "plain")
-        data_urls = []
-        if image_paths:
+        reply_accepts = getattr(request, "reply_accepts", None)
+        if not reply_accepts or not isinstance(reply_accepts, list):
+            reply_accepts = ["text"]
+        accepts_image = "image" in reply_accepts
+        data_urls: List[str] = []
+        if accepts_image and image_paths:
             for image_path in image_paths:
                 if not isinstance(image_path, str) or not os.path.isfile(image_path):
                     continue
@@ -62,7 +66,7 @@ async def run_async_inbound(core: Any, request_id: str, request: InboundRequest)
                     data_urls.append(f"data:{mime};base64,{b64}")
                 except Exception:
                     pass
-        entry = {
+        entry: Dict[str, Any] = {
             "status": "done",
             "ok": ok,
             "text": out_text,
@@ -74,6 +78,23 @@ async def run_async_inbound(core: Any, request_id: str, request: InboundRequest)
         if data_urls:
             entry["images"] = data_urls
             entry["image"] = data_urls[0]
+        elif image_paths and not accepts_image:
+            try:
+                from core.result_viewer import build_image_view_links, get_result_link_base_url
+                if get_result_link_base_url():
+                    scope = (getattr(request, "user_id", None) or "").strip() or "companion"
+                    image_links = build_image_view_links(image_paths, scope)
+                    if image_links:
+                        entry["image_links"] = image_links
+                        try:
+                            line = "\n".join(f"Image: {u}" for u in image_links[:10])
+                            if line:
+                                existing = str(entry.get("text") or "")
+                                entry["text"] = (existing + "\n\n" + line) if existing else line
+                        except Exception:
+                            pass
+            except Exception:
+                pass
         core._inbound_async_results[request_id] = entry
     except Exception as e:
         logger.exception(e)
@@ -184,6 +205,7 @@ async def handle_inbound_request_impl(
         audios=audios_list,
         files=files_list if files_list else None,
         timestamp=datetime.now().timestamp(),
+        reply_accepts=getattr(request, "reply_accepts", None),
     )
     has_permission, user = core.check_permission(
         pr.user_name, pr.user_id, ChannelType.IM, content_type_for_perm

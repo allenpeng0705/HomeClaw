@@ -245,6 +245,20 @@ class Util:
         except Exception:
             return {}
 
+    @staticmethod
+    def data_url_to_bytes(data_url: str) -> Optional[bytes]:
+        """Decode a data URL (e.g. data:image/png;base64,...) to raw bytes. Returns None on failure. Used by channels to send Core response images to the user."""
+        if not data_url or not isinstance(data_url, str) or not data_url.strip().startswith("data:"):
+            return None
+        idx = data_url.find(";base64,")
+        if idx < 0:
+            return None
+        try:
+            import base64
+            return base64.b64decode(data_url[idx + 8 :].strip(), validate=True)
+        except Exception:
+            return None
+
     def get_core_url(self) -> str:
         """Core's own HTTP URL (from config core.yml host/port). For built-in plugins calling Core REST API (e.g. /api/plugins/llm/generate). 0.0.0.0 -> 127.0.0.1."""
         meta = self.get_core_metadata()

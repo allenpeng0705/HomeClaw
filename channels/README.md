@@ -88,3 +88,36 @@ Same as before: every channel is a separate process; the runner just gives one c
 - **CORE_API_KEY** (in **channels/.env**): You may need to set this when Core has **auth_enabled** (Core config: `auth_enabled: true` and `auth_api_key: "..."`). Set `CORE_API_KEY` in `channels/.env` to the same value as Core's `auth_api_key`. All channels that POST to Core (/inbound) use it: telegram, discord, slack, signal, imessage, bluebubbles, zalo, dingtalk, google_chat, teams, feishu, webhook, whatsappweb; WebChat proxy also uses it. If Core auth is disabled, leave `CORE_API_KEY` unset or empty.
 - **config/user.yml**: Allowlist: add `telegram_<id>`, `discord_<id>`, `slack_<id>`, etc. under `im` for a user with `IM` permission.
 - Per-channel: copy `.env.example` to `.env` in the channel folder only for bot tokens if you don’t put them in `channels/.env`.
+
+## How channel maps to user
+
+When you use a channel (Slack, Feishu, DingTalk, Telegram, etc.) to talk to Core, Core maps the request to a **user** in **config/user.yml** so it knows who you are for sandbox, chat history, memory, and permissions.
+
+1. **Channel sends an identity**  
+   Each channel builds a **`user_id`** string that identifies the person (or chat) on that platform, and POSTs it to Core with **`channel_name`**:
+   - **Slack**: `user_id` = `slack_<Slack user ID>` (e.g. `slack_U0AHT91TSRL`)
+   - **Feishu**: `user_id` = `feishu_<sender_id>` or `feishu_unknown`
+   - **DingTalk**: `user_id` = `dingtalk_<sender_id>` (e.g. `dingtalk_$:LWCP_v1:$...`)
+   - **Telegram**: `user_id` = `telegram_<chat_id>`
+   - **Discord**: `user_id` = `discord_<author.id>`
+   - **Matrix**: `user_id` = Matrix ID (e.g. `@user:domain`)
+   - **WebChat**: often `user_id` = `webchat_user` (or from env)
+   - Other channels use the same idea: a prefix for the channel + the platform's user/chat identifier.
+
+2. **Core matches `user_id` to a user in user.yml**  
+   For **IM** (instant messaging) channels, Core calls **`check_permission(user_name, user_id, ChannelType.IM, ...)`**. It looks up **config/user.yml** and finds the **first user** whose **`im:`** list contains that **`user_id`** (exact or case-insensitive). That user is the "matched" user.
+
+3. **Core sets the system user**  
+   Once matched, Core sets **`request.system_user_id`** = that user's **`id`** (or **`name`**) from user.yml (e.g. `AllenPeng`). Everything that is per-user (sandbox folder, chat history, memory, knowledge base, file tools) uses this **system_user_id**.
+
+4. **What you need to do**  
+   In **config/user.yml**, under the user who should be allowed to use that channel account, add the **exact `user_id`** the channel sends to the **`im:`** list.  
+   - When someone sends a message, the channel often logs the `user_id` it's using (e.g. Feishu: "user_id=feishu_ou_xxx (add to config/user.yml under im)").  
+   - Add that string to that user's `im:` list. Then Core will map that channel identity to that user and use their sandbox and data.
+
+**Summary:**  
+**Channel identity** (`user_id` + `channel_name`) → matched against **user.im** in **user.yml** → **system_user_id** (user.id/name) → used for sandbox, chat, memory, and permissions.
+
+## Channel implementation review
+
+For a **per-channel summary** of image/file support, logic, and crash safety, see **[CHANNEL_REVIEW.md](CHANNEL_REVIEW.md)**. The design doc for the image/file contract is **docs_design/ChannelImageAndFileInbound.md**.

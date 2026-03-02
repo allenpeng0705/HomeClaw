@@ -52,7 +52,7 @@ def download_line_media(
     try:
         url = f"https://api-data.line.me/v2/bot/message/{message_id.strip()}/content"
         headers = {"Authorization": f"Bearer {channel_access_token.strip()}"}
-        with httpx.Client(timeout=30.0) as client:
+        with httpx.Client(timeout=30.0, trust_env=False) as client:
             r = client.get(url, headers=headers)
             if r.status_code != 200:
                 logger.debug("LINE get content {}: status {}", message_id, r.status_code)

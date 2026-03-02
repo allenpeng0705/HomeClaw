@@ -36,7 +36,7 @@ async def get_updates(offset: Optional[int]):
     payload = {"timeout": 30}
     if offset is not None:
         payload["offset"] = offset
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         r = await client.get(url, params=payload, timeout=35)
     return r.json()
 
@@ -44,7 +44,7 @@ async def get_updates(offset: Optional[int]):
 async def get_file_data_url(file_id: str, mime_prefix: str = "image/jpeg") -> Optional[str]:
     """Get file by file_id from Telegram, download, return data URL or None. Never raises."""
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=False) as client:
             r = await client.get(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getFile",
                 params={"file_id": file_id},
@@ -59,7 +59,7 @@ async def get_file_data_url(file_id: str, mime_prefix: str = "image/jpeg") -> Op
         if not file_path:
             return None
         download_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=False) as client:
             r2 = await client.get(download_url, timeout=30.0)
         if r2.status_code != 200 or not r2.content:
             return None
@@ -101,8 +101,20 @@ def _extract_media_from_message(msg: dict) -> Tuple[str, List[str], List[str], L
 
 async def send_message(chat_id: int, text: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         await client.post(url, json={"chat_id": chat_id, "text": text[:4096]}, timeout=30)
+
+
+async def send_photo(chat_id: int, image_bytes: bytes, caption: Optional[str] = None):
+    """Send image to chat. caption optional (max 1024 chars)."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    async with httpx.AsyncClient(trust_env=False) as client:
+        await client.post(
+            url,
+            files={"photo": ("image.png", image_bytes, "image/png")},
+            data={"chat_id": chat_id, "caption": (caption or "")[:1024]},
+            timeout=30,
+        )
 
 
 async def handle_message(
@@ -143,6 +155,7 @@ async def handle_message(
         "text": text,
         "channel_name": "telegram",
         "user_name": user_name or user_id,
+        "reply_accepts": ["text", "image"],
     }
     if images:
         payload["images"] = images
@@ -154,17 +167,30 @@ async def handle_message(
         payload["files"] = files
     try:
         headers = Util().get_channels_core_api_headers()
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=False) as client:
             r = await client.post(INBOUND_URL, json=payload, headers=headers, timeout=120.0)
-        data = r.json()
+        data = r.json() if r.content else {}
         reply = data.get("text", "")
         if not reply and r.status_code != 200:
             reply = data.get("error", "Request failed")
+        reply_images = data.get("images") or []
     except httpx.ConnectError:
         reply = "Core unreachable. Is HomeClaw running?"
+        reply_images = []
     except Exception as e:
         reply = f"Error: {e}"
-    await send_message(chat_id, reply or "(no reply)")
+        reply_images = []
+    reply = reply or "(no reply)"
+    # Send response images from Core (e.g. from image generation), then text
+    for i, data_url in enumerate(reply_images[:5]):
+        raw = Util.data_url_to_bytes(data_url)
+        if raw:
+            cap = reply if (i == 0 and reply) else None
+            await send_photo(chat_id, raw, caption=cap)
+            if i == 0 and reply:
+                reply = ""  # already sent as caption
+    if reply:
+        await send_message(chat_id, reply)
 
 
 async def poll():

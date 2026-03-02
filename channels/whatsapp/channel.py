@@ -191,6 +191,7 @@ class Channel(BaseChannel):
                 audios=audios or [],
                 files=files if files else None,
                 timestamp=datetime.now().timestamp(),
+                reply_accepts=["text", "image"],
             )
             self.syncTransferTocore(request=request)
 
@@ -213,17 +214,48 @@ class Channel(BaseChannel):
                 to = request_meta.get("sender") or ""
                 msg_id = request_meta.get("msg_id") or ""
                 chat = self.chats.pop(msg_id, None) if msg_id else None
-                if "text" in response_data and chat:
-                    text = response_data.get("text") or ""
-                    if isinstance(text, str) and text:
-                        logger.debug(f"sending text to {to}")
-                        try:
-                            client.send_message(chat, text)
-                        except asyncio.TimeoutError:
-                            logger.error(f"Timeout sending message to whatsapp user {to}")
-                        except Exception as e:
-                            logger.error(f"Error sending message: {str(e)}")
-                elif not chat:
+                if chat:
+                    if "text" in response_data:
+                        text = response_data.get("text") or ""
+                        if isinstance(text, str) and text:
+                            logger.debug(f"sending text to {to}")
+                            try:
+                                client.send_message(chat, text)
+                            except asyncio.TimeoutError:
+                                logger.error(f"Timeout sending message to whatsapp user {to}")
+                            except Exception as e:
+                                logger.error(f"Error sending message: {str(e)}")
+                    # Outbound images from Core (e.g. image generation)
+                    images_list = response_data.get("images") or ([response_data["image"]] if response_data.get("image") else [])
+                    send_image_fn = getattr(client, "send_image", None)
+                    if callable(send_image_fn) and images_list:
+                        import tempfile
+                        for i, item in enumerate(images_list[:5]):
+                            if not isinstance(item, str):
+                                continue
+                            path = None
+                            try:
+                                if item.strip().startswith("data:"):
+                                    raw = Util.data_url_to_bytes(item)
+                                    if raw:
+                                        suffix = "png" if "png" in item[:50] else "jpg"
+                                        fd, path = tempfile.mkstemp(suffix=f".{suffix}")
+                                        os.close(fd)
+                                        Path(path).write_bytes(raw)
+                                elif os.path.isfile(item):
+                                    path = item
+                                if path:
+                                    send_image_fn(chat, path)
+                                    logger.debug("WhatsApp: sent image {} to {}", i + 1, to)
+                            except Exception as e:
+                                logger.warning("WhatsApp send_image: {}", e)
+                            finally:
+                                if path and path != item and os.path.isfile(path):
+                                    try:
+                                        os.unlink(path)
+                                    except Exception:
+                                        pass
+                else:
                     logger.debug("WhatsApp: no chat for msg_id={}", msg_id)
 
                 self.message_queue.task_done()
@@ -317,7 +349,7 @@ def main():
 def suicide():
     try:
         global shutdown_url
-        httpx.get(shutdown_url)
+        httpx.get(shutdown_url, trust_env=False)
     except Exception as e:
         logger.exception(e)
 

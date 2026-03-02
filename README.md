@@ -203,7 +203,7 @@ To use the **Companion app** or WebChat from another network (e.g. phone on cell
 **Cloudflare Tunnel (public URL)**
 
 1. Install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/local/) on the Core host.
-2. Run: `cloudflared tunnel --url http://127.0.0.1:9000` and copy the URL (e.g. `https://xxx.trycloudflare.com`).
+2. Run: `cloudflared tunnel --url http://127.0.0.1:9000` and copy the URL (e.g. `https://xxx.trycloudflare.com`). If Slack or other channels get **502** (tunnel took port 9000), use port **9001** instead: in `config/core.yml` set `port: 9001`, in `channels/.env` set `core_port=9001`, and run `cloudflared tunnel --url http://127.0.0.1:9001` — Companion app keeps using the same tunnel URL; Slack and channels use 9001.
 3. Enable Core auth: in `config/core.yml` set `auth_enabled: true` and `auth_api_key: "<long-random-key>"`.
 4. In the Companion app **Settings**, set **Core URL** to the tunnel URL and the **API key** to match.
 

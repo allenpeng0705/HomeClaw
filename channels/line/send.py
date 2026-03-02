@@ -20,7 +20,7 @@ def _reply_message(reply_token: str, channel_access_token: str, messages: list) 
             "Content-Type": "application/json",
         }
         body = {"replyToken": reply_token.strip(), "messages": messages}
-        with httpx.Client(timeout=15.0) as client:
+        with httpx.Client(timeout=15.0, trust_env=False) as client:
             r = client.post(url, headers=headers, json=body)
             if r.status_code != 200:
                 logger.warning("LINE reply failed: {} {}", r.status_code, r.text[:200])
@@ -44,7 +44,7 @@ def _push_message(to: str, channel_access_token: str, messages: list) -> bool:
             "Content-Type": "application/json",
         }
         body = {"to": to, "messages": messages}
-        with httpx.Client(timeout=15.0) as client:
+        with httpx.Client(timeout=15.0, trust_env=False) as client:
             r = client.post(url, headers=headers, json=body)
             if r.status_code != 200:
                 logger.warning("LINE push failed: {} {}", r.status_code, r.text[:200])
@@ -72,3 +72,47 @@ def send_line_text(
     if is_reply_token:
         return _reply_message(to_or_reply_token, channel_access_token, messages)
     return _push_message(to_or_reply_token, channel_access_token, messages)
+
+
+def send_line_messages(
+    to_or_reply_token: str,
+    messages: list,
+    channel_access_token: str,
+    *,
+    is_reply_token: bool = False,
+) -> bool:
+    """
+    Send a list of messages (text, image, etc.). LINE allows up to 5 per request; reply token is one-time use.
+    Never raises. Returns True on success.
+    """
+    if not messages or not channel_access_token:
+        return False
+    messages = messages[:5]
+    if is_reply_token:
+        return _reply_message(to_or_reply_token, channel_access_token, messages)
+    return _push_message(to_or_reply_token, channel_access_token, messages)
+
+
+def send_line_image(
+    to_or_reply_token: str,
+    original_content_url: str,
+    preview_image_url: str,
+    channel_access_token: str,
+    *,
+    is_reply_token: bool = False,
+) -> bool:
+    """
+    Send an image message. original_content_url and preview_image_url must be HTTPS (LINE requirement).
+    Never raises. Returns True on success.
+    """
+    if not original_content_url or not original_content_url.strip().lower().startswith("https://"):
+        return False
+    preview = (preview_image_url or "").strip()
+    if not preview or not preview.lower().startswith("https://"):
+        preview = original_content_url
+    messages = [{
+        "type": "image",
+        "originalContentUrl": original_content_url.strip(),
+        "previewImageUrl": preview,
+    }]
+    return send_line_messages(to_or_reply_token, messages, channel_access_token, is_reply_token=is_reply_token)

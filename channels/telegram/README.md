@@ -9,6 +9,10 @@ Minimal Telegram channel that uses Core **POST /inbound**. No full BaseChannel; 
 3. **Configure**: Core connection: set `core_host` and `core_port` (or `CORE_URL`) in **channels/.env** only. Bot token: copy `.env.example` to `.env` in this folder and set `TELEGRAM_BOT_TOKEN`, or set `TELEGRAM_BOT_TOKEN` in `channels/.env`.
 4. **Allow users**: In `config/user.yml`, add `telegram_<chat_id>` to a user with `IM` permission. Get your chat_id from the first message to the bot (check logs or Telegram API).
 
+## Images and files
+
+This channel uses the **same request as the Companion app**: **POST /inbound** with `text`, `images`, `videos`, `audios`, and `files`. Photo/video/audio/document attachments are resolved via the Telegram Bot API to data URLs and sent to Core. Core stores **images** in the user's **images** folder when the model doesn't support vision; **files** are processed by file-understanding (documents can be added to Knowledge base). See **docs_design/ChannelImageAndFileInbound.md**.
+
 ## Run
 
 1. Start HomeClaw Core as usual.

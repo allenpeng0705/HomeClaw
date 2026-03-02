@@ -5,7 +5,7 @@ Uses FastAPI TestClient; no running server or uvicorn required.
 import pytest
 from fastapi.testclient import TestClient
 
-from portal.app import app
+from core.portal.app import app
 
 client = TestClient(app)
 

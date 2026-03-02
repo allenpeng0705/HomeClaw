@@ -5,6 +5,12 @@ import sys
 import threading
 import webbrowser
 from time import sleep
+
+# Ensure project root is on path so "import core" works when started from another cwd.
+_project_root = os.path.abspath(os.path.normpath(os.path.dirname(os.path.abspath(__file__))))
+if _project_root and _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
 import httpx
 from loguru import logger
 import requests
@@ -444,13 +450,17 @@ def run_core() -> threading.Thread:
 
 
 def run_portal(open_browser=True):
-    """Start the Portal server (config and onboarding). Bind 127.0.0.1 only. Optionally open browser when ready. Ctrl+C to stop."""
+    """Start the Portal server (config and onboarding). Bind host from PORTAL_HOST (default 0.0.0.0). Optionally open browser when ready. Ctrl+C to stop."""
+    # Ensure project root is first on path so core.portal imports work from any cwd.
+    _root = os.path.abspath(os.path.normpath(os.path.dirname(os.path.abspath(__file__))))
+    if _root and (not sys.path or sys.path[0] != _root):
+        sys.path.insert(0, _root)
     try:
         import uvicorn
-        from portal.app import app
-        from portal.config import get_host, get_port
+        from core.portal.app import app
+        from core.portal.config import get_host, get_port
     except Exception as e:
-        logger.exception("Failed to load Portal: %s", e)
+        logger.exception("Failed to load Portal: {}", e)
         sys.exit(1)
     host = get_host()
     port = get_port()
@@ -500,6 +510,8 @@ def start(open_browser=True):
         try:
             print("\nShutting down... (Ctrl+C) 正在关闭...")
             _do_shutdown()
+            # Give Core time to release the port so restart or Slack channel can bind/reach 9000
+            sleep(2)
         except Exception:
             pass
         try:

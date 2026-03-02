@@ -37,7 +37,7 @@ def get_connector_token() -> str | None:
         "scope": "https://api.botframework.com/.default",
     }
     try:
-        with httpx.Client() as client:
+        with httpx.Client(trust_env=False) as client:
             r = client.post(TOKEN_URL, data=data, timeout=10)
         if r.status_code != 200:
             return None
@@ -46,8 +46,29 @@ def get_connector_token() -> str | None:
         return None
 
 
-def send_reply(activity: dict, reply_text: str) -> bool:
-    """Send reply via Bot Framework Connector API."""
+def _image_to_content_url(item: str) -> str | None:
+    """Return a contentUrl for Bot Framework: data URL as-is, or path read and converted to data URL. Returns None on failure."""
+    if not item or not isinstance(item, str):
+        return None
+    s = item.strip()
+    if s.startswith("data:"):
+        return s
+    import base64
+    if os.path.isfile(s):
+        try:
+            with open(s, "rb") as f:
+                raw = f.read()
+            ext = (s.lower().split(".")[-1] if "." in s else "png") or "png"
+            mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
+            b64 = base64.b64encode(raw).decode("ascii")
+            return f"data:{mime};base64,{b64}"
+        except Exception:
+            return None
+    return None
+
+
+def send_reply(activity: dict, reply_text: str, image_content_urls: list | None = None) -> bool:
+    """Send reply via Bot Framework Connector API. image_content_urls: list of data URLs or file paths (converted to data URL)."""
     token = get_connector_token()
     if not token:
         return False
@@ -65,10 +86,19 @@ def send_reply(activity: dict, reply_text: str) -> bool:
         "text": reply_text,
         "replyToId": reply_to_id,
     }
-    # Bot Framework: POST to .../activities/{activityId} to send reply
+    attachments = []
+    for item in (image_content_urls or [])[:5]:
+        url = _image_to_content_url(item)
+        if url:
+            mime = "image/png"
+            if "image/jpeg" in url[:50] or "image/jpg" in url[:50]:
+                mime = "image/jpeg"
+            attachments.append({"contentType": mime, "contentUrl": url, "name": "image.png"})
+    if attachments:
+        reply_activity["attachments"] = attachments
     url = f"{service_url}/v3/conversations/{conv_id}/activities/{reply_to_id}" if reply_to_id else f"{service_url}/v3/conversations/{conv_id}/activities"
     try:
-        with httpx.Client() as client:
+        with httpx.Client(trust_env=False) as client:
             r = client.post(
                 url,
                 json=reply_activity,
@@ -102,7 +132,7 @@ async def _download_teams_attachment_to_data_url(content_url: str) -> str | None
     if (content_url or "").startswith("data:"):
         return content_url
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=False) as client:
             r = await client.get(content_url, timeout=30)
         if r.status_code != 200:
             return None
@@ -161,6 +191,7 @@ async def api_messages(request: Request):
         "text": text,
         "channel_name": "teams",
         "user_name": user_name,
+        "reply_accepts": ["text", "image"],
     }
     if images:
         payload["images"] = images
@@ -172,18 +203,21 @@ async def api_messages(request: Request):
         payload["files"] = files
     try:
         headers = Util().get_channels_core_api_headers()
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=False) as client:
             r = await client.post(INBOUND_URL, json=payload, headers=headers, timeout=120.0)
         data = r.json() if r.content else {}
         reply = data.get("text", "")
         if not reply and r.status_code != 200:
             reply = data.get("error", "Request failed")
+        reply_images = data.get("images") or ([data["image"]] if data.get("image") else [])
     except httpx.ConnectError:
         reply = "Core unreachable. Is HomeClaw running?"
+        reply_images = []
     except Exception as e:
         reply = f"Error: {e}"
+        reply_images = []
     reply = reply or "(no reply)"
-    if not send_reply(activity, reply):
+    if not send_reply(activity, reply, image_content_urls=reply_images if reply_images else None):
         # Still return 200 so Teams doesn't retry; reply may not have been sent
         pass
     return JSONResponse(status_code=200, content={})

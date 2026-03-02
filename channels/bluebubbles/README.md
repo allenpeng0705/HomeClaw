@@ -10,6 +10,10 @@
 4. **channels/.env**: Core connection only (core_host, core_port or CORE_URL). Optional: `BLUEBUBBLES_CHANNEL_PORT` (default 8017), `BLUEBUBBLES_CHANNEL_HOST`.
 5. **config/user.yml**: Add `bluebubbles_<id>` under `im` for allowed users if you use allowlists.
 
+## Images and files
+
+The bridge can send the same payload as Companion: in addition to `user_id`, `text`, `user_name`, include optional `images`, `videos`, `audios`, or `files` (data URLs or paths). The channel forwards them to Core `/inbound`. Core stores **images** in the user's **images** folder when the model doesn't support vision; **files** are processed by file-understanding (documents can be added to Knowledge base). See **docs_design/ChannelImageAndFileInbound.md**.
+
 ## Run
 
 ```bash

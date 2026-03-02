@@ -4,6 +4,7 @@
 # Main LLM and embedding can each be local or cloud independently (e.g. local chat + cloud embedding, or both local).
 name: core
 host: 0.0.0.0
+# Port for Core (Companion, tunnels, and channels all use this). Editable in Portal. Set core_port in channels/.env to match.
 port: 9000
 mode: dev
 # model_path: base path for local models (GGUF, etc.). Relative to project root; resolved on Windows, Mac, and Linux (use / in config; pathlib normalizes). Use ../models to put models outside the repo. Use ./models or leave empty for project_root/models.
@@ -20,8 +21,8 @@ use_workspace_bootstrap: true
 # Which workspace dir to load (e.g. config/workspace_day vs config/workspace_night for day/night agents)
 workspace_dir: config/workspace
 # Root for file/folder tools and links. Required for channel/companion file access. When empty, file tools return a clear error; do not use workspace for user files. Each user has two major folders: (1) their sandbox homeclaw_root/{user_id}/ (private), (2) the share folder homeclaw_root/share/ (accessible by all users). Companion app uses homeclaw_root/companion/. Subfolders: output/, knowledgebase/.
-homeclaw_root: "/User/shileipeng/Documents/homeclawroot"
-#homeclaw_root: "D:/homeclaw"
+#homeclaw_root: "/User/shileipeng/Documents/homeclawroot"
+homeclaw_root: "D:/homeclaw"
 # Session management: in config/memory_kb.yml (see memory_kb_config_file above).
 # When an unknown user (not in user.yml) tries to access, notify the owner via last-used channel so they can add to user.yml. See docs_design/OutboundMarkdownAndUnknownRequest.md.
 notify_unknown_request: false
@@ -71,9 +72,7 @@ pinggy:
   token: ""        # empty = do not start Pinggy; set to your Pinggy token to enable
   open_browser: true   # when true, open default browser to http://127.0.0.1:<port>/pinggy when tunnel is ready
 
-# Portal (Companion "Core setting"): Core proxies /portal-ui to the Portal server. Set portal_url to Portal base URL.
-# Start Portal on same host as Core: python -m main portal (default http://127.0.0.1:18472). 502 = portal_url empty or Portal not running.
-portal_url: "http://127.0.0.1:18472"
+# Portal: two servers host the same site. (1) When Core runs: Portal is served in-process at http://<core>:9000/portal-ui. Run Core from project root (python -m main start). (2) When Core is not running: run Portal standalone (python -m main portal) at http://127.0.0.1:18472. No proxy; no portal_url.
 portal_secret: ""   # optional; same as Portal's PORTAL_SECRET or config/portal_secret.txt
 
 

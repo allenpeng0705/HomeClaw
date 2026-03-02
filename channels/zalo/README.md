@@ -10,6 +10,10 @@ HTTP webhook that a **Zalo OA (Official Account) bridge** or adapter calls. The 
    - Sends the response `{ "text": "..." }` back via the Zalo OA API.
 3. Add `zalo_<id>` to `config/user.yml` under `im` for allowed users.
 
+## Images and files
+
+The bridge can send the same payload as Companion: in addition to `user_id`, `text`, `user_name`, include optional `images`, `videos`, `audios`, or `files` (data URLs or paths). The channel forwards them to Core `/inbound`. Core stores **images** in the user's **images** folder when the model doesn't support vision; **files** are processed by file-understanding (documents can be added to Knowledge base). See **docs_design/ChannelImageAndFileInbound.md**.
+
 ## Run
 
 ```bash

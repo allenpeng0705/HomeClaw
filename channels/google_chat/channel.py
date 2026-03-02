@@ -73,6 +73,7 @@ async def handle_event(request: Request):
         "text": text or "(no text)",
         "channel_name": "google_chat",
         "user_name": user_name,
+        "reply_accepts": ["text", "image"],
     }
     # Optional: attachment data URLs (if bridge or app provides them)
     msg = body.get("message") or {}
@@ -86,17 +87,43 @@ async def handle_event(request: Request):
         payload["files"] = msg["files"]
     try:
         headers = Util().get_channels_core_api_headers()
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(trust_env=False) as client:
             r = await client.post(INBOUND_URL, json=payload, headers=headers, timeout=120.0)
         data = r.json() if r.content else {}
         reply = data.get("text", "")
         if not reply and r.status_code != 200:
             reply = data.get("error", "Request failed")
+        reply_images = data.get("images") or ([data["image"]] if data.get("image") else [])
     except httpx.ConnectError:
         reply = "Core unreachable. Is HomeClaw running?"
+        reply_images = []
     except Exception as e:
         reply = f"Error: {e}"
-    return {"text": reply or "(no reply)"}
+        reply_images = []
+    reply = reply or "(no reply)"
+    # Google Chat cards support imageUrl only as HTTPS. Build image URLs from response (https as-is, or path + GOOGLE_CHAT_IMAGE_BASE_URL).
+    image_base = (os.getenv("GOOGLE_CHAT_IMAGE_BASE_URL") or "").strip().rstrip("/")
+    image_urls = []
+    for item in (reply_images or [])[:5]:
+        if not isinstance(item, str):
+            continue
+        s = item.strip()
+        if s.lower().startswith("https://"):
+            image_urls.append(s)
+        elif image_base and os.path.isfile(s):
+            import urllib.parse
+            image_urls.append(image_base + "/" + urllib.parse.quote(os.path.basename(s)))
+    response = {"text": reply}
+    if image_urls:
+        response["cardsV2"] = [{
+            "cardId": "reply-images",
+            "card": {
+                "sections": [{
+                    "widgets": [{"image": {"imageUrl": u}} for u in image_urls]
+                }]
+            }
+        }]
+    return response
 
 
 def main():

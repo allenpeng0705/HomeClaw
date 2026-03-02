@@ -532,6 +532,7 @@ def client_message_loop(stream):
                                 audios=[],
                                 files=None,
                                 timestamp=datetime.now().timestamp(),
+                                reply_accepts=["text", "image"],
                             )
                             try:
                                 _tinode_channel.syncTransferTocore(request=request)
@@ -568,6 +569,7 @@ def client_message_loop(stream):
                                 audios=[],
                                 files=None,
                                 timestamp=datetime.now().timestamp(),
+                                reply_accepts=["text", "image"],
                             )
                             if _tinode_channel is not None:
                                 _tinode_channel.syncTransferTocore(request=request)
@@ -608,6 +610,7 @@ def client_message_loop(stream):
                                         audios=[str(filename.resolve())],
                                         files=None,
                                         timestamp=datetime.now().timestamp(),
+                                        reply_accepts=["text", "image"],
                                     )
                                     _tinode_channel.syncTransferTocore(request=request)
                                 else:
@@ -647,6 +650,7 @@ def client_message_loop(stream):
                                         audios=[],
                                         files=None,
                                         timestamp=datetime.now().timestamp(),
+                                        reply_accepts=["text", "image"],
                                     )
                                     _tinode_channel.syncTransferTocore(request=request)
                                 else:
@@ -687,6 +691,7 @@ def client_message_loop(stream):
                                         audios=[],
                                         files=[str(filename.resolve())],
                                         timestamp=datetime.now().timestamp(),
+                                        reply_accepts=["text", "image"],
                                     )
                                     _tinode_channel.syncTransferTocore(request=request)
                                 else:
@@ -940,19 +945,41 @@ class Channel(BaseChannel):
                     logger.warning("Tinode: response missing request_metadata.msg_id, cannot route to topic")
                     self.message_queue.task_done()
                     continue
-                if "text" in response_data:
-                    text = response_data["text"]
-                    chat = self.chats.pop(msg_id, None)
-                    if chat is None:
-                        logger.warning("Tinode: no topic for msg_id={} (chats had {}), response not sent to app", msg_id, list(self.chats.keys())[:5])
-                    else:
-                        try:
-                            client_post(publish(chat, text))
-                            logger.info("Tinode: sent response to topic {} (msg_id={})", chat, msg_id)
-                        except Exception as e:
-                            logger.error("Tinode: error sending to Tinode: {}", e)
+                chat = self.chats.pop(msg_id, None)
+                if chat is None:
+                    logger.warning("Tinode: no topic for msg_id={} (chats had {}), response not sent to app", msg_id, list(self.chats.keys())[:5])
                 else:
-                    logger.debug("Tinode: response has no 'text' in response_data")
+                    if "text" in response_data:
+                        text = response_data["text"]
+                        if isinstance(text, str) and text:
+                            try:
+                                client_post(publish(chat, text))
+                                logger.info("Tinode: sent response to topic {} (msg_id={})", chat, msg_id)
+                            except Exception as e:
+                                logger.error("Tinode: error sending to Tinode: {}", e)
+                    # Outbound images: "images" (list) or "image" (single); path or data URL -> Tinode JSON image format
+                    images_list = response_data.get("images") or ([response_data["image"]] if response_data.get("image") else [])
+                    for img_item in images_list[:5]:
+                        if not isinstance(img_item, str):
+                            continue
+                        try:
+                            raw = None
+                            mime = "image/png"
+                            if img_item.strip().startswith("data:"):
+                                raw = Util.data_url_to_bytes(img_item)
+                                if ";base64," in img_item:
+                                    mime = (img_item.split(";")[0] or "data:image/png").replace("data:", "") or "image/png"
+                            elif os.path.isfile(img_item):
+                                raw = Path(img_item).read_bytes()
+                                ext = (img_item.lower().split(".")[-1] if "." in img_item else "png") or "png"
+                                mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png" if ext == "png" else "image/" + ext
+                            if raw:
+                                b64 = base64.b64encode(raw).decode("ascii")
+                                content = {"ent": [{"data": {"mime": mime, "val": b64}}]}
+                                client_post(publish(chat, content))
+                                logger.debug("Tinode: sent image to topic {}", chat)
+                        except Exception as e:
+                            logger.warning("Tinode: error sending image: {}", e)
                 self.message_queue.task_done()
             except asyncio.TimeoutError:
                 continue
@@ -1040,7 +1067,7 @@ def main():
 def suicide():
     try:
         global shutdown_url
-        httpx.get(shutdown_url)
+        httpx.get(shutdown_url, trust_env=False)
     except Exception as e:
         logger.exception(e)
 
