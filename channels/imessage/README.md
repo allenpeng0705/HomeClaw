@@ -21,3 +21,5 @@ python -m channels.run imessage
 ```
 
 Set `IMESSAGE_CHANNEL_HOST`, `IMESSAGE_CHANNEL_PORT` in `channels/.env` if needed. For BlueBubbles, use an adapter that forwards messages to this webhook.
+
+https://github.com/wafwoof/pyMessageBridge

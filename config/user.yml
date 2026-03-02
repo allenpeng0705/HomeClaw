@@ -22,7 +22,7 @@ users:
     username: pengshilei
     password: 123456
     email: []
-    im: ['matrix:@pengshilei:matrix.org', 'slack_U0AHT91TSRL', 'dingtalk_$:LWCP_v1:$PYr83ZBtc0VPbbkOaB1BNw==', 'feishu_unknown']
+    im: ['matrix:@pengshilei:matrix.org', 'slack_U0AHT91TSRL', 'dingtalk_$:LWCP_v1:$PYr83ZBtc0VPbbkOaB1BNw==', 'feishu_unknown', 'signal_29740730-719a-4847-b04f-38682ed0d08e']
     phone: []
     permissions: []
     friends:
