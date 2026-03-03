@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from base.base import User
 from base.util import Util
 
-from core import auth
+from core.routes import auth
 from core.user_inbox import append_message as inbox_append, get_messages as inbox_get_messages
 
 

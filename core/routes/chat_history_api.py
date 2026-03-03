@@ -10,7 +10,7 @@ from fastapi import Depends
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from core import companion_auth
+from core.routes import companion_auth
 
 
 def get_api_chat_history_handler(core):

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from base.base import User
 from base.util import Util
 
-from core import companion_auth
+from core.routes import companion_auth
 from core.friend_requests_store import (
     create_request,
     find_request,
