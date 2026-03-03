@@ -15,6 +15,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:record/record.dart';
+import 'package:video_player/video_player.dart';
 import '../chat_history_store.dart';
 import '../core_service.dart';
 import 'canvas_screen.dart';
@@ -27,6 +30,10 @@ class ChatScreen extends StatefulWidget {
   /// Which friend this chat is with (e.g. "HomeClaw", "Sabrina"). Used for store key and to route incoming push/result to this chat.
   final String? friendId;
   final String? initialMessage;
+  /// True when chatting with a real person (user-to-user). Send via POST /api/user-message; show push-to-talk. No AI reply.
+  final bool isUserFriend;
+  /// When [isUserFriend], the other user's id (for sendUserMessage and filtering inbox).
+  final String? toUserId;
 
   const ChatScreen({
     super.key,
@@ -35,16 +42,22 @@ class ChatScreen extends StatefulWidget {
     required this.userName,
     this.friendId,
     this.initialMessage,
+    this.isUserFriend = false,
+    this.toUserId,
   });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final List<MapEntry<String, bool>> _messages = [];
   /// Optional image data URLs per message (same index as _messages; null or empty when no images).
   final List<List<String>?> _messageImages = [];
+  /// Optional audio data URLs per message (same index as _messages; for user-to-user voice).
+  final List<List<String>?> _messageAudios = [];
+  /// Optional video data URLs per message (same index as _messages; for user-to-user short video).
+  final List<List<String>?> _messageVideos = [];
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   bool _loading = false;
@@ -72,6 +85,9 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _connectionChecking = false;
   Timer? _connectionCheckTimer;
   StreamSubscription<Map<String, dynamic>>? _pushMessageSubscription;
+  /// Push-to-talk (user friends only): true while recording.
+  bool _recordingPushToTalk = false;
+  final AudioRecorder _voiceRecorder = AudioRecorder();
 
   /// Rotating status messages when waiting for reply (when no progress from Core).
   static const List<String> _loadingStatusMessages = [
@@ -86,9 +102,15 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadTtsAutoSpeak();
     _loadVoiceInputLocale();
-    _loadChatHistory();
+    if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
+      _loadUserInbox();
+    } else {
+      _loadChatHistory();
+      _syncChatHistoryFromCore();
+    }
     _checkCoreConnection();
     _connectionCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkCoreConnection());
     _pushMessageSubscription = widget.coreService.pushMessageStream.listen(_onPushMessage);
@@ -101,19 +123,122 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
+      _loadUserInbox();
+    } else {
+      _syncChatHistoryFromCore();
+    }
+  }
+
   void _loadChatHistory() {
     try {
       final loaded = ChatHistoryStore().load(widget.userId, widget.friendId);
       if (loaded.isEmpty) return;
       _messages.clear();
       _messageImages.clear();
+      _messageAudios.clear();
+      _messageVideos.clear();
       for (final e in loaded) {
         _messages.add(e.key);
         _messageImages.add(e.value);
+        _messageAudios.add(null);
+        _messageVideos.add(null);
       }
       if (mounted) setState(() {});
     } catch (_) {
       // Store load failed; keep empty chat.
+    }
+  }
+
+  /// Load user-to-user messages from GET /api/user-inbox and show only thread with [widget.toUserId].
+  /// Load Core↔user (AI) chat history from Core so replies that arrived while the app was offline appear in the list.
+  Future<void> _syncChatHistoryFromCore() async {
+    if (widget.isUserFriend) return;
+    final friendId = (widget.friendId != null && widget.friendId!.trim().isNotEmpty) ? widget.friendId!.trim() : 'HomeClaw';
+    try {
+      final list = await widget.coreService.getChatHistory(userId: widget.userId, friendId: friendId, limit: 100);
+      if (list.isEmpty || !mounted) return;
+      final messages = <MapEntry<String, bool>>[];
+      final images = <List<String>?>[];
+      final audios = <List<String>?>[];
+      final videos = <List<String>?>[];
+      for (final m in list) {
+        final role = ((m['role']?.toString()) ?? '').trim().toLowerCase();
+        final content = ((m['content']?.toString()) ?? '').trim();
+        final isUser = role == 'user';
+        messages.add(MapEntry(content.isEmpty ? '(empty)' : content, isUser));
+        images.add(null);
+        audios.add(null);
+        videos.add(null);
+      }
+      if (!mounted) return;
+      setState(() {
+        _messages.clear();
+        _messageImages.clear();
+        _messageAudios.clear();
+        _messageVideos.clear();
+        _messages.addAll(messages);
+        _messageImages.addAll(images);
+        _messageAudios.addAll(audios);
+        _messageVideos.addAll(videos);
+      });
+    } catch (_) {
+      // Keep local history on failure (e.g. offline)
+    }
+  }
+
+  Future<void> _loadUserInbox() async {
+    if (widget.toUserId == null || widget.toUserId!.trim().isEmpty) return;
+    try {
+      final data = await widget.coreService.getUserInbox(userId: widget.userId, limit: 100);
+      final list = data['messages'] as List<dynamic>?;
+      if (list == null || list.isEmpty) {
+        if (mounted) setState(() {});
+        return;
+      }
+      final myId = widget.userId.trim();
+      final otherId = widget.toUserId!.trim();
+      final thread = <Map<String, dynamic>>[];
+      final inboxUserId = widget.userId.trim();
+      for (final m in list) {
+        if (m is! Map) continue;
+        final from = (m['from_user_id'] as String?)?.trim() ?? '';
+        final to = (m['to_user_id'] as String?)?.trim() ?? inboxUserId;
+        if ((from == myId && (to == otherId || to.isEmpty)) || (from == otherId && (to == myId || to.isEmpty))) {
+          thread.add(Map<String, dynamic>.from(m));
+        }
+      }
+      thread.sort((a, b) {
+        final aAt = (a['created_at'] as num?)?.toDouble() ?? 0.0;
+        final bAt = (b['created_at'] as num?)?.toDouble() ?? 0.0;
+        return aAt.compareTo(bAt);
+      });
+      _messages.clear();
+      _messageImages.clear();
+      _messageAudios.clear();
+      _messageVideos.clear();
+      for (final m in thread) {
+        final text = (m['text'] as String?)?.trim() ?? '';
+        final from = (m['from_user_id'] as String?)?.trim() ?? '';
+        final isUser = from == myId;
+        _messages.add(MapEntry(text.isEmpty ? '(attachment)' : text, isUser));
+        final imgList = m['images'] as List<dynamic>?;
+        final images = imgList != null ? imgList.whereType<String>().toList() : null;
+        _messageImages.add(images != null && images.isNotEmpty ? images : null);
+        final audList = m['audios'] as List<dynamic>?;
+        final audios = audList != null ? audList.whereType<String>().toList() : null;
+        _messageAudios.add(audios != null && audios.isNotEmpty ? audios : null);
+        final vidList = m['videos'] as List<dynamic>?;
+        final videos = vidList != null ? vidList.whereType<String>().toList() : null;
+        _messageVideos.add(videos != null && videos.isNotEmpty ? videos : null);
+      }
+      if (mounted) setState(() {});
+    } catch (_) {
+      if (mounted) setState(() {});
     }
   }
 
@@ -151,6 +276,8 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _messages.clear();
       _messageImages.clear();
+      _messageAudios.clear();
+      _messageVideos.clear();
       _lastReply = null;
     });
     if (mounted) {
@@ -209,9 +336,20 @@ class _ChatScreenState extends State<ChatScreen> {
         ? imageList.whereType<String>().toList()
         : (push['image'] is String ? <String>[push['image'] as String] : null);
     if (!mounted) return;
+    final audioList = push['audios'] as List<dynamic>?;
+    final audios = audioList != null
+        ? audioList.whereType<String>().toList()
+        : (push['audio'] is String ? <String>[push['audio'] as String] : null);
+    final videoList = push['videos'] as List<dynamic>?;
+    final videos = videoList != null
+        ? videoList.whereType<String>().toList()
+        : (push['video'] is String ? <String>[push['video'] as String] : null);
+    if (!mounted) return;
     setState(() {
       _messages.add(MapEntry(text, false));
       _messageImages.add(images != null && images.isNotEmpty ? images : null);
+      _messageAudios.add(audios != null && audios.isNotEmpty ? audios : null);
+      _messageVideos.add(videos != null && videos.isNotEmpty ? videos : null);
     });
     _scrollToBottom();
     _persistChatHistory();
@@ -290,6 +428,15 @@ class _ChatScreenState extends State<ChatScreen> {
     final userImageDataUrls = imagesToSend.isNotEmpty
         ? await _filePathsToImageDataUrls(imagesToSend)
         : <String>[];
+    // One short video for user-to-user (max 15MB, ~10s)
+    final userVideoDataUrls = videosToSend.isNotEmpty
+        ? await _filePathsToVideoDataUrls([videosToSend.first])
+        : <String>[];
+    if (videosToSend.isNotEmpty && userVideoDataUrls.isEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Video not sent: keep under 15MB (e.g. ~10 seconds) for user messages.')),
+      );
+    }
     if (!mounted) {
       _stopLoadingStatusTimer();
       setState(() => _loading = false);
@@ -301,12 +448,48 @@ class _ChatScreenState extends State<ChatScreen> {
       _pendingFilePaths.clear();
       _messages.add(MapEntry(text.isEmpty ? '(attachment)' : text, true));
       _messageImages.add(userImageDataUrls.isEmpty ? null : userImageDataUrls);
+      _messageAudios.add(null);
+      _messageVideos.add(userVideoDataUrls.isEmpty ? null : userVideoDataUrls);
       _loading = true;
       _loadingStatusIndex = 0;
     });
     _startLoadingStatusTimer();
     _scrollToBottom();
     _persistChatHistory();
+    // User-to-user: send via POST /api/user-message; no AI reply.
+    if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
+      try {
+        await widget.coreService.sendUserMessage(
+          fromUserId: widget.userId,
+          toUserId: widget.toUserId!.trim(),
+          text: text.isEmpty ? '(attachment)' : text,
+          images: userImageDataUrls.isEmpty ? null : userImageDataUrls,
+          videos: userVideoDataUrls.isEmpty ? null : userVideoDataUrls,
+        );
+        if (mounted) {
+          _stopLoadingStatusTimer();
+          setState(() {
+            _loading = false;
+            _loadingMessage = null;
+          });
+          _scrollToBottom();
+        }
+      } catch (e) {
+        if (mounted) {
+          _stopLoadingStatusTimer();
+          setState(() {
+            _messages.add(MapEntry('Error: $e', false));
+            _messageImages.add(null);
+            _messageAudios.add(null);
+            _messageVideos.add(null);
+            _loading = false;
+            _loadingMessage = null;
+          });
+          _scrollToBottom();
+        }
+      }
+      return;
+    }
     try {
       List<String> imagePaths = [];
       List<String> videoPaths = [];
@@ -358,6 +541,8 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() {
           _messages.add(MapEntry(reply.isEmpty ? '(no reply)' : reply, false));
           _messageImages.add(imageDataUrls.isEmpty ? null : imageDataUrls);
+          _messageAudios.add(null);
+          _messageVideos.add(null);
           _loading = false;
           _loadingMessage = null;
         });
@@ -373,6 +558,8 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() {
           _messages.add(MapEntry('Error: $e', false));
           _messageImages.add(null);
+          _messageAudios.add(null);
+          _messageVideos.add(null);
           _loading = false;
           _loadingMessage = null;
         });
@@ -396,13 +583,13 @@ class _ChatScreenState extends State<ChatScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () {
+              onPressed: () {
               Navigator.of(ctx).pop();
               setState(() {
                 _messages.removeAt(index);
-                if (index < _messageImages.length) {
-                  _messageImages.removeAt(index);
-                }
+                if (index < _messageImages.length) _messageImages.removeAt(index);
+                if (index < _messageAudios.length) _messageAudios.removeAt(index);
+                if (index < _messageVideos.length) _messageVideos.removeAt(index);
               });
               _persistChatHistory();
               if (mounted) {
@@ -428,6 +615,26 @@ class _ChatScreenState extends State<ChatScreen> {
     'gif': 'image/gif',
     'webp': 'image/webp',
   };
+
+  /// Build data URL for one short video (e.g. 10s). Max one video, max 15MB. Returns empty list if none or too large.
+  static const int _maxVideoBytes = 15 * 1024 * 1024;
+
+  Future<List<String>> _filePathsToVideoDataUrls(List<String> filePaths) async {
+    if (filePaths.isEmpty) return [];
+    final file = File(filePaths.first);
+    if (!await file.exists()) return [];
+    final length = await file.length();
+    if (length > _maxVideoBytes) return [];
+    try {
+      final bytes = await file.readAsBytes();
+      final b64 = base64Encode(bytes);
+      final ext = path.extension(filePaths.first).toLowerCase().replaceFirst('.', '');
+      final mime = ext == 'webm' ? 'video/webm' : 'video/mp4';
+      return ['data:$mime;base64,$b64'];
+    } catch (_) {
+      return [];
+    }
+  }
 
   /// Build data URLs for image files (same fallback as web chat when upload fails).
   Future<List<String>> _filePathsToImageDataUrls(List<String> filePaths) async {
@@ -459,6 +666,70 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     });
     if (textToSend.isNotEmpty) _send();
+  }
+
+  /// Start push-to-talk recording (user friends only). Call _stopPushToTalkAndSend when user releases.
+  Future<void> _startPushToTalk() async {
+    if (widget.toUserId == null || widget.toUserId!.trim().isEmpty) return;
+    final hasPermission = await _voiceRecorder.hasPermission();
+    if (!hasPermission) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Microphone permission is needed for voice messages.')),
+        );
+      }
+      return;
+    }
+    try {
+      final dir = await getTemporaryDirectory();
+      final recordPath = path.join(dir.path, 'push_voice_${DateTime.now().millisecondsSinceEpoch}.m4a');
+      await _voiceRecorder.start(const RecordConfig(), path: recordPath);
+      if (mounted) setState(() => _recordingPushToTalk = true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Voice record start failed: $e')));
+      }
+    }
+  }
+
+  /// Stop push-to-talk, read file, send as user message with audios, and add to chat.
+  Future<void> _stopPushToTalkAndSend() async {
+    if (!_recordingPushToTalk) return;
+    try {
+      final filePath = await _voiceRecorder.stop();
+      if (!mounted) return;
+      setState(() => _recordingPushToTalk = false);
+      if (filePath == null || filePath.isEmpty) return;
+      final file = File(filePath);
+      if (!await file.exists()) return;
+      final bytes = await file.readAsBytes();
+      final b64 = base64Encode(bytes);
+      final dataUrl = 'data:audio/mp4;base64,$b64';
+      try {
+        await widget.coreService.sendUserMessage(
+          fromUserId: widget.userId,
+          toUserId: widget.toUserId!.trim(),
+          text: '',
+          audios: [dataUrl],
+        );
+        if (!mounted) return;
+        setState(() {
+          _messages.add(MapEntry('(voice)', true));
+          _messageImages.add(null);
+          _messageAudios.add([dataUrl]);
+        });
+        _scrollToBottom();
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Send voice failed: $e')));
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _recordingPushToTalk = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Voice record stop failed: $e')));
+      }
+    }
   }
 
   /// Stop voice listening and discard the transcript (do not send).
@@ -610,6 +881,8 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() {
           _messages.add(MapEntry('Photo error: ${result.error ?? "could not read or copy the image."}', false));
           _messageImages.add(null);
+          _messageAudios.add(null);
+          _messageVideos.add(null);
         });
         return;
       }
@@ -625,6 +898,8 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() {
           _messages.add(MapEntry('Photo error: $e', false));
           _messageImages.add(null);
+          _messageAudios.add(null);
+          _messageVideos.add(null);
         });
       }
     }
@@ -674,6 +949,8 @@ class _ChatScreenState extends State<ChatScreen> {
           setState(() {
             _messages.add(MapEntry('Video error: ${result.error ?? "could not read or copy the video."}', false));
             _messageImages.add(null);
+            _messageAudios.add(null);
+            _messageVideos.add(null);
           });
           return;
         }
@@ -684,6 +961,8 @@ class _ChatScreenState extends State<ChatScreen> {
           setState(() {
             _messages.add(MapEntry('Video error: could not read or copy the video.', false));
             _messageImages.add(null);
+            _messageAudios.add(null);
+            _messageVideos.add(null);
           });
         return;
       }
@@ -698,6 +977,8 @@ class _ChatScreenState extends State<ChatScreen> {
         setState(() {
           _messages.add(MapEntry('Video error: $e', false));
           _messageImages.add(null);
+          _messageAudios.add(null);
+          _messageVideos.add(null);
         });
       }
     }
@@ -1111,11 +1392,15 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) setState(() {
         _messages.add(MapEntry('Run: $cmd\n$line', false));
         _messageImages.add(null);
+        _messageAudios.add(null);
+        _messageVideos.add(null);
       });
     } catch (e) {
       if (mounted) setState(() {
         _messages.add(MapEntry('Run error: $e', false));
         _messageImages.add(null);
+        _messageAudios.add(null);
+        _messageVideos.add(null);
       });
     }
   }
@@ -1148,11 +1433,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _connectionCheckTimer?.cancel();
     _loadingStatusTimer?.cancel();
     _pushMessageSubscription?.cancel();
     _voiceSubscription?.cancel();
     _voice.dispose();
+    _voiceRecorder.dispose();
     _inputController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -1303,6 +1590,8 @@ class _ChatScreenState extends State<ChatScreen> {
                 final entry = _messages[i];
                 final isUser = entry.value;
                 final imageUrls = i < _messageImages.length ? _messageImages[i] : null;
+                final audioUrls = i < _messageAudios.length ? _messageAudios[i] : null;
+                final videoUrls = i < _messageVideos.length ? _messageVideos[i] : null;
                 return Align(
                   alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
                   child: Container(
@@ -1350,6 +1639,34 @@ class _ChatScreenState extends State<ChatScreen> {
                                                     ),
                                                   ),
                                                 ),
+                                              ))
+                                          .toList(),
+                                    ),
+                                  ),
+                                if (audioUrls != null && audioUrls.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: audioUrls
+                                          .map((audioDataUrl) => Padding(
+                                                padding: const EdgeInsets.only(bottom: 6),
+                                                child: _AudioPlayButton(dataUrl: audioDataUrl),
+                                              ))
+                                          .toList(),
+                                    ),
+                                  ),
+                                if (videoUrls != null && videoUrls.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: videoUrls
+                                          .map((videoDataUrl) => Padding(
+                                                padding: const EdgeInsets.only(bottom: 6),
+                                                child: _VideoPlayChip(dataUrl: videoDataUrl),
                                               ))
                                           .toList(),
                                     ),
@@ -1638,6 +1955,20 @@ class _ChatScreenState extends State<ChatScreen> {
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
+                if (widget.isUserFriend)
+                  GestureDetector(
+                    onLongPressStart: (_) => _startPushToTalk(),
+                    onLongPressEnd: (_) => _stopPushToTalkAndSend(),
+                    child: IconButton(
+                      onPressed: null,
+                      icon: Icon(
+                        _recordingPushToTalk ? Icons.stop : Icons.keyboard_voice,
+                        color: _recordingPushToTalk ? Theme.of(context).colorScheme.error : null,
+                      ),
+                      tooltip: _recordingPushToTalk ? 'Recording… release to send' : 'Hold to talk',
+                    ),
+                  ),
+                if (widget.isUserFriend) const SizedBox(width: 4),
                 IconButton(
                   onPressed: _loading ? null : _toggleVoice,
                   icon: Icon(
@@ -1836,6 +2167,183 @@ class _ChatMessageText extends StatelessWidget {
       softLineBreak: true,
       shrinkWrap: true,
       fitContent: true,
+    );
+  }
+}
+
+/// Chip that opens full-screen video player for a video data URL (user-to-user short video).
+class _VideoPlayChip extends StatelessWidget {
+  final String dataUrl;
+
+  const _VideoPlayChip({required this.dataUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (ctx) => _FullScreenVideoPage(dataUrl: dataUrl),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.videocam, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(width: 8),
+              Text('Video', style: Theme.of(context).textTheme.labelLarge),
+              const SizedBox(width: 4),
+              const Icon(Icons.play_circle_fill, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-screen video player for a data URL. Writes to temp file and plays with video_player.
+class _FullScreenVideoPage extends StatefulWidget {
+  final String dataUrl;
+
+  const _FullScreenVideoPage({required this.dataUrl});
+
+  @override
+  State<_FullScreenVideoPage> createState() => _FullScreenVideoPageState();
+}
+
+class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
+  VideoPlayerController? _controller;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _initPlayer();
+  }
+
+  Future<void> _initPlayer() async {
+    if (widget.dataUrl.isEmpty || !widget.dataUrl.contains(',')) {
+      if (mounted) setState(() => _error = 'Invalid video');
+      return;
+    }
+    try {
+      final b64 = widget.dataUrl.split(',').last;
+      final bytes = base64Decode(b64);
+      final dir = await getTemporaryDirectory();
+      final ext = widget.dataUrl.contains('webm') ? 'webm' : 'mp4';
+      final file = File(path.join(dir.path, 'video_${DateTime.now().millisecondsSinceEpoch}.$ext'));
+      await file.writeAsBytes(bytes);
+      if (!mounted) return;
+      _controller = VideoPlayerController.file(file);
+      await _controller!.initialize();
+      if (mounted) setState(() {});
+      _controller!.play();
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not play: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: const Text('Video'),
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
+      body: _error != null
+          ? Center(child: Text(_error!, style: const TextStyle(color: Colors.white)))
+          : _controller == null || !_controller!.value.isInitialized
+              ? const Center(child: CircularProgressIndicator(color: Colors.white))
+              : Center(
+                  child: AspectRatio(
+                    aspectRatio: _controller!.value.aspectRatio,
+                    child: VideoPlayer(_controller!),
+                  ),
+                ),
+    );
+  }
+}
+
+/// Play button for a voice message (audio data URL). Writes to temp file and plays with audioplayers.
+class _AudioPlayButton extends StatefulWidget {
+  final String dataUrl;
+
+  const _AudioPlayButton({required this.dataUrl});
+
+  @override
+  State<_AudioPlayButton> createState() => _AudioPlayButtonState();
+}
+
+class _AudioPlayButtonState extends State<_AudioPlayButton> {
+  final AudioPlayer _player = AudioPlayer();
+  bool _playing = false;
+  StreamSubscription<void>? _completeSub;
+
+  @override
+  void dispose() {
+    _completeSub?.cancel();
+    _player.dispose();
+    super.dispose();
+  }
+
+  Future<void> _play() async {
+    if (widget.dataUrl.isEmpty || !widget.dataUrl.contains(',')) return;
+    try {
+      final b64 = widget.dataUrl.split(',').last;
+      final bytes = base64Decode(b64);
+      final dir = await getTemporaryDirectory();
+      final mime = widget.dataUrl.startsWith('data:') ? widget.dataUrl.split(';').first.replaceFirst('data:', '') : 'audio';
+      final ext = mime == 'audio/webm' ? 'webm' : (mime == 'audio/ogg' ? 'ogg' : 'webm');
+      final file = File(path.join(dir.path, 'voice_${DateTime.now().millisecondsSinceEpoch}.$ext'));
+      await file.writeAsBytes(bytes);
+      _completeSub?.cancel();
+      _completeSub = _player.onPlayerComplete.listen((_) {
+        if (mounted) setState(() => _playing = false);
+      });
+      await _player.play(DeviceFileSource(file.path));
+      if (mounted) setState(() => _playing = true);
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Could not play audio')));
+    }
+  }
+
+  Future<void> _stop() async {
+    await _player.stop();
+    if (mounted) setState(() => _playing = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: Icon(_playing ? Icons.stop : Icons.play_arrow),
+          onPressed: _playing ? _stop : _play,
+          tooltip: _playing ? 'Stop' : 'Play voice message',
+        ),
+        Text('Voice message', style: Theme.of(context).textTheme.bodySmall),
+      ],
     );
   }
 }

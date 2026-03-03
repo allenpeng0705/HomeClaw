@@ -4,12 +4,14 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
+  audioplayers_windows
   file_selector_windows
   firebase_core
   flutter_tts
   geolocator_windows
   homeclaw_native
   permission_handler_windows
+  record_windows
   speech_to_text_windows
   url_launcher_windows
 )

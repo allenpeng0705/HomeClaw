@@ -1,6 +1,6 @@
 # Remote access and auth
 
-When you expose HomeClaw Core on the internet (e.g. so a Telegram bot or WebChat can reach it from anywhere), you need to secure it. This doc describes two approaches: **built-in API key** and **recommended path (Tailscale + optional auth proxy)**.
+When you expose HomeClaw Core on the internet (e.g. so a Telegram bot or WebChat can reach it from anywhere), you need to secure it. This doc describes two approaches: **built-in API key** and **recommended path (Tailscale + optional auth proxy)**. For **encryption** between Companion and Core (TLS/HTTPS) and user-to-user messaging, see [CompanionEncryptionAndSecurity.md](CompanionEncryptionAndSecurity.md).
 
 ---
 

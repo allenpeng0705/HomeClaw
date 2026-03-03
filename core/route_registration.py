@@ -28,13 +28,20 @@ from base.base import (
 from base.tools import ROUTING_RESPONSE_ALREADY_SENT
 from base.util import Util
 
+from core.app_layer_encryption import (
+    encrypt_response as app_encrypt_response,
+    parse_inbound_body as app_parse_inbound_body,
+)
 from core.result_viewer import build_image_view_links, get_result_link_base_url
 
 from core.routes import (
     auth,
+    chat_history_api,
     companion_auth,
     companion_push_api,
     config_api,
+    friend_request_api,
+    user_message_api,
     files,
     inbound as inbound_routes,
     knowledge_base_routes,
@@ -281,6 +288,18 @@ def register_all_routes(core: Any) -> None:
         dependencies=[Depends(auth.verify_inbound_auth)],
     )
     app.add_api_route(
+        "/api/user-message",
+        user_message_api.get_user_message_post_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/user-inbox",
+        user_message_api.get_user_inbox_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
         "/api/auth/login",
         companion_auth.get_api_auth_login_handler(core),
         methods=["POST"],
@@ -295,6 +314,42 @@ def register_all_routes(core: Any) -> None:
     app.add_api_route(
         "/api/me/friends",
         companion_auth.get_api_me_friends_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/users",
+        friend_request_api.get_api_users_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/friend-request",
+        friend_request_api.get_api_friend_request_post_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/friend-requests",
+        friend_request_api.get_api_friend_requests_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/friend-request/accept",
+        friend_request_api.get_api_friend_request_accept_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/friend-request/reject",
+        friend_request_api.get_api_friend_request_reject_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/chat-history",
+        chat_history_api.get_api_chat_history_handler(core),
         methods=["GET"],
         dependencies=[Depends(companion_auth.get_companion_token_user)],
     )
@@ -443,10 +498,26 @@ def register_all_routes(core: Any) -> None:
 
     @app.post("/inbound")
     async def inbound_post_handler(
-        request: InboundRequest,
         raw_request: Request,
         _: None = Depends(auth.verify_inbound_auth),
     ):
+        try:
+            raw_body = await raw_request.body()
+            meta = Util().get_core_metadata()
+            enc_secret = (getattr(meta, "app_layer_encryption_secret", None) or "").strip()
+            parsed, response_encrypted = app_parse_inbound_body(raw_body, enc_secret or None)
+            if parsed is None:
+                return JSONResponse(
+                    status_code=422,
+                    content={"error": "Invalid or unreadable body", "text": ""},
+                )
+            request = InboundRequest.model_validate(parsed)
+        except Exception as parse_err:
+            logger.warning("inbound body parse failed: {}", parse_err)
+            return JSONResponse(
+                status_code=422,
+                content={"error": "Invalid request body", "text": ""},
+            )
         logger.info(
             "POST /inbound received: user_id={} channel_name={} (so request reached Core)",
             getattr(request, "user_id", "") or "",
@@ -497,9 +568,16 @@ def register_all_routes(core: Any) -> None:
                 )
             ok, text, status, image_paths = await core._handle_inbound_request(request)
             if not ok:
-                return JSONResponse(
-                    status_code=status, content={"error": text, "text": ""}
-                )
+                err_content = {"error": text, "text": ""}
+                if response_encrypted and enc_secret:
+                    enc_err = app_encrypt_response(err_content, enc_secret)
+                    if enc_err:
+                        return JSONResponse(
+                            status_code=status,
+                            content=enc_err,
+                            headers={"X-Encrypted": "true"},
+                        )
+                return JSONResponse(status_code=status, content=err_content)
             out_text, out_fmt = (
                 core._outbound_text_and_format(text) if text else ("", "plain")
             )
@@ -674,6 +752,13 @@ def register_all_routes(core: Any) -> None:
                     "inbound: connection-check/fallback failed: {}",
                     fallback_e,
                 )
+            if response_encrypted and enc_secret:
+                encrypted = app_encrypt_response(content, enc_secret)
+                if encrypted:
+                    return JSONResponse(
+                        content=encrypted,
+                        headers={"X-Encrypted": "true"},
+                    )
             return JSONResponse(content=content)
         except Exception as e:
             logger.exception(e)

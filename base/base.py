@@ -254,6 +254,9 @@ class Friend:
     who: Optional[Dict[str, Any]] = None  # persona: description, gender, roles, personalities, language, response_length
     identity: Optional[str] = None  # None = do not read file; "" or "identity.md" = default file; "other.md" = that filename in friend root
     preset: Optional[str] = None  # optional: name of friend preset (e.g. "reminder", "note", "finder"); when set, Core applies preset config for tools/skills/plugins/memory. See docs_design/FriendConfigFrameworkImplementation.md.
+    # User-type friend (another user in same HomeClaw): type="user", user_id=<id>. When set, Core forwards user-to-user messages; no LLM. Omitted or not "user" = core_role (AI).
+    type: Optional[str] = None  # "user" = friend is another user (user_id required); else AI friend
+    user_id: Optional[str] = None  # when type=="user", the other user's id (must exist in user.yml)
 
 
 @dataclass
@@ -387,14 +390,18 @@ class User:
                     preset = (preset_raw or "").strip() or None
                 else:
                     preset = None
-                result.append(Friend(name=fname, relation=relation, who=fwho, identity=identity, preset=preset))
+                ftype = (f.get('type') or "").strip().lower() or None
+                if ftype and ftype != "user":
+                    ftype = None
+                uid_friend = (f.get('user_id') or "").strip() or None
+                result.append(Friend(name=fname, relation=relation, who=fwho, identity=identity, preset=preset, type=ftype, user_id=uid_friend))
             except Exception:
                 continue
         if not result:
-            return [Friend(name='HomeClaw', relation=None, who=None, identity=None, preset=None)]
+            return [Friend(name='HomeClaw', relation=None, who=None, identity=None, preset=None, type=None, user_id=None)]
         first_name = (result[0].name or '').strip().lower()
         if first_name != 'homeclaw':
-            result.insert(0, Friend(name='HomeClaw', relation=None, who=None, identity=None, preset=None))
+            result.insert(0, Friend(name='HomeClaw', relation=None, who=None, identity=None, preset=None, type=None, user_id=None))
         return result
 
     @staticmethod
@@ -406,6 +413,10 @@ class User:
                 continue
             try:
                 entry = {"name": (getattr(f, "name", None) or "").strip() or "Friend"}
+                if getattr(f, "type", None) and str(getattr(f, "type", "")).strip().lower() == "user":
+                    entry["type"] = "user"
+                    if getattr(f, "user_id", None):
+                        entry["user_id"] = (f.user_id or "").strip()
                 if getattr(f, "relation", None) is not None:
                     entry["relation"] = f.relation
                 if isinstance(getattr(f, "who", None), dict) and f.who:
@@ -918,6 +929,8 @@ class CoreMetadata:
     prompt_cache_ttl_seconds: float = 0  # 0 = cache by mtime only; >0 = TTL in seconds
     auth_enabled: bool = False  # when True, require API key for /inbound and /ws; see RemoteAccess.md
     auth_api_key: str = ""  # key to require (X-API-Key header or Authorization: Bearer <key>); also used to sign file links when core_public_url is set
+    # Optional: shared secret for application-layer encryption (Companion–Core). When set, Core decrypts encrypted inbound bodies and encrypts responses. See docs_design/CompanionEncryptionAndSecurity.md.
+    app_layer_encryption_secret: str = ""
     core_public_url: str = ""  # public URL that reaches Core (e.g. https://homeclaw.example.com). Used for file/report links: core_public_url/files/out?path=...&token=...
     # File link style: "token" = signed /files/out?token=... (default); "static" = direct URL under web server doc root so link = core_public_url/file_static_prefix/scope/path (e.g. /files/AllenPeng/images/ID1.jpg). When static, set web server doc root (www_root) to homeclaw_root and alias file_static_prefix to it so all sandbox files are served.
     file_link_style: str = "token"  # "token" | "static"
@@ -1336,6 +1349,7 @@ class CoreMetadata:
             prompt_cache_ttl_seconds=float(data.get('prompt_cache_ttl_seconds', 0) or 0),
             auth_enabled=data.get('auth_enabled', False),
             auth_api_key=(data.get('auth_api_key') or '').strip(),
+            app_layer_encryption_secret=(data.get('app_layer_encryption_secret') or '').strip(),
             core_public_url=(data.get('core_public_url') or '').strip(),
             file_link_style=(data.get('file_link_style') or 'token').strip().lower() or 'token',
             file_static_prefix=(data.get('file_static_prefix') or 'files').strip().strip('/') or 'files',
@@ -1433,6 +1447,7 @@ class CoreMetadata:
                 'prompt_cache_ttl_seconds': getattr(core, 'prompt_cache_ttl_seconds', 0),
                 'auth_enabled': getattr(core, 'auth_enabled', False),
                 'auth_api_key': getattr(core, 'auth_api_key', '') or '',
+                'app_layer_encryption_secret': getattr(core, 'app_layer_encryption_secret', '') or '',
                 'core_public_url': getattr(core, 'core_public_url', '') or '',
                 'file_link_style': getattr(core, 'file_link_style', 'token') or 'token',
                 'file_static_prefix': getattr(core, 'file_static_prefix', 'files') or 'files',

@@ -65,6 +65,8 @@ prompt_cache_ttl_seconds: 0   # Unit: seconds. 0 = cache by file mtime; >0 = TTL
 # Optional: require API key for /inbound and /ws when exposing Core on the internet; see docs/RemoteAccess.md
 auth_enabled: true
 auth_api_key: "1234567890"   # when auth_enabled: true, require X-API-Key header or Authorization: Bearer <key>. Also used to sign file/report links (GET /files/out) when core_public_url is set.
+# Optional: application-layer encryption (Companion–Core). When set, Companion can send body as {"encrypted": true, "nonce": "<b64>", "ciphertext": "<b64>"}; Core decrypts and encrypts responses. Leave empty to disable.
+# app_layer_encryption_secret: ""
 # Public URL that reaches this Core instance (e.g. https://homeclaw.example.com via Cloudflare Tunnel). Used for: (1) file/report links core_public_url/files/out?path=...&token=... (2) GET /pinggy scan-to-connect page and QR for Companion. Leave empty for local-only or if using pinggy.token for tunnel.
 core_public_url: "https://homeclaw.gpt4people.online"
 # Pinggy tunnel: when token is set, Core starts a tunnel to this port and serves /pinggy with public URL + QR for Companion. open_browser: true = open browser to /pinggy when tunnel is ready. See docs_design/PinggyIntegration.md.

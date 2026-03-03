@@ -253,6 +253,166 @@ class CoreService {
     return out;
   }
 
+  /// POST /api/user-message — send a message to another user (user-to-user). Uses API key auth.
+  /// Returns {ok: true, message_id: "..."} or throws. [audios] = data URLs for push-to-talk. [videos] = one short video (e.g. 10s) as data URL.
+  Future<Map<String, dynamic>> sendUserMessage({
+    required String fromUserId,
+    required String toUserId,
+    String text = '',
+    List<String>? images,
+    List<String>? audios,
+    List<String>? videos,
+    List<String>? fileLinks,
+  }) async {
+    final url = Uri.parse('$_baseUrl/api/user-message');
+    final body = <String, dynamic>{
+      'from_user_id': fromUserId.trim(),
+      'to_user_id': toUserId.trim(),
+      'text': text.trim(),
+    };
+    if (images != null && images.isNotEmpty) body['images'] = images;
+    if (audios != null && audios.isNotEmpty) body['audios'] = audios;
+    if (videos != null && videos.isNotEmpty) body['videos'] = videos;
+    if (fileLinks != null && fileLinks.isNotEmpty) body['file_links'] = fileLinks;
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders()},
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      final err = response.body;
+      throw Exception('User message failed ${response.statusCode}: $err');
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+  }
+
+  /// GET /api/users — list users (id, name) excluding current user. Uses Bearer token. For Add Friend screen.
+  Future<List<Map<String, dynamic>>> getUsers() async {
+    final url = Uri.parse('$_baseUrl/api/users');
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      throw Exception('GET /api/users failed: ${response.statusCode} ${response.body}');
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>?;
+    final list = map?['users'] as List<dynamic>?;
+    if (list == null) return [];
+    return list.whereType<Map<String, dynamic>>().toList();
+  }
+
+  /// GET /api/friend-requests — pending requests for current user. Uses Bearer token.
+  Future<List<Map<String, dynamic>>> getFriendRequests() async {
+    final url = Uri.parse('$_baseUrl/api/friend-requests');
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      throw Exception('GET /api/friend-requests failed: ${response.statusCode} ${response.body}');
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>?;
+    final list = map?['requests'] as List<dynamic>?;
+    if (list == null) return [];
+    return list.whereType<Map<String, dynamic>>().toList();
+  }
+
+  /// POST /api/friend-request — send friend request to [toUserId]. Optional [message]. Uses Bearer token.
+  Future<void> sendFriendRequest(String toUserId, {String? message}) async {
+    final url = Uri.parse('$_baseUrl/api/friend-request');
+    final body = <String, dynamic>{'to_user_id': toUserId.trim()};
+    if (message != null && message.trim().isNotEmpty) body['message'] = message.trim();
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      throw Exception(response.body.isNotEmpty ? response.body : 'Send request failed ${response.statusCode}');
+    }
+  }
+
+  /// POST /api/friend-request/accept — accept request by [requestId]. Uses Bearer token.
+  Future<void> acceptFriendRequest(String requestId) async {
+    final url = Uri.parse('$_baseUrl/api/friend-request/accept');
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+          body: jsonEncode({'request_id': requestId.trim()}),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      throw Exception(response.body.isNotEmpty ? response.body : 'Accept failed ${response.statusCode}');
+    }
+  }
+
+  /// POST /api/friend-request/reject — reject request by [requestId]. Uses Bearer token.
+  Future<void> rejectFriendRequest(String requestId) async {
+    final url = Uri.parse('$_baseUrl/api/friend-request/reject');
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+          body: jsonEncode({'request_id': requestId.trim()}),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      throw Exception(response.body.isNotEmpty ? response.body : 'Reject failed ${response.statusCode}');
+    }
+  }
+
+  /// GET /api/chat-history — Core↔user (AI) conversation for (userId, friendId). Uses Bearer. Returns {messages: [{role, content, timestamp}]}. When app was offline, Core still stored the reply; this loads it so the "inbox" works for Core→user.
+  Future<List<Map<String, dynamic>>> getChatHistory({required String userId, required String friendId, int limit = 100}) async {
+    final url = Uri.parse('$_baseUrl/api/chat-history').replace(queryParameters: {
+      'friend_id': friendId.trim(),
+      'limit': limit.toString(),
+    });
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      throw Exception('GET /api/chat-history failed: ${response.statusCode} ${response.body}');
+    }
+    try {
+      final map = jsonDecode(response.body) as Map<String, dynamic>?;
+      final list = map?['messages'] as List<dynamic>?;
+      if (list == null) return [];
+      return list.whereType<Map<String, dynamic>>().toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// GET /api/user-inbox — list messages for [userId]. Uses API key auth.
+  /// Returns {user_id, messages: [{id, from_user_id, from_user_name, text, created_at, images?, audios?, ...}]}.
+  Future<Map<String, dynamic>> getUserInbox({
+    required String userId,
+    int limit = 50,
+    String? afterId,
+  }) async {
+    final query = <String, String>{
+      'user_id': userId.trim(),
+      'limit': limit.toString(),
+    };
+    if (afterId != null && afterId.trim().isNotEmpty) query['after_id'] = afterId.trim();
+    final url = Uri.parse('$_baseUrl/api/user-inbox').replace(queryParameters: query);
+    final response = await http
+        .get(url, headers: _authHeaders())
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      throw Exception('GET inbox failed ${response.statusCode}: ${response.body}');
+    }
+    try {
+      return jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    } catch (_) {
+      return {};
+    }
+  }
+
   Future<void> saveShowProgressDuringLongTasks(bool value) async {
     _showProgressDuringLongTasks = value;
     final prefs = await SharedPreferences.getInstance();

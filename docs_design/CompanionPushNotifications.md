@@ -14,6 +14,13 @@ When the Companion app is **killed or in the background**, the system may not ke
   1. Try WebSocket first (existing behaviour).
   2. If no WebSocket session for that user, send **remote push** per token: **APNs** for `platform` in (ios, macos, tvos, ipados, watchos); **FCM** for android and others.
 
+### 1.1 Multi-user and multi-device
+
+Push **supports multiple users**. Core stores push tokens **per user_id**; each user receives push only for their own messages, reminders, and user-to-user messages.
+
+- **One user per login (per app instance):** The Companion app can only be **logged in as one user at a time**. When the app registers its push token with Core, it sends the **current logged-in user_id**. That token is then associated with that user. If the user logs out and another user logs in on the same device, the app should **re-register** the token with the new user_id so that push goes to the correct user; Core may optionally remove or reassign the token for the previous user on that device (e.g. if using `device_id` to deduplicate).
+- **One user, multiple devices:** A single user may be logged in on **multiple devices** (e.g. phone and tablet). Each device registers its own token with the **same user_id**. Core sends push to **all tokens** for that user so that every device receives the notification.
+
 ---
 
 ## 2. Core side
@@ -108,8 +115,8 @@ If you want the app to build **without** Firebase (e.g. for desktop-only builds)
 
 ## 4. Security and privacy
 
-- **Tokens** are sensitive (they allow sending messages to that device). Store them only on Core (or your backend), protect the service account key, and use HTTPS + API key for the push-token endpoint.
-- **user_id** should match the same identity used for reminders (e.g. “System” or the chat user). One user can have multiple tokens (multiple devices).
+- **Tokens** are sensitive (they allow sending messages to that device). Store them only on Core (or your backend), protect the service account key, and use **HTTPS** + API key for the push-token endpoint. For a broader picture of encryption and security (Companion–Core and user-to-user), see [CompanionEncryptionAndSecurity.md](CompanionEncryptionAndSecurity.md).
+- **user_id** should match the **logged-in user** when the Companion registers the token. One user can have **multiple tokens** (multiple devices); each device registers with the same user_id. Only one user is logged in per app instance at a time.
 
 ---
 
@@ -122,7 +129,9 @@ If you want the app to build **without** Firebase (e.g. for desktop-only builds)
 
 | Component  | Responsibility |
 |------------|----------------|
-| **Companion** | iOS: get APNs token, send to Core with platform "ios". Android: get FCM token, send with platform "android". |
-| **Core**   | Store tokens per user_id; when deliver_to_user runs (no WebSocket), route by platform: APNs for Apple, FCM for others. |
+| **Companion** | iOS: get APNs token, send to Core with platform "ios". Android: get FCM token, send with platform "android". Register token with **current logged-in user_id**; re-register when user changes (logout/login). |
+| **Core**   | Store tokens **per user_id** (multi-user); when deliver_to_user runs (no WebSocket), send push to all tokens for that user. One user can have many tokens (multi-device). |
+
+**Multi-user:** Push is scoped by user_id; each user gets only their notifications. **One login at a time:** The app has a single active user per session; token is tied to that user until re-registration. **Multi-device:** One user can have multiple devices; each device registers its token under the same user_id.
 
 With this, reminders (and other proactive messages) can reach the user even when the Companion app has been killed by the system.

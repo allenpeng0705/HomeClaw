@@ -1,6 +1,6 @@
 # Multi-user support: how it works today
 
-This doc explains **how multiple users and friends are handled**: the allowlist in `config/user.yml`, **friends list** and **identity** per friend, how the Core matches requests to users, and which data is per-user vs per-(user, friend) vs global. See also [UserFriendsModelFullDesign.md](UserFriendsModelFullDesign.md) and the implementation steps in `docs_design/implementation_steps/`.
+This doc explains **how multiple users and friends are handled**: the allowlist in `config/user.yml`, **friends list** and **identity** per friend, how the Core matches requests to users, and which data is per-user vs per-(user, friend) vs global. See also [UserFriendsModelFullDesign.md](UserFriendsModelFullDesign.md) and the implementation steps in `docs_design/implementation_steps/`. For a design idea on **user-to-user messaging** (friends that are other users, messages forwarded without LLM), see [UserToUserMessagingViaCompanion.md](UserToUserMessagingViaCompanion.md).
 
 ---
 

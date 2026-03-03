@@ -105,16 +105,51 @@ async def send_response_to_latest_channel(core: Any, response: str) -> None:
     await send_response_to_channel_by_key(core, last_channel_store._DEFAULT_KEY, response)
 
 
+def _media_to_data_urls(
+    items: Optional[List[str]],
+    data_prefix: str,
+    default_mime: str,
+    ext_to_mime: Optional[dict] = None,
+) -> List[str]:
+    """Convert list of data URLs or file paths to data URLs. data_prefix e.g. 'data:image/' or 'data:audio/'. Never raises."""
+    result: List[str] = []
+    if not items:
+        return result
+    ext_map = ext_to_mime or {}
+    for item in items:
+        if not isinstance(item, str) or not item.strip():
+            continue
+        s = item.strip()
+        if s.lower().startswith(data_prefix):
+            result.append(s)
+            continue
+        if not os.path.isfile(s):
+            continue
+        try:
+            with open(s, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("ascii")
+            ext = (s.lower().split(".")[-1] if "." in s else "").strip() or ""
+            mime = ext_map.get(ext) if ext in ext_map else default_mime
+            if mime == "image/jpg":
+                mime = "image/jpeg"
+            result.append(f"data:{mime};base64,{b64}")
+        except Exception:
+            pass
+    return result
+
+
 async def deliver_to_user(
     core: Any,
     user_id: str,
     text: str,
     images: Optional[List[str]] = None,
+    audios: Optional[List[str]] = None,
+    videos: Optional[List[str]] = None,
     channel_key: Optional[str] = None,
     source: str = "push",
     from_friend: str = "HomeClaw",
 ) -> None:
-    """Push to user: WebSocket sessions, then push notification, then channel. Never raises."""
+    """Push to user: WebSocket sessions, then push notification, then channel. Never raises. audios = voice; videos = short video (e.g. 10s)."""
     try:
         user_id = (str(user_id or "").strip() or "companion")
         from_friend = (str(from_friend or "HomeClaw").strip() or "HomeClaw")
@@ -128,24 +163,33 @@ async def deliver_to_user(
         out_text = out_text if out_text is not None else ""
         out_fmt = out_fmt if out_fmt is not None else "plain"
         payload = {"event": "push", "source": source, "from_friend": from_friend, "text": out_text, "format": out_fmt}
-        data_urls = []
-        if images:
-            for image_path in images:
-                if not isinstance(image_path, str) or not os.path.isfile(image_path):
-                    continue
-                try:
-                    with open(image_path, "rb") as f:
-                        b64 = base64.b64encode(f.read()).decode("ascii")
-                    ext = (image_path.lower().split(".")[-1] if "." in image_path else "png") or "png"
-                    mime = "image/png" if ext == "png" else ("image/jpeg" if ext in ("jpg", "jpeg") else "image/" + ext)
-                    if mime == "image/jpg":
-                        mime = "image/jpeg"
-                    data_urls.append(f"data:{mime};base64,{b64}")
-                except Exception:
-                    pass
+        data_urls = _media_to_data_urls(
+            images,
+            "data:image/",
+            "image/png",
+            {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp"},
+        )
         if data_urls:
             payload["images"] = data_urls
             payload["image"] = data_urls[0]
+        audio_urls = _media_to_data_urls(
+            audios,
+            "data:audio/",
+            "audio/mpeg",
+            {"mp3": "audio/mpeg", "ogg": "audio/ogg", "wav": "audio/wav", "webm": "audio/webm", "m4a": "audio/mp4"},
+        )
+        if audio_urls:
+            payload["audios"] = audio_urls
+            payload["audio"] = audio_urls[0]
+        video_urls = _media_to_data_urls(
+            videos,
+            "data:video/",
+            "video/mp4",
+            {"mp4": "video/mp4", "webm": "video/webm", "mov": "video/quicktime", "m4v": "video/x-m4v"},
+        )
+        if video_urls:
+            payload["videos"] = video_urls
+            payload["video"] = video_urls[0]
         ws_count = 0
         _ws_by_session = getattr(core, "_ws_user_by_session", None)
         _ws_sessions = getattr(core, "_ws_sessions", None)
@@ -172,16 +216,19 @@ async def deliver_to_user(
             )
         else:
             logger.info("deliver_to_user: pushed to {} WebSocket session(s) for user_id={} source={}", ws_count, user_id, source)
+        # Push only for reminders (and cron reminders). User messages and friend requests stay in inbox/friend_requests;
+        # user sees them when opening the app. Push is not stable for all flows, so we use it only for time-sensitive reminders.
         try:
-            from base import push_send
-            title = "Reminder" if source == "reminder" else from_friend
-            body_safe = (out_text if out_text is not None else "")[:1024]
-            max_tokens = 1 if source == "reminder" else None
-            push_sent = push_send.send_push_to_user(
-                user_id, title=title, body=body_safe, source=source, from_friend=from_friend, max_tokens_per_user=max_tokens
-            )
-            if push_sent:
-                logger.info("deliver_to_user: sent {} push(es) (APNs/FCM) for user_id={} from_friend={}", push_sent, user_id, from_friend)
+            if source in ("reminder", "cron"):
+                from base import push_send
+                title = "Reminder" if source == "reminder" else from_friend
+                body_safe = (out_text if out_text is not None else "")[:1024]
+                max_tokens = 1
+                push_sent = push_send.send_push_to_user(
+                    user_id, title=title, body=body_safe, source=source, from_friend=from_friend, max_tokens_per_user=max_tokens
+                )
+                if push_sent:
+                    logger.info("deliver_to_user: sent {} push(es) (APNs/FCM) for user_id={} source={}", push_sent, user_id, source)
         except Exception as push_e:
             logger.debug("deliver_to_user: push send failed: {}", push_e)
         try:

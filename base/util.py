@@ -33,7 +33,7 @@ import requests
 
 from memory.chat.message import ChatMessage
 from memory.prompts import MEMORY_SUMMARIZATION_PROMPT
-from base.base import CoreMetadata, User, LLM, EmailAccount
+from base.base import CoreMetadata, Friend, User, LLM, EmailAccount
 
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 core_metadata =CoreMetadata.from_yaml(os.path.join(root_dir, 'config', 'core.yml'))
@@ -1602,7 +1602,49 @@ class Util:
             User.to_yaml(users or [], path)
         except Exception:
             pass
-    
+
+    def add_friend_bidirectional(self, user_id_a: str, user_id_b: str) -> bool:
+        """
+        Add user_id_b as a user-type friend to user_id_a and vice versa; persist to user.yml.
+        Returns True if both were updated and saved. Never raises.
+        Both users must exist; if either already has the other as a user-type friend, returns False (no-op).
+        """
+        try:
+            users = self.get_users() or []
+            if len(users) < 2:
+                return False
+            user_a = None
+            user_b = None
+            for u in users:
+                uid = (getattr(u, "id", None) or getattr(u, "name", None) or "").strip()
+                if uid == (user_id_a or "").strip():
+                    user_a = u
+                if uid == (user_id_b or "").strip():
+                    user_b = u
+            if not user_a or not user_b:
+                return False
+            friends_a = list(getattr(user_a, "friends", None) or [])
+            friends_b = list(getattr(user_b, "friends", None) or [])
+            for f in friends_a:
+                if getattr(f, "type", None) and str(getattr(f, "type", "")).strip().lower() == "user":
+                    if (getattr(f, "user_id", None) or "").strip() == (user_id_b or "").strip():
+                        return False
+            for f in friends_b:
+                if getattr(f, "type", None) and str(getattr(f, "type", "")).strip().lower() == "user":
+                    if (getattr(f, "user_id", None) or "").strip() == (user_id_a or "").strip():
+                        return False
+            name_b = (getattr(user_b, "name", None) or user_id_b or "").strip()
+            name_a = (getattr(user_a, "name", None) or user_id_a or "").strip()
+            friends_a.append(Friend(name=name_b, relation=None, who=None, identity=None, preset=None, type="user", user_id=(user_id_b or "").strip()))
+            friends_b.append(Friend(name=name_a, relation=None, who=None, identity=None, preset=None, type="user", user_id=(user_id_a or "").strip()))
+            user_a.friends = friends_a
+            user_b.friends = friends_b
+            self.save_users(users)
+            return True
+        except Exception as e:
+            logger.warning("add_friend_bidirectional failed: {}", e)
+            return False
+
     def get_email_account(self):
         if self.email_account == None:
             self.email_account = EmailAccount.from_yaml(os.path.join(self.config_path(), 'email_account.yml'))

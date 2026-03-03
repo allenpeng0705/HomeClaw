@@ -38,7 +38,8 @@ def _clean_expired_tokens() -> None:
 
 
 def _user_to_friends_list(user: User) -> List[Dict[str, Any]]:
-    """Return list of { name (friend_id), relation?, who?, identity?, preset? } for user.friends. Never raises."""
+    """Return list of { name, relation?, who?, identity?, preset?, type?, user_id? } for user.friends. Never raises.
+    When type=='user' and user_id is set, this friend is a real person (user-to-user); otherwise AI friend (user→Core)."""
     try:
         friends = getattr(user, "friends", None)
         if not isinstance(friends, list) or not friends:
@@ -57,6 +58,12 @@ def _user_to_friends_list(user: User) -> List[Dict[str, Any]]:
                 preset = getattr(f, "preset", None)
                 if preset is not None and str(preset).strip():
                     item["preset"] = str(preset).strip()
+                ftype = getattr(f, "type", None)
+                if ftype and str(ftype).strip().lower() == "user":
+                    item["type"] = "user"
+                    uid = (getattr(f, "user_id", None) or "").strip()
+                    if uid:
+                        item["user_id"] = uid
                 out.append(item)
             except Exception:
                 continue

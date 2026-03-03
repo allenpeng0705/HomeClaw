@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:home_claw_app/l10n/app_localizations.dart';
 import '../core_service.dart';
 import '../utils/friend_localization.dart';
+import 'add_friend_screen.dart';
 import 'chat_screen.dart';
+import 'friend_requests_screen.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
 
@@ -81,6 +83,33 @@ class _FriendListScreenState extends State<FriendListScreen> {
         title: Text(l10n.homeClaw),
         actions: [
           IconButton(
+            icon: const Icon(Icons.person_add),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => AddFriendScreen(coreService: widget.coreService),
+                ),
+              );
+            },
+            tooltip: 'Add friend',
+          ),
+          IconButton(
+            icon: const Icon(Icons.mail_outline),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => FriendRequestsScreen(
+                    coreService: widget.coreService,
+                    onAccept: _loadFriends,
+                  ),
+                ),
+              ).then((_) => _loadFriends());
+            },
+            tooltip: 'Friend requests',
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loading ? null : _loadFriends,
             tooltip: l10n.refreshFriends,
@@ -129,12 +158,16 @@ class _FriendListScreenState extends State<FriendListScreen> {
                         final friendId = (f['name'] as String?)?.trim() ?? 'HomeClaw';
                         final locale = Localizations.localeOf(context);
                         final displayName = localizedFriendDisplayName(friend: f, locale: locale);
+                        final isUserFriend = (f['type'] as String?)?.trim().toLowerCase() == 'user';
+                        final toUserId = (f['user_id'] as String?)?.trim();
                         return _FriendTile(
                           userId: widget.coreService.sessionUserId!,
                           friendId: friendId,
                           displayName: displayName,
                           coreService: widget.coreService,
                           initialMessage: index == 0 ? widget.initialMessage : null,
+                          isUserFriend: isUserFriend,
+                          toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
                         );
                       },
                     ),
@@ -148,6 +181,10 @@ class _FriendTile extends StatelessWidget {
   final String displayName;
   final CoreService coreService;
   final String? initialMessage;
+  /// True when this friend is a real person (type: user); chat uses user-message API and push-to-talk.
+  final bool isUserFriend;
+  /// When [isUserFriend], the other user's id for POST /api/user-message.
+  final String? toUserId;
 
   const _FriendTile({
     required this.userId,
@@ -155,6 +192,8 @@ class _FriendTile extends StatelessWidget {
     required this.displayName,
     required this.coreService,
     this.initialMessage,
+    this.isUserFriend = false,
+    this.toUserId,
   });
 
   @override
@@ -165,9 +204,13 @@ class _FriendTile extends StatelessWidget {
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: theme.colorScheme.primaryContainer,
-          child: Icon(Icons.person, color: theme.colorScheme.onPrimaryContainer),
+          child: Icon(
+            isUserFriend ? Icons.person : Icons.smart_toy,
+            color: theme.colorScheme.onPrimaryContainer,
+          ),
         ),
         title: Text(displayName),
+        subtitle: isUserFriend ? Text('User', style: Theme.of(context).textTheme.bodySmall) : null,
         onTap: () {
           Navigator.push(
             context,
@@ -178,6 +221,8 @@ class _FriendTile extends StatelessWidget {
                 userName: displayName,
                 friendId: friendId,
                 initialMessage: initialMessage,
+                isUserFriend: isUserFriend,
+                toUserId: toUserId,
               ),
             ),
           );

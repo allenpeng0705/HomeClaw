@@ -852,12 +852,14 @@ class Core(CoreInterface):
         user_id: str,
         text: str,
         images: Optional[List[str]] = None,
+        audios: Optional[List[str]] = None,
+        videos: Optional[List[str]] = None,
         channel_key: Optional[str] = None,
         source: str = "push",
         from_friend: str = "HomeClaw",
     ) -> None:
-        """Push to user (WebSocket, push, channel). Delegates to core.outbound.deliver_to_user."""
-        await _deliver_to_user_fn(self, user_id, text, images=images, channel_key=channel_key, source=source, from_friend=from_friend)
+        """Push to user (WebSocket, push, channel). Delegates to core.outbound.deliver_to_user. audios: voice; videos: short video."""
+        await _deliver_to_user_fn(self, user_id, text, images=images, audios=audios, videos=videos, channel_key=channel_key, source=source, from_friend=from_friend)
 
     async def send_response_to_request_channel(
         self,

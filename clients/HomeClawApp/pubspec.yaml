@@ -38,6 +38,9 @@ dependencies:
   firebase_core: ^3.8.1
   firebase_messaging: ^15.1.6
   uuid: ^4.5.1
+  audioplayers: ^6.1.0
+  record: ^5.1.0
+  video_player: ^2.9.2
 
 dev_dependencies:
   flutter_test:
