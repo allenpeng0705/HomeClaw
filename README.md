@@ -4,16 +4,47 @@
 
 # HomeClaw
 
-**HomeClaw** is an **AI assistant** that runs on your own hardware. Each installation is an autonomous agent: it talks to you over the channels you already use (email, Telegram, Discord, WebChat, etc.), keeps **memory** (RAG + agent memory) and context, and extends its abilities through **built-in and external plugins** and **skills**. You can use **cloud models** (OpenAI, **Google Gemini**, DeepSeek, Anthropic, and more via LiteLLM) or **local models** (llama.cpp, GGUF), or **both together** for better capability and cost—**multimodal** (images, audio, video) works with both. A **Flutter companion app** (Mac, Windows, iPhone, Android) makes HomeClaw easy to use from any device. **Multi-agent** is simple: run multiple HomeClaw instances. HomeClaw is **for the people**—decentralized, private when you want it, and fully under your control.
+**HomeClaw** is an **AI assistant** that runs on your own hardware. Each installation is an autonomous agent: it talks to you over the channels you already use, keeps **memory** (RAG + agent memory), and extends its abilities through **skills** and **plugins**. Use **local models** to save cost and keep data at home, **cloud models** for scale, or **both** with a smart router. A **companion app** on every platform and **multi-agent** by running multiple instances let you build your own AI-powered social network—decentralized, private when you want it, and fully under your control.
 
-**Highlights**
+---
 
-- **Companion app** — Flutter-based app for **Mac, Windows, iPhone, and Android**: chat, voice, attachments, and **Manage Core** (edit core.yml and user.yml) from your phone or desktop. One app, all platforms.
-- **Memory** — **RAG** (vector + relational + optional graph) and **agent memory** (AGENT_MEMORY.md, daily memory). Cognee (default) or in-house Chroma backend.
-- **Plugins** — **Built-in** (Python in `plugins/`) and **external** (any language: Node.js, Go, Java, Python, etc.). The **system plugin** (e.g. **homeclaw-browser**) is one external plugin written in **Node.js**; you can write plugins in any language and register them with Core.
-- **Skills** — Full support for **OpenClaw-style skillset**: workflows in `skills/` (SKILL.md); LLM uses tools and optional `run_skill` to accomplish tasks.
-- **Multi-agent** — Run **multiple HomeClaw instances** (e.g. one per user or use case); each instance is one agent with its own memory and config.
-- **Cloud & multimodal** — **Gemini** and other cloud models work well. **Multimodal** (images, audio, video) is supported with both **local models** (e.g. Qwen2-VL with mmproj) and **cloud** (e.g. Gemini, GPT-4o).
+## Major Features
+
+### 1. Save cost — Local, cloud, and mix mode
+
+- **Local models** — Run models on your machine with **llama.cpp** (GGUF) and **Ollama**. No per-token cloud cost; full control over data.
+- **Cloud models** — Use **OpenAI**, **Google Gemini**, DeepSeek, Anthropic, and more via LiteLLM when you need scale or latest capabilities.
+- **Mix mode with smart router** — Route each request to local or cloud automatically: simple/private tasks → local; heavy or search tasks → cloud. **3-layer router** (heuristic → semantic → classifier/perplexity) keeps cost down while keeping quality. Multimodal (images, audio, video) works with both.
+
+### 2. User sandbox — Privacy, safety, and multi-user
+
+- **Privacy and safety** — User sandbox: each user gets isolated context and permissions. Your data stays where you choose (local-only possible).
+- **Multi-user** — Add users in `config/user.yml` (id, name, channel identities, optional login). Support multiple people or roles talking to the same HomeClaw instance.
+
+### 3. Skills and plugins — OpenClaw-compatible, any language
+
+- **Skills** — **Compatible with OpenClaw skills**: workflows in `skills/` (SKILL.md). LLM uses tools and optional `run_skill` to accomplish tasks.
+- **Plugins** — **Built-in** (Python in `plugins/`) and **external in any language** (Node.js, Go, Java, Python, etc.). Register via HTTP; Core routes to them like built-ins. System plugins (e.g. **homeclaw-browser**) extend with browser automation, Canvas, and more.
+
+### 4. Companion app — All platforms, multi-role (Friend of AI)
+
+- **All platforms** — **Mac, Windows, Linux, Android, iOS**. One Flutter app: chat, voice, attachments, and **Manage Core** (edit core.yml and user.yml) from phone or desktop.
+- **Multi-role** — Configure AI as a **Friend** or other roles; one agent, many ways to interact.
+
+### 5. Multi-agent — Run multiple HomeClaw instances
+
+- Run **multiple HomeClaw instances** (e.g. one per user, use case, or “persona”). Each instance is one agent with its own memory and config. Simple multi-agent without a central orchestrator.
+
+### 6. Remote connection — Pinggy, Cloudflare, Ngrok, and all channels
+
+- **Companion app remote access** — **Built-in Pinggy** support, **Cloudflare Tunnel**, **Ngrok**, Tailscale, and more. Use the app from anywhere.
+- **Channels everywhere** — **WhatsApp**, **Google Chat**, **DingTalk**, **Feishu (Lark)**, **Slack**, **Microsoft Teams**, **Telegram**, **Discord**, **Signal**, **WeChat**, **Line**, **Email**, **WebChat**, and more. One Core serves all channels.
+
+### 7. Your own social network
+
+- Use HomeClaw as the brain behind **your own social network**: multi-user, multi-channel, multi-agent. One place for memory, skills, and plugins; your rules, your data.
+
+---
 
 **Other languages / 其他语言 / 他の言語 / 다른 언어:** [简体中文](README_zh.md) | [日本語](README_jp.md) | [한국어](README_kr.md)
 
@@ -23,13 +54,14 @@
 
 ## Table of Contents
 
+- [Major Features](#major-features) (above) — Save cost · User sandbox · Skills & plugins · Companion app · Multi-agent · Remote & channels · Your social network
 1. [What is HomeClaw?](#1-what-is-homeclaw)
-2. [What Can HomeClaw Do?](#2-what-can-homeclaw-do)
-3. [Mix mode: Smart local/cloud routing](#3-mix-mode-smart-localcloud-routing) — 3-layer router and powerful Layer 3
-4. [How to Use HomeClaw](#4-how-to-use-homeclaw) — includes [Remote access (Tailscale, Cloudflare Tunnel)](#remote-access-tailscale-cloudflare-tunnel)
+2. [What Can HomeClaw Do?](#2-what-can-homeclaw-do) — Channels (WhatsApp, Slack, Telegram, etc.), multi-user
+3. [Mix mode: Smart local/cloud routing](#3-mix-mode-smart-localcloud-routing) — 3-layer router
+4. [How to Use HomeClaw](#4-how-to-use-homeclaw) — includes [Remote access (Pinggy, Cloudflare, Ngrok, Tailscale)](#remote-access-tailscale-cloudflare-tunnel)
 5. [Companion app (Flutter)](#5-companion-app-flutter)
 6. [System plugin: homeclaw-browser](#6-system-plugin-homeclaw-browser)
-7. [Skills and Plugins: Make HomeClaw Work for You](#7-skills-and-plugins-make-homeclaw-work-for-you)
+7. [Skills and Plugins](#7-skills-and-plugins-make-homeclaw-work-for-you)
 8. [Plugins: Extend HomeClaw](#8-plugins-extend-homeclaw)
 9. [Skills: Extend HomeClaw with Workflows](#9-skills-extend-homeclaw-with-workflows)
 10. [Acknowledgments](#10-acknowledgments)
@@ -51,48 +83,7 @@ HomeClaw is built around a few principles:
 
 ### Architecture
 
-**Channels** and the **Companion app** connect to **Core**. Inside Core: **memory** (RAG + Markdown files), **tools** (base for skills), **skills & plugins** (registered in RAG, filtered per request), and the **LLM** (cloud or local). [Full design →](docs_design/ToolsSkillsPlugins.md) · [Doc site →](https://allenpeng0705.github.io/HomeClaw/)
-
-**Architecture (layer-based)**
-
-```mermaid
-flowchart TB
-  subgraph Clients["Layer 1 — Clients"]
-    direction LR
-    CH["Channels (WebChat, Telegram, Discord, Email…)"]
-    APP["Companion app"]
-  end
-
-  subgraph Core["Layer 2 — Core"]
-    subgraph Memory["Memory system"]
-      RAG["RAG-based (vector + relational + graph)"]
-      MD["Markdown-based (AGENT_MEMORY.md, daily memory)"]
-    end
-    subgraph Base["Foundation"]
-      T["Tools (base of skillset)"]
-    end
-    subgraph Ext["Extensions"]
-      direction LR
-      S["Skills (SKILL.md)"]
-      P["Plugins (any language); system_plugins: Node.js, browser"]
-    end
-    LLM["Local / Cloud LLM"]
-  end
-
-  Clients -->|"connect"| Core
-  Memory --> LLM
-  Base --> S
-  Ext --> LLM
-
-  style Clients fill:#263238,stroke:#eceff1,stroke-width:2px,color:#fff
-  style Core fill:#37474f,stroke:#eceff1,stroke-width:2px,color:#fff
-  style Memory fill:#455a64,stroke:#eceff1,stroke-width:1px,color:#fff
-  style Base fill:#546e7a,stroke:#eceff1,stroke-width:1px,color:#fff
-  style Ext fill:#607d8b,stroke:#eceff1,stroke-width:1px,color:#fff
-  style LLM fill:#78909c,stroke:#eceff1,stroke-width:2px,color:#fff
-```
-
-- **Layer 1:** Channels + Companion app → Core. **Layer 2:** Memory (RAG + Markdown), Tools, Skills & Plugins (in RAG, filtered), Local/Cloud LLM. [Tools vs skills vs plugins →](docs_design/ToolsSkillsPlugins.md) · For **system overview and data flow**, see the [docs introduction](https://allenpeng0705.github.io/HomeClaw/).
+**Channels** and the **Companion app** connect to **Core**. Inside Core: **memory** (RAG + Markdown files), **tools** (base for skills), **skills & plugins** (registered in RAG, filtered per request), and the **LLM** (cloud or local). **Layer 1:** Channels + Companion app → Core. **Layer 2:** Memory (RAG + Markdown), Tools, Skills & Plugins (in RAG, filtered), Local/Cloud LLM. [Full design →](docs_design/ToolsSkillsPlugins.md) · [Doc site →](https://allenpeng0705.github.io/HomeClaw/)
 
 
 
@@ -102,7 +93,7 @@ flowchart TB
 
 ### Channels and multi-user
 
-Talk to HomeClaw via **WebChat**, **CLI**, **Telegram**, **Discord**, **Email**, and more—all use the same Core. Add users in `config/user.yml` (id, name, email, im, phone; optional **username**/ **password** for Companion login; **friends** list with optional **identity** file per friend). [Channels →](https://allenpeng0705.github.io/HomeClaw/channels/) · [Multi-user →](docs_design/MultiUserSupport.md)
+Talk to HomeClaw via **WebChat**, **CLI**, **Telegram**, **Discord**, **Signal**, **WhatsApp**, **Google Chat**, **DingTalk**, **Feishu (Lark)**, **Slack**, **Microsoft Teams**, **WeChat**, **Line**, **Email**, and more—all use the same Core. Add users in `config/user.yml` (id, name, email, im, phone; optional **username**/ **password** for Companion login; **friends** list with optional **identity** file per friend). [Channels →](https://allenpeng0705.github.io/HomeClaw/channels/) · [Multi-user →](docs_design/MultiUserSupport.md)
 
 ### Cloud and local models
 
@@ -189,9 +180,11 @@ HomeClaw runs on **macOS**, **Windows**, and **Linux**. You need:
    - Send a message in WebChat or the CLI. For tools/skills/plugins, see **docs_design/ToolsAndSkillsTesting.md** and **docs_design/RunAndTestPlugins.md**.
    - Check config and LLM connectivity: `python -m main doctor`.
 
-### Remote access (Tailscale, Cloudflare Tunnel)
+### Remote access (Pinggy, Cloudflare Tunnel, Ngrok, Tailscale)
 
-To use the **Companion app** or WebChat from another network (e.g. phone on cellular, laptop away from home), expose Core so the client can reach it. Two common options:
+To use the **Companion app** or WebChat from another network (e.g. phone on cellular, laptop away from home), expose Core so the client can reach it. Options include **built-in Pinggy** support, **Cloudflare Tunnel**, **Ngrok**, and **Tailscale**.
+
+**Pinggy (built-in)** — HomeClaw can use [Pinggy](https://pinggy.io/) for instant public tunnels; see the docs or Companion app settings for Pinggy options.
 
 **Tailscale (recommended for home + mobile)**
 
@@ -207,7 +200,9 @@ To use the **Companion app** or WebChat from another network (e.g. phone on cell
 3. Enable Core auth: in `config/core.yml` set `auth_enabled: true` and `auth_api_key: "<long-random-key>"`.
 4. In the Companion app **Settings**, set **Core URL** to the tunnel URL and the **API key** to match.
 
-The app only needs **Core URL** and optional **API key**; no Tailscale or Cloudflare SDK in the app. For more (SSH tunnel, auth details), see the docs: **[Remote access](https://allenpeng0705.github.io/HomeClaw/remote-access/)** and **docs_design/RemoteAccess.md**.
+**Ngrok** — Run `ngrok http 9000` (or your Core port) and set **Core URL** in the app to the HTTPS URL Ngrok provides. Enable Core auth when using a public URL.
+
+The app only needs **Core URL** and optional **API key**; no tunnel SDK in the app. For more (SSH tunnel, auth details, Pinggy), see the docs: **[Remote access](https://allenpeng0705.github.io/HomeClaw/remote-access/)** and **docs_design/RemoteAccess.md**.
 
 ### More: models, database, CLI, platforms
 
@@ -220,9 +215,9 @@ The app only needs **Core URL** and optional **API key**; no Tailscale or Cloudf
 
 ## 5. Companion app (Flutter)
 
-**Companion** is a Flutter app for **Mac, Windows, iPhone, and Android**: chat, voice, attachments, and **Manage Core** (edit core.yml and user.yml from the app). [Companion app doc](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [Build from source](clients/HomeClawApp/README.md)
+**Companion** is a Flutter app for **Mac, Windows, Linux, Android, and iOS**: chat, voice, attachments, and **Manage Core** (edit core.yml and user.yml from the app). Supports **multi-role** (e.g. AI as **Friend**). [Companion app doc](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [Build from source](clients/HomeClawApp/README.md)
 
-**Quick use:** (1) Get the app from `clients/HomeClawApp/` or a build. (2) **Settings** → set **Core URL** (`http://127.0.0.1:9000` same machine, or [Tailscale](#remote-access-tailscale-cloudflare-tunnel) / [Cloudflare Tunnel](#remote-access-tailscale-cloudflare-tunnel) for remote). (3) Add your user in **config/user.yml** (or via **Manage Core** → Users). (4) Chat; use **Manage Core** to edit config. All channels and the app talk to the same Core and memory.
+**Quick use:** (1) Get the app from `clients/HomeClawApp/` or a build. (2) **Settings** → set **Core URL** (`http://127.0.0.1:9000` same machine, or [Pinggy / Cloudflare / Ngrok / Tailscale](#remote-access-tailscale-cloudflare-tunnel) for remote). (3) Add your user in **config/user.yml** (or via **Manage Core** → Users). (4) Chat; use **Manage Core** to edit config. All channels and the app talk to the same Core and memory.
 
 ---
 
