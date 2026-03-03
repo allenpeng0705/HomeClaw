@@ -1,6 +1,11 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../chat_history_store.dart';
 import '../core_service.dart';
+import 'change_password_screen.dart';
 import 'config_core_screen.dart';
 import 'permissions_screen.dart';
 import 'portal_login_screen.dart';
@@ -23,6 +28,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _nodeIdController;
   late TextEditingController _execCommandController;
   bool _nodeConnecting = false;
+  Uint8List? _myAvatarBytes;
+  bool _avatarLoading = true;
+  bool _avatarUploading = false;
 
   @override
   void initState() {
@@ -33,6 +41,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _nodesUrlController = TextEditingController(text: widget.coreService.nodesUrl ?? 'http://127.0.0.1:3020');
     _nodeIdController = TextEditingController(text: 'companion');
     _execCommandController = TextEditingController();
+    if (widget.coreService.isLoggedIn) _loadMyAvatar();
+  }
+
+  Future<void> _loadMyAvatar() async {
+    if (!widget.coreService.isLoggedIn) return;
+    setState(() => _avatarLoading = true);
+    try {
+      final bytes = await widget.coreService.fetchAvatarWithAuth(widget.coreService.meAvatarUrl);
+      if (mounted) setState(() { _myAvatarBytes = bytes; _avatarLoading = false; });
+    } catch (_) {
+      if (mounted) setState(() { _myAvatarBytes = null; _avatarLoading = false; });
+    }
+  }
+
+  Future<void> _uploadProfilePicture() async {
+    if (!widget.coreService.isLoggedIn) return;
+    try {
+      final picker = ImagePicker();
+      final x = await picker.pickImage(source: ImageSource.gallery, maxWidth: 512, imageQuality: 85);
+      if (x == null || !mounted) return;
+      final path = x.path;
+      if (path.isEmpty) return;
+      setState(() => _avatarUploading = true);
+      await widget.coreService.uploadMyAvatar(File(path));
+      await _loadMyAvatar();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile picture updated')));
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload failed: $e')));
+    } finally {
+      if (mounted) setState(() => _avatarUploading = false);
+    }
   }
 
   @override
@@ -125,6 +166,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.all(16.0),
         child: ListView(
           children: [
+            if (widget.coreService.isLoggedIn) ...[
+              const Text('Profile picture', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 32,
+                    backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    backgroundImage: _avatarLoading
+                        ? null
+                        : (_myAvatarBytes != null && _myAvatarBytes!.isNotEmpty
+                            ? MemoryImage(_myAvatarBytes!)
+                            : null),
+                    child: _avatarLoading
+                        ? const Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator(strokeWidth: 2))
+                        : (_myAvatarBytes == null || _myAvatarBytes!.isEmpty ? const Icon(Icons.person, size: 32) : null),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _avatarUploading ? null : _uploadProfilePicture,
+                      icon: _avatarUploading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.photo_camera),
+                      label: Text(_avatarUploading ? 'Uploading…' : 'Upload profile picture'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => ChangePasswordScreen(coreService: widget.coreService),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.lock),
+                label: const Text('Change password'),
+              ),
+              const SizedBox(height: 24),
+            ],
             const Text(
               'Core URL',
               style: TextStyle(fontWeight: FontWeight.bold),

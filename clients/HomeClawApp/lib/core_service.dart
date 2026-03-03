@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
@@ -71,6 +72,17 @@ class CoreService {
   final StreamController<Map<String, dynamic>> _pushMessageController = StreamController<Map<String, dynamic>>.broadcast();
   /// Stream of proactive push messages from Core (cron, reminders, record_date). UI can listen and show in chat or as notification.
   Stream<Map<String, dynamic>> get pushMessageStream => _pushMessageController.stream;
+
+  final StreamController<Map<String, dynamic>> _pushNotificationTapController = StreamController<Map<String, dynamic>>.broadcast();
+  /// FCM/APNs: when user taps a notification (app was background or terminated). Payload has from_friend, user_id, source, text. Listen and navigate to that chat.
+  Stream<Map<String, dynamic>> get pushNotificationTapStream => _pushNotificationTapController.stream;
+
+  /// Call when user opens app by tapping an FCM/APNs notification (e.g. from onMessageOpenedApp). Payload typically has from_friend, user_id, source, text.
+  void addPushNotificationTap(Map<String, dynamic> data) {
+    try {
+      if (!_pushNotificationTapController.isClosed) _pushNotificationTapController.add(Map<String, dynamic>.from(data));
+    } catch (_) {}
+  }
 
   /// True if [fullCommand] is allowed by the exec allowlist.
   /// Each entry is either an exact executable name (e.g. "ls") or a regex pattern (e.g. "^/usr/bin/.*").
@@ -251,6 +263,137 @@ class CoreService {
       else if (e is Map) out.add(Map<String, dynamic>.from(e));
     }
     return out;
+  }
+
+  /// URL for current user's avatar (GET with Bearer returns image). Use [fetchAvatarWithAuth] to load with auth.
+  String get meAvatarUrl => '$_baseUrl/api/me/avatar';
+  /// URL for a user's avatar by id (for friend list). Use [fetchAvatarWithAuth] to load with auth.
+  String userAvatarUrl(String userId) => '$_baseUrl/api/users/${Uri.encodeComponent(userId)}/avatar';
+  /// URL for an AI friend's avatar. Use [fetchAvatarWithAuth] to load with auth.
+  String friendAvatarUrl(String friendId) => '$_baseUrl/api/me/friends/${Uri.encodeComponent(friendId)}/avatar';
+
+  /// GET image with Bearer token. Returns bytes or null on 404/error. Use for avatars.
+  Future<Uint8List?> fetchAvatarWithAuth(String url) async {
+    try {
+      final uri = Uri.parse(url);
+      final response = await http.get(uri, headers: _authHeaders(forCompanionApi: true)).timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200) return null;
+      return response.bodyBytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// PUT /api/me/avatar — upload current user's profile picture (multipart). Max 1MB PNG/JPEG.
+  /// PUT /api/me/password — change password (old_password, new_password). Throws on wrong old or server error.
+  Future<void> changePassword({required String oldPassword, required String newPassword}) async {
+    final url = Uri.parse('$_baseUrl/api/me/password');
+    final body = jsonEncode(<String, String>{
+      'old_password': oldPassword,
+      'new_password': newPassword,
+    });
+    final response = await http.put(
+      url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: body,
+    ).timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      String msg = 'Password change failed';
+      try {
+        final map = jsonDecode(response.body) as Map<String, dynamic>?;
+        final d = map?['detail'];
+        if (d != null && d.toString().trim().isNotEmpty) msg = d.toString();
+      } catch (_) {}
+      throw Exception(msg);
+    }
+  }
+
+  Future<void> uploadMyAvatar(File file) async {
+    if (!await file.exists()) throw Exception('File not found');
+    final url = Uri.parse('$_baseUrl/api/me/avatar');
+    final request = http.MultipartRequest('PUT', url);
+    request.headers.addAll(_authHeaders(forCompanionApi: true));
+    request.files.add(await http.MultipartFile.fromPath('file', file.path, filename: path.basename(file.path)));
+    final streamed = await request.send().timeout(const Duration(seconds: 15));
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode != 200) throw Exception(response.body.isNotEmpty ? response.body : 'Upload failed ${response.statusCode}');
+  }
+
+  /// POST /api/me/friends — add a custom AI friend (name, relation?, who?, identity text). Persisted to user.yml.
+  /// If [avatarFile] is provided, uploads it after adding the friend.
+  Future<void> addAIFriend({required String name, String? relation, Map<String, dynamic>? who, String? identityText, File? avatarFile}) async {
+    final url = Uri.parse('$_baseUrl/api/me/friends');
+    final body = <String, dynamic>{'name': name.trim()};
+    if (relation != null && relation.trim().isNotEmpty) body['relation'] = relation.trim();
+    if (who != null && who.isNotEmpty) body['who'] = who;
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: jsonEncode(body),
+    ).timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) throw Exception(response.body.isNotEmpty ? response.body : 'Add AI friend failed');
+    String friendId = name.trim();
+    try {
+      final map = jsonDecode(response.body) as Map<String, dynamic>?;
+      final id = map?['friend_id'];
+      if (id != null && id.toString().trim().isNotEmpty) friendId = id.toString().trim();
+    } catch (_) {}
+    if (identityText != null && identityText.trim().isNotEmpty) {
+      await setFriendIdentity(friendId, identityText.trim());
+    }
+    if (avatarFile != null && await avatarFile.exists()) {
+      await uploadFriendAvatar(friendId, avatarFile);
+    }
+  }
+
+  /// PATCH /api/me/friends/{friend_id} — update AI friend. Cannot update HomeClaw.
+  Future<void> updateAIFriend(String friendId, {String? name, String? relation, Map<String, dynamic>? who, String? identityText}) async {
+    final fid = friendId.trim();
+    if (fid.isEmpty || fid.toLowerCase() == 'homeclaw') throw Exception('Cannot update HomeClaw');
+    final url = Uri.parse('$_baseUrl/api/me/friends/${Uri.encodeComponent(fid)}');
+    final body = <String, dynamic>{};
+    if (name != null && name.trim().isNotEmpty) body['name'] = name.trim();
+    if (relation != null) body['relation'] = relation;
+    if (who != null) body['who'] = who;
+    final response = await http.patch(
+      url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: jsonEncode(body),
+    ).timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200 && response.statusCode != 404) throw Exception(response.body.isNotEmpty ? response.body : 'Update failed');
+    if (identityText != null && identityText.trim().isNotEmpty) await setFriendIdentity(fid, identityText.trim());
+  }
+
+  /// DELETE /api/me/friends/{friend_id} — remove AI friend. Cannot remove HomeClaw.
+  Future<void> deleteAIFriend(String friendId) async {
+    final fid = friendId.trim();
+    if (fid.isEmpty) throw Exception('friend_id required');
+    final url = Uri.parse('$_baseUrl/api/me/friends/${Uri.encodeComponent(fid)}');
+    final response = await http.delete(url, headers: _authHeaders(forCompanionApi: true)).timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) throw Exception(response.body.isNotEmpty ? response.body : 'Delete failed');
+  }
+
+  /// PUT /api/me/friends/{friend_id}/identity — set identity file content for an AI friend.
+  Future<void> setFriendIdentity(String friendId, String content) async {
+    final url = Uri.parse('$_baseUrl/api/me/friends/${Uri.encodeComponent(friendId.trim())}/identity');
+    final response = await http.put(
+      url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: jsonEncode({'content': content}),
+    ).timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) throw Exception(response.body.isNotEmpty ? response.body : 'Set identity failed');
+  }
+
+  /// PUT /api/me/friends/{friend_id}/avatar — upload avatar for an AI friend. Max 1MB.
+  Future<void> uploadFriendAvatar(String friendId, File file) async {
+    if (!await file.exists()) throw Exception('File not found');
+    final url = Uri.parse('$_baseUrl/api/me/friends/${Uri.encodeComponent(friendId.trim())}/avatar');
+    final request = http.MultipartRequest('PUT', url);
+    request.headers.addAll(_authHeaders(forCompanionApi: true));
+    request.files.add(await http.MultipartFile.fromPath('file', file.path, filename: path.basename(file.path)));
+    final streamed = await request.send().timeout(const Duration(seconds: 15));
+    final response = await http.Response.fromStream(streamed);
+    if (response.statusCode != 200) throw Exception(response.body.isNotEmpty ? response.body : 'Upload failed');
   }
 
   /// POST /api/user-message — send a message to another user (user-to-user). Uses API key auth.

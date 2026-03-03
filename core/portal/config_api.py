@@ -5,7 +5,7 @@ Used by GET/PATCH /api/config/<name>. Never raises; returns None or False on err
 import copy
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.portal import config_backup
 from core.portal.config import get_config_dir
@@ -139,3 +139,191 @@ def update_config(name: str, body: Dict[str, Any]) -> bool:
             return yaml_config.update_yml_preserving(path, {"users": body["users"]}, whitelist=frozenset({"users"}))
         return False
     return False
+
+
+# Default password when creating a user without one (Portal user CRUD).
+DEFAULT_NEW_USER_PASSWORD = "changeme"
+
+
+def _friends_dicts_from_preset_names(preset_names: List[str]) -> List[Dict[str, Any]]:
+    """Build friends list of dicts for user.yml: HomeClaw first, then one entry per preset. Never raises."""
+    result: List[Dict[str, Any]] = [{"name": "HomeClaw", "type": "ai"}]
+    if not isinstance(preset_names, list):
+        return result
+    try:
+        path = str(get_config_path("friend_presets"))
+        data = yaml_config.load_yml_preserving(path)
+        presets = (data or {}).get("presets") if isinstance(data, dict) else None
+        if not isinstance(presets, dict):
+            return result
+        for key in preset_names:
+            k = (str(key) if key is not None else "").strip().lower()
+            if not k or k == "homeclaw":
+                continue
+            if k in presets:
+                display = k[0].upper() + k[1:] if len(k) > 1 else k.upper()
+                result.append({"name": display, "preset": k, "type": "ai"})
+    except Exception:
+        pass
+    return result
+
+
+def add_user(body: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Add a user to user.yml. Returns (True, None) on success, (False, error_detail) on failure. Never raises."""
+    if not isinstance(body, dict) or not (body.get("name") or "").strip():
+        return False, "name required"
+    name = str(body["name"]).strip()
+    uid = (body.get("id") or name).strip() or name
+    email = list(body.get("email") or []) if isinstance(body.get("email"), list) else []
+    im = list(body.get("im") or []) if isinstance(body.get("im"), list) else []
+    phone = list(body.get("phone") or []) if isinstance(body.get("phone"), list) else []
+    permissions = list(body.get("permissions") or []) if isinstance(body.get("permissions"), list) else []
+    user_type = str(body.get("type") or "normal").strip().lower() or "normal"
+    if user_type not in ("normal", "companion"):
+        user_type = "normal"
+    username = (body.get("username") or "").strip() or None
+    password = body.get("password")
+    if password is not None and not isinstance(password, str):
+        password = str(password) if password else None
+    if password is not None and not (password or "").strip():
+        password = None
+    if password is None:
+        password = DEFAULT_NEW_USER_PASSWORD
+    if "friend_preset_names" in body and isinstance(body["friend_preset_names"], list):
+        friends = _friends_dicts_from_preset_names(body["friend_preset_names"])
+    else:
+        friends = _friends_dicts_from_preset_names([])
+    user_entry: Dict[str, Any] = {
+        "id": uid,
+        "name": name,
+        "username": username,
+        "password": password,
+        "email": email,
+        "im": im,
+        "phone": phone,
+        "permissions": permissions,
+        "type": user_type,
+        "friends": friends,
+    }
+    if not username:
+        user_entry.pop("username", None)
+    data = load_config("user")
+    if data is None:
+        data = {}
+    users = list(data.get("users") or [])
+    if not isinstance(users, list):
+        users = []
+    for u in users:
+        if isinstance(u, dict) and ((u.get("name") or "").strip() == name or (u.get("id") or "").strip() == uid):
+            return False, "User with same name or id already exists"
+    users.append(user_entry)
+    if not update_config("user", {"users": users}):
+        return False, "Failed to save config"
+    return True, None
+
+
+def update_user(user_name: str, body: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Update a user in user.yml by name. Returns (True, None) on success, (False, error_detail) on failure."""
+    if not isinstance(body, dict):
+        return False, "JSON object required"
+    data = load_config("user")
+    if data is None:
+        return False, "Config not found"
+    users = list(data.get("users") or [])
+    if not isinstance(users, list):
+        return False, "Invalid users list"
+    found_idx = None
+    for i, u in enumerate(users):
+        if isinstance(u, dict) and (u.get("name") or "").strip() == user_name:
+            found_idx = i
+            break
+    if found_idx is None:
+        return False, f"User '{user_name}' not found"
+    found = dict(users[found_idx])
+    name = (body.get("name") or found.get("name") or "").strip() or found.get("name")
+    uid = (body.get("id") or name).strip() or name
+    email = body["email"] if "email" in body else list(found.get("email") or [])
+    if not isinstance(email, list):
+        email = []
+    im = body["im"] if "im" in body else list(found.get("im") or [])
+    if not isinstance(im, list):
+        im = []
+    phone = body["phone"] if "phone" in body else list(found.get("phone") or [])
+    if not isinstance(phone, list):
+        phone = []
+    permissions = body["permissions"] if "permissions" in body else list(found.get("permissions") or [])
+    if not isinstance(permissions, list):
+        permissions = []
+    user_type = str(body.get("type") or found.get("type") or "normal").strip().lower() or "normal"
+    if user_type not in ("normal", "companion"):
+        user_type = "normal"
+    username = body.get("username") if "username" in body else found.get("username")
+    if username is not None and not str(username).strip():
+        username = None
+    else:
+        username = str(username).strip() if username else None
+    password = found.get("password")
+    if "password" in body and body["password"] and str(body["password"]).strip() and str(body["password"]).strip() != "***":
+        password = str(body["password"]).strip()
+    if body.get("reset_password") and str(body["reset_password"]).strip() and len(str(body["reset_password"]).strip()) <= 512:
+        password = str(body["reset_password"]).strip()
+    if "friend_preset_names" in body and isinstance(body["friend_preset_names"], list):
+        friends = _friends_dicts_from_preset_names(body["friend_preset_names"])
+    elif "friends" in body:
+        friends = list(body["friends"]) if isinstance(body["friends"], list) else list(found.get("friends") or [])
+    else:
+        friends = list(found.get("friends") or [])
+    updated = {
+        "id": uid,
+        "name": name,
+        "email": email,
+        "im": im,
+        "phone": phone,
+        "permissions": permissions,
+        "type": user_type,
+        "friends": friends,
+    }
+    if username is not None:
+        updated["username"] = username
+    if password is not None:
+        updated["password"] = password
+    users[found_idx] = updated
+    if not update_config("user", {"users": users}):
+        return False, "Failed to save config"
+    return True, None
+
+
+def delete_user(user_name: str) -> Tuple[bool, Optional[str]]:
+    """Remove a user from user.yml by name. Returns (True, None) on success, (False, error_detail) on failure."""
+    data = load_config("user")
+    if data is None:
+        return False, "Config not found"
+    users = list(data.get("users") or [])
+    if not isinstance(users, list):
+        return False, "Invalid users list"
+    new_users = [u for u in users if isinstance(u, dict) and (u.get("name") or "").strip() != user_name]
+    if len(new_users) == len(users):
+        return False, f"User '{user_name}' not found"
+    if not update_config("user", {"users": new_users}):
+        return False, "Failed to save config"
+    return True, None
+
+
+def update_user_password(user_name: str, new_password: str) -> Tuple[bool, Optional[str]]:
+    """Set a user's password. Returns (True, None) on success, (False, error_detail) on failure."""
+    if not new_password or not isinstance(new_password, str) or len(new_password.strip()) > 512:
+        return False, "password required (max 512 chars)"
+    new_password = new_password.strip()
+    data = load_config("user")
+    if data is None:
+        return False, "Config not found"
+    users = list(data.get("users") or [])
+    if not isinstance(users, list):
+        return False, "Invalid users list"
+    for i, u in enumerate(users):
+        if isinstance(u, dict) and (u.get("name") or "").strip() == user_name:
+            users[i] = {**u, "password": new_password}
+            if not update_config("user", {"users": users}):
+                return False, "Failed to save config"
+            return True, None
+    return False, f"User '{user_name}' not found"

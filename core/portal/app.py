@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
@@ -236,6 +237,28 @@ def _get_channels_list() -> list:
         return sorted(out)
     except Exception:
         return []
+
+
+@app.get("/api/portal/friend-presets")
+def friend_presets_list():
+    """Return { presets: [ { id, name }, ... ] } for multi-select (HomeClaw excluded; always added server-side). Never raises."""
+    try:
+        from base.friend_presets import load_friend_presets
+        config_path = str(portal_config.get_config_dir() / "friend_presets.yml")
+        presets = load_friend_presets(config_path) or {}
+        out = []
+        for pid, _ in (presets.items() if isinstance(presets, dict) else []):
+            if not pid or not isinstance(pid, str):
+                continue
+            pid_str = str(pid).strip()
+            if not pid_str or pid_str.lower() == "homeclaw":
+                continue
+            name = pid_str[0].upper() + pid_str[1:] if len(pid_str) > 1 else pid_str.upper()
+            out.append({"id": pid_str, "name": name})
+        return JSONResponse(content={"presets": out})
+    except Exception as e:
+        _log.debug("friend-presets list failed: %s", e)
+        return JSONResponse(content={"presets": []})
 
 
 @app.get("/api/portal/channels")
@@ -988,21 +1011,246 @@ def _render_generic_form(config_name: str, data: Optional[Dict[str, Any]]) -> st
     return "".join(out)
 
 
+def _get_portal_users_list():
+    """Return list of user dicts (id, name, username, type, ...). Use Util() when available else config. Never raises."""
+    try:
+        from base.util import Util
+        users = Util().get_users() or []
+        return [
+            {
+                "id": getattr(u, "id", None) or getattr(u, "name", ""),
+                "name": getattr(u, "name", ""),
+                "type": str(getattr(u, "type", None) or "normal").strip().lower() or "normal",
+                "username": getattr(u, "username", None),
+                "email": list(getattr(u, "email", None) or []),
+                "im": list(getattr(u, "im", None) or []),
+                "phone": list(getattr(u, "phone", None) or []),
+            }
+            for u in users if getattr(u, "name", None)
+        ]
+    except Exception:
+        data = config_api.load_config_for_api("user")
+        users = (data.get("users") or []) if isinstance(data, dict) else []
+        return [u for u in users if isinstance(u, dict) and (u.get("name") or u.get("id"))]
+
+
+def _get_portal_friend_presets():
+    """Return list of {id, name} for presets (HomeClaw excluded). Never raises."""
+    try:
+        from base.friend_presets import load_friend_presets
+        config_path = str(portal_config.get_config_dir() / "friend_presets.yml")
+        presets = load_friend_presets(config_path) or {}
+        out = []
+        for pid in (presets.keys() if isinstance(presets, dict) else []):
+            if not pid or str(pid).strip().lower() == "homeclaw":
+                continue
+            pid_str = str(pid).strip()
+            name = pid_str[0].upper() + pid_str[1:] if len(pid_str) > 1 else pid_str.upper()
+            out.append({"id": pid_str, "name": name})
+        return out
+    except Exception:
+        return []
+
+
+def _render_user_list_and_actions(users: list) -> str:
+    """HTML: Create user button + list of users with Edit link. HomeClaw is always added server-side."""
+    esc = html_module.escape
+    out = ['<p><a href="/settings/user/create" class="btn" style="display:inline-block;width:auto;padding:0.75rem 1.25rem;text-decoration:none;">Create user</a></p>']
+    if not users:
+        out.append("<p class=\"subtitle\">No users yet. Create one above.</p>")
+        return "".join(out)
+    out.append("<ul style=\"list-style:none;padding:0;margin:0.75rem 0;\">")
+    for u in users:
+        if not isinstance(u, dict):
+            continue
+        name = (u.get("name") or u.get("id") or "?").strip() or "?"
+        uname = (u.get("username") or "").strip()
+        typ = (u.get("type") or "normal").strip().lower()
+        edit_url = "/settings/user/" + quote(str(name), safe="") + "/edit"
+        delete_url = "/settings/user/" + quote(str(name), safe="") + "/delete"
+        out.append(
+            f'<li style="padding:0.5rem 0;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">'
+            f'<span>{esc(name)}</span>'
+            f'<span style="color:#64748b;font-size:0.875rem;">{esc(uname or "—")} · {esc(typ)}</span>'
+            f'<a href="{edit_url}" class="btn btn-sm" style="margin-left:auto;">Edit</a>'
+            f'<form method="post" action="{delete_url}" style="display:inline;" onsubmit="return confirm(\'Delete this user? This cannot be undone.\');">'
+            f'<button type="submit" class="btn btn-sm" style="background:#dc2626;color:#fff;border:none;">Delete</button></form>'
+            f'</li>'
+        )
+    out.append("</ul>")
+    return "".join(out)
+
+
+def _render_user_create_form(presets: list, saved: bool = False, error: bool = False) -> str:
+    """Form: name, username, optional password, type, email/im/phone (optional), multi-select AI friend presets. HomeClaw not in list; always added."""
+    esc = html_module.escape
+    msg = ""
+    if saved:
+        msg = '<p class="settings-msg ok">User created.</p>'
+    if error:
+        msg = '<p class="settings-msg err">Create failed. Check name and try again.</p>'
+    preset_checks = "".join(
+        f'<label style="display:block;margin:0.25rem 0;"><input type="checkbox" name="friend_preset_names" value="{esc(p["id"])}"> {esc(p["name"])}</label>'
+        for p in (presets or []) if isinstance(p, dict) and p.get("id")
+    )
+    return f"""
+  <h1 class="title">Create user</h1>
+  <p class="subtitle">HomeClaw is always added as the first AI friend. Optionally add more from presets below.</p>
+  {msg}
+  <form method="post" action="/settings/user/create" class="settings-form">
+    <div class="form-group">
+      <label for="name">Name *</label>
+      <input type="text" id="name" name="name" required placeholder="Display name">
+    </div>
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" placeholder="Login username (defaults to name)">
+    </div>
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" placeholder="Optional; default 'changeme'">
+    </div>
+    <div class="form-group">
+      <label for="type">Type</label>
+      <select id="type" name="type">
+        <option value="normal">normal</option>
+        <option value="companion">companion</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Email (one per line, optional)</label>
+      <textarea name="email" rows="2" placeholder="email@example.com"></textarea>
+    </div>
+    <div class="form-group">
+      <label>IM (one per line, optional)</label>
+      <textarea name="im" rows="2" placeholder="e.g. telegram id"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Phone (one per line, optional)</label>
+      <textarea name="phone" rows="2" placeholder="+1234567890"></textarea>
+    </div>
+    <div class="form-group">
+      <label>AI friends (presets)</label>
+      <p class="form-hint">Select presets to add. HomeClaw is always included.</p>
+      {preset_checks if preset_checks else "<p>No presets in friend_presets.yml.</p>"}
+    </div>
+    <button type="submit" class="btn btn-block">Create user</button>
+    <p style="margin-top:1rem;"><a href="/settings/user">← Back to Users</a></p>
+  </form>
+"""
+
+
+def _render_user_edit_form(user_d: Dict[str, Any], presets: list, saved: bool = False, error: bool = False, reset_ok: bool = False, reset_err: Optional[str] = None) -> str:
+    """Form: same fields as create (pre-filled) + optional preset multi-select to replace AI friends, and Reset password."""
+    esc = html_module.escape
+    if not isinstance(user_d, dict):
+        user_d = {}
+    name = (user_d.get("name") or user_d.get("id") or "").strip() or "?"
+    username = (user_d.get("username") or "").strip()
+    typ = (user_d.get("type") or "normal").strip().lower()
+    email = user_d.get("email") or []
+    im = user_d.get("im") or []
+    phone = user_d.get("phone") or []
+    if isinstance(email, list):
+        email_txt = "\n".join(str(x) for x in email if x)
+    else:
+        email_txt = str(email or "")
+    if isinstance(im, list):
+        im_txt = "\n".join(str(x) for x in im if x)
+    else:
+        im_txt = str(im or "")
+    if isinstance(phone, list):
+        phone_txt = "\n".join(str(x) for x in phone if x)
+    else:
+        phone_txt = str(phone or "")
+    msg = ""
+    if saved:
+        msg = '<p class="settings-msg ok">User updated.</p>'
+    if error:
+        msg = '<p class="settings-msg err">Update failed.</p>'
+    if reset_ok:
+        msg += '<p class="settings-msg ok">Password reset.</p>'
+    if reset_err:
+        msg += f'<p class="settings-msg err">{esc(reset_err)}</p>'
+    selected_preset_ids = set()
+    for f in (user_d.get("friends") or []):
+        if isinstance(f, dict) and f.get("preset"):
+            selected_preset_ids.add(str(f.get("preset", "")).strip().lower())
+    preset_checks = "".join(
+        f'<label style="display:block;margin:0.25rem 0;"><input type="checkbox" name="friend_preset_names" value="{esc(p["id"])}"{" checked" if (p.get("id") or "").strip().lower() in selected_preset_ids else ""}> {esc(p["name"])}</label>'
+        for p in (presets or []) if isinstance(p, dict) and p.get("id")
+    )
+    edit_action = esc("/settings/user/" + quote(name, safe="") + "/edit")
+    reset_action = esc("/settings/user/" + quote(name, safe="") + "/reset-password")
+    return f"""
+  <h1 class="title">Edit user</h1>
+  <p class="subtitle">{esc(name)}</p>
+  {msg}
+  <form method="post" action="{edit_action}" class="settings-form">
+    <div class="form-group">
+      <label for="name">Name *</label>
+      <input type="text" id="name" name="name" required value="{esc(name)}">
+    </div>
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" value="{esc(username)}">
+    </div>
+    <div class="form-group">
+      <label for="type">Type</label>
+      <select id="type" name="type">
+        <option value="normal"{" selected" if typ == "normal" else ""}>normal</option>
+        <option value="companion"{" selected" if typ == "companion" else ""}>companion</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Email (one per line)</label>
+      <textarea name="email" rows="2">{esc(email_txt)}</textarea>
+    </div>
+    <div class="form-group">
+      <label>IM (one per line)</label>
+      <textarea name="im" rows="2">{esc(im_txt)}</textarea>
+    </div>
+    <div class="form-group">
+      <label>Phone (one per line)</label>
+      <textarea name="phone" rows="2">{esc(phone_txt)}</textarea>
+    </div>
+    <div class="form-group">
+      <label>Replace AI friends by presets (optional)</label>
+      <p class="form-hint">Check presets to set; HomeClaw is always kept.</p>
+      {preset_checks if preset_checks else "<p>No presets.</p>"}
+    </div>
+    <button type="submit" class="btn btn-block">Save</button>
+  </form>
+  <h3 class="form-section-title">Reset password</h3>
+  <form method="post" action="{reset_action}" class="settings-form" style="margin-top:0.5rem;">
+    <div class="form-group">
+      <label for="new_password">New password</label>
+      <input type="password" id="new_password" name="password" placeholder="New password">
+    </div>
+    <button type="submit" class="btn btn-block">Reset password</button>
+  </form>
+  <p style="margin-top:1.5rem;"><a href="/settings/user">← Back to Users</a></p>
+"""
+
+
 def _render_user_form(data: Optional[Dict[str, Any]]) -> str:
-    """Server-render User tab: user picker, selected user JSON, Add/Remove with confirmation."""
+    """Server-render User tab: list + Create/Edit links, then user picker and JSON editor."""
     esc = html_module.escape
     if not data:
         return (
-            '<form method="post" action="/settings/user" class="settings-form">'
+            _render_user_list_and_actions(_get_portal_users_list())
+            + '<form method="post" action="/settings/user" class="settings-form">'
             '<p class="error">No user config data.</p>'
             '<button type="submit" class="btn btn-block">Save</button></form>'
         )
+    users_for_list = _get_portal_users_list()
+    out = [_render_user_list_and_actions(users_for_list)]
     users = data.get("users")
     if not isinstance(users, list):
         users = []
     users_json = json.dumps(users, indent=2)
 
-    out = ['<form method="post" action="/settings/user" class="settings-form" id="user-form">']
+    out.append('<form method="post" action="/settings/user" class="settings-form" id="user-form">')
     out.append('<div class="form-group"><label>User</label><select id="user-select">')
     out.append('<option value="">—</option>')
     for i, u in enumerate(users):
@@ -1591,7 +1839,97 @@ from core.portal.settings_routes import router as settings_router
 app.include_router(settings_router, prefix="/settings")
 
 
-# ----- Config API (GET/PATCH; auth by middleware: session or X-Portal-Secret) -----
+# ----- Config API: users CRUD and friend-presets (then GET/PATCH by name) -----
+
+@app.get("/api/config/users")
+def api_config_users_list(request: Request):
+    """Return { users: [...] } (redacted). For Portal UI and API parity with Core."""
+    data = config_api.load_config_for_api("user")
+    if data is None:
+        return JSONResponse(content={"users": []})
+    return JSONResponse(content=data)
+
+
+@app.get("/api/config/friend-presets")
+def api_config_friend_presets_list(request: Request):
+    """Return { presets: [ { id, name }, ... ] } for multi-select. HomeClaw excluded (always added server-side)."""
+    try:
+        from base.friend_presets import load_friend_presets
+        config_path = str(portal_config.get_config_dir() / "friend_presets.yml")
+        presets = load_friend_presets(config_path) or {}
+        out = []
+        for pid, _ in (presets.items() if isinstance(presets, dict) else []):
+            if not pid or not isinstance(pid, str):
+                continue
+            pid_str = str(pid).strip()
+            if not pid_str or pid_str.lower() == "homeclaw":
+                continue
+            name = pid_str[0].upper() + pid_str[1:] if len(pid_str) > 1 else pid_str.upper()
+            out.append({"id": pid_str, "name": name})
+        return JSONResponse(content={"presets": out})
+    except Exception as e:
+        _log.debug("friend-presets list failed: %s", e)
+        return JSONResponse(content={"presets": []})
+
+
+@app.post("/api/config/users")
+async def api_config_users_post(request: Request):
+    """Add user. Body: name, username?, password?, type?, email?, im?, phone?, friend_preset_names?."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"detail": "Invalid JSON body"})
+    ok, err = config_api.add_user(body if isinstance(body, dict) else {})
+    if not ok:
+        return JSONResponse(status_code=400 if err and "required" in (err or "").lower() else 500, content={"detail": err or "Failed to add user"})
+    return JSONResponse(content={"result": "ok", "name": (body.get("name") or "").strip()})
+
+
+@app.patch("/api/config/users/{user_name}")
+async def api_config_users_patch(request: Request, user_name: str):
+    """Update user by name. Body: name?, id?, username?, password?, type?, email?, im?, phone?, friend_preset_names?, reset_password?."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"detail": "Invalid JSON body"})
+    ok, err = config_api.update_user(user_name, body if isinstance(body, dict) else {})
+    if not ok:
+        if err and "not found" in (err or "").lower():
+            return JSONResponse(status_code=404, content={"detail": err})
+        return JSONResponse(status_code=400 if err and "required" in (err or "").lower() else 500, content={"detail": err or "Update failed"})
+    return JSONResponse(content={"result": "ok", "name": (body.get("name") or user_name).strip()})
+
+
+@app.delete("/api/config/users/{user_name}")
+def api_config_users_delete(request: Request, user_name: str):
+    """Remove user by name."""
+    ok, err = config_api.delete_user(user_name)
+    if not ok:
+        if err and "not found" in (err or "").lower():
+            return JSONResponse(status_code=404, content={"detail": err})
+        return JSONResponse(status_code=500, content={"detail": err or "Delete failed"})
+    return JSONResponse(content={"result": "ok", "name": user_name})
+
+
+@app.post("/api/config/users/{user_name}/reset-password")
+async def api_config_users_reset_password(request: Request, user_name: str):
+    """Set new password for user. Body: { \"password\": \"...\" }. Admin reset."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"detail": "Invalid JSON body"})
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"detail": "JSON object required"})
+    new_password = (body.get("password") or "").strip() if isinstance(body.get("password"), str) else ""
+    ok, err = config_api.update_user_password(user_name, new_password)
+    if not ok:
+        if err and "not found" in (err or "").lower():
+            return JSONResponse(status_code=404, content={"detail": err})
+        return JSONResponse(status_code=400 if err and "required" in (err or "").lower() else 500, content={"detail": err})
+    return JSONResponse(content={"result": "ok", "name": user_name})
+
+
+# ----- Config API (GET/PATCH by config name; auth by middleware) -----
 
 @app.get("/api/config/{name}")
 def api_config_get(request: Request, name: str):

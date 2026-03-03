@@ -3,10 +3,18 @@ Optional APNs (Apple Push Notification service) send for Companion on iOS/macOS/
 Requires: pip install pyjwt cryptography httpx (httpx with http2 extra).
 Config: core.yml push_notifications.ios (or apns): key_path (.p8), key_id, team_id, bundle_id, sandbox (bool).
 Used for Apple devices; FCM is used for Android and other platforms.
+Includes a deep link (link) in the payload so when the user taps the notification, iOS can open homeclaw://chat?from_friend=... and the app navigates to that chat.
 """
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Optional
+
+
+def _chat_deep_link(from_friend: Optional[str] = None) -> str:
+    """Build homeclaw://chat?from_friend=... for tap-to-open chat. Same format for APNs and FCM."""
+    friend = (str(from_friend or "HomeClaw").strip())[:128] or "HomeClaw"
+    return f"homeclaw://chat?from_friend={urllib.parse.quote(friend)}"
 
 from loguru import logger
 
@@ -121,6 +129,7 @@ def send_apns_one(
             payload["source"] = str(source).strip()[:64]
         if from_friend is not None and str(from_friend).strip():
             payload["from_friend"] = str(from_friend).strip()[:128]
+        payload["link"] = _chat_deep_link(from_friend)
         headers = {
             "authorization": f"bearer {jwt_token}",
             "apns-topic": str(config.get("bundle_id", "")),

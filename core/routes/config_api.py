@@ -1,5 +1,5 @@
 """
-Config API routes: GET/PATCH /api/config/core, GET/POST/PATCH/DELETE /api/config/users.
+Config API routes: GET/PATCH /api/config/core, GET/POST/PATCH/DELETE /api/config/users, GET /api/config/friend-presets.
 Same auth as /inbound (auth.verify_inbound_auth). Config is served by Core; Portal is in-process or standalone (no proxy).
 """
 from pathlib import Path
@@ -8,9 +8,13 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from base.util import Util
+from base.friend_presets import load_friend_presets
 from core.routes import portal_proxy
 from base.base import User, Friend
 from base.workspace import ensure_user_sandbox_folders
+
+# Default password when creating a user without one (user should change in Companion or admin resets in Portal).
+DEFAULT_NEW_USER_PASSWORD = "changeme"
 
 # All top-level keys in core.yml that are safe to read/write via API (nested sections merged on PATCH).
 CONFIG_CORE_WHITELIST = frozenset({
@@ -143,6 +147,55 @@ def get_api_config_core_patch_handler(core):  # noqa: ARG001
     return api_config_core_patch
 
 
+def _friends_from_preset_names(preset_names: list) -> list:
+    """Build friends list: HomeClaw first, then one Friend per preset. Never raises."""
+    result = [Friend(name="HomeClaw", relation=None, who=None, identity=None, preset=None, type="ai", user_id=None)]
+    if not isinstance(preset_names, list):
+        return result
+    try:
+        presets = load_friend_presets()
+        if not isinstance(presets, dict):
+            return result
+        for key in preset_names:
+            k = (str(key) if key is not None else "").strip().lower()
+            if not k or k == "homeclaw":
+                continue
+            if k in presets:
+                # Display name: capitalize first letter (e.g. reminder -> Reminder)
+                display = k[0].upper() + k[1:] if len(k) > 1 else k.upper()
+                result.append(Friend(name=display, relation=None, who=None, identity=None, preset=k, type="ai", user_id=None))
+    except Exception:
+        pass
+    return result
+
+
+def get_api_config_friend_presets_handler(core):  # noqa: ARG001
+    """Return handler for GET /api/config/friend-presets. For Portal: list presets to select as user's AI friends."""
+    async def api_config_friend_presets(request: Request):
+        if portal_proxy.should_proxy_config():
+            if portal_proxy.get_portal_admin_from_request(request) is None:
+                return JSONResponse(status_code=403, content={"detail": "Portal admin auth required for config proxy (Bearer token or Basic)"})
+            return await portal_proxy.proxy_request_to_portal(request)
+        try:
+            presets = load_friend_presets()
+            if not isinstance(presets, dict):
+                return JSONResponse(content={"presets": []})
+            out = []
+            for pid, pconfig in presets.items():
+                if not pid or not isinstance(pid, str):
+                    continue
+                pid_str = str(pid).strip()
+                if not pid_str or pid_str.lower() == "homeclaw":
+                    continue
+                name = pid_str[0].upper() + pid_str[1:] if len(pid_str) > 1 else pid_str.upper()
+                out.append({"id": pid_str, "name": name})
+            return JSONResponse(content={"presets": out})
+        except Exception as e:
+            logger.debug("Config friend-presets get failed: {}", e)
+            return JSONResponse(content={"presets": []})
+    return api_config_friend_presets
+
+
 def get_api_config_users_get_handler(core):  # noqa: ARG001
     """Return handler for GET /api/config/users."""
     async def api_config_users_get(request: Request):
@@ -155,9 +208,10 @@ def get_api_config_users_get_handler(core):  # noqa: ARG001
             users = Util().get_users() or []
             out = []
             for u in users:
+                u_name = getattr(u, "name", None) or ""
                 entry = {
-                    "id": getattr(u, "id", None) or u.name,
-                    "name": u.name,
+                    "id": getattr(u, "id", None) or u_name,
+                    "name": u_name,
                     "type": str(getattr(u, "type", None) or "normal").strip().lower() or "normal",
                     "email": list(getattr(u, "email", []) or []),
                     "im": list(getattr(u, "im", []) or []),
@@ -192,11 +246,15 @@ def get_api_config_users_post_handler(core):  # noqa: ARG001
                 return JSONResponse(status_code=403, content={"detail": "Portal admin auth required for config proxy (Bearer token or Basic)"})
             return await portal_proxy.proxy_request_to_portal(request)
         try:
-            body = await request.json()
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
             if not isinstance(body, dict) or not body.get("name"):
                 return JSONResponse(status_code=400, content={"detail": "name required"})
             name = str(body["name"]).strip()
-            uid = (body.get("id") or name).strip() or name
+            raw_id = body.get("id")
+            uid = (str(raw_id).strip() if raw_id is not None else name) or name
             email = list(body.get("email") or []) if isinstance(body.get("email"), list) else []
             im = list(body.get("im") or []) if isinstance(body.get("im"), list) else []
             phone = list(body.get("phone") or []) if isinstance(body.get("phone"), list) else []
@@ -219,9 +277,17 @@ def get_api_config_users_post_handler(core):  # noqa: ARG001
                 password = str(password) if password else None
             if password is not None and not (password or "").strip():
                 password = None
-            friends = User._parse_friends(body.get("friends")) if "friends" in body else None
-            if friends is None:
-                friends = [Friend(name="HomeClaw", relation=None, who=None, identity=None)]
+            if password is None:
+                password = DEFAULT_NEW_USER_PASSWORD
+            # Friends: from friend_preset_names (Portal), or explicit friends, or default [HomeClaw].
+            if "friend_preset_names" in body and isinstance(body["friend_preset_names"], list):
+                friends = _friends_from_preset_names(body["friend_preset_names"])
+            elif "friends" in body:
+                friends = User._parse_friends(body.get("friends"))
+                if not friends:
+                    friends = [Friend(name="HomeClaw", relation=None, who=None, identity=None, preset=None, type="ai", user_id=None)]
+            else:
+                friends = [Friend(name="HomeClaw", relation=None, who=None, identity=None, preset=None, type="ai", user_id=None)]
             user = User(
                 name=name, id=uid, email=email, im=im, phone=phone, permissions=permissions,
                 username=username, password=password, skill_api_keys=skill_api_keys, type=user_type, who=who, friends=friends,
@@ -253,15 +319,20 @@ def get_api_config_users_patch_handler(core):  # noqa: ARG001
                 return JSONResponse(status_code=403, content={"detail": "Portal admin auth required for config proxy (Bearer token or Basic)"})
             return await portal_proxy.proxy_request_to_portal(request)
         try:
-            body = await request.json()
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
             if not isinstance(body, dict):
                 return JSONResponse(status_code=400, content={"detail": "JSON object required"})
             users = Util().get_users() or []
-            found = next((u for u in users if u.name == user_name), None)
+            found = next((u for u in users if (getattr(u, "name", None) or "") == user_name), None)
             if not found:
                 return JSONResponse(status_code=404, content={"detail": f"User '{user_name}' not found"})
-            name = (body.get("name") or found.name or "").strip() or found.name
-            uid = (body.get("id") or name).strip() or name
+            found_name = getattr(found, "name", None) or ""
+            name = (body.get("name") or found_name or "").strip() or found_name
+            raw_id = body.get("id")
+            uid = (str(raw_id).strip() if raw_id is not None else name) or name
             def _list(bkey, attr):
                 if bkey not in body:
                     return list(getattr(found, attr, []) or [])
@@ -293,9 +364,20 @@ def get_api_config_users_patch_handler(core):  # noqa: ARG001
                 password = str(password) if password else None
             if password is not None and not (password or "").strip():
                 password = None
-            friends = User._parse_friends(body.get("friends")) if "friends" in body else getattr(found, "friends", None)
+            if "friend_preset_names" in body and isinstance(body["friend_preset_names"], list):
+                friends = _friends_from_preset_names(body["friend_preset_names"])
+            elif "friends" in body:
+                friends = User._parse_friends(body.get("friends"))
+                if not friends:
+                    friends = [Friend(name="HomeClaw", relation=None, who=None, identity=None, preset=None, type="ai", user_id=None)]
+            else:
+                friends = getattr(found, "friends", None)
             if friends is None:
-                friends = [Friend(name="HomeClaw", relation=None, who=None, identity=None)]
+                friends = [Friend(name="HomeClaw", relation=None, who=None, identity=None, preset=None, type="ai", user_id=None)]
+            if "reset_password" in body and body["reset_password"] is not None:
+                rp = str(body["reset_password"]).strip()
+                if rp and len(rp) <= 512:
+                    password = rp
             updated = User(
                 name=name, id=uid, email=email, im=im, phone=phone, permissions=permissions,
                 username=username, password=password, skill_api_keys=skill_api_keys, type=user_type, who=who, friends=friends,
@@ -324,7 +406,7 @@ def get_api_config_users_delete_handler(core):  # noqa: ARG001
         try:
             users = Util().get_users() or []
             for u in users:
-                if u.name == user_name:
+                if (getattr(u, "name", None) or "") == user_name:
                     Util().remove_user(u)
                     return JSONResponse(content={"result": "ok", "name": user_name})
             return JSONResponse(status_code=404, content={"detail": f"User '{user_name}' not found"})
@@ -332,3 +414,37 @@ def get_api_config_users_delete_handler(core):  # noqa: ARG001
             logger.exception("Config users delete failed: {}", e)
             return JSONResponse(status_code=500, content={"detail": str(e)})
     return api_config_users_delete
+
+
+def get_api_config_users_reset_password_handler(core):  # noqa: ARG001
+    """Return handler for POST /api/config/users/{user_name}/reset-password. Body: { \"password\": \"...\" }. Admin reset (no old password)."""
+    async def api_config_users_reset_password(request: Request, user_name: str):
+        if portal_proxy.should_proxy_config():
+            if portal_proxy.get_portal_admin_from_request(request) is None:
+                return JSONResponse(status_code=403, content={"detail": "Portal admin auth required for config proxy (Bearer token or Basic)"})
+            return await portal_proxy.proxy_request_to_portal(request)
+        try:
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+            if not isinstance(body, dict):
+                return JSONResponse(status_code=400, content={"detail": "JSON object required"})
+            new_password = body.get("password")
+            if new_password is not None and not isinstance(new_password, str):
+                new_password = str(new_password).strip()
+            else:
+                new_password = (new_password or "").strip()
+            if not new_password or len(new_password) > 512:
+                return JSONResponse(status_code=400, content={"detail": "password required (max 512 chars)"})
+            users = Util().get_users() or []
+            found = next((u for u in users if (getattr(u, "name", None) or "") == user_name), None)
+            if not found:
+                return JSONResponse(status_code=404, content={"detail": f"User '{user_name}' not found"})
+            if not Util().update_user_password(getattr(found, "id", None) or found.name, new_password):
+                return JSONResponse(status_code=500, content={"detail": "Failed to update password"})
+            return JSONResponse(content={"result": "ok", "name": user_name})
+        except Exception as e:
+            logger.exception("Config users reset-password failed: {}", e)
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+    return api_config_users_reset_password

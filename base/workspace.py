@@ -118,6 +118,35 @@ def load_friend_identity_file(
         return ""
 
 
+def write_friend_identity_file(
+    homeclaw_root: str,
+    user_id: str,
+    friend_id: str,
+    content: str,
+    identity_filename: Optional[str] = None,
+) -> bool:
+    """
+    Write the friend identity file at homeclaw_root/{user_id}/{friend_id}/{identity_filename}.
+    Creates parent dirs if needed. Returns True on success. Never raises.
+    """
+    try:
+        root = (homeclaw_root or "").strip()
+        if not root:
+            return False
+        uid = _sanitize_system_user_id(user_id)
+        fid = _sanitize_friend_id(friend_id)
+        if not uid or not fid:
+            return False
+        fname = _sanitize_identity_filename(identity_filename)
+        path = Path(root).resolve() / uid / fid / fname
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text((content or "").strip() or "", encoding="utf-8")
+        return True
+    except Exception as e:
+        logger.debug("write_friend_identity_file failed: {}", e)
+        return False
+
+
 def get_user_knowledgebase_dir(homeclaw_root: str, user_id: str, folder_name: str = "knowledgebase") -> Optional[Path]:
     """
     Path to a user's knowledge base folder: {homeclaw_root}/{user_id}/{folder_name}/.

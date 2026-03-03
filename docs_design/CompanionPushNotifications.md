@@ -41,15 +41,11 @@ Push **supports multiple users**. Core stores push tokens **per user_id**; each 
 Core adds **user_id**, **source**, and **from_friend** to every push so the Companion can show which user the notification is for and which friend it is from (e.g. open the correct chat thread).
 
 - **APNs (iOS/macOS):** Custom keys at root level (outside `aps`):
-  - `user_id` (string): target user (e.g. `"alice"`, `"companion"`).
-  - `source` (string): e.g. `"reminder"`, `"push"`, `"inbound"`.
-  - `from_friend` (string): which friend the message is from — `"HomeClaw"` (system) or a friend name (e.g. `"Sabrina"`). Used to route the notification to the correct friend chat.
-  - Standard: `aps.alert.title`, `aps.alert.body`, `aps.sound`.
+  - `user_id`, `source`, `from_friend`: as above.
+  - **`link`** (string): deep link for tap-to-open, e.g. `homeclaw://chat?from_friend=HomeClaw`. When the user taps the notification, the app opens this URL and navigates to that chat (iOS/macOS AppDelegate opens the URL; Dart handles `homeclaw://chat` via app_links).
 - **FCM (Android):** `data` map (all values strings):
-  - `user_id`: target user.
-  - `source`: e.g. `"reminder"`, `"push"`, `"inbound"`.
-  - `from_friend`: which friend the message is from (`"HomeClaw"` or friend name).
-  - `text`: body text (same as notification body).
+  - `user_id`, `source`, `from_friend`, `text`: as above.
+  - **`link`** (string): same deep link format so the app can use it if desired (Android already uses FCM tap callback; the link is available for consistency).
 
 **Companion behaviour:** When the app receives a push (foreground handler or when the user taps the notification), read `user_id`, `source`, and **from_friend** from the payload. Use `from_friend` to route to the correct friend chat (e.g. show “From Sabrina: …” or add the notification to Sabrina’s thread). One device can receive push for many users; the payload identifies which user and which friend each notification is for.
 
@@ -91,9 +87,11 @@ push_notifications:
 - The app’s **AppDelegate** must call `HomeclawNativePlugin.receiveApnsToken(deviceToken)` in `didRegisterForRemoteNotificationsWithDeviceToken` (already done in `ios/Runner/AppDelegate.swift` and `macos/Runner/AppDelegate.swift`).
 
 **Android (FCM):**
-1. Create a [Firebase project](https://console.firebase.google.com/) and add an **Android** app (package name).
-2. Download **google-services.json** and place it in `clients/HomeClawApp/android/app/google-services.json`.
-3. Run `flutter pub get` in `clients/HomeClawApp`.
+1. Create a [Firebase project](https://console.firebase.google.com/) and add an **Android** app. Use package name **`com.homeclaw.homeclawApp`** (must match `android/app/build.gradle.kts` `applicationId`).
+2. Download **google-services.json** from the Firebase Console (Project settings → Your apps → Android app → Download config) and place it in **`clients/HomeClawApp/android/app/google-services.json`**. (Do not commit this file if it contains secrets; add to `.gitignore` if needed.)
+3. The repo already applies the **Google Services** plugin: `android/settings.gradle.kts` declares it, and `android/app/build.gradle.kts` applies it. No extra Gradle edits needed once the JSON is in place.
+4. Run `flutter pub get` and build: `cd clients/HomeClawApp && flutter pub get && flutter build apk` (or run on a device).
+5. **Core (server)** must be able to send FCM: install `pip install firebase-admin` and set **config/core.yml** `push_notifications.fcm.credentials_path` to the path to your **Firebase service account JSON** (Project settings → Service accounts → Generate new private key), or set env **`GOOGLE_APPLICATION_CREDENTIALS`** to that file path. See §2.4 above.
 
 ### 3.2 Flutter dependencies
 
@@ -105,7 +103,9 @@ push_notifications:
 1. **iOS / macOS**: Request notification permission; get **APNs device token** via native `HomeclawNative().getApnsToken()` (no Firebase). Send to Core with `platform: "ios"` or `"macos"`. AppDelegate must call `HomeclawNativePlugin.receiveApnsToken(deviceToken)` when the system delivers the token.
 2. **Android**: Firebase is initialized only on Android. Get **FCM token** via `FirebaseMessaging.instance.getToken()`; send to Core with `platform: "android"`.
 3. **Send token to Core**: `POST /api/companion/push-token` with `user_id`, `token`, `platform` (“ios” or “android”). Same auth (API key) as other Core requests.
-4. **Background/terminated**: When the user taps the notification, the OS opens the app. Reminder text is shown in the notification.
+4. **Background/terminated / tap to open chat**: When the user taps the notification:
+   - **Android**: FCM `onMessageOpenedApp` / `getInitialMessage` provides the payload; the app navigates to the chat for `from_friend`.
+   - **iOS/macOS**: Each push includes a **deep link** (`link`: `homeclaw://chat?from_friend=...`). AppDelegate implements `UNUserNotificationCenterDelegate` and opens that URL when the user taps; the app handles `homeclaw://chat` via **app_links** (`getInitialLink` for cold start, `uriLinkStream` when already running) and navigates to that chat. No Firebase on Apple; works in China.
 
 ### 3.4 Optional: conditional compilation
 
@@ -125,7 +125,7 @@ If you want the app to build **without** Firebase (e.g. for desktop-only builds)
 | Platform   | Token source        | Core sends via |
 |-----------|---------------------|----------------|
 | **iOS**   | APNs device token    | **APNs** (HTTP/2, .p8 key) |
-| **Android** | FCM token         | **FCM** (Firebase Admin SDK) |
+| **Android** | FCM token         | **FCM** (Firebase Admin SDK). In China, Google/FCM is often blocked; the app does not rely on FCM for core features and will not crash — push for reminders when app is killed/background simply won't arrive; users still get messages and reminders when they open the app (inbox, chat history sync). |
 
 | Component  | Responsibility |
 |------------|----------------|
@@ -135,3 +135,20 @@ If you want the app to build **without** Firebase (e.g. for desktop-only builds)
 **Multi-user:** Push is scoped by user_id; each user gets only their notifications. **One login at a time:** The app has a single active user per session; token is tied to that user until re-registration. **Multi-device:** One user can have multiple devices; each device registers its token under the same user_id.
 
 With this, reminders (and other proactive messages) can reach the user even when the Companion app has been killed by the system.
+
+---
+
+## 6. Android FCM verification checklist
+
+After setting up the app in the Firebase Console and adding **google-services.json**:
+
+| Step | What to check |
+|------|----------------|
+| **Companion** | `android/app/google-services.json` present; package name in Firebase matches `com.homeclaw.homeclawApp`. |
+| **Companion** | Gradle: `android/settings.gradle.kts` has `com.google.gms.google-services` plugin; `android/app/build.gradle.kts` applies it. Build succeeds. |
+| **Companion** | App has Core **base URL** and **API key** set (Settings). Token registration uses same auth as `/inbound`. |
+| **Companion** | On Android, after login or opening a chat, `registerPushTokenWithCore(userId)` runs; no errors in logs. |
+| **Core** | `config/core.yml` → `push_notifications.enabled: true` and `push_notifications.fcm.credentials_path` set to your **service account JSON** path (or `GOOGLE_APPLICATION_CREDENTIALS` env). |
+| **Core** | `pip install firebase-admin` (in `requirements.txt`). Core starts without FCM errors. |
+| **Core** | When a reminder fires and there is no WebSocket for that user, Core calls `send_push_to_user`; Android tokens get FCM. Check Core logs for "deliver_to_user: sent … push(es)". |
+| **E2E** | Create a reminder in Core for the logged-in user; kill or background the Companion app; reminder time passes → device receives the notification. |

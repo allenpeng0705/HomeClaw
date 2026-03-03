@@ -41,6 +41,7 @@ from core.routes import (
     companion_push_api,
     config_api,
     friend_request_api,
+    me_api,
     user_message_api,
     files,
     inbound as inbound_routes,
@@ -115,6 +116,12 @@ def register_all_routes(core: Any) -> None:
         dependencies=[Depends(auth.verify_inbound_auth)],
     )
     app.add_api_route(
+        "/api/config/friend-presets",
+        config_api.get_api_config_friend_presets_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
         "/api/config/users",
         config_api.get_api_config_users_get_handler(core),
         methods=["GET"],
@@ -136,6 +143,12 @@ def register_all_routes(core: Any) -> None:
         "/api/config/users/{user_name}",
         config_api.get_api_config_users_delete_handler(core),
         methods=["DELETE"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/config/users/{user_name}/reset-password",
+        config_api.get_api_config_users_reset_password_handler(core),
+        methods=["POST"],
         dependencies=[Depends(auth.verify_inbound_auth)],
     )
     # Portal auth (Phase 5): POST /api/portal/auth returns token for portal admin; no Core API key required.
@@ -315,6 +328,66 @@ def register_all_routes(core: Any) -> None:
         "/api/me/friends",
         companion_auth.get_api_me_friends_handler(core),
         methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/me/avatar",
+        me_api.get_api_me_avatar_get_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/me/avatar",
+        me_api.get_api_me_avatar_put_handler(core),
+        methods=["PUT"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/me/password",
+        me_api.get_api_me_password_put_handler(core),
+        methods=["PUT"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/users/{user_id}/avatar",
+        me_api.get_api_users_avatar_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/me/friends",
+        me_api.get_api_me_friends_post_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/me/friends/{friend_id}",
+        me_api.get_api_me_friends_patch_handler(core),
+        methods=["PATCH"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/me/friends/{friend_id}",
+        me_api.get_api_me_friends_delete_handler(core),
+        methods=["DELETE"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/me/friends/{friend_id}/identity",
+        me_api.get_api_me_friends_identity_put_handler(core),
+        methods=["PUT"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/me/friends/{friend_id}/avatar",
+        me_api.get_api_me_friends_avatar_get_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/me/friends/{friend_id}/avatar",
+        me_api.get_api_me_friends_avatar_put_handler(core),
+        methods=["PUT"],
         dependencies=[Depends(companion_auth.get_companion_token_user)],
     )
     app.add_api_route(

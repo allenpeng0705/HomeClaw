@@ -114,7 +114,8 @@ class Util:
                     CoreMetadata.to_yaml(self.core_metadata, os.path.join(self.config_path(), 'core.yml'))
                 logger.debug("CUDA is not available. Using CPU.")
             try:
-                self.users = User.from_yaml(os.path.join(self.config_path(), 'user.yml'))
+                from base import user_store
+                self.users = user_store.get_all(self.config_path, self.data_path)
                 if not isinstance(self.users, list):
                     self.users = []
             except Exception:
@@ -1403,8 +1404,8 @@ class Util:
         """
         if self.users is None:
             try:
-                path = os.path.join(self.config_path(), 'user.yml')
-                self.users = User.from_yaml(path)
+                from base import user_store
+                self.users = user_store.get_all(self.config_path, self.data_path)
                 if not isinstance(self.users, list):
                     self.users = []
                 else:
@@ -1596,12 +1597,34 @@ class Util:
                 return
         
     def save_users(self, users: List[User] = None):
-        """Save users to user.yml. Never raises (User.to_yaml catches all exceptions)."""
+        """Save users to TinyDB (database/users.json). Never raises. See docs_design/UserDataTinyDB.md."""
         try:
-            path = os.path.join(self.config_path(), 'user.yml')
-            User.to_yaml(users or [], path)
+            from base import user_store
+            user_store.save_all(users or [], self.config_path, self.data_path)
         except Exception:
             pass
+
+    def update_user_password(self, user_id: str, new_password: str) -> bool:
+        """
+        Set the password for the given user and persist to TinyDB.
+        Returns True if user was found and saved. Never raises.
+        """
+        try:
+            uid = (user_id or "").strip()
+            if not uid:
+                return False
+            users = self.get_users() or []
+            for u in users:
+                u_id = (getattr(u, "id", None) or getattr(u, "name", None) or "").strip()
+                if u_id != uid:
+                    continue
+                u.password = (new_password or "").strip() or None
+                self.save_users(users)
+                return True
+            return False
+        except Exception as e:
+            logger.warning("update_user_password failed: {}", e)
+            return False
 
     def add_friend_bidirectional(self, user_id_a: str, user_id_b: str) -> bool:
         """
@@ -1643,6 +1666,139 @@ class Util:
             return True
         except Exception as e:
             logger.warning("add_friend_bidirectional failed: {}", e)
+            return False
+
+    def add_ai_friend(
+        self,
+        user_id: str,
+        name: str,
+        relation: Optional[str] = None,
+        who: Optional[Dict[str, Any]] = None,
+        identity_filename: Optional[str] = "identity.md",
+        preset: Optional[str] = None,
+    ) -> bool:
+        """
+        Add an AI-type friend to the given user and persist to user.yml.
+        name must be unique among this user's friends (no duplicate names). Returns True on success.
+        """
+        try:
+            uid = (user_id or "").strip()
+            fname = (name or "").strip()
+            if not uid or not fname:
+                return False
+            users = self.get_users() or []
+            user = None
+            for u in users:
+                u_id = (getattr(u, "id", None) or getattr(u, "name", None) or "").strip()
+                if u_id == uid:
+                    user = u
+                    break
+            if not user:
+                return False
+            friends = list(getattr(user, "friends", None) or [])
+            for f in friends:
+                n = (getattr(f, "name", None) or "").strip()
+                if n.lower() == fname.lower():
+                    return False  # duplicate name
+            ident = (identity_filename or "").strip() or "identity.md"
+            friends.append(
+                Friend(
+                    name=fname,
+                    relation=relation,
+                    who=who if isinstance(who, dict) else None,
+                    identity=ident,
+                    preset=preset,
+                    type="ai",
+                    user_id=None,
+                )
+            )
+            user.friends = friends
+            self.save_users(users)
+            return True
+        except Exception as e:
+            logger.warning("add_ai_friend failed: {}", e)
+            return False
+
+    def update_ai_friend(
+        self,
+        user_id: str,
+        friend_id: str,
+        name: Optional[str] = None,
+        relation: Optional[str] = None,
+        who: Optional[Dict[str, Any]] = None,
+        identity_filename: Optional[str] = None,
+        preset: Optional[str] = None,
+    ) -> bool:
+        """Update an existing AI friend by name (friend_id). Returns True if found and updated."""
+        try:
+            uid = (user_id or "").strip()
+            fid = (friend_id or "").strip()
+            if not uid or not fid:
+                return False
+            users = self.get_users() or []
+            for u in users:
+                u_id = (getattr(u, "id", None) or getattr(u, "name", None) or "").strip()
+                if u_id != uid:
+                    continue
+                friends = list(getattr(u, "friends", None) or [])
+                for i, f in enumerate(friends):
+                    n = (getattr(f, "name", None) or "").strip()
+                    if n.lower() != fid.lower():
+                        continue
+                    ftype = (getattr(f, "type", None) or "").strip().lower()
+                    if ftype != "ai" and ftype not in ("remote_ai",):
+                        continue
+                    new_name = (name or "").strip() or n
+                    new_relation = relation if relation is not None else getattr(f, "relation", None)
+                    new_who = who if isinstance(who, dict) else getattr(f, "who", None)
+                    new_ident = (identity_filename or getattr(f, "identity", None) or "identity.md").strip() or "identity.md"
+                    new_preset = preset if preset is not None else getattr(f, "preset", None)
+                    friends[i] = Friend(
+                        name=new_name,
+                        relation=new_relation,
+                        who=new_who,
+                        identity=new_ident,
+                        preset=new_preset,
+                        type=ftype,
+                        user_id=None,
+                    )
+                    u.friends = friends
+                    self.save_users(users)
+                    return True
+            return False
+        except Exception as e:
+            logger.warning("update_ai_friend failed: {}", e)
+            return False
+
+    def remove_ai_friend(self, user_id: str, friend_id: str) -> bool:
+        """Remove an AI friend by name (friend_id). Returns True if found and removed. Cannot remove HomeClaw."""
+        try:
+            uid = (user_id or "").strip()
+            fid = (friend_id or "").strip()
+            if not uid or not fid:
+                return False
+            if fid.lower() == "homeclaw":
+                return False
+            users = self.get_users() or []
+            for u in users:
+                u_id = (getattr(u, "id", None) or getattr(u, "name", None) or "").strip()
+                if u_id != uid:
+                    continue
+                friends = list(getattr(u, "friends", None) or [])
+                for i, f in enumerate(friends):
+                    n = (getattr(f, "name", None) or "").strip()
+                    if n.lower() != fid.lower():
+                        continue
+                    ftype = (getattr(f, "type", None) or "").strip().lower()
+                    if ftype != "ai" and ftype not in ("remote_ai",):
+                        continue
+                    friends.pop(i)
+                    u.friends = friends
+                    self.save_users(users)
+                    return True
+            return False
+        except Exception as e:
+            logger.warning("remove_ai_friend failed: {}", e)
             return False
 
     def get_email_account(self):
@@ -1793,23 +1949,31 @@ class Util:
         
     def watch_config_file(self):
         """
-        Monitor the user.yml and core.yml changes in the config path.
-        If some change happened, the users and core metadata can be reload automatically.
+        Monitor config and user data: user.yml (legacy) and database/users.json (TinyDB).
+        On change, reload users so Core picks up edits.
         """
-        if self.config_observer is None:  
+        if self.config_observer is None:
             class Handler(watchdog.events.PatternMatchingEventHandler):
                 def __init__(self, util: Util):
-                    super().__init__(patterns=['user.yml'])
+                    super().__init__(patterns=['user.yml', 'users.json'])
                     self.util: Util = util
 
                 def on_modified(self, event):
-                    if event.src_path.endswith('user.yml'):
-                        self.util.users = None
-                        self.util.get_users()
-        
-      
+                    try:
+                        if event.src_path.endswith('user.yml') or event.src_path.endswith('users.json'):
+                            self.util.users = None
+                            self.util.get_users()
+                    except Exception:
+                        pass
+
             self.config_observer = watchdog.observers.Observer()
             self.config_observer.schedule(Handler(self), self.config_path(), recursive=False)
+            try:
+                data_dir = self.data_path()
+                if data_dir and os.path.isdir(data_dir):
+                    self.config_observer.schedule(Handler(self), data_dir, recursive=False)
+            except Exception:
+                pass
             self.config_observer.start()
                 
             # Gracefully stop the observer

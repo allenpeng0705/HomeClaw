@@ -43,7 +43,7 @@ def _user_to_friends_list(user: User) -> List[Dict[str, Any]]:
     try:
         friends = getattr(user, "friends", None)
         if not isinstance(friends, list) or not friends:
-            return [{"name": "HomeClaw", "relation": None, "who": None, "identity": None}]
+            return [{"name": "HomeClaw", "relation": None, "who": None, "identity": None, "type": "ai"}]
         out = []
         for f in friends:
             if not hasattr(f, "name"):
@@ -58,19 +58,21 @@ def _user_to_friends_list(user: User) -> List[Dict[str, Any]]:
                 preset = getattr(f, "preset", None)
                 if preset is not None and str(preset).strip():
                     item["preset"] = str(preset).strip()
-                ftype = getattr(f, "type", None)
-                if ftype and str(ftype).strip().lower() == "user":
-                    item["type"] = "user"
+                ftype = (getattr(f, "type", None) or "").strip().lower() or "ai"
+                if ftype not in ("user", "ai", "remote_ai", "remote_user"):
+                    ftype = "ai"
+                item["type"] = ftype
+                if ftype == "user":
                     uid = (getattr(f, "user_id", None) or "").strip()
                     if uid:
                         item["user_id"] = uid
                 out.append(item)
             except Exception:
                 continue
-        return out if out else [{"name": "HomeClaw", "relation": None, "who": None, "identity": None}]
+        return out if out else [{"name": "HomeClaw", "relation": None, "who": None, "identity": None, "type": "ai"}]
     except Exception as e:
         logger.debug("companion_auth: _user_to_friends_list failed: {}", e)
-        return [{"name": "HomeClaw", "relation": None, "who": None, "identity": None}]
+        return [{"name": "HomeClaw", "relation": None, "who": None, "identity": None, "type": "ai"}]
 
 
 def get_companion_token_user(request: Request) -> Tuple[str, User]:

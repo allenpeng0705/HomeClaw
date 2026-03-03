@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "524412533267",
+    "project_id": "homeclaw-dfab7",
+    "storage_bucket": "homeclaw-dfab7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:524412533267:android:7be3768586cdd843c3dde6",
+        "android_client_info": {
+          "package_name": "com.homeclaw.homeclawApp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBSKAD_VbOa8XIaRE6-USoq_5fL02B4GMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

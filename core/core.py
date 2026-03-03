@@ -1532,7 +1532,8 @@ class Core(CoreInterface):
             logger.debug(f"User:  + {user}")
             if channel_type == ChannelType.Email:
                 logger.debug(f"Email:  + {user.email}, email_id: {user_id}")
-                if ((user_id in user.email) or (len(user.email) == 0)):
+                # Only match when user_id is in this user's email list. Empty list = no channel access.
+                if user.email and (user_id in user.email or any(str(e or "").strip() == (user_id or "").strip() for e in user.email)):
                     return (ChannelType.Email in user.permissions or len(user.permissions) == 0), user
             if channel_type == ChannelType.IM:
                 # Match only when request user_id is in this user's im list. Do NOT treat empty im list as "match all"
@@ -1552,7 +1553,8 @@ class Core(CoreInterface):
                 if (user_id or "").strip() == "homeclaw:local":
                     return True, user
             if channel_type == ChannelType.Phone:
-                if ((user_id in user.phone) or (len(user.phone) == 0)):
+                # Only match when user_id is in this user's phone list. Empty list = no channel access.
+                if user.phone and (user_id in user.phone or any(str(p or "").strip() == (user_id or "").strip() for p in user.phone)):
                     return (ChannelType.Phone in user.permissions or len(user.permissions) == 0), user
         # No user matched (IM: add this id to config/user.yml im for the right user)
         if channel_type == ChannelType.IM and (user_id or "").strip():

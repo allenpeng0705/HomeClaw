@@ -298,65 +298,119 @@ class User:
             if not isinstance(u, dict):
                 continue
             try:
-                name = (u.get('name') or '').strip() or f"user_{i}"
-                uid = (u.get('id') or u.get('name') or name).strip() or name
-                email = u.get('email')
-                im = u.get('im')
-                phone = u.get('phone')
-                permissions = u.get('permissions')
-                if not isinstance(email, list):
-                    email = []
-                if not isinstance(im, list):
-                    im = []
-                if not isinstance(phone, list):
-                    phone = []
-                if not isinstance(permissions, list):
-                    permissions = []
-                raw_keys = u.get('skill_api_keys')
-                skill_api_keys = None
-                if isinstance(raw_keys, dict):
-                    try:
-                        skill_api_keys = {
-                            str(k).strip(): str(v).strip()
-                            for k, v in raw_keys.items()
-                            if k and v and str(v).strip()
-                        }
-                        if not skill_api_keys:
-                            skill_api_keys = None
-                    except Exception:
-                        skill_api_keys = None
-                user_type = str(u.get('type') or 'normal').strip().lower() or 'normal'
-                if user_type not in ('normal', 'companion'):
-                    user_type = 'normal'
-                who = u.get('who')
-                if not isinstance(who, dict):
-                    who = None
-                username = (u.get('username') or '').strip() or None
-                if not username:
-                    username = None
-                password = u.get('password')
-                if password is not None and not isinstance(password, str):
-                    password = str(password)
-                if password is not None and not (password or '').strip():
-                    password = None
-                friends = User._parse_friends(u.get('friends'))
-                users.append(User(
-                    name=name,
-                    email=email,
-                    im=im,
-                    phone=phone,
-                    permissions=permissions,
-                    id=uid,
-                    username=username,
-                    password=password,
-                    skill_api_keys=skill_api_keys,
-                    type=user_type,
-                    who=who,
-                    friends=friends,
-                ))
+                user = User._from_dict(u, f"user_{i}")
+                if user:
+                    users.append(user)
             except Exception:
                 continue
         return users
+
+    @staticmethod
+    def _from_dict(u: Dict[str, Any], fallback_name: str = "user_0") -> Optional['User']:
+        """Build one User from a dict (YAML or TinyDB document). Returns None on failure. Never raises."""
+        if not isinstance(u, dict):
+            return None
+        try:
+            name = (u.get('name') or '').strip() or fallback_name
+            uid = (u.get('id') or u.get('name') or name)
+            if isinstance(uid, str):
+                uid = uid.strip() or name
+            else:
+                uid = name
+            email = u.get('email')
+            im = u.get('im')
+            phone = u.get('phone')
+            permissions = u.get('permissions')
+            if not isinstance(email, list):
+                email = []
+            if not isinstance(im, list):
+                im = []
+            if not isinstance(phone, list):
+                phone = []
+            if not isinstance(permissions, list):
+                permissions = []
+            raw_keys = u.get('skill_api_keys')
+            skill_api_keys = None
+            if isinstance(raw_keys, dict):
+                try:
+                    skill_api_keys = {
+                        str(k).strip(): str(v).strip()
+                        for k, v in raw_keys.items()
+                        if k and v and str(v).strip()
+                    }
+                    if not skill_api_keys:
+                        skill_api_keys = None
+                except Exception:
+                    skill_api_keys = None
+            user_type = str(u.get('type') or 'normal').strip().lower() or 'normal'
+            if user_type not in ('normal', 'companion'):
+                user_type = 'normal'
+            who = u.get('who')
+            if not isinstance(who, dict):
+                who = None
+            username = (u.get('username') or '').strip() or None
+            if not username:
+                username = None
+            password = u.get('password')
+            if password is not None and not isinstance(password, str):
+                password = str(password)
+            if password is not None and not (password or '').strip():
+                password = None
+            friends = User._parse_friends(u.get('friends'))
+            return User(
+                name=name,
+                email=email,
+                im=im,
+                phone=phone,
+                permissions=permissions,
+                id=uid,
+                username=username,
+                password=password,
+                skill_api_keys=skill_api_keys,
+                type=user_type,
+                who=who,
+                friends=friends,
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def from_doc(doc: Dict[str, Any]) -> Optional['User']:
+        """Build one User from a TinyDB document. Returns None on failure. Never raises."""
+        if doc is None or not isinstance(doc, dict):
+            return None
+        return User._from_dict(doc, "user_0")
+
+    def to_doc(self) -> Dict[str, Any]:
+        """Serialize this user to a TinyDB/YAML-compatible dict. Never raises."""
+        try:
+            d = {
+                "name": getattr(self, "name", "") or "",
+                "email": list(getattr(self, "email", None) or []),
+                "im": list(getattr(self, "im", None) or []),
+                "phone": list(getattr(self, "phone", None) or []),
+                "permissions": list(getattr(self, "permissions", None) or []),
+                "id": getattr(self, "id", None) or getattr(self, "name", ""),
+                "type": str(getattr(self, "type", None) or "normal").strip().lower() or "normal",
+            }
+            username = getattr(self, "username", None)
+            if username is not None and str(username).strip():
+                d["username"] = str(username).strip()
+            password = getattr(self, "password", None)
+            if password is not None and str(password).strip():
+                d["password"] = str(password)
+            keys = getattr(self, "skill_api_keys", None)
+            if isinstance(keys, dict) and keys:
+                d["skill_api_keys"] = {str(k): str(v) for k, v in keys.items() if k and v}
+            who = getattr(self, "who", None)
+            if isinstance(who, dict) and who:
+                d["who"] = who
+            friends = getattr(self, "friends", None)
+            if isinstance(friends, list) and friends:
+                d["friends"] = User._friends_to_dict_list(friends)
+            return d
+        except Exception:
+            return {"name": "user", "email": [], "im": [], "phone": [], "permissions": [], "id": "user", "type": "normal"}
 
     @staticmethod
     def _parse_friends(raw: Any) -> List['Friend']:
@@ -391,17 +445,17 @@ class User:
                 else:
                     preset = None
                 ftype = (f.get('type') or "").strip().lower() or None
-                if ftype and ftype != "user":
-                    ftype = None
-                uid_friend = (f.get('user_id') or "").strip() or None
+                if ftype not in ("user", "ai", "remote_ai", "remote_user"):
+                    ftype = "ai"  # explicit default for AI friends
+                uid_friend = (f.get('user_id') or "").strip() if ftype == "user" else None
                 result.append(Friend(name=fname, relation=relation, who=fwho, identity=identity, preset=preset, type=ftype, user_id=uid_friend))
             except Exception:
                 continue
         if not result:
-            return [Friend(name='HomeClaw', relation=None, who=None, identity=None, preset=None, type=None, user_id=None)]
+            return [Friend(name='HomeClaw', relation=None, who=None, identity=None, preset=None, type='ai', user_id=None)]
         first_name = (result[0].name or '').strip().lower()
         if first_name != 'homeclaw':
-            result.insert(0, Friend(name='HomeClaw', relation=None, who=None, identity=None, preset=None, type=None, user_id=None))
+            result.insert(0, Friend(name='HomeClaw', relation=None, who=None, identity=None, preset=None, type='ai', user_id=None))
         return result
 
     @staticmethod
@@ -413,10 +467,10 @@ class User:
                 continue
             try:
                 entry = {"name": (getattr(f, "name", None) or "").strip() or "Friend"}
-                if getattr(f, "type", None) and str(getattr(f, "type", "")).strip().lower() == "user":
-                    entry["type"] = "user"
-                    if getattr(f, "user_id", None):
-                        entry["user_id"] = (f.user_id or "").strip()
+                ftype = (getattr(f, "type", None) or "").strip().lower() or "ai"
+                entry["type"] = ftype if ftype in ("user", "ai", "remote_ai", "remote_user") else "ai"
+                if ftype == "user" and getattr(f, "user_id", None):
+                    entry["user_id"] = (f.user_id or "").strip()
                 if getattr(f, "relation", None) is not None:
                     entry["relation"] = f.relation
                 if isinstance(getattr(f, "who", None), dict) and f.who:

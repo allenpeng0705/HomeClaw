@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:home_claw_app/l10n/app_localizations.dart';
 import '../core_service.dart';
 import '../utils/friend_localization.dart';
+import 'add_ai_friend_screen.dart';
 import 'add_friend_screen.dart';
 import 'chat_screen.dart';
 import 'friend_requests_screen.dart';
@@ -10,14 +11,17 @@ import 'settings_screen.dart';
 
 /// Friends list for the logged-in user (from GET /api/me/friends).
 /// If not logged in, shows LoginScreen. Tap a friend to open chat with friendId.
+/// When [initialPushFromFriend] is set (app opened by tapping FCM notification), open that chat after friends load.
 class FriendListScreen extends StatefulWidget {
   final CoreService coreService;
   final String? initialMessage;
+  final String? initialPushFromFriend;
 
   const FriendListScreen({
     super.key,
     required this.coreService,
     this.initialMessage,
+    this.initialPushFromFriend,
   });
 
   @override
@@ -28,10 +32,12 @@ class _FriendListScreenState extends State<FriendListScreen> {
   List<Map<String, dynamic>> _friends = [];
   bool _loading = true;
   String? _error;
+  String? _initialPushFromFriend;
 
   @override
   void initState() {
     super.initState();
+    _initialPushFromFriend = widget.initialPushFromFriend;
     _loadFriends();
   }
 
@@ -50,6 +56,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
           _friends = sorted;
           _loading = false;
         });
+        _openInitialPushChatIfNeeded();
       }
     } catch (e) {
       if (mounted) {
@@ -60,6 +67,53 @@ class _FriendListScreenState extends State<FriendListScreen> {
         });
       }
     }
+  }
+
+  void _openInitialPushChatIfNeeded() {
+    final name = _initialPushFromFriend?.trim();
+    if (name == null || name.isEmpty || _friends.isEmpty) return;
+    _initialPushFromFriend = null;
+    final nameLower = name.toLowerCase();
+    Map<String, dynamic>? match;
+    for (final f in _friends) {
+      final n = (f['name'] as String?)?.trim() ?? '';
+      if (n.isNotEmpty && (n == name || n.toLowerCase() == nameLower)) {
+        match = f;
+        break;
+      }
+    }
+    if (match == null) {
+      for (final f in _friends) {
+        if ((f['name'] as String?)?.trim().toLowerCase() == 'homeclaw') {
+          match = f;
+          break;
+        }
+      }
+    }
+    if (match == null) return;
+    final userId = widget.coreService.sessionUserId;
+    if (userId == null || userId.isEmpty) return;
+    final friendId = (match['name'] as String?)?.trim() ?? 'HomeClaw';
+    final isUserFriend = (match['type'] as String?)?.trim().toLowerCase() == 'user';
+    final toUserId = (match['user_id'] as String?)?.trim();
+    final locale = Localizations.localeOf(context);
+    final displayName = localizedFriendDisplayName(friend: match, locale: locale);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.maybeOf(context)?.push(
+        MaterialPageRoute(
+          builder: (context) => ChatScreen(
+            coreService: widget.coreService,
+            userId: userId,
+            userName: displayName,
+            friendId: friendId,
+            initialMessage: widget.initialMessage,
+            isUserFriend: isUserFriend,
+            toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
+          ),
+        ),
+      );
+    });
   }
 
   Future<void> _logout() async {
@@ -93,6 +147,18 @@ class _FriendListScreenState extends State<FriendListScreen> {
               );
             },
             tooltip: 'Add friend',
+          ),
+          IconButton(
+            icon: const Icon(Icons.smart_toy_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => AddAIFriendScreen(coreService: widget.coreService),
+                ),
+              ).then((_) => _loadFriends());
+            },
+            tooltip: 'Add AI friend',
           ),
           IconButton(
             icon: const Icon(Icons.mail_outline),

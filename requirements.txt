@@ -25,6 +25,8 @@ requests>=2.28.0
 jinja2>=3.1.0
 # DB: SQLite via sqlalchemy (memory/chat, memory/database)
 sqlalchemy>=2.0.0
+# User/friends store: document DB (replaces user.yml for persistence). See docs_design/UserDataTinyDB.md.
+tinydb>=4.8.0
 # Pydantic (models; fastapi brings it, but explicit for non-FastAPI paths)
 pydantic>=2.0.0
 # PPT Maker plugin (generate .pptx)
@@ -59,9 +61,9 @@ protego>=0.1
 semantic-router>=0.0.20
 
 # Optional: push notifications so Core can send reminders when Companion app is killed/background.
-# APNs (iOS/Apple): pyjwt cryptography; FCM (Android): firebase-admin
-# pyjwt[crypto]>=2.0.0
-# firebase-admin>=6.0.0
+# APNs (iOS/Apple): pyjwt cryptography; FCM (Android): firebase-admin (may not work in China; iOS/macOS use APNs only, no Firebase).
+firebase-admin>=6.0.0
+# pyjwt[crypto]>=2.0.0   # uncomment for APNs (iOS/macOS push)
 
 # Optional (uncomment if needed):
 # document_read tool: PDF, PPT, Word, MD, HTML, XML, JSON, etc. (one powerful tool)

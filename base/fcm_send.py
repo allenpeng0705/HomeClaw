@@ -3,9 +3,17 @@ Optional FCM (Firebase Cloud Messaging) send for Companion push when app is kill
 Requires: pip install firebase-admin and a service account JSON key.
 Config: core.yml push_notifications.enabled: true, push_notifications.credentials_path: path/to/serviceAccountKey.json
 Or env: GOOGLE_APPLICATION_CREDENTIALS=/path/to/serviceAccountKey.json
+Includes a deep link (link) in the data payload so the app can open the right chat when the user taps (same format as APNs).
 """
+import urllib.parse
 from pathlib import Path
 from typing import Optional
+
+
+def _chat_deep_link(from_friend: Optional[str] = None) -> str:
+    """Build homeclaw://chat?from_friend=... for tap-to-open chat. Same format as APNs."""
+    friend = (str(from_friend or "HomeClaw").strip())[:128] or "HomeClaw"
+    return f"homeclaw://chat?from_friend={urllib.parse.quote(friend)}"
 
 from loguru import logger
 
@@ -96,6 +104,7 @@ def send_fcm_one(
             data["user_id"] = str(user_id).strip()[:256]
         if from_friend is not None and str(from_friend).strip():
             data["from_friend"] = str(from_friend).strip()[:128]
+        data["link"] = _chat_deep_link(from_friend)
         msg = messaging.Message(
             notification=messaging.Notification(title=title_s, body=body_s),
             data=data,

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:app_links/app_links.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:home_claw_app/l10n/app_localizations.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
@@ -10,6 +11,7 @@ import 'chat_history_store.dart';
 import 'core_service.dart';
 import 'screens/friend_list_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/open_chat_from_push_screen.dart';
 import 'screens/permissions_screen.dart';
 
 void main() async {
@@ -38,21 +40,72 @@ void main() async {
     coreService.registerPushTokenWithCore(coreService.sessionUserId!);
   }
   String? initialMessage;
+  String? initialPushFromFriend;
   try {
     final appLinks = AppLinks();
     final uri = await appLinks.getInitialLink();
-    if (uri != null && (uri.path == 'agent' || uri.path == '/agent')) {
-      initialMessage = uri.queryParameters['message'];
+    if (uri != null) {
+      if (uri.path == 'agent' || uri.path == '/agent') {
+        initialMessage = uri.queryParameters['message'];
+      }
+      // Deep link from push tap (iOS opens link; Android FCM also can use link): homeclaw://chat?from_friend=...
+      if (uri.path == 'chat' || uri.path == '/chat') {
+        final fromFriend = uri.queryParameters['from_friend']?.trim();
+        if (fromFriend != null && fromFriend.isNotEmpty) {
+          initialPushFromFriend = fromFriend;
+        }
+      }
     }
+    // Listen for deep links when app is already running (e.g. iOS notification tap opens link).
+    appLinks.uriLinkStream.listen((Uri uri) {
+      try {
+        if (uri.path == 'chat' || uri.path == '/chat') {
+          final fromFriend = uri.queryParameters['from_friend']?.trim();
+          if (fromFriend != null && fromFriend.isNotEmpty) {
+            coreService.addPushNotificationTap({'from_friend': fromFriend});
+          }
+        }
+      } catch (_) {}
+    });
   } catch (_) {}
-  runApp(HomeClawCompanionApp(coreService: coreService, initialMessage: initialMessage));
+  // When app was opened by tapping an FCM notification (Android), open the relevant chat.
+  if (Platform.isAndroid) {
+    try {
+      final msg = await FirebaseMessaging.instance.getInitialMessage();
+      if (msg != null && msg.data != null) {
+        initialPushFromFriend = (msg.data!['from_friend'] ?? 'HomeClaw').toString().trim();
+        if (initialPushFromFriend!.isEmpty) initialPushFromFriend = 'HomeClaw';
+      }
+    } catch (_) {}
+    try {
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        try {
+          final data = message.data;
+          if (data != null && data.isNotEmpty) {
+            coreService.addPushNotificationTap(Map<String, dynamic>.from(data));
+          }
+        } catch (_) {}
+      });
+    } catch (_) {}
+  }
+  runApp(HomeClawCompanionApp(
+    coreService: coreService,
+    initialMessage: initialMessage,
+    initialPushFromFriend: initialPushFromFriend,
+  ));
 }
 
 class HomeClawCompanionApp extends StatelessWidget {
   final CoreService coreService;
   final String? initialMessage;
+  final String? initialPushFromFriend;
 
-  const HomeClawCompanionApp({super.key, required this.coreService, this.initialMessage});
+  const HomeClawCompanionApp({
+    super.key,
+    required this.coreService,
+    this.initialMessage,
+    this.initialPushFromFriend,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +117,11 @@ class HomeClawCompanionApp extends StatelessWidget {
       ),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
-      home: _InitialScreen(coreService: coreService, initialMessage: initialMessage),
+      home: _InitialScreen(
+        coreService: coreService,
+        initialMessage: initialMessage,
+        initialPushFromFriend: initialPushFromFriend,
+      ),
     );
   }
 }
@@ -73,8 +130,13 @@ class HomeClawCompanionApp extends StatelessWidget {
 class _InitialScreen extends StatefulWidget {
   final CoreService coreService;
   final String? initialMessage;
+  final String? initialPushFromFriend;
 
-  const _InitialScreen({required this.coreService, this.initialMessage});
+  const _InitialScreen({
+    required this.coreService,
+    this.initialMessage,
+    this.initialPushFromFriend,
+  });
 
   @override
   State<_InitialScreen> createState() => _InitialScreenState();
@@ -83,11 +145,27 @@ class _InitialScreen extends StatefulWidget {
 class _InitialScreenState extends State<_InitialScreen> {
   Future<Widget>? _homeFuture;
   StreamSubscription<Map<String, dynamic>>? _pushSubscription;
+  StreamSubscription<Map<String, dynamic>>? _pushTapSubscription;
 
   @override
   void initState() {
     super.initState();
     _homeFuture = _resolveHome();
+    _pushTapSubscription = widget.coreService.pushNotificationTapStream.listen((data) {
+      if (!mounted) return;
+      try {
+        final fromFriend = (data['from_friend'] ?? 'HomeClaw').toString().trim();
+        if (fromFriend.isEmpty) return;
+        Navigator.maybeOf(context)?.push(
+          MaterialPageRoute(
+            builder: (context) => OpenChatFromPushScreen(
+              coreService: widget.coreService,
+              fromFriendName: fromFriend,
+            ),
+          ),
+        );
+      } catch (_) {}
+    });
     _pushSubscription = widget.coreService.pushMessageStream.listen((push) {
       try {
         final text = push['text'] as String? ?? '';
@@ -118,6 +196,7 @@ class _InitialScreenState extends State<_InitialScreen> {
   @override
   void dispose() {
     _pushSubscription?.cancel();
+    _pushTapSubscription?.cancel();
     super.dispose();
   }
 
@@ -135,6 +214,7 @@ class _InitialScreenState extends State<_InitialScreen> {
     return FriendListScreen(
       coreService: widget.coreService,
       initialMessage: widget.initialMessage,
+      initialPushFromFriend: widget.initialPushFromFriend,
     );
   }
 
