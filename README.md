@@ -46,6 +46,71 @@
 
 ---
 
+## Quick Start
+
+### Supported platforms
+
+HomeClaw runs on **macOS**, **Windows**, and **Linux**. You need:
+
+- **Python** 3.10–3.12 (recommended).
+- For **local GGUF models**: copy **llama.cpp's binary distribution** into `llama.cpp-master/<platform>/` for your device type (mac/, win_cuda/, linux_cpu/, etc.); used for both main and embedding local models. See `llama.cpp-master/README.md`. Then start servers per config.
+- For **cloud models**: only network access and the right API keys in the environment.
+
+**Recommended: Install script + Portal**
+
+| OS | Command |
+|----|--------|
+| **Mac / Linux** | `./install.sh` (run from project root, or from a parent directory — the script will clone into `./HomeClaw` and continue) |
+| **Windows** | `.\install.ps1` (run from project root, or from a parent directory — the script will clone into `.\HomeClaw` and continue) |
+
+The script checks or installs **Python 3.9+**, **Node.js**, clones the repo if needed, runs `pip install -r requirements.txt`, guides you on **llama.cpp** and **GGUF/Ollama**, then starts the **Portal** and opens http://127.0.0.1:18472 in your browser.
+
+**Portal** — Use the web UI to create an admin account, manage settings (Core, users, LLM, channels), start Core and channels, and follow the built-in **Guide to install**. No need to edit YAML by hand unless you prefer it. From the same machine you can also open Core’s **/portal-ui** (when Core is running and `portal_url` is set in `config/core.yml`) or use the **Companion app** to reach the Portal via Core.
+
+After install, run `python -m main doctor` to verify config and LLM connectivity. Full install details: **[InstallationGuide.md](InstallationGuide.md)**.
+
+**Manual install** — Clone the repo, then `pip install -r requirements.txt`. Edit **Core**: `config/core.yml` (host, port, `main_llm`, `embedding_llm`, etc.); **Users**: `config/user.yml`; **Channels**: `channels/.env` (e.g. `CORE_URL`, bot tokens). For **models**: set cloud API keys and `main_llm`, or set up local (llama.cpp/Ollama) and `local_models`. See **[HOW_TO_USE.md](HOW_TO_USE.md)** and [InstallationGuide.md](InstallationGuide.md) for the full step-by-step.
+
+**Run Portal** — Start the config and onboarding web UI:
+
+```bash
+python -m main portal
+```
+
+By default this opens http://127.0.0.1:18472 in your browser. Use the Portal to manage settings and **start Core** from the dashboard (or follow the in-app guide).
+
+**Run Core** — Either start Core from the Portal dashboard, or in a terminal:
+
+```bash
+python -m main start
+```
+
+(This runs Core and the built-in CLI channel.) Or run Core only: `python -m core.core` (default port 9000).
+
+**Run a channel** — With Core running, start each channel in its own terminal so people can talk to HomeClaw via that platform:
+
+```bash
+python -m channels.run <channel_name>
+```
+
+Examples: **WebChat** (browser UI at http://localhost:8014), **Slack**, **WhatsApp**, **Telegram**, **Discord**, **Signal**, **Google Chat**, **Teams**, **WeChat**, **Line**, **Feishu**, **DingTalk**, and more. For example:
+
+```bash
+python -m channels.run webchat    # → http://localhost:8014
+python -m channels.run slack
+python -m channels.run whatsapp
+python -m channels.run telegram
+python -m channels.run discord
+```
+
+Copy `channels/.env.example` to `channels/.env` and set `CORE_URL` (e.g. `http://127.0.0.1:9000`) and any bot tokens (e.g. `SLACK_BOT_TOKEN`, `TELEGRAM_BOT_TOKEN`). Each channel has a README in `channels/<name>/` with setup steps. Full list: [channels/README.md](channels/README.md).
+
+### Use the Companion app to chat
+
+Install the app from `clients/HomeClawApp/` or a release. Open the app → **Settings** → set **Core URL** to `http://127.0.0.1:9000` when on the same machine as Core, or to your [remote URL](#remote-access-tailscale-cloudflare-tunnel) (Tailscale, Cloudflare Tunnel, Ngrok, etc.) when away. Add your user in `config/user.yml` (or via Portal / **Manage Core** → Users) so Core accepts your messages. Then open **Chat** — the app sends messages to Core; you get the same AI and memory as WebChat and other channels.
+
+---
+
 **Other languages / 其他语言 / 他の言語 / 다른 언어:** [简体中文](README_zh.md) | [日本語](README_jp.md) | [한국어](README_kr.md)
 
 **Documentation:** [https://allenpeng0705.github.io/HomeClaw/](https://allenpeng0705.github.io/HomeClaw/) — Full docs (install, run, mix mode, reports, tools, plugins) are built with MkDocs and published there. You can also browse the source in the **`docs/`** folder on GitHub.
@@ -54,7 +119,8 @@
 
 ## Table of Contents
 
-- [Major Features](#major-features) (above) — Save cost · User sandbox · Skills & plugins · Companion app · Multi-agent · Remote & channels · Your social network
+- [Major Features](#major-features) — Save cost · User sandbox · Skills & plugins · Companion app · Multi-agent · Remote & channels · Your social network
+- [Quick Start](#quick-start) — Install script & Portal · Run Core · Run a channel · Companion app
 1. [What is HomeClaw?](#1-what-is-homeclaw)
 2. [What Can HomeClaw Do?](#2-what-can-homeclaw-do) — Channels (WhatsApp, Slack, Telegram, etc.), multi-user
 3. [Mix mode: Smart local/cloud routing](#3-mix-mode-smart-localcloud-routing) — 3-layer router
@@ -121,64 +187,7 @@ Use **cloud** (LiteLLM: OpenAI, Gemini, DeepSeek, etc.) or **local** (llama.cpp,
 
 ## 4. How to Use HomeClaw
 
-For a **step-by-step guide** (install, config, local/cloud models, memory, tools, workspace, testing, plugins, skills), see **[HOW_TO_USE.md](HOW_TO_USE.md)** (also [中文](HOW_TO_USE_zh.md) | [日本語](HOW_TO_USE_jp.md) | [한국어](HOW_TO_USE_kr.md)).
-
-### Supported platforms
-
-HomeClaw runs on **macOS**, **Windows**, and **Linux**. You need:
-
-- **Python** 3.10–3.12 (recommended).
-- For **local GGUF models**: copy **llama.cpp's binary distribution** into `llama.cpp-master/<platform>/` for your device type (mac/, win_cuda/, linux_cpu/, etc.); used for both main and embedding local models. See `llama.cpp-master/README.md`. Then start servers per config.
-- For **cloud models**: only network access and the right API keys in the environment.
-
-### Quick start (run, config, test)
-
-1. **Clone and install**
-
-   ```bash
-   git clone <repo_url>
-   cd <your_clone_folder>   # e.g. HomeClaw or GPT4All
-   pip install -r requirements.txt
-   ```
-
-2. **Config**
-
-   - **Core**: `config/core.yml` — host, port (default 9000), `main_llm`, `embedding_llm`, `use_tools`, `use_skills`, `use_memory`, etc.
-   - **Users**: `config/user.yml` — allowlist of users and their channel identities (email, im, phone).
-   - **Channels**: Copy `channels/.env.example` to `channels/.env`; set `CORE_URL` (e.g. `http://127.0.0.1:9000`) and any bot tokens (e.g. `TELEGRAM_BOT_TOKEN`). See `channels/README.md` per channel.
-
-3. **Models**
-
-   - **Cloud**: Add entries to `cloud_models` in `config/core.yml` with `api_key_name`; set the env var (e.g. `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`). Set `main_llm` to e.g. `cloud_models/OpenAI-GPT4o` or `cloud_models/Gemini-2.5-Flash`.
-   - **Local**: Copy **llama.cpp's binary distribution** into `llama.cpp-master/` for your device type (see `llama.cpp-master/README.md`); used for both main and embedding local models. Download GGUF models (e.g. from Hugging Face) into a `models/` folder; configure `local_models` in `config/core.yml` with path, host, port. Start the llama.cpp server(s) for each model you use. Or use **Ollama**: run Ollama, then use `llm download` and `llm set` in the CLI. Set `main_llm` to e.g. `local_models/main_vl_model_4B`.
-   - **Both**: You can use cloud for one role and local for another (e.g. cloud chat + local embedding), or switch between them; they can work together for better capability and cost.
-
-4. **Run Core**
-
-   ```bash
-   python -m core.core
-   ```
-
-   Or run the interactive CLI (Core + built-in channel):
-
-   ```bash
-   python -m main start
-   ```
-
-   **Run Core and all system plugins in one command:** Set `system_plugins_auto_start: true` in `config/core.yml`. Core will then start each plugin in `system_plugins/` (e.g. homeclaw-browser) and register them automatically. See [§6 System plugin: homeclaw-browser](#6-system-plugin-homeclaw-browser) and **system_plugins/README.md**.
-
-5. **Run a channel** (in another terminal)
-
-   ```bash
-   python -m channels.run webchat
-   ```
-
-   Open http://localhost:8014 (or the port shown). Or run Telegram/Discord/Slack, etc., as needed.
-
-6. **Test**
-
-   - Send a message in WebChat or the CLI. For tools/skills/plugins, see **docs_design/ToolsAndSkillsTesting.md** and **docs_design/RunAndTestPlugins.md**.
-   - Check config and LLM connectivity: `python -m main doctor`.
+For a **step-by-step guide** (install, config, local/cloud models, memory, tools, workspace, testing, plugins, skills), see **[HOW_TO_USE.md](HOW_TO_USE.md)** (also [中文](HOW_TO_USE_zh.md) | [日本語](HOW_TO_USE_jp.md) | [한국어](HOW_TO_USE_kr.md)). For getting started quickly, see [Quick Start](#quick-start) above.
 
 ### Remote access (Pinggy, Cloudflare Tunnel, Ngrok, Tailscale)
 
@@ -217,7 +226,7 @@ The app only needs **Core URL** and optional **API key**; no tunnel SDK in the a
 
 **Companion** is a Flutter app for **Mac, Windows, Linux, Android, and iOS**: chat, voice, attachments, and **Manage Core** (edit core.yml and user.yml from the app). Supports **multi-role** (e.g. AI as **Friend**). [Companion app doc](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [Build from source](clients/HomeClawApp/README.md)
 
-**Quick use:** (1) Get the app from `clients/HomeClawApp/` or a build. (2) **Settings** → set **Core URL** (`http://127.0.0.1:9000` same machine, or [Pinggy / Cloudflare / Ngrok / Tailscale](#remote-access-tailscale-cloudflare-tunnel) for remote). (3) Add your user in **config/user.yml** (or via **Manage Core** → Users). (4) Chat; use **Manage Core** to edit config. All channels and the app talk to the same Core and memory.
+To use it: set **Core URL** in Settings (same machine: `http://127.0.0.1:9000`; remote: see [Remote access](#remote-access-tailscale-cloudflare-tunnel)), ensure your user is in **config/user.yml** (or add via Portal / **Manage Core** → Users), then open **Chat** to talk to HomeClaw. The app talks to Core; same AI and memory as WebChat and other channels. You can also open **Manage Core** in the app to edit config or go to **/portal-ui** when Core is running with `portal_url` set.
 
 ---
 
