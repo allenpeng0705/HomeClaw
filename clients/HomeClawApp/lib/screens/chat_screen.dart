@@ -98,6 +98,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   int _loadingStatusIndex = 0;
   Timer? _loadingStatusTimer;
   bool _wasRouteCurrent = false;
+  Uint8List? _chatPartnerAvatar;
+
+  Future<void> _loadChatPartnerAvatar() async {
+    final url = widget.isUserFriend && (widget.toUserId ?? '').trim().isNotEmpty
+        ? widget.coreService.userAvatarUrl(widget.toUserId!.trim())
+        : widget.coreService.friendAvatarUrl((widget.friendId ?? 'HomeClaw').trim());
+    final bytes = await widget.coreService.fetchAvatarWithAuth(url);
+    if (mounted && bytes != null && bytes.isNotEmpty) {
+      setState(() => _chatPartnerAvatar = bytes);
+    }
+  }
 
   @override
   void initState() {
@@ -105,6 +116,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _loadTtsAutoSpeak();
     _loadVoiceInputLocale();
+    _loadChatPartnerAvatar();
     if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
       _loadUserInbox();
     } else {
@@ -1459,9 +1471,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } else if (!isCurrent) {
       _wasRouteCurrent = false;
     }
+    final hasThumbnail = _chatPartnerAvatar != null && _chatPartnerAvatar!.isNotEmpty;
+    final hideHomeClawLabel = hasThumbnail && widget.userName.trim().toLowerCase() == 'homeclaw';
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.userName),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+              backgroundImage: hasThumbnail ? MemoryImage(_chatPartnerAvatar!) : null,
+              child: hasThumbnail ? null : Text((widget.userName.isNotEmpty ? widget.userName[0] : '?').toUpperCase(), style: const TextStyle(fontSize: 16)),
+            ),
+            if (!hideHomeClawLabel) ...[
+              const SizedBox(width: 10),
+              Flexible(child: Text(widget.userName, overflow: TextOverflow.ellipsis)),
+            ],
+          ],
+        ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.of(context).pop(),

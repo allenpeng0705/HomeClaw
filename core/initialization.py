@@ -221,6 +221,12 @@ def run_initialize(core: Any) -> None:
     vector stores, knowledge base, and memory backend (Cognee or chroma). Sets attributes on core.
     """
     logger.debug("core initializing...")
+    # Log GPU/CUDA availability once so users can confirm whether local LLM will use GPU
+    try:
+        cuda_available = Util().has_gpu_cuda()
+        logger.info("CUDA (GPU) available: {} — local llama.cpp models will use {}", cuda_available, "GPU" if cuda_available else "CPU")
+    except Exception:
+        logger.info("CUDA (GPU) available: unknown — local llama.cpp will use platform default (CPU or GPU)")
     core.initialize_vector_store(collection_name="memory")
     logger.debug("core init: vector_store done")
     core.embedder = LlamaCppEmbedding()

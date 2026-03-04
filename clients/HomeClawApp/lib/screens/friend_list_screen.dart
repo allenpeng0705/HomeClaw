@@ -175,26 +175,32 @@ class _FriendListScreenState extends State<FriendListScreen> {
             },
             tooltip: 'Friend requests',
           ),
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loading ? null : _loadFriends,
-            tooltip: l10n.refreshFriends,
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => SettingsScreen(coreService: widget.coreService),
-                ),
-              );
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'More',
+            onSelected: (value) {
+              switch (value) {
+                case 'refresh':
+                  if (!_loading) _loadFriends();
+                  break;
+                case 'settings':
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => SettingsScreen(coreService: widget.coreService),
+                    ),
+                  );
+                  break;
+                case 'logout':
+                  _logout();
+                  break;
+              }
             },
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: _logout,
-            tooltip: l10n.logOut,
+            itemBuilder: (context) => [
+              PopupMenuItem(value: 'refresh', enabled: !_loading, child: Row(children: [const Icon(Icons.refresh, size: 20), const SizedBox(width: 16), Text(l10n.refreshFriends)])),
+              const PopupMenuItem(value: 'settings', child: Row(children: [Icon(Icons.settings, size: 20), SizedBox(width: 16), Text('Settings')])),
+              PopupMenuItem(value: 'logout', child: Row(children: [const Icon(Icons.logout, size: 20), const SizedBox(width: 16), Text(l10n.logOut)])),
+            ],
           ),
         ],
       ),
@@ -234,6 +240,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
                           initialMessage: index == 0 ? widget.initialMessage : null,
                           isUserFriend: isUserFriend,
                           toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
+                          onRemoved: _loadFriends,
                         );
                       },
                     ),
@@ -251,6 +258,7 @@ class _FriendTile extends StatelessWidget {
   final bool isUserFriend;
   /// When [isUserFriend], the other user's id for POST /api/user-message.
   final String? toUserId;
+  final VoidCallback? onRemoved;
 
   const _FriendTile({
     required this.userId,
@@ -260,7 +268,51 @@ class _FriendTile extends StatelessWidget {
     this.initialMessage,
     this.isUserFriend = false,
     this.toUserId,
+    this.onRemoved,
   });
+
+  /// Id to send to DELETE /api/me/friends/{id}: for user friend use toUserId, for AI use friendId.
+  String get _deleteId => (isUserFriend && (toUserId ?? '').trim().isNotEmpty) ? toUserId!.trim() : friendId;
+
+  /// HomeClaw cannot be removed (system default).
+  bool get _canRemove => friendId.trim().toLowerCase() != 'homeclaw';
+
+  Future<void> _removeFriend(BuildContext context) async {
+    if (!_canRemove) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(isUserFriend ? 'Remove user friend?' : 'Remove AI friend?'),
+        content: Text(
+          isUserFriend
+              ? 'Remove $displayName from your friends? They will no longer appear in your list.'
+              : 'Remove $displayName from your friends? You can add them again later.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await coreService.deleteAIFriend(_deleteId);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$displayName removed')));
+        onRemoved?.call();
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to remove: $e'), backgroundColor: Theme.of(context).colorScheme.errorContainer),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -277,6 +329,13 @@ class _FriendTile extends StatelessWidget {
         ),
         title: Text(displayName),
         subtitle: isUserFriend ? Text('User', style: Theme.of(context).textTheme.bodySmall) : null,
+        trailing: _canRemove
+            ? IconButton(
+                icon: const Icon(Icons.more_vert),
+                onPressed: () => _removeFriend(context),
+                tooltip: 'Remove friend',
+              )
+            : null,
         onTap: () {
           Navigator.push(
             context,
