@@ -135,13 +135,19 @@ class LLMServiceManager:
                               opts_override: Dict = None):
         """
         Start llama.cpp server. Parameters not passed are read from config/core.yml under llama_cpp.
-        When opts_override is set (e.g. llama_cpp.embedding), it is merged over base llama_cpp opts.
+        When opts_override is set (embedding): only llama_cpp.embedding is used — main model settings are not applied.
         For vision models: pass mmproj_path (full path to projector .gguf).
         For LoRA: pass lora_paths (list of full paths; one or more adapters) and optionally lora_base_path.
         """
-        opts = dict(self._llama_cpp_opts())
-        if opts_override:
-            opts.update(opts_override)
+        if opts_override is not None:
+            # Embedding server: use only the embedding subsection; main model opts (batch_size, cache_type_k, grp_attn_*, etc.) do not apply.
+            opts = dict(opts_override)
+            # Embedding-friendly defaults when keys are missing (do not use main-model values).
+            opts.setdefault("ctx_size", 0)
+            opts.setdefault("threads", 4)
+            opts.setdefault("n_gpu_layers", 20)
+        else:
+            opts = dict(self._llama_cpp_opts())
 
         def _str(v):
             return str(v) if v is not None else None
@@ -149,8 +155,8 @@ class LLMServiceManager:
         ctx_size = _str(ctx_size) or _str(opts.get("ctx_size")) or ("0" if pooling else "32768")
         predict = _str(predict) or _str(opts.get("predict")) or "8192"
         temp = _str(temp) or _str(opts.get("temp")) or "0.8"
-        threads = _str(threads) or _str(opts.get("threads")) or "8"
-        n_gpu_layers = _str(n_gpu_layers) or _str(opts.get("n_gpu_layers")) or "99"
+        threads = _str(threads) or _str(opts.get("threads")) or ("4" if opts_override is not None else "8")
+        n_gpu_layers = _str(n_gpu_layers) or _str(opts.get("n_gpu_layers")) or ("20" if opts_override is not None else "99")
         verbose = verbose if verbose is not None else opts.get("verbose", False)
         repeat_penalty = _str(opts.get("repeat_penalty")) or "1.5"
         if chat_format is None:
@@ -201,6 +207,12 @@ class LLMServiceManager:
             )
             return
         use_gpu = folder in (FOLDER_WIN_CUDA, FOLDER_LINUX_CUDA)
+        logger.info(
+            "LLM device: {} (platform folder: {}), model: {}",
+            "GPU (CUDA)" if use_gpu else "CPU",
+            folder,
+            os.path.basename(full_model_path),
+        )
         threads_val = threads if (thread_num is None or thread_num > 8) else str(thread_num)
 
         cmd_list = [
@@ -246,11 +258,69 @@ class LLMServiceManager:
         if use_gpu:
             cmd_list.extend(["--n-gpu-layers", n_gpu_layers])
 
+        # Flash Attention: --flash-attn auto | on | off (from config; omit = server default)
+        flash_attn = opts.get("flash_attn")
+        if flash_attn is not None and str(flash_attn).lower() in ("auto", "on", "off"):
+            cmd_list.extend(["--flash-attn", str(flash_attn).lower()])
+
+        # Memory mapping: use_mmap false → --no-mmap (default is mmap enabled)
+        use_mmap = opts.get("use_mmap")
+        if use_mmap is False or (isinstance(use_mmap, str) and str(use_mmap).lower() in ("false", "0", "no")):
+            cmd_list.append("--no-mmap")
+
+        # Batch size: prompt processing batch (higher = better throughput, more VRAM). Omit = server default (e.g. 512).
+        batch_size = opts.get("batch_size")
+        if batch_size is not None:
+            try:
+                cmd_list.extend(["--batch-size", str(int(batch_size))])
+            except (TypeError, ValueError):
+                pass
+
+        # Continuous batching: -cb for parallel request handling (can improve throughput; helps avoid OOM during prefill).
+        cont_batching = opts.get("cont_batching")
+        if cont_batching in (True, "true", "True", "1", 1):
+            cmd_list.append("--cont-batching")
+
+        # KV cache quantization: --cache-type-k / --cache-type-v (e.g. q8_0, q4_0) — cuts KV cache size 50%+; can reduce VRAM and help reasoning speed.
+        cache_type_k = opts.get("cache_type_k")
+        if cache_type_k is not None and str(cache_type_k).strip().lower() in ("q8_0", "q4_0", "q4_1", "f16"):
+            cmd_list.extend(["--cache-type-k", str(cache_type_k).strip().lower()])
+        cache_type_v = opts.get("cache_type_v")
+        if cache_type_v is not None and str(cache_type_v).strip().lower() in ("q8_0", "q4_0", "q4_1", "f16"):
+            cmd_list.extend(["--cache-type-v", str(cache_type_v).strip().lower()])
+
+        # Self-extend: --grp-attn-n and --grp-attn-w — extend context with less overhead (e.g. 4k model to 16k). n=expansion factor, w=window (e.g. 512–2048).
+        grp_attn_n = opts.get("grp_attn_n")
+        if grp_attn_n is not None:
+            try:
+                n_val = int(grp_attn_n)
+                if n_val >= 1:
+                    cmd_list.extend(["--grp-attn-n", str(n_val)])
+            except (TypeError, ValueError):
+                pass
+        grp_attn_w = opts.get("grp_attn_w")
+        if grp_attn_w is not None:
+            try:
+                w_val = int(grp_attn_w)
+                if w_val >= 1:
+                    cmd_list.extend(["--grp-attn-w", str(w_val)])
+            except (TypeError, ValueError):
+                pass
+        # Some llama.cpp builds use --grp-attn-s (neighbor scale) instead of or with -w
+        grp_attn_s = opts.get("grp_attn_s")
+        if grp_attn_s is not None:
+            try:
+                s_val = int(grp_attn_s)
+                if s_val >= 1:
+                    cmd_list.extend(["--grp-attn-s", str(s_val)])
+            except (TypeError, ValueError):
+                pass
+
         # Diagnose port in use before starting (common blocker)
         try:
             with socket.create_connection((host, port), timeout=1.0):
-                logger.warning(
-                    "Port {}:{} is already in use; llama-server may fail to bind. Free the port or change config (local_models port).",
+                logger.error(
+                    "Port {}:{} is already in use — local model will not work. Free the port (stop the process using it) or set main_llm_port to another port in config/llm.yml.",
                     host, port,
                 )
         except (socket.error, OSError):
@@ -354,9 +424,7 @@ class LLMServiceManager:
             self.llms.append(llm_name)
             logger.debug("Ollama model {} registered (no process started; ensure Ollama server is running on {}:{})", llm_name, host, port)
         elif llm_type == 'local':
-            main_ref = Util().get_core_metadata().main_llm
-            if mode == "mix" and local_ref:
-                main_ref = local_ref
+            main_ref = (local_ref if (mode == "mix" and local_ref) else (Util()._effective_main_llm_ref() or getattr(Util().get_core_metadata(), "main_llm", None)) or "").strip()
             entry, _ = Util()._get_model_entry(main_ref)
             mmproj_path, lora_paths, lora_base_path = (None, [], None)
             if entry and not Util()._is_ollama_entry(entry):

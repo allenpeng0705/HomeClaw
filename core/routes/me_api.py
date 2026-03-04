@@ -193,7 +193,7 @@ def get_api_me_friends_patch_handler(core):  # noqa: ARG001
 
 
 def get_api_me_friends_delete_handler(core):  # noqa: ARG001
-    """DELETE /api/me/friends/{friend_id}. Remove AI friend. Cannot remove HomeClaw."""
+    """DELETE /api/me/friends/{friend_id}. Remove AI friend (friend_id=name) or user friend (friend_id=other user's id). Cannot remove HomeClaw."""
 
     async def handler(
         friend_id: str,
@@ -205,6 +205,8 @@ def get_api_me_friends_delete_handler(core):  # noqa: ARG001
             if not fid:
                 return JSONResponse(status_code=400, content={"detail": "friend_id required"})
             if Util().remove_ai_friend(user_id, fid):
+                return JSONResponse(content={"ok": True})
+            if Util().remove_user_friend(user_id, fid):
                 return JSONResponse(content={"ok": True})
             return JSONResponse(status_code=400, content={"detail": "Not found or cannot remove HomeClaw"})
         except Exception as e:

@@ -59,7 +59,16 @@ local_models:
     path: Qwen3VL-4B-Instruct-Q4_K_M.gguf
     mmproj: mmproj-Qwen3VL-4B-Instruct-F16.gguf
     host: 127.0.0.1
-    port: 5023
+    port: 5027
+    capabilities: [Chat]
+    supported_media: [image]
+
+  - id: main_vl_model_8B
+    alias: main_vl_model_8B
+    path: Qwen3-VL-8B-Instruct-Q4_K_M.gguf
+    mmproj: mmproj-Qwen3-VL-8B-BF16.gguf
+    host: 127.0.0.1
+    port: 5028
     capabilities: [Chat]
     supported_media: [image]
 
@@ -67,15 +76,16 @@ local_models:
     alias: Qwen3.5-27B-Q4_K_M
     path: Qwen3.5-27B-Q4_K_M.gguf
     host: 127.0.0.1
-    port: 5024
+    port: 5023
     capabilities: [Chat]
 
   - id: Qwen3.5-9B-Q5_K_M
     alias: Qwen3.5-9B-Q5_K_M
     path: Qwen3.5-9B-Q5_K_M.gguf
     host: 127.0.0.1
-    port: 5024
+    port: 5026
     capabilities: [Chat]
+    # Note: was 5024; use a different port so 27B and 9B can run at the same time (only one process per port).
 
   - id: gemma_3_4b_it_4B
     alias: gemma_3_4b_it_4B
@@ -170,7 +180,7 @@ cloud_models:
 # main_llm: optional when main_llm_mode is set. When mode is "local" we use main_llm_local; when "cloud" we use main_llm_cloud; when "mix" we use both per request.
 # If the local llama.cpp server is not running (e.g. connection refused to 127.0.0.1:5022), use main_llm_mode: cloud so only cloud is used, or start the local server.
 #main_llm: local_models/main_vl_model_4B
-main_llm_mode: mix
+main_llm_mode: local
 main_llm_local: local_models/Qwen3.5-27B-Q4_K_M
 main_llm_cloud: cloud_models/DeepSeek-Chat
 # Mix mode routing: heuristic (Layer 1), semantic (Layer 2), SLM (Layer 3: classifier or perplexity). See comments in hybrid_router.
@@ -197,7 +207,9 @@ main_llm_language: [en, zh]
 
 embedding_llm: local_models/Qwen3-Embedding-0.6B
 
-# Legacy fields (derived from model entry when using local_models/cloud_models)
+# Main and embedding server connection: Core always uses these host/port for the selected main LLM and embedding model.
+# Per-model host/port in local_models above are for multi-model use (e.g. running several models on different ports later).
+# If local model doesn't work: check logs for "unreachable" (server not running), "port already in use", or "exited quickly" (startup failed).
 embedding_host: 127.0.0.1
 embedding_port: 5066
 # embedding_health_check_timeout_sec: 120   # seconds to wait for local embedding server; default 120

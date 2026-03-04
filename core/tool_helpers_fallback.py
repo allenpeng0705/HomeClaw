@@ -124,27 +124,142 @@ def tool_result_usable_as_final_response(
         return False
 
 
+# Broad reminder/scheduling intent keywords across languages. Not limited to specific actions (drink, meeting).
+# If the user says "remind me to X" or "N分钟后提醒我 X" in any language, we want to match on the reminder part.
+_REMINDER_INTENT_KEYWORDS = (
+    # Chinese (generic reminder / alarm / notify)
+    "提醒", "提醒我", "闹钟", "定时", "通知", "到点", "到点提醒", "提前提醒", "能提醒", "帮我提醒",
+    "记得提醒", "到时提醒", "到时间提醒", "叫我", "闹铃", "提醒一下", "设个提醒", "设提醒",
+    # English (generic)
+    "remind", "remind me", "reminder", "reminders", "notify", "notify me", "alert", "alert me",
+    "alarm", "wake me", "call me", "ping me", "tell me", "set reminder", "set a reminder",
+    "add reminder", "create reminder", "schedule reminder", "wake up", "check in",
+    # Korean
+    "알림", "알려줘", "알려주", "알려", "리마인드", "알려주세요",
+    # Japanese
+    "リマインド", "思い出させて", "通知", "アラーム", "覚えて",
+    # Spanish / Portuguese
+    "recordar", "recordarme", "avisar", "avísame", "lembrar", "lembre-me", "avisa",
+    # German / French
+    "erinnern", "erinnere mich", "rappeler", "rappelle-moi",
+    # Italian / Dutch
+    "ricordare", "ricordami", "herinner", "herinner me",
+    # Other
+    "hatırlat", "napomni", "напомни", "przypomnij",
+)
+# Patterns (order matters): (regex, group_index, multiplier). multiplier 1 = minutes, 60 = hours->minutes.
+# "提前 X 分钟 ... Y 分钟后" is handled above with m_ev/m_bef, not here.
+# Multilingual: Chinese, English, and common European time phrases.
+_REMIND_ME_MINUTES_PATTERNS = [
+    # Chinese
+    (r"(\d+)\s*分钟(?:后|以后|之后)?", 1, 1),
+    (r"(\d+)\s*分钟", 1, 1),
+    (r"过\s*(\d+)\s*分钟", 1, 1),
+    (r"(\d+)\s*分钟\s*后", 1, 1),
+    (r"(\d+)\s*小时\s*后", 1, 60),
+    (r"(\d+)\s*个小时\s*后", 1, 60),
+    # English
+    (r"(?:remind|tell|ping|call)\s+(?:me\s+)?in\s+(\d+)\s*(?:min|minutes?)\b", 1, 1),
+    (r"in\s+(\d+)\s*(?:min|minutes?)\s*(?:from now|later)?", 1, 1),
+    (r"(\d+)\s*(?:min|minutes?)\s+(?:from now|later|from now on)", 1, 1),
+    (r"(\d+)\s*(?:min|mins?)\b", 1, 1),
+    (r"after\s+(\d+)\s*(?:min|minutes?)", 1, 1),
+    (r"in\s+(\d+)\s*hours?\b", 1, 60),
+    (r"(\d+)\s*hours?\s+(?:from now|later)", 1, 60),
+    # French, German, Spanish, Italian (e.g. "dans 10 minutes", "in 10 Minuten")
+    (r"(?:dans|en|in|tra)\s+(\d+)\s*(?:min|minutes?|minuten|minuti|minutos?)\b", 1, 1),
+    (r"(\d+)\s*(?:min|minutes?|minuten|minuti|minutos?)\s*(?:plus tard|later)", 1, 1),
+]
+# When user says "event in N min" but no "remind M min before", we don't guess — return None (ask).
+_EVENT_ONLY_KEYWORDS = ("有个会", "开会", "meeting", "会议", "appointment", "会")
+
+
+def _has_reminder_intent(q: str) -> bool:
+    """
+    True if query suggests a one-shot reminder. Uses:
+    (1) Multilingual reminder keywords (any language), not limited to specific actions.
+    (2) Fallback: clear time phrase (e.g. "in 5 min", "10分钟后") + first-person or imperative
+        so "5分钟后叫我" or "in 10 minutes tell me" match without needing "喝水" or "meeting".
+    """
+    if not q or len(q.strip()) < 2:
+        return False
+    q_lower = q.lower()
+    for kw in _REMINDER_INTENT_KEYWORDS:
+        if kw.isascii() and kw in q_lower:
+            return True
+        if not kw.isascii() and kw in q:
+            return True
+    # Time phrase + first-person or tell/remind verb (any language) -> treat as reminder intent
+    has_time = bool(
+        re.search(r"\d+\s*分钟(?:后|以后|之后)?|\d+\s*分钟", q)
+        or re.search(r"in\s+\d+\s*(?:min|minutes?|hours?)\b", q, re.IGNORECASE)
+        or re.search(r"\d+\s*(?:min|minutes?|hours?)\s+(?:from now|later)", q, re.IGNORECASE)
+    )
+    first_person_or_imperative = bool(
+        re.search(r"我|me\b|mich|moi", q, re.IGNORECASE)
+        or re.search(r"(提醒|叫|告诉|remind|tell|notify|call|wake|ping)\s*(me|我)?", q, re.IGNORECASE)
+    )
+    if has_time and first_person_or_imperative:
+        return True
+    return False
+
+
+def _is_event_without_advance(q: str) -> bool:
+    """True if user mentioned an event (e.g. meeting) but not 'M minutes before'."""
+    for kw in _EVENT_ONLY_KEYWORDS:
+        if kw in q or kw in q.lower():
+            if re.search(r"提前\s*\d+\s*分钟", q) or re.search(r"\d+\s*(?:min|minutes?)\s+(?:before|in advance|ahead)", q, re.IGNORECASE):
+                return False
+            return True
+    return False
+
+
 def infer_remind_me_fallback(query: str) -> Optional[Dict[str, Any]]:
-    """Infer remind_me(minutes, message) from Chinese/English reminder phrases. Never raises."""
+    """
+    Infer remind_me(minutes, message) from natural-language reminder phrases (many styles/languages).
+    When the LLM did not call remind_me, this allows Core to run the tool anyway so the reminder is actually set.
+    Never raises.
+    """
     if not query or not isinstance(query, str):
         return None
     try:
         q = query.strip()
+        if not q or not _has_reminder_intent(q):
+            return None
+        # "Event in N min" without "M min before" -> do not guess; ask user.
+        if _is_event_without_advance(q):
+            return None
+        minutes = None
+        mult = 1
+        # Prefer "X分钟后...提前Y分钟" -> minutes = X - Y
         m_ev = re.search(r"(\d+)\s*分钟(?:后|以后|之后)?", q)
         m_bef = re.search(r"提前\s*(\d+)\s*分钟", q)
         if m_ev and m_bef:
-            ev, bef = int(m_ev.group(1)), int(m_bef.group(1))
-            if 1 <= ev <= 43200 and 0 <= bef <= ev:
-                n = max(1, ev - bef)
-                return {"tool": "remind_me", "arguments": {"minutes": n, "message": q[:120] or "Reminder"}}
-        m = re.search(r"(\d+)\s*分钟后", q)
-        if m:
-            n = int(m.group(1))
-            if 0 < n <= 43200:
-                event_kw = ("有个会", "开会", "meeting", "会议")
-                if not m_bef and any(k in q for k in event_kw):
-                    return None
-                return {"tool": "remind_me", "arguments": {"minutes": n, "message": q[:120] or "Reminder"}}
+            try:
+                ev, bef = int(m_ev.group(1)), int(m_bef.group(1))
+                if 1 <= ev <= 43200 and 0 <= bef <= ev:
+                    minutes = max(1, ev - bef)
+            except (ValueError, TypeError):
+                pass
+        if minutes is None:
+            for pat, grp_idx, mul in _REMIND_ME_MINUTES_PATTERNS:
+                m = re.search(pat, q, re.IGNORECASE)
+                if m:
+                    try:
+                        n = int(m.group(grp_idx))
+                        if 0 < n <= (43200 if mul == 1 else 720):  # cap 30d in min, 12h in hours
+                            minutes = n * mul
+                            break
+                    except (ValueError, IndexError, TypeError):
+                        continue
+        if minutes is None or minutes <= 0 or minutes > 43200:
+            return None
+        # Short message without date/time (tool will show time; we avoid inventing)
+        msg = (q[:80].strip() if len(q) > 80 else q.strip()) or "Reminder"
+        # If message is only a clock/time fragment (e.g. "下午5:19"), use generic label so we don't duplicate time in UI
+        if len(msg) <= 25 and re.search(r"\d{1,2}\s*[点:]\s*\d{1,2}|下午\d|上午\d|^\d{1,2}:\d{2}", msg):
+            msg = "Reminder"
+        return {"tool": "remind_me", "arguments": {"minutes": minutes, "message": msg[:120] or "Reminder"}}
     except Exception:
         pass
     return None
@@ -154,9 +269,7 @@ def remind_me_needs_clarification(query: str) -> bool:
     """True when user wants a reminder but we couldn't extract when. Never raises."""
     if not query or not isinstance(query, str):
         return False
-    q = query.strip()
-    reminder_kw = ("remind", "提醒", "闹钟", "定时", "有个会", "开会", "meeting", "提前提醒", "到点提醒")
-    if not any(kw in q.lower() if kw.isascii() else kw in q for kw in reminder_kw):
+    if not _has_reminder_intent(query.strip()):
         return False
     return infer_remind_me_fallback(query) is None
 

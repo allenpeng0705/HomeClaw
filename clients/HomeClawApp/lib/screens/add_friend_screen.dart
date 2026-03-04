@@ -30,9 +30,22 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
     });
     try {
       final list = await widget.coreService.getUsers();
+      final friends = await widget.coreService.getFriends();
+      final alreadyFriendIds = <String>{};
+      for (final f in friends) {
+        final type = (f['type'] as String?)?.trim().toLowerCase();
+        if (type == 'user') {
+          final uid = (f['user_id'] as String?)?.trim();
+          if (uid != null && uid.isNotEmpty) alreadyFriendIds.add(uid);
+        }
+      }
+      final filtered = list.where((u) {
+        final id = (u['id'] as String?)?.trim() ?? '';
+        return id.isNotEmpty && !alreadyFriendIds.contains(id);
+      }).toList();
       if (mounted) {
         setState(() {
-          _users = list;
+          _users = filtered;
           _loading = false;
         });
       }

@@ -49,8 +49,10 @@ from core.log_helpers import _component_log, _truncate_for_log, _strip_leading_r
 _SCHEDULING_INTENT_TOKENS = (
     # Chinese
     "提醒", "每隔", "每小时", "个小时", "小时", "早上", "点", "每天", "定时", "预约", "问候",
+    "喝水", "吃药", "能提醒", "帮我提醒", "到时提醒", "分钟后", "分钟",
     # English
     "remind", "every", "hour", "schedule", "recurring", "cron", "wake", "greet", "check in",
+    "in 5 min", "in 10 min", "set a reminder", "set reminder",
     # Korean (remind, hour, daily, etc.)
     "알림", "알려", "시간", "매시간", "매일", "예약",
     # Japanese
@@ -517,7 +519,7 @@ async def answer_from_memory(
                     ctx_line += f" User location: {loc_str[:500]}."
             except Exception as e:
                 logger.debug("System context location resolve: {}", e)
-            ctx_line += "\nCritical for cron jobs and reminders: this current datetime is the single source of truth. The server uses it when scheduling; you must use it for all time calculations. Do not use any other time (e.g. from memory or prior turns—they may be outdated). Use this block only when the user explicitly asks (e.g. \"what day is it?\", \"what time is it?\", scheduling with remind_me, record_date, cron_schedule). Do not volunteer date/time in greetings. For reminders and cron: use ONLY the Current time above; do not invent or guess any time (e.g. never output 26号 15:49, 明天下午7点, 2026-1月 3号, or 2:49 PM). If the user says \"in N minutes\", reminder time = Current time + N minutes (e.g. Current time 17:58 + 30 min = 18:28). For remind_me(message=...): do NOT put any date or time inside the message; use a short label only (e.g. 会议提醒, Reminder: meeting)."
+            ctx_line += "\nCritical for cron jobs and reminders: this current datetime is the single source of truth. The server uses it when scheduling; you must use it for all time calculations. Do not use any other time (e.g. from memory or prior turns—they may be outdated). Use this block only when the user explicitly asks (e.g. \"what day is it?\", \"what time is it?\", scheduling with remind_me, record_date, cron_schedule). Do not volunteer date/time in greetings. For any reminder or schedule request (in any wording), you MUST call the tool (remind_me, cron_schedule, or record_date)—replying with text only does not create a reminder. For reminders and cron: use ONLY the Current time above; do not invent or guess any time (e.g. never output 26号 15:49, 明天下午7点, 2026-1月 3号, or 2:49 PM). If the user says \"in N minutes\", reminder time = Current time + N minutes (e.g. Current time 17:58 + 30 min = 18:28). For remind_me(message=...): do NOT put any date or time inside the message; use a short label only (e.g. 会议提醒, Reminder: meeting)."
             system_parts.append("## System context (date/time and location)\n" + ctx_line + "\n\n")
         except Exception as e:
             logger.debug("System context block failed: {}", e)
@@ -1119,8 +1121,9 @@ async def answer_from_memory(
                 "Opening a URL in a browser (real web URLs only, e.g. https://example.com) -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=browser_navigate, parameters={\"url\": \"<URL>\"}). Node ids like test-node-1 are NOT URLs.\n"
                 "Listing connected nodes or \"what nodes are connected\" -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_list).\n"
                 "If the request clearly matches one of the available plugins below, call route_to_plugin with that plugin_id (and capability_id/parameters when relevant).\n"
-                "For time-related requests only: one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only when the user clearly asks to schedule or remind (e.g. \"remind me in 5 minutes\", \"every day at 9am\"). When the user asks for periodic check-ins, recurring reminders, or \"every N hours\" / \"daily at X o'clock\" (in any language), you MUST call cron_schedule or remind_me so the schedule is actually created; replying with text only does NOT set any schedule.\n"
-                f"When the user asks to be reminded in N minutes (e.g. \"30分钟后提醒我\", \"remind me in 30 minutes\", \"我30分钟后有个会能提醒一下吗\"), you MUST call the remind_me tool with minutes=N (use the number from the user's message; 30分钟后 = 30 minutes) and message= a short reminder text WITHOUT any date or time (e.g. \"会议提醒\" or \"Reminder: meeting\"; do NOT put \"26号 15:49\" or \"7pm\" in message). Do NOT reply with text-only or fake JSON; always call remind_me so the reminder is actually scheduled. The current time for this request is {_req_time_24}. Use only this time in your reply; never invent times (e.g. never 2:49 PM, 明天下午7点, 2026-1月 3号)—if current time is {_req_time_24} and user says 15 minutes, say that time or \"in 15 minutes\".\n"
+                "Rule (scheduling): For any reminder or schedule request—in any wording or language (e.g. \"提醒我\", \"remind me\", \"7分钟后喝水\", \"in 10 minutes\", \"every day at 9\")—you MUST call the tool (remind_me, cron_schedule, or record_date). Replying with text only does NOT create a reminder; the user will not be notified. Always invoke the tool in this turn.\n"
+                "For time-related requests: one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only when the user clearly asks to schedule or remind.\n"
+                f"When the user asks to be reminded in N minutes (any phrasing: \"N分钟后\", \"N分钟提醒\", \"remind me in N minutes\", \"in N min\"), you MUST call remind_me with minutes=N (use the number from the user's message) and message= a short label only (e.g. \"喝水\", \"会议提醒\"; do NOT put date/time in message). Current time: {_req_time_24}. Use only this time; never invent times (e.g. never 2:49 PM, 明天下午7点).\n"
                 "For script-based workflows use run_skill(skill_name, script, ...). For instruction-only skills (no scripts/) use run_skill(skill_name) with no script—then you MUST continue in the same turn (document_read, generate content, file_write or save_result_page, return link); do not reply with only the confirmation. skill_name can be folder or short name (e.g. html-slides).\n"
                 "When the user asks to generate an HTML slide or report from a document/file: (1) call document_read(path) to get the file content, (2) use that returned text as the source and generate the full HTML yourself, (3) call save_result_page(title=..., content=<your generated full HTML>, format='html'). For HTML slides do NOT use format='markdown'—use format='html'. Never pass empty or minimal content; content must be the full slide deck/report HTML.\n"
                 "Using an external service (Slack, LinkedIn, Outlook, HubSpot, Notion, Gmail, Stripe, Google Calendar, Salesforce, Airtable, etc.) -> use run_skill(skill_name='maton-api-gateway-1.0.0', script='request.py') with app and path from the maton skill body (Supported Services table and references/). Do not claim the action was done without calling the skill. For LinkedIn post: GET linkedin/rest/me then POST linkedin/rest/posts with commentary.\n"
@@ -1130,6 +1133,12 @@ async def answer_from_memory(
             )
             system_parts.append(routing_block)
             force_include_instructions.extend(plugin_force_instructions)
+
+        # When user message looks like a reminder/schedule request, add a short instruction so the model prefers calling the tool.
+        if query and isinstance(query, str) and _query_looks_like_scheduling(query.strip()):
+            force_include_instructions.append(
+                "This message is a reminder or schedule request. You MUST call one of: remind_me (one-shot in N min or at a time), cron_schedule (recurring), or record_date (record event). Do not reply with text only—text does not create a reminder."
+            )
 
         # Optional: surface recorded events (TAM) in context so model knows what's coming up (per-user)
         if getattr(core, "orchestratorInst", None) and getattr(core.orchestratorInst, "tam", None):
@@ -1436,6 +1445,16 @@ async def answer_from_memory(
                         logger.debug("mix error_retry resolve failed: {}", e)
                     use_other_model_next_turn = False
                 _t0 = time.time()
+                _resolved = Util()._resolve_llm(llm_name_this_turn) or Util().main_llm()
+                if _resolved and len(_resolved) >= 5:
+                    _path, _raw_id, _mtype, _host, _port = _resolved[0], _resolved[1], _resolved[2], _resolved[3], _resolved[4]
+                    logger.info(
+                        "Calling LLM: {} at {}:{} (type={})",
+                        llm_name_this_turn or _raw_id or _path,
+                        _host,
+                        _port,
+                        _mtype,
+                    )
                 logger.debug("LLM call started (tools={})", "yes" if openai_tools else "no")
                 try:
                     msg = await Util().openai_chat_completion_message(
@@ -1444,7 +1463,15 @@ async def answer_from_memory(
                 except Exception as e:
                     logger.warning("LLM call failed (will try fallback if available): {}", e)
                     msg = None
-                logger.debug("LLM call returned in {:.1f}s", time.time() - _t0)
+                _elapsed = time.time() - _t0
+                logger.debug("LLM call returned in {:.1f}s", _elapsed)
+                if msg is not None:
+                    _content = (msg.get("content") or "").strip()
+                    if not _content or len(_content) < 10:
+                        logger.warning(
+                            "Local LLM returned empty or very short content (len={}) in {:.1f}s — ensure the server on the logged host:port is the correct model and fully loaded (e.g. llama-server for main_llm_port).",
+                            len(_content), _elapsed,
+                        )
                 if msg is None:
                     # Mix fallback: one model failed (timeout/error/exception); retry once with the other route so the task is not blocked.
                     hr = getattr(Util().get_core_metadata(), "hybrid_router", None) or {}

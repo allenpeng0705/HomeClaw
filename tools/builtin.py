@@ -4750,7 +4750,12 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="cron_schedule",
-            description="Schedule a reminder, a skill, a plugin, or a tool at cron times. Use cron_expr (5 fields: minute hour day month weekday), e.g. '0 7 * * *' = daily at 7:00. task_type 'message' (default): send a fixed message. task_type 'run_tool': run a tool (e.g. web_search) and send its output — use for 'search the latest sports news every 7 am' with tool_name=web_search, tool_arguments={query: 'latest sports news', count: 10}. Do NOT use run_plugin headlines for 'search'. task_type 'run_skill': run a skill script. task_type 'run_plugin': run a plugin (e.g. headlines for top headlines from News API) — use for 'top 5 headlines every 8 am' or 'headlines about sports every 8 am', not for 'search'. Use post_process_prompt to refine output. Optional: tz, delivery_target.",
+            description=(
+                "RECURRING only: 'every N hours', 'daily at 9am', '每天早上', 'every 10 minutes'. "
+                "For ONE-SHOT ('in 5 minutes', 'remind me at 9am once') use remind_me instead. "
+                "Schedule a reminder, skill, plugin, or tool at cron times. cron_expr: 5 fields (minute hour day month weekday), e.g. '0 7 * * *' = daily at 7:00. "
+                "task_type 'message' (default): send a fixed message. 'run_tool'/'run_skill'/'run_plugin' for periodic tasks. Optional: tz, delivery_target."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -4832,13 +4837,20 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="remind_me",
-            description="Schedule a one-shot reminder. Use for 'remind me in 5 minutes' or 'remind me tomorrow at 9am'. No second LLM; supply minutes (e.g. 5) or at_time (YYYY-MM-DD HH:MM:SS).",
+            description=(
+                "Schedule a ONE-SHOT reminder (single notification). USE THIS when the user says: "
+                "'remind me in N minutes', 'N分钟后提醒我', 'in 10 min tell me', '提醒我5分钟后', "
+                "'remind me at 9am', '明天早上提醒我', or any single future time. "
+                "Supply minutes (integer, e.g. 5 for 'in 5 minutes') OR at_time (YYYY-MM-DD HH:MM:SS). "
+                "message = short label only (e.g. '喝水', 'meeting'); do NOT put date/time in message. "
+                "Do NOT use for: recurring (every day/N hours) -> use cron_schedule; recording an event -> use record_date."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "message": {"type": "string", "description": "Reminder message to show at the scheduled time.", "default": "Reminder"},
-                    "minutes": {"type": "integer", "description": "Remind in this many minutes (e.g. 5 for 'in 5 minutes'). Omit if using at_time."},
-                    "at_time": {"type": "string", "description": "Remind at this time: YYYY-MM-DD HH:MM:SS or YYYY-MM-DD. Omit if using minutes."},
+                    "message": {"type": "string", "description": "Short reminder label (e.g. 'drink water', '会议'). No date/time here.", "default": "Reminder"},
+                    "minutes": {"type": "integer", "description": "Remind in this many minutes from now (e.g. 5 for 'in 5 minutes', 30 for '30分钟后'). Use this when user says 'in N min' or 'N分钟后'. Omit if using at_time."},
+                    "at_time": {"type": "string", "description": "Remind at exact time: YYYY-MM-DD HH:MM:SS or YYYY-MM-DD. Use when user says 'at 9am', 'tomorrow at 3pm'. Omit if using minutes."},
                 },
                 "required": ["message"],
             },

@@ -414,28 +414,20 @@ class Util:
         if entry is not None:
             _, raw_id = self._parse_model_ref(main_llm_name)
             raw_id = raw_id or main_llm_name
+            # Main model always uses main_llm_host / main_llm_port for connection; per-model host/port are for multi-model use.
+            host = str(getattr(self.core_metadata, 'main_llm_host', None) or '127.0.0.1').strip() or '127.0.0.1'
             try:
-                host = str(entry.get('host') or '127.0.0.1').strip() or '127.0.0.1'
-            except Exception:
-                host = '127.0.0.1'
+                port = max(1, min(65535, int(getattr(self.core_metadata, 'main_llm_port', None) or 5088)))
+            except (TypeError, ValueError):
+                port = 5088
             if mtype == 'ollama':
                 path = (entry.get('path') or raw_id or '').strip() or raw_id
-                port = self._ollama_port(entry)
                 return path, raw_id, 'ollama', host, port
             if mtype == 'local':
-                port = int(entry.get('port', 5088)) if entry.get('port') is not None else 5088
-                try:
-                    port = max(1, min(65535, int(port)))
-                except (TypeError, ValueError):
-                    port = 5088
                 path = os.path.normpath(entry.get('path', ''))
                 full_path = os.path.join(self.models_path(), path)
                 return full_path, raw_id, 'local', host, port
             # litellm
-            try:
-                port = max(1, min(65535, int(entry.get('port', 5088))))
-            except (TypeError, ValueError):
-                port = 5088
             return entry.get('path', main_llm_name), raw_id, 'litellm', host, port
         # Legacy: no local_models/cloud_models or id not found — return safe fallback so callers never get None
         eff_type = self._effective_main_llm_type()
@@ -471,26 +463,18 @@ class Util:
         if entry is not None:
             _, raw_id = self._parse_model_ref(main_llm_name)
             raw_id = raw_id or main_llm_name
+            host = str(getattr(self.core_metadata, 'main_llm_host', None) or '127.0.0.1').strip() or '127.0.0.1'
             try:
-                host = str(entry.get('host') or '127.0.0.1').strip() or '127.0.0.1'
-            except Exception:
-                host = '127.0.0.1'
+                port = max(1, min(65535, int(getattr(self.core_metadata, 'main_llm_port', None) or 5088)))
+            except (TypeError, ValueError):
+                port = 5088
             if mtype == 'ollama':
                 path = (entry.get('path') or raw_id or '').strip() or raw_id
-                port = self._ollama_port(entry)
                 return path, raw_id, 'ollama', host, port
             if mtype == 'local':
-                try:
-                    port = max(1, min(65535, int(entry.get('port', 5088))))
-                except (TypeError, ValueError):
-                    port = 5088
                 path = os.path.normpath(entry.get('path', ''))
                 full_path = os.path.join(self.models_path(), path)
                 return full_path, raw_id, 'local', host, port
-            try:
-                port = max(1, min(65535, int(entry.get('port', 5088))))
-            except (TypeError, ValueError):
-                port = 5088
             return entry.get('path', main_llm_name), raw_id, 'litellm', host, port
         return self.main_llm()
 
@@ -522,33 +506,40 @@ class Util:
         return model_for_request, headers
 
     def _resolve_llm(self, llm_name: Optional[str] = None):
-        """Return (path, model_id, type, host, port) for llm_name, or for main_llm if llm_name is None/empty. Returns None if llm_name given but not found."""
+        """Return (path, model_id, type, host, port) for llm_name, or for main_llm if llm_name is None/empty. Returns None if llm_name given but not found.
+        When the resolved model is the current main LLM, host/port are taken from main_llm_host/main_llm_port."""
         if llm_name and str(llm_name).strip():
             name = str(llm_name).strip()
             entry, mtype = self._get_model_entry(name)
             if entry is not None:
-                try:
-                    host = str(entry.get('host') or '127.0.0.1').strip() or '127.0.0.1'
-                except Exception:
-                    host = '127.0.0.1'
-                _, raw_id = self._parse_model_ref(name)
-                rid = raw_id or name
-                if mtype == 'ollama':
-                    path = (entry.get('path') or rid or '').strip() or rid
-                    port = self._ollama_port(entry)
-                    return path, rid, 'ollama', host, port
-                if mtype == 'local':
+                main_ref = (self._effective_main_llm_ref() or "").strip()
+                use_main_port = main_ref and name.strip() == main_ref
+                if use_main_port:
+                    host = str(getattr(self.core_metadata, 'main_llm_host', None) or '127.0.0.1').strip() or '127.0.0.1'
+                    try:
+                        port = max(1, min(65535, int(getattr(self.core_metadata, 'main_llm_port', None) or 5088)))
+                    except (TypeError, ValueError):
+                        port = 5088
+                else:
+                    try:
+                        host = str(entry.get('host') or '127.0.0.1').strip() or '127.0.0.1'
+                    except Exception:
+                        host = '127.0.0.1'
                     try:
                         port = max(1, min(65535, int(entry.get('port', 5088))))
                     except (TypeError, ValueError):
                         port = 5088
+                _, raw_id = self._parse_model_ref(name)
+                rid = raw_id or name
+                if mtype == 'ollama':
+                    path = (entry.get('path') or rid or '').strip() or rid
+                    if not use_main_port:
+                        port = self._ollama_port(entry)
+                    return path, rid, 'ollama', host, port
+                if mtype == 'local':
                     path = os.path.normpath(entry.get('path', ''))
                     full_path = os.path.join(self.models_path(), path)
                     return full_path, rid, 'local', host, port
-                try:
-                    port = max(1, min(65535, int(entry.get('port', 5088))))
-                except (TypeError, ValueError):
-                    port = 5088
                 return entry.get('path', name), rid, 'litellm', host, port
             return None
         return self.main_llm()
@@ -608,31 +599,24 @@ class Util:
         
             
     def embedding_llm(self):
+        """Return (path, raw_id, mtype, host, port). Embedding always uses embedding_host / embedding_port for connection; per-model host/port are for multi-model use."""
         embedding_llm_name = self.core_metadata.embedding_llm
         entry, mtype = self._get_model_entry(embedding_llm_name)
         if entry is not None:
             _, raw_id = self._parse_model_ref(embedding_llm_name)
             raw_id = raw_id or embedding_llm_name
+            host = str(getattr(self.core_metadata, 'embedding_host', None) or '127.0.0.1').strip() or '127.0.0.1'
             try:
-                host = str(entry.get('host') or '127.0.0.1').strip() or '127.0.0.1'
-            except Exception:
-                host = '127.0.0.1'
+                port = max(1, min(65535, int(getattr(self.core_metadata, 'embedding_port', None) or 5066)))
+            except (TypeError, ValueError):
+                port = 5066
             if mtype == 'ollama':
                 path = (entry.get('path') or raw_id or '').strip() or raw_id
-                port = self._ollama_port(entry)
                 return path, raw_id, 'ollama', host, port
             if mtype == 'local':
-                try:
-                    port = max(1, min(65535, int(entry.get('port', 5066))))
-                except (TypeError, ValueError):
-                    port = 5066
                 path = os.path.normpath(entry.get('path', ''))
                 full_path = os.path.join(self.models_path(), path)
                 return full_path, raw_id, 'local', host, port
-            try:
-                port = max(1, min(65535, int(entry.get('port', 5066))))
-            except (TypeError, ValueError):
-                port = 5066
             return entry.get('path', embedding_llm_name), raw_id, 'litellm', host, port
         eff_type = self._effective_embedding_llm_type()
         if eff_type == "local":
@@ -1295,7 +1279,21 @@ class Util:
             timeout = aiohttp.ClientTimeout(total=timeout_sec)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(chat_completion_api_url, headers=headers, data=data_json) as resp:
-                    resp_json = await resp.json()
+                    resp_text = await resp.text()
+                    if resp.status != 200:
+                        logger.warning(
+                            "Local LLM returned HTTP {} ({}:{}). Response: {}",
+                            resp.status, model_host, model_port, (resp_text or "")[:500],
+                        )
+                        return None
+                    try:
+                        resp_json = json.loads(resp_text) if resp_text else {}
+                    except Exception as parse_err:
+                        logger.warning(
+                            "Local LLM response is not JSON ({}:{}): {}",
+                            model_host, model_port, (resp_text or "")[:300],
+                        )
+                        return None
                     if isinstance(resp_json, dict) and "choices" in resp_json and len(resp_json["choices"]) > 0:
                         msg = resp_json["choices"][0].get("message", {})
                         # Return message in OpenAI shape: role, content, tool_calls (optional)
@@ -1303,6 +1301,11 @@ class Util:
                         if "tool_calls" in msg and msg["tool_calls"]:
                             out["tool_calls"] = msg["tool_calls"]
                         return out
+                    err_msg = (resp_json.get("error") or resp_json.get("message") or "").strip() if isinstance(resp_json, dict) else ""
+                    logger.warning(
+                        "Local LLM response has no choices ({}:{}). {}",
+                        model_host, model_port, err_msg or "Check that the server is the correct model and loaded.",
+                    )
                     return None
         except asyncio.TimeoutError:
             logger.warning("LLM chat completion timed out after {}s ({}:{})", timeout_sec, model_host, model_port)
@@ -1311,7 +1314,14 @@ class Util:
             logger.info("LLM chat completion was cancelled (e.g. client disconnected)")
             return None
         except Exception as e:
-            logger.exception(e)
+            err_str = str(e).lower()
+            if "connection refused" in err_str or "connection reset" in err_str or "cannot connect" in err_str or "connectorerror" in err_str:
+                logger.warning(
+                    "Local LLM unreachable at {}:{} — is the server running? Start Core so it starts the main model, or run llama-server manually on that port. Error: {}",
+                    model_host, model_port, e,
+                )
+            else:
+                logger.exception(e)
             return None
 
     
@@ -1799,6 +1809,35 @@ class Util:
             return False
         except Exception as e:
             logger.warning("remove_ai_friend failed: {}", e)
+            return False
+
+    def remove_user_friend(self, user_id: str, other_user_id: str) -> bool:
+        """Remove a user friend (type=user) by the other user's id. Returns True if found and removed."""
+        try:
+            uid = (user_id or "").strip()
+            oid = (other_user_id or "").strip()
+            if not uid or not oid:
+                return False
+            users = self.get_users() or []
+            for u in users:
+                u_id = (getattr(u, "id", None) or getattr(u, "name", None) or "").strip()
+                if u_id != uid:
+                    continue
+                friends = list(getattr(u, "friends", None) or [])
+                for i, f in enumerate(friends):
+                    ftype = (getattr(f, "type", None) or "").strip().lower()
+                    if ftype != "user":
+                        continue
+                    f_uid = (getattr(f, "user_id", None) or "").strip()
+                    if f_uid != oid:
+                        continue
+                    friends.pop(i)
+                    u.friends = friends
+                    self.save_users(users)
+                    return True
+            return False
+        except Exception as e:
+            logger.warning("remove_user_friend failed: {}", e)
             return False
 
     def get_email_account(self):
