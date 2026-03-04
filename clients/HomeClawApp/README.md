@@ -42,6 +42,31 @@ Then run `flutter run -d windows` again.
 
 To list devices: `flutter devices`.
 
+## iOS: "Command PhaseScriptExecution failed" in Xcode
+
+The iOS build needs Flutter (for script phases) and CocoaPods (for pods). Do this **before** building in Xcode:
+
+**1. From Terminal** (from repo root or `HomeClawApp`):
+
+```bash
+cd clients/HomeClawApp
+flutter pub get          # creates ios/Flutter/Generated.xcconfig
+cd ios && pod install && cd ..
+```
+
+Or run the helper once: `./scripts/ios_ready.sh`
+
+**2. In Xcode**
+
+- Open **`ios/Runner.xcworkspace`** (the **workspace**), not `Runner.xcodeproj`.
+- Build (⌘B).
+
+**If you haven’t run `flutter pub get`:** The project now falls back to finding Flutter from your **PATH** in the Run Script phases, and the Podfile can use `which flutter` so `pod install` may still work. So if `flutter` is on PATH (e.g. you use FVM or a global Flutter install), try opening `ios/Runner.xcworkspace` and building; if it fails, run the steps above.
+
+**If it still fails:** The Run Script / Thin Binary phases use **`ios/Flutter/flutter_wrapper.sh`**, which finds Flutter via: `Generated.xcconfig` → `FLUTTER_ROOT` env → login shell `which flutter` → `$HOME/flutter`. To see **which phase** failed: in Xcode open **Report navigator** (⌘9), select the latest build, and expand the red **Run Script**, **Thin Binary**, or **[CP] Check Pods Manifest.lock** step. If you see **"Could not find Flutter SDK"**, run the Terminal steps above or set **FLUTTER_ROOT** in **Product → Scheme → Edit Scheme… → Run → Arguments → Environment Variables**. If you see **Podfile.lock / Manifest.lock out of sync**, run `cd clients/HomeClawApp/ios && pod install` and build again.
+
+**If you see "RecordLinux is missing implementations for startStream / hasPermission":** That’s a dependency version clash (old `record_linux` vs new `record_platform_interface`). The app uses **record ^6.0.0** so compatible platform implementations are used. Run `flutter pub get` (and `cd ios && pod install` if needed), then build again.
+
 ## Build macOS app for distribution (let users run it directly)
 
 **One command to build a DMG (from repo root):**
