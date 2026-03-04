@@ -208,39 +208,37 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Load full thread (both directions) from GET /api/user-inbox/thread so sent messages do not disappear on poll.
   Future<void> _loadUserInbox() async {
     if (widget.toUserId == null || widget.toUserId!.trim().isEmpty) return;
     try {
-      final data = await widget.coreService.getUserInbox(userId: widget.userId, limit: 100);
+      final data = await widget.coreService.getUserInboxThread(
+        userId: widget.userId,
+        otherUserId: widget.toUserId!,
+        limit: 100,
+      );
       final list = data['messages'] as List<dynamic>?;
-      if (list == null || list.isEmpty) {
-        // Mark thread as read (now) so friend list does not show a stale red dot.
+      if (list == null) return;
+      if (list.isEmpty) {
+        // Valid empty thread: clear UI and mark read so friend list does not show a stale red dot.
         widget.coreService.setUserInboxLastRead(widget.userId, widget.toUserId!, DateTime.now().millisecondsSinceEpoch / 1000.0);
-        if (mounted) setState(() {});
+        if (mounted) {
+          setState(() {
+            _messages.clear();
+            _messageImages.clear();
+            _messageAudios.clear();
+            _messageVideos.clear();
+          });
+        }
         return;
       }
       final myId = widget.userId.trim();
-      final otherId = widget.toUserId!.trim();
-      final thread = <Map<String, dynamic>>[];
-      final inboxUserId = widget.userId.trim();
-      for (final m in list) {
-        if (m is! Map) continue;
-        final from = (m['from_user_id'] as String?)?.trim() ?? '';
-        final to = (m['to_user_id'] as String?)?.trim() ?? inboxUserId;
-        if ((from == myId && (to == otherId || to.isEmpty)) || (from == otherId && (to == myId || to.isEmpty))) {
-          thread.add(Map<String, dynamic>.from(m));
-        }
-      }
-      thread.sort((a, b) {
-        final aAt = (a['created_at'] as num?)?.toDouble() ?? 0.0;
-        final bAt = (b['created_at'] as num?)?.toDouble() ?? 0.0;
-        return aAt.compareTo(bAt);
-      });
       _messages.clear();
       _messageImages.clear();
       _messageAudios.clear();
       _messageVideos.clear();
-      for (final m in thread) {
+      for (final m in list) {
+        if (m is! Map) continue;
         final text = (m['text'] as String?)?.trim() ?? '';
         final from = (m['from_user_id'] as String?)?.trim() ?? '';
         final isUser = from == myId;
@@ -257,7 +255,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       // Mark thread as read up to latest message so friend list unread dot clears.
       double latestTs = DateTime.now().millisecondsSinceEpoch / 1000.0;
-      for (final m in thread) {
+      for (final m in list) {
+        if (m is! Map) continue;
         final at = (m['created_at'] as num?)?.toDouble();
         if (at != null && at > latestTs) latestTs = at;
       }
@@ -508,6 +507,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (mounted) {
           _stopLoadingStatusTimer();
           setState(() {
+            _messages.add(MapEntry(text.isEmpty ? '(attachment)' : text, true));
+            _messageImages.add(userImageDataUrls.isEmpty ? null : userImageDataUrls);
+            _messageAudios.add(null);
+            _messageVideos.add(userVideoDataUrls.isEmpty ? null : userVideoDataUrls);
             _loading = false;
             _loadingMessage = null;
           });

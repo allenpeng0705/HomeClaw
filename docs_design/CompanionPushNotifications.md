@@ -36,9 +36,16 @@ Push **supports multiple users**. Core stores push tokens **per user_id**; each 
   - **APNs** for `platform` in (ios, macos, tvos, ipados, watchos): send via APNs HTTP/2 API (JWT auth with .p8 key).
   - **FCM** for android and others: send via Firebase Admin SDK (service account JSON).
 
-### 2.3 Push payload format (multi-user, per-friend)
+### 2.3 When push is sent
 
-Core adds **user_id**, **source**, and **from_friend** to every push so the Companion can show which user the notification is for and which friend it is from (e.g. open the correct chat thread).
+- **Reminders** and **cron** (time-sensitive): push is always sent so the user gets notified when the app is in background.
+- **User-to-user messages** (`source=user_message`): push is sent so the recipient gets a notification when user1 sends to user2 and user2’s app is in background or killed. Title is “Message from &lt;sender name&gt;”, body is the message text.
+
+**How to verify push for user messages:** Log in as user2 on a device, put the app in background (or kill it). From another device/session, have user1 send a message to user2. user2 should receive a system notification; tapping it should open the app and the chat with user1. Ensure FCM/APNs is configured (see 2.4) and that the Companion has registered the push token with Core for user2 (e.g. by opening any chat as user2 once).
+
+### 2.4 Push payload format (multi-user, per-friend)
+
+Core adds **user_id**, **source**, **from_friend**, and for user_message **from_user_id** to every push so the Companion can show which user the notification is for and which friend it is from (e.g. open the correct chat thread).
 
 - **APNs (iOS/macOS):** Custom keys at root level (outside `aps`):
   - `user_id`, `source`, `from_friend`: as above.
@@ -49,7 +56,7 @@ Core adds **user_id**, **source**, and **from_friend** to every push so the Comp
 
 **Companion behaviour:** When the app receives a push (foreground handler or when the user taps the notification), read `user_id`, `source`, and **from_friend** from the payload. Use `from_friend` to route to the correct friend chat (e.g. show “From Sabrina: …” or add the notification to Sabrina’s thread). One device can receive push for many users; the payload identifies which user and which friend each notification is for.
 
-### 2.4 Config (core.yml)
+### 2.5 Config (core.yml)
 
 Add to **config/core.yml** (optional):
 

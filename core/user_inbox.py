@@ -124,3 +124,44 @@ def get_messages(
     except Exception as e:
         logger.debug("user_inbox get_messages failed: {}", e)
         return []
+
+
+def get_thread(
+    user_id: str,
+    other_user_id: str,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """
+    Return the conversation thread between user_id and other_user_id.
+    Merges messages from user_id's inbox (from other) and other_user_id's inbox (from user_id),
+    sorted by created_at. Used so both sides see the full thread (sent + received).
+    """
+    try:
+        user_id = (user_id or "").strip()
+        other_user_id = (other_user_id or "").strip()
+        if not user_id or not other_user_id or user_id == other_user_id:
+            return []
+        limit = max(1, min(200, limit))
+        # Messages TO me FROM other (in my inbox)
+        to_me = get_messages(user_id, limit=limit, after_id=None)
+        from_other = [m for m in to_me if isinstance(m, dict) and (m.get("from_user_id") or "").strip() == other_user_id]
+        # Messages TO other FROM me (in their inbox)
+        to_other = get_messages(other_user_id, limit=limit, after_id=None)
+        from_me = [m for m in to_other if isinstance(m, dict) and (m.get("from_user_id") or "").strip() == user_id]
+        # Copy and set to_user_id so we don't mutate the original loaded dicts.
+        result = []
+        for m in from_other:
+            if isinstance(m, dict):
+                out = dict(m)
+                out["to_user_id"] = user_id
+                result.append(out)
+        for m in from_me:
+            if isinstance(m, dict):
+                out = dict(m)
+                out["to_user_id"] = other_user_id
+                result.append(out)
+        result.sort(key=lambda m: (m.get("created_at") or 0))
+        return result[-limit:] if limit > 0 else result
+    except Exception as e:
+        logger.debug("user_inbox get_thread failed: {}", e)
+        return []

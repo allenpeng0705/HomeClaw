@@ -19,7 +19,7 @@ from base.base import User
 from base.util import Util
 
 from core.routes import auth
-from core.user_inbox import append_message as inbox_append, get_messages as inbox_get_messages
+from core.user_inbox import append_message as inbox_append, get_messages as inbox_get_messages, get_thread as inbox_get_thread
 
 
 def _get_user_by_id(user_id: str) -> Optional[User]:
@@ -141,3 +141,31 @@ def get_user_inbox_handler(core):  # noqa: ARG001
             return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
     return get_user_inbox
+
+
+def get_user_inbox_thread_handler(core):  # noqa: ARG001
+    """Return handler for GET /api/user-inbox/thread. Returns full conversation between user_id and other_user_id (both directions)."""
+
+    async def get_user_inbox_thread(
+        user_id: str = "",
+        other_user_id: str = "",
+        limit: int = 100,
+        _: None = Depends(auth.verify_inbound_auth),
+    ):
+        try:
+            user_id = (user_id or "").strip()
+            other_user_id = (other_user_id or "").strip()
+            if not user_id or not other_user_id:
+                return JSONResponse(status_code=400, content={"error": "user_id and other_user_id required"})
+            try:
+                limit = int(limit) if limit is not None else 100
+            except (TypeError, ValueError):
+                limit = 100
+            limit = max(1, min(200, limit))
+            messages = inbox_get_thread(user_id, other_user_id, limit=limit)
+            return JSONResponse(status_code=200, content={"user_id": user_id, "other_user_id": other_user_id, "messages": messages})
+        except Exception as e:
+            logger.warning("user-inbox thread GET failed: {}", e)
+            return JSONResponse(status_code=500, content={"error": "Internal server error"})
+
+    return get_user_inbox_thread

@@ -576,6 +576,32 @@ class CoreService {
     }
   }
 
+  /// GET /api/user-inbox/thread — full conversation between [userId] and [otherUserId] (both directions).
+  /// Use this for the chat screen so sent and received messages persist across poll/refresh.
+  Future<Map<String, dynamic>> getUserInboxThread({
+    required String userId,
+    required String otherUserId,
+    int limit = 100,
+  }) async {
+    final query = <String, String>{
+      'user_id': userId.trim(),
+      'other_user_id': otherUserId.trim(),
+      'limit': limit.toString(),
+    };
+    final url = Uri.parse('$_baseUrl/api/user-inbox/thread').replace(queryParameters: query);
+    final response = await http
+        .get(url, headers: _authHeaders())
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      throw Exception('GET thread failed ${response.statusCode}: ${response.body}');
+    }
+    try {
+      return jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    } catch (_) {
+      return {};
+    }
+  }
+
   /// GET /api/user-inbox — list messages for [userId]. Uses API key auth.
   /// Returns {user_id, messages: [{id, from_user_id, from_user_name, text, created_at, images?, audios?, ...}]}.
   Future<Map<String, dynamic>> getUserInbox({
