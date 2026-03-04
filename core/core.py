@@ -857,9 +857,10 @@ class Core(CoreInterface):
         channel_key: Optional[str] = None,
         source: str = "push",
         from_friend: str = "HomeClaw",
+        from_user_id: Optional[str] = None,
     ) -> None:
-        """Push to user (WebSocket, push, channel). Delegates to core.outbound.deliver_to_user. audios: voice; videos: short video."""
-        await _deliver_to_user_fn(self, user_id, text, images=images, audios=audios, videos=videos, channel_key=channel_key, source=source, from_friend=from_friend)
+        """Push to user (WebSocket, push, channel). Delegates to core.outbound.deliver_to_user. audios: voice; videos: short video. from_user_id: for user_message so Companion can match chat thread."""
+        await _deliver_to_user_fn(self, user_id, text, images=images, audios=audios, videos=videos, channel_key=channel_key, source=source, from_friend=from_friend, from_user_id=from_user_id)
 
     async def send_response_to_request_channel(
         self,

@@ -100,6 +100,7 @@ def get_user_message_post_handler(core):
                         videos=body.videos,
                         source="user_message",
                         from_friend=from_name,
+                        from_user_id=from_user_id,
                     )
             except Exception as e:
                 logger.debug("user-message: deliver_to_user failed: {}", e)

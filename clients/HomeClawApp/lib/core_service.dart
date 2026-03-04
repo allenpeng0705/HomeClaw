@@ -602,6 +602,33 @@ class CoreService {
     }
   }
 
+  static String _userInboxLastReadKey(String userId, String otherUserId) {
+    final a = userId.trim().replaceAll(RegExp(r'[^\w\-.]'), '_');
+    final b = otherUserId.trim().replaceAll(RegExp(r'[^\w\-.]'), '_');
+    return 'user_inbox_last_read_${a}_$b';
+  }
+
+  /// Persist last-read timestamp for a user-to-user thread so the friend list can show an unread dot.
+  Future<void> setUserInboxLastRead(String userId, String otherUserId, double timestampSeconds) async {
+    if (userId.trim().isEmpty || otherUserId.trim().isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(_userInboxLastReadKey(userId, otherUserId), timestampSeconds);
+    } catch (_) {}
+  }
+
+  /// Last-read timestamp for a user-to-user thread; null if never read.
+  Future<double?> getUserInboxLastRead(String userId, String otherUserId) async {
+    if (userId.trim().isEmpty || otherUserId.trim().isEmpty) return null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final v = prefs.getDouble(_userInboxLastReadKey(userId, otherUserId));
+      return v;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> saveShowProgressDuringLongTasks(bool value) async {
     _showProgressDuringLongTasks = value;
     final prefs = await SharedPreferences.getInstance();
@@ -962,6 +989,7 @@ class CoreService {
       final text = msg['text'] as String? ?? '';
       final source = msg['source'] as String? ?? 'push';
       final fromFriend = msg['from_friend'] as String?;
+      final fromUserId = msg['from_user_id'] as String?;
       final responseImages = msg['images'];
       final responseImage = msg['image'];
       final imageList = responseImages is List
@@ -975,6 +1003,9 @@ class CoreService {
         };
         if (fromFriend != null && fromFriend.toString().trim().isNotEmpty) {
           map['from_friend'] = fromFriend.toString().trim();
+        }
+        if (fromUserId != null && fromUserId.toString().trim().isNotEmpty) {
+          map['from_user_id'] = fromUserId.toString().trim();
         }
         if (_sessionUserId != null && _sessionUserId!.isNotEmpty) {
           map['user_id'] = _sessionUserId!;

@@ -148,8 +148,9 @@ async def deliver_to_user(
     channel_key: Optional[str] = None,
     source: str = "push",
     from_friend: str = "HomeClaw",
+    from_user_id: Optional[str] = None,
 ) -> None:
-    """Push to user: WebSocket sessions, then push notification, then channel. Never raises. audios = voice; videos = short video (e.g. 10s)."""
+    """Push to user: WebSocket sessions, then push notification, then channel. Never raises. audios = voice; videos = short video (e.g. 10s). from_user_id: for user_message, sender id so Companion can match chat thread."""
     try:
         user_id = (str(user_id or "").strip() or "companion")
         from_friend = (str(from_friend or "HomeClaw").strip() or "HomeClaw")
@@ -163,6 +164,8 @@ async def deliver_to_user(
         out_text = out_text if out_text is not None else ""
         out_fmt = out_fmt if out_fmt is not None else "plain"
         payload = {"event": "push", "source": source, "from_friend": from_friend, "text": out_text, "format": out_fmt}
+        if (from_user_id or "").strip():
+            payload["from_user_id"] = (from_user_id or "").strip()
         data_urls = _media_to_data_urls(
             images,
             "data:image/",
@@ -216,12 +219,16 @@ async def deliver_to_user(
             )
         else:
             logger.info("deliver_to_user: pushed to {} WebSocket session(s) for user_id={} source={}", ws_count, user_id, source)
-        # Push only for reminders (and cron reminders). User messages and friend requests stay in inbox/friend_requests;
-        # user sees them when opening the app. Push is not stable for all flows, so we use it only for time-sensitive reminders.
+        # Push: reminders/cron (time-sensitive) and user_message (so recipient gets notified when app is in background).
         try:
-            if source in ("reminder", "cron"):
+            if source in ("reminder", "cron", "user_message"):
                 from base import push_send
-                title = "Reminder" if source == "reminder" else from_friend
+                if source == "reminder":
+                    title = "Reminder"
+                elif source == "user_message":
+                    title = f"Message from {from_friend}"
+                else:
+                    title = from_friend
                 body_safe = (out_text if out_text is not None else "")[:1024]
                 max_tokens = 1
                 push_sent = push_send.send_push_to_user(

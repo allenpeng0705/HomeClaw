@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -36,6 +37,9 @@ class _FriendListScreenState extends State<FriendListScreen> {
   String? _error;
   String? _initialPushFromFriend;
   Uint8List? _myAvatarBytes;
+  /// User ids (of user friends) that have at least one unread message in inbox.
+  Set<String> _unreadUserIds = {};
+  StreamSubscription<Map<String, dynamic>>? _pushSubscription;
 
   @override
   void initState() {
@@ -43,6 +47,43 @@ class _FriendListScreenState extends State<FriendListScreen> {
     _initialPushFromFriend = widget.initialPushFromFriend;
     _loadFriends();
     _loadMyAvatar();
+    _pushSubscription = widget.coreService.pushMessageStream.listen((push) {
+      final source = (push['source'] as String?)?.trim();
+      if (source == 'user_message' && mounted) _loadUnreadState();
+    });
+  }
+
+  @override
+  void dispose() {
+    _pushSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadUnreadState() async {
+    final userId = widget.coreService.sessionUserId?.trim();
+    if (userId == null || userId.isEmpty || !mounted) return;
+    try {
+      final data = await widget.coreService.getUserInbox(userId: userId, limit: 200);
+      final list = data['messages'] as List<dynamic>? ?? [];
+      final unread = <String>{};
+      for (final f in _friends) {
+        if ((f['type'] as String?)?.trim().toLowerCase() != 'user') continue;
+        final otherId = (f['user_id'] as String?)?.trim();
+        if (otherId == null || otherId.isEmpty) continue;
+        final lastRead = await widget.coreService.getUserInboxLastRead(userId, otherId);
+        for (final m in list) {
+          if (m is! Map) continue;
+          final fromId = (m['from_user_id'] as String?)?.trim();
+          if (fromId != otherId) continue;
+          final at = (m['created_at'] as num?)?.toDouble();
+          if (at != null && (lastRead == null || at > lastRead)) {
+            unread.add(otherId);
+            break;
+          }
+        }
+      }
+      if (mounted) setState(() => _unreadUserIds = unread);
+    } catch (_) {}
   }
 
   Future<void> _loadMyAvatar() async {
@@ -67,6 +108,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
           _friends = sorted;
           _loading = false;
         });
+        _loadUnreadState();
         _openInitialPushChatIfNeeded();
       }
     } catch (e) {
@@ -256,6 +298,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
                         final displayName = localizedFriendDisplayName(friend: f, locale: locale);
                         final isUserFriend = (f['type'] as String?)?.trim().toLowerCase() == 'user';
                         final toUserId = (f['user_id'] as String?)?.trim();
+                        final hasUnread = isUserFriend && toUserId != null && _unreadUserIds.contains(toUserId);
                         return _FriendTile(
                           userId: widget.coreService.sessionUserId!,
                           friendId: friendId,
@@ -264,7 +307,9 @@ class _FriendListScreenState extends State<FriendListScreen> {
                           initialMessage: index == 0 ? widget.initialMessage : null,
                           isUserFriend: isUserFriend,
                           toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
+                          hasUnread: hasUnread,
                           onRemoved: _loadFriends,
+                          onReturnFromChat: _loadUnreadState,
                         );
                       },
                     ),
@@ -282,7 +327,11 @@ class _FriendTile extends StatefulWidget {
   final bool isUserFriend;
   /// When [isUserFriend], the other user's id for POST /api/user-message.
   final String? toUserId;
+  /// When true, show a red dot to indicate new messages from this user.
+  final bool hasUnread;
   final VoidCallback? onRemoved;
+  /// Called when returning from chat so the list can refresh unread state.
+  final VoidCallback? onReturnFromChat;
 
   const _FriendTile({
     required this.userId,
@@ -292,7 +341,9 @@ class _FriendTile extends StatefulWidget {
     this.initialMessage,
     this.isUserFriend = false,
     this.toUserId,
+    this.hasUnread = false,
     this.onRemoved,
+    this.onReturnFromChat,
   });
 
   @override
@@ -369,15 +420,34 @@ class _FriendTileState extends State<_FriendTile> {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: theme.colorScheme.primaryContainer,
-          backgroundImage: hasThumbnail ? MemoryImage(_avatarBytes!) : null,
-          child: hasThumbnail
-              ? null
-              : Icon(
-                  widget.isUserFriend ? Icons.person : Icons.smart_toy,
-                  color: theme.colorScheme.onPrimaryContainer,
+        leading: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            CircleAvatar(
+              backgroundColor: theme.colorScheme.primaryContainer,
+              backgroundImage: hasThumbnail ? MemoryImage(_avatarBytes!) : null,
+              child: hasThumbnail
+                  ? null
+                  : Icon(
+                      widget.isUserFriend ? Icons.person : Icons.smart_toy,
+                      color: theme.colorScheme.onPrimaryContainer,
+                    ),
+            ),
+            if (widget.hasUnread)
+              Positioned(
+                right: -2,
+                top: -2,
+                child: Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.error,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: theme.colorScheme.surface, width: 1.5),
+                  ),
                 ),
+              ),
+          ],
         ),
         title: Text(widget.displayName),
         subtitle: widget.isUserFriend ? Text('User', style: Theme.of(context).textTheme.bodySmall) : null,
@@ -396,7 +466,7 @@ class _FriendTileState extends State<_FriendTile> {
                 toUserId: widget.toUserId,
               ),
             ),
-          );
+          ).then((_) => widget.onReturnFromChat?.call());
         },
       ),
     );

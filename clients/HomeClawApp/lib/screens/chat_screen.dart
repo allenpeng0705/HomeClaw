@@ -84,6 +84,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool? _coreConnected;
   bool _connectionChecking = false;
   Timer? _connectionCheckTimer;
+  /// When chatting with a user friend, poll inbox so new messages appear without leaving the screen.
+  Timer? _userInboxPollTimer;
   StreamSubscription<Map<String, dynamic>>? _pushMessageSubscription;
   /// Push-to-talk (user friends only): true while recording.
   bool _recordingPushToTalk = false;
@@ -119,6 +121,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _loadChatPartnerAvatar();
     if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
       _loadUserInbox();
+      _userInboxPollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+        if (mounted && widget.isUserFriend && widget.toUserId != null) _loadUserInbox();
+      });
     } else {
       _loadChatHistory();
       _syncChatHistoryFromCore();
@@ -209,6 +214,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final data = await widget.coreService.getUserInbox(userId: widget.userId, limit: 100);
       final list = data['messages'] as List<dynamic>?;
       if (list == null || list.isEmpty) {
+        // Mark thread as read (now) so friend list does not show a stale red dot.
+        widget.coreService.setUserInboxLastRead(widget.userId, widget.toUserId!, DateTime.now().millisecondsSinceEpoch / 1000.0);
         if (mounted) setState(() {});
         return;
       }
@@ -248,6 +255,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final videos = vidList != null ? vidList.whereType<String>().toList() : null;
         _messageVideos.add(videos != null && videos.isNotEmpty ? videos : null);
       }
+      // Mark thread as read up to latest message so friend list unread dot clears.
+      double latestTs = DateTime.now().millisecondsSinceEpoch / 1000.0;
+      for (final m in thread) {
+        final at = (m['created_at'] as num?)?.toDouble();
+        if (at != null && at > latestTs) latestTs = at;
+      }
+      widget.coreService.setUserInboxLastRead(widget.userId, widget.toUserId!, latestTs);
       if (mounted) setState(() {});
     } catch (_) {
       if (mounted) setState(() {});
@@ -338,6 +352,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _onPushMessage(Map<String, dynamic> push) {
     final text = push['text'] as String? ?? '';
     if (text.isEmpty) return;
+    final source = (push['source'] as String?)?.trim() ?? 'push';
+    // User-to-user: refresh inbox so the new message appears; match by from_user_id or from_friend.
+    if (widget.isUserFriend && widget.toUserId != null && source == 'user_message') {
+      final fromUserId = (push['from_user_id'] as String?)?.trim();
+      final pushFriendId = (push['friend_id'] ?? push['from_friend']) as String?;
+      final pushFriend = (pushFriendId?.toString().trim() ?? '').isEmpty ? '' : pushFriendId!.trim();
+      final thisFriend = (widget.friendId?.trim() ?? '').isEmpty ? '' : widget.friendId!.trim();
+      final match = (fromUserId != null && fromUserId == widget.toUserId!.trim()) || (pushFriend.isNotEmpty && pushFriend == thisFriend);
+      if (match) {
+        _loadUserInbox();
+        return;
+      }
+    }
     final pushFriendId = (push['friend_id'] ?? push['from_friend']) as String?;
     final pushFriend = (pushFriendId?.toString().trim() ?? '').isEmpty ? 'HomeClaw' : pushFriendId!.trim();
     final thisFriend = (widget.friendId?.trim() ?? '').isEmpty ? 'HomeClaw' : widget.friendId!.trim();
@@ -1447,6 +1474,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _connectionCheckTimer?.cancel();
+    _userInboxPollTimer?.cancel();
     _loadingStatusTimer?.cancel();
     _pushMessageSubscription?.cancel();
     _voiceSubscription?.cancel();
