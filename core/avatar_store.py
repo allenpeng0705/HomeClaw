@@ -1,6 +1,7 @@
 """
 Avatar storage for user and friend thumbnails.
 Paths: data_path()/avatars/users/{user_id}.png, data_path()/avatars/friends/{user_id}/{friend_id}.png.
+Preset thumbnails: config/preset_thumbnails/{filename} from friend_presets.yml thumbnail key.
 Sanitizes user_id and friend_id for path safety. Max size 1MB; formats JPEG/PNG.
 """
 import re
@@ -55,6 +56,36 @@ def get_friend_avatar_path(user_id: str, friend_id: str, data_root: Optional[str
         return base / f"{fid}.png"
     except Exception:
         return Path("/nonexistent")
+
+
+def get_preset_thumbnail_path(preset_name: str) -> Optional[Path]:
+    """
+    Return path to preset thumbnail image if it exists.
+    preset_name: e.g. 'reminder', 'note', 'finder'.
+    Reads friend_presets.yml for thumbnail filename (default {preset}.png under config/preset_thumbnails/).
+    Returns None if file missing or config invalid. Never raises.
+    """
+    try:
+        pn = (preset_name or "").strip()
+        if not pn:
+            return None
+        from base.friend_presets import load_friend_presets
+        presets = load_friend_presets()
+        if not presets or not isinstance(presets, dict):
+            return None
+        cfg = presets.get(pn)
+        if not isinstance(cfg, dict):
+            return None
+        filename = (cfg.get("thumbnail") or "").strip() or f"{pn}.png"
+        # Path safety: only allow basename (no path traversal)
+        filename = Path(filename).name or f"{pn}.png"
+        root = (Util().root_path() or "").strip()
+        if not root:
+            return None
+        path = Path(root) / "config" / "preset_thumbnails" / filename
+        return path if path.is_file() else None
+    except Exception:
+        return None
 
 
 def save_user_avatar(user_id: str, content: bytes, content_type: Optional[str] = None) -> bool:

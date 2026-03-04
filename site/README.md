@@ -35,29 +35,47 @@ Promo images are copied from `docs/assets/`. If you add new ones there, copy the
 
 ## Run locally
 
+**Important:** The server must use the **`site/` folder as the document root**. If you run a server from the repo root without this, http://127.0.0.1:9999 will show a directory listing or 404 instead of the site.
+
 From the **repository root** (HomeClaw):
 
 ```bash
-# Option 1: Python script (works on Windows and Linux)
+# Option 1: Python script (recommended — sets document root to site/)
 python scripts/serve_site.py
-# Or: python scripts/serve_site.py 3000
+# Or: python scripts/serve_site.py 9999
 
-# Option 2: Python module (Linux/macOS)
-python3 -m http.server 9999 --directory site
+# Option 2: Python module — must use --directory site (from repo root)
+python -m http.server 9999 --directory site
 
 # Option 3: npx serve (if you have Node)
 npx serve site -p 9999
 ```
 
-On **Windows**, use `python scripts\serve_site.py` (or the same script from PowerShell).
+On **Windows**, use `python scripts\serve_site.py` from the repo root.
 
 Then open:
 
-- **http://localhost:9999** — redirects to en/ or zh/ by browser language
-- **http://localhost:9999/en/** — English home
-- **http://localhost:9999/zh/** — 中文首页
-- **http://localhost:9999/en/docs.html** — Curated docs (EN)
-- **http://localhost:9999/zh/docs.html** — 本站文档 (中文)
+- **http://127.0.0.1:9999** or **http://localhost:9999** — redirects to en/ or zh/ by browser language
+- **http://127.0.0.1:9999/en/** — English home
+- **http://127.0.0.1:9999/zh/** — 中文首页
+- **http://127.0.0.1:9999/en/docs.html** — Curated docs (EN)
+- **http://127.0.0.1:9999/zh/docs.html** — 本站文档 (中文)
+
+### Troubleshooting: "Site cannot be displayed" or blank page
+
+1. **Use the right command**  
+   If you run `python -m http.server 9999` **without** `--directory site`, the web root is the repo root. There is no `index.html` there, so the site won’t load. Use one of the commands above so the **document root is the `site/` folder**.
+
+2. **Run from the repository root**  
+   For Option 1, run `python scripts/serve_site.py` from the folder that contains the `site` and `scripts` directories (HomeClaw repo root). For Option 2, run `python -m http.server 9999 --directory site` from that same repo root.
+
+3. **Open the URL in the browser**  
+   Use **http://127.0.0.1:9999** (or http://localhost:9999). Don’t open the HTML files via `file://` — that can break assets and redirects.
+
+4. **Try the language path directly**  
+   If the root redirect doesn’t work, open **http://127.0.0.1:9999/en/** or **http://127.0.0.1:9999/zh/** directly.
+
+**Using Cloudflare Tunnel:** If you expose the site with `cloudflared` and the tunnel URL doesn’t work (502, blank page, or connection errors), see **[docs/site-service-and-cloudflare-tunnel.md](../docs/site-service-and-cloudflare-tunnel.md)** — section **“Troubleshooting: tunnel doesn’t work / proxy issues”**. Common causes: site server not running, wrong port in the tunnel, or document root not set to `site/`.
 
 ## Run as a service and publish with Cloudflare Tunnel
 

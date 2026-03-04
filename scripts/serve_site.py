@@ -25,12 +25,17 @@ def main():
             pass
     os.chdir(site_dir)
     server = HTTPServer(("127.0.0.1", port), SimpleHTTPRequestHandler)
-    print(f"Serving site at http://127.0.0.1:{port} (directory: {site_dir})")
+    print(f"Serving site at http://127.0.0.1:{port}")
+    print(f"Document root: {site_dir}")
+    print("Open http://127.0.0.1:{} in your browser (root redirects to /en/ or /zh/)".format(port))
+    print("Press Ctrl+C to stop.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nShutting down.")
-        server.shutdown()
+        pass
+    print("\nShutting down.")
+    server.shutdown()
+    server.server_close()
 
 if __name__ == "__main__":
     main()

@@ -1580,6 +1580,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 case 'sync_kb':
                   await _syncKnowledgeBase();
                   break;
+                default:
+                  break;
               }
             },
             itemBuilder: (context) => [
@@ -1587,7 +1589,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               const PopupMenuItem(value: 'video', child: Text('Record video')),
               const PopupMenuItem(value: 'document', child: Text('Attach file')),
               const PopupMenuItem(value: 'screen', child: Text('Record screen')),
-              const PopupMenuItem(value: 'run', child: Text('Run command')),
+              ...(Platform.isMacOS || Platform.isWindows || Platform.isLinux
+                  ? [const PopupMenuItem(value: 'run', child: Text('Run command'))]
+                  : []),
               const PopupMenuItem(value: 'speak', child: Text('Speak last reply')),
               const PopupMenuItem(value: 'stop_tts', child: Text('Stop speaking')),
               const PopupMenuItem(value: 'sync_kb', child: Text('Sync knowledge base')),

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:home_claw_app/l10n/app_localizations.dart';
 import '../core_service.dart';
@@ -33,12 +35,21 @@ class _FriendListScreenState extends State<FriendListScreen> {
   bool _loading = true;
   String? _error;
   String? _initialPushFromFriend;
+  Uint8List? _myAvatarBytes;
 
   @override
   void initState() {
     super.initState();
     _initialPushFromFriend = widget.initialPushFromFriend;
     _loadFriends();
+    _loadMyAvatar();
+  }
+
+  Future<void> _loadMyAvatar() async {
+    final bytes = await widget.coreService.getMyAvatarCached();
+    if (mounted && bytes != null && bytes.isNotEmpty) {
+      setState(() => _myAvatarBytes = bytes);
+    }
   }
 
   Future<void> _loadFriends() async {
@@ -132,9 +143,22 @@ class _FriendListScreenState extends State<FriendListScreen> {
       return LoginScreen(coreService: widget.coreService);
     }
     final l10n = AppLocalizations.of(context)!;
+    final hasMyAvatar = _myAvatarBytes != null && _myAvatarBytes!.isNotEmpty;
     return Scaffold(
       appBar: AppBar(
-        title: Text(l10n.homeClaw),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+              backgroundImage: hasMyAvatar ? MemoryImage(_myAvatarBytes!) : null,
+              child: hasMyAvatar ? null : Icon(Icons.person, color: Theme.of(context).colorScheme.onPrimaryContainer, size: 22),
+            ),
+            const SizedBox(width: 10),
+            Text(l10n.homeClaw),
+          ],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.person_add),
@@ -189,7 +213,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
                     MaterialPageRoute(
                       builder: (context) => SettingsScreen(coreService: widget.coreService),
                     ),
-                  );
+                  ).then((_) => _loadMyAvatar());
                   break;
                 case 'logout':
                   _logout();
@@ -248,7 +272,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
   }
 }
 
-class _FriendTile extends StatelessWidget {
+class _FriendTile extends StatefulWidget {
   final String userId;
   final String friendId;
   final String displayName;
@@ -271,22 +295,45 @@ class _FriendTile extends StatelessWidget {
     this.onRemoved,
   });
 
+  @override
+  State<_FriendTile> createState() => _FriendTileState();
+}
+
+class _FriendTileState extends State<_FriendTile> {
+  Uint8List? _avatarBytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAvatar();
+  }
+
+  Future<void> _loadAvatar() async {
+    final url = widget.isUserFriend && (widget.toUserId ?? '').trim().isNotEmpty
+        ? widget.coreService.userAvatarUrl(widget.toUserId!.trim())
+        : widget.coreService.friendAvatarUrl((widget.friendId).trim());
+    final bytes = await widget.coreService.fetchAvatarWithAuth(url);
+    if (mounted && bytes != null && bytes.isNotEmpty) {
+      setState(() => _avatarBytes = bytes);
+    }
+  }
+
   /// Id to send to DELETE /api/me/friends/{id}: for user friend use toUserId, for AI use friendId.
-  String get _deleteId => (isUserFriend && (toUserId ?? '').trim().isNotEmpty) ? toUserId!.trim() : friendId;
+  String get _deleteId => (widget.isUserFriend && (widget.toUserId ?? '').trim().isNotEmpty) ? widget.toUserId!.trim() : widget.friendId;
 
   /// HomeClaw cannot be removed (system default).
-  bool get _canRemove => friendId.trim().toLowerCase() != 'homeclaw';
+  bool get _canRemove => widget.friendId.trim().toLowerCase() != 'homeclaw';
 
   Future<void> _removeFriend(BuildContext context) async {
     if (!_canRemove) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(isUserFriend ? 'Remove user friend?' : 'Remove AI friend?'),
+        title: Text(widget.isUserFriend ? 'Remove user friend?' : 'Remove AI friend?'),
         content: Text(
-          isUserFriend
-              ? 'Remove $displayName from your friends? They will no longer appear in your list.'
-              : 'Remove $displayName from your friends? You can add them again later.',
+          widget.isUserFriend
+              ? 'Remove ${widget.displayName} from your friends? They will no longer appear in your list.'
+              : 'Remove ${widget.displayName} from your friends? You can add them again later.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
@@ -300,10 +347,10 @@ class _FriendTile extends StatelessWidget {
     );
     if (confirmed != true) return;
     try {
-      await coreService.deleteAIFriend(_deleteId);
+      await widget.coreService.deleteAIFriend(_deleteId);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$displayName removed')));
-        onRemoved?.call();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${widget.displayName} removed')));
+        widget.onRemoved?.call();
       }
     } catch (e) {
       if (context.mounted) {
@@ -317,18 +364,22 @@ class _FriendTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final hasThumbnail = _avatarBytes != null && _avatarBytes!.isNotEmpty;
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: theme.colorScheme.primaryContainer,
-          child: Icon(
-            isUserFriend ? Icons.person : Icons.smart_toy,
-            color: theme.colorScheme.onPrimaryContainer,
-          ),
+          backgroundImage: hasThumbnail ? MemoryImage(_avatarBytes!) : null,
+          child: hasThumbnail
+              ? null
+              : Icon(
+                  widget.isUserFriend ? Icons.person : Icons.smart_toy,
+                  color: theme.colorScheme.onPrimaryContainer,
+                ),
         ),
-        title: Text(displayName),
-        subtitle: isUserFriend ? Text('User', style: Theme.of(context).textTheme.bodySmall) : null,
+        title: Text(widget.displayName),
+        subtitle: widget.isUserFriend ? Text('User', style: Theme.of(context).textTheme.bodySmall) : null,
         trailing: _canRemove
             ? IconButton(
                 icon: const Icon(Icons.more_vert),
@@ -341,13 +392,13 @@ class _FriendTile extends StatelessWidget {
             context,
             MaterialPageRoute(
               builder: (context) => ChatScreen(
-                coreService: coreService,
-                userId: userId,
-                userName: displayName,
-                friendId: friendId,
-                initialMessage: initialMessage,
-                isUserFriend: isUserFriend,
-                toUserId: toUserId,
+                coreService: widget.coreService,
+                userId: widget.userId,
+                userName: widget.displayName,
+                friendId: widget.friendId,
+                initialMessage: widget.initialMessage,
+                isUserFriend: widget.isUserFriend,
+                toUserId: widget.toUserId,
               ),
             ),
           );

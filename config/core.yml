@@ -91,7 +91,7 @@ push_notifications:
     sandbox: false   # true for development/TestFlight, false for App Store
   # FCM (Android and other non-Apple). Optional: set GOOGLE_APPLICATION_CREDENTIALS env instead.
   fcm:
-    credentials_path: ""   # path to serviceAccountKey.json (relative to project root), or leave empty to use env
+    credentials_path: "config/serviceAccountKey.json"   # path relative to project root; or leave empty to use env
 
 # Tool layer (use_tools: true): tools section is in skills_and_plugins.yml. Edit config/skills_and_plugins.yml under "tools:".
 # Knowledge base and memory/DB blocks are in memory_kb.yml (see memory_kb_config_file above).
@@ -166,7 +166,7 @@ llama_cpp:
 # Fallbacks: max_tokens → llama_cpp.predict; temperature/top_p/repeat_penalty → llama_cpp.temp / (none) / llama_cpp.repeat_penalty.
 completion:
   max_tokens: 8192          # max tokens to generate per response (fallback: llama_cpp.predict)
-  temperature: 0.7          # sampling temperature 0..2 (fallback: llama_cpp.temp)
+  temperature: 0.5          # sampling temperature 0..2 (fallback: llama_cpp.temp)
   top_p: 1.0                # nucleus sampling 0..1
   presence_penalty: 0       # OpenAI-style; penalize tokens that appear in text so far
   frequency_penalty: 0      # OpenAI-style; penalize by token frequency

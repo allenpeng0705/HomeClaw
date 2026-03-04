@@ -12,6 +12,7 @@ from loguru import logger
 from base.util import Util
 from core.avatar_store import (
     get_friend_avatar_path,
+    get_preset_thumbnail_path,
     get_user_avatar_path,
     save_friend_avatar,
     save_user_avatar,
@@ -259,8 +260,32 @@ def get_api_me_friends_identity_put_handler(core):  # noqa: ARG001
     return handler
 
 
+def _preset_for_friend(user_id: str, friend_id: str) -> Optional[str]:
+    """Resolve preset name for a friend by user_id and friend_id (friend display name). Returns None if not found."""
+    try:
+        users = Util().get_users() or []
+        fid = (friend_id or "").strip().lower()
+        uid = (user_id or "").strip()
+        if not fid or not uid:
+            return None
+        for u in users:
+            u_id = (getattr(u, "id", None) or getattr(u, "name", None) or "").strip()
+            if u_id != uid:
+                continue
+            for f in getattr(u, "friends", None) or []:
+                n = (getattr(f, "name", None) or "").strip()
+                if n.lower() == fid:
+                    preset = getattr(f, "preset", None)
+                    if preset and str(preset).strip():
+                        return str(preset).strip()
+            break
+    except Exception:
+        pass
+    return None
+
+
 def get_api_me_friends_avatar_get_handler(core):  # noqa: ARG001
-    """GET /api/me/friends/{friend_id}/avatar. Returns avatar for that (custom AI) friend. 404 if none."""
+    """GET /api/me/friends/{friend_id}/avatar. Returns custom avatar, or preset thumbnail if friend has a preset and no custom avatar. 404 if none."""
 
     async def handler(
         friend_id: str,
@@ -269,11 +294,19 @@ def get_api_me_friends_avatar_get_handler(core):  # noqa: ARG001
         try:
             user_id, _ = token_user
             path = get_friend_avatar_path(user_id, friend_id)
-            if not path.is_file():
-                return JSONResponse(status_code=404, content={"detail": "No avatar"})
-            suffix = (path.suffix or "").strip().lower()
-            media_type = "image/png" if suffix == ".png" else "image/jpeg"
-            return FileResponse(path, media_type=media_type)
+            if path.is_file():
+                suffix = (path.suffix or "").strip().lower()
+                media_type = "image/png" if suffix == ".png" else "image/jpeg"
+                return FileResponse(path, media_type=media_type)
+            # No custom avatar: try preset thumbnail from config/preset_thumbnails/
+            preset = _preset_for_friend(user_id, friend_id)
+            if preset:
+                preset_path = get_preset_thumbnail_path(preset)
+                if preset_path and preset_path.is_file():
+                    suffix = (preset_path.suffix or "").strip().lower()
+                    media_type = "image/png" if suffix == ".png" else "image/jpeg"
+                    return FileResponse(preset_path, media_type=media_type)
+            return JSONResponse(status_code=404, content={"detail": "No avatar"})
         except Exception as e:
             logger.debug("GET /api/me/friends/.../avatar failed: {}", e)
             return JSONResponse(status_code=500, content={"detail": "Failed"})

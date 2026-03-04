@@ -7,6 +7,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -178,10 +179,11 @@ class CoreService {
     await prefs.setString(_keyCompanionUserId, _sessionUserId!);
   }
 
-  /// Clear session and saved credentials (logout). Removes username and password from device.
+  /// Clear session and saved credentials (logout). Removes username and password from device and clears cached avatar.
   Future<void> clearSession() async {
     _sessionToken = null;
     _sessionUserId = null;
+    await clearUserAvatarCache();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyCompanionToken);
     await prefs.remove(_keyCompanionUserId);
@@ -282,6 +284,50 @@ class CoreService {
     } catch (_) {
       return null;
     }
+  }
+
+  static const String _userAvatarCacheFilename = 'user_avatar.png';
+
+  /// Path for cached current user avatar (application cache directory). Used for home page display.
+  Future<String> _userAvatarCachePath() async {
+    final dir = await getApplicationCacheDirectory();
+    return path.join(dir.path, _userAvatarCacheFilename);
+  }
+
+  /// Load current user's avatar: from local cache if present, else fetch from API and save to cache. Returns null if not logged in or no avatar.
+  Future<Uint8List?> getMyAvatarCached() async {
+    if (!isLoggedIn) return null;
+    try {
+      final cachePath = await _userAvatarCachePath();
+      final file = File(cachePath);
+      if (await file.exists()) {
+        final bytes = await file.readAsBytes();
+        if (bytes.isNotEmpty) return bytes;
+      }
+      final bytes = await fetchAvatarWithAuth(meAvatarUrl);
+      if (bytes != null && bytes.isNotEmpty) {
+        await file.writeAsBytes(bytes);
+        return bytes;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Save avatar bytes to local cache (e.g. after upload in Settings). Home page will show this on next load.
+  Future<void> saveMyAvatarToCache(Uint8List bytes) async {
+    try {
+      final cachePath = await _userAvatarCachePath();
+      await File(cachePath).writeAsBytes(bytes);
+    } catch (_) {}
+  }
+
+  /// Remove cached user avatar (e.g. on logout so next user doesn't see it).
+  Future<void> clearUserAvatarCache() async {
+    try {
+      final cachePath = await _userAvatarCachePath();
+      final file = File(cachePath);
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
   }
 
   /// PUT /api/me/avatar — upload current user's profile picture (multipart). Max 1MB PNG/JPEG.

@@ -209,6 +209,90 @@ Gives you a **stable hostname** (e.g. `site.yourdomain.com`) and allows running 
 
 4. After a **reboot**, both the site server and the tunnel should start automatically: the site serves files on localhost:9999, and cloudflared exposes them at https://site.yourdomain.com.
 
+### 2.3a One tunnel, multiple routes (Core + marketing site)
+
+If you already run **one** Cloudflare Tunnel for HomeClaw (e.g. Core on port 9000 at homeclaw.online), you can add the **marketing site** (port 9999) as another route on the **same** tunnel. Use **different hostnames** (recommended) or different paths.
+
+**Option A – Different hostnames (recommended)**  
+Use one hostname for Core and one for the site so each app is at the root of its URL (no path stripping):
+
+```yaml
+tunnel: <your-tunnel-id>
+credentials-file: /path/to/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: homeclaw.online
+    service: http://127.0.0.1:9000
+  - hostname: www.homeclaw.online
+    service: http://127.0.0.1:9999
+  - service: http_status:404
+```
+
+- **homeclaw.online** → Core (9000)  
+- **www.homeclaw.online** → marketing site (9999)
+
+Or use a subdomain for the site, e.g. `site.homeclaw.online` → 9999. Add each hostname in **Zero Trust** → **Tunnels** → your tunnel → **Public Hostname** (or use `cloudflared tunnel route dns <tunnel-name> www.homeclaw.online` etc.). **Order matters**: the first matching hostname wins.
+
+**Option B – Path-based**  
+You can route by path (e.g. `/site` → 9999), but the static site expects to be at **root** (`/`, `/en/`, `/zh/`). So path-based routing only works if you put the site on a **subdomain** (Option A) or run a reverse proxy that strips the path. For the simple Python server, **Option A (subdomain or www)** is the one that works without extra proxy logic.
+
+After editing ingress, **restart the tunnel** so the new route is active.
+
+### 2.4 Troubleshooting: tunnel doesn’t work / proxy issues
+
+If the tunnel URL shows an error (e.g. **502 Bad Gateway**, **Connection refused**, or a blank page), work through these checks.
+
+1. **Confirm the site works locally**  
+   Before starting the tunnel, ensure the site server is running and the document root is correct:
+   ```bash
+   python scripts/serve_site.py
+   ```
+   Then open **http://127.0.0.1:9999** in your browser (and e.g. http://127.0.0.1:9999/en/). If it doesn’t load locally, fix that first (see [site/README.md](../site/README.md#troubleshooting-site-cannot-be-displayed-or-blank-page)).
+
+2. **Start order**  
+   Start the **site server first**, then start **cloudflared**. If the tunnel runs but the origin server is not listening, Cloudflare will show **502 Bad Gateway** or similar.
+
+3. **Tunnel origin URL**  
+   Use exactly the URL your site server listens on:
+   - **Quick tunnel:** `cloudflared tunnel --url http://127.0.0.1:9999`
+   - In **config.yml** under `ingress`: `service: http://127.0.0.1:9999`  
+   If your server uses another port (e.g. 3000), use that port in the tunnel. Using `http://localhost:9999` instead of `127.0.0.1` is fine if you prefer.
+
+4. **502 Bad Gateway**  
+   Usually means cloudflared cannot reach the origin:
+   - Site server not running: start `python scripts/serve_site.py` (or your systemd/NSSM service).
+   - Wrong port: confirm the server is on 9999 (or the port you use) with `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9999` (expect 200).
+   - Firewall: on the same machine, 127.0.0.1 is rarely blocked; if the tunnel runs on another machine, the origin must listen on a reachable address (e.g. `0.0.0.0:9999` — see note below).
+
+5. **Blank or broken page over the tunnel**  
+   - Open the tunnel URL and try **https://your-tunnel-url/en/** or **/zh/** directly (the root redirects via JavaScript).
+   - Check the browser dev tools (Network tab): if CSS or assets return 404, the path is wrong (e.g. document root not `site/`). Run the site with `scripts/serve_site.py` so the root is `site/`.
+   - The site is static; no special proxy headers (e.g. `X-Forwarded-Host`) are required. If you use a **reverse proxy in front** of the site (e.g. nginx), ensure it forwards the path unchanged and the proxy target is `http://127.0.0.1:9999`.
+
+6. **Named tunnel: “tunnel not found” or no traffic**  
+   - Run `cloudflared tunnel list` and confirm the tunnel name and ID.
+   - In config, `credentials-file` must point to the correct JSON file (path for your OS/user).
+   - Run in the foreground to see errors: `cloudflared tunnel run homeclaw-site`.
+   - If using a custom hostname, run `cloudflared tunnel route dns homeclaw-site site.yourdomain.com` and wait for DNS to propagate; the hostname must point to the tunnel (CNAME).
+
+7. **Tunnel and site on different machines**  
+   By default the site binds to `127.0.0.1`, so only the same machine can connect. To run cloudflared on another host, either run the tunnel on the **same** machine as the site, or make the site listen on all interfaces (e.g. change the serve script to bind `0.0.0.0` and use a firewall so only cloudflared’s host can reach 9999).
+
+8. **Works on 127.0.0.1:9999 but not via custom domain (e.g. homeclaw.online)**  
+   The site and Python server do **not** need any proxy or Host-header changes; they serve the same content for any hostname. If https://homeclaw.online fails but http://127.0.0.1:9999 works, the problem is **DNS or tunnel routing**, not the web server:
+
+   - **DNS must point the domain to the tunnel**  
+     For a named tunnel with a custom domain (e.g. homeclaw.online), Cloudflare must route that hostname to your tunnel. Either: **(A)** In **Zero Trust** → **Networks** → **Tunnels** → your tunnel → **Public Hostname**, add hostname `homeclaw.online` with Service `http://127.0.0.1:9999`; or **(B)** Run `cloudflared tunnel route dns <tunnel-name> homeclaw.online` so the CNAME for homeclaw.online points to `<tunnel-id>.cfargotunnel.com`. If the domain uses an A record (your server IP) instead of the tunnel CNAME, traffic never reaches cloudflared.
+
+   - **Tunnel must be running**  
+     Run `cloudflared tunnel run homeclaw-site` (or your tunnel name) on the same machine as the site server. If the tunnel process is stopped, you get 522 or 502.
+
+   - **Ingress hostname**  
+     In `~/.cloudflared/config.yml`, the `ingress` entry must include `hostname: homeclaw.online` and `service: http://127.0.0.1:9999`. Restart the tunnel after editing.
+
+   - **Quick tunnel test**  
+     Run `cloudflared tunnel --url http://127.0.0.1:9999` and open the printed `https://xxxx.trycloudflare.com` URL. If that works but homeclaw.online does not, the issue is custom-domain routing (DNS or public hostname), not the origin server.
+
 **Useful commands:**
 
 | Command | Description |

@@ -6,9 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../chat_history_store.dart';
 import '../core_service.dart';
 import 'change_password_screen.dart';
-import 'config_core_screen.dart';
 import 'permissions_screen.dart';
-import 'portal_login_screen.dart';
 import 'scan_connect_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -66,6 +64,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() => _avatarUploading = true);
       await widget.coreService.uploadMyAvatar(File(path));
       await _loadMyAvatar();
+      if (mounted && _myAvatarBytes != null && _myAvatarBytes!.isNotEmpty) {
+        await widget.coreService.saveMyAvatarToCache(_myAvatarBytes!);
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile picture updated')));
       }
@@ -258,30 +259,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (context) => PortalLoginScreen(coreService: widget.coreService),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.settings_applications),
-              label: const Text('Core setting (Portal)'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => ConfigCoreScreen(coreService: widget.coreService),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.tune),
-              label: const Text('Manage Core (core.yml & user.yml)'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
                     builder: (context) => PermissionsScreen(
                       coreService: widget.coreService,
                       fromSettings: true,
@@ -452,45 +429,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
               keyboardType: TextInputType.url,
               autocorrect: false,
             ),
-            const SizedBox(height: 24),
-            const Text(
-              'Exec allowlist (system run)',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Allowed commands: exact executable name (e.g. ls) or regex pattern (e.g. ^/usr/bin/.*). Desktop only.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-            const SizedBox(height: 8),
-            ...widget.coreService.execAllowlist.map((cmd) => ListTile(
-              title: Text(cmd, style: const TextStyle(fontFamily: 'monospace')),
-              trailing: IconButton(
-                icon: const Icon(Icons.remove_circle_outline),
-                onPressed: () => _removeExecCommand(cmd),
+            if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) ...[
+              const SizedBox(height: 24),
+              const Text(
+                'Exec allowlist (system run)',
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
-            )),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _execCommandController,
-                    decoration: const InputDecoration(
-                      hintText: 'e.g. ls, pwd',
-                      border: OutlineInputBorder(),
-                      isDense: true,
+              const SizedBox(height: 4),
+              const Text(
+                'Allowed commands: exact executable name (e.g. ls) or regex pattern (e.g. ^/usr/bin/.*). Desktop only.',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              const SizedBox(height: 8),
+              ...widget.coreService.execAllowlist.map((cmd) => ListTile(
+                title: Text(cmd, style: const TextStyle(fontFamily: 'monospace')),
+                trailing: IconButton(
+                  icon: const Icon(Icons.remove_circle_outline),
+                  onPressed: () => _removeExecCommand(cmd),
+                ),
+              )),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _execCommandController,
+                      decoration: const InputDecoration(
+                        hintText: 'e.g. ls, pwd',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onSubmitted: (_) => _addExecCommand(),
                     ),
-                    onSubmitted: (_) => _addExecCommand(),
                   ),
-                ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: _addExecCommand,
-                  child: const Text('Add'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 32),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: _addExecCommand,
+                    child: const Text('Add'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32),
+            ],
             SafeArea(
               top: false,
               child: FilledButton(

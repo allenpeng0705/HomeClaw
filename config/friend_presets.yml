@@ -11,6 +11,7 @@
 #
 # --- Field reference (each key) ---
 # tools_preset: One of the names above, or array for union (e.g. [reminder, finder]). Resolved in base/friend_presets.py.
+# thumbnail: Filename for preset avatar (e.g. reminder.png). Stored under config/preset_thumbnails/. Omit = use {preset}.png; if file missing, app shows default icon.
 # skills: Which skills to inject. List of skill folder names; [] = none. Omit or "all" = all skills.
 # plugins: Which plugins to inject. List of plugin ids; [] = none. Omit or "all" = all plugins.
 # memory_sources: Which memory to inject. List: cognee (RAG), agent_memory, daily_memory, md (agent+daily).
@@ -23,6 +24,7 @@
 presets:
   # Reminder: minimal context — cognee only; reminder + cron tools (see base/friend_presets.py).
   reminder:
+    thumbnail: reminder.png  # under config/preset_thumbnails/; used when no custom avatar
     tools_preset: reminder   # remind_me, record_date, recorded_events_list, cron_*, route_to_tam
     skills: []               # no skills
     plugins: []              # no plugins
@@ -33,6 +35,7 @@ presets:
     system_prompt: "You are the Reminder assistant. You only schedule and list reminders. Use only the provided tools. For all scheduling (remind_me, record_date, cron_schedule), use the current datetime and user location from the \"## System context (date/time and location)\" block in this message as the single source of truth; do not invent or guess times or locations."
 
   note:
+    thumbnail: note.png
     tools_preset: note       # file + save/query tools only; Cognee for memory (no append_agent_memory/append_daily_memory)
     skills: []
     plugins: []
@@ -44,6 +47,7 @@ presets:
 
   # Finder: short context (history: 10) so the model focuses on file + web. Tools: search/list files, read, view link, edit, save_result_page, run_skill (html-slides, ppt), web_search.
   finder:
+    thumbnail: finder.png
     tools_preset: finder     # file_find, folder_list, document_read, file_read/write, save_result_page, get_file_view_link, run_skill, web_search
     skills: [html-slides-1.0.0, ppt-generation-1.0.0, summarize-1.0.0, baidu-search-1.0.0]
     plugins: []
