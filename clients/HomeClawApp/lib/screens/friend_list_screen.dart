@@ -346,6 +346,7 @@ class _FriendTileState extends State<_FriendTile> {
       ),
     );
     if (confirmed != true) return;
+    if (!context.mounted) return;
     try {
       await widget.coreService.deleteAIFriend(_deleteId);
       if (context.mounted) {
@@ -380,13 +381,7 @@ class _FriendTileState extends State<_FriendTile> {
         ),
         title: Text(widget.displayName),
         subtitle: widget.isUserFriend ? Text('User', style: Theme.of(context).textTheme.bodySmall) : null,
-        trailing: _canRemove
-            ? IconButton(
-                icon: const Icon(Icons.more_vert),
-                onPressed: () => _removeFriend(context),
-                tooltip: 'Remove friend',
-              )
-            : null,
+        onLongPress: _canRemove ? () => _removeFriend(context) : null,
         onTap: () {
           Navigator.push(
             context,
