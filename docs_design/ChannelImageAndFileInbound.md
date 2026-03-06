@@ -58,7 +58,7 @@ Core uses the same logic for **all** inbound sources (Companion, Slack, DingTalk
 - **Files (non-image documents, or any type in `files`)**
   - Core runs **file-understanding** on `files` (and image data URLs in `files` are moved into `images`). Data URLs are decoded to **temporary files** for processing.
   - **Documents**: Extracted text is injected into the user message; if the user sends file(s) only (no or negligible text) and the doc is not too big, Core can **add the content to the user’s Knowledge base** (config `file_understanding.add_to_kb_max_chars`). The **physical file** is not automatically saved to a folder; the LLM can use tools (e.g. write to `documents` or `downloads`) if the user asks to save it.
-  - **User sandbox folders** (under `{homeclaw_root}/{user_id}/`): `images`, `downloads`, `documents`, `knowledgebase`, `work`, `output`, `share`. So:
+  - **User sandbox folders** (under `{homeclaw_root}/{user_id}/`): `images`, `downloads`, `documents`, `knowledge`, `work`, `output`, `share`. So:
     - **Images** → stored in **`{user_id}/images`** when the model doesn’t support vision.
     - **Files** → processed for content; content can go to **Knowledge base**; saving the file to **`downloads`** or **`documents`** is done by the LLM/tools (e.g. user says “save this to my downloads”) or could be added as an optional Core behavior later.
 
@@ -97,7 +97,7 @@ For **images** (step 1: files can be added later), the intended flow is:
 
 - **InboundRequest**: `base/base.py`
 - **Inbound handling (images, files, file_understanding)**: `core/inbound_handlers.py`, `core/core.py` (e.g. `images_dir = Path(root) / str(user_id) / "images"`, file_understanding, add_to_kb)
-- **User sandbox folders**: `base/workspace.py` (`ensure_user_sandbox_folders`: `images`, `downloads`, `documents`, `knowledgebase`, …)
+- **User sandbox folders**: `base/workspace.py` (`ensure_user_sandbox_folders`: `images`, `downloads`, `documents`, `knowledge`, …)
 - **File-understanding**: `docs_design/FileUnderstandingDesign.md`
 - **How to write a channel**: `docs_design/HowToWriteAChannel.md` (§2.2: images, files, data URLs, paths)
 - **Data URL to bytes**: `base.util.Util.data_url_to_bytes` (for channels sending Core response images to the user)

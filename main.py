@@ -451,14 +451,14 @@ def run_core() -> threading.Thread:
 
 def run_portal(open_browser=True):
     """Start the Portal server (config and onboarding). Bind host from PORTAL_HOST (default 0.0.0.0). Optionally open browser when ready. Ctrl+C to stop."""
-    # Ensure project root is first on path so core.portal imports work from any cwd.
+    # Ensure project root is first on path so portal imports work from any cwd.
     _root = os.path.abspath(os.path.normpath(os.path.dirname(os.path.abspath(__file__))))
     if _root and (not sys.path or sys.path[0] != _root):
         sys.path.insert(0, _root)
     try:
         import uvicorn
-        from core.portal.app import app
-        from core.portal.config import get_host, get_port
+        from portal.app import app
+        from portal.config import get_host, get_port
     except Exception as e:
         logger.exception("Failed to load Portal: {}", e)
         sys.exit(1)

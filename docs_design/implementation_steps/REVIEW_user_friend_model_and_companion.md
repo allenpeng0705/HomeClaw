@@ -107,7 +107,7 @@ This document summarizes the review of all changes and docs for: (1) logic corre
 
 ### 5.1 Tool descriptions (builtin.py)
 
-- **file_read, document_read, file_understand, file_write:** Describe user sandbox (downloads/, documents/, output/, work/, share/, knowledgebase/) and per-friend paths ({FriendName}/output/, {FriendName}/knowledge/). Share = global share. ✓
+- **file_read, document_read, file_understand, file_write:** Describe user sandbox (downloads/, documents/, output/, work/, share/, knowledge/) and per-friend paths ({FriendName}/output/, {FriendName}/knowledge/). Share = global share. ✓
 - **Path parameter:** "Relative path under user sandbox"; "Use 'share/...' for global share"; friend paths documented. ✓
 
 ### 5.2 TAM and other config prompts

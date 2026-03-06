@@ -8,6 +8,81 @@
 # the main config. Edit this file for all LLM/model settings.
 # =============================================================================
 
+# ——— 1. llama.cpp server settings (for local models) ———
+# ctx_size, predict, temp are used when starting the llama.cpp server.
+# For chat completions, max_tokens and temperature are sent per request (see completion below).
+# ctx_size: total context window (input + output). Typical values: 8192, 16384, 32768 (32K), 65536 (64K).
+# Higher = more VRAM/RAM and can slow inference; check your model's native max context.
+#
+# How to choose ctx_size:
+#   • Start with 8192 or 16384 for speed/VRAM — use 32K only if you actually hit limits.
+#   • You NEED larger context (e.g. 32K) when: long multi-turn chats, many tools/skills in one prompt,
+#     large pasted docs, or compaction/trimming kicks in often (see compaction.reserve_tokens and logs).
+#   • Signs to INCREASE: "context length exceeded", truncation, wrong routing, or model "forgets" earlier messages.
+#   • If you rarely have long chats or big tool lists, 8192–16384 is usually enough and faster.
+#
+# ——— Performance: CUDA build, flash_attn: on, n_gpu_layers: 99. Optional: cont_batching, cache_type_k/q8_0 (KV cache), grp_attn_n/w (self-extend).
+# Reduce ctx_size if you don't need long context. Quantized GGUF (Q4_K_M, Q5_K_M) is smaller and faster than F16.
+llama_cpp:
+  # 32768
+  ctx_size: 131072 #128K
+  predict: 8192
+  temp: 0.7
+  threads: 8
+  n_gpu_layers: 99
+  verbose: false
+  repeat_penalty: 1.5
+  chat_format: null
+  function_calling: true
+  # Model load / throughput (passed to llama-server at startup):
+  # flash_attn: "auto" | "on" | "off" — use "on" for faster GPU inference when your llama.cpp build supports it.
+  flash_attn: on
+  # use_mmap: true = memory-map (default, lower RAM); false = --no-mmap (if you see mmap errors).
+  use_mmap: false
+  # batch_size: prompt batch size (default server ~512). Try 256–512 for 27B; higher = more VRAM, often better throughput.
+  batch_size: 512
+  # cont_batching: true = --cont-batching (smaller batches, start generating sooner; helps avoid OOM on prefill).
+  # Self-extend (long context with less slowdown): grp_attn_n = expansion factor (e.g. 4 for 4k→16k), grp_attn_w = window (e.g. 1024).
+  #grp_attn_n: 4
+  #grp_attn_w: 1024
+
+  # ——— Embedding server: fully separate from main model. Only the keys below are used.
+  # Uncomment and set any optional key as needed. Defaults when omitted: ctx_size 0, threads 4, n_gpu_layers 20, verbose false.
+  embedding:
+    ctx_size: 0           # 0 = use model default (recommended)
+    threads: 4
+    n_gpu_layers: 20
+    verbose: false
+
+    # ——— Optional (uncomment to override server defaults) ———
+    # flash_attn: auto       # auto | on | off — Flash Attention for GPU
+    # use_mmap: true         # false = --no-mmap (if embedding model has mmap errors)
+    # batch_size: 512        # prompt batch size
+    # cont_batching: false   # true = --cont-batching
+    # cache_type_k: q8_0     # KV cache K quant: q8_0 | q4_0 | q4_1 — less VRAM
+    # cache_type_v: q8_0     # KV cache V quant
+    # predict: 8192          # max tokens (embedding often ignores)
+    # temp: 0.8              # temperature
+    # repeat_penalty: 1.5    # (embedding server may ignore when pooling)
+
+# ——— Completion (per-request generation) ———
+# All parameters below are sent with every chat completion call. Omit or comment out to use server default or llama_cpp fallback where noted.
+# Fallbacks: max_tokens → llama_cpp.predict; temperature/top_p/repeat_penalty → llama_cpp.temp / (none) / llama_cpp.repeat_penalty.
+completion:
+  max_tokens: 8192          # max tokens to generate per response (fallback: llama_cpp.predict)
+  temperature: 0.5          # sampling temperature 0..2 (fallback: llama_cpp.temp)
+  top_p: 1.0                # nucleus sampling 0..1
+  presence_penalty: 0       # OpenAI-style; penalize tokens that appear in text so far
+  frequency_penalty: 0      # OpenAI-style; penalize by token frequency
+  repeat_penalty: 1.5       # llama.cpp-style; sent in extra_body (fallback: llama_cpp.repeat_penalty)
+  seed: null                 # optional; int for reproducible sampling
+  stop: null                 # optional; list of strings, e.g. ["</s>", "Human:"]
+  # logit_bias: {}          # optional; dict of token id to bias (-100..100)
+  # n: 1                    # number of completions (default 1)
+  # response_format: null   # optional; e.g. { "type": "json_object" }
+  # timeout: null            # optional; Unit: seconds
+  image_max_dimension: 512   # 0 = no resize. Set e.g. 1024 to resize images before sending to vision model (keeps aspect ratio; requires Pillow)
+
 # ——— 2. Local models (llama.cpp server per model, or Ollama) ———
 # Default: llama.cpp — path = GGUF path relative to model_path; Core starts one server per model.
 # Optional per model: mmproj (vision), lora (adapter(s)), lora_base (optional base for LoRA).
@@ -50,7 +125,7 @@ local_models:
     path: Qwen3VL-2B-Instruct-Q4_K_M.gguf
     mmproj: mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf
     host: 127.0.0.1
-    port: 5022
+    port: 5025
     capabilities: [Chat]
     supported_media: [image]
     
@@ -59,7 +134,7 @@ local_models:
     path: Qwen3VL-4B-Instruct-Q4_K_M.gguf
     mmproj: mmproj-Qwen3VL-4B-Instruct-F16.gguf
     host: 127.0.0.1
-    port: 5027
+    port: 5026
     capabilities: [Chat]
     supported_media: [image]
 
@@ -68,7 +143,7 @@ local_models:
     path: Qwen3-VL-8B-Instruct-Q4_K_M.gguf
     mmproj: mmproj-Qwen3-VL-8B-BF16.gguf
     host: 127.0.0.1
-    port: 5028
+    port: 5027
     capabilities: [Chat]
     supported_media: [image]
 
@@ -76,14 +151,14 @@ local_models:
     alias: Qwen3.5-27B-Q4_K_M
     path: Qwen3.5-27B-Q4_K_M.gguf
     host: 127.0.0.1
-    port: 5023
+    port: 5028
     capabilities: [Chat]
 
   - id: Qwen3.5-9B-Q5_K_M
     alias: Qwen3.5-9B-Q5_K_M
     path: Qwen3.5-9B-Q5_K_M.gguf
     host: 127.0.0.1
-    port: 5026
+    port: 5029
     capabilities: [Chat]
     # Note: was 5024; use a different port so 27B and 9B can run at the same time (only one process per port).
 
@@ -92,7 +167,7 @@ local_models:
     path: gemma-3-4b-it-Q4_K_M.gguf
     mmproj: mmproj-gemma-3-4b-BF16.gguf
     host: 127.0.0.1
-    port: 5025
+    port: 5030
     capabilities: [Chat]
     supported_media: [image]
 
@@ -101,7 +176,7 @@ local_models:
     alias: classifier
     path: Qwen3-0.6B-Q5_K_M.gguf
     host: 127.0.0.1
-    port: 5089
+    port: 5031
     capabilities: [Chat]
 
 # Ollama (local): type: ollama, path = Ollama model name (e.g. qwen2.5:7b). Core does not start a process; ensure Ollama server is running (default 127.0.0.1:11434). See docs_design/OllamaAsLocalModelAndCLI.md.
@@ -183,6 +258,8 @@ cloud_models:
 main_llm_mode: local
 main_llm_local: local_models/Qwen3.5-27B-Q4_K_M
 main_llm_cloud: cloud_models/DeepSeek-Chat
+# vision_llm: when main model has no vision (e.g. 27B text-only), use this model to describe images; description is injected into user message and main model replies. E.g. local_models/main_vl_model_2B. Omit or leave empty to save images and return a polite message instead.
+vision_llm: local_models/main_vl_model_2B
 # Mix mode routing: heuristic (Layer 1), semantic (Layer 2), SLM (Layer 3: classifier or perplexity). See comments in hybrid_router.
 hybrid_router:
   default_route: local
@@ -215,3 +292,10 @@ embedding_port: 5066
 # embedding_health_check_timeout_sec: 120   # seconds to wait for local embedding server; default 120
 main_llm_host: 127.0.0.1
 main_llm_port: 5023
+
+# Vision sidecar: when vision_llm is set (e.g. local_models/small_vision_2B), Core uses this host/port to call it for image description.
+# Run the vision model server on this port so Core always knows where to reach it.
+vision_llm_host: 127.0.0.1
+vision_llm_port: 5024
+# Optional: resize images before sending to vision sidecar (max width or height). 0 = use completion.image_max_dimension only. E.g. 1024 for small vision models.
+# vision_image_max_dimension: 1024

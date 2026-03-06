@@ -36,7 +36,7 @@ Each channel that can receive image, audio, or video from the platform must:
    - Set **text**: User message text or a short caption (e.g. "User sent an image", "Voice message", or the platform caption).
    - Set **images** / **audios** / **videos**: List of **paths** or **data URLs** (one item per file). Empty list `[]` when there is no media of that type.
    - Set **contentType**: `ContentType.TEXT` (text only), `ContentType.TEXTWITHIMAGE` (text + image(s)), `ContentType.IMAGE` (image only), `ContentType.AUDIO` (audio), `ContentType.VIDEO` (video). Use the type that matches what you are sending so Core and permissions behave correctly.
-4. **Send** the same **PromptRequest** to Core as today (`transferTocore` or `localChatWithcore`). Core will only add media parts that the main model supports (**supported_media** in config); unsupported types are omitted and a short note is added so the model does not crash.
+4. **Send** the same **PromptRequest** to Core as today (`transferTocore` or `localChatWithcore`). Core will only add media parts that the main model supports (**supported_media** in config). **When the model does not support images** (e.g. text-only 27B): Core does **not** call the LLM with image data. It saves received images to the user’s **images** folder (when `homeclaw_root` and `user_id` are set), then returns a single stable reply explaining that the current model doesn’t support image understanding and suggesting a vision-capable model. So the user never loses the image and gets a clear, consistent response without confusing “(Image(s) omitted...)” in the conversation.
 
 **What kind of file each channel should handle**
 
@@ -50,6 +50,16 @@ Each channel that can receive image, audio, or video from the platform must:
 Channels do not need to support all three media types. You can send **files** (paths) and Core will classify and handle each; or send **images** / **audios** / **videos** explicitly when you already know the type. Support only the modalities your platform can send (e.g. WhatsApp: image + audio; email: image + attachment). Core accepts any subset of `images`, `audios`, `videos`; it will omit unsupported types based on **main_llm_supported_media()**.
 
 **Summary:** The channel is responsible for **receiving and saving** (or encoding) the media and **composing** the request to Core with **text**, **images** / **audios** / **videos** (paths or data URLs), and **contentType**. Core is responsible for checking model support and building the LLM message; it does not fetch or store media for channels.
+
+### Vision sidecar (vision_llm) when main model has no vision
+
+When the **main** model does not support images (e.g. a text-only 27B model), you can set **vision_llm** in `config/llm.yml` (or `config/core.yml`) to a **small vision-capable model** (e.g. `local_models/main_vl_model_2B`). Core will then:
+
+1. Call the **vision_llm** with the image(s) and the user's message (e.g. "Describe the image(s). User message: …").
+2. Take the vision model's text response and inject it into the user message as *"[Image description]: &lt;response&gt;"*.
+3. Send that **text-only** message to the **main** model, which replies as usual (with tools, memory, etc.).
+
+So you run one small vision model (e.g. 2B) for image understanding and keep your large text model (e.g. 27B) for reasoning and tools. If **vision_llm** is not set or the vision call fails, Core falls back to saving images to the user's images folder and returning a polite message (see above).
 
 ---
 

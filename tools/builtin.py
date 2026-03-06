@@ -677,22 +677,16 @@ async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContex
     job_id = tam.schedule_cron_task(task, cron_expr, params=params)
     if job_id is None:
         return "Error: Failed to schedule (invalid cron expression or croniter not installed)."
-    out = {"scheduled": True, "job_id": job_id, "cron_expr": cron_expr, "message": params.get("message", "Scheduled reminder")}
+    msg = params.get("message", "Scheduled reminder")
+    # Return a user-friendly string so the reply is never raw JSON (better UX when used as final or when model paraphrases).
+    friendly = f"Recurring reminder scheduled. I'll remind you: {msg}. (To cancel: say 'list my recurring reminders' and remove it.)"
     if task_type == "run_skill":
-        out["task_type"] = "run_skill"
-        out["skill_name"] = params.get("skill_name")
-        out["script"] = params.get("script")
+        friendly += f" [Task: run_skill {params.get('skill_name', '')} {params.get('script', '')}]"
     elif task_type == "run_plugin":
-        out["task_type"] = "run_plugin"
-        out["plugin_id"] = params.get("plugin_id")
+        friendly += f" [Task: run_plugin {params.get('plugin_id', '')}]"
     elif task_type == "run_tool":
-        out["task_type"] = "run_tool"
-        out["tool_name"] = params.get("tool_name")
-    if tz:
-        out["tz"] = tz
-    if delivery_target:
-        out["delivery_target"] = delivery_target
-    return json.dumps(out)
+        friendly += f" [Task: run_tool {params.get('tool_name', '')}]"
+    return friendly
 
 
 async def _cron_list_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
@@ -898,7 +892,19 @@ async def _record_date_executor(arguments: Dict[str, Any], context: ToolContext)
             system_user_id=system_user_id,
             friend_id=friend_id,
         )
-        return json.dumps(result)
+        # Return a user-friendly string so the reply is never raw JSON. Never raise.
+        if isinstance(result, dict) and result.get("recorded"):
+            ev = result.get("event_name", event_name) or "event"
+            wh = result.get("when", when) or ""
+            parts = [f"Recorded: {ev} on {wh}."]
+            rs = result.get("reminders_scheduled")
+            if rs and isinstance(rs, (list, tuple)):
+                parts.append(" Reminder(s) set: " + ", ".join(str(x) for x in rs) + ".")
+            return "".join(parts)
+        try:
+            return json.dumps(result) if result is not None else "Recorded."
+        except (TypeError, ValueError):
+            return str(result) if result is not None else "Recorded."
     except Exception as e:
         return f"Error: {e!s}"
 
@@ -2178,7 +2184,7 @@ def _append_file_link_to_run_skill_output(script_output: str, context: Optional[
 
 
 async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Run a script from a loaded skill's scripts/ folder. Supports Python (.py), Node.js (.js, .mjs, .cjs), shell (.sh). Skill name = folder name under skills_dir; script = filename or path relative to scripts/. Optional args as list of strings. Sandboxed: only scripts under <skill>/scripts/; optional allowlist in config. Skills without scripts/ are instruction-only: omit script and use the skill's instructions in your response."""
+    """Run a script from a loaded skill's scripts/ folder. Supports Python (.py), Node.js (.js, .mjs, .cjs), TypeScript (.ts via tsx or ts-node when in PATH), shell (.sh). Skill name = folder name under skills_dir; script = filename or path relative to scripts/. Optional args as list of strings. Sandboxed: only scripts under <skill>/scripts/; optional allowlist in config. Skills without scripts/ are instruction-only: omit script and use the skill's instructions in your response."""
     try:
         from base.util import Util
     except ImportError:
@@ -2370,6 +2376,24 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
                 return "Error: Node.js script requires 'node' in PATH. Install Node.js (https://nodejs.org) or use a Python/shell script."
             proc = await asyncio.create_subprocess_exec(
                 node_path,
+                str(script_path),
+                *args_list,
+                cwd=str(skill_folder),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=skill_env,
+            )
+        elif script_path.suffix.lower() == ".ts":
+            # TypeScript: run with tsx (preferred) or ts-node if in PATH; Node does not run .ts natively.
+            ts_runner = shutil.which("tsx") or shutil.which("ts-node")
+            if not ts_runner:
+                return (
+                    "Error: TypeScript script requires 'tsx' or 'ts-node' in PATH. "
+                    "Install one: npm install -g tsx  (or: npm install -g ts-node). "
+                    "Alternatively compile to .js and use run_skill(script='file.js')."
+                )
+            proc = await asyncio.create_subprocess_exec(
+                ts_runner,
                 str(script_path),
                 *args_list,
                 cwd=str(skill_folder),
@@ -3046,7 +3070,7 @@ _FILE_VIEW_LINK_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bm
 
 
 # When user/model passes only a filename (no path), try these subdirs so we can still find the file (e.g. images/ID1.jpg).
-_GET_FILE_VIEW_LINK_FALLBACK_PREFIXES = ("images/", "documents/", "downloads/", "output/")
+_GET_FILE_VIEW_LINK_FALLBACK_PREFIXES = ("images/", "documents/", "downloads/", "output/", "work/", "knowledge/")
 
 # Max results when searching sandbox for a filename (avoid slow scans).
 _GET_FILE_VIEW_LINK_SEARCH_MAX = 25
@@ -3162,7 +3186,7 @@ _FILE_ACCESS_DENIED_MSG = (
 def _file_not_found_msg(context: Optional[Any] = None) -> str:
     """Message when file/path not found. Include current sandbox (user_key) so operator can fix user_id if files live under another user folder."""
     base = "That file or path wasn't found. Only two bases are accessible (sandbox): user sandbox root (omit path) and share (path 'share'), and their subfolders. "
-    hint = "Try: (1) folder_list() or file_find(pattern='*filename*') to list/search user sandbox; (2) use the **exact path** from the result that matches the filename the user asked for in document_read (e.g. user asked for 1.pdf → use path '1.pdf' only, not output/ or any other path)."
+    hint = "Try: (1) folder_list() or file_find(pattern='*') to list files; (2) use the **path** field from the result (e.g. documents/1.pdf), not the name, in document_read(path='documents/1.pdf') or get_file_view_link."
     try:
         user_key = _get_file_workspace_subdir(context) if context is not None else "?"
         if user_key and user_key != "?":
@@ -3344,7 +3368,7 @@ def _resolve_file_path(
     Resolve a file path for file tools. Returns (full_path, base_for_validation) or None on error (caller should return polite message).
     - When path is empty or omitted: base = user sandbox root (homeclaw_root/{user_id}/).
     - When path starts with a friend name (e.g. "Sabrina/output/report.pdf"): resolved under user sandbox as {user_id}/Sabrina/output/report.pdf, so Core can access that friend's folder under the user.
-    - User sandbox contains: downloads/, documents/, output/, work/, share/, knowledgebase/, and per-friend {FriendName}/ with output/, knowledge/. Path "share" or "share/..." → homeclaw_root/share/ (global share for ALL users); when the user says "share" or "shared folder", use this path.
+    - User sandbox contains: downloads/, documents/, output/, work/, share/, knowledge/, and per-friend {FriendName}/ with output/, knowledge/. Path "share" or "share/..." → homeclaw_root/share/ (global share for ALL users); when the user says "share" or "shared folder", use this path.
     - When homeclaw_root is NOT SET: path_arg can be absolute. base_for_validation = None.
     Never raises; returns None on any exception.
     """
@@ -3594,7 +3618,7 @@ async def _folder_list_executor(arguments: Dict[str, Any], context: ToolContext)
                 "path": rel,
             })
         if not entries:
-            return "No entries (directory is empty). Use path '' or '.' for user sandbox root; path 'share' for shared folder. Then use document_read(path='exact_filename') with a path from this list."
+            return "No entries (directory is empty). Use path '' or '.' for user sandbox root; path 'share' for shared folder. Then use document_read(path='...') with the **path** value from the list (not the name)."
         return json.dumps(entries, ensure_ascii=False, indent=0)
     except Exception as e:
         logger.debug("folder_list failed: %s", e)
@@ -3627,7 +3651,7 @@ async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -
                 results.append({"path": "(truncated)", "type": "", "name": ""})
                 break
             try:
-                rel = str(p.relative_to(base_for_rel))
+                rel = str(p.relative_to(base_for_rel)).replace("\\", "/")
             except ValueError:
                 rel = p.name
             results.append({
@@ -3636,7 +3660,7 @@ async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -
                 "name": p.name,
             })
         if not results:
-            return "No files or folders matched the pattern. Try file_find(pattern='*') to list all files in the sandbox, or folder_list() to see the directory. Then use document_read(path='exact_path') with a path from the result."
+            return "No files or folders matched the pattern. Try file_find(pattern='*') to list all files in the sandbox, or folder_list() to see the directory. Then use document_read(path='exact_path') with the **path** value from the result (not the name)."
         return json.dumps(results, ensure_ascii=False, indent=0)
     except Exception as e:
         logger.debug("file_find failed: %s", e)
@@ -4728,7 +4752,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "properties": {
                     "skill_name": {"type": "string", "description": "Skill name: folder name or short name (e.g. html-slides, html slides, linkedin-writer-1.0.0)."},
                     "skill": {"type": "string", "description": "Alias for skill_name."},
-                    "script": {"type": "string", "description": "Script filename or path relative to the skill's scripts/ folder (e.g. run.sh, main.py, index.js). Omit for instruction-only skills."},
+                    "script": {"type": "string", "description": "Script filename or path relative to the skill's scripts/ folder (e.g. run.sh, main.py, index.js, index.ts). Omit for instruction-only skills."},
                     "script_name": {"type": "string", "description": "Alias for script."},
                     "args": {"type": "array", "items": {"type": "string"}, "description": "Optional list of arguments to pass to the script."},
                 },
@@ -5223,7 +5247,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_read",
-            description="Read contents of a file. Paths relative to user sandbox. When path not given: use user sandbox root or infer (e.g. 'my documents' → documents/). When user mentions a friend: use path '{FriendName}/...'. When user says 'share' or 'shared folder (for all users)': use path 'share' or 'share/...' to access the global share (homeclaw_root/share/). User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/; per friend: {FriendName}/output/, {FriendName}/knowledge/.",
+            description="Read contents of a file. Paths relative to user sandbox. When path not given: use user sandbox root or infer (e.g. 'my documents' → documents/). When user mentions a friend: use path '{FriendName}/...'. When user says 'share' or 'shared folder (for all users)': use path 'share' or 'share/...' to access the global share (homeclaw_root/share/). User sandbox: downloads/, documents/, output/, work/, share/, knowledge/; per friend: {FriendName}/output/, {FriendName}/knowledge/.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -5238,11 +5262,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="document_read",
-            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. When path not given: use user sandbox root or infer (e.g. 'my documents' → documents/). When user mentions a friend (e.g. 'Sabrina\'s document'), use path '{FriendName}/...' or '{FriendName}/output/...'. User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/; per friend: {FriendName}/output/, {FriendName}/knowledge/. Use 'share/...' for global share. For long files, increase max_chars.",
+            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. When path not given: use user sandbox root or infer (e.g. 'my documents' → documents/). When user mentions a friend (e.g. 'Sabrina\'s document'), use path '{FriendName}/...' or '{FriendName}/output/...'. User sandbox: downloads/, documents/, output/, work/, share/, knowledge/; per friend: {FriendName}/output/, {FriendName}/knowledge/. Use 'share/...' for global share. For long files, increase max_chars.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path under user sandbox (e.g. documents/1.pdf, output/report.pdf, HomeClaw/output/slides.pptx). Use 'share/...' for global share. Use exact path from folder_list or file_find."},
+                    "path": {"type": "string", "description": "Relative path under user sandbox (e.g. documents/1.pdf, output/report.pdf). Use the **path** field from folder_list or file_find result (not the name field). Use 'share/...' for global share."},
                     "max_chars": {"type": "integer", "description": "Max characters to return (default from config tools.file_read_max_chars, or 64000).", "default": 64000},
                 },
                 "required": ["path"],
@@ -5253,7 +5277,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_understand",
-            description="Classify a file as image, audio, video, or document and return type + path. When path not given: use user sandbox root or infer. When user mentions a friend, use path '{FriendName}/...'. User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/; per friend: {FriendName}/output/, {FriendName}/knowledge/. Use 'share/...' for global share. For images, use image_analyze(path) if user asks to describe.",
+            description="Classify a file as image, audio, video, or document and return type + path. When path not given: use user sandbox root or infer. When user mentions a friend, use path '{FriendName}/...'. User sandbox: downloads/, documents/, output/, work/, share/, knowledge/; per friend: {FriendName}/output/, {FriendName}/knowledge/. Use 'share/...' for global share. For images, use image_analyze(path) if user asks to describe.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -5268,7 +5292,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_write",
-            description="Write content to a file. When path not given: use user sandbox root, or infer (e.g. 'save to my output' → output/). When user mentions a friend (e.g. 'save for Sabrina'), use path '{FriendName}/output/...'. User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/; per friend: {FriendName}/output/, {FriendName}/knowledge/. Use 'share/...' only when user says share folder.",
+            description="Write content to a file. When path not given: use user sandbox root, or infer (e.g. 'save to my output' → output/). When user mentions a friend (e.g. 'save for Sabrina'), use path '{FriendName}/output/...'. User sandbox: downloads/, documents/, output/, work/, share/, knowledge/; per friend: {FriendName}/output/, {FriendName}/knowledge/. Use 'share/...' only when user says share folder.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -5283,7 +5307,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_edit",
-            description="Replace old_string with new_string in a file. When path not given: use user sandbox root or infer. When user mentions a friend, use path '{FriendName}/...' or '{FriendName}/output/...'. User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/; per friend: {FriendName}/output/. Use 'share/...' for global share. Use replace_all=true to replace all occurrences.",
+            description="Replace old_string with new_string in a file. When path not given: use user sandbox root or infer. When user mentions a friend, use path '{FriendName}/...' or '{FriendName}/output/...'. User sandbox: downloads/, documents/, output/, work/, share/, knowledge/; per friend: {FriendName}/output/. Use 'share/...' for global share. Use replace_all=true to replace all occurrences.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -5317,11 +5341,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="folder_list",
-            description="List one level of a directory (subfolders and files). Use when the user asks for **folder structure** or **what folders/directories exist** (e.g. 'what folders are in my sandbox'). When path not given: lists user sandbox root. To list **only files** (e.g. all images), use file_find with path and pattern and files_only=true instead. User sandbox: downloads/, documents/, output/, work/, share/, knowledgebase/; per friend: {FriendName}/. Use path 'share' for global share. Returned 'path' is the exact path to pass to document_read/file_read.",
+            description="List one level of a directory (subfolders and files). Use when the user asks for **folder structure** or **what folders/directories exist** (e.g. 'what folders are in my sandbox'). When path not given: lists user sandbox root. To list **only files** (e.g. all images), use file_find with path and pattern and files_only=true instead. User sandbox: downloads/, documents/, output/, work/, share/, knowledge/; per friend: {FriendName}/. Use path 'share' for global share. Returned 'path' is the exact path to pass to document_read/file_read.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Omit or '' for user sandbox root. Subdir: output, documents, downloads, work, share, knowledgebase, or FriendName, FriendName/output, FriendName/knowledge. Use 'share' or 'share/...' for global share. Use exact path from result in document_read.", "default": ""},
+                    "path": {"type": "string", "description": "Omit or '' for user sandbox root. Subdir: output, documents, downloads, work, share, knowledge, or FriendName, FriendName/output, FriendName/knowledge. Use 'share' or 'share/...' for global share. Use exact path from result in document_read.", "default": ""},
                     "max_entries": {"type": "integer", "description": "Max entries to return (default 500).", "default": 500},
                 },
                 "required": [],
@@ -5332,7 +5356,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="file_find",
-            description="Find or list files by name pattern (glob). Use when the user asks to **list files**, **list images**, **search for files**, or **list all images** — use path (e.g. 'images') and pattern (e.g. '*' or '*.png'), and set files_only=true to return only files (not folders). Use folder_list when they ask for **folder structure** or **what folders exist**. When path not given: search user sandbox root. User sandbox: downloads/, documents/, output/, images/, work/, share/, knowledgebase/. Use path 'share' for global share. Use the **exact path** from the result in document_read.",
+            description="Find or list files by name pattern (glob). Use when the user asks to **list files**, **list images**, **search for files**, or **list all images** — use path (e.g. 'images') and pattern (e.g. '*' or '*.png'), and set files_only=true to return only files (not folders). Use folder_list when they ask for **folder structure** or **what folders exist**. When path not given: search user sandbox root. User sandbox: downloads/, documents/, output/, images/, work/, share/, knowledge/. Use path 'share' for global share. Use the **exact path** from the result in document_read.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -5520,11 +5544,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="get_file_view_link",
-            description="Get a view/download link for any file in the user sandbox or share. Use when the user asks to send or get a file (e.g. 'send me that file', '发给我 ID1.jpg', '把XX发给我', 'give me the link to 1.pdf'). Pass the exact path from folder_list/file_find that matches the requested filename. For images, the image is also sent inline. Reply with only the URL from this tool.",
+            description="Get a view/download link for any file in the user sandbox or share. Use when the user asks to send or get a file (e.g. 'send me that file', '发给我 ID1.jpg'). Pass the **path** value from folder_list/file_find (not the name). For images, the image is also sent inline. Reply with only the URL from this tool.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path to the file (e.g. output/report.html, documents/1.pdf, images/photo.png). Use the path returned by file_find or folder_list."},
+                    "path": {"type": "string", "description": "Relative path to the file. Use the **path** field from folder_list or file_find result (e.g. documents/1.pdf, images/photo.png), not the name field."},
                 },
                 "required": ["path"],
             },

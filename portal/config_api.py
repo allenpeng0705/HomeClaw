@@ -7,9 +7,9 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.portal import config_backup
-from core.portal.config import get_config_dir
-from core.portal import yaml_config
+from portal import config_backup
+from portal.config import get_config_dir
+from portal import yaml_config
 
 _log = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ WHITELIST_CORE = frozenset({
     "use_prompt_manager", "prompts_dir", "prompt_default_language", "prompt_cache_ttl_seconds",
     "auth_enabled", "auth_api_key", "core_public_url", "file_link_style", "file_static_prefix",
     "file_view_link_expiry_sec", "inbound_request_timeout_seconds",
-    "pinggy", "push_notifications", "file_understanding", "llama_cpp", "completion",
+    "pinggy", "push_notifications", "file_understanding",
     "llm_config_file", "endpoints",
     "portal_url", "portal_secret",  # optional; Portal is in-process on Core or standalone (no proxy)
 })

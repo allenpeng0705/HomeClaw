@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from core.portal.yaml_config import (
+from portal.yaml_config import (
     load_yml_preserving,
     update_yml_preserving,
     WHITELIST_LLM,

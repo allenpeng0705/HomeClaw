@@ -17,7 +17,7 @@ We do **not** auto-create `identity.md`; only directories. No crash on mkdir fai
 
 - **_sanitize_subdir(name, default)** — Sanitizes a subdir name for path use (path-unsafe chars replaced). Never raises.
 - **ensure_user_sandbox_folders** extended with:
-  - **User-level subdirs:** `downloads_subdir`, `documents_subdir`, `work_subdir`, `user_share_subdir` (defaults: downloads, documents, work, share). For each user we create: `{user_id}/output`, `{user_id}/knowledgebase`, `{user_id}/downloads`, `{user_id}/documents`, `{user_id}/work`, `{user_id}/share`.
+  - **User-level subdirs:** `downloads_subdir`, `documents_subdir`, `work_subdir`, `user_share_subdir` (defaults: downloads, documents, work, share). For each user we create: `{user_id}/output`, `{user_id}/knowledge`, `{user_id}/downloads`, `{user_id}/documents`, `{user_id}/work`, `{user_id}/share`.
   - **Per-friend:** Optional **friends_by_user: Optional[Dict[str, List[str]]]** = None. When provided, for each (user_id, list of friend names) we create `{user_id}/{friend_id}`, `{friend_id}/output`, `{friend_id}/knowledge` (friend output and knowledge subdirs configurable via **friend_output_subdir**, **friend_knowledge_subdir**).
   - **friends_map** is built from `friends_by_user` with keys sanitized by `_sanitize_system_user_id` so they match the `uid` used in the loop; friend names are sanitized with `_sanitize_friend_id`. Non-dict or invalid entries are skipped; no exception propagates.
 - All mkdir calls remain in try/except; OSError is logged and we continue. Top-level Exception is caught and logged. Never raises.

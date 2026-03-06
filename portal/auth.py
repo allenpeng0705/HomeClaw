@@ -11,7 +11,7 @@ import secrets
 from pathlib import Path
 from typing import Optional, Tuple
 
-from core.portal.config import get_config_dir
+from portal.config import get_config_dir
 
 _log = logging.getLogger(__name__)
 

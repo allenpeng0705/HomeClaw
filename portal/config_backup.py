@@ -7,7 +7,7 @@ User can restore to system or revert to previous. All functions never raise.
 import logging
 import shutil
 from pathlib import Path
-from core.portal.config import get_config_dir
+from portal.config import get_config_dir
 
 _log = logging.getLogger(__name__)
 

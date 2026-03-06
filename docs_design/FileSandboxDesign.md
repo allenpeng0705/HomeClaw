@@ -9,12 +9,12 @@ This document defines how HomeClaw restricts file and folder access per user and
 | Area | Purpose | Used by channel/companion? | Config / path |
 |------|---------|----------------------------|---------------|
 | **Workspace** | Internal working folder: IDENTITY.md, AGENTS.md, TOOLS.md, AGENT_MEMORY, daily memory. | **No** — do not use for user file access. | `workspace_dir` (e.g. `config/workspace`) |
-| **Sandbox (per user)** | Main folder for each user. File search, read, write; generated files go into **output**; **knowledgebase** subfolder for KB sync. | **Yes** — default base for file tools. | `homeclaw_root/{user_id}/` (or `homeclaw_root/companion/`) |
+| **Sandbox (per user)** | Main folder for each user. File search, read, write; generated files go into **output**; **knowledge** subfolder for KB sync. | **Yes** — default base for file tools. | `homeclaw_root/{user_id}/` (or `homeclaw_root/companion/`) |
 | **Share** | Shared by all users. Use when the user says "share" or when the file is not in the user's sandbox. | **Yes** — path `share` or `share/...`. | `homeclaw_root/share/` |
 
 - **homeclaw_root** (in `config/core.yml`, top-level) is **required** for file and folder access from channel/companion. When it is not set, file tools return a clear message: set homeclaw_root so that each user has a subfolder (e.g. `homeclaw_root/{user_id}/` for private files, `homeclaw_root/share` for shared). Core does **not** fall back to workspace_dir for user files — workspace is internal only.
 - Under **homeclaw_root** we have:
-  - **Per-user sandbox** – `homeclaw_root/{user_id}/` (or `homeclaw_root/companion/` when not tied to a user). Path `"."` or `"subdir"` resolves here. Subfolders: **output/** (generated files; use path `output/<filename>` and return a link), **knowledgebase/** (for KB folder sync).
+  - **Per-user sandbox** – `homeclaw_root/{user_id}/` (or `homeclaw_root/companion/` when not tied to a user). Path `"."` or `"subdir"` resolves here. Subfolders: **output/** (generated files; use path `output/<filename>` and return a link), **knowledge/** (for KB folder sync; same name as friends’ knowledge folder).
   - **Share** – `homeclaw_root/share/`. Path `share` or `share/...` resolves here. Visible and writable by all users and companion.
 - When the user asks for file search, list, or read **without specifying a folder**: search/list in the user's sandbox first (path `"."`); if not found or the user says "share", use path `"share"` or `"share/..."`. Results (e.g. generated reports, PPT) go into **output/** and Core generates a link and sends it back.
 

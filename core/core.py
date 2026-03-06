@@ -1375,8 +1375,59 @@ class Core(CoreInterface):
                     "For local vision: the llama.cpp server must be started with --mmproj (Core does this when it auto-starts the main LLM; if you start llama-server yourself, add --mmproj <path_to_mmproj.gguf>).",
                     main_llm_ref or "(empty)",
                 )
-                # Local-only mode: save images to user's images folder and return polite message (no LLM call).
-                if main_llm_mode != "mix" and Util()._effective_main_llm_type() == "local":
+                # Optional: use a small vision model (vision_llm) to describe the image, then inject into user message so main model can reply.
+                vision_sidecar_ok = False
+                vision_llm_ref = ""
+                try:
+                    meta = Util().get_core_metadata()
+                    vision_llm_ref = (getattr(meta, "vision_llm", None) or "").strip() if meta else ""
+                except Exception:
+                    pass
+                supported_vision = []
+                if vision_llm_ref:
+                    try:
+                        supported_vision = Util().main_llm_supported_media_for_ref(vision_llm_ref) or []
+                    except Exception:
+                        pass
+                if vision_llm_ref and "image" in supported_vision:
+                    try:
+                        prompt_for_vision = "Describe the image(s) in detail. If the user asked a question about the image(s), answer it concisely. User message: " + ((text_only or "").strip() or "(no text)")
+                        vision_content = [{"type": "text", "text": prompt_for_vision}]
+                        vision_max_dim = 0
+                        try:
+                            meta = Util().get_core_metadata()
+                            vision_max_dim = max(0, int(getattr(meta, "vision_image_max_dimension", 0) or 0))
+                        except (TypeError, ValueError, AttributeError):
+                            pass
+                        _to_data_url = getattr(self, "_image_item_to_data_url", None)
+                        _resize_fn = getattr(self, "_resize_image_data_url_if_needed", None)
+                        for img in images_list:
+                            try:
+                                data_url = (_to_data_url(img) if _to_data_url and img is not None else "") or ""
+                            except Exception:
+                                data_url = ""
+                            if not data_url or not data_url.strip().lower().startswith("data:image/"):
+                                continue
+                            if vision_max_dim > 0 and _resize_fn:
+                                try:
+                                    data_url = _resize_fn(data_url, vision_max_dim) or data_url
+                                except Exception:
+                                    pass
+                            vision_content.append({"type": "image_url", "image_url": {"url": data_url}})
+                        if len(vision_content) > 1:
+                            desc = await self.openai_chat_completion([{"role": "user", "content": vision_content}], llm_name=vision_llm_ref)
+                            if desc and isinstance(desc, str) and (desc.strip() or ""):
+                                text_only = "[Image description]: " + desc.strip() + "\n\nUser: " + ((text_only or "").strip() or "(no text)")
+                                vision_sidecar_ok = True
+                                logger.info("Vision sidecar ({}): injected image description into user message for main model.", vision_llm_ref)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        logger.debug("Vision sidecar ({}): failed: {}", vision_llm_ref, e)
+                if not vision_sidecar_ok:
+                    # No vision sidecar or it failed: save images to user folder when possible and return a clear reply (no LLM call with omitted images).
+                    saved = 0
+                    root = ""
                     try:
                         try:
                             root = str(Util().get_core_metadata().get_homeclaw_root() or "").strip()
@@ -1386,22 +1437,21 @@ class Core(CoreInterface):
                             images_dir = Path(root) / str(user_id) / "images"
                             images_dir.mkdir(parents=True, exist_ok=True)
                             ts = int(time.time())
-                            saved = 0
                             for i, img in enumerate(images_list):
-                                data_url = self._image_item_to_data_url(img) if getattr(self, "_image_item_to_data_url", None) else None
-                                if not data_url or not data_url.strip().lower().startswith("data:image/"):
-                                    if isinstance(img, str) and os.path.isfile(img):
-                                        import shutil
-                                        ext = (img.lower().split(".")[-1] if "." in img else "jpg") or "jpg"
-                                        dest = images_dir / f"{ts}_{i}.{ext}"
-                                        shutil.copy2(img, dest)
-                                        saved += 1
-                                    continue
-                                idx = data_url.find(";base64,")
-                                if idx > 0:
-                                    import base64
-                                    payload = data_url[idx + 8:]
-                                    try:
+                                try:
+                                    data_url = self._image_item_to_data_url(img) if getattr(self, "_image_item_to_data_url", None) else None
+                                    if not data_url or not data_url.strip().lower().startswith("data:image/"):
+                                        if isinstance(img, str) and os.path.isfile(img):
+                                            import shutil
+                                            ext = (img.lower().split(".")[-1] if "." in img else "jpg") or "jpg"
+                                            dest = images_dir / f"{ts}_{i}.{ext}"
+                                            shutil.copy2(img, dest)
+                                            saved += 1
+                                        continue
+                                    idx = data_url.find(";base64,")
+                                    if idx > 0:
+                                        import base64
+                                        payload = data_url[idx + 8:]
                                         raw = base64.b64decode(payload)
                                         ext = "jpg"
                                         if "png" in data_url[:30]:
@@ -1409,14 +1459,21 @@ class Core(CoreInterface):
                                         dest = images_dir / f"{ts}_{i}.{ext}"
                                         dest.write_bytes(raw)
                                         saved += 1
-                                    except Exception:
-                                        pass
-                            if saved:
-                                polite = "I've saved your image(s) to your images folder. The current model doesn't support image understanding. You can switch to a vision-capable model (e.g. in mix mode or a local vision model) to ask about the image."
-                                return polite
+                                except Exception:
+                                    pass
                     except Exception as e:
                         logger.debug("vision save image to user folder failed: {}", e)
-                text_only = (text_only + " (Image(s) omitted - model does not support images.)").strip()
+                    # Build one stable, user-facing reply (no LLM call).
+                    prefix = ""
+                    if (text_only or "").strip():
+                        prefix = f"You asked: \"{(text_only or '').strip()}\" and sent image(s). "
+                    if saved:
+                        polite = f"{prefix}I've saved your image(s) to your images folder. The current model doesn't support image understanding. You can switch to a vision-capable model (e.g. in mix mode or a local vision model) to ask about the image."
+                    else:
+                        polite = f"{prefix}I received your image(s) but the current model doesn't support image understanding. You can switch to a vision-capable model (e.g. in mix mode or a local vision model) to ask about images."
+                        if root and user_id:
+                            polite += " (Saving to your images folder failed; you can try again or check homeclaw_root and folder permissions.)"
+                    return polite
             elif images_list and "image" in supported_media:
                 logger.debug("Including {} image(s) in user message for vision model", len(images_list))
             if (audios_list or videos_list) and "audio" not in supported_media and "video" not in supported_media:
@@ -2325,7 +2382,7 @@ class Core(CoreInterface):
             if not root:
                 out["message"] = "homeclaw_root not set; cannot sync folder."
                 return out
-            folder_name = (fs_cfg.get("folder_name") or "knowledgebase").strip() or "knowledgebase"
+            folder_name = (fs_cfg.get("folder_name") or "knowledge").strip() or "knowledge"
             kb_dir = get_user_knowledgebase_dir(root, user_id, folder_name)
             if kb_dir is None or not kb_dir.is_dir():
                 out["ok"] = True

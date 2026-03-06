@@ -147,7 +147,7 @@ def write_friend_identity_file(
         return False
 
 
-def get_user_knowledgebase_dir(homeclaw_root: str, user_id: str, folder_name: str = "knowledgebase") -> Optional[Path]:
+def get_user_knowledgebase_dir(homeclaw_root: str, user_id: str, folder_name: str = "knowledge") -> Optional[Path]:
     """
     Path to a user's knowledge base folder: {homeclaw_root}/{user_id}/{folder_name}/.
     Used for folder_sync: files here are scanned and synced to the user's KB. Returns None if homeclaw_root is empty.
@@ -160,11 +160,11 @@ def get_user_knowledgebase_dir(homeclaw_root: str, user_id: str, folder_name: st
         uid = _sanitize_system_user_id(user_id)
         if not uid:
             return None
-        name = (folder_name or "knowledgebase").strip() or "knowledgebase"
+        name = (folder_name or "knowledge").strip() or "knowledge"
         for c in r'/\:*?"<>|':
             name = name.replace(c, "_")
         if not name:
-            name = "knowledgebase"
+            name = "knowledge"
         return Path(root).resolve() / uid / name
     except Exception:
         return None
@@ -188,7 +188,7 @@ def ensure_user_sandbox_folders(
     share_dir: str = "share",
     companion: bool = False,
     output_subdir: str = "output",
-    knowledgebase_subdir: str = "knowledgebase",
+    knowledgebase_subdir: str = "knowledge",
     downloads_subdir: str = "downloads",
     documents_subdir: str = "documents",
     work_subdir: str = "work",
@@ -200,7 +200,7 @@ def ensure_user_sandbox_folders(
 ) -> None:
     """
     Create per-user, per-friend, and shared sandbox folders under homeclaw_root (UserFriendsModelFullDesign.md Step 5).
-    For each user_id: {user_id}, {user_id}/output, {user_id}/knowledgebase, {user_id}/images, {user_id}/downloads, {user_id}/documents, {user_id}/work, {user_id}/share.
+    For each user_id: {user_id}, {user_id}/output, {user_id}/knowledge, {user_id}/images, {user_id}/downloads, {user_id}/documents, {user_id}/work, {user_id}/share.
     For each (user_id, friend_id) when friends_by_user is set: {user_id}/{friend_id}, {friend_id}/output, {friend_id}/knowledge.
     Also: {homeclaw_root}/share. If companion=True: {homeclaw_root}/companion, companion/output (not used when there is no companion user).
     Never raises; logs on mkdir failure.
@@ -235,7 +235,7 @@ def ensure_user_sandbox_folders(
             except OSError as e:
                 logger.debug("ensure_user_sandbox_folders: mkdir companion failed: {}", e)
         out_sub = _sanitize_subdir(output_subdir, "output")
-        kb_sub = _sanitize_subdir(knowledgebase_subdir, "knowledgebase")
+        kb_sub = _sanitize_subdir(knowledgebase_subdir, "knowledge")
         img_sub = _sanitize_subdir(images_subdir, "images")
         dl_sub = _sanitize_subdir(downloads_subdir, "downloads")
         doc_sub = _sanitize_subdir(documents_subdir, "documents")
@@ -282,6 +282,51 @@ def ensure_user_sandbox_folders(
                     logger.debug("ensure_user_sandbox_folders: mkdir user/friend {}/{} failed: {}", uid, fid, e)
     except Exception as e:
         logger.debug("ensure_user_sandbox_folders: {}", e)
+
+
+def ensure_friend_folders(
+    homeclaw_root: Optional[str] = None,
+    user_id: Optional[str] = None,
+    friend_id: Optional[str] = None,
+    friend_output_subdir: str = "output",
+    friend_knowledge_subdir: str = "knowledge",
+) -> None:
+    """
+    Create sandbox folders for a single (user_id, friend_id) pair. Use when a friend is added via API
+    so the folder exists without waiting for Core restart. Never raises; logs on mkdir failure.
+    """
+    try:
+        root = (homeclaw_root or "").strip()
+        if not root:
+            return
+        uid = _sanitize_system_user_id(user_id)
+        fid = _sanitize_friend_id(friend_id)
+        if not uid or not fid:
+            return
+        base = Path(root).resolve()
+        if not base.exists():
+            try:
+                base.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                logger.debug("ensure_friend_folders: mkdir root {} failed: {}", base, e)
+                return
+        user_base = base / uid
+        try:
+            user_base.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.debug("ensure_friend_folders: mkdir user {} failed: {}", uid, e)
+            return
+        f_out_sub = _sanitize_subdir(friend_output_subdir, "output")
+        f_kb_sub = _sanitize_subdir(friend_knowledge_subdir, "knowledge")
+        friend_base = user_base / fid
+        try:
+            friend_base.mkdir(parents=True, exist_ok=True)
+            (friend_base / f_out_sub).mkdir(parents=True, exist_ok=True)
+            (friend_base / f_kb_sub).mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.debug("ensure_friend_folders: mkdir user/friend {}/{} failed: {}", uid, fid, e)
+    except Exception as e:
+        logger.debug("ensure_friend_folders: {}", e)
 
 
 def get_workspace_dir(config_dir: Optional[str] = None) -> Path:

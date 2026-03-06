@@ -19,12 +19,12 @@ from fastapi import FastAPI, Request, Form
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from core.portal import config as portal_config
-from core.portal.config import get_config_dir, get_portal_secret
-from core.portal import auth
-from core.portal import config_api
-from core.portal import config_backup
-from core.portal.session import create_session_value, verify_session_value
+from portal import config as portal_config
+from portal.config import get_config_dir, get_portal_secret
+from portal import auth
+from portal import config_api
+from portal import config_backup
+from portal.session import create_session_value, verify_session_value
 
 app = FastAPI(
     title="HomeClaw Portal",
@@ -122,7 +122,7 @@ def status():
     })
 
 
-from core.portal import guide as guide_module
+from portal import guide as guide_module
 
 
 @app.get("/api/portal/guide/checks")
@@ -924,10 +924,12 @@ _CORE_HIDDEN_KEYS = frozenset({
     "name", "llm_config_file", "skills_dir", "skills_and_plugins_config_file",
     "use_prompt_manager", "prompts_dir", "prompt_cache_ttl_seconds", "workspace_dir",
     "memory_kb_config_file", "endpoints", "use_workspace_bootstrap", "outbound_markdown_format",
-    "file_link_style", "file_static_prefix", "push_notifications", "llama_cpp", "completion",
-    "file_understanding",
+    "file_link_style", "file_static_prefix", "push_notifications", "file_understanding",
 })
-_CORE_ADVANCED_KEYS = ("push_notifications", "llama_cpp", "completion", "file_understanding")
+# Core-only advanced keys (llama_cpp, completion, vision_llm live in llm.yml)
+_CORE_ADVANCED_KEYS = ("push_notifications", "file_understanding")
+# vision_llm is on the LLM page as a dropdown; only these advanced keys stay on Advanced tab
+_LLM_ADVANCED_KEYS = ("llama_cpp", "completion", "vision_llm_host", "vision_llm_port", "vision_image_max_dimension")
 _FRIEND_PRESETS_KEYS = ("presets",)
 REDACTED_PLACEHOLDER = "***"
 
@@ -940,8 +942,8 @@ SETTINGS_PAGES = [
 
 
 def _render_core_form_html(data: Optional[Dict[str, Any]]) -> str:
-    """Server-render Core config form so content shows without JavaScript."""
-    if not data:
+    """Server-render Core config form so content shows without JavaScript. Never raises."""
+    if not data or not isinstance(data, dict):
         return (
             '<form class="settings-form" id="form-core">'
             '<p class="error">No config data. Create core.yml in config dir.</p>'
@@ -987,8 +989,8 @@ def _render_core_form_html(data: Optional[Dict[str, Any]]) -> str:
 
 
 def _render_generic_form(config_name: str, data: Optional[Dict[str, Any]]) -> str:
-    """Server-render a generic config form (llm, memory_kb, skills_and_plugins, user)."""
-    if not data:
+    """Server-render a generic config form (llm, memory_kb, skills_and_plugins, user). Never raises."""
+    if not data or not isinstance(data, dict):
         return (
             f'<form method="post" action="/settings/{config_name}" class="settings-form">'
             '<p class="error">No config data.</p>'
@@ -1381,9 +1383,9 @@ def _render_user_form(data: Optional[Dict[str, Any]]) -> str:
 
 
 def _render_llm_form(data: Optional[Dict[str, Any]]) -> str:
-    """Server-render LLM tab: mode/local/cloud/embedding pickers, local/cloud model lists, add-model modal (no hybrid_router)."""
+    """Server-render LLM tab: mode/local/cloud/embedding pickers, local/cloud model lists, add-model modal (no hybrid_router). Never raises."""
     esc = html_module.escape
-    if not data:
+    if not data or not isinstance(data, dict):
         return (
             '<form method="post" action="/settings/llm" class="settings-form">'
             '<p class="error">No LLM config data.</p>'
@@ -1402,6 +1404,7 @@ def _render_llm_form(data: Optional[Dict[str, Any]]) -> str:
     main_llm_local = data.get("main_llm_local") or ""
     main_llm_cloud = data.get("main_llm_cloud") or ""
     embedding_llm = data.get("embedding_llm") or ""
+    vision_llm = data.get("vision_llm") or ""
     main_llm_language = data.get("main_llm_language")
     if isinstance(main_llm_language, list):
         lang_str = ", ".join(str(x) for x in main_llm_language)
@@ -1468,6 +1471,23 @@ def _render_llm_form(data: Optional[Dict[str, Any]]) -> str:
             ref = "cloud_models/" + str(m["id"])
             label = esc(m.get("alias") or m["id"]) + " (cloud)"
             sel = ' selected' if embedding_llm == ref else ''
+            out.append(f'<option value="{esc(ref)}"{sel}>{label}</option>')
+    out.append('</select></div>')
+
+    # Vision sidecar: optional model for image description when main model has no vision. Empty = disabled.
+    out.append('<div class="form-group"><label>Vision LLM (sidecar)</label><select name="vision_llm">')
+    out.append('<option value="">— (disabled)</option>')
+    for m in local_models:
+        if isinstance(m, dict) and m.get("id"):
+            ref = "local_models/" + str(m["id"])
+            label = esc(m.get("alias") or m["id"]) + " (local)"
+            sel = ' selected' if vision_llm == ref else ''
+            out.append(f'<option value="{esc(ref)}"{sel}>{label}</option>')
+    for m in cloud_models:
+        if isinstance(m, dict) and m.get("id"):
+            ref = "cloud_models/" + str(m["id"])
+            label = esc(m.get("alias") or m["id"]) + " (cloud)"
+            sel = ' selected' if vision_llm == ref else ''
             out.append(f'<option value="{esc(ref)}"{sel}>{label}</option>')
     out.append('</select></div>')
 
@@ -1705,8 +1725,8 @@ def _render_llm_form(data: Optional[Dict[str, Any]]) -> str:
 
 
 def _render_generic_section(data: Optional[Dict], keys: Optional[tuple], esc, out: list) -> None:
-    """Append form groups for the given keys from data (dict/list -> textarea, else input)."""
-    if not data:
+    """Append form groups for the given keys from data (dict/list -> textarea, else input). Never raises."""
+    if not data or not isinstance(data, dict):
         return
     key_iter = keys if keys is not None else [k for k in data if data.get(k) is not None]
     for key in key_iter:
@@ -1729,7 +1749,7 @@ def _render_advanced_form(
     data_memory_kb: Optional[Dict],
     data_skills_and_plugins: Optional[Dict],
 ) -> str:
-    """Server-render Advanced tab: core advanced, hybrid_router, friend presets, Memory & KB, Skills & Plugins."""
+    """Server-render Advanced tab: core advanced, LLM advanced (llm.yml), hybrid_router, friend presets, Memory & KB, Skills & Plugins."""
     esc = html_module.escape
     out = ['<form method="post" action="/settings/advanced" class="settings-form">']
     for key in _CORE_ADVANCED_KEYS:
@@ -1744,6 +1764,20 @@ def _render_advanced_form(
             else:
                 v = "" if is_redacted else esc(str(val))
                 out.append(f'<div class="form-group"><label>{esc(key)}</label><input type="text" name="{esc(key)}" value="{v}" placeholder="•••"></div>')
+    # LLM advanced keys (llm.yml): llama_cpp, completion, vision_llm
+    _llm_data = data_llm if isinstance(data_llm, dict) else {}
+    for key in _LLM_ADVANCED_KEYS:
+        val = _llm_data.get(key)
+        if val is None and _llm_data:
+            continue
+        if val is not None:
+            is_redacted = val == REDACTED_PLACEHOLDER
+            if isinstance(val, dict) or isinstance(val, list):
+                body = "" if is_redacted else esc(json.dumps(val, indent=2))
+                out.append(f'<div class="form-group"><label>{esc(key)} (llm.yml)</label><textarea name="{esc(key)}" rows="4" placeholder="•••">{body}</textarea></div>')
+            else:
+                v = "" if is_redacted else esc(str(val) if val is not None else "")
+                out.append(f'<div class="form-group"><label>{esc(key)} (llm.yml)</label><input type="text" name="{esc(key)}" value="{v}" placeholder="•••"></div>')
     if data_llm and data_llm.get("hybrid_router") is not None:
         out.append('<h3 class="form-section-title">Hybrid router (LLM)</h3>')
         val = data_llm["hybrid_router"]
@@ -1808,13 +1842,17 @@ def _settings_page_html(page: str, form_html: str, saved: bool = False, error: b
 
 
 def _form_body_from_data(form_data: dict, original: Optional[Dict], keys: Optional[tuple] = None) -> Dict[str, Any]:
-    """Build merge body from form data with types from original config. Skip empty and •••."""
+    """Build merge body from form data with types from original config. Skip empty and •••. Never raises."""
     body = {}
-    keys_iter = list(keys) if keys is not None else list(form_data.keys()) if isinstance(form_data, dict) else []
+    if form_data is None or not isinstance(form_data, dict):
+        form_data = {}
+    keys_iter = list(keys) if keys is not None else list(form_data.keys())
     for key in keys_iter:
         if key not in form_data:
             continue
-        val = form_data.get(key, "").strip()
+        val = form_data.get(key)
+        val = (val if isinstance(val, str) else (str(val) if val is not None else ""))
+        val = val.strip()
         if val == "" or val == "•••":
             continue
         orig_val = original.get(key) if original else None
@@ -1835,7 +1873,7 @@ def _form_body_from_data(form_data: dict, original: Optional[Dict], keys: Option
     return body
 
 
-from core.portal.settings_routes import router as settings_router
+from portal.settings_routes import router as settings_router
 app.include_router(settings_router, prefix="/settings")
 
 

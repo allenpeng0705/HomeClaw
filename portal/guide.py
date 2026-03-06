@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-from core.portal.config import ROOT_DIR
+from portal.config import ROOT_DIR
 
 # llama.cpp platform subfolders (must match llm/llama_cpp_platform.py)
 _LLAMA_FOLDERS = ("mac", "win_cpu", "win_cuda", "linux_cpu", "linux_cuda")
@@ -21,7 +21,7 @@ _LLAMA_EXE_UNIX = "llama-server"
 def _get_models_dir() -> Path:
     """Resolve models directory from core.yml model_path (relative to project root)."""
     try:
-        from core.portal import config_api
+        from portal import config_api
         core_data = config_api.load_config("core")
         raw = (core_data or {}).get("model_path") or ""
         raw = (raw or "models").strip().rstrip("/\\")

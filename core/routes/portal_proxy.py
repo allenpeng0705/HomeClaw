@@ -20,7 +20,7 @@ from base.util import Util
 
 
 def _ensure_core_importable():
-    """Ensure the directory containing the core package (project root) is first on sys.path so core.portal can be imported."""
+    """Ensure the directory containing the core package (project root) is first on sys.path so portal can be imported."""
     try:
         # This file is core/routes/portal_proxy.py -> parent.parent = project root (dir containing core/)
         _here = Path(__file__).resolve().parent
@@ -32,17 +32,17 @@ def _ensure_core_importable():
         pass
 
 
-# Lazy-load core.portal.auth only when needed (after path is set in route_registration).
+# Lazy-load portal.auth only when needed (after path is set in route_registration).
 _portal_auth_module = None
 
 def _get_portal_auth():
-    """Return core.portal.auth module or None if not loadable. Used for admin auth."""
+    """Return portal.auth module or None if not loadable. Used for admin auth."""
     global _portal_auth_module
     if _portal_auth_module is not None:
         return _portal_auth_module
     _ensure_core_importable()
     try:
-        from core.portal import auth as m
+        from portal import auth as m
         _portal_auth_module = m
         return m
     except ImportError:
@@ -69,17 +69,17 @@ def should_proxy_config() -> bool:
 
 
 def should_use_portal_in_process() -> bool:
-    """True when Portal app can be imported (core.portal) and served at /portal-ui on Core."""
+    """True when Portal app can be imported (portal) and served at /portal-ui on Core."""
     _ensure_core_importable()
     try:
-        import core.portal.app  # noqa: F401
+        import portal.app  # noqa: F401
         return True
     except ImportError as e:
         global _portal_import_error
         _portal_import_error = str(e)
         _root = (Path(__file__).resolve().parent.parent.parent)  # project root
         logger.warning(
-            "Portal in-process not available (import core.portal.app failed): {} (sys.path[0]={!r}, project_root={!r})",
+            "Portal in-process not available (import portal.app failed): {} (sys.path[0]={!r}, project_root={!r})",
             e, sys.path[0] if sys.path else None, str(_root),
         )
         return False
@@ -88,7 +88,7 @@ def should_use_portal_in_process() -> bool:
 def get_portal_app_for_mount():
     """Return Portal's FastAPI app for mounting at /portal-ui. Use only when should_use_portal_in_process()."""
     _ensure_core_importable()
-    from core.portal.app import app
+    from portal.app import app
     return app
 
 

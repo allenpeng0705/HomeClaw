@@ -34,6 +34,7 @@ CONFIG_CORE_WHITELIST = frozenset({
     "prompt_cache_ttl_seconds", "auth_enabled", "auth_api_key", "core_public_url", "tools", "result_viewer", "knowledge_base",
     "file_understanding", "llama_cpp", "completion", "local_models", "cloud_models", "main_llm",
     "embedding_llm", "main_llm_language", "embedding_host", "embedding_port", "main_llm_host", "main_llm_port",
+    "vision_llm", "vision_llm_host", "vision_llm_port", "vision_image_max_dimension",
     "database", "vectorDB", "graphDB", "cognee", "memory_summarization",
 })
 CONFIG_CORE_BOOL_KEYS = frozenset({
@@ -296,7 +297,8 @@ def get_api_config_users_post_handler(core):  # noqa: ARG001
             root_str = (getattr(Util().get_core_metadata(), "homeclaw_root", None) or "").strip()
             if root_str and uid:
                 try:
-                    ensure_user_sandbox_folders(root_str, [uid])
+                    # Include default friend HomeClaw so friend folders exist without restart
+                    ensure_user_sandbox_folders(root_str, [uid], friends_by_user={uid: ["HomeClaw"]})
                     from tools.builtin import build_and_save_sandbox_paths_json
                     build_and_save_sandbox_paths_json()
                 except Exception:

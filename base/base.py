@@ -1008,6 +1008,11 @@ class CoreMetadata:
     main_llm_mode: str = ""
     main_llm_local: str = ""   # e.g. local_models/main_vl_model_4B; required when main_llm_mode == "mix"
     main_llm_cloud: str = ""  # e.g. cloud_models/Gemini-2.5-Flash; required when main_llm_mode == "mix"
+    # Optional: when main model has no vision, use this model (e.g. local_models/main_vl_model_2B) to describe images; description is injected into the user message and main model replies. See docs_design/Multimodal.md.
+    vision_llm: str = ""
+    vision_llm_host: str = "127.0.0.1"   # host for vision sidecar; Core always uses this when calling vision_llm
+    vision_llm_port: int = 5024           # port for vision sidecar; set in llm.yml so you always know which port it uses
+    vision_image_max_dimension: int = 0   # when > 0, resize images to max(w,h) <= this before sending to vision_llm sidecar; 0 = use completion.image_max_dimension only
     hybrid_router: Dict[str, Any] = field(default_factory=dict)  # default_route, heuristic, semantic, slm (enabled, threshold, paths/model)
     # Companion: config kept for backward compat; Core no longer routes to Friends plugin. All users (normal + companion type) use the same main flow. See docs_design/CompanionFeatureDesign.md.
     companion: Dict[str, Any] = field(default_factory=dict)
@@ -1161,9 +1166,11 @@ class CoreMetadata:
         # Optional: merge LLM config from external file (llm.yml).
         _llm_file = (data.get('llm_config_file') or '').strip()
         _LLM_KEYS = frozenset({
-            'local_models', 'cloud_models', 'main_llm', 'main_llm_mode', 'main_llm_local', 'main_llm_cloud',
+            'local_models', 'cloud_models', 'main_llm', 'main_llm_mode', 'main_llm_local', 'main_llm_cloud', 'vision_llm',
             'hybrid_router', 'main_llm_language', 'embedding_llm',
             'embedding_host', 'embedding_port', 'main_llm_host', 'main_llm_port', 'embedding_health_check_timeout_sec',
+            'vision_llm_host', 'vision_llm_port', 'vision_image_max_dimension',
+            'llama_cpp', 'completion',
         })
         if _llm_file:
             _config_dir = os.path.dirname(os.path.abspath(yaml_file))
@@ -1182,7 +1189,10 @@ class CoreMetadata:
                             if _k == 'hybrid_router' and not isinstance(_v, dict):
                                 logging.warning("llm config %s: hybrid_router must be a dict, got %s; skipping", _llm_path, type(_v).__name__)
                                 continue
-                            if _k in ('embedding_port', 'main_llm_port'):
+                            if _k in ('llama_cpp', 'completion') and not isinstance(_v, dict):
+                                logging.warning("llm config %s: %s must be a dict, got %s; skipping", _llm_path, _k, type(_v).__name__)
+                                continue
+                            if _k in ('embedding_port', 'main_llm_port', 'vision_llm_port', 'vision_image_max_dimension'):
                                 try:
                                     _ = int(_v) if _v is not None else 0
                                 except (TypeError, ValueError):
@@ -1426,6 +1436,10 @@ class CoreMetadata:
             main_llm_mode=main_llm_mode_val,
             main_llm_local=main_llm_local_val,
             main_llm_cloud=main_llm_cloud_val,
+            vision_llm=(str(data.get('vision_llm') or '').strip()),
+            vision_llm_host=(str(data.get('vision_llm_host') or '127.0.0.1').strip()) or '127.0.0.1',
+            vision_llm_port=max(1, min(65535, int(data.get('vision_llm_port') or 5024))),
+            vision_image_max_dimension=max(0, int(data.get('vision_image_max_dimension') or 0)),
             hybrid_router=hybrid_router_val,
             companion=data.get('companion') if isinstance(data.get('companion'), dict) else {},
             memory_summarization=data.get('memory_summarization') if isinstance(data.get('memory_summarization'), dict) else {},
@@ -1558,8 +1572,9 @@ class CoreMetadata:
         _llm_ext = (getattr(core, 'llm_config_file', None) or '').strip()
         _LLM_POP = frozenset({
             'local_models', 'cloud_models', 'main_llm', 'main_llm_mode', 'main_llm_local', 'main_llm_cloud',
-            'hybrid_router', 'main_llm_language', 'embedding_llm',
+            'hybrid_router', 'main_llm_language', 'embedding_llm', 'vision_llm',
             'embedding_host', 'embedding_port', 'main_llm_host', 'main_llm_port', 'embedding_health_check_timeout_sec',
+            'vision_llm_host', 'vision_llm_port', 'vision_image_max_dimension',
         })
         if _llm_ext:
             for _k in list(core_dict.keys()):

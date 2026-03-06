@@ -507,7 +507,8 @@ class Util:
 
     def _resolve_llm(self, llm_name: Optional[str] = None):
         """Return (path, model_id, type, host, port) for llm_name, or for main_llm if llm_name is None/empty. Returns None if llm_name given but not found.
-        When the resolved model is the current main LLM, host/port are taken from main_llm_host/main_llm_port."""
+        When the resolved model is the current main LLM, host/port are taken from main_llm_host/main_llm_port.
+        When the resolved model is vision_llm, host/port are taken from vision_llm_host/vision_llm_port."""
         if llm_name and str(llm_name).strip():
             name = str(llm_name).strip()
             entry, mtype = self._get_model_entry(name)
@@ -521,14 +522,28 @@ class Util:
                     except (TypeError, ValueError):
                         port = 5088
                 else:
+                    vision_ref = ""
                     try:
-                        host = str(entry.get('host') or '127.0.0.1').strip() or '127.0.0.1'
+                        if getattr(self, 'core_metadata', None):
+                            vision_ref = (getattr(self.core_metadata, 'vision_llm', None) or '').strip() or ""
                     except Exception:
-                        host = '127.0.0.1'
-                    try:
-                        port = max(1, min(65535, int(entry.get('port', 5088))))
-                    except (TypeError, ValueError):
-                        port = 5088
+                        pass
+                    use_vision_port = vision_ref and name.strip() == vision_ref
+                    if use_vision_port:
+                        host = str(getattr(self.core_metadata, 'vision_llm_host', None) or '127.0.0.1').strip() or '127.0.0.1'
+                        try:
+                            port = max(1, min(65535, int(getattr(self.core_metadata, 'vision_llm_port', None) or 5024)))
+                        except (TypeError, ValueError):
+                            port = 5024
+                    else:
+                        try:
+                            host = str(entry.get('host') or '127.0.0.1').strip() or '127.0.0.1'
+                        except Exception:
+                            host = '127.0.0.1'
+                        try:
+                            port = max(1, min(65535, int(entry.get('port', 5088))))
+                        except (TypeError, ValueError):
+                            port = 5088
                 _, raw_id = self._parse_model_ref(name)
                 rid = raw_id or name
                 if mtype == 'ollama':

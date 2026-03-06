@@ -102,6 +102,7 @@ try:
         parse_raw_tool_calls_from_content as _parse_raw_tool_calls_from_content,
         infer_route_to_plugin_fallback as _infer_route_to_plugin_fallback,
         infer_remind_me_fallback as _infer_remind_me_fallback,
+        infer_cron_schedule_fallback as _infer_cron_schedule_fallback,
         remind_me_needs_clarification as _remind_me_needs_clarification,
         remind_me_clarification_question as _remind_me_clarification_question,
     )
@@ -112,6 +113,7 @@ except Exception:
         parse_raw_tool_calls_from_content as _parse_raw_tool_calls_from_content,
         infer_route_to_plugin_fallback as _infer_route_to_plugin_fallback,
         infer_remind_me_fallback as _infer_remind_me_fallback,
+        infer_cron_schedule_fallback as _infer_cron_schedule_fallback,
         remind_me_needs_clarification as _remind_me_needs_clarification,
         remind_me_clarification_question as _remind_me_clarification_question,
     )
@@ -492,6 +494,7 @@ async def answer_from_memory(
             day_num_cn = str(d)
             ctx_line = f"Current date: {date_str}. Day of week: {dow}. Current time: {time_24} (24-hour, system local). Current datetime (use this only, never invent): {datetime_line}. 今日（中文）：{month_day_cn}，{day_num_cn}号。回复中提及「今天」「当前是」时只使用此日期（如 当前是{day_num_cn}号）。"
             core._request_current_time_24 = time_24  # so routing block can inject it; model must use this, not invent 2:49 etc.
+            core._request_current_datetime_line = datetime_line  # inject again next to last user message so model does not use chat history time
             loc_str = None
             try:
                 meta = request.request_metadata if getattr(request, "request_metadata", None) else {}
@@ -526,6 +529,8 @@ async def answer_from_memory(
             try:
                 fallback = f"Current date: {date.today().isoformat()}."
                 system_parts.append("## System context\n" + fallback + "\n\n")
+                # Still set a minimal datetime line so prepend and routing blocks can use it
+                core._request_current_datetime_line = getattr(core, "_request_current_datetime_line", None) or date.today().isoformat() + " 00:00"
             except Exception:
                 pass
 
@@ -1313,6 +1318,23 @@ async def answer_from_memory(
                 logger.info("Last user message: multimodal ({} image(s) in content)", n_img)
             else:
                 logger.info("Last user message: text only (no image in this turn)")
+            # Put current datetime immediately before the last user message so the model uses it (not chat history). Never crash.
+            try:
+                _dt_line = getattr(core, "_request_current_datetime_line", None) or ""
+                _last_msg = llm_input[-1]
+                if (
+                    _dt_line
+                    and isinstance(_last_msg, dict)
+                    and _last_msg.get("role") == "user"
+                    and isinstance(last_content, str)
+                    and last_content.strip()
+                ):
+                    _prefix = f"[Current time for this request only: {_dt_line}. Do not use any date/time from chat history or memory.]\n\n"
+                    if isinstance(query, str) and query.strip() and _query_looks_like_scheduling(query.strip()):
+                        _prefix += "[You must call remind_me, cron_schedule, or record_date for this request; replying with text only does not create a reminder.]\n\n"
+                    llm_input[-1] = dict(_last_msg, content=_prefix + last_content)
+            except Exception as e:
+                logger.debug("Prepend current-time to last user message failed (non-fatal): {}", e)
         logger.debug("Start to generate the response for user input: " + query)
         logger.info("Main LLM input (user query): {}", _truncate_for_log(query, 500))
 
@@ -1385,7 +1407,7 @@ async def answer_from_memory(
                                 "\n\n## File tools — sandbox (only two bases)\n"
                                 "Only these two bases are the search path and working area; their subfolders can be accessed. Any other folder cannot be accessed (sandbox). "
                                 "(1) User sandbox root — omit path or use subdir name; (2) share — path \"share\" or \"share/...\". "
-                                "**User sandbox has these standard folders:** output (generated files, reports, slides), documents, downloads, images, work, knowledgebase. Use path '' or '.' for root; folder_list(path='documents'), folder_list(path='output'), etc.; use the exact path from the result in document_read or get_file_view_link. "
+                                "**User sandbox has these standard folders:** output (generated files, reports, slides), documents, downloads, images, work, knowledge. Use path '' or '.' for root; folder_list(path='documents'), folder_list(path='output'), etc.; use the exact path from the result in document_read or get_file_view_link. "
                                 "**Do not invent or fabricate file names, file paths, or URLs** to complete tasks. Use only: (a) values returned by your tool calls (e.g. path from folder_list, file_find), (b) the exact filename or path the user mentioned (e.g. 1.pdf), (c) links returned by save_result_page or get_file_view_link. If you need a path or URL, call the appropriate tool first and use its result. "
                                 "**Never use absolute paths** (e.g. /mnt/, C:\\, /Users/). Use only relative paths under the sandbox: the filename (e.g. 1.pdf) or the path from folder_list/file_find. "
                                 "Do not use workspace, config, or paths outside these two trees. Put generated files in output/ (path \"output/filename\") and return the link. "
@@ -1393,8 +1415,9 @@ async def answer_from_memory(
                                 "When the user asks to **send or get a file** (e.g. \"发给我 ID1.jpg\", \"send me that file\", \"把XX发给我\"): call get_file_view_link(path=<exact path>) with the path from folder_list/file_find that matches the requested file, then output **only** the URL from the tool—do not ask for confirmation or give long explanations. "
                                 "When the user asks for file search, list, or read without a specific name: omit path for user sandbox; if user says \"share\", use path \"share\" or \"share/...\". "
                                 "**When folder_list or file_find returns a list,** reply with a short user-friendly numbered list (e.g. \"1. Allen_Peng_resume_en.docx, 2. other.docx\") so the user can say \"file 1\" or \"item 1\"; do not output raw JSON. "
+                                "**Critical:** Each list entry has a **path** field (e.g. documents/1.pdf). Always use that path in document_read(path='...') and get_file_view_link(path='...')—never use only the name (e.g. 1.pdf) if the path is documents/1.pdf, or the file may not be found. "
                                 "folder_list() = list user sandbox; folder_list(path=\"share\") = list share; file_find(pattern=\"*.pdf\") = search user sandbox. "
-                                "To read a file, use **only** the exact path returned by folder_list or file_find in document_read (e.g. 1.pdf). "
+                                "To read a file, use **only** the path value from folder_list/file_find in document_read (e.g. path 'documents/1.pdf'). "
                                 "**When the user gives an exact filename** (e.g. \"1.pdf\", \"2.pdf\", \"report.docx\"): use that file — document_read(path='1.pdf') or the path from file_find for that name; do not treat it as \"item 1\" or \"item 2\" from a list. "
                                 "**When the user refers to an item by ordinal** (e.g. \"file 1\", \"item 1\", \"the first one\", \"number 2\") after you listed files with folder_list or file_find: use the **path** of that position in the list (1 = first, 2 = second, …) in document_read or get_file_view_link — do not ask which file; map the ordinal to the path from your previous result. "
                                 "When the user asks for **HTML slides or PowerPoint/PPT** from a document: use document_read on the file first, then follow the skill instructions (e.g. html-slides or ppt-generation) to generate content and call save_result_page or run_skill; do not reply without calling the tools. "
@@ -1528,7 +1551,7 @@ async def answer_from_memory(
                         run_force_include = bool(force_include_auto_invoke and registry and (unhelpful_for_auto_invoke or any_always_run))
                         _component_log("tools", "model returned no tool_calls; unhelpful=%s auto_invoke_count=%s run_force_include=%s" % (unhelpful_for_auto_invoke, len(force_include_auto_invoke or []), run_force_include))
                         # Log when user clearly asked for scheduling but model didn't call any tool — so we can see TAM did not set a schedule (applies to all friends including Reminder).
-                        if _query_looks_like_scheduling(query) and registry:
+                        if isinstance(query, str) and _query_looks_like_scheduling(query) and registry:
                             try:
                                 _tool_names = [getattr(t, "name", None) for t in (registry.list_tools() or []) if getattr(t, "name", None)]
                                 if any(n in _tool_names for n in ("cron_schedule", "remind_me", "route_to_tam")):
@@ -1653,7 +1676,21 @@ async def answer_from_memory(
                                         response = _remind_me_ask_message()
                                 except Exception:
                                     pass
-                            else:
+                            # When model didn't call any tool and query looks like recurring (e.g. "every day at 9"), try cron_schedule fallback so the reminder is actually set. Never crash.
+                            if (response is None or response == content_str) and isinstance(query, str) and query.strip() and _query_looks_like_scheduling(query.strip()):
+                                try:
+                                    cron_fallback = _infer_cron_schedule_fallback(query)
+                                    _tools_list = (registry.list_tools() or []) if registry else []
+                                    _has_cron = any(getattr(t, "name", None) == "cron_schedule" for t in _tools_list)
+                                    if cron_fallback and isinstance(cron_fallback.get("arguments"), dict) and registry and _has_cron and last_tool_name != "cron_schedule":
+                                        _component_log("tools", "fallback cron_schedule (model did not call tool)")
+                                        _cargs = cron_fallback.get("arguments") or {}
+                                        result = await registry.execute_async("cron_schedule", _cargs, context)
+                                        if isinstance(result, str) and result.strip() and "Error:" not in result:
+                                            response = result
+                                except Exception as e:
+                                    logger.debug("Fallback cron_schedule failed: {}", e)
+                            if response is None or response == content_str:
                                 # Fallback: model didn't call a tool (e.g. replied "No"). If user intent is clear, run plugin or run_skill anyway.
                                 unhelpful = not content_str or len(content_str) < 80 or content_str.strip().lower() in ("no", "i can't", "i cannot", "sorry", "nope")
                                 fallback_route = _infer_route_to_plugin_fallback(query) if unhelpful else None
@@ -1964,6 +2001,20 @@ async def answer_from_memory(
                         if lines:
                             response = label_prefix + "Here are the items:\n\n" + "\n".join(lines)
             except (json.JSONDecodeError, TypeError):
+                pass
+        # If the model echoed raw JSON from a scheduling tool (cron_schedule, record_date), show a short friendly line so the user never sees raw JSON. Never crash.
+        if isinstance(response, str) and response.strip().startswith("{"):
+            try:
+                obj = json.loads(response.strip())
+                if isinstance(obj, dict):
+                    if obj.get("scheduled") and ("job_id" in obj or "cron_expr" in obj):
+                        msg = str(obj.get("message", "Scheduled reminder") or "Scheduled reminder")
+                        response = f"Recurring reminder scheduled. I'll remind you: {msg}."
+                    elif obj.get("recorded") and ("event_name" in obj or "when" in obj):
+                        ev = str(obj.get("event_name") or "event")
+                        wh = str(obj.get("when") or "")
+                        response = f"Recorded: {ev} on {wh}."
+            except (json.JSONDecodeError, TypeError, ValueError):
                 pass
         # If the model echoed the internal file_write/save_result_page empty-content message, show a short user-facing message instead
         if isinstance(response, str) and ("Do NOT share this link" in response or ("empty or too small" in response and '"written"' in response)):

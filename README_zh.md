@@ -14,6 +14,7 @@
 - **技能** — 完整支持 **OpenClaw 风格技能集**：工作流位于 `skills/`（SKILL.md）；LLM 使用工具与可选 `run_skill` 完成任务。
 - **多智能体** — 运行**多个 HomeClaw 实例**（如按用户或场景）；每个实例为一个智能体，拥有自己的记忆与配置。
 - **云端与多模态** — **Gemini** 等云端模型表现良好。**多模态**（图像、音频、视频）在**本地模型**（如 Qwen2-VL + mmproj）与**云端**（如 Gemini、GPT-4o）均支持。
+- **社交网络** — **好友**（AI 好友如 HomeClaw、Note、Reminder，以及**用户型好友**即其他用户）用于聊天与记忆；**用户间消息**通过伴侣应用收发明信（收件箱、推送），Core 仅转发、不经过 LLM。参见 [SocialNetworkDesign.md](docs_design/SocialNetworkDesign.md)。
 
 **其他语言 / Other languages:** [English](README.md) | [日本語](README_jp.md) | [한국어](README_kr.md)
 
@@ -24,7 +25,7 @@
 ## 目录
 
 1. [HomeClaw 是什么？](#1-homeclaw-是什么)
-2. [HomeClaw 能做什么？](#2-homeclaw-能做什么)
+2. [HomeClaw 能做什么？](#2-homeclaw-能做什么) — 渠道、多用户、[社交网络（Companion + Core）](#社交网络companion--core)
 3. [Mix 模式：智能本地/云端路由](#3-mix-模式智能本地云端路由) — 三层路由与强大的第三层
 4. [如何使用 HomeClaw](#4-如何使用-homeclaw) — 含 [远程访问（Tailscale、Cloudflare Tunnel）](#远程访问tailscale-cloudflare-tunnel)
 5. [伴侣应用（Flutter）](#5-伴侣应用flutter)
@@ -105,6 +106,19 @@ flowchart TB
 ### 云端与本地模型
 
 使用**云端**（LiteLLM：OpenAI、Gemini、DeepSeek 等）或**本地**（llama.cpp、GGUF），或两者。在 `config/core.yml` 中设置 `main_llm` 与 `embedding_llm`。[模型 →](https://allenpeng0705.github.io/HomeClaw/models/) · [远程访问](#远程访问tailscale-cloudflare-tunnel)（Tailscale、Cloudflare Tunnel）供伴侣应用使用。
+
+### 社交网络（Companion + Core）
+
+HomeClaw 可在单实例上作为**您自己的社交网络**枢纽（设计上可扩展为多实例）。社交网络仅限 **Companion 应用与 Core** — 渠道（Telegram、Slack 等）用于与 AI 对话，不承载用户间消息。
+
+| 功能 | 说明 |
+|------|------|
+| **好友列表** | 每个用户在 `config/user.yml` 中有 **friends** 列表：**AI 好友**（HomeClaw、Note、Reminder、自定义角色）用于聊天与记忆，**用户型好友**（同一 HomeClaw 上的其他用户）。 |
+| **与 AI 好友聊天** | 在伴侣应用或 WebChat 中选择要对话的好友。每个 AI 好友可有独立身份与知识目录，位于 `homeclaw_root/{user_id}/{friend_id}/`。 |
+| **用户间消息** | 用户仅可通过 **Companion 应用**互发消息。Core 转发（不经 LLM）。收件箱：**GET /api/user-inbox**；发送：**POST /api/user-message**。支持文本、图片与 push-to-talk（语音）。 |
+| **多用户、单 Core** | 在 `config/user.yml` 或通过 Portal 添加用户。每个用户有独立上下文、沙箱与好友。伴侣应用可选登录（用户名/密码）。 |
+
+详见 [SocialNetworkDesign.md](docs_design/SocialNetworkDesign.md)、[UserToUserMessagingViaCompanion.md](docs_design/UserToUserMessagingViaCompanion.md) 与 [docs/friends-folders-and-users.md](docs/friends-folders-and-users.md)。
 
 ---
 
@@ -207,9 +221,10 @@ HomeClaw 支持 **macOS**、**Windows** 与 **Linux**。需要：
 
 应用仅需 **Core URL** 与可选的 **API key**；无需在应用内集成 Tailscale 或 Cloudflare SDK。更多（SSH 隧道、认证细节）见文档 **[远程访问](https://allenpeng0705.github.io/HomeClaw/remote-access/)** 与 **docs_design/RemoteAccess.md**。
 
-### 更多：模型、数据库、CLI、平台
+### 更多：模型、数据库、CLI、平台、社交网络
 
 - **CLI**（`python -m main start`）：`llm` / `llm set` / `llm cloud`，`channel list` / `channel run <name>`，`reset`。[HOW_TO_USE_zh.md](HOW_TO_USE_zh.md)
+- **社交网络**（Companion + Core）：用户间消息：**POST /api/user-message**（发送）、**GET /api/user-inbox**（收件箱）。示例：`python scripts/test_user_message_api.py --from AllenPeng --to PengXiaoFeng --text "Hello"`；`python scripts/test_user_message_api.py --inbox PengXiaoFeng`。见 [§2 社交网络](#社交网络companion--core) 与 [UserToUserMessagingViaCompanion.md](docs_design/UserToUserMessagingViaCompanion.md)。
 - **本地 GGUF** 与**云端（OpenAI、Gemini 等）**：[模型文档](https://allenpeng0705.github.io/HomeClaw/models/) · 配置在 `config/core.yml`。
 - **Postgres、Neo4j、企业向量库**：[MemoryAndDatabase.md](docs_design/MemoryAndDatabase.md)
 - **Windows**（Visual C++ Build Tools、微信）：[Install VSBuildTools](https://github.com/bycloudai/InstallVSBuildToolsWindows) · **中国**（pip 镜像）：[getting-started](https://allenpeng0705.github.io/HomeClaw/getting-started/)。

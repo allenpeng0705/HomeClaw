@@ -71,9 +71,10 @@ def image_item_to_data_url(core: Any, item: str) -> str:
         data_url = f"data:image/jpeg;base64,{item}"
     max_dim = 0
     try:
-        comp = getattr(Util().get_core_metadata(), "completion", None) or {}
-        max_dim = int(comp.get("image_max_dimension") or 0)
-    except (TypeError, ValueError):
+        meta = Util().get_core_metadata()
+        comp = getattr(meta, "completion", None) or {} if meta else {}
+        max_dim = max(0, int(comp.get("image_max_dimension") or 0))
+    except (TypeError, ValueError, AttributeError):
         pass
     return resize_image_data_url_if_needed(core, data_url, max_dim)
 

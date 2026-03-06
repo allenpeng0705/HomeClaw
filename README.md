@@ -40,9 +40,11 @@
 - **Companion app remote access** — **Built-in Pinggy** support, **Cloudflare Tunnel**, **Ngrok**, Tailscale, and more. Use the app from anywhere.
 - **Channels everywhere** — **WhatsApp**, **Google Chat**, **DingTalk**, **Feishu (Lark)**, **Slack**, **Microsoft Teams**, **Telegram**, **Discord**, **Signal**, **WeChat**, **Line**, **Email**, **WebChat**, and more. One Core serves all channels.
 
-### 7. Your own social network
+### 7. Social networking — Friends, user-to-user, your own network
 
-- Use HomeClaw as the brain behind **your own social network**: multi-user, multi-channel, multi-agent. One place for memory, skills, and plugins; your rules, your data.
+- **Friends (AI + people)** — Each user has a **friends** list: **AI friends** (HomeClaw, Note, Reminder, or custom personas) for chat and memory, and **user-type friends** (other people on the same HomeClaw). Talk to AI friends via Companion or channels; talk to people via **Companion only** (user-to-user messaging).
+- **User-to-user messaging** — Send and receive messages between users from the **Companion app** (inbox, push). Core forwards messages; no LLM. Add friends with `type: user` in `config/user.yml` or via Portal; use **POST /api/user-message** and **GET /api/user-inbox**.
+- **One place, your rules** — Multi-user, multi-channel, multi-agent. Memory, skills, and plugins are shared; identity and sandbox are per user and per friend. Designed so multiple HomeClaw instances can connect later for a larger social network.
 
 ---
 
@@ -111,14 +113,14 @@ python -m channels.run discord
 
 Copy `channels/.env.example` to `channels/.env` and set `CORE_URL` (e.g. `http://127.0.0.1:9000`). **Each channel has its own README** in `channels/<name>/` (e.g. `channels/slack/README.md`, `channels/telegram/README.md`); follow that README to set up the channel (bot tokens, webhooks, etc.). Full list: [channels/README.md](channels/README.md).
 
-**User-to-user messaging (single HomeClaw social network)** — Users can message each other via the Companion (Core forwards; no LLM). **Current design:** User→AI (chat with Core) = **text and image only**; User→User = **text, image, and push-to-talk (voice).** Add friends with `type: user` and `user_id` in `config/user.yml`; then use **POST /api/user-message** (send) and **GET /api/user-inbox** (inbox). Test from the command line:
+**Social networking** — HomeClaw supports a **social network** on top of one instance (Companion + Core only; channels are for User↔AI). **Friends:** each user has a friends list — **AI friends** (e.g. HomeClaw, Note, Reminder) for chat and memory, and **user-type friends** (other users) for direct messaging. **User-to-user:** send and receive messages via the Companion app (Core forwards; no LLM). User→AI = text and image; User→User = text, image, and push-to-talk (voice). Add user-type friends in `config/user.yml` (`type: user`, `user_id`) or via Portal; then **POST /api/user-message** (send) and **GET /api/user-inbox** (inbox). Example:
 
 ```bash
 python scripts/test_user_message_api.py --from AllenPeng --to PengXiaoFeng --text "Hello"
 python scripts/test_user_message_api.py --inbox PengXiaoFeng
 ```
 
-See [UserToUserMessagingViaCompanion.md](docs_design/UserToUserMessagingViaCompanion.md) and [SocialNetworkDesign.md](docs_design/SocialNetworkDesign.md). Optional **application-layer encryption** (Companion–Core): set `app_layer_encryption_secret` in `config/core.yml`; Companion implementation spec: [CompanionAppLayerEncryption.md](docs_design/CompanionAppLayerEncryption.md). Logic and no-crash review: [SocialNetworkAndEncryptionReview.md](docs_design/SocialNetworkAndEncryptionReview.md).
+Design and security: [UserToUserMessagingViaCompanion.md](docs_design/UserToUserMessagingViaCompanion.md) · [SocialNetworkDesign.md](docs_design/SocialNetworkDesign.md) · [CompanionAppLayerEncryption.md](docs_design/CompanionAppLayerEncryption.md) (optional `app_layer_encryption_secret` in `config/core.yml`) · [SocialNetworkAndEncryptionReview.md](docs_design/SocialNetworkAndEncryptionReview.md).
 
 ---
 
@@ -130,10 +132,10 @@ See [UserToUserMessagingViaCompanion.md](docs_design/UserToUserMessagingViaCompa
 
 ## Table of Contents
 
-- [Major Features](#major-features) — Save cost · User sandbox · Skills & plugins · Companion app · Multi-agent · Remote & channels · Your social network
-- [Quick Start](#quick-start) — Run Core · Companion app · Portal · Config & channels
+- [Major Features](#major-features) — Save cost · User sandbox · Skills & plugins · Companion app · Multi-agent · Remote & channels · Social networking
+- [Quick Start](#quick-start) — Run Core · Companion app · Portal · Config & channels · Social networking
 1. [What is HomeClaw?](#1-what-is-homeclaw)
-2. [What Can HomeClaw Do?](#2-what-can-homeclaw-do) — Channels (WhatsApp, Slack, Telegram, etc.), multi-user
+2. [What Can HomeClaw Do?](#2-what-can-homeclaw-do) — Channels, multi-user, [Social networking (Companion + Core)](#social-networking-companion--core)
 3. [Mix mode: Smart local/cloud routing](#3-mix-mode-smart-localcloud-routing) — 3-layer router
 4. [How to Use HomeClaw](#4-how-to-use-homeclaw) — includes [Remote access (Pinggy, Cloudflare, Ngrok, Tailscale)](#remote-access-tailscale-cloudflare-tunnel)
 5. [Companion app (Flutter)](#5-companion-app-flutter)
@@ -175,6 +177,19 @@ Talk to HomeClaw via **WebChat**, **CLI**, **Telegram**, **Discord**, **Signal**
 ### Cloud and local models
 
 Use **cloud** (LiteLLM: OpenAI, Gemini, DeepSeek, etc.) or **local** (llama.cpp, GGUF), or both. Set `main_llm` and `embedding_llm` in `config/core.yml`. [Models →](https://allenpeng0705.github.io/HomeClaw/models/) · [Remote access](#remote-access-tailscale-cloudflare-tunnel) (Tailscale, Cloudflare Tunnel) for the Companion app.
+
+### Social networking (Companion + Core)
+
+HomeClaw can act as the hub for **your own social network** on one instance (and is designed to extend to multiple instances later). The social network is **Companion app and Core only** — channels (Telegram, Slack, etc.) are for talking to the AI, not for user-to-user messaging.
+
+| Feature | Description |
+|--------|-------------|
+| **Friends list** | Each user has a **friends** list in `config/user.yml`: **AI friends** (HomeClaw, Note, Reminder, custom personas) for chat and memory, and **user-type friends** (other users on the same HomeClaw). |
+| **Chat with AI friends** | From the Companion app (or WebChat), choose which friend to talk to. Each AI friend can have its own identity and knowledge folder under `homeclaw_root/{user_id}/{friend_id}/`. |
+| **User-to-user messaging** | Users can send messages to each other via the **Companion app** only. Core forwards messages (no LLM). Inbox: **GET /api/user-inbox**. Send: **POST /api/user-message**. Supports text, image, and push-to-talk (voice). |
+| **Multi-user, one Core** | Add users in `config/user.yml` or via Portal. Each user has isolated context, sandbox, and friends. Optional login (username/password) for the Companion app. |
+
+See [SocialNetworkDesign.md](docs_design/SocialNetworkDesign.md), [UserToUserMessagingViaCompanion.md](docs_design/UserToUserMessagingViaCompanion.md), and [docs/friends-folders-and-users.md](docs/friends-folders-and-users.md) for details.
 
 ---
 

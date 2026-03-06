@@ -66,10 +66,10 @@ knowledge_base:
   embed_timeout: 600           # seconds
   store_timeout: 600            # seconds
   retrieval_min_score: 0.5     # only inject chunks with score >= this (0-1); null = inject top-k regardless
-  # Per-user folder sync: scan {homeclaw_root}/{user_id}/knowledgebase/, add/remove files. See docs_design/PerUserKnowledgeBaseFolder.md
+  # Per-user folder sync: scan {homeclaw_root}/{user_id}/knowledge/, add/remove files. See docs_design/PerUserKnowledgeBaseFolder.md. Use folder_name: knowledge (same as friends); legacy: knowledgebase.
   folder_sync:
     enabled: false
-    folder_name: knowledgebase # subdir under each user's sandbox
+    folder_name: knowledge # subdir under each user's sandbox (unified with friends: {FriendName}/knowledge/)
     schedule: ""               # cron, e.g. "0 */6 * * *" every 6h; empty = only on-demand via POST /knowledge_base/sync_folder
     allowed_extensions: [".md", ".txt", ".pdf", ".docx", ".html", ".htm", ".rst", ".csv", ".ppt", ".pptx"]
     max_file_size_bytes: 5000000

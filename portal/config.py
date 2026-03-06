@@ -6,13 +6,15 @@ import os
 from pathlib import Path
 from typing import Optional
 
-# Project root: when portal lives under core/portal/, parent.parent = project root (core's parent).
+# Project root: when portal lives at project_root/portal/, parent = project root.
 _PORTAL_DIR = Path(__file__).resolve().parent
-ROOT_DIR = _PORTAL_DIR.parent.parent
+ROOT_DIR = _PORTAL_DIR.parent
+
 
 def get_host() -> str:
     """Bind host. Default 127.0.0.1 (local only). Set PORTAL_HOST=0.0.0.0 to allow LAN/Core to reach Portal."""
     return os.environ.get("PORTAL_HOST", "127.0.0.1")
+
 
 def get_port() -> int:
     """Portal server port. Default 18472 to avoid common ports (8000, 8080, etc.)."""
@@ -20,6 +22,7 @@ def get_port() -> int:
         return int(os.environ.get("PORTAL_PORT", "18472"))
     except (TypeError, ValueError):
         return 18472
+
 
 def get_config_dir() -> Path:
     """Path to config directory (e.g. config/)."""

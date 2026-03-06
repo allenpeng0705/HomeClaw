@@ -1,6 +1,6 @@
 # Per-user knowledge base folder — design
 
-This doc has two parts: **(1) Review** of recent companion/user and client changes for correctness and robustness; **(2) Design** for a per-user "knowledgebase" folder that stays in sync with the knowledge base (add new files, remove when file is deleted).
+This doc has two parts: **(1) Review** of recent companion/user and client changes for correctness and robustness; **(2) Design** for a per-user **knowledge** folder (same name as friends’ `{FriendName}/knowledge/`) that stays in sync with the knowledge base (add new files, remove when file is deleted).
 
 ---
 
@@ -50,7 +50,7 @@ This doc has two parts: **(1) Review** of recent companion/user and client chang
 
 ### 2.1 Goal
 
-- Every user has **one private folder** for “knowledge base” files: e.g. `{homeclaw_root}/{user_id}/knowledgebase/`.
+- Every user has **one private folder** for “knowledge base” files: e.g. `{homeclaw_root}/{user_id}/knowledge/`.
 - User can put files there; files received from channels or the companion app can be saved there. All of these become part of that user’s **private knowledge base** (chunked, embedded, searchable).
 - A **sync process** runs periodically (or on demand):
   - **Add:** Scan the folder; for files that are supported and not yet in the KB, read content and add to the KB.
@@ -59,28 +59,28 @@ This doc has two parts: **(1) Review** of recent companion/user and client chang
 ### 2.2 Paths and layout
 
 - **Folder per user:**  
-  `{homeclaw_root}/{user_id}/knowledgebase/`  
+  `{homeclaw_root}/{user_id}/knowledge/`  
   Same `user_id` as used for sandbox and file tools (sanitized id/name from user.yml). Requires `homeclaw_root` to be set.
 
 - **Received files:**  
-  When the Core processes inbound with attachments (files/images/videos/audios), it can optionally **copy** (or move) supported document files into the requesting user’s `knowledgebase/` folder so the next sync will pick them up. Exact policy (e.g. only “document” types, only when user asks, or always for documents) can be configurable.
+  When the Core processes inbound with attachments (files/images/videos/audios), it can optionally **copy** (or move) supported document files into the requesting user’s `knowledge/` folder so the next sync will pick them up. Exact policy (e.g. only “document” types, only when user asks, or always for documents) can be configurable.
 
 - **Share folder:**  
-  Unchanged. `share/` remains shared; the **knowledgebase** folder is per-user only.
+  Unchanged. `share/` remains shared; the **knowledge** folder is per-user only.
 
 ### 2.3 Sync logic (high level)
 
 1. **List files on disk**  
-   Recursively (or one level, configurable) under `{homeclaw_root}/{user_id}/knowledgebase/`.  
+   Recursively (or one level, configurable) under `{homeclaw_root}/{user_id}/knowledge/`.  
    Only consider **allowed extensions** (e.g. `.md`, `.txt`, `.pdf`, `.docx`, `.html`, …) and **max file size** to avoid OOM.
 
 2. **List current KB sources for this user**  
    Use existing `list_sources(user_id)`. Filter to `source_type == "folder"` (or a dedicated type like `"kb_folder"`).  
-   Each such source has a `source_id` = path relative to the user’s knowledgebase folder (e.g. `doc.pdf`, `notes/readme.md`).
+   Each such source has a `source_id` = path relative to the user’s knowledge folder (e.g. `doc.pdf`, `notes/readme.md`).
 
 3. **Add new or updated files**  
    For each file on disk:
-   - `source_id` = path relative to `knowledgebase/` (stable and unique per user).
+   - `source_id` = path relative to `knowledge/` (stable and unique per user).
    - If this `source_id` is not in the KB, or if “re-sync on mtime change” is enabled and file mtime &gt; last add time:
      - Read content (reuse existing document_read / file-understanding pipeline).
      - If this source_id was already in the KB, call `remove_by_source_id(user_id, source_id)` first.
@@ -88,7 +88,7 @@ This doc has two parts: **(1) Review** of recent companion/user and client chang
 
 4. **Remove deleted files from KB**  
    For each KB source with `source_type == "folder"` (and same user_id):
-   - If the file no longer exists at `knowledgebase/{source_id}` (or the full path derived from it), call `remove_by_source_id(user_id, source_id)`.
+   - If the file no longer exists at `knowledge/{source_id}` (or the full path derived from it), call `remove_by_source_id(user_id, source_id)`.
 
 5. **Idempotency and errors**  
    - Sync should be safe to run repeatedly.  
@@ -101,13 +101,13 @@ This doc has two parts: **(1) Review** of recent companion/user and client chang
   - **Removal rule:** Only consider `source_type == "folder"` when deciding what to remove because a file is missing.
   - **Listing:** Optional “list folder-synced sources” for UI or debugging.
 
-- **source_id:** Path relative to the user’s knowledgebase directory, with a consistent separator (e.g. `/`). Examples: `doc.pdf`, `subdir/note.md`. This is stable across runs and unique per user per file.
+- **source_id:** Path relative to the user’s knowledge directory, with a consistent separator (e.g. `/`). Examples: `doc.pdf`, `subdir/note.md`. This is stable across runs and unique per user per file.
 
 ### 2.5 When to run sync
 
 - **Option A – Scheduled:** Cron (or Core’s internal scheduler) calls an endpoint or internal method at an interval (e.g. every 6 or 24 hours). Config: e.g. `knowledge_base.folder_sync.schedule` (cron expression) and `knowledge_base.folder_sync.enabled`.
 - **Option B – On demand:** Endpoint `POST /knowledge_base/sync_folder` (or similar) that runs sync for the current user (or for a given user_id if admin). Useful for testing and “sync now” from UI.
-- **Option C – After inbound with files:** When Core saves received documents into the user’s knowledgebase folder, optionally trigger a sync for that user (or queue it) so new files are indexed soon. Can be combined with A/B.
+- **Option C – After inbound with files:** When Core saves received documents into the user’s knowledge folder, optionally trigger a sync for that user (or queue it) so new files are indexed soon. Can be combined with A/B.
 
 Recommendation: implement **A + B** first (schedule + on-demand); add C later if needed.
 
@@ -124,7 +124,7 @@ knowledge_base:
   folder_sync:
     enabled: false
     # Folder name under each user's sandbox: {homeclaw_root}/{user_id}/{folder_name}/
-    folder_name: knowledgebase
+    folder_name: knowledge
     # Cron expression; empty = only on-demand via API
     schedule: "0 */6 * * *"
     # Allowed extensions (lowercase)
@@ -140,10 +140,10 @@ knowledge_base:
 ### 2.7 Saving received files into the folder (optional)
 
 - When processing **inbound** (companion, WebChat, channels) with `files` (or document-type attachments), Core can:
-  1. Save/copy each file to `{homeclaw_root}/{user_id}/knowledgebase/{original_filename}` (or a safe name if conflict).
+  1. Save/copy each file to `{homeclaw_root}/{user_id}/knowledge/{original_filename}` (or a safe name if conflict).
   2. Rely on the next **scheduled or on-demand sync** to add it to the KB.
 
-- Alternatively, do **not** auto-save to knowledgebase; only sync what the user (or another process) has put in the folder. Then “receiving from channels/companion” is handled by existing upload + optional “save to my knowledge base” (e.g. user asks to add to KB; we add and optionally write to folder for consistency). Design can support both; first phase can be “sync folder only,” then add “save inbound docs to folder” as an option.
+- Alternatively, do **not** auto-save to knowledge; only sync what the user (or another process) has put in the folder. Then “receiving from channels/companion” is handled by existing upload + optional “save to my knowledge base” (e.g. user asks to add to KB; we add and optionally write to folder for consistency). Design can support both; first phase can be “sync folder only,” then add “save inbound docs to folder” as an option.
 
 ### 2.8 Implementation outline
 
@@ -151,27 +151,27 @@ knowledge_base:
    Add `folder_sync` (and optional `folder_name`) under `knowledge_base` in core.yml; parse in CoreMetadata / config loader.
 
 2. **Path helper**  
-   `get_user_knowledgebase_dir(user_id)` → `Path(homeclaw_root) / sanitize(user_id) / folder_name` (e.g. `knowledgebase`). Return None if homeclaw_root not set.
+   `get_user_knowledgebase_dir(user_id)` → `Path(homeclaw_root) / sanitize(user_id) / folder_name` (e.g. `knowledge`). Return None if homeclaw_root not set.
 
 3. **Sync function (per user)**  
    - `sync_user_kb_folder(user_id)` (async or sync, wrapped in try/except):
-     - Get user’s knowledgebase dir; if missing, return.
+     - Get user’s knowledge dir; if missing, return.
      - List files (respect allowed_extensions, max_file_size).
      - Call KB `list_sources(user_id)`, filter by source_type `"folder"`.
      - **Remove:** For each folder source_id where file does not exist, call `remove_by_source_id(user_id, source_id)`.
      - **Add/update:** For each file on disk, compute relative source_id; if not in list_sources or (resync_on_mtime_change and mtime &gt; last known), read content (reuse document_read or file-understanding), then add (removing old by source_id first if updating).
 
 4. **Scheduler**  
-   If `folder_sync.enabled` and `folder_sync.schedule` is set, register a job that, at schedule time, gets all user ids (from user.yml or from “users who have a knowledgebase dir”) and runs `sync_user_kb_folder(user_id)` for each. One failure per user should not stop others.
+   If `folder_sync.enabled` and `folder_sync.schedule` is set, register a job that, at schedule time, gets all user ids (from user.yml or from “users who have a knowledge dir”) and runs `sync_user_kb_folder(user_id)` for each. One failure per user should not stop others.
 
 5. **Endpoint**  
    `POST /knowledge_base/sync_folder` (auth required): body optional `user_id` (default: current request user). Calls `sync_user_kb_folder(user_id)`.
 
 6. **Received files (phase 2)**  
-   In inbound file handling, if `folder_sync.enabled` and config says “save inbound docs to user’s knowledgebase folder,” copy supported documents to the user’s knowledgebase dir with a safe filename, then optionally trigger sync for that user or rely on next scheduled run.
+   In inbound file handling, if `folder_sync.enabled` and config says “save inbound docs to user’s knowledge folder,” copy supported documents to the user’s knowledge dir with a safe filename, then optionally trigger sync for that user or rely on next scheduled run.
 
 ### 2.9 Summary
 
-- **One folder per user:** `{homeclaw_root}/{user_id}/knowledgebase/`.
+- **One folder per user:** `{homeclaw_root}/{user_id}/knowledge/`.
 - **Sync:** Periodically and/or on demand: add new/changed files (source_type `"folder"`, source_id = relative path), remove KB entries when the file is deleted.
 - **Stable and bounded:** Only folder-synced sources are removed when files disappear; sync is idempotent and fault-tolerant so the system stays correct and does not grow without bound.

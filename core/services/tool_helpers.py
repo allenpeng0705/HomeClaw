@@ -20,8 +20,9 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
-# Re-use single robust implementation for reminder inference (many NL styles/languages).
+# Re-use single robust implementation for reminder/cron inference (many NL styles/languages).
 from core.tool_helpers_fallback import (
+    infer_cron_schedule_fallback,
     infer_remind_me_fallback,
     remind_me_clarification_question,
     remind_me_needs_clarification,

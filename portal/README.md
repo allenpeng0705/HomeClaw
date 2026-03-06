@@ -15,7 +15,7 @@ The default browser opens automatically when the server is ready. To disable: `p
 Or run the app directly (same venv, no auto-open):
 
 ```bash
-python -c "import uvicorn; from core.portal.app import app; from core.portal.config import get_host, get_port; uvicorn.run(app, host=get_host(), port=get_port())"
+python -c "import uvicorn; from portal.app import app; from portal.config import get_host, get_port; uvicorn.run(app, host=get_host(), port=get_port())"
 ```
 
 - **Host:** `127.0.0.1` (override: `PORTAL_HOST`)

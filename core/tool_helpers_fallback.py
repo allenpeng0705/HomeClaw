@@ -286,6 +286,74 @@ def remind_me_clarification_question(query: str) -> Optional[str]:
     return None
 
 
+def infer_cron_schedule_fallback(query: str) -> Optional[Dict[str, Any]]:
+    """
+    Infer cron_schedule(cron_expr, message) from recurring phrases when the LLM did not call the tool.
+    Handles "every day at 9", "每天9点", "every 8 hours", "每4小时提醒喝水", etc. Never raises.
+    """
+    if not query or not isinstance(query, str):
+        return None
+    try:
+        q = query.strip()
+        if not q or len(q) < 5:
+            return None
+        q_lower = q.lower()
+        # Recurring keywords (multilingual)
+        if not any(
+            kw in q_lower or kw in q
+            for kw in ("every", "每天", "每小时", "hours", "daily", "recurring", "cron", "每隔", "每", "小时", "点")
+        ):
+            return None
+        cron_expr = None
+        message = (q[:80].strip() if len(q) > 80 else q.strip()) or "Reminder"
+        message = str(message)[:120]
+
+        # "every N hours" / "每N小时" -> 0 */N * * *
+        m = re.search(r"every\s+(\d+)\s*hours?", q_lower) or re.search(r"每\s*(\d+)\s*小时", q)
+        if m:
+            n = int(m.group(1))
+            if 1 <= n <= 24:
+                cron_expr = f"0 */{n} * * *"
+        if cron_expr is None:
+            m = re.search(r"(\d+)\s*hours?\s*(?:every|apart)?", q_lower)
+            if m:
+                n = int(m.group(1))
+                if 1 <= n <= 24:
+                    cron_expr = f"0 */{n} * * *"
+
+        # "every day at H" / "每天H点" / "daily at H" / "每天早上H点" -> 0 H * * *
+        if cron_expr is None:
+            # English: "every day at 9", "daily at 8 am", "every morning at 8"
+            m = re.search(r"(?:every\s+day|daily|every\s+morning|every\s+evening)\s+at\s+(\d{1,2})", q_lower)
+            if not m:
+                m = re.search(r"at\s+(\d{1,2})\s*(?:am|pm|o'clock)?\s*(?:every\s+day|daily)?", q_lower)
+            if not m:
+                m = re.search(r"(\d{1,2})\s*:\s*00\s*(?:every\s+day|daily)", q_lower)
+            if m:
+                hour = int(m.group(1))
+                if 0 <= hour <= 23:
+                    cron_expr = f"0 {hour} * * *"
+            # Chinese: "每天9点", "每天早上8点"
+            if cron_expr is None:
+                m = re.search(r"每天(?:早上|晚上|早晨)?\s*(\d{1,2})\s*点", q) or re.search(r"每天\s*(\d{1,2})\s*点", q)
+                if m:
+                    hour = int(m.group(1))
+                    if 0 <= hour <= 23:
+                        cron_expr = f"0 {hour} * * *"
+            if cron_expr is None:
+                m = re.search(r"(\d{1,2})\s*点\s*(?:提醒|每天|定时)", q)
+                if m:
+                    hour = int(m.group(1))
+                    if 0 <= hour <= 23:
+                        cron_expr = f"0 {hour} * * *"
+
+        if cron_expr:
+            return {"tool": "cron_schedule", "arguments": {"cron_expr": cron_expr, "message": message}}
+        return None
+    except Exception:
+        return None
+
+
 def infer_route_to_plugin_fallback(query: str) -> Optional[Dict[str, Any]]:
     """Infer route_to_plugin from user query when LLM returns no tool call. Never raises."""
     if not query or not isinstance(query, str):

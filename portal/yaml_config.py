@@ -17,6 +17,7 @@ WHITELIST_LLM = frozenset({
     "main_llm_mode", "main_llm_local", "main_llm_cloud", "main_llm_language",
     "embedding_host", "embedding_port", "main_llm_host", "main_llm_port",
     "hybrid_router",
+    "vision_llm", "vision_llm_host", "vision_llm_port", "vision_image_max_dimension", "llama_cpp", "completion",
 })
 WHITELIST_MEMORY_KB = frozenset({
     "use_memory", "memory_backend", "memory_check_before_add", "memory_summarization",

@@ -14,6 +14,7 @@
 - **スキル** — **OpenClaw スタイルのスキルセット**を完全サポート：`skills/`（SKILL.md）のワークフロー；LLM がツールとオプションの `run_skill` でタスクを実行。
 - **マルチエージェント** — **複数 HomeClaw インスタンス**を起動（ユーザーやユースケースごとなど）；各インスタンスは 1 エージェントで、独自のメモリと設定を持ちます。
 - **クラウド・マルチモーダル** — **Gemini** などのクラウドモデルがよく動作。**マルチモーダル**（画像・音声・動画）は**ローカルモデル**（例：Qwen2-VL + mmproj）と**クラウド**（例：Gemini、GPT-4o）の両方でサポート。
+- **ソーシャルネットワーク** — **フレンド**（HomeClaw、Note、Reminder などの AI フレンドと、**ユーザー型フレンド**＝他のユーザー）でチャット・メモリ；**ユーザー間メッセージ**はコンパニオンアプリで送受信（受信トレイ・プッシュ）。Core は転送のみで LLM は不要。[SocialNetworkDesign.md](docs_design/SocialNetworkDesign.md) 参照。
 
 **他の言語 / Other languages:** [English](README.md) | [简体中文](README_zh.md) | [한국어](README_kr.md)
 
@@ -24,7 +25,7 @@
 ## 目次
 
 1. [HomeClaw とは？](#1-homeclaw-とは)
-2. [HomeClaw でできること](#2-homeclaw-でできること)
+2. [HomeClaw でできること](#2-homeclaw-でできること) — チャネル、マルチユーザー、[ソーシャルネットワーク（Companion + Core）](#ソーシャルネットワークcompanion--core)
 3. [Mix モード：スマートなローカル/クラウドルーティング](#3-mix-モードスマートなローカルクラウドルーティング) — 3 層ルーターと強力な第 3 層
 4. [HomeClaw の使い方](#4-homeclaw-の使い方) — [リモートアクセス（Tailscale、Cloudflare Tunnel）](#リモートアクセスtailscale-cloudflare-tunnel) を含む
 5. [コンパニオンアプリ（Flutter）](#5-コンパニオンアプリflutter)
@@ -105,6 +106,19 @@ flowchart TB
 ### クラウドとローカルモデル
 
 **クラウド**（LiteLLM：OpenAI、Gemini、DeepSeek など）または**ローカル**（llama.cpp、GGUF）、または両方。`config/core.yml` で `main_llm` と `embedding_llm` を設定。[モデル →](https://allenpeng0705.github.io/HomeClaw/models/) · [リモートアクセス](#リモートアクセスtailscale-cloudflare-tunnel)（Tailscale、Cloudflare Tunnel）でコンパニオンアプリから利用。
+
+### ソーシャルネットワーク（Companion + Core）
+
+HomeClaw は 1 インスタンス上で**ご自身のソーシャルネットワーク**のハブとして機能します（将来のマルチインスタンス接続も想定）。ソーシャルネットワークは**コンパニオンアプリと Core のみ**— チャネル（Telegram、Slack など）は AI との対話用で、ユーザー間メッセージは含みません。
+
+| 機能 | 説明 |
+|------|------|
+| **フレンドリスト** | 各ユーザーは `config/user.yml` で **friends** リストを持ちます：**AI フレンド**（HomeClaw、Note、Reminder、カスタムペルソナ）でチャット・メモリ、**ユーザー型フレンド**（同一 HomeClaw の他のユーザー）。 |
+| **AI フレンドとのチャット** | コンパニオンアプリまたは WebChat で対話するフレンドを選択。各 AI フレンドは `homeclaw_root/{user_id}/{friend_id}/` に独自の identity と knowledge フォルダを持てます。 |
+| **ユーザー間メッセージ** | ユーザーは**コンパニオンアプリ**経由でのみ相互にメッセージ送受信。Core は転送のみ（LLM 不使用）。受信トレイ：**GET /api/user-inbox**。送信：**POST /api/user-message**。テキスト・画像・プッシュトーク（音声）対応。 |
+| **マルチユーザー・単一 Core** | `config/user.yml` または Portal でユーザーを追加。各ユーザーは分離されたコンテキスト・サンドボックス・フレンドを持ちます。コンパニオンアプリはオプションでログイン（ユーザー名/パスワード）。 |
+
+詳細は [SocialNetworkDesign.md](docs_design/SocialNetworkDesign.md)・[UserToUserMessagingViaCompanion.md](docs_design/UserToUserMessagingViaCompanion.md)・[docs/friends-folders-and-users.md](docs/friends-folders-and-users.md) を参照。
 
 ---
 
@@ -207,9 +221,10 @@ HomeClaw は **macOS**、**Windows**、**Linux** で動作。必要環境：
 
 アプリに必要なのは **Core URL** とオプションの **API key** のみ；Tailscale や Cloudflare の SDK はアプリに含みません。詳細（SSH トンネル、認証）はドキュメント **[リモートアクセス](https://allenpeng0705.github.io/HomeClaw/remote-access/)** と **docs_design/RemoteAccess.md** を参照。
 
-### その他：モデル、DB、CLI、プラットフォーム
+### その他：モデル、DB、CLI、プラットフォーム、ソーシャルネットワーク
 
 - **CLI**（`python -m main start`）：`llm` / `llm set` / `llm cloud`、`channel list` / `channel run <name>`、`reset`。[HOW_TO_USE_jp.md](HOW_TO_USE_jp.md)
+- **ソーシャルネットワーク**（Companion + Core）：ユーザー間メッセージは **POST /api/user-message**（送信）、**GET /api/user-inbox**（受信トレイ）。例：`python scripts/test_user_message_api.py --from AllenPeng --to PengXiaoFeng --text "Hello"`；`python scripts/test_user_message_api.py --inbox PengXiaoFeng`。[§2 ソーシャルネットワーク](#ソーシャルネットワークcompanion--core) と [UserToUserMessagingViaCompanion.md](docs_design/UserToUserMessagingViaCompanion.md) 参照。
 - **ローカル GGUF** と**クラウド（OpenAI、Gemini など）**：[モデルドキュメント](https://allenpeng0705.github.io/HomeClaw/models/) · 設定は `config/core.yml`。
 - **Postgres、Neo4j、エンタープライズベクトル DB**：[MemoryAndDatabase.md](docs_design/MemoryAndDatabase.md)
 - **Windows**（Visual C++ Build Tools、WeChat）：[Install VSBuildTools](https://github.com/bycloudai/InstallVSBuildToolsWindows) · **中国**（pip ミラー）：[getting-started](https://allenpeng0705.github.io/HomeClaw/getting-started/)。

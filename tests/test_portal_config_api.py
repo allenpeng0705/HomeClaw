@@ -5,16 +5,16 @@ Requires session (login). Uses temp config dir and minimal config files.
 import pytest
 from fastapi.testclient import TestClient
 
-from core.portal.app import app
+from portal.app import app
 
 
 @pytest.fixture
 def portal_temp_config(monkeypatch, tmp_path):
     """Point portal config and auth to tmp_path; create minimal config files."""
-    import core.portal.config as config_mod
-    import core.portal.auth as auth_mod
-    import core.portal.config_backup as cb_mod
-    import core.portal.config_api as api_mod
+    import portal.config as config_mod
+    import portal.auth as auth_mod
+    import portal.config_backup as cb_mod
+    import portal.config_api as api_mod
     monkeypatch.setattr(config_mod, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr(auth_mod, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr(cb_mod, "get_config_dir", lambda: tmp_path)

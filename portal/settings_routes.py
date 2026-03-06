@@ -10,11 +10,11 @@ from urllib.parse import quote
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from core.portal import auth
-from core.portal import config_api
-from core.portal import config_backup
-from core.portal import yaml_config
-from core.portal.app import (
+from portal import auth
+from portal import config_api
+from portal import config_backup
+from portal import yaml_config
+from portal.app import (
     _logged_in_page,
     _render_advanced_form,
     _render_core_form_html,
@@ -31,6 +31,7 @@ from core.portal.app import (
     _form_body_from_data,
     SETTINGS_PAGES,
     _CORE_ADVANCED_KEYS,
+    _LLM_ADVANCED_KEYS,
     _FRIEND_PRESETS_KEYS,
 )
 
@@ -39,7 +40,7 @@ router = APIRouter()
 
 def _get_session_username(request: Request) -> Optional[str]:
     """Session check; import from app to avoid circular import at load."""
-    from core.portal.app import _get_session_username as _get
+    from portal.app import _get_session_username as _get
     return _get(request)
 
 
@@ -85,7 +86,7 @@ def _portal_friends_from_preset_names(preset_names):
     try:
         from base.base import Friend
         from base.friend_presets import load_friend_presets
-        from core.portal import config as portal_config
+        from portal import config as portal_config
         result = [Friend(name="HomeClaw", relation=None, who=None, identity=None, preset=None, type="ai", user_id=None)]
         if not isinstance(preset_names, list):
             return result
@@ -326,7 +327,7 @@ async def settings_post(request: Request, page: str):
             data_memory_kb = config_api.load_config_for_api("memory_kb")
             data_skills = config_api.load_config_for_api("skills_and_plugins")
             body_core = _form_body_from_data(form_data, data_core, _CORE_ADVANCED_KEYS)
-            body_llm = _form_body_from_data(form_data, data_llm, ("hybrid_router",))
+            body_llm = _form_body_from_data(form_data, data_llm, ("hybrid_router",) + _LLM_ADVANCED_KEYS)
             body_friend = _form_body_from_data(form_data, data_friend, _FRIEND_PRESETS_KEYS)
             body_memory_kb = _form_body_from_data(
                 form_data, data_memory_kb, tuple(yaml_config.WHITELIST_MEMORY_KB)

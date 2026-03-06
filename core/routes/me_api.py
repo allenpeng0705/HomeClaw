@@ -19,7 +19,7 @@ from core.avatar_store import (
 )
 from core.routes.companion_auth import get_companion_token_user
 from base.base import User
-from base.workspace import write_friend_identity_file
+from base.workspace import ensure_friend_folders, write_friend_identity_file
 
 
 def get_api_me_avatar_get_handler(core):  # noqa: ARG001
@@ -150,6 +150,13 @@ def get_api_me_friends_post_handler(core):  # noqa: ARG001
             who = body.get("who") if isinstance(body.get("who"), dict) else None
             identity_filename = (body.get("identity_filename") or "identity.md").strip() or "identity.md"
             if Util().add_ai_friend(user_id, name, relation=relation, who=who, identity_filename=identity_filename):
+                try:
+                    meta = Util().get_core_metadata()
+                    root = (getattr(meta, "homeclaw_root", None) or "").strip() if meta else ""
+                    if root:
+                        ensure_friend_folders(root, user_id, name)
+                except Exception:
+                    pass
                 return JSONResponse(content={"ok": True, "friend_id": name})
             return JSONResponse(status_code=400, content={"detail": "Duplicate name or invalid"})
         except Exception as e:
