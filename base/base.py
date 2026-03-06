@@ -1038,7 +1038,7 @@ class CoreMetadata:
 
     @staticmethod
     def _normalize_system_plugins_env(raw: Any) -> Dict[str, Dict[str, str]]:
-        """Convert system_plugins_env from YAML to Dict[plugin_id, Dict[var_name, str]]. Values may be non-string in YAML."""
+        """Convert system_plugins_env from YAML to Dict[plugin_id, Dict[var_name, str]]. Values may be non-string in YAML. Never raises."""
         if not raw or not isinstance(raw, dict):
             return {}
         out: Dict[str, Dict[str, str]] = {}
@@ -1047,12 +1047,15 @@ class CoreMetadata:
                 continue
             normalized = {}
             for k, v in vars_dict.items():
-                if v is True:
-                    normalized[str(k)] = "true"
-                elif v is False:
-                    normalized[str(k)] = "false"
-                else:
-                    normalized[str(k)] = str(v)
+                try:
+                    if v is True:
+                        normalized[str(k)] = "true"
+                    elif v is False:
+                        normalized[str(k)] = "false"
+                    else:
+                        normalized[str(k)] = str(v) if v is not None else ""
+                except Exception:
+                    normalized[str(k)] = ""
             out[str(plugin_id)] = normalized
         return out
 
