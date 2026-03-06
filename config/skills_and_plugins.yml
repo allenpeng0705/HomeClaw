@@ -230,6 +230,9 @@ system_plugins_env:
 tools:
   # exec: allowed command names. Empty = platform default (Unix: ls, cat, pwd; Windows: dir, type, cd).
   exec_allowlist: []
+  # markdown_to_pdf: VMPrint (github.com/cosmiciron/vmprint). install.sh/install.ps1 clone it to tools/vmprint and run npm install. Use tools/vmprint (relative to repo root) or an absolute path.
+  markdown_to_pdf:
+    vmprint_dir: "tools/vmprint"   # default after install; empty = use pandoc or weasyprint
   exec_timeout: 30   # seconds
   # Max characters returned by file_read when the tool does not pass max_chars. Increase for long PDFs/documents.
   file_read_max_chars: 5000000

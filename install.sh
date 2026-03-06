@@ -109,6 +109,46 @@ fi
 # ----- Step 3: already done if IN_REPO -----
 # (clone was done above if needed)
 
+# ----- Step 4b: VMPrint (Markdown → PDF tool) -----
+echo ""
+echo "=== Step 4b: VMPrint (Markdown to PDF) ==="
+VMPRINT_DIR="$ROOT/tools/vmprint"
+VMPRINT_MAIN="$ROOT/tools/vmprint-main"
+# If user downloaded GitHub ZIP, folder is vmprint-main; rename to vmprint so config path works
+if [ -d "$VMPRINT_MAIN" ] && [ ! -d "$VMPRINT_DIR" ]; then
+  echo "Renaming tools/vmprint-main to tools/vmprint ..."
+  mv "$VMPRINT_MAIN" "$VMPRINT_DIR"
+fi
+if [ -d "$VMPRINT_DIR/draft2final" ] && [ -f "$VMPRINT_DIR/package.json" ]; then
+  echo "OK: VMPrint already at tools/vmprint"
+else
+  if command -v git >/dev/null 2>&1; then
+    mkdir -p "$ROOT/tools"
+    if [ -d "$VMPRINT_DIR/.git" ]; then
+      echo "Updating VMPrint at tools/vmprint ..."
+      (cd "$VMPRINT_DIR" && git pull --quiet 2>/dev/null || true)
+    else
+      echo "Cloning VMPrint into tools/vmprint ..."
+      git clone --depth 1 https://github.com/cosmiciron/vmprint.git "$VMPRINT_DIR" 2>/dev/null || true
+    fi
+    if [ -d "$VMPRINT_DIR/draft2final" ] && command -v npm >/dev/null 2>&1; then
+      echo "Installing VMPrint dependencies (npm install) ..."
+      (cd "$VMPRINT_DIR" && npm install --silent 2>/dev/null) || true
+      if [ -d "$VMPRINT_DIR/node_modules" ]; then
+        echo "OK: VMPrint installed at tools/vmprint"
+      else
+        echo "VMPrint clone present; run manually: cd $VMPRINT_DIR && npm install"
+      fi
+    elif [ -d "$VMPRINT_DIR/draft2final" ]; then
+      echo "VMPrint cloned; Node/npm not found. Install Node from https://nodejs.org then run: cd $VMPRINT_DIR && npm install"
+    else
+      echo "VMPrint clone skipped (git failed or no network). Markdown-to-PDF will use pandoc/weasyprint if available."
+    fi
+  else
+    echo "VMPrint skipped (git not found). Markdown-to-PDF will use pandoc or weasyprint if available."
+  fi
+fi
+
 # ----- Step 5: pip install -r requirements.txt -----
 echo ""
 echo "=== Step 5: Python dependencies ==="
