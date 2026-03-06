@@ -42,8 +42,10 @@ compaction:
   memory_flush_prompt: "Pre-compaction memory flush. From the conversation so far, store durable memories now. Use append_agent_memory for lasting facts and append_daily_memory for today's short-term notes. APPEND only; do not overwrite. If nothing to store, reply briefly with 'Nothing to store.'"
 # Tools and skills are always enabled. skills_dir and tool config: config/skills_and_plugins.yml (and tools: there).
 skills_dir: skills
-# Optional extra dirs for skills (paths relative to project root). User can put more skill folders here; merged with skills_dir (first wins by folder name). See docs_design/SkillsAndPluginsSamePolicy.md.
-# skills_extra_dirs: [external_skills]
+# One default external skills folder at project root (external_skills/). Empty by default; put converted or experimental skills here; when stable, move to skills/. Same behavior as skills_dir. Set to "" to disable.
+external_skills_dir: external_skills
+# Optional: more skill dirs (list). Order: skills_dir, then external_skills_dir, then these. Omit or leave empty for just the two above.
+# skills_extra_dirs: []
 # Folder names to not load (case-insensitive). Use to disable a skill without removing it (e.g. ["x-api-1.0.0"]).
 # skills_disabled: []
 # Skills and plugins: all skills_*, plugins_*, system_plugins* settings live in a separate file so core.yml stays short.

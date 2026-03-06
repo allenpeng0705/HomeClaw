@@ -106,6 +106,27 @@ else
   fi
 fi
 
+# ----- Step 2b: TypeScript runner (for .ts skill scripts) -----
+# Skills can use .js (node) or .ts (tsx/ts-node). Node is required for .js; tsx or ts-node for .ts.
+echo ""
+echo "=== Step 2b: TypeScript runner (for .ts skill scripts) ==="
+if command -v node >/dev/null 2>&1; then
+  if command -v tsx >/dev/null 2>&1; then
+    echo "OK: tsx $(tsx --version 2>&1) (for .ts skills)"
+  elif command -v ts-node >/dev/null 2>&1; then
+    echo "OK: ts-node (for .ts skills)"
+  else
+    echo "tsx/ts-node not found. Installing tsx (recommended for running TypeScript skill scripts)..."
+    if npm install -g tsx 2>/dev/null; then
+      echo "OK: tsx installed (for .ts skills)"
+    else
+      echo "To run TypeScript (.ts) skill scripts later, install one of: npm install -g tsx  (recommended), or  npm install -g ts-node"
+    fi
+  fi
+else
+  echo "Node.js not available; skipping. For .ts skills you need: node on PATH, then npm install -g tsx (or ts-node)."
+fi
+
 # ----- Step 3: already done if IN_REPO -----
 # (clone was done above if needed)
 

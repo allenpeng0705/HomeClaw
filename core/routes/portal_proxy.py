@@ -112,11 +112,15 @@ _HTML_URL_ATTRS = re.compile(
     r'\b(href|action|src)=["\']/(?!portal-ui/)',
     re.IGNORECASE,
 )
+# Inline script fetch() etc.: "/api/portal/ or '/api/portal/ -> add /portal-ui prefix (avoid double-replace)
+_HTML_API_PORTAL = re.compile(r'(["\'])(?!/portal-ui)/api/portal/')
 
 
 def _rewrite_html_prefix(html: str) -> str:
-    """Prefix root-relative URLs in HTML with /portal-ui so they work when mounted."""
-    return _HTML_URL_ATTRS.sub(r'\1="/portal-ui/', html)
+    """Prefix root-relative URLs in HTML with /portal-ui so they work when mounted (links, forms, and API paths in script)."""
+    html = _HTML_URL_ATTRS.sub(r'\1="/portal-ui/', html)
+    html = _HTML_API_PORTAL.sub(r'\1/portal-ui/api/portal/', html)
+    return html
 
 
 class _PortalUIInProcessMiddleware(BaseHTTPMiddleware):
@@ -275,6 +279,11 @@ def get_portal_ui_fallback_response() -> Response:
     if _portal_import_error:
         content["import_error"] = _portal_import_error
     return JSONResponse(status_code=503, content=content)
+
+
+def get_portal_ui_in_process_middleware():
+    """Return the middleware class for rewriting Portal responses when mounted at /portal-ui. Use when should_use_portal_in_process()."""
+    return _PortalUIInProcessMiddleware
 
 
 def get_portal_ui_handler():

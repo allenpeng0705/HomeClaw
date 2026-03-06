@@ -44,7 +44,7 @@ You do **not** need to add a matching entry to `skills_force_include_rules` in c
 
 ## Adding skills
 
-1. Create a subfolder under `skills/` (project root), e.g. `skills/weather-help/`.
+1. Create a subfolder under `skills/` (project root), e.g. `skills/weather-help/`. You can also use **external_skills/** (or the path set in `external_skills_dir` in config): put converted or experimental skills there; when a skill is stable and often used, move it to `skills/`.
 2. Add **SKILL.md** with `name`, `description`, and optional body.
 3. (Optional) Add **USAGE.md** in the same folder: user-facing "how to ask" examples. When the skill is loaded with body (see **skills_include_body_for** in core.yml), USAGE.md is appended to the skill body so the model can answer "how do I use this?".
 4. (Optional) Add **scripts/** with runnable scripts; the agent can call **run_skill**(skill_name, script, args).

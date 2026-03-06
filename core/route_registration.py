@@ -163,9 +163,13 @@ def register_all_routes(core: Any) -> None:
         portal_proxy.get_portal_proxy_status_handler,
         methods=["GET"],
     )
-    # Portal runs as its own web server (python -m main portal). Core does not serve Portal; /portal-ui points users there.
-    app.add_api_route("/portal-ui", portal_proxy.get_portal_ui_handler(), methods=["GET"])
-    app.add_api_route("/portal-ui/{path:path}", portal_proxy.get_portal_ui_path_handler(), methods=["GET"])
+    # Portal: when loadable, mount at /portal-ui so Companion and browsers get full Portal (Skills, etc.). Else 503.
+    if portal_proxy.should_use_portal_in_process():
+        app.add_middleware(portal_proxy.get_portal_ui_in_process_middleware())
+        app.mount("/portal-ui", portal_proxy.get_portal_app_for_mount())
+    else:
+        app.add_api_route("/portal-ui", portal_proxy.get_portal_ui_handler(), methods=["GET"])
+        app.add_api_route("/portal-ui/{path:path}", portal_proxy.get_portal_ui_path_handler(), methods=["GET"])
     app.add_api_route(
         "/files/out",
         files.get_files_out_handler(core),
@@ -267,6 +271,12 @@ def register_all_routes(core: Any) -> None:
     app.add_api_route(
         "/api/skills/clear-vector-store",
         misc_api.get_api_skills_clear_vector_store_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/skills/sync-vector-store",
+        misc_api.get_api_skills_sync_vector_store_handler(core),
         methods=["POST"],
         dependencies=[Depends(auth.verify_inbound_auth)],
     )

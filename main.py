@@ -114,6 +114,21 @@ def run_doctor():
             ok.append("skills_dir exists: " + sd)
         else:
             issues.append("skills_dir missing or not a directory: " + sd)
+        # external_skills_dir (optional; e.g. for converted OpenClaw skills)
+        ext_sd = (config.get("external_skills_dir") or "").strip()
+        if ext_sd:
+            ext_path = os.path.join(root, ext_sd) if not os.path.isabs(ext_sd) else ext_sd
+            if os.path.isdir(ext_path):
+                ok.append("external_skills_dir exists: " + ext_sd)
+        # Optional: ClawHub CLI for OpenClaw skills search/install
+        try:
+            from base.clawhub_integration import clawhub_available
+            if clawhub_available():
+                ok.append("clawhub CLI found on PATH (OpenClaw skills search/install)")
+            else:
+                ok.append("clawhub CLI not found (optional; install OpenClaw/ClawHub to search & import skills)")
+        except Exception:
+            ok.append("clawhub CLI check skipped (optional)")
     # LLM connectivity (requires Util().get_core_metadata() to be loaded)
     try:
         meta = Util().get_core_metadata()
@@ -581,23 +596,44 @@ if __name__ == "__main__":
         "command",
         nargs="?",
         default="start",
-        choices=["start", "onboard", "doctor", "ollama", "portal"],
-        help="start (default): run Core; onboard: wizard; doctor: check config; ollama: list/pull/set-main Ollama models; portal: run Portal server (config and onboarding)",
+        choices=["start", "onboard", "doctor", "ollama", "portal", "skills"],
+        help="start (default): run Core; onboard: wizard; doctor: check config; ollama: list/pull/set-main Ollama models; portal: run Portal server (config and onboarding); skills: search/install OpenClaw skills via ClawHub",
     )
     parser.add_argument(
         "ollama_action",
         nargs="?",
-        help="ollama subcommand: list, pull <name>, set-main <name>",
+        help="ollama subcommand: list, pull <name>, set-main <name>. For skills: search <query...> | install <skill[@version]> [--dry-run] [--with-deps]",
     )
     parser.add_argument(
         "ollama_name",
         nargs="?",
-        help="Ollama model name (for pull and set-main)",
+        help="Ollama model name (for pull and set-main). For skills: first argument (query token or skill id).",
+    )
+    parser.add_argument(
+        "extra",
+        nargs=argparse.REMAINDER,
+        help="Extra args for subcommands (e.g. skills search query words...).",
     )
     parser.add_argument(
         "--no-open-browser",
         action="store_true",
         help="do not open the browser when starting Core or Portal",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Limit for skills search results (skills command only).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview only (skills install only): runs clawhub install --dry-run; does not convert.",
+    )
+    parser.add_argument(
+        "--with-deps",
+        action="store_true",
+        help="Install with dependencies (skills install only).",
     )
     args = parser.parse_args()
     try:
@@ -629,6 +665,75 @@ if __name__ == "__main__":
             run_onboard()
         elif args.command == "doctor":
             run_doctor()
+        elif args.command == "skills":
+            from pathlib import Path
+            from base.clawhub_integration import clawhub_available, clawhub_search, clawhub_install_and_convert
+
+            if not clawhub_available():
+                print("clawhub not found on PATH. Install OpenClaw/ClawHub first, then try again.")
+                sys.exit(2)
+            action = (args.ollama_action or "").strip().lower()
+            if not action:
+                print("Usage: python -m main skills search <query...>\n       python -m main skills install <skill[@version]> [--dry-run] [--with-deps]")
+                sys.exit(2)
+            if action == "search":
+                tokens = []
+                if args.ollama_name:
+                    tokens.append(str(args.ollama_name))
+                if args.extra:
+                    tokens.extend([t for t in args.extra if t and not str(t).startswith("-")])
+                query = " ".join(tokens).strip()
+                results, raw = clawhub_search(query, limit=args.limit)
+                if raw.error and not raw.ok:
+                    print(f"Search failed: {raw.error}")
+                    if raw.stderr:
+                        print(raw.stderr.strip()[:1000])
+                    sys.exit(1)
+                if not results:
+                    print("No results.")
+                    sys.exit(0)
+                print(f"Found {len(results)} result(s):")
+                for row in results[: max(1, min(50, int(args.limit) if args.limit else 20))]:
+                    sid = row.get("id") or ""
+                    desc = (row.get("description") or "").strip()
+                    print(f"  {sid}  {desc}".rstrip())
+                sys.exit(0)
+            if action == "install":
+                spec = (args.ollama_name or "").strip()
+                if not spec and args.extra:
+                    spec = str(args.extra[0]).strip()
+                if not spec:
+                    print("Usage: python -m main skills install <skill[@version]>")
+                    sys.exit(2)
+                try:
+                    meta = Util().get_core_metadata()
+                    ext_dir = (getattr(meta, "external_skills_dir", None) or "external_skills").strip() or "external_skills"
+                except Exception:
+                    ext_dir = "external_skills"
+                home_root = Path(Util().root_path()).resolve()
+                out = clawhub_install_and_convert(
+                    skill_spec=spec,
+                    skill_id_hint=None,
+                    homeclaw_root=home_root,
+                    external_skills_dir=ext_dir,
+                    dry_run=bool(args.dry_run),
+                    with_deps=bool(args.with_deps),
+                )
+                if args.dry_run:
+                    print("Install dry-run:")
+                    print((out.get("install") or {}).get("stdout") or "")
+                    sys.exit(0 if out.get("ok") else 1)
+                if not out.get("ok"):
+                    err = out.get("error") or ((out.get("convert") or {}).get("error")) or ((out.get("install") or {}).get("error")) or "Install/convert failed"
+                    print(str(err))
+                    sys.exit(1)
+                convert = out.get("convert") or {}
+                print(f"Installed & converted: {spec}")
+                print(f"  Output: {convert.get('output')}")
+                # Skills vector store is off by default; new skills are registered when Core restarts (if vector search enabled).
+                sys.exit(0)
+            print("Usage: python -m main skills search <query...> | install <skill[@version]>")
+            sys.exit(2)
         else:
             start(open_browser=not args.no_open_browser)
     except KeyboardInterrupt:

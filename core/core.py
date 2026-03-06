@@ -1757,13 +1757,18 @@ class Core(CoreInterface):
             # Sync skills to vector store when skills_use_vector_search and skills_refresh_on_startup
             if getattr(core_metadata, "skills_use_vector_search", False) and getattr(core_metadata, "skills_refresh_on_startup", True):
                 if getattr(self, "skills_vector_store", None) and getattr(self, "embedder", None):
-                    from base.skills import get_skills_dir, sync_skills_to_vector_store
+                    from base.skills import get_all_skills_dirs, get_skills_dir, sync_skills_to_vector_store
                     root = Path(__file__).resolve().parent.parent
-                    skills_path = get_skills_dir(getattr(core_metadata, "skills_dir", None), root=root)
+                    all_skills_dirs = get_all_skills_dirs(
+                        getattr(core_metadata, "skills_dir", None) or "skills",
+                        (getattr(core_metadata, "external_skills_dir", None) or "").strip(),
+                        getattr(core_metadata, "skills_extra_dirs", None) or [],
+                        root,
+                    )
+                    skills_path = all_skills_dirs[0] if all_skills_dirs else get_skills_dir("skills", root=root)
+                    skills_extra_paths = list(all_skills_dirs[1:]) if len(all_skills_dirs) > 1 else []
                     skills_test_dir_str = (getattr(core_metadata, "skills_test_dir", None) or "").strip()
                     skills_test_path = get_skills_dir(skills_test_dir_str, root=root) if skills_test_dir_str else None
-                    skills_extra_raw = getattr(core_metadata, "skills_extra_dirs", None) or []
-                    skills_extra_paths = [root / p if not Path(p).is_absolute() else Path(p) for p in skills_extra_raw if (p or "").strip()]
                     disabled_folders = getattr(core_metadata, "skills_disabled", None) or []
                     incremental = bool(getattr(core_metadata, "skills_incremental_sync", False))
                     try:

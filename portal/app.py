@@ -15,7 +15,7 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form, Body
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -292,6 +292,112 @@ def channel_start(name: str):
         return JSONResponse(content={"result": "error", "error": str(e)}, status_code=500)
 
 
+# ----- Skills marketplace: search & import from ClawHub -----
+
+def _load_all_skills_list():
+    """
+    Load all skills from skills_dir, external_skills_dir, and skills_extra_dirs (same logic as Core).
+    Returns list of {"folder", "name", "description", "path"}. Never raises; returns [] on error.
+    """
+    try:
+        from pathlib import Path
+        from base.skills import get_all_skills_dirs, load_skills_from_dirs
+        root = Path(portal_config.ROOT_DIR)
+        core_cfg = config_api.load_config("core") or {}
+        skills_dir = (core_cfg.get("skills_dir") or "skills").strip() or "skills"
+        ext_dir = (core_cfg.get("external_skills_dir") or "").strip()
+        extra_dirs = core_cfg.get("skills_extra_dirs") or []
+        if not isinstance(extra_dirs, list):
+            extra_dirs = []
+        disabled = core_cfg.get("skills_disabled") or []
+        if not isinstance(disabled, list):
+            disabled = []
+        dirs = get_all_skills_dirs(skills_dir, ext_dir, extra_dirs, root)
+        skills = load_skills_from_dirs(dirs, disabled_folders=disabled, include_body=False)
+        out = []
+        for s in skills:
+            if not isinstance(s, dict):
+                continue
+            desc = s.get("description")
+            desc_str = (desc if isinstance(desc, str) else str(desc or ""))[:500]
+            out.append({
+                "folder": s.get("folder") or "",
+                "name": s.get("name") or s.get("folder") or "",
+                "description": desc_str,
+                "path": s.get("path") or "",
+            })
+        return out
+    except Exception as e:
+        _log.debug("load all skills failed: %s", e)
+        return []
+
+
+@app.get("/api/portal/skills/list")
+def skills_list():
+    """Return all loaded skills (skills_dir + external_skills_dir + skills_extra_dirs). Requires login. Never raises."""
+    skills = _load_all_skills_list()
+    return JSONResponse(content={"skills": skills})
+
+
+@app.get("/api/portal/skills/search")
+def skills_search(query: str = ""):
+    """Search ClawHub skills via local clawhub CLI. Requires login (API middleware). Never raises."""
+    try:
+        from base.clawhub_integration import clawhub_available, clawhub_search
+        q = (query or "").strip()
+        if not q:
+            return JSONResponse(content={"results": []})
+        if not clawhub_available():
+            return JSONResponse(status_code=400, content={"detail": "clawhub not found on PATH"})
+        results, raw = clawhub_search(q, limit=20)
+        if not raw.ok and raw.error:
+            return JSONResponse(status_code=502, content={"detail": raw.error, "stderr": (raw.stderr or "")[-1000:]})
+        return JSONResponse(content={"results": results})
+    except Exception as e:
+        _log.debug("skills search failed: %s", e)
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+@app.post("/api/portal/skills/install")
+def skills_install(body: dict = Body(default_factory=dict)):
+    """
+    Install (download) via `clawhub install`, then convert into HomeClaw external_skills_dir.
+    Requires login (API middleware). Never raises.
+    """
+    try:
+        from base.clawhub_integration import clawhub_available, clawhub_install_and_convert
+        if not clawhub_available():
+            return JSONResponse(status_code=400, content={"detail": "clawhub not found on PATH"})
+        if not isinstance(body, dict):
+            body = {}
+        skill_id = (body.get("id") or body.get("skill") or "").strip()
+        version = (body.get("version") or "").strip()
+        dry_run = bool(body.get("dry_run", False))
+        with_deps = bool(body.get("with_deps", False))
+        if not skill_id:
+            return JSONResponse(status_code=400, content={"detail": "Missing skill id"})
+        spec = f"{skill_id}@{version}" if version else skill_id
+
+        core_cfg = config_api.load_config("core") or {}
+        ext_dir = (core_cfg.get("external_skills_dir") or "external_skills").strip() or "external_skills"
+        out = clawhub_install_and_convert(
+            skill_spec=spec,
+            skill_id_hint=skill_id,
+            homeclaw_root=portal_config.ROOT_DIR,
+            external_skills_dir=ext_dir,
+            dry_run=dry_run,
+            with_deps=with_deps,
+        )
+
+        # Skills vector store is off by default; new skills are registered when Core restarts (if vector search enabled).
+
+        status = 200 if out.get("ok") else (502 if (out.get("install") or {}).get("ok") else 500)
+        return JSONResponse(status_code=status, content=out)
+    except Exception as e:
+        _log.debug("skills install failed: %s", e)
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
 # ----- Shared layout and styles -----
 
 _PORTAL_STYLES = """
@@ -555,7 +661,7 @@ def _logged_in_page(title: str, nav_active: str, content: str, card_class: str =
             style = "display:inline-block;padding:0.5rem 1.25rem;color:#cbd5e1;text-decoration:none;border-radius:0.5rem;border:1px solid transparent;background:rgba(255,255,255,0.08);font-weight:500;"
         cls = ' class="active"' if active else ""
         return f'<a href="{href}"{cls} style="{style}">{html_module.escape(label)}</a>'
-    nav_html = nav_link("/dashboard", "Dashboard", nav_active == "dashboard") + "\n    " + nav_link("/channels", "Start channel", nav_active == "channels") + "\n    " + nav_link("/guide", "Guide to install", nav_active == "guide") + "\n    " + nav_link("/settings", "Manage settings", nav_active == "settings") + "\n    " + nav_link("/logout", "Log out", False)
+    nav_html = nav_link("/dashboard", "Dashboard", nav_active == "dashboard") + "\n    " + nav_link("/channels", "Start channel", nav_active == "channels") + "\n    " + nav_link("/skills", "Skills", nav_active == "skills") + "\n    " + nav_link("/guide", "Guide to install", nav_active == "guide") + "\n    " + nav_link("/settings", "Manage settings", nav_active == "settings") + "\n    " + nav_link("/logout", "Log out", False)
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0f172a"><title>{title} — HomeClaw Portal</title>{_PORTAL_STYLES}</head>
 <body class="page-wrap">
@@ -776,6 +882,152 @@ def channels_page_get(request: Request):
     if _get_session_username(request) is None:
         return RedirectResponse(url="/login", status_code=302)
     return HTMLResponse(_logged_in_page("Start channel", "channels", _channels_page_content()))
+
+
+# ----- Skills marketplace (protected) -----
+
+def _skills_page_content() -> str:
+    """Skills marketplace page: list all loaded skills + search/install from ClawHub."""
+    return r"""
+  <h1 class="title">Skills</h1>
+  <p class="subtitle">All skills loaded from <code>skills/</code>, <code>external_skills/</code>, and any extra dirs (config). Search and import more from <strong>ClawHub</strong> below.</p>
+
+  <h2 style="font-size:1.125rem;margin:1rem 0 0.5rem 0;color:#0f172a;">Installed skills</h2>
+  <p id="installed-msg" class="dashboard-meta" style="min-height:1.2rem;">Loading…</p>
+  <div id="installed-skills" style="margin-top:0.5rem;"></div>
+
+  <h2 style="font-size:1.125rem;margin:1.5rem 0 0.5rem 0;color:#0f172a;">Import from ClawHub</h2>
+  <div class="form-group">
+    <label for="skill-query">Search</label>
+    <input type="text" id="skill-query" placeholder="e.g. summarize, github, web scraping" autocomplete="off">
+  </div>
+  <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+    <button type="button" class="btn" id="skill-search-btn" style="display:inline-block;width:auto;padding:0.75rem 1.25rem;margin-top:0;">Search</button>
+    <button type="button" class="btn" id="skill-clear-btn" style="display:inline-block;width:auto;padding:0.75rem 1.25rem;margin-top:0;background:#334155;">Clear</button>
+  </div>
+  <p id="skill-msg" class="dashboard-meta" style="min-height:1.2rem;margin-top:0.75rem;"></p>
+  <div id="skill-results" style="margin-top:1rem;"></div>
+
+  <div style="margin-top:1.25rem;padding:0.9rem 1rem;background:#fff7ed;border:1px solid #fed7aa;border-radius:0.75rem;">
+    <strong>Security note</strong>
+    <p style="margin:0.25rem 0 0 0;color:#7c2d12;">
+      ClawHub skills are third-party code. Review the installed files under <code>external_skills/</code> before enabling tools that execute scripts.
+    </p>
+  </div>
+
+  <script>
+  (function() {
+    var qEl = document.getElementById('skill-query');
+    var msgEl = document.getElementById('skill-msg');
+    var resEl = document.getElementById('skill-results');
+    var btnSearch = document.getElementById('skill-search-btn');
+    var btnClear = document.getElementById('skill-clear-btn');
+    var installedMsg = document.getElementById('installed-msg');
+    var installedEl = document.getElementById('installed-skills');
+    function esc(s) {
+      return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    function setMsg(s) { msgEl.textContent = s || ''; }
+    function loadInstalledSkills() {
+      if (!installedMsg) return;
+      installedMsg.textContent = 'Loading…';
+      fetch('/api/portal/skills/list', { credentials: 'same-origin' })
+        .then(function(r) { return r.json().then(function(j){ return { ok:r.ok, j:j }; }); })
+        .then(function(resp) {
+          if (!installedMsg || !installedEl) return;
+          if (!resp.ok) { installedMsg.textContent = 'Failed to load list.'; installedEl.innerHTML = ''; return; }
+          var list = (resp.j && resp.j.skills) ? resp.j.skills : [];
+          installedMsg.textContent = list.length + ' skill(s) loaded.';
+          if (list.length === 0) { installedEl.innerHTML = '<p class="dashboard-meta">No skills in skills/ or external_skills/.</p>'; return; }
+          var html = '<div style="display:grid;gap:0.5rem;">';
+          list.forEach(function(s) {
+            var folder = s.folder || s.name || '';
+            var desc = (s.description || '').trim();
+            html += '<div style="padding:0.6rem 0.75rem;border:1px solid #e2e8f0;border-radius:0.5rem;background:#f8fafc;">';
+            html += '<div style="font-weight:600;color:#0f172a;"><code>' + esc(folder) + '</code></div>';
+            if (desc) html += '<div class="dashboard-meta" style="margin-top:0.2rem;font-size:0.875rem;">' + esc(desc) + '</div>';
+            html += '</div>';
+          });
+          html += '</div>';
+          installedEl.innerHTML = html;
+        })
+        .catch(function(e) { if (installedMsg) installedMsg.textContent = 'Load error: ' + e.message; });
+    }
+    loadInstalledSkills();
+    function renderResults(rows) {
+      if (!rows || rows.length === 0) { resEl.innerHTML = '<p class="dashboard-meta">No results.</p>'; return; }
+      var html = '<div style="display:grid;gap:0.75rem;">';
+      rows.forEach(function(r) {
+        var id = r.id || r.name || '';
+        var desc = r.description || '';
+        html += '<div style="padding:0.9rem 1rem;border:1px solid #e2e8f0;border-radius:0.75rem;background:#f8fafc;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.75rem;flex-wrap:wrap;">';
+        html += '<div><div style="font-weight:700;color:#0f172a;"><code>' + esc(id) + '</code></div>';
+        if (desc) html += '<div class="dashboard-meta" style="margin-top:0.25rem;color:#334155;">' + esc(desc) + '</div>';
+        html += '</div>';
+        html += '<button type="button" class="btn btn-sm" data-skill="' + esc(id) + '" style="display:inline-block;width:auto;margin-top:0;padding:0.55rem 1rem;">Install</button>';
+        html += '</div></div>';
+      });
+      html += '</div>';
+      resEl.innerHTML = html;
+      resEl.querySelectorAll('button[data-skill]').forEach(function(b) {
+        b.onclick = function() { installSkill(b.getAttribute('data-skill') || ''); };
+      });
+    }
+    function doSearch() {
+      var q = (qEl.value || '').trim();
+      if (!q) { setMsg('Enter a search query.'); return; }
+      setMsg('Searching…');
+      fetch('/api/portal/skills/search?query=' + encodeURIComponent(q), { credentials: 'same-origin' })
+        .then(function(r) { return r.json().then(function(j){ return { ok:r.ok, j:j }; }); })
+        .then(function(resp) {
+          if (!resp.ok) { setMsg((resp.j && resp.j.detail) ? resp.j.detail : 'Search failed'); renderResults([]); return; }
+          setMsg('Results: ' + ((resp.j.results || []).length));
+          renderResults(resp.j.results || []);
+        })
+        .catch(function(e) { setMsg('Search error: ' + e.message); renderResults([]); });
+    }
+    function installSkill(id) {
+      id = (id || '').trim();
+      if (!id) return;
+      if (!confirm('Install and import skill \"' + id + '\" from ClawHub?')) return;
+      setMsg('Installing ' + id + '…');
+      fetch('/api/portal/skills/install', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ id: id })
+      })
+      .then(function(r) { return r.json().then(function(j){ return { ok:r.ok, j:j, status:r.status }; }); })
+      .then(function(resp) {
+        if (!resp.ok) {
+          var detail = (resp.j && (resp.j.error || resp.j.detail)) ? (resp.j.error || resp.j.detail) : ('Install failed (HTTP ' + resp.status + ')');
+          setMsg(detail);
+          return;
+        }
+        var out = resp.j || {};
+        var output = (out.convert && out.convert.output) ? out.convert.output : '';
+        setMsg('Installed. Converted to: ' + output);
+        loadInstalledSkills();
+      })
+      .catch(function(e) { setMsg('Install error: ' + e.message); });
+    }
+    if (btnSearch) btnSearch.onclick = doSearch;
+    if (btnClear) btnClear.onclick = function() { qEl.value=''; resEl.innerHTML=''; setMsg(''); };
+    if (qEl) qEl.addEventListener('keydown', function(ev){ if (ev.key === 'Enter') doSearch(); });
+  })();
+  </script>
+"""
+
+
+@app.get("/skills", response_class=HTMLResponse)
+def skills_page_get(request: Request):
+    """Show skills marketplace page; require login."""
+    if not auth.admin_is_configured():
+        return RedirectResponse(url="/setup", status_code=302)
+    if _get_session_username(request) is None:
+        return RedirectResponse(url="/login", status_code=302)
+    return HTMLResponse(_logged_in_page("Skills", "skills", _skills_page_content(), card_class="card card-wide"))
 
 
 # ----- Guide to install (protected) -----

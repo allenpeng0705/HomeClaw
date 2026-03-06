@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 from base.tools import ToolContext, ToolDefinition, ToolRegistry, ROUTING_RESPONSE_ALREADY_SENT
-from base.skills import get_skills_dir, resolve_skill_folder_name
+from base.skills import get_all_skills_dirs, resolve_skill_to_path
 from base.workspace import get_workspace_dir, get_agent_memory_file_path, append_daily_memory
 from base.util import Util, redact_params_for_log
 from base.base import PluginResult, User
@@ -2199,18 +2199,21 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
         meta = Util().get_core_metadata()
         if meta is None:
             return "Error: Core config not available"
-        skills_dir_str = str(getattr(meta, "skills_dir", None) or "skills").strip() or "skills"
         root = Path(Util().root_path())
-        skills_base = get_skills_dir(skills_dir_str, root=root)
-        resolved_folder = resolve_skill_folder_name(skills_base, skill_name)
-        if resolved_folder is not None:
-            skill_name = resolved_folder
-        skill_folder = (skills_base / skill_name).resolve()
+        skills_dirs = get_all_skills_dirs(
+            getattr(meta, "skills_dir", None) or "skills",
+            (getattr(meta, "external_skills_dir", None) or "").strip(),
+            getattr(meta, "skills_extra_dirs", None) or [],
+            root,
+        )
+        skill_folder = resolve_skill_to_path(skill_name, skills_dirs)
+        if skill_folder is not None:
+            skill_name = skill_folder.name
     except Exception as e:
         logger.debug("run_skill setup failed: %s", e)
         return f"Error: run_skill failed: {e!s}"
-    if not skill_folder.is_dir():
-        return f"Error: skill folder not found: {skill_name} (under {skills_base}). Try the exact folder name from Available skills (e.g. html-slides-1.0.0)."
+    if skill_folder is None or not skill_folder.is_dir():
+        return f"Error: skill folder not found: {skill_name} (searched skills_dir, external_skills_dir, skills_extra_dirs). Try the exact folder name from Available skills (e.g. html-slides-1.0.0)."
     scripts_dir = (skill_folder / "scripts").resolve()
     if not scripts_dir.is_dir():
         if not script_arg:

@@ -9,6 +9,7 @@
 # Edit this file for all skill/plugin/tools settings; core.yml stays short.
 #
 # Optional keys (code defaults if omitted): skills_dir (default: skills),
+# external_skills_dir (default: external_skills; empty to disable; same behavior as skills_dir; can be absolute path, e.g. /opt/skills, to use a folder outside the project),
 # skills_extra_dirs ([]), skills_disabled ([]), skills_include_body_max_chars (0),
 # plugins_extra_dirs ([]), system_plugins_start_delay (2.0). Add them here to override.
 # =============================================================================

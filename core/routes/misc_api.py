@@ -1,6 +1,8 @@
 """
 Misc API routes: skills clear-vector-store, testing clear-all, sessions list, reports usage.
 """
+from pathlib import Path
+
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 from loguru import logger
@@ -34,6 +36,50 @@ def get_api_skills_clear_vector_store_handler(core):
             logger.exception(e)
             return JSONResponse(status_code=500, content={"detail": str(e)})
     return api_skills_clear_vector_store
+
+
+def get_api_skills_sync_vector_store_handler(core):
+    """Return handler for POST /api/skills/sync-vector-store."""
+    async def api_skills_sync_vector_store():
+        try:
+            meta = None
+            try:
+                meta = Util().get_core_metadata()
+            except Exception:
+                meta = None
+            if not meta or not getattr(meta, "skills_use_vector_search", False):
+                return JSONResponse(content={"synced": 0, "message": "skills_use_vector_search is disabled"})
+
+            vs = getattr(core, "skills_vector_store", None)
+            embedder = getattr(core, "embedder", None)
+            if not vs or not embedder:
+                return JSONResponse(content={"synced": 0, "message": "Skills vector store not enabled"})
+
+            from base.skills import get_all_skills_dirs, get_skills_dir, sync_skills_to_vector_store
+            root = Path(__file__).resolve().parent.parent.parent
+            all_dirs = get_all_skills_dirs(
+                getattr(meta, "skills_dir", None) or "skills",
+                (getattr(meta, "external_skills_dir", None) or "").strip(),
+                getattr(meta, "skills_extra_dirs", None) or [],
+                root,
+            )
+            skills_path = all_dirs[0] if all_dirs else get_skills_dir("skills", root=root)
+            skills_extra_paths = list(all_dirs[1:]) if len(all_dirs) > 1 else []
+            skills_test_dir_str = (getattr(meta, "skills_test_dir", None) or "").strip()
+            skills_test_path = get_skills_dir(skills_test_dir_str, root=root) if skills_test_dir_str else None
+            disabled_folders = getattr(meta, "skills_disabled", None) or []
+            incremental = bool(getattr(meta, "skills_incremental_sync", False))
+            n = await sync_skills_to_vector_store(
+                skills_path, vs, embedder,
+                skills_test_dir=skills_test_path, incremental=incremental,
+                skills_extra_dirs=skills_extra_paths if skills_extra_paths else None,
+                disabled_folders=disabled_folders if disabled_folders else None,
+            )
+            return JSONResponse(content={"synced": int(n) if n is not None else 0})
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+    return api_skills_sync_vector_store
 
 
 def get_api_testing_clear_all_handler(core):

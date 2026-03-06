@@ -33,6 +33,7 @@ from base.friend_presets import (
     trim_messages_to_last_n_turns,
 )
 from base.skills import (
+    get_all_skills_dirs,
     get_skills_dir,
     load_skills_from_dirs,
     load_skill_by_folder_from_dirs,
@@ -694,9 +695,12 @@ async def answer_from_memory(
             try:
                 root = Path(__file__).resolve().parent.parent
                 meta_skills = Util().core_metadata
-                skills_path = get_skills_dir(getattr(meta_skills, 'skills_dir', None), root=root)
-                skills_extra_raw = getattr(meta_skills, 'skills_extra_dirs', None) or []
-                skills_dirs = [skills_path] + [root / p if not Path(p).is_absolute() else Path(p) for p in skills_extra_raw if (p or "").strip()]
+                skills_dirs = get_all_skills_dirs(
+                    getattr(meta_skills, 'skills_dir', None) or 'skills',
+                    (getattr(meta_skills, 'external_skills_dir', None) or "").strip(),
+                    getattr(meta_skills, 'skills_extra_dirs', None) or [],
+                    root,
+                )
                 disabled_folders = getattr(meta_skills, 'skills_disabled', None) or []
                 skills_list = []
                 use_vector_search = bool(getattr(meta_skills, 'skills_use_vector_search', False))

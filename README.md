@@ -24,6 +24,7 @@
 ### 3. Skills and plugins — OpenClaw-compatible, any language
 
 - **Skills** — **Compatible with OpenClaw skills**: workflows in `skills/` (SKILL.md). LLM uses tools and optional `run_skill` to accomplish tasks.
+- **ClawHub import (Portal + CLI)** — If you have OpenClaw/ClawHub installed (so `clawhub` is on PATH), you can **search and import** skills into `external_skills/` from **Portal → Skills** or the CLI: `python -m main skills search ...`, `python -m main skills install <skill>`.
 - **Plugins** — **Built-in** (Python in `plugins/`) and **external in any language** (Node.js, Go, Java, Python, etc.). Register via HTTP; Core routes to them like built-ins. System plugins (e.g. **homeclaw-browser**) extend with browser automation, Canvas, and more.
 
 ### 4. Companion app — All platforms, multi-role (Friend of AI)
@@ -58,14 +59,14 @@ HomeClaw runs on **macOS**, **Windows**, and **Linux**. You need:
 - For **local GGUF models**: copy **llama.cpp's binary distribution** into `llama.cpp-master/<platform>/` for your device type (mac/, win_cuda/, linux_cpu/, etc.); used for both main and embedding local models. Download pre-built binaries from [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases) (macOS Apple Silicon/Intel, Windows x64/arm64/CUDA/Vulkan, Ubuntu CPU/Vulkan/ROCm, etc.). See `llama.cpp-master/README.md`. Then start servers per config.
 - For **cloud models**: only network access and the right API keys in the environment.
 
-**Recommended: Install script + Portal**
+**Recommended: Install script + Portal** — See **[QuickStart.md](QuickStart.md)** for a short path from install to running.
 
 | OS | Command |
 |----|--------|
 | **Mac / Linux** | `./install.sh` (run from project root, or from a parent directory — the script will clone into `./HomeClaw` and continue) |
 | **Windows** | `.\install.ps1` (run from project root, or from a parent directory — the script will clone into `.\HomeClaw` and continue) |
 
-The script checks or installs **Python 3.9+**, **Node.js**, clones the repo if needed, runs `pip install -r requirements.txt`, guides you on **llama.cpp** and **GGUF/Ollama**, then starts the **Portal** and opens http://127.0.0.1:18472 in your browser.
+The script checks or installs **Python 3.9+**, **Node.js**, **tsx** (for .ts skill scripts), clones the repo if needed, runs `pip install -r requirements.txt`, guides you on **llama.cpp** and **GGUF/Ollama**, then starts the **Portal** and opens http://127.0.0.1:18472 in your browser. If **llama.cpp** was installed via brew or winget, you only need to add models (see QuickStart.md).
 
 **Portal** — Use the web UI to create an admin account, manage settings (Core, users, **LLM / config/llm.yml** — choose which model to use and set cloud API keys), start Core and channels, and follow the built-in **Guide to install**. No need to edit YAML by hand unless you prefer it. From the same machine you can also open Core’s **/portal-ui** (when Core is running and `portal_url` is set in `config/core.yml`) or use the **Companion app** to reach the Portal via Core.
 

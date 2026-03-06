@@ -75,14 +75,40 @@ def _append_usage_if_present(skill_dir: Path, parsed: Dict[str, Any]) -> None:
 
 
 def get_skills_dir(config_dir: Optional[str] = None, root: Optional[Path] = None) -> Path:
-    """Return skills directory. If config_dir is relative, resolve against root or project root."""
+    """Return skills directory. If config_dir is relative, resolve against root or project root. Absolute paths are used as-is (e.g. folder outside project)."""
     base = root or _PROJECT_ROOT
     if config_dir:
-        p = Path(config_dir)
+        p = Path(config_dir.strip())
         if not p.is_absolute():
             p = base / p
         return p
-    return _DEFAULT_SKILLS_DIR
+    return (base or _PROJECT_ROOT) / "skills"
+
+
+def get_all_skills_dirs(
+    skills_dir: str,
+    external_skills_dir: str,
+    skills_extra_dirs: Optional[Iterable[str]],
+    root: Path,
+) -> List[Path]:
+    """
+    Return the ordered list of directories to search for skills (first match wins).
+    Used by prompt building and run_skill so lookup is consistent. Relative paths
+    are resolved against root; absolute paths (e.g. outside project) are used as-is.
+    """
+    base = root or _PROJECT_ROOT
+    out: List[Path] = []
+    main = (skills_dir or "skills").strip()
+    if main:
+        out.append(get_skills_dir(main, root=base))
+    ext = (external_skills_dir or "").strip()
+    if ext:
+        out.append(get_skills_dir(ext, root=base))
+    for p in skills_extra_dirs or []:
+        s = (p or "").strip()
+        if s:
+            out.append(get_skills_dir(s, root=base))
+    return out
 
 
 def load_skills(skills_dir: Optional[Path] = None, include_body: bool = True) -> List[Dict[str, Any]]:
@@ -176,6 +202,26 @@ def resolve_skill_folder_name(skills_base: Path, skill_name: str) -> Optional[st
         return None
 
 
+def resolve_skill_to_path(skill_name: str, base_dirs: Iterable[Path]) -> Optional[Path]:
+    """
+    Resolve a skill name to the full path of its folder by searching base_dirs in order.
+    Returns the first matching skill folder path, or None. Use this for run_skill and
+    any single-skill lookup so behavior matches get_all_skills_dirs.
+    """
+    if not skill_name or not base_dirs:
+        return None
+    for base in base_dirs:
+        if base is None:
+            continue
+        base = Path(base)
+        resolved = resolve_skill_folder_name(base, skill_name)
+        if resolved is not None:
+            folder = (base / resolved).resolve()
+            if folder.is_dir():
+                return folder
+    return None
+
+
 def load_skills_from_dirs(
     dirs: List[Path],
     disabled_folders: Optional[Iterable[str]] = None,
@@ -229,7 +275,7 @@ def load_skill_by_folder_from_dirs(
 
 
 def load_skill_by_folder(
-    skills_dir: Path,
+    skills_dir: Optional[Path],
     folder: str,
     include_body: bool = False,
     body_max_chars: int = 0,
@@ -237,8 +283,16 @@ def load_skill_by_folder(
     """
     Load a single skill by folder name. Returns skill dict or None if folder/SKILL.md missing.
     When include_body is True and body_max_chars > 0, truncate body to that many chars (keeps prompt bounded).
+    Never raises: returns None if skills_dir is None or invalid.
     """
-    root = skills_dir if isinstance(skills_dir, Path) else Path(skills_dir)
+    if skills_dir is None:
+        return None
+    try:
+        root = skills_dir if isinstance(skills_dir, Path) else Path(skills_dir)
+    except (TypeError, ValueError):
+        return None
+    if not root.is_dir():
+        return None
     item = root / folder
     if not item.is_dir():
         return None

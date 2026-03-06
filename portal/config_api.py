@@ -19,7 +19,7 @@ WHITELIST_CORE = frozenset({
     "memory_kb_config_file", "use_workspace_bootstrap", "workspace_dir", "homeclaw_root",
     "notify_unknown_request", "outbound_markdown_format",
     "llm_max_concurrent_local", "llm_max_concurrent_cloud", "compaction",
-    "skills_dir", "skills_extra_dirs", "skills_disabled", "skills_and_plugins_config_file",
+    "skills_dir", "external_skills_dir", "skills_extra_dirs", "skills_disabled", "skills_and_plugins_config_file",
     "use_prompt_manager", "prompts_dir", "prompt_default_language", "prompt_cache_ttl_seconds",
     "auth_enabled", "auth_api_key", "core_public_url", "file_link_style", "file_static_prefix",
     "file_view_link_expiry_sec", "inbound_request_timeout_seconds",

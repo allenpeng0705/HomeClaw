@@ -31,6 +31,9 @@ import pytest
 from unittest.mock import MagicMock
 
 
+# These route-layer smoke tests require FastAPI to be installed.
+pytest.importorskip("fastapi")
+
 # Handler factories that take (core) and return a callable. get_pinggy_handler(core, get_pinggy_state) takes 2 args.
 ROUTE_FACTORIES = [
     ("lifecycle", "get_register_channel_handler", ()),
@@ -62,6 +65,7 @@ ROUTE_FACTORIES = [
     ("plugins_api", "get_api_plugins_memory_search_handler", ()),
     ("plugins_api", "get_api_plugin_ui_list_handler", ()),
     ("misc_api", "get_api_skills_clear_vector_store_handler", ()),
+    ("misc_api", "get_api_skills_sync_vector_store_handler", ()),
     ("misc_api", "get_api_testing_clear_all_handler", ()),
     ("misc_api", "get_api_sessions_list_handler", ()),
     ("misc_api", "get_api_reports_usage_handler", ()),

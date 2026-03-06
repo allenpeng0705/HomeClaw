@@ -941,6 +941,7 @@ class CoreMetadata:
     use_tools: bool = True   # always on; kept for optional override. Tool layer (tool registry, execute tool_calls in chat loop).
     use_skills: bool = True  # always on; kept for optional override. Inject skills (SKILL.md from skills_dir) into system prompt.
     skills_dir: str = "skills"  # directory to scan for skill folders (each with SKILL.md); project root, same level as plugin
+    external_skills_dir: str = "external_skills"  # second folder for skills (e.g. converted OpenClaw skills); same behavior as skills_dir. Empty string to disable.
     skills_extra_dirs: List[str] = field(default_factory=list)  # optional extra dirs (paths relative to project root); user can put more skills here
     skills_disabled: List[str] = field(default_factory=list)  # folder names to not load (e.g. ["x-api-1.0.0"]); case-insensitive match
     skills_max_in_prompt: int = 5  # when skills_use_vector_search=true, cap RAG results to this many in prompt; when false (include all) this is not used
@@ -1097,7 +1098,7 @@ class CoreMetadata:
                         _ext_data = yaml.safe_load(_f)
                     if isinstance(_ext_data, dict):
                         for _k, _v in _ext_data.items():
-                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k == 'tools'):
+                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k == 'tools' or _k == 'external_skills_dir'):
                                 continue
                             # Avoid injecting wrong types so later from_yaml never raises on this key
                             if _k in ('skills_force_include_rules', 'plugins_force_include_rules', 'system_plugins', 'skills_include_body_for', 'skills_extra_dirs', 'skills_disabled', 'plugins_extra_dirs') and not isinstance(_v, list):
@@ -1108,6 +1109,9 @@ class CoreMetadata:
                                 continue
                             if _k == 'tools' and not isinstance(_v, dict):
                                 logging.warning("skills_and_plugins config %s: tools must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
+                                continue
+                            if _k == 'external_skills_dir' and _v is not None and not isinstance(_v, str):
+                                logging.warning("skills_and_plugins config %s: external_skills_dir must be a string, got %s; skipping", _ext_path, type(_v).__name__)
                                 continue
                             # Numeric/string keys: only set if value is safe so int/float/str later never raise
                             if _k in ('skills_max_in_prompt', 'plugins_max_in_prompt', 'plugins_description_max_chars', 'skills_max_retrieved', 'skills_include_body_max_chars'):
@@ -1383,6 +1387,7 @@ class CoreMetadata:
             use_tools=data.get('use_tools', True),
             use_skills=data.get('use_skills', True),
             skills_dir=(data.get('skills_dir') or 'skills').strip() or 'skills',
+            external_skills_dir=(data.get('external_skills_dir') or 'external_skills').strip(),
             skills_extra_dirs=[str(p).strip() for p in (data.get('skills_extra_dirs') or []) if str(p).strip()],
             skills_disabled=[str(f).strip() for f in (data.get('skills_disabled') or []) if str(f).strip()],
             skills_max_in_prompt=max(0, int(data.get('skills_max_in_prompt', 5) or 5)),
@@ -1484,6 +1489,7 @@ class CoreMetadata:
                 'homeclaw_root': CoreMetadata._safe_str_strip(getattr(core, 'homeclaw_root', None)),
                 # use_tools / use_skills omitted from core_dict so core.yml stays minimal; both default True in from_yaml
                 'skills_dir': getattr(core, 'skills_dir', 'skills'),
+                'external_skills_dir': getattr(core, 'external_skills_dir', '') or '',
                 'skills_extra_dirs': getattr(core, 'skills_extra_dirs', None) or [],
                 'skills_disabled': getattr(core, 'skills_disabled', None) or [],
                 'skills_max_in_prompt': getattr(core, 'skills_max_in_prompt', 0),

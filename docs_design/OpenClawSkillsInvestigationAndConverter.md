@@ -92,7 +92,7 @@ So we can reuse:
 | Aspect | OpenClaw | HomeClaw | Reuse strategy |
 |--------|----------|----------|-----------------|
 | Manifest | skill.yaml (entryPoint, permissions, config) | No skill.yaml; config in core.yml / user.yml / skill config.yml | Converter can map skill.yaml → SKILL.md frontmatter or to a short “Config” section in body; config/API keys via HomeClaw’s keyed skill config or env. |
-| Entry point | typescript → .ts/.js path; shell → .sh; natural → no script | run_skill(script=filename) with file in scripts/ | Ensure the **file** that OpenClaw would run is present in `scripts/` with a supported extension. For TypeScript: use compiled `.js` (or `.mjs`/`.cjs`) in scripts/. |
+| Entry point | typescript → .ts/.js path; shell → .sh; natural → no script | run_skill(script=filename) with file in scripts/ | Ensure the **file** that OpenClaw would run is present in `scripts/` with a supported extension. For TypeScript: `.ts` runs via **tsx** or **ts-node** when in PATH; otherwise use compiled `.js` (or `.mjs`/`.cjs`). |
 | Tool names | May reference OpenClaw tool names (e.g. web_fetch, browser_*) | HomeClaw names (fetch_url, browser_navigate, …) | Converter or doc can map names; or add a “Tool names” section in converted SKILL.md (see skills/README.md). |
 | SDK / runtime | TypeScript skills may use `@openclaw/sdk` (browser, notify, etc.) | No OpenClaw SDK | Skills that rely on SDK need a **Python or Node** reimplementation using HomeClaw tools/plugins (e.g. route_to_plugin for browser), or we document “partial support / instruction-only” and do not run the script. |
 
@@ -100,7 +100,7 @@ So we can reuse:
 
 - **Instruction-only:** Copy the OpenClaw skill folder into `skills/`; keep SKILL.md (and references/). Optionally adjust tool names in the body to HomeClaw’s (fetch_url, browser_*, etc.).
 - **Script-based (Python or shell):** Copy folder; ensure script is under `scripts/`. Add script name to `tools.run_skill_allowlist` if you use an allowlist.
-- **Script-based (TypeScript/JS):** Copy folder; put the **compiled** `.js` (or `.mjs`/`.cjs`) in `scripts/`, or a thin Node script that uses the same CLI contract. If the skill depends on `@openclaw/sdk`, treat as “needs port” or instruction-only.
+- **Script-based (TypeScript/JS):** Copy folder; put `.js`/`.mjs`/`.cjs` in `scripts/` (Node) or `.ts` in `scripts/` (requires **tsx** or **ts-node** on PATH). If the skill depends on `@openclaw/sdk`, treat as “needs port” or instruction-only.
 
 ---
 
@@ -111,6 +111,8 @@ So we can reuse:
 - **Download** OpenClaw skills from a source (e.g. GitHub `openclaw/skills` subtree, or a ClawHub API if available).
 - **Normalize** to HomeClaw layout: one folder per skill under `skills/` with **SKILL.md** and optional **scripts/**.
 - **Map** skill.yaml → SKILL.md (frontmatter + optional “Config” section) and ensure the runnable script (if any) is in `scripts/` with a supported extension.
+
+**external_skills folder** — HomeClaw supports a second skills folder, **external_skills_dir** (default: `external_skills`). It is loaded and used the same way as `skills/`. Put converted OpenClaw skills in `external_skills/`; when a skill is stable and often used, move it to `skills/`. Set `external_skills_dir: ""` to disable. See `config/core.yml` and `config/skills_and_plugins.yml`.
 
 ### 4.2 Source options
 

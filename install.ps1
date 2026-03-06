@@ -97,6 +97,36 @@ if (-not $NodeOk) {
   }
 }
 
+# ----- Step 2b: TypeScript runner (for .ts skill scripts) -----
+# Skills can use .js (node) or .ts (tsx/ts-node). Node is required for .js; tsx or ts-node for .ts.
+Write-Host ""
+Write-Host "=== Step 2b: TypeScript runner (for .ts skill scripts) ==="
+$TsRunnerOk = $false
+if ($NodeOk) {
+  try {
+    $null = Get-Command tsx -ErrorAction SilentlyContinue
+    if ($?) { Write-Host "OK: tsx (for .ts skills)"; $TsRunnerOk = $true }
+  } catch {}
+  if (-not $TsRunnerOk) {
+    try {
+      $null = Get-Command ts-node -ErrorAction SilentlyContinue
+      if ($?) { Write-Host "OK: ts-node (for .ts skills)"; $TsRunnerOk = $true }
+    } catch {}
+  }
+  if (-not $TsRunnerOk) {
+    Write-Host "tsx/ts-node not found. Installing tsx (recommended for running TypeScript skill scripts)..."
+    try {
+      npm install -g tsx 2>$null
+      if ($LASTEXITCODE -eq 0) { Write-Host "OK: tsx installed (for .ts skills)"; $TsRunnerOk = $true }
+    } catch {}
+    if (-not $TsRunnerOk) {
+      Write-Host "To run TypeScript (.ts) skill scripts later, install one of: npm install -g tsx  (recommended), or  npm install -g ts-node"
+    }
+  }
+} else {
+  Write-Host "Node.js not available; skipping. For .ts skills you need: node on PATH, then npm install -g tsx (or ts-node)."
+}
+
 # ----- Step 4b: VMPrint (Markdown to PDF tool) -----
 Write-Host ""
 Write-Host "=== Step 4b: VMPrint (Markdown to PDF) ==="
