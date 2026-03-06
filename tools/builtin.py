@@ -17,6 +17,7 @@ import os
 import platform
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -3065,6 +3066,151 @@ async def _file_write_executor(arguments: Dict[str, Any], context: ToolContext) 
         return _file_not_found_msg(context)
 
 
+async def _markdown_to_pdf_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Convert Markdown content to PDF and save to the given path; return the file link when path is under output/."""
+    path_arg = (arguments.get("path") or "").strip()
+    content = arguments.get("content", "")
+    if not path_arg:
+        return "Path is required (e.g. output/summary.pdf)."
+    content_str = (content or "").strip()
+    if not content_str:
+        return "Content is required (Markdown text to convert to PDF)."
+    try:
+        r = _resolve_file_path(path_arg, context, for_write=True)
+        if r is None:
+            return _file_resolve_error_msg(path_arg)
+        full, base = r
+        if not _path_under(full, base):
+            return _FILE_ACCESS_DENIED_MSG
+        full.parent.mkdir(parents=True, exist_ok=True)
+        # Prefer VMPrint when configured (tools.markdown_to_pdf.vmprint_dir); else pandoc then weasyprint
+        tools_cfg = _get_tools_config() or {}
+        md2pdf_cfg = tools_cfg.get("markdown_to_pdf") if isinstance(tools_cfg, dict) else {}
+        if not isinstance(md2pdf_cfg, dict):
+            md2pdf_cfg = {}
+        vmprint_dir = (md2pdf_cfg.get("vmprint_dir") or "").strip() or None
+        if vmprint_dir and not os.path.isabs(vmprint_dir):
+            _project_root = Path(__file__).resolve().parent.parent
+            vmprint_dir = str((_project_root / vmprint_dir).resolve())
+        loop = asyncio.get_event_loop()
+        pdf_bytes, err = await loop.run_in_executor(
+            None, lambda: _markdown_to_pdf_convert_sync(content_str, vmprint_dir=vmprint_dir)
+        )
+        if err:
+            return err
+        if not pdf_bytes:
+            return "PDF conversion produced no output."
+        full.write_bytes(pdf_bytes)
+        out = json.dumps({"written": True, "path": path_arg})
+        if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
+            scope = _get_file_workspace_subdir(context)
+            if scope:
+                from core.result_viewer import build_file_view_link
+                link, _ = build_file_view_link(scope, path_arg)
+                if link:
+                    return f"PDF saved. CRITICAL: Use ONLY the URL on the next line; copy it exactly—do not modify, truncate, or append anything.\n{link}\n{out}"
+                out = f"{out}\nPath: {path_arg}. To get a view link, set core_public_url and auth_api_key in config/core.yml."
+        return out
+    except Exception as e:
+        logger.debug("markdown_to_pdf failed: %s", e)
+        return f"Failed to save PDF: {e!s}"
+
+
+def _markdown_to_pdf_convert_sync(
+    md_content: str, vmprint_dir: Optional[str] = None
+) -> Tuple[Optional[bytes], Optional[str]]:
+    """Synchronous Markdown->PDF. Prefer VMPrint when vmprint_dir is set (see github.com/cosmiciron/vmprint), else pandoc then weasyprint."""
+    md_content = (md_content or "").strip()
+    if not md_content:
+        return (None, "Content is empty.")
+
+    # 1. VMPrint (draft2final): when tools.markdown_to_pdf.vmprint_dir is set to a clone of https://github.com/cosmiciron/vmprint
+    if vmprint_dir:
+        vmp = Path(vmprint_dir).resolve()
+        if vmp.is_dir() and (vmp / "draft2final").is_dir():
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w", encoding="utf-8") as f:
+                    f.write(md_content)
+                    md_path = f.name
+                out_path = md_path + ".pdf"
+                try:
+                    result = subprocess.run(
+                        ["npm", "run", "dev", "--prefix", "draft2final", "--", "build", md_path, "-o", out_path, "--format", "academic"],
+                        cwd=str(vmp),
+                        capture_output=True,
+                        timeout=120,
+                        check=False,
+                    )
+                    if result.returncode != 0 and b"academic" in (result.stderr or b""):
+                        result = subprocess.run(
+                            ["npm", "run", "dev", "--prefix", "draft2final", "--", "build", md_path, "-o", out_path],
+                            cwd=str(vmp),
+                            capture_output=True,
+                            timeout=120,
+                            check=False,
+                        )
+                    if result.returncode == 0 and Path(out_path).is_file():
+                        pdf_bytes = Path(out_path).read_bytes()
+                        Path(out_path).unlink(missing_ok=True)
+                        Path(md_path).unlink(missing_ok=True)
+                        return (pdf_bytes, None)
+                    err = (result.stderr or result.stdout or b"").decode("utf-8", errors="replace").strip() or "unknown"
+                    logger.debug("markdown_to_pdf vmprint: %s", err)
+                finally:
+                    Path(md_path).unlink(missing_ok=True)
+                    Path(md_path + ".pdf").unlink(missing_ok=True)
+            except FileNotFoundError:
+                pass
+            except Exception as e:
+                logger.debug("markdown_to_pdf vmprint: %s", e)
+
+    # 2. Pandoc
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w", encoding="utf-8") as f:
+            f.write(md_content)
+            md_path = f.name
+        try:
+            out_path = md_path + ".pdf"
+            result = subprocess.run(
+                ["pandoc", "-f", "markdown", "-t", "pdf", "-o", out_path, md_path],
+                capture_output=True, timeout=60, check=False,
+            )
+            if result.returncode == 0 and Path(out_path).is_file():
+                pdf_bytes = Path(out_path).read_bytes()
+                Path(out_path).unlink(missing_ok=True)
+                Path(md_path).unlink(missing_ok=True)
+                return (pdf_bytes, None)
+        finally:
+            Path(md_path).unlink(missing_ok=True)
+            if Path(md_path + ".pdf").exists():
+                Path(md_path + ".pdf").unlink(missing_ok=True)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.debug("markdown_to_pdf pandoc: %s", e)
+
+    # 3. Weasyprint (Markdown -> HTML -> PDF)
+    try:
+        import markdown as md_lib
+        html = md_lib.markdown(md_content, extensions=["extra", "nl2br"])
+        full_html = f"<!DOCTYPE html><html><head><meta charset='utf-8'/></head><body>{html}</body></html>"
+        from weasyprint import HTML
+        pdf_io = HTML(string=full_html).write_pdf()
+        return (pdf_io.getvalue(), None)
+    except ImportError:
+        return (
+            None,
+            "Markdown to PDF: set tools.markdown_to_pdf.vmprint_dir to a VMPrint clone (github.com/cosmiciron/vmprint), or install pandoc, or pip install markdown weasyprint."
+        )
+    except Exception as e:
+        logger.debug("markdown_to_pdf weasyprint: %s", e)
+        return (None, f"PDF conversion failed: {e!s}")
+    return (
+        None,
+        "No PDF converter available. Use VMPrint (config: tools.markdown_to_pdf.vmprint_dir), or install pandoc, or: pip install markdown weasyprint.",
+    )
+
+
 # Image extensions: when get_file_view_link serves these, we attach the image to the response so the client can show it inline.
 _FILE_VIEW_LINK_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico")
 
@@ -5553,5 +5699,21 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path"],
             },
             execute_async=_get_file_view_link_executor,
+        )
+    )
+    # Markdown → PDF: save long Markdown as PDF and return link (used by summarize skill when result is long).
+    registry.register(
+        ToolDefinition(
+            name="markdown_to_pdf",
+            description="Convert Markdown content to a PDF file and save it. Use when the user or a skill produces long Markdown (e.g. a summary or report) and you want to give them a downloadable PDF. Pass the Markdown as content and a path under output/ (e.g. output/summary.pdf). Returns the file link so you can include it in your reply. Prefer VMPrint when configured (config: tools.markdown_to_pdf.vmprint_dir to path of github.com/cosmiciron/vmprint clone); else uses pandoc or pip install markdown weasyprint.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "The Markdown text to convert to PDF (e.g. a long summary or report)."},
+                    "path": {"type": "string", "description": "Relative path for the PDF file (e.g. output/summary.pdf, output/report_2024.pdf). Use output/ so the user gets a view link."},
+                },
+                "required": ["content", "path"],
+            },
+            execute_async=_markdown_to_pdf_executor,
         )
     )

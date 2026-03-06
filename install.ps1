@@ -97,6 +97,52 @@ if (-not $NodeOk) {
   }
 }
 
+# ----- Step 4b: VMPrint (Markdown to PDF tool) -----
+Write-Host ""
+Write-Host "=== Step 4b: VMPrint (Markdown to PDF) ==="
+$VmprintDir = Join-Path $Root "tools\vmprint"
+$VmprintMain = Join-Path $Root "tools\vmprint-main"
+# If user downloaded GitHub ZIP, folder is vmprint-main; rename to vmprint so config path works
+if ((Test-Path $VmprintMain) -and -not (Test-Path $VmprintDir)) {
+  Write-Host "Renaming tools\vmprint-main to tools\vmprint ..."
+  Rename-Item -Path $VmprintMain -NewName "vmprint"
+}
+$VmprintOk = (Test-Path (Join-Path $VmprintDir "draft2final")) -and (Test-Path (Join-Path $VmprintDir "package.json"))
+if ($VmprintOk) {
+  Write-Host "OK: VMPrint already at tools\vmprint"
+} else {
+  try {
+    $null = Get-Command git -ErrorAction SilentlyContinue
+    if ($?) {
+      New-Item -ItemType Directory -Path (Join-Path $Root "tools") -Force | Out-Null
+      if (Test-Path (Join-Path $VmprintDir ".git")) {
+        Write-Host "Updating VMPrint at tools\vmprint ..."
+        Set-Location $VmprintDir; git pull --quiet 2>$null; Set-Location $Root
+      } else {
+        Write-Host "Cloning VMPrint into tools\vmprint ..."
+        git clone --depth 1 https://github.com/cosmiciron/vmprint.git $VmprintDir 2>$null
+      }
+      if ((Test-Path (Join-Path $VmprintDir "draft2final")) -and (Get-Command node -ErrorAction SilentlyContinue)) {
+        Write-Host "Installing VMPrint dependencies (npm install) ..."
+        Set-Location $VmprintDir; npm install --silent 2>$null; Set-Location $Root
+        if (Test-Path (Join-Path $VmprintDir "node_modules")) {
+          Write-Host "OK: VMPrint installed at tools\vmprint"
+        } else {
+          Write-Host "VMPrint clone present; run manually: cd $VmprintDir; npm install"
+        }
+      } elseif (Test-Path (Join-Path $VmprintDir "draft2final")) {
+        Write-Host "VMPrint cloned; Node not found. Install from https://nodejs.org then run: cd $VmprintDir; npm install"
+      } else {
+        Write-Host "VMPrint clone skipped. Markdown-to-PDF will use pandoc/weasyprint if available."
+      }
+    } else {
+      Write-Host "VMPrint skipped (git not found). Markdown-to-PDF will use pandoc or weasyprint if available."
+    }
+  } catch {
+    Write-Host "VMPrint skipped. Markdown-to-PDF will use pandoc or weasyprint if available."
+  }
+}
+
 # ----- Step 5: pip install -r requirements.txt -----
 Write-Host ""
 Write-Host "=== Step 5: Python dependencies ==="

@@ -17,6 +17,9 @@
 /plugins/Quotes/__pycache__
 /plugins/Weather/__pycache__
 /tools/__pycache__
+# VMPrint clone (install.sh/install.ps1); do not commit
+/tools/vmprint
+/tools/vmprint-main
 /llama.cpp-master/linux_cpu
 /llama.cpp-master/mac
 /llama.cpp-master/win_cpu

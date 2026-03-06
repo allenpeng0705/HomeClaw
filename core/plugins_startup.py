@@ -22,8 +22,13 @@ def _discover_system_plugins(core: Any) -> List[Dict]:
     base = getattr(Util(), "system_plugins_path", lambda: os.path.join(root, "system_plugins"))()
     if not os.path.isdir(base):
         return []
+    try:
+        names = sorted(os.listdir(base))
+    except OSError as e:
+        logger.debug("system_plugins: cannot list %s: %s", base, e)
+        return []
     out = []
-    for name in sorted(os.listdir(base)):
+    for name in names:
         if name.startswith("."):
             continue
         folder = os.path.join(base, name)
@@ -100,37 +105,55 @@ async def _run_system_plugins_startup(core: Any) -> None:
     Called via asyncio.create_task() so it runs in the background and does not block Core or the HTTP server.
     Each plugin runs in a separate OS process (node server.js)."""
     meta = Util().get_core_metadata()
-    allowlist = getattr(meta, "system_plugins", None) or []
+    allowlist = getattr(meta, "system_plugins", None)
+    allowlist = allowlist if isinstance(allowlist, list) else []
     candidates = _discover_system_plugins(core)
     if not candidates:
         return
-    to_start = [c for c in candidates if not allowlist or c["id"] in allowlist]
+    to_start = [c for c in candidates if not allowlist or c.get("id", "") in allowlist]
     if not to_start:
         return
-    core_url = f"http://{meta.host}:{meta.port}"
+    host = (getattr(meta, "host", None) or "").strip() or "127.0.0.1"
+    try:
+        port = getattr(meta, "port", None)
+        port = int(port) if port is not None else 9000
+        if not (1 <= port <= 65535):
+            port = 9000
+    except (TypeError, ValueError):
+        port = 9000
+    core_url = f"http://{host}:{port}"
     base_env = os.environ.copy()
     base_env["CORE_URL"] = core_url
     if getattr(meta, "auth_enabled", False) and getattr(meta, "auth_api_key", ""):
         base_env["CORE_API_KEY"] = getattr(meta, "auth_api_key", "")
     plugin_env_config = getattr(meta, "system_plugins_env", None) or {}
+    if not isinstance(plugin_env_config, dict):
+        plugin_env_config = {}
     # Give the HTTP server a moment to bind (avoids "Core did not become ready" on Windows where the task can poll before server.serve() is listening).
     await asyncio.sleep(2)
     # Wait for Core to be ready so registration succeeds (poll GET /ready until 200).
     # Use 127.0.0.1 for the probe when host is 0.0.0.0 so readiness works on Windows (connecting to 0.0.0.0 often fails there).
-    ready_host = "127.0.0.1" if (getattr(meta, "host", None) or "").strip() in ("0.0.0.0", "") else meta.host
-    ready_url = f"http://{ready_host}:{meta.port}"
-    timeout_ready = max(30.0, float(getattr(meta, "system_plugins_ready_timeout", 90) or 90))
+    ready_host = "127.0.0.1" if host in ("0.0.0.0", "") else host
+    ready_url = f"http://{ready_host}:{port}"
+    try:
+        timeout_ready = max(30.0, float(getattr(meta, "system_plugins_ready_timeout", 90) or 90))
+    except (TypeError, ValueError):
+        timeout_ready = 90.0
     ready = await _wait_for_core_ready(core, ready_url, timeout_sec=timeout_ready)
     if not ready:
         logger.warning("system_plugins: Core did not become ready in time; starting plugins anyway.")
     else:
         _component_log("system_plugins", "Core ready, starting plugin(s)")
     for item in to_start:
-        cwd = item["cwd"]
-        start_argv = item["start_argv"]
+        cwd = item.get("cwd")
+        start_argv = item.get("start_argv") or []
+        if not cwd or not start_argv:
+            continue
         env = {**base_env}
-        for k, v in plugin_env_config.get(item["id"], {}).items():
-            env[k] = v
+        plugin_env = plugin_env_config.get(item.get("id", ""))
+        if isinstance(plugin_env, dict):
+            for k, v in plugin_env.items():
+                env[str(k)] = str(v) if v is not None else ""
         try:
             proc = await asyncio.create_subprocess_exec(
                 start_argv[0],
@@ -140,28 +163,38 @@ async def _run_system_plugins_startup(core: Any) -> None:
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            core._system_plugin_processes.append(proc)
-            _component_log("system_plugins", f"started {item['id']} (pid={proc.pid})")
+            procs = getattr(core, "_system_plugin_processes", None)
+            if isinstance(procs, list):
+                procs.append(proc)
+            _component_log("system_plugins", f"started {item.get('id', '?')} (pid={proc.pid})")
         except Exception as e:
-            logger.warning("system_plugins: failed to start {}: {}", item["id"], e)
-    delay = max(0.5, float(getattr(meta, "system_plugins_start_delay", 2) or 2))
+            logger.warning("system_plugins: failed to start {}: {}", item.get("id", "?"), e)
+    try:
+        delay = max(0.5, float(getattr(meta, "system_plugins_start_delay", 2) or 2))
+    except (TypeError, ValueError):
+        delay = 2.0
     await asyncio.sleep(delay)
     for item in to_start:
+        cwd = item.get("cwd")
+        if not cwd:
+            continue
         env = {**base_env}
-        for k, v in plugin_env_config.get(item["id"], {}).items():
-            env[k] = v
+        plugin_env = plugin_env_config.get(item.get("id", ""))
+        if isinstance(plugin_env, dict):
+            for k, v in plugin_env.items():
+                env[str(k)] = str(v) if v is not None else ""
         try:
             reg = await asyncio.create_subprocess_exec(
                 "node", "register.js",
-                cwd=item["cwd"],
+                cwd=cwd,
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             _, stderr = await reg.communicate()
             if reg.returncode == 0:
-                _component_log("system_plugins", f"registered {item['id']}")
+                _component_log("system_plugins", f"registered {item.get('id', '?')}")
             else:
-                logger.debug("system_plugins: register {} stderr: {}", item["id"], (stderr or b"").decode(errors="replace")[:500])
+                logger.debug("system_plugins: register {} stderr: {}", item.get("id", "?"), (stderr or b"").decode(errors="replace")[:500])
         except Exception as e:
-            logger.debug("system_plugins: register {} failed: {}", item["id"], e)
+            logger.debug("system_plugins: register {} failed: {}", item.get("id", "?"), e)
