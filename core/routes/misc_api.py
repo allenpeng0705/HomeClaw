@@ -128,7 +128,7 @@ def get_api_skills_search_handler(core):  # noqa: ARG001
     """Return handler for GET /api/skills/search?query=... . Companion->Core direct; uses clawhub CLI."""
     async def api_skills_search(request: Request):
         try:
-            from base.clawhub_integration import clawhub_available, clawhub_search
+            from base.clawhub_integration import clawhub_available, clawhub_ensure_logged_in, clawhub_search
             q = (request.query_params.get("query") or "").strip()
             if not q:
                 return JSONResponse(content={"results": []})
@@ -142,6 +142,9 @@ def get_api_skills_search_handler(core):  # noqa: ARG001
                         )
                     },
                 )
+            meta = Util().get_core_metadata()
+            token = (getattr(meta, "clawhub_token", None) or "").strip() if meta else ""
+            clawhub_ensure_logged_in(token)
             results, raw = clawhub_search(q, limit=20)
             if not raw.ok and raw.error:
                 return JSONResponse(status_code=502, content={"detail": raw.error, "stderr": (raw.stderr or "")[-1000:]})
@@ -181,6 +184,9 @@ def get_api_skills_install_handler(core):  # noqa: ARG001
                 return JSONResponse(status_code=400, content={"detail": "Missing skill id"})
             spec = f"{skill_id}@{version}" if version else skill_id
             meta = Util().get_core_metadata()
+            from base.clawhub_integration import clawhub_ensure_logged_in
+            token = (getattr(meta, "clawhub_token", None) or "").strip() if meta else ""
+            clawhub_ensure_logged_in(token)
             root = Path(Util().root_path())
             ext_dir = (getattr(meta, "external_skills_dir", None) or "external_skills").strip() or "external_skills"
             download_dir = (getattr(meta, "clawhub_download_dir", None) or "downloads").strip() or "downloads"
@@ -206,16 +212,18 @@ def get_api_skills_install_handler(core):  # noqa: ARG001
 
 
 def get_api_skills_clawhub_login_status_handler(core):  # noqa: ARG001
-    """GET /api/skills/clawhub-login-status — whether ClawHub CLI is logged in (whoami). Companion->Core."""
+    """GET /api/skills/clawhub-login-status — whether ClawHub CLI is logged in (whoami). Uses clawhub_token from config if set."""
     async def api_skills_clawhub_login_status(request: Request):
         try:
-            from base.clawhub_integration import clawhub_available, clawhub_whoami
+            from base.clawhub_integration import clawhub_available, clawhub_ensure_logged_in
             if not clawhub_available():
                 return JSONResponse(
                     status_code=200,
                     content={"logged_in": False, "message": "clawhub not found on PATH", "clawhub_available": False},
                 )
-            logged_in, message = clawhub_whoami()
+            meta = Util().get_core_metadata()
+            token = (getattr(meta, "clawhub_token", None) or "").strip() if meta else ""
+            logged_in, message = clawhub_ensure_logged_in(token)
             return JSONResponse(
                 content={"logged_in": logged_in, "message": message, "clawhub_available": True},
             )
@@ -226,10 +234,10 @@ def get_api_skills_clawhub_login_status_handler(core):  # noqa: ARG001
 
 
 def get_api_skills_clawhub_login_handler(core):  # noqa: ARG001
-    """POST /api/skills/clawhub-login — start ClawHub login; returns URL to open in browser if available. Companion->Core."""
+    """POST /api/skills/clawhub-login — start ClawHub login (browser or token). Body: {} or { \"token\": \"...\" }. Companion->Core."""
     async def api_skills_clawhub_login(request: Request):
         try:
-            from base.clawhub_integration import clawhub_available, clawhub_login_start
+            from base.clawhub_integration import clawhub_available, clawhub_login_start, clawhub_login_with_token
             if not clawhub_available():
                 return JSONResponse(
                     status_code=400,
@@ -239,8 +247,19 @@ def get_api_skills_clawhub_login_handler(core):  # noqa: ARG001
                         "ok": False,
                     },
                 )
-            # Return quickly with URL so proxies (e.g. Cloudflare) do not 524 timeout; user completes OAuth on Core machine.
-            out = clawhub_login_start(wait_for_url_s=15)
+            body = {}
+            try:
+                if (request.headers.get("content-type") or "").strip().lower().startswith("application/json"):
+                    body = await request.json() or {}
+            except Exception:
+                pass
+            if not isinstance(body, dict):
+                body = {}
+            token = (str(body.get("token") or "")).strip()
+            if token:
+                out = clawhub_login_with_token(token)
+            else:
+                out = clawhub_login_start(wait_for_url_s=15)
             status = 200 if out.get("ok") else 400
             return JSONResponse(
                 status_code=status,

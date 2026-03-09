@@ -51,6 +51,9 @@ dev_dependencies:
 flutter:
   generate: true
   uses-material-design: true
+  assets:
+    - assets/icon/
+    - assets/preset_friends/
 
 # Generate app icon from assets/icon/app_icon.png (paw logo derived from social/HomeClaw_Promo_EN.jpg).
 flutter_launcher_icons:

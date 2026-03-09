@@ -31,6 +31,8 @@ class _SkillsScreenState extends State<SkillsScreen> {
   bool _clawhubLoginInProgress = false;
   String? _clawhubLoginUrl;
   String _clawhubLoginMessage = '';
+  final TextEditingController _tokenController = TextEditingController();
+  bool _tokenLoginInProgress = false;
 
   @override
   void initState() {
@@ -42,6 +44,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
   @override
   void dispose() {
     _queryController.dispose();
+    _tokenController.dispose();
     super.dispose();
   }
 
@@ -91,6 +94,41 @@ class _SkillsScreenState extends State<SkillsScreen> {
           _clawhubLoginInProgress = false;
           _clawhubLoginUrl = null;
           _clawhubLoginMessage = msg.isNotEmpty ? msg : 'Login request failed';
+        });
+      }
+    }
+  }
+
+  Future<void> _startClawhubTokenLogin() async {
+    final token = _tokenController.text.trim();
+    if (token.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Paste your ClawHub token first')));
+      return;
+    }
+    setState(() {
+      _tokenLoginInProgress = true;
+      _clawhubLoginMessage = '';
+      _clawhubLoginUrl = null;
+    });
+    try {
+      final result = await widget.coreService.clawhubLoginWithToken(token);
+      if (mounted) {
+        setState(() {
+          _tokenLoginInProgress = false;
+          _clawhubLoginMessage = (result['message'] ?? '').toString();
+        });
+        if (result['ok'] == true) {
+          _tokenController.clear();
+          _loadClawhubLoginStatus();
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Logged in with token')));
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        final msg = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
+        setState(() {
+          _tokenLoginInProgress = false;
+          _clawhubLoginMessage = msg;
         });
       }
     }
@@ -324,11 +362,48 @@ class _SkillsScreenState extends State<SkillsScreen> {
                 ],
               ],
             ),
+            const SizedBox(height: 12),
+            SelectableText(
+              'Or use token (from clawhub.ai):',
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _tokenController,
+                    decoration: const InputDecoration(
+                      hintText: 'Paste ClawHub token',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    obscureText: true,
+                    maxLines: 1,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: (_tokenLoginInProgress || _clawhubLoginInProgress) ? null : _startClawhubTokenLogin,
+                  child: _tokenLoginInProgress
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('Login with token'),
+                ),
+              ],
+            ),
             if (_clawhubLoginMessage.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: SelectableText(_clawhubLoginMessage, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
               ),
+            if (_clawhubLoginMessage.toLowerCase().contains('missing state')) ...[
+              const SizedBox(height: 10),
+              SelectableText(
+                'Workaround: Use token login. Open clawhub.ai in a browser, sign in with GitHub, get your CLI token. On the machine running Core run: clawhub login --no-browser --token YOUR_TOKEN',
+                style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.primary, fontStyle: FontStyle.italic),
+              ),
+            ],
             if (_clawhubLoginUrl != null && _clawhubLoginUrl!.isNotEmpty) ...[
               const SizedBox(height: 8),
               SelectableText(

@@ -127,12 +127,33 @@ def clawhub_whoami(*, timeout_s: int = 10) -> Tuple[bool, str]:
     return (True, out or "Logged in")
 
 
+def clawhub_ensure_logged_in(token: Optional[str] = None) -> Tuple[bool, str]:
+    """
+    Ensure ClawHub CLI is logged in. If whoami fails and token is provided, run login --no-browser --token and retry.
+    Use when config has clawhub_token (e.g. from core.yml). Returns (logged_in, message). Never raises.
+    """
+    try:
+        logged_in, msg = clawhub_whoami(timeout_s=10)
+        if logged_in:
+            return (True, msg)
+        t = (token or "").strip()
+        if not t:
+            return (False, msg)
+        clawhub_login_with_token(t)
+        return clawhub_whoami(timeout_s=10)
+    except Exception:
+        return (False, "Not logged in")
+
+
 # Pattern to find a URL in clawhub login output (e.g. "Open https://... to authenticate")
 _URL_RE = re.compile(r"https?://[^\s\)\]\"']+")
 
 
 def _extract_login_url(combined: str) -> Optional[str]:
-    """Extract OAuth URL from clawhub login stdout+stderr. Returns first likely URL or None."""
+    """Extract OAuth URL from clawhub login stdout+stderr. Returns first likely URL or None. Never raises."""
+    combined = (combined or "").strip()
+    if not combined:
+        return None
     for m in _URL_RE.finditer(combined):
         candidate = m.group(0).rstrip(".,;:")
         if any(x in candidate.lower() for x in ("github", "openclaw", "clawhub", "convex", "auth")):
@@ -176,11 +197,34 @@ def _reap_clawhub_login_proc(proc: subprocess.Popen) -> None:
         pass
 
 
+def clawhub_login_with_token(token: str) -> Dict[str, Any]:
+    """
+    Log in to ClawHub using a token (no browser). Run `clawhub login --no-browser --token <token>`.
+    Use when the browser flow fails with "Missing state". Get a token from clawhub.ai (sign in with GitHub).
+    Returns dict with: ok (bool), message (str), stdout (str), stderr (str). Never raises.
+    """
+    t = (token or "").strip()
+    if not t:
+        return {"ok": False, "message": "Token is empty", "stdout": "", "stderr": ""}
+    if not clawhub_available():
+        return {"ok": False, "message": "clawhub not found on PATH", "stdout": "", "stderr": ""}
+    argv = _clawhub_argv("login", "--no-browser", "--token", t)
+    if not argv:
+        return {"ok": False, "message": "clawhub not found on PATH", "stdout": "", "stderr": ""}
+    r = _run_cmd(argv, timeout_s=30, env=_login_env())
+    if r.ok:
+        out = (r.stdout or "").strip() or "Logged in with token."
+        return {"ok": True, "message": out, "stdout": r.stdout or "", "stderr": r.stderr or ""}
+    err = (r.stderr or r.stdout or r.error or "Token login failed").strip()
+    return {"ok": False, "message": err[:500], "stdout": r.stdout or "", "stderr": r.stderr or ""}
+
+
 def clawhub_login_start(*, wait_for_url_s: int = 15) -> Dict[str, Any]:
     """
     Start `clawhub login` in the background and return as soon as we have the URL (or after
     wait_for_url_s). The HTTP request can return quickly so proxies (e.g. Cloudflare) do not
     return 524. The user completes OAuth on the Core machine; tap "Refresh status" to verify.
+    If already logged in (whoami succeeds), returns immediately without opening the browser.
     Returns dict with: ok (bool), url (str or None), message (str), stdout (str), stderr (str).
     Never raises.
     """
@@ -190,6 +234,16 @@ def clawhub_login_start(*, wait_for_url_s: int = 15) -> Dict[str, Any]:
     argv = _clawhub_argv("login")
     if not argv:
         return {"ok": False, "url": None, "message": "clawhub not found on PATH", "stdout": "", "stderr": ""}
+    # If already logged in, do not open the browser; just report success.
+    logged_in, whoami_msg = clawhub_whoami(timeout_s=10)
+    if logged_in:
+        return {
+            "ok": True,
+            "url": None,
+            "message": f"Already logged in. {whoami_msg} No need to open the browser. Tap Refresh status to confirm.",
+            "stdout": "",
+            "stderr": "",
+        }
     with _clawhub_login_lock:
         if _clawhub_login_proc is not None and _clawhub_login_proc.poll() is None:
             url = _clawhub_login_url or ""
@@ -214,6 +268,8 @@ def clawhub_login_start(*, wait_for_url_s: int = 15) -> Dict[str, Any]:
     output_lock = threading.Lock()
 
     def read_stream(stream: Any) -> None:
+        if stream is None:
+            return
         try:
             while True:
                 chunk = stream.read(4096)

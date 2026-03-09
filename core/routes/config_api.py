@@ -23,7 +23,7 @@ CONFIG_CORE_WHITELIST = frozenset({
     "agent_memory_max_chars", "use_agent_memory_search", "agent_memory_vector_collection",
     "agent_memory_bootstrap_max_chars", "agent_memory_bootstrap_max_chars_local",
     "use_daily_memory", "daily_memory_dir", "session", "notify_unknown_request", "outbound_markdown_format",
-    "llm_max_concurrent_local", "llm_max_concurrent_cloud", "compaction", "use_tools",     "use_skills", "skills_dir", "external_skills_dir", "clawhub_download_dir",
+    "llm_max_concurrent_local", "llm_max_concurrent_cloud", "compaction", "use_tools",     "use_skills", "skills_dir", "external_skills_dir", "clawhub_download_dir", "clawhub_token",
     "skills_max_in_prompt", "plugins_max_in_prompt",
     "plugins_description_max_chars", "skills_use_vector_search", "skills_vector_collection",
     "skills_max_retrieved", "skills_similarity_threshold", "skills_refresh_on_startup", "skills_test_dir",
