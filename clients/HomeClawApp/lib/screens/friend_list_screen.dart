@@ -12,6 +12,14 @@ import 'friend_requests_screen.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
 
+/// Bundled preset thumbnail assets (used when Core does not serve one). No download; shipped with app.
+const Set<String> _bundledPresetKeys = {'reminder', 'note', 'finder'};
+String? _bundledPresetAssetPath(String? preset) {
+  final p = (preset ?? '').trim().toLowerCase();
+  if (p.isEmpty || !_bundledPresetKeys.contains(p)) return null;
+  return 'assets/preset_friends/$p.png';
+}
+
 /// Known localized names -> preset key (so avatar works when API returns localized friend name).
 const Map<String, String> _localizedNameToPreset = {
   'reminder': 'reminder', 'finder': 'finder', 'note': 'note', 'files': 'finder',
@@ -456,6 +464,7 @@ class _FriendTileState extends State<_FriendTile> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final hasThumbnail = _avatarBytes != null && _avatarBytes!.isNotEmpty;
+    final bundledPath = _bundledPresetAssetPath(widget.preset);
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
@@ -473,14 +482,29 @@ class _FriendTileState extends State<_FriendTile> {
                         width: 40,
                         height: 40,
                       )
-                    : ColoredBox(
-                        color: theme.colorScheme.primaryContainer,
-                        child: Icon(
-                          widget.isUserFriend ? Icons.person : Icons.smart_toy,
-                          color: theme.colorScheme.onPrimaryContainer,
-                          size: 24,
-                        ),
-                      ),
+                    : bundledPath != null
+                        ? Image.asset(
+                            bundledPath,
+                            fit: BoxFit.cover,
+                            width: 40,
+                            height: 40,
+                            errorBuilder: (_, __, ___) => ColoredBox(
+                              color: theme.colorScheme.primaryContainer,
+                              child: Icon(
+                                widget.isUserFriend ? Icons.person : Icons.smart_toy,
+                                color: theme.colorScheme.onPrimaryContainer,
+                                size: 24,
+                              ),
+                            ),
+                          )
+                        : ColoredBox(
+                            color: theme.colorScheme.primaryContainer,
+                            child: Icon(
+                              widget.isUserFriend ? Icons.person : Icons.smart_toy,
+                              color: theme.colorScheme.onPrimaryContainer,
+                              size: 24,
+                            ),
+                          ),
               ),
             ),
             if (widget.hasUnread)
