@@ -132,14 +132,17 @@ def clawhub_ensure_logged_in(token: Optional[str] = None) -> Tuple[bool, str]:
     Ensure ClawHub CLI is logged in. If whoami fails and token is provided, run login --no-browser --token and retry.
     Use when config has clawhub_token (e.g. from core.yml). Returns (logged_in, message). Never raises.
     """
-    logged_in, msg = clawhub_whoami(timeout_s=10)
-    if logged_in:
-        return (True, msg)
-    t = (token or "").strip()
-    if not t:
-        return (False, msg)
-    clawhub_login_with_token(t)
-    return clawhub_whoami(timeout_s=10)
+    try:
+        logged_in, msg = clawhub_whoami(timeout_s=10)
+        if logged_in:
+            return (True, msg)
+        t = (token or "").strip()
+        if not t:
+            return (False, msg)
+        clawhub_login_with_token(t)
+        return clawhub_whoami(timeout_s=10)
+    except Exception:
+        return (False, "Not logged in")
 
 
 # Pattern to find a URL in clawhub login output (e.g. "Open https://... to authenticate")
@@ -147,7 +150,10 @@ _URL_RE = re.compile(r"https?://[^\s\)\]\"']+")
 
 
 def _extract_login_url(combined: str) -> Optional[str]:
-    """Extract OAuth URL from clawhub login stdout+stderr. Returns first likely URL or None."""
+    """Extract OAuth URL from clawhub login stdout+stderr. Returns first likely URL or None. Never raises."""
+    combined = (combined or "").strip()
+    if not combined:
+        return None
     for m in _URL_RE.finditer(combined):
         candidate = m.group(0).rstrip(".,;:")
         if any(x in candidate.lower() for x in ("github", "openclaw", "clawhub", "convex", "auth")):
@@ -262,6 +268,8 @@ def clawhub_login_start(*, wait_for_url_s: int = 15) -> Dict[str, Any]:
     output_lock = threading.Lock()
 
     def read_stream(stream: Any) -> None:
+        if stream is None:
+            return
         try:
             while True:
                 chunk = stream.read(4096)

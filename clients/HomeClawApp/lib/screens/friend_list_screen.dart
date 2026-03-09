@@ -15,7 +15,7 @@ import 'settings_screen.dart';
 /// Bundled preset thumbnail assets (used when Core does not serve one). No download; shipped with app.
 const Set<String> _bundledPresetKeys = {'reminder', 'note', 'finder'};
 String? _bundledPresetAssetPath(String? preset) {
-  final p = (preset ?? '').trim().toLowerCase();
+  final p = (preset is String ? preset : '').trim().toLowerCase();
   if (p.isEmpty || !_bundledPresetKeys.contains(p)) return null;
   return 'assets/preset_friends/$p.png';
 }
@@ -35,7 +35,7 @@ const Map<String, String> _localizedNameToPreset = {
 /// Derive preset key from friend name when API does not return preset (e.g. Reminder→reminder, Note/Notes→note, Finder/Files→finder).
 /// Handles English and localized names (zh, es, fr, de, it, ja, ko) so thumbnails show regardless of locale.
 String? _presetKeyFromFriendName(String name) {
-  final n = (name).trim();
+  final n = (name is String ? name : '').trim();
   if (n.isEmpty) return null;
   final nLower = n.toLowerCase();
   final byKey = _localizedNameToPreset[nLower];

@@ -143,7 +143,8 @@ def get_api_skills_search_handler(core):  # noqa: ARG001
                     },
                 )
             meta = Util().get_core_metadata()
-            clawhub_ensure_logged_in((getattr(meta, "clawhub_token", None) or "").strip())
+            token = (getattr(meta, "clawhub_token", None) or "").strip() if meta else ""
+            clawhub_ensure_logged_in(token)
             results, raw = clawhub_search(q, limit=20)
             if not raw.ok and raw.error:
                 return JSONResponse(status_code=502, content={"detail": raw.error, "stderr": (raw.stderr or "")[-1000:]})
@@ -184,7 +185,8 @@ def get_api_skills_install_handler(core):  # noqa: ARG001
             spec = f"{skill_id}@{version}" if version else skill_id
             meta = Util().get_core_metadata()
             from base.clawhub_integration import clawhub_ensure_logged_in
-            clawhub_ensure_logged_in((getattr(meta, "clawhub_token", None) or "").strip())
+            token = (getattr(meta, "clawhub_token", None) or "").strip() if meta else ""
+            clawhub_ensure_logged_in(token)
             root = Path(Util().root_path())
             ext_dir = (getattr(meta, "external_skills_dir", None) or "external_skills").strip() or "external_skills"
             download_dir = (getattr(meta, "clawhub_download_dir", None) or "downloads").strip() or "downloads"
@@ -220,7 +222,7 @@ def get_api_skills_clawhub_login_status_handler(core):  # noqa: ARG001
                     content={"logged_in": False, "message": "clawhub not found on PATH", "clawhub_available": False},
                 )
             meta = Util().get_core_metadata()
-            token = (getattr(meta, "clawhub_token", None) or "").strip()
+            token = (getattr(meta, "clawhub_token", None) or "").strip() if meta else ""
             logged_in, message = clawhub_ensure_logged_in(token)
             return JSONResponse(
                 content={"logged_in": logged_in, "message": message, "clawhub_available": True},
@@ -253,7 +255,7 @@ def get_api_skills_clawhub_login_handler(core):  # noqa: ARG001
                 pass
             if not isinstance(body, dict):
                 body = {}
-            token = (body.get("token") or "").strip()
+            token = (str(body.get("token") or "")).strip()
             if token:
                 out = clawhub_login_with_token(token)
             else:
