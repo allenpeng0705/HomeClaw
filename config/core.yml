@@ -63,6 +63,8 @@ skills_and_plugins_config_file: skills_and_plugins.yml
 # orchestrator_timeout_seconds: 60
 # Recommended max time (seconds) for clients/proxies waiting for Core to respond (e.g. /inbound). 0 = unlimited (no recommended limit). Long tasks (document_read, HTML slides, summarization) may take 2+ minutes; "Connection closed while receiving data" usually means proxy/client read_timeout was exceeded. Fix: use POST /inbound with stream: true (SSE) and/or set proxy read_timeout >= 300. Proxies (nginx, Cloudflare) should set read_timeout >= this when >0.
 # inbound_request_timeout_seconds: 0
+# Timeout (seconds) for each LLM chat completion HTTP call. Default 300. If large local models (e.g. 27B) often time out, set 600 or 900. Minimum 60.
+# llm_completion_timeout_seconds: 300
 # Prompt manager: load prompts from config/prompts with language/model overrides. See docs/PromptManagement.md.
 use_prompt_manager: true
 prompts_dir: config/prompts

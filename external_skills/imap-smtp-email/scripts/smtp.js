@@ -169,14 +169,66 @@ async function testConnection() {
   }
 }
 
+// Extract first email address from a string (e.g. user message).
+function extractEmailFromMessage(text) {
+  if (!text || typeof text !== 'string') return null;
+  const match = text.match(/[\w.-]+@[\w.-]+\.\w+/);
+  return match ? match[0].trim() : null;
+}
+
+// Extract the intended email content from a natural-language request, so we don't send the full meta sentence as the body.
+// E.g. "能帮我给a@b.com发封邮件，告诉他xxx" -> "xxx"; "send email to a@b.com saying hello" -> "hello"
+function extractBodyFromMessage(fullMessage) {
+  const msg = (fullMessage || '').trim();
+  // Chinese: "告诉他/说/内容(：|:)? ..." or "发邮件...告诉他..." -> take the part after the verb
+  const cnTell = msg.match(/(?:告诉(?:他|她|他们)?|说|写|内容)[:：]\s*(.+)/s);
+  if (cnTell && cnTell[1]) return cnTell[1].trim();
+  const cnAfter = msg.match(/(?:发(?:封)?邮件[，,]?\s*)?(?:告诉(?:他|她|他们)|说)\s*(.+?)(?:\s*[。.]|$)/s);
+  if (cnAfter && cnAfter[1]) return cnAfter[1].trim();
+  // English: "say(ing)? ..." or "tell him/her ..." or "message: ..."
+  const enSay = msg.match(/(?:say(?:ing)?|tell\s+(?:him|her|them)|message)\s*[:：]?\s*(.+)/is);
+  if (enSay && enSay[1]) return enSay[1].trim();
+  // Fallback: if message contains an email, use the part after the email as body (e.g. "给 a@b.com 发邮件，xxx" -> "xxx")
+  const to = extractEmailFromMessage(msg);
+  if (to) {
+    const idx = msg.indexOf(to);
+    const after = msg.substring(idx + to.length).replace(/^[\s，,、：:]+/, '').trim();
+    if (after.length > 0) return after;
+  }
+  return msg;
+}
+
+// Parse natural-language send request (e.g. "能帮我给a@b.com发封邮件，告诉他xxx") -> { to, body, subject }.
+function parseSendFromMessage(fullMessage) {
+  const msg = (fullMessage || '').trim();
+  const to = extractEmailFromMessage(msg);
+  const body = extractBodyFromMessage(msg);
+  if (!to) return { to: null, body: msg, subject: 'Message from HomeClaw' };
+  return { to, body: body || msg, subject: 'Message from HomeClaw' };
+}
+
 // Main CLI handler
 async function main() {
-  const { command, options, positional } = parseArgs();
+  let { command, options, positional } = parseArgs();
+  // When run_skill is called with no args, Core sets HOMECLAW_USER_MESSAGE to the user's text; treat as send-from-message.
+  if ((command === undefined || command === '') && process.env.HOMECLAW_USER_MESSAGE) {
+    command = 'send-from-message';
+    positional = [process.env.HOMECLAW_USER_MESSAGE];
+  }
 
   try {
     let result;
 
     switch (command) {
+      case 'send-from-message': {
+        const rawMessage = positional[0] || options.body || options.message || '';
+        const { to, body, subject } = parseSendFromMessage(rawMessage);
+        if (!to) {
+          throw new Error('No email address found in message. Include an address like user@example.com');
+        }
+        result = await sendEmailWithContent({ to, subject, body });
+        break;
+      }
       case 'send':
         if (!options.to) {
           throw new Error('Missing required option: --to <email>');
@@ -216,10 +268,10 @@ async function main() {
 
       default:
         console.error('Unknown command:', command);
-        console.error('Available commands: send, test');
+        console.error('Available commands: send, send-from-message, test');
         console.error('\nUsage:');
         console.error('  send   --to <email> --subject <text> [--body <text>] [--html] [--cc <email>] [--bcc <email>] [--attach <file>]');
-        console.error('  send   --to <email> --subject <text> --body-file <file> [--html-file <file>] [--attach <file>]');
+        console.error('  send-from-message <natural language>  Extract email from message and send (e.g. "给 user@example.com 发邮件，告诉他 ...")');
         console.error('  test   Test SMTP connection');
         process.exit(1);
     }

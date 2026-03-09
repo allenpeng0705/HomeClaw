@@ -972,6 +972,8 @@ class CoreMetadata:
     skills_include_body_for: List[str] = field(default_factory=list)
     # When > 0, cap the body for skills in skills_include_body_for to this many chars (avoids blowing up context). 0 = no truncation.
     skills_include_body_max_chars: int = 0
+    # When True (OpenClaw-style): inject only name, description, and location (skill:<folder>) into the prompt; model reads SKILL.md via file_read(path='skill:<folder>'). Reduces context tokens.
+    skills_use_location_only: bool = False
     # Optional: when user query matches a regex, ensure these skill folders are in the prompt and optionally append an instruction. List of { pattern: str, folders: [str], instruction?: str }.
     skills_force_include_rules: List[Dict[str, Any]] = field(default_factory=list)
     # Optional: when user query matches a regex, ensure these plugin ids are in the routing block and optionally append an instruction. List of { pattern: str, plugins: [str], instruction?: str }.
@@ -989,6 +991,7 @@ class CoreMetadata:
     tools_config: Dict[str, Any] = field(default_factory=dict)  # merged tools dict from core.yml + optional skills_and_plugins file; used by tool layer (exec_allowlist, web.search, etc.)
     orchestrator_unified_with_tools: bool = True  # when True (default), main LLM with tools routes TAM/plugin/chat; when False, separate orchestrator_handler runs first (one LLM for intent+plugin)
     inbound_request_timeout_seconds: int = 0  # recommended max seconds for clients/proxies waiting for Core; 0 = unlimited. Default when missing: 0. Not enforced by Core; set proxies read_timeout >= this when >0.
+    llm_completion_timeout_seconds: int = 300  # HTTP timeout for each LLM chat completion call (local or cloud). Increase (e.g. 600, 900) if large local models often time out; 0 = no timeout (not recommended).
     use_prompt_manager: bool = True  # load prompts from config/prompts (language/model overrides); see docs/PromptManagement.md
     prompts_dir: str = "config/prompts"  # base dir for section/name.lang.model layout
     prompt_default_language: str = "en"  # fallback when lang not in request/metadata
@@ -1417,6 +1420,7 @@ class CoreMetadata:
             skills_incremental_sync=bool(data.get('skills_incremental_sync', False)),
             skills_include_body_for=[str(f).strip() for f in (data.get('skills_include_body_for') or []) if f],
             skills_include_body_max_chars=max(0, int(data.get('skills_include_body_max_chars', 0) or 0)),
+            skills_use_location_only=bool(data.get('skills_use_location_only', False)),
             skills_force_include_rules=[r for r in (data.get('skills_force_include_rules') or []) if isinstance(r, dict) and (r.get('pattern') or r.get('patterns')) and (r.get('folders') is not None or r.get('auto_invoke'))],
             plugins_force_include_rules=[r for r in (data.get('plugins_force_include_rules') or []) if isinstance(r, dict) and r.get('pattern') and r.get('plugins')],
             skills_and_plugins_config_file=(data.get('skills_and_plugins_config_file') or '').strip(),
@@ -1428,6 +1432,7 @@ class CoreMetadata:
             tools_config=copy.deepcopy(data.get('tools')) if isinstance(data.get('tools'), dict) else {},
             orchestrator_unified_with_tools=data.get('orchestrator_unified_with_tools', True),
             inbound_request_timeout_seconds=max(0, int(data.get('inbound_request_timeout_seconds', 0) or 0)),
+            llm_completion_timeout_seconds=max(60, int(data.get('llm_completion_timeout_seconds', 300) or 300)),
             use_prompt_manager=data.get('use_prompt_manager', True),
             prompts_dir=(data.get('prompts_dir') or 'config/prompts').strip(),
             prompt_default_language=(data.get('prompt_default_language') or 'en').strip() or 'en',
@@ -1531,6 +1536,7 @@ class CoreMetadata:
                 # tool_timeout_seconds is written under data["tools"] below, not as top-level
                 'orchestrator_unified_with_tools': getattr(core, 'orchestrator_unified_with_tools', True),
                 'inbound_request_timeout_seconds': getattr(core, 'inbound_request_timeout_seconds', 0),
+                'llm_completion_timeout_seconds': getattr(core, 'llm_completion_timeout_seconds', 300),
                 'notify_unknown_request': getattr(core, 'notify_unknown_request', False),
                 'outbound_markdown_format': getattr(core, 'outbound_markdown_format', 'whatsapp') or 'whatsapp',
                 'use_prompt_manager': getattr(core, 'use_prompt_manager', True),

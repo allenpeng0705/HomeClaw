@@ -12,6 +12,7 @@ To add a new built-in tool:
 """
 
 import asyncio
+import difflib
 import json
 import os
 import platform
@@ -34,6 +35,11 @@ from base.base import PluginResult, User
 from base.media_io import save_data_url_to_media_folder
 from loguru import logger
 import time as _time
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 # ---- Process job store (background exec) ----
 _process_jobs: Dict[str, Dict[str, Any]] = {}
@@ -2184,8 +2190,123 @@ def _append_file_link_to_run_skill_output(script_output: str, context: Optional[
     return script_output
 
 
+# Limits for skill env parsing (SKILL.md and request env) to keep behavior stable and avoid DoS.
+_SKILL_ENV_MAX_FILE_BYTES = 512 * 1024
+_SKILL_ENV_MAX_KEY_LEN = 256
+_SKILL_ENV_MAX_VAL_LEN = 65536
+_SKILL_ENV_MAX_PAIRS = 256
+_SKILL_ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _normalize_skill_env_entry(key: Any, value: Any) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Validate and normalize a single env key/value (from SKILL.md or user input).
+    Returns (normalized_key, normalized_value) or (None, None) if invalid.
+    """
+    if key is None or not isinstance(key, str):
+        return (None, None)
+    k = key.strip()
+    if not k or k.startswith("_") or len(k) > _SKILL_ENV_MAX_KEY_LEN:
+        return (None, None)
+    if not _SKILL_ENV_KEY_RE.match(k):
+        return (None, None)
+    if value is None:
+        return (k, "")
+    if isinstance(value, bool):
+        v = "true" if value else "false"
+    elif isinstance(value, (int, float)):
+        v = str(value)
+    elif isinstance(value, str):
+        v = value.strip()
+    else:
+        return (None, None)
+    if len(v) > _SKILL_ENV_MAX_VAL_LEN:
+        v = v[:_SKILL_ENV_MAX_VAL_LEN]
+    return (k, v)
+
+
+def _get_skill_env_from_skill_md(skill_folder: Path) -> Dict[str, str]:
+    """
+    Read SKILL.md in the skill folder and return env vars to inject when running the script.
+    Sources: (1) frontmatter key 'script_env' (dict), (2) first code block in body that looks
+    like KEY=VALUE (e.g. under ## Configuration). Caller merges with only keys not already set.
+    Never raises; returns empty dict on any error. Limits apply to file size, key/value length, and pair count.
+    """
+    out: Dict[str, str] = {}
+    skill_md = skill_folder / "SKILL.md"
+    if not skill_md.is_file():
+        return out
+    try:
+        stat = skill_md.stat()
+        if stat.st_size > _SKILL_ENV_MAX_FILE_BYTES or stat.st_size < 0:
+            return out
+        raw = skill_md.read_text(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        return out
+    if "---" not in raw:
+        return out
+    parts = raw.split("---", 2)
+    # Frontmatter: script_env dict
+    if yaml and len(parts) >= 2:
+        fm_str = (parts[1] or "").strip()
+        if fm_str:
+            try:
+                fm = yaml.safe_load(fm_str)
+                if isinstance(fm, dict):
+                    script_env = fm.get("script_env")
+                    if isinstance(script_env, dict) and len(out) < _SKILL_ENV_MAX_PAIRS:
+                        for k, v in script_env.items():
+                            if len(out) >= _SKILL_ENV_MAX_PAIRS:
+                                break
+                            nk, nv = _normalize_skill_env_entry(k, v)
+                            if nk is not None:
+                                out[nk] = nv or ""
+            except Exception:
+                pass
+    # Body: first code block that has KEY=VALUE lines (e.g. ## Configuration)
+    if len(parts) >= 3:
+        body = (parts[2] or "").strip()
+        block_pattern = re.compile(r"```(?:\w*)\s*\n(.*?)```", re.DOTALL)
+        for match in block_pattern.finditer(body):
+            block = match.group(1) or ""
+            env_found = False
+            for line in block.splitlines():
+                if len(out) >= _SKILL_ENV_MAX_PAIRS:
+                    break
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "#" in line:
+                    line = line.split("#", 1)[0].strip()
+                if "=" not in line:
+                    continue
+                key_part, _, val_part = line.partition("=")
+                key_part = key_part.strip()
+                val_part = (val_part.strip().strip('"').strip("'") or "").strip()
+                nk, nv = _normalize_skill_env_entry(key_part, val_part)
+                if nk is not None:
+                    out[nk] = nv or ""
+                    env_found = True
+            if env_found:
+                break
+    return out
+
+
 async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Run a script from a loaded skill's scripts/ folder. Supports Python (.py), Node.js (.js, .mjs, .cjs), TypeScript (.ts via tsx or ts-node when in PATH), shell (.sh). Skill name = folder name under skills_dir; script = filename or path relative to scripts/. Optional args as list of strings. Sandboxed: only scripts under <skill>/scripts/; optional allowlist in config. Skills without scripts/ are instruction-only: omit script and use the skill's instructions in your response."""
+    """Run a script from a loaded skill's scripts/ folder. All usage (script name, args) is defined in SKILL.md; the model must pass them. Never raises: returns an error string on failure."""
+    if not isinstance(arguments, dict):
+        return "Error: run_skill arguments must be a dict (skill_name, script, args)."
+    try:
+        return await _run_skill_executor_impl(arguments, context)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as e:
+        logger.debug("run_skill executor error: %s", e)
+        return "Error: run_skill failed (internal error). Check Core logs."
+
+
+async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Implementation of run_skill. All exceptions are caught by _run_skill_executor."""
     try:
         from base.util import Util
     except ImportError:
@@ -2194,7 +2315,7 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
     script_arg = (arguments.get("script") or arguments.get("script_name") or "").strip()
     args_input = arguments.get("args")
     if not skill_name:
-        return "Error: skill_name (or skill) is required"
+        return "Error: skill_name (or skill) is required. Use the folder name from Available skills (SKILL.md)."
     try:
         meta = Util().get_core_metadata()
         if meta is None:
@@ -2224,27 +2345,52 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
             )
         return f"Error: skill has no scripts/ folder: {skill_name}. Use the skill's instructions in your response instead of run_skill."
     if not script_arg:
-        return "Error: script (or script_name) is required for this skill; it has a scripts/ folder."
+        return (
+            "Error: script (or script_name) is required for this skill; it has a scripts/ folder. "
+            "Use the skill's SKILL.md (name, description, usage) to choose the correct script and args for run_skill(skill_name, script, args)."
+        )
     # Normalize: LLMs sometimes pass full paths (e.g. /homeclaw/skills/.../get_weather.py or C:\...\get_weather.py); use only the script filename so path resolves under scripts_dir on any OS.
     script_arg_normalized = (script_arg or "").replace("\\", "/").strip()
     if "/" in script_arg_normalized or script_arg_normalized.startswith("."):
         script_arg_normalized = script_arg_normalized.rstrip("/").split("/")[-1] or script_arg_normalized
     # Strip any remaining path/leading chars so we never join an absolute path to scripts_dir
     script_arg_normalized = script_arg_normalized.lstrip("./\\").strip()
+    # Remove internal spaces so "smptp.j s" -> "smptp.js"
+    script_arg_normalized = script_arg_normalized.replace(" ", "")
     if not script_arg_normalized or ".." in script_arg_normalized:
         return "Error: script must be a filename under the skill's scripts/ directory (e.g. get_weather.py)."
     script_path = (scripts_dir / script_arg_normalized).resolve()
     try:
-        script_path.resolve().relative_to(scripts_dir)
-    except ValueError:
+        scripts_dir_resolved = scripts_dir.resolve()
+        script_path_resolved = script_path.resolve()
+        rel = script_path_resolved.relative_to(scripts_dir_resolved)
+        if ".." in str(rel) or str(rel).startswith(".."):
+            return "Error: script path must be under the skill's scripts/ directory"
+    except (ValueError, OSError):
         return "Error: script path must be under the skill's scripts/ directory"
-    if not script_path.is_file():
-        return f"Error: script not found: {script_arg_normalized} (under {skill_name}/scripts/)"
-    config = _get_tools_config()
+    # Unified fallback for all skills: if exact name not found, pick closest match in scripts/ (handles typos/spacing).
+    if not script_path_resolved.is_file():
+        try:
+            candidates = [f.name for f in scripts_dir.iterdir() if f.is_file()]
+            if candidates:
+                matches = difflib.get_close_matches(script_arg_normalized, candidates, n=1, cutoff=0.6)
+                if len(matches) == 1:
+                    script_arg_normalized = matches[0]
+                    script_path = (scripts_dir / script_arg_normalized).resolve()
+                    script_path_resolved = script_path.resolve()
+        except (OSError, TypeError):
+            pass
+    if not script_path_resolved.is_file():
+        return f"Error: script not found or not a file: {script_arg_normalized} (under {skill_name}/scripts/)"
+    script_path = script_path_resolved
+    config = _get_tools_config() or {}
     allowlist = config.get("run_skill_allowlist")
     if allowlist and script_path.name not in allowlist:
         return f"Error: script '{script_path.name}' is not in run_skill_allowlist. Allowed: {allowlist}"
-    timeout = int(config.get("run_skill_timeout", 60))
+    try:
+        timeout = max(1, int(config.get("run_skill_timeout", 60) or 60))
+    except (TypeError, ValueError):
+        timeout = 60
     # Resolve request output dir (user/companion output folder) when sandbox is active; pass to script via env so skills can save files there.
     skill_env = dict(os.environ)
     r_out = _resolve_file_path(FILE_OUTPUT_SUBDIR, context, for_write=True)
@@ -2256,15 +2402,16 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
     # Latest location (from client, e.g. Companion) has higher priority than profile.
     # For "System" / "companion" user, latest location is stored under shared key so check both uid and shared key.
     try:
+        core = getattr(context, "core", None)
         req = getattr(context, "request", None)
         uid = (getattr(context, "system_user_id", None) or (getattr(req, "user_id", None) if req else None)) or ""
         uid = (uid or "").strip()
         loc = None
-        if uid and hasattr(core, "_get_latest_location"):
+        if core and uid and hasattr(core, "_get_latest_location"):
             latest = core._get_latest_location(uid)
             if latest and isinstance(latest, str) and latest.strip():
                 loc = latest.strip()
-        if not loc and uid and (uid.lower() in ("system", "companion")) and hasattr(core, "_get_latest_location"):
+        if not loc and core and uid and (uid.lower() in ("system", "companion")) and hasattr(core, "_get_latest_location"):
             shared_key = getattr(core, "_LATEST_LOCATION_SHARED_KEY", "companion")
             latest = core._get_latest_location(shared_key)
             if latest and isinstance(latest, str) and latest.strip():
@@ -2285,6 +2432,14 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
             skill_env["HOMECLAW_USER_LOCATION"] = loc
     except Exception:
         pass
+    # Env from SKILL.md (script_env frontmatter + Configuration code block): defaults only, do not overwrite existing env.
+    try:
+        env_from_skill = _get_skill_env_from_skill_md(skill_folder)
+        for k, v in (env_from_skill or {}).items():
+            if k and k not in skill_env:
+                skill_env[k] = v
+    except Exception:
+        pass
     # Keyed skills: inject per-user API keys from user.yml, or use skill config/env when Companion without user.
     try:
         keyed_overrides, keyed_error = _get_keyed_skill_env_overrides(skill_name, context)
@@ -2294,10 +2449,24 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
         return keyed_error
     if isinstance(keyed_overrides, dict) and keyed_overrides:
         skill_env.update(keyed_overrides)
+    # Optional env from run_skill arguments (user/conversation input): overrides SKILL.md and keyed for this run.
+    # Skip empty values so the LLM cannot wipe SKILL.md/keyed defaults (e.g. env: { SMTP_HOST: '' }).
+    try:
+        req_env = arguments.get("env") or arguments.get("script_env")
+        if isinstance(req_env, dict) and req_env:
+            for k, v in req_env.items():
+                nk, nv = _normalize_skill_env_entry(k, v)
+                if nk is not None and (nv or "").strip() != "":
+                    skill_env[nk] = (nv or "").strip()
+    except Exception:
+        pass
     args_list: List[str] = []
     if args_input is not None:
         if isinstance(args_input, list):
-            args_list = [str(x) for x in args_input]
+            try:
+                args_list = [str(x) for x in args_input]
+            except Exception:
+                args_list = []
             # LLMs sometimes return one mangled string (e.g. '--prompt", "boat..."," --filename=...'); normalize so argparse gets proper argv
             if len(args_list) == 1 and '","' in args_list[0]:
                 raw = args_list[0]
@@ -2325,6 +2494,24 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
                     args_list = [p for p in parts if p]
         elif isinstance(args_input, str):
             args_list = [x.strip() for x in args_input.split() if x.strip()]
+    # When the model omits args, pass the current user message so scripts can use it (e.g. smtp.js send-from-message).
+    if not args_list:
+        try:
+            req = getattr(context, "request", None)
+            if req is not None:
+                user_text = (getattr(req, "text", None) or "").strip()
+                if user_text:
+                    skill_env["HOMECLAW_USER_MESSAGE"] = user_text
+        except Exception:
+            pass
+    # Cap args count and length to avoid DoS (inspired by sandbox limits).
+    try:
+        _max_args, _max_len = 512, 65536
+        if len(args_list) > _max_args:
+            args_list = args_list[:_max_args]
+        args_list = [str(a)[:_max_len] for a in args_list]
+    except Exception:
+        args_list = []
     try:
         if script_path.suffix.lower() in (".py", ".pyw"):
             # Default: subprocess (isolated, never break Core). In-process only when skill folder name is in run_skill_py_in_process_skills.
@@ -2336,7 +2523,11 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
             if in_process:
                 logger.info("run_skill: executing Python script in-process (Core Python: %s)", sys.executable)
                 loop = asyncio.get_event_loop()
-                env_for_process = keyed_overrides if isinstance(keyed_overrides, dict) else {}
+                # Pass only the delta so script sees same logical env as subprocess (HOMECLAW_*, SKILL.md, keyed, request env).
+                env_for_process = {
+                    k: skill_env[k] for k in skill_env
+                    if os.environ.get(k) != skill_env.get(k)
+                }
                 out_str, err_str = await asyncio.wait_for(
                     loop.run_in_executor(
                         None,
@@ -2555,12 +2746,76 @@ async def _process_kill_executor(arguments: Dict[str, Any], context: ToolContext
 
 
 # ---- File read (cross-platform; restricted to base path) ----
+def _resolve_skill_skill_md_path(path_arg: str) -> Optional[Path]:
+    """
+    Resolve path_arg like 'skill:folder' or 'skill:folder/SKILL.md' to the absolute Path of that skill's SKILL.md.
+    Returns None if not a skill: path or skill not found. Never raises.
+    """
+    try:
+        if not path_arg or not isinstance(path_arg, str):
+            return None
+        raw = path_arg.strip()
+        if len(raw) > 2048:
+            return None
+        if not raw.lower().startswith("skill:"):
+            return None
+        rest = raw[6:].strip().lstrip("/\\")
+        if not rest:
+            return None
+        folder_name = rest.split("/")[0].split("\\")[0].strip()
+        if not folder_name or ".." in folder_name:
+            return None
+        from base.util import Util
+        meta = Util().get_core_metadata()
+        if meta is None:
+            return None
+        root_val = Util().root_path()
+        if not root_val or not isinstance(root_val, str):
+            return None
+        root = Path(root_val)
+        if not root.is_dir():
+            return None
+        skills_dirs = get_all_skills_dirs(
+            getattr(meta, "skills_dir", None) or "skills",
+            (getattr(meta, "external_skills_dir", None) or "").strip(),
+            getattr(meta, "skills_extra_dirs", None) or [],
+            root,
+        )
+        skill_folder = resolve_skill_to_path(folder_name, skills_dirs)
+        if skill_folder is None or not skill_folder.is_dir():
+            return None
+        skill_md = (skill_folder / "SKILL.md").resolve()
+        if not skill_md.is_file():
+            return None
+        return skill_md
+    except Exception:
+        return None
+
+
 async def _file_read_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Read a file. When homeclaw_root is set: use 'share/...' for shared folder, or a path for your user or companion folder. When not set, absolute paths allowed."""
-    path_arg = (arguments.get("path") or "").strip()
+    """Read a file. When homeclaw_root is set: use 'share/...' for shared folder, or a path for your user or companion folder. When not set, absolute paths allowed. Use path 'skill:folder' to read a skill's SKILL.md."""
+    try:
+        path_arg = str(arguments.get("path") or "").strip()
+    except (TypeError, ValueError):
+        path_arg = ""
     if not path_arg:
         return "Path is required."
     try:
+        skill_md_path = _resolve_skill_skill_md_path(path_arg)
+        if skill_md_path is not None:
+            content = skill_md_path.read_text(encoding="utf-8", errors="replace")
+            config = _get_tools_config() or {}
+            try:
+                default_max = max(1, int(config.get("file_read_max_chars") or 0) or 32_000)
+            except (TypeError, ValueError):
+                default_max = 32_000
+            try:
+                max_chars = max(1, int(arguments.get("max_chars", 0)) or default_max)
+            except (TypeError, ValueError):
+                max_chars = default_max
+            if len(content) > max_chars:
+                content = content[:max_chars] + "\n... (truncated; increase max_chars if needed)"
+            return content
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
             return _file_resolve_error_msg(path_arg)
@@ -4904,6 +5159,8 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                     "script": {"type": "string", "description": "Script filename or path relative to the skill's scripts/ folder (e.g. run.sh, main.py, index.js, index.ts). Omit for instruction-only skills."},
                     "script_name": {"type": "string", "description": "Alias for script."},
                     "args": {"type": "array", "items": {"type": "string"}, "description": "Optional list of arguments to pass to the script."},
+                    "env": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Optional env vars for this run (e.g. SMTP_HOST, SMTP_USER). Overrides SKILL.md and keyed config for this call only. Keys must be valid env names (letters, numbers, underscore)."},
+                    "script_env": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Alias for env."},
                 },
                 "required": ["skill_name"],
             },

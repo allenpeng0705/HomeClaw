@@ -30,7 +30,7 @@ CONFIG_CORE_WHITELIST = frozenset({
     "skills_incremental_sync", "plugins_use_vector_search", "plugins_vector_collection",
     "plugins_max_retrieved", "plugins_similarity_threshold", "plugins_refresh_on_startup",
     "system_plugins_auto_start", "system_plugins", "system_plugins_env", "orchestrator_unified_with_tools",
-    "orchestrator_timeout_seconds", "inbound_request_timeout_seconds", "use_prompt_manager", "prompts_dir", "prompt_default_language",
+    "orchestrator_timeout_seconds", "inbound_request_timeout_seconds", "llm_completion_timeout_seconds", "use_prompt_manager", "prompts_dir", "prompt_default_language",
     "prompt_cache_ttl_seconds", "auth_enabled", "auth_api_key", "core_public_url", "tools", "result_viewer", "knowledge_base",
     "file_understanding", "llama_cpp", "completion", "local_models", "cloud_models", "main_llm",
     "embedding_llm", "main_llm_language", "embedding_host", "embedding_port", "main_llm_host", "main_llm_port",

@@ -1,0 +1,17 @@
+{
+  "name": "imap-smtp-email",
+  "description": "IMAP/SMTP email skill for HomeClaw — read and send email",
+  "private": true,
+  "version": "1.0.0",
+  "main": "scripts/smtp.js",
+  "scripts": {
+    "send": "node scripts/smtp.js",
+    "imap": "node scripts/imap.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "imap": "^0.8.19",
+    "mailparser": "^3.6.5",
+    "nodemailer": "^6.9.0"
+  }
+}

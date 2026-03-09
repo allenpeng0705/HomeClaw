@@ -34,7 +34,10 @@ skills_test_dir: ""                          # Optional: test folder for full sy
 skills_incremental_sync: false               # When true: only process skill folders not already in vector store (default: false)
 
 # --- Skills: body in prompt ---
-# For these skill folders only, include SKILL.md body (and USAGE.md) in the prompt so the model can answer "how do I use this?" and follow the workflow (e.g. Finder uses html-slides and ppt-generation to complete tasks).
+# When true (OpenClaw-style): inject only name, description, and location (skill:<folder>) into the prompt; the model reads SKILL.md on demand via file_read(path='skill:<folder>'). Reduces context tokens; set to true to save tokens.
+# When false (default): inject name, description, keywords, and optionally body; model infers script/args from the text.
+skills_use_location_only: false
+# For these skill folders only (when skills_use_location_only is false), include SKILL.md body (and USAGE.md) in the prompt so the model can answer "how do I use this?" and follow the workflow (e.g. Finder uses html-slides and ppt-generation to complete tasks).
 # Set skills_include_body_max_chars > 0 (e.g. 8000) in core.yml or below to cap body length; 0 = no truncation (default).
 skills_include_body_for: [maton-api-gateway-1.0.0, x-api-1.0.0, meta-social-1.0.0, html-slides-1.0.0, ppt-generation-1.0.0]
 
@@ -200,6 +203,16 @@ skills_force_include_rules:
     - "summarize|总结|摘要|概括|summarise|概括一下"
     folders: [summarize-1.0.0]
     instruction: "User asked to summarize. Use run_skill(skill_name='summarize-1.0.0', ...) or the summarize CLI / web_search as needed. Do not say you have no skill."
+  - patterns:
+    - "发封?邮件|发送邮件|发邮件|send\\s+email|write\\s+email|mail\\s+to"
+    folders: [imap-smtp-email]
+    instruction: "User asked to send or write an email. Use run_skill(skill_name='imap-smtp-email', script='smtp.js', args=['send', '--to', '<email>', '--subject', '<subject>', '--body', '<body>']). Do not claim the email was sent without calling the skill."
+    auto_invoke:
+      tool: run_skill
+      arguments:
+        skill_name: imap-smtp-email
+        script: smtp.js
+        args: ["send-from-message", "{{query}}"]
 
 # --- Plugins: vector search (RAG) ---
 # When false (default): include ALL plugins in the routing block. When true: vector store + RAG to pick top-N.

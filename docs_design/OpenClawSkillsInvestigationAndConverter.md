@@ -182,7 +182,38 @@ Recommendation: start with **GitHub** (clone or download per skill folder); opti
 
 ---
 
-## 6. References
+## 6. OpenClaw source reference (clawdbot)
+
+When aligning how HomeClaw runs skills and uses SKILL.md, refer to the **OpenClaw source** in the sibling repo **`../clawdbot`**. Key modules:
+
+### 6.1 Loading skills and SKILL.md
+
+- **`src/agents/skills/workspace.ts`** — `loadSkillEntries()` scans workspace/managed/bundled/extra dirs for folders with **SKILL.md**; parses frontmatter; `buildWorkspaceSkillsPrompt()` / `resolveSkillsPromptForRun()` build the prompt (name, description, **location** = path to SKILL.md).
+- **`src/agents/skills/frontmatter.ts`** — Parses YAML frontmatter; metadata (emoji, requires.bins/env), invocation policy, optional command-dispatch (tool name, arg mode).
+- **`src/agents/skills/types.ts`** — `SkillEntry`, `SkillCommandSpec` (name, skillName, description, optional dispatch to tool).
+
+### 6.2 How the agent uses skills (Read-then-follow)
+
+- **`src/agents/system-prompt.ts`** — Skills section: *"If exactly one skill clearly applies: read its SKILL.md at &lt;location&gt; with **Read**, then follow it."* The model does **not** call a generic run_skill(script, args); it uses **Read** to load SKILL.md, then follows the body (which may describe shell/scripts). Script execution is via the model running shell/exec from the doc.
+
+### 6.3 User-invokable commands (/command)
+
+- **`buildWorkspaceSkillCommandSpecs()`** (workspace.ts) — One `SkillCommandSpec` per skill; optional frontmatter `command-dispatch: tool` + `command-tool: <toolName>` so `/command args` invokes that tool with raw args.
+- **`src/auto-reply/skill-commands.ts`** — `resolveSkillCommandInvocation()` parses e.g. `/weather London` or `/skill weather London` and returns the command + args for the runner.
+
+### 6.4 OpenClaw vs HomeClaw (running skills)
+
+| Aspect | OpenClaw (clawdbot) | HomeClaw |
+|--------|---------------------|----------|
+| Discovery | Prompt lists name, description, **location** (path to SKILL.md). | Prompt lists name, description, folder, optional body. |
+| Use | Model **reads** SKILL.md at location with Read, then follows body (may run shell from doc). | Model calls **run_skill**(skill_name, script, args); script/args from SKILL.md. |
+| Scripts | Described in SKILL.md; model runs via shell/exec. | **run_skill** tool; Core runs script in scripts/ (Python/Node/shell). |
+
+**Takeaways:** (1) SKILL.md format is aligned. (2) Including **path to SKILL.md** in the prompt would let the model `file_read` it (OpenClaw-style). (3) HomeClaw keeps **run_skill(script, args)** for script execution. (4) OpenClaw `skills/skill-creator/SKILL.md` is a good reference for progressive disclosure and layout.
+
+---
+
+## 7. References
 
 - HomeClaw: `base/skills.py`, `tools/builtin.py` (`_run_skill_executor`), `skills/README.md`, `docs_design/SkillsGuide.md`.
 - OpenClaw: [Creating Skills](https://docs.openclaw.ai/tools/creating-skills), [Building Custom Skills](https://openclawai.me/blog/building-skills), [Skill Manifest Reference](https://openclawai.me/blog/skill-manifest-reference).

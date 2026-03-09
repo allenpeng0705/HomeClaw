@@ -878,10 +878,12 @@ async def answer_from_memory(
                 if skills_list:
                     selected_names = [s.get("folder") or s.get("name") or "?" for s in skills_list]
                     _component_log("skills", f"selected: {', '.join(selected_names)}")
-                # For skills in skills_include_body_for, re-load with body (and USAGE.md if present) so the model can answer "how do I use this?"
-                include_body_for = list(getattr(meta_skills, "skills_include_body_for", None) or [])
+                # OpenClaw-style: when skills_use_location_only is true, inject only name + description + location; model reads SKILL.md via file_read(path='skill:folder') to reduce context tokens.
+                use_location_only = bool(getattr(meta_skills, "skills_use_location_only", False))
+                _body_for_raw = getattr(meta_skills, "skills_include_body_for", None)
+                include_body_for = list(_body_for_raw) if isinstance(_body_for_raw, (list, tuple)) else []
                 body_max_chars = max(0, int(getattr(meta_skills, "skills_include_body_max_chars", 0) or 0))
-                if include_body_for:
+                if not use_location_only and include_body_for:
                     for i, s in enumerate(skills_list):
                         folder = (s.get("folder") or "").strip()
                         if folder and folder in include_body_for:
@@ -890,8 +892,8 @@ async def answer_from_memory(
                             )
                             if full_skill:
                                 skills_list[i] = full_skill
-                include_body = bool(include_body_for)
-                skills_block = build_skills_system_block(skills_list, include_body=include_body)
+                include_body = bool(include_body_for) and not use_location_only
+                skills_block = build_skills_system_block(skills_list, include_body=include_body, use_location_only=use_location_only)
                 if skills_block:
                     system_parts.append(skills_block)
                 force_include_instructions.extend(matched_instructions)
@@ -1975,6 +1977,16 @@ async def answer_from_memory(
                             response = None
 
         if response is None or (isinstance(response, str) and len(response.strip()) == 0):
+            try:
+                err_hint = (getattr(Util(), "_last_llm_error", None) or "")
+                err_hint = str(err_hint).strip() if err_hint else ""
+            except Exception:
+                err_hint = ""
+            if err_hint:
+                try:
+                    return "Sorry, something went wrong. {} Please try again. (对不起，出错了，请再试一次)".format(err_hint)
+                except Exception:
+                    return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
             return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
         # If the model echoed raw "[]" (e.g. from empty folder_list/file_find), show a friendly message instead
         if isinstance(response, str) and response.strip() == "[]":

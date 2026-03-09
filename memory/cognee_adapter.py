@@ -285,9 +285,17 @@ class CogneeMemory(MemoryBase):
                 else:
                     first = msg.split("\n")[0].strip()
                     summary = first[:300] if first else "Cognify failed"
-                logger.debug("Cognee add/cognify failed: {}", summary)
+                summary = summary or "Cognee add/cognify error"
             else:
-                logger.debug("Cognee add/cognify: {}", msg)
+                summary = msg or "Cognee add/cognify error"
+            # Known Cognee/litellm template errors (e.g. Jinja "System message must be at the beginning") are upstream; log at WARNING so user sees it once.
+            if "Jinja" in summary or "System message must be" in summary or "raise_exception" in summary:
+                logger.warning(
+                    "Cognee add/cognify failed (memory add skipped): %s. This is a known Cognee/litellm template issue; chat and tools are unaffected.",
+                    summary[:200],
+                )
+            else:
+                logger.debug("Cognee add/cognify failed: %s", summary)
         return [{"id": memory_id, "event": "add", "data": data}]
 
     async def search(

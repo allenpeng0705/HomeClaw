@@ -1,6 +1,11 @@
 ---
 name: imap-smtp-email
 description: Read and send email via IMAP/SMTP. Check for new/unread messages, fetch content, search mailboxes, mark as read/unread, and send emails with attachments. Works with any IMAP/SMTP server including Gmail, Outlook, 163.com, vip.163.com, 126.com, vip.126.com, 188.com, and vip.188.com.
+keywords: [ "email", "send email", "发邮件", "发送邮件", "发封邮件", "邮件", "IMAP", "SMTP" ]
+trigger:
+  patterns:
+    - "发封?邮件|发送邮件|发邮件|send\\s+email|write\\s+email|mail\\s+to"
+  instruction: "User asked to send or write an email. You MUST compose a proper email from the user's intent: choose a short subject and a refined body (do not use the user's raw message as the body). Call run_skill(skill_name='imap-smtp-email', script='smtp.js', args=['send', '--to=<recipient>', '--subject=<subject>', '--body=<your composed body>']). Extract recipient from the request; body must be the actual message content you write, not the user's instruction text."
 metadata:
   openclaw:
     emoji: "📧"
@@ -22,16 +27,34 @@ metadata:
 
 Read, search, and manage email via IMAP protocol. Send email via SMTP. Supports Gmail, Outlook, 163.com, vip.163.com, 126.com, vip.126.com, 188.com, vip.188.com, and any standard IMAP/SMTP server.
 
+## Install dependencies
+
+From the skill folder (e.g. `external_skills/imap-smtp-email` or `config/skills/imap-smtp-email`), run:
+
+```bash
+npm install
+```
+
+This installs `nodemailer`, `dotenv`, `imap`, and `mailparser`. Required before using the skill.
+
 ## Configuration
 
-Create `.env` in the skill folder or set environment variables:
+Variables can come from **SKILL.md** or **user input**; merge order is stable and robust (later overrides earlier):
+
+1. **System environment** (base)
+2. **SKILL.md**: frontmatter `script_env` (if present) and the **first code block below** (KEY=VALUE lines)
+3. **User config**: per-skill keys from user config (e.g. user.yml)
+4. **User input for this run**: optional `env` (or `script_env`) in the `run_skill` call
+5. **Script `.env`**: the script also loads `.env` in the skill folder (Node `dotenv`), which can override the above
+
+Use the code block below for defaults; put secrets in `.env` (gitignored) or user config when possible.
 
 ```bash
 # IMAP Configuration (receiving email)
 IMAP_HOST=imap.gmail.com          # Server hostname
 IMAP_PORT=993                     # Server port
 IMAP_USER=shileipeng@email.com
-IMAP_PASS=
+IMAP_PASS=cmpdmqzubstfnigw
 IMAP_TLS=true                     # Use TLS/SSL connection
 IMAP_REJECT_UNAUTHORIZED=true     # Set to false for self-signed certs
 IMAP_MAILBOX=INBOX                # Default mailbox
@@ -41,7 +64,7 @@ SMTP_HOST=smtp.gmail.com          # SMTP server hostname
 SMTP_PORT=587                     # SMTP port (587 for STARTTLS, 465 for SSL)
 SMTP_SECURE=false                 # true for SSL (465), false for STARTTLS (587)
 SMTP_USER=shileipeng@gmail.com          # Your email address
-SMTP_PASS=           # Your password or app password
+SMTP_PASS=cmpdmqzubstfnigw          # Your password or app password
 SMTP_FROM=shileipeng@gmail.com          # Default sender email (optional)
 SMTP_REJECT_UNAUTHORIZED=true     # Set to false for self-signed certs
 ```
@@ -160,9 +183,11 @@ node scripts/smtp.js send --to <email> --subject <text> [options]
 - `--attach <file>`: Attachments (comma-separated)
 - `--from <email>`: Override default sender
 
+**Important:** When the user asks to send an email, compose a **refined subject and body** from their intent (e.g. "告诉他 homeclaw 可以发邮件了" → subject like "HomeClaw 功能更新", body like "你好，HomeClaw 现在可以发邮件了，特此告知。"). Do not pass the user's raw sentence as the body.
+
 **Examples:**
 ```bash
-# Simple text email
+# Simple text email (body = the actual message content, not the user's instruction)
 node scripts/smtp.js send --to recipient@example.com --subject "Hello" --body "World"
 
 # HTML email

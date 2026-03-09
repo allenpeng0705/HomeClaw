@@ -1,10 +1,12 @@
 # Skills (SKILL.md format)
 
-**Full guide:** See **docs/SkillsGuide.md** for a complete user and developer guide: introduction, how to use skills, how to implement them, how to test them, and config reference.
+**Full guide:** See **docs/SkillsGuide.md** (or **docs_design/SkillsGuide.md**) for a complete user and developer guide: introduction, how to use skills, how to implement them, how to test them, and config reference. For how **OpenClaw** runs skills and uses SKILL.md (source code in **`../clawdbot`**), see **docs_design/OpenClawSkillsInvestigationAndConverter.md** §6–7 (OpenClaw source reference).
 
 **Tools vs skills:** In HomeClaw, **tools** are the **static base**—callable actions (exec, browser, cron, sessions_*, memory, file, web, **route_to_plugin**, run_skill, etc.). **Skills** are the **application layer**: each skill is a task-oriented instruction package (SKILL.md) that tells the agent *how* to use tools (and plugins) to finish tasks. So: tools = capabilities; skills = know-how.
 
 **Can skills use plugins?** Yes. Skills don’t call tools or plugins directly — the **agent** does. The agent has the **route_to_plugin** tool (plugin_id, capability_id, parameters). When a skill says “use the browser to navigate to X,” the agent can call **route_to_plugin**(plugin_id="homeclaw-browser", capability_id="browser_navigate", parameters={url: X}). So when browser (or canvas, nodes) are provided by the **homeclaw-browser** plugin (with tools.browser_enabled: false), skills that refer to browser/canvas/nodes still work: the agent uses route_to_plugin with the right capability_id. See **docs_design/ToolsSkillsPlugins.md** (§2.2 “Can skills use plugins?”).
+
+**SKILL.md is the single source of truth.** All information about how to use a skill—what it does, which script to run, and which arguments to pass—comes from SKILL.md (frontmatter + body). The model infers `run_skill(skill_name, script, args)` from the skill description and usage in SKILL.md. Core does not add per-skill logic; it loads SKILL.md and injects it into the prompt so the agent can call the skill correctly.
 
 When **use_skills: true** in `config/core.yml`, HomeClaw scans this directory for **skill folders**: each subfolder that contains a **SKILL.md** file is loaded and injected into the system prompt as "Available skills". When **skills_use_vector_search** is true, the text we **embed for RAG** is: **name** + **description** + **keywords** + **trigger** (instruction snippet + pattern terms from `trigger:` in SKILL.md). So adding **keywords** and/or **trigger** improves skill selection for user queries. See **docs_design/SkillsRAGContent.md** for details.
 

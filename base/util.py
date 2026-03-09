@@ -1161,7 +1161,8 @@ class Util:
 
             #logger.debug(f"Message Request to LLM: {data_json}")
             chat_completion_api_url = 'http://' + model_host + ':' + str(model_port) + '/v1/chat/completions'
-            timeout_sec = 300
+            meta = Util().get_core_metadata()
+            timeout_sec = max(60, int(getattr(meta, 'llm_completion_timeout_seconds', 300) or 300))
             timeout = aiohttp.ClientTimeout(total=timeout_sec)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(chat_completion_api_url, headers=headers, data=data_json) as resp:
@@ -1172,12 +1173,35 @@ class Util:
                     #logger.debug(f"Original Response from LLM: {resp_json}")
                     if isinstance(resp_json, dict) and 'choices' in resp_json:
                         if isinstance(resp_json['choices'], list) and len(resp_json['choices']) > 0:
-                            if 'message' in resp_json['choices'][0] and 'content' in resp_json['choices'][0]['message']:
-                                message_content = resp_json['choices'][0]['message']['content'].strip()
+                            choice0 = resp_json['choices'][0]
+                            msg = (choice0.get('message') or {}) if isinstance(choice0, dict) else {}
+                            if not isinstance(msg, dict):
+                                msg = {}
+                            content_val = msg.get('content') or None
+                            try:
+                                content_len = len(content_val) if isinstance(content_val, (str, bytes)) else (len(content_val) if content_val is not None and hasattr(content_val, "__len__") else 0)
+                            except Exception:
+                                content_len = 0
+                            tool_calls_raw = msg.get('tool_calls')
+                            tool_calls_list = tool_calls_raw if isinstance(tool_calls_raw, list) else []
+                            num_tool_calls = len(tool_calls_list)
+                            logger.info(
+                                "LLM responded ({}:{}): role={} content_length={} tool_calls={}",
+                                model_host, model_port,
+                                msg.get('role', 'assistant'),
+                                content_len,
+                                num_tool_calls,
+                            )
+                            try:
+                                content_preview = (content_val if isinstance(content_val, str) else str(content_val))[:2000] if content_val is not None else "(empty)"
+                            except Exception:
+                                content_preview = "(unable to preview)"
+                            logger.debug("LLM response content: {}", content_preview)
+                            if 'content' in msg and msg['content']:
+                                message_content = msg['content'].strip() if isinstance(msg['content'], str) else ""
                                 # Filter out the <think> tag and its content
                                 filtered_message_content = self.process_text(message_content)
                                 if filtered_message_content is not None:
-                                    logger.debug(f"Message Response from LLM: {message_content}")
                                     return filtered_message_content
                                 else:
                                     #logger.error("filtered message content is None")
@@ -1191,7 +1215,26 @@ class Util:
             logger.info("LLM chat completion was cancelled (e.g. client disconnected)")
             return None
         except Exception as e:
-            logger.exception(e)
+            err_str = str(e).lower()
+            _is_conn_err = (
+                "connection refused" in err_str
+                or "connection reset" in err_str
+                or "cannot connect" in err_str
+                or "refused" in err_str
+                or "network name is no longer available" in err_str
+                or "winerror 64" in err_str
+                or isinstance(e, (ConnectionResetError, ConnectionAbortedError))
+                or (isinstance(e, OSError) and getattr(e, "winerror", None) == 64)
+            )
+            if not _is_conn_err and hasattr(e, "__cause__") and e.__cause__ is not None:
+                _is_conn_err = isinstance(e.__cause__, (ConnectionResetError, ConnectionAbortedError))
+            if _is_conn_err:
+                logger.warning(
+                    "LLM unreachable at {}:{} — is the server running? Start the model server (or Core) and try again. Error: {}",
+                    model_host, model_port, e,
+                )
+            else:
+                logger.exception(e)
             return None
 
     async def plugin_llm_generate(
@@ -1289,8 +1332,8 @@ class Util:
                 data.setdefault("extra_body", {}).update(extra_body_params)
             data_json = json.dumps(data, ensure_ascii=False) if self.is_utf8_compatible(data) else json.dumps(data, ensure_ascii=False).encode("utf-8")
             chat_completion_api_url = "http://" + model_host + ":" + str(model_port) + "/v1/chat/completions"
-            # Generous timeout for tool-augmented calls (e.g. search + reply). Prevents indefinite wait.
-            timeout_sec = 300
+            meta = Util().get_core_metadata()
+            timeout_sec = max(60, int(getattr(meta, 'llm_completion_timeout_seconds', 300) or 300))
             timeout = aiohttp.ClientTimeout(total=timeout_sec)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(chat_completion_api_url, headers=headers, data=data_json) as resp:
@@ -1300,6 +1343,10 @@ class Util:
                             "Local LLM returned HTTP {} ({}:{}). Response: {}",
                             resp.status, model_host, model_port, (resp_text or "")[:500],
                         )
+                        try:
+                            setattr(self, "_last_llm_error", "The model server at {}:{} returned HTTP {}. Check that the server is running and the model is loaded.".format(model_host, model_port, resp.status))
+                        except Exception:
+                            setattr(self, "_last_llm_error", "The model server returned an error. Check Core logs.")
                         return None
                     try:
                         resp_json = json.loads(resp_text) if resp_text else {}
@@ -1308,35 +1355,114 @@ class Util:
                             "Local LLM response is not JSON ({}:{}): {}",
                             model_host, model_port, (resp_text or "")[:300],
                         )
+                        setattr(self, "_last_llm_error", "The model server returned invalid JSON. Check Core logs.")
                         return None
                     if isinstance(resp_json, dict) and "choices" in resp_json and len(resp_json["choices"]) > 0:
-                        msg = resp_json["choices"][0].get("message", {})
+                        choice0 = resp_json["choices"][0]
+                        msg = choice0.get("message") if isinstance(choice0, dict) else None
+                        if not isinstance(msg, dict):
+                            msg = {}
+                        content_val = msg.get("content") or None
+                        # When content is empty, log raw server response at DEBUG so you can see why (e.g. wrong template, no tool_calls schema).
+                        if not (content_val and str(content_val).strip()):
+                            finish = choice0.get("finish_reason", "")
+                            logger.debug(
+                                "Local LLM returned empty content ({}:{}). finish_reason=%s message_keys=%s usage=%s",
+                                model_host, model_port,
+                                finish,
+                                list(msg.keys()) if isinstance(msg, dict) else "?",
+                                resp_json.get("usage", ""),
+                            )
+                        # Always log what the LLM responded (summary at INFO, full at DEBUG); never crash on malformed response
+                        try:
+                            content_len = len(content_val) if isinstance(content_val, (str, bytes)) else (len(content_val) if content_val is not None and hasattr(content_val, "__len__") else 0)
+                        except Exception:
+                            content_len = 0
+                        tool_calls_raw = msg.get("tool_calls")
+                        tool_calls_list = tool_calls_raw if isinstance(tool_calls_raw, list) else []
+                        num_tool_calls = len(tool_calls_list)
+                        logger.info(
+                            "LLM responded ({}:{}): role={} content_length={} tool_calls={}",
+                            model_host, model_port,
+                            msg.get("role", "assistant"),
+                            content_len,
+                            num_tool_calls,
+                        )
+                        try:
+                            content_preview = (content_val if isinstance(content_val, str) else str(content_val))[:2000] if content_val is not None else "(empty)"
+                        except Exception:
+                            content_preview = "(unable to preview)"
+                        logger.debug("LLM response content: {}", content_preview)
+                        if tool_calls_list:
+                            try:
+                                tc_previews = []
+                                for tc in tool_calls_list:
+                                    if not isinstance(tc, dict):
+                                        continue
+                                    fn = tc.get("function") or {}
+                                    name = fn.get("name") if isinstance(fn, dict) else None
+                                    args_str = (fn.get("arguments") or "") if isinstance(fn, dict) else ""
+                                    args_preview = (args_str[:200] if isinstance(args_str, str) else str(args_str)[:200])
+                                    tc_previews.append((name, args_preview))
+                                if tc_previews:
+                                    logger.debug("LLM response tool_calls: {}", tc_previews)
+                            except Exception:
+                                logger.debug("LLM response tool_calls: (unable to parse)")
                         # Return message in OpenAI shape: role, content, tool_calls (optional)
-                        out = {"role": msg.get("role", "assistant"), "content": msg.get("content") or None}
+                        out = {"role": msg.get("role", "assistant"), "content": content_val}
                         if "tool_calls" in msg and msg["tool_calls"]:
                             out["tool_calls"] = msg["tool_calls"]
+                        setattr(self, "_last_llm_error", None)
                         return out
                     err_msg = (resp_json.get("error") or resp_json.get("message") or "").strip() if isinstance(resp_json, dict) else ""
                     logger.warning(
                         "Local LLM response has no choices ({}:{}). {}",
                         model_host, model_port, err_msg or "Check that the server is the correct model and loaded.",
                     )
+                    try:
+                        setattr(self, "_last_llm_error", "The model returned no valid response. Check that the correct model is loaded on {}:{}.".format(model_host, model_port))
+                    except Exception:
+                        setattr(self, "_last_llm_error", "The model returned no valid response. Check Core logs.")
                     return None
         except asyncio.TimeoutError:
             logger.warning("LLM chat completion timed out after {}s ({}:{})", timeout_sec, model_host, model_port)
+            try:
+                setattr(self, "_last_llm_error", "Request timed out ({}s). Try again or increase llm_completion_timeout_seconds in config.".format(timeout_sec))
+            except Exception:
+                setattr(self, "_last_llm_error", "Request timed out. Try again or increase llm_completion_timeout_seconds in config.")
             return None
         except asyncio.CancelledError:
             logger.info("LLM chat completion was cancelled (e.g. client disconnected)")
+            setattr(self, "_last_llm_error", None)
             return None
         except Exception as e:
             err_str = str(e).lower()
-            if "connection refused" in err_str or "connection reset" in err_str or "cannot connect" in err_str or "connectorerror" in err_str:
+            _is_conn_err = (
+                "connection refused" in err_str
+                or "connection reset" in err_str
+                or "cannot connect" in err_str
+                or "connectorerror" in err_str
+                or "refused" in err_str
+                or "network name is no longer available" in err_str
+                or "winerror 64" in err_str
+                or "no longer available" in err_str
+                or isinstance(e, (ConnectionResetError, ConnectionAbortedError))
+                or (isinstance(e, OSError) and getattr(e, "winerror", None) == 64)
+            )
+            if not _is_conn_err and hasattr(e, "__cause__") and e.__cause__ is not None:
+                _is_conn_err = isinstance(e.__cause__, (ConnectionResetError, ConnectionAbortedError))
+            if _is_conn_err:
                 logger.warning(
-                    "Local LLM unreachable at {}:{} — is the server running? Start Core so it starts the main model, or run llama-server manually on that port. Error: {}",
+                    "Local LLM unreachable at {}:{} — is the server running? Start the model server (or Core so it starts the main LLM) and try again. Error: {}",
                     model_host, model_port, e,
                 )
+                try:
+                    setattr(self, "_last_llm_error", "The model server at {}:{} was unreachable. Start the LLM server (or Core) and try again.".format(model_host, model_port))
+                except Exception:
+                    setattr(self, "_last_llm_error", "The model server was unreachable. Start the LLM server and try again.")
             else:
                 logger.exception(e)
+                setattr(self, "_last_llm_error", "The model call failed. Check Core logs for details.")
             return None
 
     

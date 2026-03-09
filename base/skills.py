@@ -27,28 +27,39 @@ def _parse_skill_md(content: str) -> Dict[str, Any]:
     """
     Parse SKILL.md: YAML frontmatter between --- and ---, then body.
     Returns {"name": str, "description": str, "body": str, **frontmatter}.
+    Never raises: on any error returns a dict with at least name, description, body (safe strings).
     """
     result: Dict[str, Any] = {"name": "", "description": "", "body": ""}
-    if not content or "---" not in content:
+    try:
+        if content is None:
+            content = ""
+        content = str(content)
+    except Exception:
+        content = ""
+    if "---" not in content:
         result["body"] = content or ""
         return result
     parts = content.split("---", 2)
     if len(parts) < 3:
-        result["body"] = content
+        result["body"] = (content or "").strip()
         return result
-    # parts[0] may be empty or whitespace before first ---
-    frontmatter_str = parts[1].strip()
-    result["body"] = parts[2].strip()
+    frontmatter_str = (parts[1] or "").strip()
+    result["body"] = (parts[2] or "").strip()
     if not frontmatter_str:
         return result
     try:
         fm = yaml.safe_load(frontmatter_str)
         if isinstance(fm, dict):
-            result["name"] = fm.get("name") or ""
-            result["description"] = fm.get("description") or ""
+            result["name"] = str(fm.get("name") or "").strip()
+            result["description"] = str(fm.get("description") or "").strip()
             for k, v in fm.items():
-                if k not in result:
-                    result[k] = v
+                if k in ("name", "description", "body"):
+                    continue
+                try:
+                    if k and isinstance(k, str) and not k.startswith("_"):
+                        result[k] = v
+                except Exception:
+                    pass
     except Exception as e:
         logger.warning("Failed to parse SKILL.md frontmatter: {}", e)
     return result
@@ -76,14 +87,17 @@ def _append_usage_if_present(skill_dir: Path, parsed: Dict[str, Any]) -> None:
 
 
 def get_skills_dir(config_dir: Optional[str] = None, root: Optional[Path] = None) -> Path:
-    """Return skills directory. If config_dir is relative, resolve against root or project root. Absolute paths are used as-is (e.g. folder outside project)."""
-    base = root or _PROJECT_ROOT
-    if config_dir:
-        p = Path(config_dir.strip())
-        if not p.is_absolute():
-            p = base / p
-        return p
-    return (base or _PROJECT_ROOT) / "skills"
+    """Return skills directory. If config_dir is relative, resolve against root or project root. Never raises."""
+    try:
+        base = root if root is not None else _PROJECT_ROOT
+        if config_dir is not None and str(config_dir).strip():
+            p = Path(str(config_dir).strip())
+            if not p.is_absolute():
+                p = base / p
+            return p
+        return (base or _PROJECT_ROOT) / "skills"
+    except Exception:
+        return _PROJECT_ROOT / "skills"
 
 
 def get_all_skills_dirs(
@@ -130,15 +144,17 @@ def load_skills(skills_dir: Optional[Path] = None, include_body: bool = True) ->
         try:
             content = skill_file.read_text(encoding="utf-8", errors="replace")
             parsed = _parse_skill_md(content)
+            if not isinstance(parsed, dict):
+                continue
             parsed["path"] = str(item)
-            parsed["folder"] = item.name  # folder name under skills_dir; use as skill_name in run_skill
+            parsed["folder"] = getattr(item, "name", None) or str(item)  # skill_name for run_skill
             if not include_body:
                 parsed.pop("body", None)
             elif parsed.get("body") is not None:
                 _append_usage_if_present(item, parsed)
             if parsed.get("name") or parsed.get("description") or parsed.get("body"):
                 skills.append(parsed)
-                logger.debug("Loaded skill: {} from {}", parsed.get("name") or item.name, item)
+                logger.debug("Loaded skill: {} from {}", parsed.get("name") or parsed.get("folder"), item)
         except Exception as e:
             logger.warning("Failed to load skill from {}: {}", skill_file, e)
     return skills
@@ -392,15 +408,18 @@ def load_skill_by_folder(
     try:
         content = skill_file.read_text(encoding="utf-8", errors="replace")
         parsed = _parse_skill_md(content)
+        if not isinstance(parsed, dict):
+            return None
         parsed["path"] = str(item)
-        parsed["folder"] = item.name
+        parsed["folder"] = getattr(item, "name", None) or str(item)
         if not include_body:
             parsed.pop("body", None)
         elif parsed.get("body") is not None:
             _append_usage_if_present(item, parsed)
-            if body_max_chars > 0 and len(parsed["body"]) > body_max_chars:
+            body_val = parsed.get("body") or ""
+            if body_max_chars > 0 and len(body_val) > body_max_chars:
                 parsed["body"] = (
-                    parsed["body"][:body_max_chars].rstrip()
+                    body_val[:body_max_chars].rstrip()
                     + "\n\n*(Body truncated; see SKILL.md in skill folder for full text.)*"
                 )
         return parsed
@@ -457,20 +476,59 @@ def _skill_keywords_line(skill: Dict[str, Any]) -> str:
         return ""
 
 
-def build_skills_system_block(skills: List[Dict[str, Any]], include_body: bool = False) -> str:
+def build_skills_system_block(
+    skills: List[Dict[str, Any]],
+    include_body: bool = False,
+    use_location_only: bool = False,
+) -> str:
     """
-    Build a system-prompt block listing available skills (name + description, keywords, optionally body).
-    Includes folder and short-name hints so the LLM can call run_skill(skill_name=<folder or short name>) accurately.
+    Build a system-prompt block listing available skills.
+
+    When use_location_only is True (OpenClaw-style): inject only name, description, and location
+    (path for file_read). Instruction: read SKILL.md at <location> with file_read, then follow it.
+    Reduces context tokens; model loads skill content on demand.
+
+    When use_location_only is False: inject name, description, keywords, and optionally body.
+    Instruction: infer script/args from description/body and call run_skill. Never raises.
     """
     if not skills:
         return ""
+    if use_location_only:
+        lines = [
+            "## Available skills",
+            "Before using a skill: scan the list below by <description>. If exactly one skill clearly applies, read its SKILL.md with file_read(path='<location>'), then follow the instructions in that file (including calling run_skill(skill_name, script, args) when the skill has scripts). If multiple could apply, choose the most specific one. If none apply, do not read any SKILL.md.",
+            "Locations use the form skill:<folder>; pass that string as path to file_read (e.g. file_read(path='skill:imap-smtp-email')).",
+            "",
+        ]
+        for s in skills:
+            try:
+                if not isinstance(s, dict):
+                    continue
+                name = str(s.get("name") or "(unnamed)").strip() or "(unnamed)"
+                folder = str(s.get("folder") or "").strip()
+                folder = "".join(c for c in folder if c not in "\n\r").strip()
+                if not folder:
+                    continue
+                desc = str(s.get("description") or "").strip()
+                location = f"skill:{folder}"
+                line = f"- **{name}** — {desc}" if desc else f"- **{name}**"
+                lines.append(line)
+                lines.append(f"  location: {location}")
+            except Exception:
+                continue
+            lines.append("")
+        return "\n".join(lines).strip() + "\n\n" if lines else ""
+
     lines = [
         "## Available skills",
-        "Match the user's request to one skill by name, description, or keywords. Call run_skill(skill_name=<folder or short name>); short names (e.g. html-slides, html slides) work.",
+        "All information about how to use each skill is in SKILL.md (shown below). Infer the script name and arguments from the skill description and body.",
+        "When a skill has a scripts/ folder, you MUST call run_skill(skill_name=<folder>, script=<filename from SKILL.md>, args=[...] as shown in usage). Short names (e.g. html-slides) resolve to the folder name.",
         "",
     ]
     for s in skills:
         try:
+            if not isinstance(s, dict):
+                continue
             name = str(s.get("name") or "(unnamed)").strip() or "(unnamed)"
             folder = str(s.get("folder") or "").strip()
             desc = str(s.get("description") or "").strip()
@@ -489,7 +547,7 @@ def build_skills_system_block(skills: List[Dict[str, Any]], include_body: bool =
         except Exception:
             continue
         lines.append("")
-    lines.append("Skills without a scripts/ folder are instruction-only: call run_skill(skill_name=<folder or short name>) with no script, then follow that skill's instructions.")
+    lines.append("Skills without a scripts/ folder are instruction-only: call run_skill(skill_name=<folder>) with no script, then follow that skill's instructions in the body above.")
     return "\n".join(lines).strip() + "\n\n"
 
 
@@ -498,35 +556,38 @@ def build_skill_refined_text(skill: Dict[str, Any], body_max_chars: int = 0) -> 
     Build the text to embed for a skill. Used as the single index vector for RAG.
     Embedded: name, description, keywords, trigger (instruction snippet + pattern terms), optionally body.
     body_max_chars=0 (default): do not include body; body is in the prompt when skill is selected.
+    Never raises: returns "" on any error so RAG sync never crashes.
     """
-    name = (skill.get("name") or "").strip()
-    desc = (skill.get("description") or "").strip()
-    parts = [name, desc] if name and desc else [name or desc]
-    if body_max_chars and skill.get("body"):
-        body = (skill["body"] or "").strip()[:body_max_chars]
-        if body:
-            parts.append(body)
-    # Optional frontmatter "keywords" (string or list) for better RAG match across languages
-    keywords = skill.get("keywords")
-    if keywords:
-        kw_str = " ".join(keywords) if isinstance(keywords, (list, tuple)) else str(keywords).strip()
-        if kw_str:
-            parts.append(kw_str)
-    # Trigger: include instruction snippet and pattern terms so RAG matches user phrases (e.g. "how's the weather", "天气")
-    trigger = skill.get("trigger") if isinstance(skill.get("trigger"), dict) else None
-    if trigger:
-        instr = (trigger.get("instruction") or "").strip()[:200]
-        if instr:
-            parts.append(instr)
-        patterns = trigger.get("patterns") or ([trigger.get("pattern")] if trigger.get("pattern") else [])
-        for pat in patterns:
-            if not pat or not isinstance(pat, str):
-                continue
-            # Turn regex into searchable words: "weather|forecast|天气" -> "weather forecast 天气"
-            words = re.sub(r"[\\^$.*+?()\[\]{}|]", " ", pat).replace("'", " ").split()
-            if words:
-                parts.append(" ".join(words))
-    return "\n".join(parts).strip() or ""
+    try:
+        if not isinstance(skill, dict):
+            return ""
+        name = str(skill.get("name") or "").strip()
+        desc = str(skill.get("description") or "").strip()
+        parts = [name, desc] if name and desc else [name or desc]
+        if body_max_chars and skill.get("body"):
+            body = (str(skill.get("body") or "").strip())[: body_max_chars]
+            if body:
+                parts.append(body)
+        keywords = skill.get("keywords")
+        if keywords:
+            kw_str = " ".join(keywords) if isinstance(keywords, (list, tuple)) else str(keywords).strip()
+            if kw_str:
+                parts.append(kw_str)
+        trigger = skill.get("trigger") if isinstance(skill.get("trigger"), dict) else None
+        if trigger:
+            instr = (str(trigger.get("instruction") or "").strip())[:200]
+            if instr:
+                parts.append(instr)
+            patterns = trigger.get("patterns") or ([trigger.get("pattern")] if trigger.get("pattern") else [])
+            for pat in patterns:
+                if not pat or not isinstance(pat, str):
+                    continue
+                words = re.sub(r"[\\^$.*+?()\[\]{}|]", " ", pat).replace("'", " ").split()
+                if words:
+                    parts.append(" ".join(words))
+        return "\n".join(parts).strip() or ""
+    except Exception:
+        return ""
 
 
 TEST_ID_PREFIX = "test__"
