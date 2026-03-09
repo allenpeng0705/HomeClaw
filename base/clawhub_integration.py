@@ -35,6 +35,64 @@ def clawhub_available() -> bool:
         return False
 
 
+def clawhub_whoami(*, timeout_s: int = 10) -> Tuple[bool, str]:
+    """
+    Run `clawhub whoami` to check if the user is logged in.
+    Returns (logged_in, message). Never raises.
+    """
+    if not clawhub_available():
+        return (False, "clawhub not found on PATH")
+    r = _run_cmd(["clawhub", "whoami"], timeout_s=timeout_s)
+    if not r.ok:
+        return (False, (r.stderr or r.stdout or r.error or "Not logged in").strip() or "Not logged in")
+    out = (r.stdout or "").strip()
+    return (True, out or "Logged in")
+
+
+# Pattern to find a URL in clawhub login output (e.g. "Open https://... to authenticate")
+_URL_RE = re.compile(r"https?://[^\s\)\]\"']+")
+
+
+def clawhub_login(*, timeout_s: int = 45) -> Dict[str, Any]:
+    """
+    Run `clawhub login` to start the auth flow. When run without a TTY, many OAuth CLIs
+    print a URL to stdout. We capture that and return it so the Companion can show "Open in browser".
+    Returns dict with: ok (bool), url (str or None), message (str), stdout (str), stderr (str).
+    Never raises.
+    """
+    if not clawhub_available():
+        return {"ok": False, "url": None, "message": "clawhub not found on PATH", "stdout": "", "stderr": ""}
+    r = _run_cmd(["clawhub", "login"], timeout_s=timeout_s)
+    combined = f"{r.stdout or ''}\n{r.stderr or ''}"
+    url = None
+    for m in _URL_RE.finditer(combined):
+        candidate = m.group(0).rstrip(".,;:")
+        if any(x in candidate.lower() for x in ("github", "openclaw", "clawhub", "convex", "auth")):
+            url = candidate
+            break
+    if not url:
+        first = _URL_RE.search(combined)
+        if first:
+            url = first.group(0).rstrip(".,;:")
+    if url:
+        return {
+            "ok": True,
+            "url": url,
+            "message": "Open the URL in a browser on this device (or the machine running Core) to complete GitHub login.",
+            "stdout": r.stdout or "",
+            "stderr": r.stderr or "",
+        }
+    if r.ok:
+        return {"ok": True, "url": None, "message": "Login may have completed. Check with whoami.", "stdout": r.stdout or "", "stderr": r.stderr or ""}
+    return {
+        "ok": False,
+        "url": None,
+        "message": (r.stderr or r.stdout or r.error or "Login failed").strip() or "Run 'clawhub login' in a terminal on the machine running Core.",
+        "stdout": r.stdout or "",
+        "stderr": r.stderr or "",
+    }
+
+
 def _run_cmd(
     argv: List[str],
     *,

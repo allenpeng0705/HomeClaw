@@ -305,6 +305,18 @@ def register_all_routes(core: Any) -> None:
         dependencies=[Depends(companion_auth.get_companion_token_user)],
     )
     app.add_api_route(
+        "/api/skills/clawhub-login-status",
+        misc_api.get_api_skills_clawhub_login_status_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/skills/clawhub-login",
+        misc_api.get_api_skills_clawhub_login_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
         "/api/skills/remove",
         misc_api.get_api_skills_remove_handler(core),
         methods=["POST"],

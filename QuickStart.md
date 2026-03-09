@@ -1,6 +1,6 @@
 # HomeClaw Quick Start
 
-Get from zero to running HomeClaw in a few steps. This doc is kept short on purpose; we improve it over time.
+Get from zero to running HomeClaw in a few steps. You can chat via the **Companion app** and/or **channels** (WebChat, Telegram, etc.)—they all use the same **Core**. Run Core once, then use the app and any channel together.
 
 ---
 
@@ -42,17 +42,37 @@ In the browser (http://127.0.0.1:18472):
 
 ---
 
-## 4. Run HomeClaw
+## 4. Run Core
 
-- **Core + web UI:** `python -m main start` (or start Core from the Portal).
-- **Portal only:** `python -m main portal`
-- **Channels** (Telegram, Slack, WebChat, etc.): with Core running, in another terminal run `python -m channels.run <channel_name>`. See `channels/README.md`.
+Start Core (in a terminal or from the Portal):
+
+```bash
+python -m main start
+```
+
+This runs Core (default port 9000) and the built-in CLI; the web UI opens. **Core is the single backend** for the Companion app and all channels.
+
+## 5. Use the Companion app and/or channels
+
+**Companion app** — Install from `clients/HomeClawApp/` or a release. In the app: **Settings** → **Core URL** = `http://127.0.0.1:9000` (same machine) or your remote URL (Tailscale, Cloudflare Tunnel, Pinggy). If Core has `auth_enabled: true`, set the **API key** in Settings. Ensure your user is in `config/user.yml` (or add via Portal / **Manage Core** → Users). Open **Chat** to talk to HomeClaw. From Settings you can open **Skills** (list, search, install, remove via ClawHub) and **Manage Core** (edit core.yml, user.yml).
+
+**Channels** — With Core running, in another terminal run for example:
+
+```bash
+python -m channels.run webchat    # → http://localhost:8014
+python -m channels.run telegram
+python -m channels.run discord
+```
+
+Set `CORE_URL` (e.g. `http://127.0.0.1:9000`) in `channels/.env` (copy from `channels/.env.example`). Each channel has a README in `channels/<name>/` for tokens and setup.
+
+**Companion and channels together** — Run **Core once**. The Companion app and every channel connect to that same Core. Use the app on your phone and WebChat on your laptop at the same time; they share one agent, one memory.
 
 After setup, run `python -m main doctor` to verify config and LLM connectivity.
 
 ---
 
-## 5. Import OpenClaw / ClawHub skills (optional)
+## 6. Import OpenClaw / ClawHub skills (optional)
 
 HomeClaw can **search and import OpenClaw skills** from **ClawHub**, then **convert** them into HomeClaw skills under `external_skills/` (config key: `external_skills_dir`).
 

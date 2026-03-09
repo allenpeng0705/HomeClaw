@@ -27,4 +27,4 @@ HomeClaw supports **cloud** and **local** models (or both together for better ca
 
 ## 3. Next step
 
-After install, see [Run](run.md) to start Core and a channel. For full setup (config, users, memory), see the main [HOW_TO_USE.md](https://github.com/allenpeng0705/HomeClaw/blob/main/HOW_TO_USE.md) in the repo.
+After install, see [Run](run.md) to start Core, then use the **Companion app** (set Core URL in Settings, add your user) and/or run a **channel** (e.g. `python -m channels.run webchat`). Companion and channels use the same Core—run Core once, use both together. For full setup (config, users, memory), see [Getting started](getting-started.md) and the main [HOW_TO_USE.md](https://github.com/allenpeng0705/HomeClaw/blob/main/HOW_TO_USE.md) in the repo.

@@ -127,6 +127,29 @@ if ($NodeOk) {
   Write-Host "Node.js not available; skipping. For .ts skills you need: node on PATH, then npm install -g tsx (or ts-node)."
 }
 
+# ----- Step 2c: ClawHub CLI (for skill search/install from Portal and Companion) -----
+Write-Host ""
+Write-Host "=== Step 2c: ClawHub CLI (skill search/install) ==="
+$ClawhubOk = $false
+try {
+  $null = Get-Command clawhub -ErrorAction SilentlyContinue
+  if ($?) { Write-Host "OK: clawhub already on PATH"; $ClawhubOk = $true }
+} catch {}
+if (-not $ClawhubOk) {
+  if ($NodeOk) {
+    Write-Host "Installing ClawHub CLI (npm i -g clawhub)..."
+    try {
+      npm install -g clawhub 2>$null
+      if ($LASTEXITCODE -eq 0) { Write-Host "OK: clawhub installed (for skill search/install from Portal and Companion)"; $ClawhubOk = $true }
+    } catch {}
+    if (-not $ClawhubOk) {
+      Write-Host "ClawHub CLI install failed. To install later: npm i -g clawhub"
+    }
+  } else {
+    Write-Host "npm not available; skipping. For skill search/install from Companion/Portal, install Node.js then: npm i -g clawhub"
+  }
+}
+
 # ----- Step 4b: VMPrint (Markdown to PDF tool) -----
 Write-Host ""
 Write-Host "=== Step 4b: VMPrint (Markdown to PDF) ==="

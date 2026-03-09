@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../core_service.dart';
 
 /// Skills screen: list installed skills and search/install from ClawHub via Core API (Companion->Core direct, no Portal).
@@ -23,16 +25,75 @@ class _SkillsScreenState extends State<SkillsScreen> {
   String? _installMsg;
   bool _installing = false;
 
+  bool? _clawhubLoggedIn;
+  String _clawhubStatusMsg = '';
+  bool _clawhubStatusLoading = true;
+  bool _clawhubLoginInProgress = false;
+  String? _clawhubLoginUrl;
+  String _clawhubLoginMessage = '';
+
   @override
   void initState() {
     super.initState();
     _loadInstalled();
+    _loadClawhubLoginStatus();
   }
 
   @override
   void dispose() {
     _queryController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadClawhubLoginStatus() async {
+    try {
+      final status = await widget.coreService.getClawhubLoginStatus();
+      if (mounted) {
+        setState(() {
+          _clawhubStatusLoading = false;
+          _clawhubLoggedIn = status['logged_in'] == true;
+          _clawhubStatusMsg = (status['message'] ?? '').toString();
+          if (status['clawhub_available'] == false) _clawhubStatusMsg = 'clawhub not found on PATH';
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _clawhubStatusLoading = false;
+          _clawhubLoggedIn = false;
+          _clawhubStatusMsg = 'Could not check status';
+        });
+      }
+    }
+  }
+
+  Future<void> _startClawhubLogin() async {
+    setState(() {
+      _clawhubLoginInProgress = true;
+      _clawhubLoginUrl = null;
+      _clawhubLoginMessage = '';
+    });
+    try {
+      final result = await widget.coreService.clawhubLogin();
+      if (mounted) {
+        setState(() {
+          _clawhubLoginInProgress = false;
+          final u = result['url'];
+          _clawhubLoginUrl = (u is String && u.trim().isNotEmpty) ? u.trim() : null;
+          _clawhubLoginMessage = (result['message'] ?? '').toString();
+        });
+        if (result['ok'] == true && _clawhubLoginUrl == null) _loadClawhubLoginStatus();
+      }
+    } catch (e) {
+      if (mounted) {
+        final msg = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
+        setState(() {
+          _clawhubLoginInProgress = false;
+          _clawhubLoginUrl = null;
+          _clawhubLoginMessage = msg.isNotEmpty ? msg : 'Login request failed';
+        });
+      }
+    }
   }
 
   Future<void> _loadInstalled() async {
@@ -85,9 +146,10 @@ class _SkillsScreenState extends State<SkillsScreen> {
       }
     } catch (e) {
       if (mounted) {
+        final msg = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
         setState(() {
           _searching = false;
-          _searchMsg = 'Search error: $e';
+          _searchMsg = msg.isNotEmpty ? 'Search error: $msg' : 'Search failed.';
           _searchResults = [];
         });
       }
@@ -232,12 +294,74 @@ class _SkillsScreenState extends State<SkillsScreen> {
             ],
             const SizedBox(height: 24),
             const Text(
+              'ClawHub account',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            if (_clawhubStatusLoading)
+              const Text('Checking login status…', style: TextStyle(fontSize: 12))
+            else
+              Text(
+                _clawhubLoggedIn == true ? 'Logged in. ${_clawhubStatusMsg.isNotEmpty ? _clawhubStatusMsg : "You can search and install skills."}' : _clawhubStatusMsg,
+                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                FilledButton.tonal(
+                  onPressed: (_clawhubStatusLoading || _clawhubLoginInProgress) ? null : _startClawhubLogin,
+                  child: _clawhubLoginInProgress
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      : Text(_clawhubLoggedIn == true ? 'Re-login to ClawHub' : 'Login to ClawHub'),
+                ),
+                if (_clawhubLoggedIn == true) ...[
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: _clawhubStatusLoading ? null : _loadClawhubLoginStatus,
+                    child: const Text('Refresh status'),
+                  ),
+                ],
+              ],
+            ),
+            if (_clawhubLoginMessage.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(_clawhubLoginMessage, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              ),
+            if (_clawhubLoginUrl != null && _clawhubLoginUrl!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              SelectableText(_clawhubLoginUrl!, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.primary)),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  FilledButton.icon(
+                    onPressed: () async {
+                      final uri = Uri.tryParse(_clawhubLoginUrl!);
+                      if (uri != null && await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    },
+                    icon: const Icon(Icons.open_in_browser, size: 18),
+                    label: const Text('Open in browser'),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: _clawhubLoginUrl!));
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copied')));
+                    },
+                    icon: const Icon(Icons.copy, size: 18),
+                    label: const Text('Copy link'),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 24),
+            const Text(
               'Import from ClawHub',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
             Text(
-              'Search and install OpenClaw/ClawHub skills. Core must have clawhub on PATH.',
+              'Search and install OpenClaw/ClawHub skills. On the machine running Core, install the CLI: npm i -g clawhub. Restart Core from a terminal where clawhub is on PATH.',
               style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 12),

@@ -93,7 +93,15 @@ def get_api_skills_search_handler(core):  # noqa: ARG001
             if not q:
                 return JSONResponse(content={"results": []})
             if not clawhub_available():
-                return JSONResponse(status_code=400, content={"detail": "clawhub not found on PATH"})
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "detail": (
+                            "clawhub not found on PATH. Install the ClawHub CLI (e.g. npm i -g clawhub), "
+                            "then restart Core from a terminal/session where 'clawhub' is on PATH."
+                        )
+                    },
+                )
             results, raw = clawhub_search(q, limit=20)
             if not raw.ok and raw.error:
                 return JSONResponse(status_code=502, content={"detail": raw.error, "stderr": (raw.stderr or "")[-1000:]})
@@ -110,7 +118,15 @@ def get_api_skills_install_handler(core):  # noqa: ARG001
         try:
             from base.clawhub_integration import clawhub_available, clawhub_install_and_convert
             if not clawhub_available():
-                return JSONResponse(status_code=400, content={"detail": "clawhub not found on PATH"})
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "detail": (
+                            "clawhub not found on PATH. Install the ClawHub CLI (e.g. npm i -g clawhub), "
+                            "then restart Core from a terminal/session where 'clawhub' is on PATH."
+                        )
+                    },
+                )
             try:
                 body = await request.json() if request.headers.get("content-type", "").strip().startswith("application/json") else {}
             except Exception:
@@ -143,6 +159,58 @@ def get_api_skills_install_handler(core):  # noqa: ARG001
             logger.exception(e)
             return JSONResponse(status_code=500, content={"detail": str(e)})
     return api_skills_install
+
+
+def get_api_skills_clawhub_login_status_handler(core):  # noqa: ARG001
+    """GET /api/skills/clawhub-login-status — whether ClawHub CLI is logged in (whoami). Companion->Core."""
+    async def api_skills_clawhub_login_status(request: Request):
+        try:
+            from base.clawhub_integration import clawhub_available, clawhub_whoami
+            if not clawhub_available():
+                return JSONResponse(
+                    status_code=200,
+                    content={"logged_in": False, "message": "clawhub not found on PATH", "clawhub_available": False},
+                )
+            logged_in, message = clawhub_whoami()
+            return JSONResponse(
+                content={"logged_in": logged_in, "message": message, "clawhub_available": True},
+            )
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e), "logged_in": False})
+    return api_skills_clawhub_login_status
+
+
+def get_api_skills_clawhub_login_handler(core):  # noqa: ARG001
+    """POST /api/skills/clawhub-login — start ClawHub login; returns URL to open in browser if available. Companion->Core."""
+    async def api_skills_clawhub_login(request: Request):
+        try:
+            from base.clawhub_integration import clawhub_available, clawhub_login
+            if not clawhub_available():
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "detail": "clawhub not found on PATH. Install the ClawHub CLI (e.g. npm i -g clawhub), then restart Core.",
+                        "url": None,
+                        "ok": False,
+                    },
+                )
+            out = clawhub_login(timeout_s=25)
+            status = 200 if out.get("ok") else 400
+            return JSONResponse(
+                status_code=status,
+                content={
+                    "ok": out.get("ok", False),
+                    "url": out.get("url"),
+                    "message": out.get("message", ""),
+                    "stdout": (out.get("stdout") or "")[-2000:],
+                    "stderr": (out.get("stderr") or "")[-2000:],
+                },
+            )
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e), "ok": False, "url": None})
+    return api_skills_clawhub_login
 
 
 def get_api_skills_remove_handler(core):  # noqa: ARG001

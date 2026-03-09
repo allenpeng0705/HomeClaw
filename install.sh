@@ -127,6 +127,24 @@ else
   echo "Node.js not available; skipping. For .ts skills you need: node on PATH, then npm install -g tsx (or ts-node)."
 fi
 
+# ----- Step 2c: ClawHub CLI (for skill search/install from Portal and Companion) -----
+echo ""
+echo "=== Step 2c: ClawHub CLI (skill search/install) ==="
+if command -v clawhub >/dev/null 2>&1; then
+  echo "OK: clawhub already on PATH"
+else
+  if command -v npm >/dev/null 2>&1; then
+    echo "Installing ClawHub CLI (npm i -g clawhub)..."
+    if npm install -g clawhub 2>/dev/null; then
+      echo "OK: clawhub installed (for skill search/install from Portal and Companion)"
+    else
+      echo "ClawHub CLI install failed or needs sudo. To install later: npm i -g clawhub"
+    fi
+  else
+    echo "npm not available; skipping. For skill search/install from Companion/Portal, install Node.js then: npm i -g clawhub"
+  fi
+fi
+
 # ----- Step 3: already done if IN_REPO -----
 # (clone was done above if needed)
 

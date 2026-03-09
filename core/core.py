@@ -1727,9 +1727,6 @@ class Core(CoreInterface):
                 _uvicorn_access.addFilter(_SuppressConfigCoreAccessFilter())
             config = uvicorn.Config(self.app, host=core_metadata.host, port=core_metadata.port, log_level="critical", access_log=False)
             self.server = Server(config=config)
-            # Start HTTP server early so GET /ready is served by this process (avoids 502 from another process on same port). /ready returns 503 until init done.
-            server_task = asyncio.create_task(self.server.serve())
-            await asyncio.sleep(0.5)
             # Start embedding (and main LLM) server before initializing Cognee.
             logger.debug("Starting LLM manager (embedding + main LLM)...")
             self.llmManager.run()
@@ -1751,7 +1748,11 @@ class Core(CoreInterface):
                         logger.debug("Embedding server ready.")
                 except Exception as e:
                     logger.warning("Embedding server health check failed: {}; Cognee/sync may fail.", e)
+            # Initialize (register routes and middleware) before starting the HTTP server. Starlette/FastAPI do not allow add_middleware() after the app has started serving.
             self.initialize()
+            # Start HTTP server after app is fully configured. /ready returns 503 until lifecycle sets ready.
+            server_task = asyncio.create_task(self.server.serve())
+            await asyncio.sleep(0.5)
             self.start_email_channel()
 
             # Sync skills to vector store when skills_use_vector_search and skills_refresh_on_startup

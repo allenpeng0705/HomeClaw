@@ -37,7 +37,7 @@
     <section class="hero container">
       <h1>HomeClaw</h1>
       <p class="tagline">运行在你机器上的 AI 助手。你的数据，你做主。</p>
-      <p class="hero-platform">支持 <strong>Mac、Windows、Linux</strong>（Python 技术栈）。可通过<strong>任意语言编写外部插件</strong>扩展（Node.js、Go、Java 等）。</p>
+      <p class="hero-platform">支持 <strong>Mac、Windows、Linux</strong>（Python 技术栈）。<strong>伴侣应用</strong>（Mac、Windows、iPhone、Android）用于聊天、<strong>好友</strong>（AI + 用户间）与<strong>技能</strong>（经 ClawHub 安装）。<strong>渠道</strong>（WebChat、Telegram、Discord 等）及任意语言插件。</p>
       <img src="../assets/homeclaw-promo-zh.png" alt="HomeClaw：混合模式、插件、技能、渠道、伴侣应用、多智能体" class="hero-img" width="720" height="auto">
       <div class="hero-cta">
         <a href="https://github.com/allenpeng0705/HomeClaw" class="btn btn-primary" target="_blank" rel="noopener">GitHub</a>
@@ -48,12 +48,12 @@
 
     <section class="section container quickstart-section">
       <h2>快速开始</h2>
-      <p class="lead">在 <strong>Mac</strong>、<strong>Windows</strong> 或 <strong>Linux</strong> 上几步运行 HomeClaw。需要 <strong>Python 3</strong> 和 <strong>git</strong>。</p>
+      <p class="lead">运行 HomeClaw 后，可通过<strong>伴侣应用</strong>和/或<strong>渠道</strong>（WebChat、Telegram 等）聊天。它们都连接同一个 <strong>Core</strong>——只需启动一次 Core，即可同时使用应用和任意渠道。</p>
       <ol class="quickstart-steps">
-        <li><strong>克隆并安装</strong> — <code>git clone https://github.com/allenpeng0705/HomeClaw.git</code>，<code>cd HomeClaw</code>，然后 <code>pip install -r requirements.txt</code>。</li>
-        <li><strong>配置（可选）</strong> — 编辑 <code>config/core.yml</code>（LLM、记忆）和 <code>config/user.yml</code>（允许谁对话）。<strong>云端</strong>模型需设置环境变量中的 API Key；<strong>本地</strong>模型需将 llama.cpp 二进制复制到 <code>llama.cpp-master/&lt;platform&gt;/</code>（见 <code>llama.cpp-master/README.md</code>）。</li>
-        <li><strong>启动 Core</strong> — <code>python -m main start</code>。会启动 Core 与内置 CLI，可在同一终端中聊天。</li>
-        <li><strong>聊天</strong> — 在该终端使用 CLI，或运行渠道（如 <code>python -m channels.run webchat</code> 后打开 http://localhost:8014），或打开<strong>伴侣应用</strong>并将 Core URL 设为 <code>http://127.0.0.1:9000</code>。</li>
+        <li><strong>安装</strong> — <code>git clone https://github.com/allenpeng0705/HomeClaw.git</code>，<code>cd HomeClaw</code>，<code>pip install -r requirements.txt</code>。或运行 <code>./install.sh</code>（Mac/Linux）/ <code>.\install.ps1</code>（Windows）完成环境并打开 Portal http://127.0.0.1:18472。</li>
+        <li><strong>配置（可选）</strong> — 编辑 <code>config/core.yml</code> 和 <code>config/user.yml</code>，或使用 Portal。云端模型需设 API Key；本地模型见 <code>llama.cpp-master/README.md</code>。</li>
+        <li><strong>启动 Core</strong> — <code>python -m main start</code>。Core（端口 9000）是伴侣应用与所有渠道的统一后端。</li>
+        <li><strong>聊天</strong> — <strong>伴侣应用：</strong>从 <code>clients/HomeClawApp/</code> 安装，在设置中将 Core URL 设为 <code>http://127.0.0.1:9000</code>，在 user.yml 中添加用户，打开聊天。<strong>渠道：</strong>Core 运行后执行 <code>python -m channels.run webchat</code> → http://localhost:8014（在 <code>channels/.env</code> 中设置 <code>CORE_URL</code>）。可同时使用；同一智能体、同一记忆。</li>
       </ol>
       <p><strong>Windows：</strong>步骤相同；若出现编译错误，请安装 <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">Visual C++ 生成工具</a>（见完整文档）。运行 <code>python -m main doctor</code> 可检查配置与 LLM 连通性。</p>
       <p><a href="docs.html#quickstart" class="btn btn-secondary">本站完整快速开始</a> · <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">入门（完整文档）</a></p>

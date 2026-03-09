@@ -746,7 +746,11 @@ class CoreService {
         .get(url, headers: _authHeaders(forCompanionApi: true))
         .timeout(const Duration(seconds: 30));
     if (response.statusCode == 401) throw Exception('Session expired; please log in again');
-    if (response.statusCode == 400) throw Exception('clawhub not found on PATH');
+    if (response.statusCode == 400) {
+      final map = jsonDecode(response.body) as Map<String, dynamic>?;
+      final detail = map?['detail'] ?? 'clawhub not found on PATH. Install with: npm i -g clawhub, then restart Core.';
+      throw Exception(detail is String ? detail : 'clawhub not found on PATH');
+    }
     if (response.statusCode != 200) {
       final map = jsonDecode(response.body) as Map<String, dynamic>?;
       final detail = map?['detail'] ?? response.body;
@@ -778,12 +782,43 @@ class CoreService {
         )
         .timeout(const Duration(seconds: 120));
     if (response.statusCode == 401) throw Exception('Session expired; please log in again');
-    if (response.statusCode == 400) throw Exception('clawhub not found on PATH or missing skill id');
+    if (response.statusCode == 400) {
+      final map = jsonDecode(response.body) as Map<String, dynamic>?;
+      final detail = map?['detail'] ?? 'clawhub not found on PATH. Install with: npm i -g clawhub, then restart Core.';
+      throw Exception(detail is String ? detail : 'clawhub not found on PATH or missing skill id');
+    }
     final map = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
     if (response.statusCode != 200) {
       final detail = map['detail'] ?? map['error'] ?? response.body;
       throw Exception(detail is String ? detail : 'Install failed');
     }
+    return map;
+  }
+
+  /// GET /api/skills/clawhub-login-status — whether ClawHub CLI is logged in (whoami). Requires session token.
+  Future<Map<String, dynamic>> getClawhubLoginStatus() async {
+    final url = Uri.parse('$_baseUrl/api/skills/clawhub-login-status');
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 10));
+    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+    final map = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    return map;
+  }
+
+  /// POST /api/skills/clawhub-login — start ClawHub login; returns URL to open in browser if available. Requires session token.
+  Future<Map<String, dynamic>> clawhubLogin() async {
+    final url = Uri.parse('$_baseUrl/api/skills/clawhub-login');
+    final response = await http
+        .post(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 35));
+    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+    if (response.statusCode == 400) {
+      final map = jsonDecode(response.body) as Map<String, dynamic>?;
+      final detail = map?['detail'] ?? 'clawhub not found on PATH. Install with: npm i -g clawhub, then restart Core.';
+      throw Exception(detail is String ? detail : 'ClawHub login failed');
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
     return map;
   }
 

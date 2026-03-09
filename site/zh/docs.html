@@ -64,7 +64,7 @@
       <div class="doc-section-img-wrap" aria-hidden="true"></div>
       <div class="doc-section-body">
         <h2>快速开始 — 在 Mac、Windows 或 Linux 上运行 HomeClaw</h2>
-        <p class="doc-section-summary">克隆、安装、配置（可选）、启动 Core，然后通过 CLI、WebChat 或伴侣应用聊天。</p>
+        <p class="doc-section-summary">安装、启动 Core，然后通过<strong>伴侣应用</strong>和/或<strong>渠道</strong>（WebChat、Telegram 等）聊天。它们都使用同一个 Core——只需启动一次 Core，即可同时使用应用和任意渠道。</p>
         <p><strong>前置条件：</strong>Python 3（建议 3.9+）、git。Windows 上若出现 C++ 编译错误，请安装 <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">Visual C++ 生成工具</a>（见完整文档）。</p>
 
         <h3>Mac 与 Linux</h3>
@@ -89,11 +89,11 @@ pip install -r requirements.txt</code></pre>
           <p>会启动 Core 与内置 CLI，可在同一终端中聊天。</p>
         </div>
         <div class="doc-keys">
-          <p class="doc-keys-title">4. 聊天</p>
+          <p class="doc-keys-title">4. 使用伴侣应用和/或渠道</p>
           <ul>
-            <li><strong>CLI</strong> — 在运行 <code>python -m main start</code> 的同一终端使用交互式聊天。</li>
-            <li><strong>WebChat</strong> — 在另一终端运行 <code>python -m channels.run webchat</code>，然后打开 http://localhost:8014。</li>
-            <li><strong>伴侣应用</strong> — 从 <code>clients/HomeClawApp/</code> 构建或安装；在设置中将 <strong>Core URL</strong> 设为 <code>http://127.0.0.1:9000</code>（远程则填 Tailscale/隧道 URL）。</li>
+            <li><strong>伴侣应用</strong> — 从 <code>clients/HomeClawApp/</code> 安装。在设置中将 <strong>Core URL</strong> 设为 <code>http://127.0.0.1:9000</code>（或远程用 Tailscale/隧道 URL）。在 <code>config/user.yml</code> 或通过 Portal 添加用户。打开<strong>聊天</strong>；在设置中可管理<strong>技能</strong>（经 ClawHub 安装/移除）和<strong>管理 Core</strong>。</li>
+            <li><strong>渠道</strong> — Core 运行后：<code>python -m channels.run webchat</code> → http://localhost:8014；或 <code>python -m channels.run telegram</code> 等。在 <code>channels/.env</code> 中设置 <code>CORE_URL</code>。</li>
+            <li><strong>伴侣与渠道一起用</strong> — 只需启动一次 Core。应用与各渠道都连接同一 Core；可同时使用（如手机用应用、笔记本用 WebChat）——同一智能体、同一记忆。</li>
           </ul>
         </div>
         <p><strong>检查配置与 LLM：</strong><code>python -m main doctor</code>。</p>

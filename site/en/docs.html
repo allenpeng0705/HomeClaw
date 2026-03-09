@@ -64,7 +64,7 @@
       <div class="doc-section-img-wrap" aria-hidden="true"></div>
       <div class="doc-section-body">
         <h2>QuickStart — run HomeClaw on Mac, Windows, or Linux</h2>
-        <p class="doc-section-summary">Clone, install, configure (optional), run Core, then chat via CLI, WebChat, or the Companion app.</p>
+        <p class="doc-section-summary">Install, run Core, then chat via the <strong>Companion app</strong> and/or <strong>channels</strong> (WebChat, Telegram, etc.). They all use the same Core—run Core once, use the app and any channel together.</p>
         <p><strong>Prerequisites:</strong> Python 3 (3.9+ recommended), git. On Windows, if you hit C++ build errors, install <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">Visual C++ Build Tools</a> (see full docs).</p>
 
         <h3>Mac &amp; Linux</h3>
@@ -89,11 +89,11 @@ pip install -r requirements.txt</code></pre>
           <p>This starts Core and the built-in CLI; you can chat in the same terminal.</p>
         </div>
         <div class="doc-keys">
-          <p class="doc-keys-title">4. Chat</p>
+          <p class="doc-keys-title">4. Use the Companion app and/or channels</p>
           <ul>
-            <li><strong>CLI</strong> — Use the interactive chat in the same terminal where you ran <code>python -m main start</code>.</li>
-            <li><strong>WebChat</strong> — In another terminal: <code>python -m channels.run webchat</code>, then open http://localhost:8014.</li>
-            <li><strong>Companion app</strong> — Build or install from <code>clients/HomeClawApp/</code>; in Settings set <strong>Core URL</strong> to <code>http://127.0.0.1:9000</code> (or your Tailscale/tunnel URL for remote).</li>
+            <li><strong>Companion app</strong> — Install from <code>clients/HomeClawApp/</code>. In Settings set <strong>Core URL</strong> to <code>http://127.0.0.1:9000</code> (or Tailscale/tunnel URL for remote). Add your user in <code>config/user.yml</code> or via Portal. Open <strong>Chat</strong>; use Settings for <strong>Skills</strong> (install/remove via ClawHub) and <strong>Manage Core</strong>.</li>
+            <li><strong>Channels</strong> — With Core running: <code>python -m channels.run webchat</code> → http://localhost:8014; or <code>python -m channels.run telegram</code>, etc. Set <code>CORE_URL</code> in <code>channels/.env</code>.</li>
+            <li><strong>Companion and channels together</strong> — Run Core once. The app and every channel connect to that same Core; use both at the same time (e.g. app on phone, WebChat on laptop)—same agent, same memory.</li>
           </ul>
         </div>
         <p><strong>Check config and LLM:</strong> <code>python -m main doctor</code>.</p>

@@ -37,7 +37,7 @@
     <section class="hero container">
       <h1>HomeClaw</h1>
       <p class="tagline">AI assistant that runs on your machine. Your data, your control.</p>
-      <p class="hero-platform">Runs on <strong>Mac, Windows, and Linux</strong> (Python stack). Extend with <strong>external plugins in any language</strong> (Node.js, Go, Java, etc.).</p>
+      <p class="hero-platform">Runs on <strong>Mac, Windows, and Linux</strong> (Python stack). <strong>Companion app</strong> (Mac, Windows, iPhone, Android) for chat, <strong>friends</strong> (AI + user-to-user), and <strong>skills</strong> (install via ClawHub). <strong>Channels</strong> (WebChat, Telegram, Discord, etc.) and plugins in any language.</p>
       <img src="../assets/homeclaw-promo.png" alt="HomeClaw: Mix mode, Plugins, Skills, Channels, Companion app, Multi-agent" class="hero-img" width="720" height="auto">
       <div class="hero-cta">
         <a href="https://github.com/allenpeng0705/HomeClaw" class="btn btn-primary" target="_blank" rel="noopener">GitHub</a>
@@ -48,12 +48,12 @@
 
     <section class="section container quickstart-section">
       <h2>QuickStart</h2>
-      <p class="lead">Run HomeClaw on <strong>Mac</strong>, <strong>Windows</strong>, or <strong>Linux</strong> in a few steps. You need <strong>Python 3</strong> and <strong>git</strong>.</p>
+      <p class="lead">Run HomeClaw, then chat via the <strong>Companion app</strong> and/or <strong>channels</strong> (WebChat, Telegram, etc.). They all use the same <strong>Core</strong>—run Core once, use the app and any channel together.</p>
       <ol class="quickstart-steps">
-        <li><strong>Clone and install</strong> — <code>git clone https://github.com/allenpeng0705/HomeClaw.git</code>, <code>cd HomeClaw</code>, then <code>pip install -r requirements.txt</code>.</li>
+        <li><strong>Install</strong> — <code>git clone https://github.com/allenpeng0705/HomeClaw.git</code>, <code>cd HomeClaw</code>, <code>pip install -r requirements.txt</code>. Or <code>./install.sh</code> (Mac/Linux) / <code>.\install.ps1</code> (Windows) to set up and open the Portal at http://127.0.0.1:18472.</li>
         <li><strong>Configure (optional)</strong> — Edit <code>config/core.yml</code> (LLM, memory) and <code>config/user.yml</code> (who can talk). For <strong>cloud</strong> models set API keys in the environment; for <strong>local</strong> models copy llama.cpp binary into <code>llama.cpp-master/&lt;platform&gt;/</code> for your device (see <code>llama.cpp-master/README.md</code>).</li>
-        <li><strong>Run Core</strong> — <code>python -m main start</code>. This starts Core and the built-in CLI; you can chat in the same terminal.</li>
-        <li><strong>Chat</strong> — Use the CLI in that terminal, or run a channel (e.g. <code>python -m channels.run webchat</code> and open http://localhost:8014), or open the <strong>Companion app</strong> and set Core URL to <code>http://127.0.0.1:9000</code>.</li>
+        <li><strong>Run Core</strong> — <code>python -m main start</code>. Core (port 9000) is the single backend for the Companion app and all channels.</li>
+        <li><strong>Chat</strong> — <strong>Companion app:</strong> Install from <code>clients/HomeClawApp/</code>, set Core URL to <code>http://127.0.0.1:9000</code> in Settings, add your user in user.yml, open Chat. <strong>Channels:</strong> With Core running, <code>python -m channels.run webchat</code> → http://localhost:8014 (set <code>CORE_URL</code> in <code>channels/.env</code>). Use both at the same time; same agent, same memory.</li>
       </ol>
       <p><strong>Windows:</strong> Same steps; if you see build errors, install <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">Visual C++ Build Tools</a> (see full docs). Run <code>python -m main doctor</code> to check config and LLM connectivity.</p>
       <p><strong>Deploy to cloud:</strong> Run HomeClaw on a VM (Aliyun ECS, AWS EC2, etc.) so it’s always on. <a href="docs.html#deploy-cloud">Deploy to cloud (this site)</a> · <a href="https://allenpeng0705.github.io/HomeClaw/deploy-cloud/" target="_blank" rel="noopener">Full guide (docs site)</a></p>
