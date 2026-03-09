@@ -11,32 +11,43 @@ from base.util import Util
 
 
 def _install_failure_detail(out: dict) -> str:
-    """Build a short, readable error message for skill install failure (no raw JSON/stderr dump)."""
-    err = (out.get("error") or "").strip()
-    if err:
-        return err[:600]
-    convert = out.get("convert") or {}
-    install = out.get("install") or {}
-    err = (convert.get("error") or "").strip()
-    if err:
-        return err[:600]
-    err = (install.get("error") or "").strip()
-    # If install only has generic "Command failed (N)", prefer stderr so user sees real reason
-    if err and not (err.startswith("Command failed (") and "): " not in err):
-        return err[:600]
-    stderr = (install.get("stderr") or "").strip()
-    if stderr:
-        lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
-        for ln in lines:
-            ln_lower = ln.lower()
-            if "experimental" in ln_lower or "deprecat" in ln_lower or "warning" in ln_lower:
-                continue
-            if len(ln) > 10:
-                return ln[:600]
-        return (lines[0] if lines else stderr[:400])[:600]
-    if err:
-        return err[:600]
-    return "Install or conversion failed. Check Core logs for details."
+    """Build a short, readable error message for skill install failure (no raw JSON/stderr dump). Never raises."""
+    try:
+        err = str(out.get("error") or "").strip()
+        if err:
+            msg = err[:600]
+        else:
+            convert = out.get("convert") or {}
+            install = out.get("install") or {}
+            err = str(convert.get("error") or "").strip()
+            if err:
+                msg = err[:600]
+            else:
+                err = str(install.get("error") or "").strip()
+                if err and not (err.startswith("Command failed (") and "): " not in err):
+                    msg = err[:600]
+                else:
+                    stderr = str(install.get("stderr") or "").strip()
+                    if stderr:
+                        lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
+                        msg = "Install or conversion failed. Check Core logs for details."
+                        for ln in lines:
+                            ln_lower = ln.lower()
+                            if "experimental" in ln_lower or "deprecat" in ln_lower or "warning" in ln_lower:
+                                continue
+                            if len(ln) > 10:
+                                msg = ln[:600]
+                                break
+                        else:
+                            msg = (lines[0] if lines else stderr[:400])[:600]
+                    else:
+                        msg = err[:600] if err else "Install or conversion failed. Check Core logs for details."
+        hint = str((out.get("install") or {}).get("hint") or "").strip()
+        if hint and hint not in msg:
+            msg = f"{msg}. {hint}"[:700]
+        return msg
+    except Exception:
+        return "Install or conversion failed. Check Core logs for details."
 
 
 def get_api_skills_clear_vector_store_handler(core):

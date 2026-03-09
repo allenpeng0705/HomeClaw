@@ -2,9 +2,12 @@
 Companion auth: login (username/password) and token-based "me" / "my friends" API.
 Step 12: Companion never gets the full user list; only login → user_id + token + friends, and GET /api/me/friends with token.
 Never crash Core; 401 on invalid credentials or missing/expired token.
+Tokens are persisted to disk so sessions survive Core restarts.
 """
+import json
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import Depends, HTTPException, Request
@@ -14,9 +17,75 @@ from loguru import logger
 from base.base import User
 from base.util import Util
 
-# In-memory token store: token_str -> {"user_id": str, "expires_at": float}. Expired entries cleaned on access.
+# Token store: token_str -> {"user_id": str, "expires_at": float}. Loaded from disk; saved on each login.
 _COMPANION_TOKENS: Dict[str, Dict[str, Any]] = {}
 _TOKEN_TTL_SECONDS = 7 * 24 * 3600  # 7 days
+_TOKENS_LOADED = False
+_TOKENS_FILENAME = "companion_tokens.json"
+
+
+def _tokens_path() -> Path:
+    """Path to persisted companion tokens file. Under data_path (e.g. database/). Never raises."""
+    try:
+        root = (Util().data_path() or "").strip() or "database"
+        return Path(root) / _TOKENS_FILENAME
+    except Exception:
+        return Path("database") / _TOKENS_FILENAME
+
+
+def _load_tokens_from_disk() -> None:
+    """Load tokens from disk once. Merge into _COMPANION_TOKENS. Never raises."""
+    global _TOKENS_LOADED
+    if _TOKENS_LOADED:
+        return
+    _TOKENS_LOADED = True
+    try:
+        path = _tokens_path()
+        if not path.is_file():
+            return
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return
+        tokens = data.get("tokens")
+        if not isinstance(tokens, dict):
+            return
+        now = time.time()
+        for t, v in tokens.items():
+            if not isinstance(v, dict) or not t or not isinstance(t, str):
+                continue
+            try:
+                exp = v.get("expires_at")
+                exp = float(exp) if exp is not None else 0.0
+            except (TypeError, ValueError):
+                exp = 0.0
+            if exp > now:
+                uid = str(v.get("user_id") or "").strip()
+                _COMPANION_TOKENS[t] = {"user_id": uid, "expires_at": exp}
+    except Exception as e:
+        logger.debug("companion_auth: load tokens failed: {}", e)
+
+
+def _save_tokens_to_disk() -> None:
+    """Write current _COMPANION_TOKENS to disk. Only serializes valid entries. Never raises."""
+    try:
+        path = _tokens_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        safe = {}
+        for t, v in list(_COMPANION_TOKENS.items()):
+            if not isinstance(t, str) or not t or not isinstance(v, dict):
+                continue
+            try:
+                uid = str(v.get("user_id") or "").strip()
+                exp = v.get("expires_at")
+                exp = float(exp) if exp is not None else 0.0
+                safe[t] = {"user_id": uid, "expires_at": exp}
+            except (TypeError, ValueError):
+                continue
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"tokens": safe}, f, indent=0)
+    except Exception as e:
+        logger.debug("companion_auth: save tokens failed: {}", e)
 
 
 def _clean_expired_tokens() -> None:
@@ -77,6 +146,7 @@ def _user_to_friends_list(user: User) -> List[Dict[str, Any]]:
 
 def get_companion_token_user(request: Request) -> Tuple[str, User]:
     """Dependency: require Authorization: Bearer <session_token>. Resolve to (user_id, user). Raises HTTPException(401) if missing or invalid. Never crashes Core."""
+    _load_tokens_from_disk()
     _clean_expired_tokens()
     try:
         auth = (request.headers.get("Authorization") or "").strip()
@@ -126,6 +196,7 @@ def get_companion_token_user(request: Request) -> Tuple[str, User]:
 def get_api_auth_login_handler(core):  # noqa: ARG001
     """POST /api/auth/login. Body: { username, password }. Returns { user_id, token, name, friends }. 401 on invalid. Never crashes."""
     async def api_auth_login(request: Request):
+        _load_tokens_from_disk()
         try:
             try:
                 body = await request.json()
@@ -182,6 +253,7 @@ def get_api_auth_login_handler(core):  # noqa: ARG001
             expires_at = time.time() + _TOKEN_TTL_SECONDS
             _COMPANION_TOKENS[token] = {"user_id": user_id, "expires_at": expires_at}
             _clean_expired_tokens()
+            _save_tokens_to_disk()
             friends = _user_to_friends_list(user)
             return JSONResponse(content={
                 "user_id": user_id,

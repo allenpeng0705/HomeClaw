@@ -62,10 +62,14 @@ class CoreService {
   /// Called when a companion API returns 401 (session expired). Set by app to e.g. navigate to login and clear stack.
   void Function()? onSessionExpired;
 
-  /// Clear session and notify so app can force login screen. Call on 401 from companion APIs.
+  /// Clear session and notify so app can force login screen. Call on 401 from companion APIs. Never throws.
   Future<void> _handleSessionExpired() async {
-    await clearSession();
-    onSessionExpired?.call();
+    try {
+      await clearSession();
+    } catch (_) {}
+    try {
+      onSessionExpired?.call();
+    } catch (_) {}
   }
 
   /// WebSocket to Core /ws for push: when open, Core can push async inbound results and proactive messages (cron, reminders).
@@ -226,24 +230,53 @@ class CoreService {
   /// POST /api/auth/login with username and password. Returns {user_id, token, name, friends}. Throws on failure.
   Future<Map<String, dynamic>> login({required String username, required String password}) async {
     final url = Uri.parse('$_baseUrl/api/auth/login');
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders()},
-          body: jsonEncode({'username': username.trim(), 'password': password}),
-        )
-        .timeout(const Duration(seconds: 15));
-    if (response.statusCode != 200) {
-      final body = response.body;
-      throw Exception(response.statusCode == 401 ? 'Invalid username or password' : 'Login failed: $body');
+    String? lastError;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final response = await http
+            .post(
+              url,
+              headers: {'Content-Type': 'application/json', ..._authHeaders()},
+              body: jsonEncode({'username': username.trim(), 'password': password}),
+            )
+            .timeout(const Duration(seconds: 20));
+        if (response.statusCode != 200) {
+          final body = (response.body).trim();
+          String detail = '';
+          try {
+            final m = jsonDecode(response.body) as Map<String, dynamic>?;
+            detail = (m?['detail'] as String?)?.trim() ?? '';
+          } catch (_) {}
+          if (response.statusCode == 401) {
+            final lower = (detail + body).toLowerCase();
+            if (lower.contains('api key') || lower.contains('api_key') || lower.contains('bearer') || lower.contains('authorization')) {
+              throw Exception('Core rejected the request. Check Core URL and API key in Settings. If Core has auth enabled, the API key must match config (auth_api_key).');
+            }
+            throw Exception('Invalid username or password');
+          }
+          throw Exception(detail.isNotEmpty ? detail : (body.isEmpty ? 'Login failed (${response.statusCode})' : body.length > 200 ? '${body.substring(0, 200)}…' : body));
+        }
+        Map<String, dynamic>? map;
+        try {
+          map = jsonDecode(response.body) as Map<String, dynamic>?;
+        } catch (_) {
+          throw Exception('Invalid response from Core (not JSON). Check Core URL and that the server is HomeClaw Core.');
+        }
+        final userId = (map?['user_id'] as String?)?.trim() ?? '';
+        final token = (map?['token'] as String?)?.trim() ?? '';
+        if (userId.isEmpty || token.isEmpty) throw Exception('Login response missing user_id or token');
+        await saveSession(token: token, userId: userId);
+        await saveCredentials(username: username.trim(), password: password);
+        return map ?? {};
+      } catch (e) {
+        lastError = e.toString();
+        final msg = lastError.toLowerCase();
+        final isRetryable = msg.contains('timeout') || msg.contains('connection') || msg.contains('socket') || msg.contains('connection refused') || msg.contains('failed host lookup');
+        if (attempt == 0 && isRetryable) continue;
+        rethrow;
+      }
     }
-    final map = jsonDecode(response.body) as Map<String, dynamic>?;
-    final userId = (map?['user_id'] as String?)?.trim() ?? '';
-    final token = (map?['token'] as String?)?.trim() ?? '';
-    if (userId.isEmpty || token.isEmpty) throw Exception('Login response missing user_id or token');
-    await saveSession(token: token, userId: userId);
-    await saveCredentials(username: username.trim(), password: password);
-    return map ?? {};
+    throw Exception(lastError ?? 'Login failed');
   }
 
   /// GET /api/me with Bearer token. Returns {user_id, name, friends}. 401 if token invalid.
@@ -287,7 +320,13 @@ class CoreService {
   /// URL for a user's avatar by id (for friend list). Use [fetchAvatarWithAuth] to load with auth.
   String userAvatarUrl(String userId) => '$_baseUrl/api/users/${Uri.encodeComponent(userId)}/avatar';
   /// URL for an AI friend's avatar. Use [fetchAvatarWithAuth] to load with auth.
-  String friendAvatarUrl(String friendId) => '$_baseUrl/api/me/friends/${Uri.encodeComponent(friendId)}/avatar';
+  /// When [preset] is set (e.g. reminder, note, finder), appends ?preset= so Core can serve the preset thumbnail even if the stored friend has no preset.
+  String friendAvatarUrl(String friendId, {String? preset}) {
+    final base = '$_baseUrl/api/me/friends/${Uri.encodeComponent(friendId)}/avatar';
+    final p = (preset ?? '').trim();
+    if (p.isEmpty) return base;
+    return '$base?preset=${Uri.encodeComponent(p)}';
+  }
 
   /// GET image with Bearer token. Returns bytes or null on 404/error. Use for avatars.
   Future<Uint8List?> fetchAvatarWithAuth(String url) async {

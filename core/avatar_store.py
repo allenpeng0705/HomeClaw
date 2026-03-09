@@ -79,11 +79,19 @@ def get_preset_thumbnail_path(preset_name: str) -> Optional[Path]:
         filename = (cfg.get("thumbnail") or "").strip() or f"{pn}.png"
         # Path safety: only allow basename (no path traversal)
         filename = Path(filename).name or f"{pn}.png"
-        # Try Util().root_path() first (e.g. project or homeclaw root); then try repo root (where this file lives) so preset icons work even when root_path points elsewhere.
-        for root in (
+        # Try multiple roots so preset thumbnails work from repo, installed package, or custom root.
+        roots = [
             (Util().root_path() or "").strip(),
-            str(Path(__file__).resolve().parent.parent),
-        ):
+            str(Path(__file__).resolve().parent.parent),  # core's parent = project root
+        ]
+        try:
+            import base.friend_presets as _fp
+            base_dir = Path(getattr(_fp, "__file__", "") or "").resolve().parent.parent
+            if base_dir and str(base_dir):
+                roots.append(str(base_dir))
+        except Exception:
+            pass
+        for root in roots:
             if not root:
                 continue
             path = Path(root) / "config" / "preset_thumbnails" / filename

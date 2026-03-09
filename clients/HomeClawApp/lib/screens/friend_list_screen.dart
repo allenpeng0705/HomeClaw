@@ -299,11 +299,13 @@ class _FriendListScreenState extends State<FriendListScreen> {
                         final isUserFriend = (f['type'] as String?)?.trim().toLowerCase() == 'user';
                         final toUserId = (f['user_id'] as String?)?.trim();
                         final hasUnread = isUserFriend && toUserId != null && _unreadUserIds.contains(toUserId);
+                        final preset = (f['preset'] as String?)?.trim();
                         return _FriendTile(
                           userId: widget.coreService.sessionUserId!,
                           friendId: friendId,
                           displayName: displayName,
                           coreService: widget.coreService,
+                          preset: preset?.isNotEmpty == true ? preset : null,
                           initialMessage: index == 0 ? widget.initialMessage : null,
                           isUserFriend: isUserFriend,
                           toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
@@ -322,6 +324,8 @@ class _FriendTile extends StatefulWidget {
   final String friendId;
   final String displayName;
   final CoreService coreService;
+  /// Preset key (e.g. reminder, note, finder) when this friend is a preset; used to request preset thumbnail from Core.
+  final String? preset;
   final String? initialMessage;
   /// True when this friend is a real person (type: user); chat uses user-message API and push-to-talk.
   final bool isUserFriend;
@@ -338,6 +342,7 @@ class _FriendTile extends StatefulWidget {
     required this.friendId,
     required this.displayName,
     required this.coreService,
+    this.preset,
     this.initialMessage,
     this.isUserFriend = false,
     this.toUserId,
@@ -362,7 +367,10 @@ class _FriendTileState extends State<_FriendTile> {
   Future<void> _loadAvatar() async {
     final url = widget.isUserFriend && (widget.toUserId ?? '').trim().isNotEmpty
         ? widget.coreService.userAvatarUrl(widget.toUserId!.trim())
-        : widget.coreService.friendAvatarUrl((widget.friendId).trim());
+        : widget.coreService.friendAvatarUrl(
+            widget.friendId.trim(),
+            preset: widget.preset,
+          );
     final bytes = await widget.coreService.fetchAvatarWithAuth(url);
     if (mounted && bytes != null && bytes.isNotEmpty) {
       setState(() => _avatarBytes = bytes);
@@ -423,15 +431,26 @@ class _FriendTileState extends State<_FriendTile> {
         leading: Stack(
           clipBehavior: Clip.none,
           children: [
-            CircleAvatar(
-              backgroundColor: theme.colorScheme.primaryContainer,
-              backgroundImage: hasThumbnail ? MemoryImage(_avatarBytes!) : null,
-              child: hasThumbnail
-                  ? null
-                  : Icon(
-                      widget.isUserFriend ? Icons.person : Icons.smart_toy,
-                      color: theme.colorScheme.onPrimaryContainer,
-                    ),
+            ClipOval(
+              child: SizedBox(
+                width: 40,
+                height: 40,
+                child: hasThumbnail
+                    ? Image.memory(
+                        _avatarBytes!,
+                        fit: BoxFit.cover,
+                        width: 40,
+                        height: 40,
+                      )
+                    : ColoredBox(
+                        color: theme.colorScheme.primaryContainer,
+                        child: Icon(
+                          widget.isUserFriend ? Icons.person : Icons.smart_toy,
+                          color: theme.colorScheme.onPrimaryContainer,
+                          size: 24,
+                        ),
+                      ),
+              ),
             ),
             if (widget.hasUnread)
               Positioned(

@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -433,9 +434,13 @@ def convert_installed_openclaw_skill_to_homeclaw(
     Returns { ok: bool, ... }. Never raises.
     """
     try:
+        # Ensure project root (parent of base/) is on sys.path so "scripts" can be imported when Core is run from another cwd
+        _project_root = str(Path(__file__).resolve().parent.parent)
+        if _project_root not in sys.path:
+            sys.path.insert(0, _project_root)
         from scripts.convert_openclaw_skill import convert_skill  # type: ignore
     except Exception as e:
-        return {"ok": False, "error": f"Converter import failed: {e}"}
+        return {"ok": False, "error": f"Converter import failed: {e}. Run Core from the project root or ensure scripts/ is on PYTHONPATH."}
 
     sid = (skill_id or "").strip()
     if not sid:
@@ -446,7 +451,12 @@ def convert_installed_openclaw_skill_to_homeclaw(
     except Exception:
         src = None
     if not src or not src.is_dir():
-        return {"ok": False, "error": f"Installed OpenClaw skill not found for '{sid}'. Try running `clawhub install {sid}` first."}
+        candidates = _candidate_openclaw_skills_dirs(extra_dirs=openclaw_search_dirs)
+        searched = ", ".join(str(p) for p in candidates[:5])
+        return {
+            "ok": False,
+            "error": f"Installed OpenClaw skill not found for '{sid}'. Searched: {searched}. If clawhub install succeeded, the skill may be under a different name (e.g. skill-1.0.0); check the install cwd (e.g. downloads/skills/).",
+        }
 
     # external_skills_dir can be relative to root or absolute; empty means disabled.
     ext = (external_skills_dir or "").strip()
@@ -518,6 +528,12 @@ def clawhub_install_and_convert(
     if dry_run:
         return {"ok": install_res.ok, "install": install_info, "convert": None}
     if not install_res.ok:
+        # If stderr suggests login/auth or permission, append a hint
+        err_lower = (install_res.stderr or "").lower()
+        if any(x in err_lower for x in ("login", "not logged in", "unauthorized", "401", "authenticate", "clawhub login")):
+            install_info["hint"] = "ClawHub may require login. On the machine running Core, run: clawhub login"
+        elif any(x in err_lower for x in ("eacces", "permission denied", "eperm", "read-only")):
+            install_info["hint"] = "Permission denied. Run Core from a writable directory or set homeclaw_root in config to a writable path."
         return {"ok": False, "install": install_info, "convert": None}
 
     openclaw_search_dirs: Optional[List[Path]] = None

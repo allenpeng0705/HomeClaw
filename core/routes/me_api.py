@@ -268,20 +268,20 @@ def get_api_me_friends_identity_put_handler(core):  # noqa: ARG001
 
 
 def _preset_for_friend(user_id: str, friend_id: str) -> Optional[str]:
-    """Resolve preset name for a friend by user_id and friend_id (friend display name). Returns None if not found."""
+    """Resolve preset name for a friend by user_id and friend_id (friend display name). Returns None if not found. Never raises."""
     try:
         users = Util().get_users() or []
-        fid = (friend_id or "").strip().lower()
-        uid = (user_id or "").strip()
+        fid = (str(friend_id or "").strip()).lower()
+        uid = (str(user_id or "").strip())
         if not fid or not uid:
             return None
         for u in users:
-            u_id = (getattr(u, "id", None) or getattr(u, "name", None) or "").strip()
+            u_id = (str(getattr(u, "id", None) or getattr(u, "name", None) or "") or "").strip()
             if u_id != uid:
                 continue
             for f in getattr(u, "friends", None) or []:
-                n = (getattr(f, "name", None) or "").strip()
-                if n.lower() == fid:
+                n = (str(getattr(f, "name", None) or "") or "").strip().lower()
+                if n == fid:
                     preset = getattr(f, "preset", None)
                     if preset and str(preset).strip():
                         return str(preset).strip()
@@ -292,9 +292,11 @@ def _preset_for_friend(user_id: str, friend_id: str) -> Optional[str]:
 
 
 def get_api_me_friends_avatar_get_handler(core):  # noqa: ARG001
-    """GET /api/me/friends/{friend_id}/avatar. Returns custom avatar, or preset thumbnail if friend has a preset and no custom avatar. 404 if none."""
+    """GET /api/me/friends/{friend_id}/avatar. Returns custom avatar, or preset thumbnail if friend has a preset and no custom avatar.
+    Optional query param: preset= (e.g. reminder, note, finder) to request preset thumbnail directly so Companion can pass preset from the friends list."""
 
     async def handler(
+        request: Request,
         friend_id: str,
         token_user: tuple = Depends(get_companion_token_user),
     ):
@@ -305,10 +307,25 @@ def get_api_me_friends_avatar_get_handler(core):  # noqa: ARG001
                 suffix = (path.suffix or "").strip().lower()
                 media_type = "image/png" if suffix == ".png" else "image/jpeg"
                 return FileResponse(path, media_type=media_type)
-            # No custom avatar: try preset thumbnail from config/preset_thumbnails/
+            # Optional: client can pass ?preset=reminder so we serve preset thumbnail without relying on stored friend preset
+            preset_query = (request.query_params.get("preset") or "").strip().lower()
+            if preset_query:
+                preset_path = get_preset_thumbnail_path(preset_query)
+                if preset_path and preset_path.is_file():
+                    suffix = (preset_path.suffix or "").strip().lower()
+                    media_type = "image/png" if suffix == ".png" else "image/jpeg"
+                    return FileResponse(preset_path, media_type=media_type)
+            # No custom avatar: try preset thumbnail from config/preset_thumbnails/ (resolve preset from user's friend list)
             preset = _preset_for_friend(user_id, friend_id)
             if preset:
                 preset_path = get_preset_thumbnail_path(preset)
+                if preset_path and preset_path.is_file():
+                    suffix = (preset_path.suffix or "").strip().lower()
+                    media_type = "image/png" if suffix == ".png" else "image/jpeg"
+                    return FileResponse(preset_path, media_type=media_type)
+            # HomeClaw (default friend with no preset): try preset key "homeclaw" so homeclaw.png can be used if present
+            if (friend_id or "").strip().lower() == "homeclaw":
+                preset_path = get_preset_thumbnail_path("homeclaw")
                 if preset_path and preset_path.is_file():
                     suffix = (preset_path.suffix or "").strip().lower()
                     media_type = "image/png" if suffix == ".png" else "image/jpeg"
