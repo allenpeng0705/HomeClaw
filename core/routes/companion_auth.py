@@ -106,9 +106,28 @@ def _clean_expired_tokens() -> None:
         logger.debug("companion_auth: clean_expired failed: {}", e)
 
 
+def _name_to_preset_key(name: str) -> Optional[str]:
+    """Map known preset friend names to preset key so API always returns preset for Reminder/Note/Finder. Never raises."""
+    n = (name or "").strip().lower()
+    if not n:
+        return None
+    if n in ("reminder",):
+        return "reminder"
+    if n in ("finder", "files"):
+        return "finder"
+    if n in ("note", "notes") or "note" in n:
+        return "note"
+    if "reminder" in n:
+        return "reminder"
+    if "finder" in n or "file" in n:
+        return "finder"
+    return None
+
+
 def _user_to_friends_list(user: User) -> List[Dict[str, Any]]:
     """Return list of { name, relation?, who?, identity?, preset?, type?, user_id? } for user.friends. Never raises.
-    When type=='user' and user_id is set, this friend is a real person (user-to-user); otherwise AI friend (user→Core)."""
+    When type=='user' and user_id is set, this friend is a real person (user-to-user); otherwise AI friend (user→Core).
+    Ensures preset is set for known names (Reminder, Note, Finder) so Companion can show preset thumbnails."""
     try:
         friends = getattr(user, "friends", None)
         if not isinstance(friends, list) or not friends:
@@ -118,8 +137,9 @@ def _user_to_friends_list(user: User) -> List[Dict[str, Any]]:
             if not hasattr(f, "name"):
                 continue
             try:
+                fname = (getattr(f, "name", "") or "").strip() or "HomeClaw"
                 item = {
-                    "name": (getattr(f, "name", "") or "").strip() or "HomeClaw",
+                    "name": fname,
                     "relation": getattr(f, "relation", None),
                     "who": getattr(f, "who", None),
                     "identity": getattr(f, "identity", None),
@@ -127,6 +147,10 @@ def _user_to_friends_list(user: User) -> List[Dict[str, Any]]:
                 preset = getattr(f, "preset", None)
                 if preset is not None and str(preset).strip():
                     item["preset"] = str(preset).strip()
+                else:
+                    derived = _name_to_preset_key(fname)
+                    if derived:
+                        item["preset"] = derived
                 ftype = (getattr(f, "type", None) or "").strip().lower() or "ai"
                 if ftype not in ("user", "ai", "remote_ai", "remote_user"):
                     ftype = "ai"

@@ -91,6 +91,12 @@ def get_preset_thumbnail_path(preset_name: str) -> Optional[Path]:
                 roots.append(str(base_dir))
         except Exception:
             pass
+        try:
+            cwd = Path.cwd().resolve()
+            if cwd and str(cwd) not in roots:
+                roots.append(str(cwd))
+        except Exception:
+            pass
         for root in roots:
             if not root:
                 continue

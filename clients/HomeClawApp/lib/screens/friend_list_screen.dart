@@ -12,16 +12,31 @@ import 'friend_requests_screen.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
 
+/// Known localized names -> preset key (so avatar works when API returns localized friend name).
+const Map<String, String> _localizedNameToPreset = {
+  'reminder': 'reminder', 'finder': 'finder', 'note': 'note', 'files': 'finder',
+  '提醒': 'reminder', '文件': 'finder', '私密笔记': 'note',
+  'recordatorio': 'reminder', 'archivos': 'finder', 'notas privadas': 'note',
+  'rappel': 'reminder', 'fichiers': 'finder', 'notes privées': 'note',
+  'erinnerung': 'reminder', 'dateien': 'finder', 'private notizen': 'note',
+  'promemoria': 'reminder', 'file': 'finder', 'note private': 'note',
+  'リマインダー': 'reminder', 'ファイル': 'finder', 'プライベートメモ': 'note',
+  '리마인더': 'reminder', '비공개 메모': 'note',
+};
+
 /// Derive preset key from friend name when API does not return preset (e.g. Reminder→reminder, Note/Notes→note, Finder/Files→finder).
+/// Handles English and localized names (zh, es, fr, de, it, ja, ko) so thumbnails show regardless of locale.
 String? _presetKeyFromFriendName(String name) {
-  final n = (name).trim().toLowerCase();
+  final n = (name).trim();
   if (n.isEmpty) return null;
-  if (n == 'reminder') return 'reminder';
-  if (n == 'finder' || n == 'files') return 'finder';
-  if (n == 'note' || n == 'notes') return 'note';
-  if (n.contains('reminder')) return 'reminder';
-  if (n.contains('finder') || n.contains('file')) return 'finder';
-  if (n.contains('note')) return 'note';
+  final nLower = n.toLowerCase();
+  final byKey = _localizedNameToPreset[nLower];
+  if (byKey != null) return byKey;
+  final byKeyExact = _localizedNameToPreset[n];
+  if (byKeyExact != null) return byKeyExact;
+  if (nLower == 'reminder' || nLower.contains('reminder')) return 'reminder';
+  if (nLower == 'finder' || nLower == 'files' || nLower.contains('finder') || nLower.contains('file')) return 'finder';
+  if (nLower == 'note' || nLower == 'notes' || nLower.contains('note')) return 'note';
   return null;
 }
 
