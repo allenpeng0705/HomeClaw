@@ -31,7 +31,7 @@ Create `.env` in the skill folder or set environment variables:
 IMAP_HOST=imap.gmail.com          # Server hostname
 IMAP_PORT=993                     # Server port
 IMAP_USER=shileipeng@email.com
-IMAP_PASS=Eficode232410@
+IMAP_PASS=
 IMAP_TLS=true                     # Use TLS/SSL connection
 IMAP_REJECT_UNAUTHORIZED=true     # Set to false for self-signed certs
 IMAP_MAILBOX=INBOX                # Default mailbox
@@ -41,7 +41,7 @@ SMTP_HOST=smtp.gmail.com          # SMTP server hostname
 SMTP_PORT=587                     # SMTP port (587 for STARTTLS, 465 for SSL)
 SMTP_SECURE=false                 # true for SSL (465), false for STARTTLS (587)
 SMTP_USER=shileipeng@gmail.com          # Your email address
-SMTP_PASS=Eficode232410@           # Your password or app password
+SMTP_PASS=           # Your password or app password
 SMTP_FROM=shileipeng@gmail.com          # Default sender email (optional)
 SMTP_REJECT_UNAUTHORIZED=true     # Set to false for self-signed certs
 ```
