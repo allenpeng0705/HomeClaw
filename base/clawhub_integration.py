@@ -186,6 +186,21 @@ def _decode_output(raw: Any) -> str:
     return ""
 
 
+def _first_error_line(stderr: str, max_len: int = 500) -> str:
+    """Extract first meaningful error line from stderr (skip Node/experimental warnings). Never raises."""
+    if not (stderr or "").strip():
+        return ""
+    for line in (stderr or "").splitlines():
+        ln = (line or "").strip()
+        if not ln or len(ln) < 5:
+            continue
+        low = ln.lower()
+        if "experimental" in low or "deprecat" in low or "warning" in low or "warn:" in low:
+            continue
+        return ln[:max_len]
+    return (stderr or "").strip()[:max_len]
+
+
 def _run_cmd(
     argv: List[str],
     *,
@@ -204,13 +219,20 @@ def _run_cmd(
             timeout=max(1, int(timeout_s)),
         )
         dt_ms = int((time.perf_counter() - t0) * 1000)
+        out_str = _decode_output(proc.stdout)
+        err_str = _decode_output(proc.stderr)
+        if proc.returncode == 0:
+            err_msg = None
+        else:
+            snippet = _first_error_line(err_str)
+            err_msg = f"Command failed ({proc.returncode})" + (f": {snippet}" if snippet else "")
         return ClawHubResult(
             ok=proc.returncode == 0,
-            stdout=_decode_output(proc.stdout),
-            stderr=_decode_output(proc.stderr),
+            stdout=out_str,
+            stderr=err_str,
             returncode=int(proc.returncode),
             duration_ms=dt_ms,
-            error=None if proc.returncode == 0 else f"Command failed ({proc.returncode})",
+            error=err_msg,
         )
     except FileNotFoundError:
         dt_ms = int((time.perf_counter() - t0) * 1000)

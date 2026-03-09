@@ -21,7 +21,8 @@ def _install_failure_detail(out: dict) -> str:
     if err:
         return err[:600]
     err = (install.get("error") or "").strip()
-    if err:
+    # If install only has generic "Command failed (N)", prefer stderr so user sees real reason
+    if err and not (err.startswith("Command failed (") and "): " not in err):
         return err[:600]
     stderr = (install.get("stderr") or "").strip()
     if stderr:
@@ -33,6 +34,8 @@ def _install_failure_detail(out: dict) -> str:
             if len(ln) > 10:
                 return ln[:600]
         return (lines[0] if lines else stderr[:400])[:600]
+    if err:
+        return err[:600]
     return "Install or conversion failed. Check Core logs for details."
 
 
