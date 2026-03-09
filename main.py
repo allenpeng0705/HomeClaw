@@ -456,10 +456,21 @@ def run_ollama_set_main(model_name: str):
         print("Failed to update config: {}.".format(e))
 
 
+def _run_core_capture_exception(exc_holder):
+    """Run core.main() and store any exception in exc_holder (e.g. a list) so the main thread can report it."""
+    try:
+        core.main()
+    except BaseException as e:
+        exc_holder.append(e)
+
+
 def run_core() -> threading.Thread:
     """Start the same Core as core/core.py (core.main) in a background thread.
-    So `python -m main start` and `python core/core.py` both run the same Core server."""
-    thread = threading.Thread(target=core.main, daemon=True)
+    So `python -m main start` and `python core/core.py` both run the same Core server.
+    If Core exits with an exception, it is stored and reported after join()."""
+    exc_holder = []
+    thread = threading.Thread(target=_run_core_capture_exception, args=(exc_holder,), daemon=True)
+    thread._exc_holder = exc_holder
     thread.start()
     return thread
 
@@ -581,6 +592,21 @@ def start(open_browser=True):
                 core_thread.join()
             except Exception:
                 pass
+            exc_holder = getattr(core_thread, "_exc_holder", None)
+            if exc_holder and len(exc_holder) > 0:
+                err = exc_holder[0]
+                print("\nCore exited with an error:", file=sys.stderr)
+                try:
+                    import traceback
+                    traceback.print_exception(type(err), err, err.__traceback__, file=sys.stderr)
+                except Exception:
+                    print(err, file=sys.stderr)
+                print("Check logs/core_debug.log for the full error if Core had started logging.", file=sys.stderr)
+                try:
+                    _do_shutdown()
+                except Exception:
+                    pass
+                sys.exit(1)
     except Exception as e:
         logger.exception(e)
         try:
@@ -668,13 +694,37 @@ if __name__ == "__main__":
         elif args.command == "skills":
             from pathlib import Path
             from base.clawhub_integration import clawhub_available, clawhub_search, clawhub_install_and_convert
+            from base.skills import remove_skill_folder
 
-            if not clawhub_available():
-                print("clawhub not found on PATH. Install OpenClaw/ClawHub first, then try again.")
-                sys.exit(2)
             action = (args.ollama_action or "").strip().lower()
             if not action:
-                print("Usage: python -m main skills search <query...>\n       python -m main skills install <skill[@version]> [--dry-run] [--with-deps]")
+                print("Usage: python -m main skills search <query...>\n       python -m main skills install <skill[@version]> [--dry-run] [--with-deps]\n       python -m main skills remove <folder-name>")
+                sys.exit(2)
+            if action == "remove":
+                folder = (args.ollama_name or "").strip()
+                if not folder and args.extra:
+                    folder = str(args.extra[0]).strip()
+                if not folder:
+                    print("Usage: python -m main skills remove <folder-name>")
+                    sys.exit(2)
+                try:
+                    meta = Util().get_core_metadata()
+                    skills_dir = (getattr(meta, "skills_dir", None) or "skills").strip() or "skills"
+                    ext_dir = (getattr(meta, "external_skills_dir", None) or "external_skills").strip()
+                    extra_dirs = getattr(meta, "skills_extra_dirs", None) or []
+                    if not isinstance(extra_dirs, list):
+                        extra_dirs = []
+                except Exception:
+                    skills_dir, ext_dir, extra_dirs = "skills", "external_skills", []
+                root = Path(Util().root_path()).resolve()
+                out = remove_skill_folder(folder, root, skills_dir, ext_dir, extra_dirs)
+                if out.get("removed"):
+                    print(f"Removed skill: {folder}")
+                    sys.exit(0)
+                print(out.get("error") or "Remove failed")
+                sys.exit(1)
+            if not clawhub_available():
+                print("clawhub not found on PATH. Install OpenClaw/ClawHub first, then try again.")
                 sys.exit(2)
             if action == "search":
                 tokens = []
@@ -708,14 +758,17 @@ if __name__ == "__main__":
                 try:
                     meta = Util().get_core_metadata()
                     ext_dir = (getattr(meta, "external_skills_dir", None) or "external_skills").strip() or "external_skills"
+                    download_dir = (getattr(meta, "clawhub_download_dir", None) or "downloads").strip() or "downloads"
                 except Exception:
                     ext_dir = "external_skills"
+                    download_dir = "downloads"
                 home_root = Path(Util().root_path()).resolve()
                 out = clawhub_install_and_convert(
                     skill_spec=spec,
                     skill_id_hint=None,
                     homeclaw_root=home_root,
                     external_skills_dir=ext_dir,
+                    clawhub_download_dir=download_dir,
                     dry_run=bool(args.dry_run),
                     with_deps=bool(args.with_deps),
                 )
@@ -732,7 +785,7 @@ if __name__ == "__main__":
                 print(f"  Output: {convert.get('output')}")
                 # Skills vector store is off by default; new skills are registered when Core restarts (if vector search enabled).
                 sys.exit(0)
-            print("Usage: python -m main skills search <query...> | install <skill[@version]>")
+            print("Usage: python -m main skills search <query...> | install <skill[@version]> | remove <folder-name>")
             sys.exit(2)
         else:
             start(open_browser=not args.no_open_browser)

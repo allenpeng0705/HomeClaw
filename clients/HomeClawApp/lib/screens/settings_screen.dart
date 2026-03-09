@@ -8,6 +8,7 @@ import '../core_service.dart';
 import 'change_password_screen.dart';
 import 'permissions_screen.dart';
 import 'scan_connect_screen.dart';
+import 'skills_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final CoreService coreService;
@@ -268,6 +269,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
               icon: const Icon(Icons.security),
               label: const Text('Review permissions'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => SkillsScreen(coreService: widget.coreService),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.extension),
+              label: const Text('Skills (search & install from Core)'),
             ),
             const SizedBox(height: 16),
             OutlinedButton.icon(

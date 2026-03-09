@@ -144,9 +144,14 @@ def clawhub_search(query: str, *, limit: int = 20, timeout_s: int = 30) -> Tuple
     return (results, r2)
 
 
-def _candidate_openclaw_skills_dirs() -> List[Path]:
-    """Likely OpenClaw install dirs (documented order: workspace skills/, then ~/.openclaw/skills)."""
+def _candidate_openclaw_skills_dirs(extra_dirs: Optional[List[Path]] = None) -> List[Path]:
+    """Likely OpenClaw install dirs: optional extra_dirs first (e.g. project downloads/skills), then cwd/skills, then ~/.openclaw/skills."""
     out: List[Path] = []
+    if extra_dirs:
+        for p in extra_dirs:
+            if p is None:
+                continue
+            out.append(p)
     try:
         out.append(Path.cwd() / "skills")
     except Exception:
@@ -170,15 +175,16 @@ def _candidate_openclaw_skills_dirs() -> List[Path]:
     return uniq
 
 
-def find_openclaw_installed_skill_dir(skill_id: str) -> Optional[Path]:
+def find_openclaw_installed_skill_dir(skill_id: str, extra_search_dirs: Optional[List[Path]] = None) -> Optional[Path]:
     """
     Best-effort locate of an installed OpenClaw skill folder.
+    When extra_search_dirs is set (e.g. [downloads/skills, downloads]), those are searched first.
     Never raises; returns None if not found.
     """
     sid = (skill_id or "").strip()
     if not sid:
         return None
-    candidates = _candidate_openclaw_skills_dirs()
+    candidates = _candidate_openclaw_skills_dirs(extra_dirs=extra_search_dirs)
     # Prefer exact name match; else newest folder containing sid.
     newest: Tuple[float, Optional[Path]] = (0.0, None)
     for base in candidates:
@@ -206,10 +212,18 @@ def find_openclaw_installed_skill_dir(skill_id: str) -> Optional[Path]:
     return newest[1]
 
 
-def clawhub_install(skill_spec: str, *, timeout_s: int = 180, dry_run: bool = False, with_deps: bool = False) -> ClawHubResult:
+def clawhub_install(
+    skill_spec: str,
+    *,
+    timeout_s: int = 180,
+    dry_run: bool = False,
+    with_deps: bool = False,
+    cwd: Optional[Path] = None,
+) -> ClawHubResult:
     """
     Install a skill via `clawhub install <spec>`.
-    Note: this installs into OpenClaw's skills directory (not HomeClaw). We locate it after install and then convert.
+    When cwd is set (e.g. project_root/downloads), clawhub uses that as working dir so the skill is downloaded there
+    (typically into cwd/skills/<skill_id>). Otherwise uses process cwd / ~/.openclaw/skills.
     """
     spec = (skill_spec or "").strip()
     if not spec:
@@ -219,7 +233,7 @@ def clawhub_install(skill_spec: str, *, timeout_s: int = 180, dry_run: bool = Fa
         argv.append("--dry-run")
     if with_deps:
         argv.append("--with-deps")
-    return _run_cmd(argv, timeout_s=timeout_s)
+    return _run_cmd(argv, cwd=cwd, timeout_s=timeout_s)
 
 
 def convert_installed_openclaw_skill_to_homeclaw(
@@ -227,10 +241,12 @@ def convert_installed_openclaw_skill_to_homeclaw(
     skill_id: str,
     homeclaw_root: Path,
     external_skills_dir: str,
+    openclaw_search_dirs: Optional[List[Path]] = None,
     timeout_s: int = 180,
 ) -> Dict[str, Any]:
     """
     Convert an already-installed OpenClaw skill into HomeClaw external_skills dir using scripts/convert_openclaw_skill.py.
+    When openclaw_search_dirs is set (e.g. [downloads/skills, downloads]), those are searched first for the skill folder.
     Returns { ok: bool, ... }. Never raises.
     """
     try:
@@ -243,7 +259,7 @@ def convert_installed_openclaw_skill_to_homeclaw(
         return {"ok": False, "error": "skill_id is empty"}
 
     try:
-        src = find_openclaw_installed_skill_dir(sid)
+        src = find_openclaw_installed_skill_dir(sid, extra_search_dirs=openclaw_search_dirs)
     except Exception:
         src = None
     if not src or not src.is_dir():
@@ -278,18 +294,36 @@ def clawhub_install_and_convert(
     skill_id_hint: Optional[str],
     homeclaw_root: Path,
     external_skills_dir: str,
+    clawhub_download_dir: Optional[str] = None,
     dry_run: bool = False,
     with_deps: bool = False,
 ) -> Dict[str, Any]:
     """
-    One-shot: run `clawhub install`, then locate installed folder, then convert into HomeClaw external_skills_dir.
+    One-shot: run `clawhub install` with cwd=clawhub_download_dir (staging), then locate installed folder,
+    then convert into HomeClaw external_skills_dir. When clawhub_download_dir is set (e.g. "downloads"),
+    install runs with cwd=homeclaw_root/clawhub_download_dir so OpenClaw downloads go there; we then search
+    that dir (and its skills/ subdir) first when locating the skill for conversion.
     Returns { ok: bool, install: {..}, convert: {..} }. Never raises.
     """
     spec = (skill_spec or "").strip()
     if not spec:
         return {"ok": False, "error": "skill_spec is empty"}
     sid = (skill_id_hint or "").strip() or spec.split("@", 1)[0].split(":", 1)[0].strip()
-    install_res = clawhub_install(spec, dry_run=dry_run, with_deps=with_deps)
+
+    download_path: Optional[Path] = None
+    if (clawhub_download_dir or "").strip():
+        try:
+            d = Path((clawhub_download_dir or "").strip())
+            download_path = (homeclaw_root / d).resolve() if not d.is_absolute() else d.resolve()
+            # Ensure cwd exists so subprocess.run(cwd=...) does not fail
+            if download_path and not download_path.is_dir():
+                download_path.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            download_path = None
+
+    install_res = clawhub_install(
+        spec, dry_run=dry_run, with_deps=with_deps, cwd=download_path, timeout_s=180
+    )
     install_info = {
         "ok": install_res.ok,
         "returncode": install_res.returncode,
@@ -303,10 +337,15 @@ def clawhub_install_and_convert(
     if not install_res.ok:
         return {"ok": False, "install": install_info, "convert": None}
 
+    openclaw_search_dirs: Optional[List[Path]] = None
+    if download_path and download_path.is_dir():
+        openclaw_search_dirs = [download_path / "skills", download_path]
+
     convert_res = convert_installed_openclaw_skill_to_homeclaw(
         skill_id=sid,
         homeclaw_root=homeclaw_root,
         external_skills_dir=external_skills_dir,
+        openclaw_search_dirs=openclaw_search_dirs,
     )
     return {"ok": bool(convert_res.get("ok")), "install": install_info, "convert": convert_res}
 

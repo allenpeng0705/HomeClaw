@@ -719,6 +719,97 @@ class CoreService {
     _nodeService = null;
   }
 
+  /// GET /api/skills/list — list installed skills (Companion->Core direct). Requires session token.
+  Future<List<Map<String, dynamic>>> getSkillsList() async {
+    final url = Uri.parse('$_baseUrl/api/skills/list');
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+    if (response.statusCode != 200) throw Exception('Failed to load skills: ${response.body}');
+    final map = jsonDecode(response.body) as Map<String, dynamic>?;
+    final list = map?['skills'];
+    if (list is! List<dynamic>) return [];
+    final out = <Map<String, dynamic>>[];
+    for (final e in list) {
+      if (e is Map<String, dynamic>) out.add(e);
+      else if (e is Map) out.add(Map<String, dynamic>.from(e));
+    }
+    return out;
+  }
+
+  /// GET /api/skills/search?query=... — search ClawHub (Companion->Core direct). Requires session token.
+  Future<List<Map<String, dynamic>>> searchSkills(String query) async {
+    final q = query.trim();
+    final url = Uri.parse('$_baseUrl/api/skills/search').replace(queryParameters: q.isEmpty ? {} : {'query': q});
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+    if (response.statusCode == 400) throw Exception('clawhub not found on PATH');
+    if (response.statusCode != 200) {
+      final map = jsonDecode(response.body) as Map<String, dynamic>?;
+      final detail = map?['detail'] ?? response.body;
+      throw Exception(detail is String ? detail : 'Search failed');
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>?;
+    final list = map?['results'];
+    if (list is! List<dynamic>) return [];
+    final out = <Map<String, dynamic>>[];
+    for (final e in list) {
+      if (e is Map<String, dynamic>) out.add(e);
+      else if (e is Map) out.add(Map<String, dynamic>.from(e));
+    }
+    return out;
+  }
+
+  /// POST /api/skills/install — install a skill from ClawHub (Companion->Core direct). Requires session token.
+  Future<Map<String, dynamic>> installSkill(String id, {String? version, bool dryRun = false, bool withDeps = false}) async {
+    final url = Uri.parse('$_baseUrl/api/skills/install');
+    final body = <String, dynamic>{'id': id.trim()};
+    if (version != null && version.trim().isNotEmpty) body['version'] = version.trim();
+    if (dryRun) body['dry_run'] = true;
+    if (withDeps) body['with_deps'] = true;
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 120));
+    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+    if (response.statusCode == 400) throw Exception('clawhub not found on PATH or missing skill id');
+    final map = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    if (response.statusCode != 200) {
+      final detail = map['detail'] ?? map['error'] ?? response.body;
+      throw Exception(detail is String ? detail : 'Install failed');
+    }
+    return map;
+  }
+
+  /// POST /api/skills/remove — remove a skill by folder name (only from external_skills). Requires session token.
+  Future<void> removeSkill(String folder) async {
+    final url = Uri.parse('$_baseUrl/api/skills/remove');
+    final body = jsonEncode(<String, String>{'folder': folder.trim()});
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+          body: body,
+        )
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+    Map<String, dynamic> map = {};
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) map = decoded;
+    } catch (_) {}
+    if (response.statusCode == 200) return;
+    final detail = map['detail'] ?? map['error'];
+    final msg = detail is String ? detail : (response.statusCode == 403 ? 'Cannot remove built-in skill' : response.statusCode == 404 ? 'Skill not found' : 'Remove failed');
+    throw Exception(msg);
+  }
+
   /// Auth headers for requests. Use [forCompanionApi: true] only for /api/me and /api/me/friends (they require Bearer session token).
   /// All other routes (/inbound, /api/config/*, /ws, etc.) use Core's verify_inbound_auth which expects the API key, so we pass API key when [forCompanionApi] is false.
   Map<String, String> _authHeaders({bool forCompanionApi = false}) {

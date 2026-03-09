@@ -96,7 +96,12 @@ def register_all_routes(core: Any) -> None:
         methods=["GET"],
         response_class=HTMLResponse,
     )
-    app.add_api_route("/shutdown", lifecycle.get_shutdown_handler(core), methods=["GET"])
+    app.add_api_route(
+        "/shutdown",
+        lifecycle.get_shutdown_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
     app.add_api_route(
         "/inbound/result",
         inbound_routes.get_inbound_result_handler(core),
@@ -280,6 +285,31 @@ def register_all_routes(core: Any) -> None:
         methods=["POST"],
         dependencies=[Depends(auth.verify_inbound_auth)],
     )
+    # Companion->Core direct: list/search/install skills (no Portal)
+    app.add_api_route(
+        "/api/skills/list",
+        misc_api.get_api_skills_list_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/skills/search",
+        misc_api.get_api_skills_search_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/skills/install",
+        misc_api.get_api_skills_install_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/skills/remove",
+        misc_api.get_api_skills_remove_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
     app.add_api_route(
         "/api/testing/clear-all",
         misc_api.get_api_testing_clear_all_handler(core),
@@ -448,7 +478,10 @@ def register_all_routes(core: Any) -> None:
     app.add_websocket_route("/ws", websocket_routes.get_websocket_handler(core))
 
     @app.post("/process")
-    async def process_request(request: PromptRequest):
+    async def process_request(
+        request: PromptRequest,
+        _: None = Depends(auth.verify_inbound_auth),
+    ):
         try:
             user_name: str = request.user_name
             user_id: str = request.user_id
@@ -526,7 +559,10 @@ def register_all_routes(core: Any) -> None:
             return Response(content="Server Internal Error", status_code=500)
 
     @app.post("/local_chat")
-    async def process_request_local(request: PromptRequest):
+    async def process_request_local(
+        request: PromptRequest,
+        _: None = Depends(auth.verify_inbound_auth),
+    ):
         try:
             user_name: str = request.user_name
             user_id: str = request.user_id

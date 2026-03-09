@@ -11,7 +11,16 @@ import uvicorn
 import yaml
 from dataclasses import dataclass, field
 from typing import Dict, List, Any
-    
+
+try:
+    from base.auth_api_key_crypto import decrypt_auth_api_key, encrypt_auth_api_key
+except Exception:
+    def decrypt_auth_api_key(v):
+        return (v or "").strip() if isinstance(v, str) else ""
+    def encrypt_auth_api_key(v):
+        return (v or "").strip() if isinstance(v, str) else ""
+
+
 class ChannelType(Enum):
     """Enum representing different communication channels."""
     Email = "EMAIL"
@@ -942,6 +951,7 @@ class CoreMetadata:
     use_skills: bool = True  # always on; kept for optional override. Inject skills (SKILL.md from skills_dir) into system prompt.
     skills_dir: str = "skills"  # directory to scan for skill folders (each with SKILL.md); project root, same level as plugin
     external_skills_dir: str = "external_skills"  # second folder for skills (e.g. converted OpenClaw skills); same behavior as skills_dir. Empty string to disable.
+    clawhub_download_dir: str = "downloads"  # staging dir for clawhub install (OpenClaw format); relative to project root. Install runs with cwd=this dir; converted output goes to external_skills_dir.
     skills_extra_dirs: List[str] = field(default_factory=list)  # optional extra dirs (paths relative to project root); user can put more skills here
     skills_disabled: List[str] = field(default_factory=list)  # folder names to not load (e.g. ["x-api-1.0.0"]); case-insensitive match
     skills_max_in_prompt: int = 5  # when skills_use_vector_search=true, cap RAG results to this many in prompt; when false (include all) this is not used
@@ -1098,7 +1108,7 @@ class CoreMetadata:
                         _ext_data = yaml.safe_load(_f)
                     if isinstance(_ext_data, dict):
                         for _k, _v in _ext_data.items():
-                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k == 'tools' or _k == 'external_skills_dir'):
+                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k == 'tools' or _k == 'external_skills_dir' or _k == 'clawhub_download_dir'):
                                 continue
                             # Avoid injecting wrong types so later from_yaml never raises on this key
                             if _k in ('skills_force_include_rules', 'plugins_force_include_rules', 'system_plugins', 'skills_include_body_for', 'skills_extra_dirs', 'skills_disabled', 'plugins_extra_dirs') and not isinstance(_v, list):
@@ -1110,8 +1120,8 @@ class CoreMetadata:
                             if _k == 'tools' and not isinstance(_v, dict):
                                 logging.warning("skills_and_plugins config %s: tools must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
                                 continue
-                            if _k == 'external_skills_dir' and _v is not None and not isinstance(_v, str):
-                                logging.warning("skills_and_plugins config %s: external_skills_dir must be a string, got %s; skipping", _ext_path, type(_v).__name__)
+                            if _k in ('external_skills_dir', 'clawhub_download_dir') and _v is not None and not isinstance(_v, str):
+                                logging.warning("skills_and_plugins config %s: %s must be a string, got %s; skipping", _ext_path, _k, type(_v).__name__)
                                 continue
                             # Numeric/string keys: only set if value is safe so int/float/str later never raise
                             if _k in ('skills_max_in_prompt', 'plugins_max_in_prompt', 'plugins_description_max_chars', 'skills_max_retrieved', 'skills_include_body_max_chars'):
@@ -1388,6 +1398,7 @@ class CoreMetadata:
             use_skills=data.get('use_skills', True),
             skills_dir=(data.get('skills_dir') or 'skills').strip() or 'skills',
             external_skills_dir=(data.get('external_skills_dir') or 'external_skills').strip(),
+            clawhub_download_dir=(data.get('clawhub_download_dir') or 'downloads').strip() or 'downloads',
             skills_extra_dirs=[str(p).strip() for p in (data.get('skills_extra_dirs') or []) if str(p).strip()],
             skills_disabled=[str(f).strip() for f in (data.get('skills_disabled') or []) if str(f).strip()],
             skills_max_in_prompt=max(0, int(data.get('skills_max_in_prompt', 5) or 5)),
@@ -1420,7 +1431,7 @@ class CoreMetadata:
             prompt_default_language=(data.get('prompt_default_language') or 'en').strip() or 'en',
             prompt_cache_ttl_seconds=float(data.get('prompt_cache_ttl_seconds', 0) or 0),
             auth_enabled=data.get('auth_enabled', False),
-            auth_api_key=(data.get('auth_api_key') or '').strip(),
+            auth_api_key=(decrypt_auth_api_key(data.get('auth_api_key')) or '').strip(),
             app_layer_encryption_secret=(data.get('app_layer_encryption_secret') or '').strip(),
             core_public_url=(data.get('core_public_url') or '').strip(),
             file_link_style=(data.get('file_link_style') or 'token').strip().lower() or 'token',
@@ -1490,6 +1501,7 @@ class CoreMetadata:
                 # use_tools / use_skills omitted from core_dict so core.yml stays minimal; both default True in from_yaml
                 'skills_dir': getattr(core, 'skills_dir', 'skills'),
                 'external_skills_dir': getattr(core, 'external_skills_dir', '') or '',
+                'clawhub_download_dir': getattr(core, 'clawhub_download_dir', 'downloads') or 'downloads',
                 'skills_extra_dirs': getattr(core, 'skills_extra_dirs', None) or [],
                 'skills_disabled': getattr(core, 'skills_disabled', None) or [],
                 'skills_max_in_prompt': getattr(core, 'skills_max_in_prompt', 0),
@@ -1523,7 +1535,7 @@ class CoreMetadata:
                 'prompt_default_language': getattr(core, 'prompt_default_language', 'en') or 'en',
                 'prompt_cache_ttl_seconds': getattr(core, 'prompt_cache_ttl_seconds', 0),
                 'auth_enabled': getattr(core, 'auth_enabled', False),
-                'auth_api_key': getattr(core, 'auth_api_key', '') or '',
+                'auth_api_key': encrypt_auth_api_key(getattr(core, 'auth_api_key', '') or '') or '',
                 'app_layer_encryption_secret': getattr(core, 'app_layer_encryption_secret', '') or '',
                 'core_public_url': getattr(core, 'core_public_url', '') or '',
                 'file_link_style': getattr(core, 'file_link_style', 'token') or 'token',

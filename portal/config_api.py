@@ -19,7 +19,7 @@ WHITELIST_CORE = frozenset({
     "memory_kb_config_file", "use_workspace_bootstrap", "workspace_dir", "homeclaw_root",
     "notify_unknown_request", "outbound_markdown_format",
     "llm_max_concurrent_local", "llm_max_concurrent_cloud", "compaction",
-    "skills_dir", "external_skills_dir", "skills_extra_dirs", "skills_disabled", "skills_and_plugins_config_file",
+    "skills_dir", "external_skills_dir", "clawhub_download_dir", "skills_extra_dirs", "skills_disabled", "skills_and_plugins_config_file",
     "use_prompt_manager", "prompts_dir", "prompt_default_language", "prompt_cache_ttl_seconds",
     "auth_enabled", "auth_api_key", "core_public_url", "file_link_style", "file_static_prefix",
     "file_view_link_expiry_sec", "inbound_request_timeout_seconds",
@@ -124,7 +124,14 @@ def update_config(name: str, body: Dict[str, Any]) -> bool:
     config_backup.prepare_for_update(name)
     path = str(get_config_path(name))
     if name == "core":
-        return yaml_config.update_yml_preserving(path, body, whitelist=WHITELIST_CORE)
+        core_body = dict(body)
+        if "auth_api_key" in core_body and isinstance(core_body["auth_api_key"], str) and core_body["auth_api_key"].strip() and not core_body["auth_api_key"].strip().startswith("encrypted:"):
+            try:
+                from base.auth_api_key_crypto import encrypt_auth_api_key
+                core_body["auth_api_key"] = encrypt_auth_api_key(core_body["auth_api_key"]) or core_body["auth_api_key"]
+            except Exception:
+                pass
+        return yaml_config.update_yml_preserving(path, core_body, whitelist=WHITELIST_CORE)
     if name == "llm":
         return yaml_config.update_yml_preserving(path, body, whitelist=yaml_config.WHITELIST_LLM)
     if name == "memory_kb":

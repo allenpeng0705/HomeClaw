@@ -1,5 +1,5 @@
 """
-Misc API routes: skills clear-vector-store, testing clear-all, sessions list, reports usage.
+Misc API routes: skills clear-vector-store, skills list/search/install (Companion->Core), testing clear-all, sessions list, reports usage.
 """
 from pathlib import Path
 
@@ -36,6 +36,149 @@ def get_api_skills_clear_vector_store_handler(core):
             logger.exception(e)
             return JSONResponse(status_code=500, content={"detail": str(e)})
     return api_skills_clear_vector_store
+
+
+def _core_skills_list(core) -> list:
+    """Load all skills from skills_dir, external_skills_dir, skills_extra_dirs. Returns list of dicts. Never raises; returns [] on error."""
+    try:
+        from base.skills import get_all_skills_dirs, load_skills_from_dirs
+        meta = Util().get_core_metadata()
+        root = Path(Util().root_path())
+        skills_dir = (getattr(meta, "skills_dir", None) or "skills").strip() or "skills"
+        ext_dir = (getattr(meta, "external_skills_dir", None) or "").strip()
+        extra_dirs = getattr(meta, "skills_extra_dirs", None) or []
+        if not isinstance(extra_dirs, list):
+            extra_dirs = []
+        disabled = getattr(meta, "skills_disabled", None) or []
+        if not isinstance(disabled, list):
+            disabled = []
+        dirs = get_all_skills_dirs(skills_dir, ext_dir, extra_dirs, root)
+        skills = load_skills_from_dirs(dirs, disabled_folders=disabled, include_body=False)
+        out = []
+        for s in skills:
+            if not isinstance(s, dict):
+                continue
+            desc = s.get("description")
+            desc_str = (desc if isinstance(desc, str) else str(desc or ""))[:500]
+            out.append({
+                "folder": s.get("folder") or "",
+                "name": s.get("name") or s.get("folder") or "",
+                "description": desc_str,
+                "path": s.get("path") or "",
+            })
+        return out
+    except Exception as e:
+        logger.debug("Core skills list failed: %s", e)
+        return []
+
+
+def get_api_skills_list_handler(core):  # noqa: ARG001
+    """Return handler for GET /api/skills/list. Companion->Core direct; returns { skills: [...] }."""
+    async def api_skills_list():
+        try:
+            skills = _core_skills_list(core)
+            return JSONResponse(content={"skills": skills})
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+    return api_skills_list
+
+
+def get_api_skills_search_handler(core):  # noqa: ARG001
+    """Return handler for GET /api/skills/search?query=... . Companion->Core direct; uses clawhub CLI."""
+    async def api_skills_search(request: Request):
+        try:
+            from base.clawhub_integration import clawhub_available, clawhub_search
+            q = (request.query_params.get("query") or "").strip()
+            if not q:
+                return JSONResponse(content={"results": []})
+            if not clawhub_available():
+                return JSONResponse(status_code=400, content={"detail": "clawhub not found on PATH"})
+            results, raw = clawhub_search(q, limit=20)
+            if not raw.ok and raw.error:
+                return JSONResponse(status_code=502, content={"detail": raw.error, "stderr": (raw.stderr or "")[-1000:]})
+            return JSONResponse(content={"results": results})
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+    return api_skills_search
+
+
+def get_api_skills_install_handler(core):  # noqa: ARG001
+    """Return handler for POST /api/skills/install. Companion->Core direct; body { id, version?, dry_run?, with_deps? }."""
+    async def api_skills_install(request: Request):
+        try:
+            from base.clawhub_integration import clawhub_available, clawhub_install_and_convert
+            if not clawhub_available():
+                return JSONResponse(status_code=400, content={"detail": "clawhub not found on PATH"})
+            try:
+                body = await request.json() if request.headers.get("content-type", "").strip().startswith("application/json") else {}
+            except Exception:
+                body = {}
+            if not isinstance(body, dict):
+                body = {}
+            skill_id = (body.get("id") or body.get("skill") or "").strip()
+            version = (body.get("version") or "").strip()
+            dry_run = bool(body.get("dry_run", False))
+            with_deps = bool(body.get("with_deps", False))
+            if not skill_id:
+                return JSONResponse(status_code=400, content={"detail": "Missing skill id"})
+            spec = f"{skill_id}@{version}" if version else skill_id
+            meta = Util().get_core_metadata()
+            root = Path(Util().root_path())
+            ext_dir = (getattr(meta, "external_skills_dir", None) or "external_skills").strip() or "external_skills"
+            download_dir = (getattr(meta, "clawhub_download_dir", None) or "downloads").strip() or "downloads"
+            out = clawhub_install_and_convert(
+                skill_spec=spec,
+                skill_id_hint=skill_id,
+                homeclaw_root=root,
+                external_skills_dir=ext_dir,
+                clawhub_download_dir=download_dir,
+                dry_run=dry_run,
+                with_deps=with_deps,
+            )
+            status = 200 if out.get("ok") else (502 if (out.get("install") or {}).get("ok") else 500)
+            return JSONResponse(status_code=status, content=out)
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+    return api_skills_install
+
+
+def get_api_skills_remove_handler(core):  # noqa: ARG001
+    """Return handler for POST /api/skills/remove. Companion->Core direct; body { folder: "skill-folder-name" }. Only removes from external_skills_dir."""
+    async def api_skills_remove(request: Request):
+        try:
+            from base.skills import get_all_skills_dirs, remove_skill_folder
+            try:
+                body = await request.json() if request.headers.get("content-type", "").strip().startswith("application/json") else {}
+            except Exception:
+                body = {}
+            if not isinstance(body, dict):
+                body = {}
+            folder = (body.get("folder") or body.get("name") or "").strip()
+            if not folder:
+                return JSONResponse(status_code=400, content={"detail": "Missing folder name", "ok": False, "removed": False})
+            meta = Util().get_core_metadata()
+            root = Path(Util().root_path())
+            skills_dir = (getattr(meta, "skills_dir", None) or "skills").strip() or "skills"
+            ext_dir = (getattr(meta, "external_skills_dir", None) or "external_skills").strip()
+            extra_dirs = getattr(meta, "skills_extra_dirs", None) or []
+            if not isinstance(extra_dirs, list):
+                extra_dirs = []
+            out = remove_skill_folder(folder, root, skills_dir, ext_dir, extra_dirs)
+            err = (out.get("error") or "").strip()
+            if out.get("removed"):
+                return JSONResponse(content=out)
+            if "built-in" in err.lower() or "not configured" in err.lower():
+                return JSONResponse(status_code=403, content={"detail": err, **out})
+            if "not found" in err.lower():
+                return JSONResponse(status_code=404, content={"detail": err, **out})
+            return JSONResponse(status_code=400, content={"detail": err or "Remove failed", **out})
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e), "ok": False, "removed": False})
+    return api_skills_remove
 
 
 def get_api_skills_sync_vector_store_handler(core):

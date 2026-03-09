@@ -8,6 +8,7 @@ Vector retrieval: sync_skills_to_vector_store() and search_skills_by_query() for
 registration and retrieval by user query (docs/ToolsSkillsPlugins.md §8).
 """
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
@@ -220,6 +221,95 @@ def resolve_skill_to_path(skill_name: str, base_dirs: Iterable[Path]) -> Optiona
             if folder.is_dir():
                 return folder
     return None
+
+
+def resolve_skill_to_path_and_base(
+    skill_name: str, base_dirs: List[Path]
+) -> Tuple[Optional[Path], Optional[Path]]:
+    """
+    Resolve a skill name to (skill_folder_path, base_dir_containing_it).
+    Returns (None, None) if not found. Use to know which base dir a skill lives under (e.g. to allow remove only from external_skills).
+    """
+    if not skill_name or not base_dirs:
+        return None, None
+    for base in base_dirs:
+        if base is None:
+            continue
+        try:
+            base = Path(base).resolve()
+        except (TypeError, ValueError, OSError):
+            continue
+        resolved = resolve_skill_folder_name(base, skill_name)
+        if resolved is not None:
+            folder = (base / resolved).resolve()
+            if folder.is_dir():
+                return folder, base
+    return None, None
+
+
+def remove_skill_folder(
+    folder_name: str,
+    root: Path,
+    skills_dir: str,
+    external_skills_dir: str,
+    skills_extra_dirs: Optional[Iterable[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Remove a skill by deleting its folder. Only allowed when the skill lives under external_skills_dir
+    (not under the main skills_dir). Returns {"ok": bool, "removed": bool, "error": str}. Never raises.
+    """
+    out: Dict[str, Any] = {"ok": False, "removed": False, "error": ""}
+    folder_name = (folder_name or "").strip()
+    if not folder_name:
+        out["error"] = "Folder name is required"
+        return out
+    if "/" in folder_name or "\\" in folder_name or ".." in folder_name:
+        out["error"] = "Invalid folder name"
+        return out
+    try:
+        base_dirs = get_all_skills_dirs(
+            skills_dir or "skills",
+            (external_skills_dir or "").strip(),
+            skills_extra_dirs or [],
+            root,
+        )
+        skill_path, base_containing = resolve_skill_to_path_and_base(folder_name, base_dirs)
+        if not skill_path or not skill_path.is_dir():
+            out["error"] = "Skill not found"
+            return out
+        ext_dir_str = (external_skills_dir or "").strip()
+        if not ext_dir_str:
+            out["error"] = "Cannot remove: external_skills_dir not configured"
+            return out
+        ext_base = get_skills_dir(ext_dir_str, root=root).resolve()
+        if base_containing is None or ext_base is None:
+            out["error"] = "Skill not found"
+            return out
+        try:
+            if not ext_base.is_dir():
+                out["error"] = "Cannot remove: external_skills dir not found"
+                return out
+            # Allow remove only if the skill is under external_skills_dir (same as ext_base)
+            try:
+                skill_path.resolve().relative_to(ext_base.resolve())
+            except ValueError:
+                out["error"] = "Cannot remove built-in skill; only skills in external_skills can be removed"
+                return out
+            # Ensure no path escape: skill must be a direct child or under ext_base
+            if skill_path.resolve() == ext_base.resolve():
+                out["error"] = "Invalid path"
+                return out
+            shutil.rmtree(skill_path)
+            out["ok"] = True
+            out["removed"] = True
+            return out
+        except OSError as e:
+            out["error"] = f"Failed to remove folder: {e}"
+            return out
+    except Exception as e:
+        logger.debug("remove_skill_folder failed: %s", e)
+        out["error"] = str(e)
+        return out
 
 
 def load_skills_from_dirs(

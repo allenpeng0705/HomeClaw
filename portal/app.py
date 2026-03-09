@@ -380,11 +380,13 @@ def skills_install(body: dict = Body(default_factory=dict)):
 
         core_cfg = config_api.load_config("core") or {}
         ext_dir = (core_cfg.get("external_skills_dir") or "external_skills").strip() or "external_skills"
+        download_dir = (core_cfg.get("clawhub_download_dir") or "downloads").strip() or "downloads"
         out = clawhub_install_and_convert(
             skill_spec=spec,
             skill_id_hint=skill_id,
             homeclaw_root=portal_config.ROOT_DIR,
             external_skills_dir=ext_dir,
+            clawhub_download_dir=download_dir,
             dry_run=dry_run,
             with_deps=with_deps,
         )

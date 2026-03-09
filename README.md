@@ -23,8 +23,8 @@
 
 ### 3. Skills and plugins — OpenClaw-compatible, any language
 
-- **Skills** — **Compatible with OpenClaw skills**: workflows in `skills/` (SKILL.md). LLM uses tools and optional `run_skill` to accomplish tasks.
-- **ClawHub import (Portal + CLI)** — If you have OpenClaw/ClawHub installed (so `clawhub` is on PATH), you can **search and import** skills into `external_skills/` from **Portal → Skills** or the CLI: `python -m main skills search ...`, `python -m main skills install <skill>`.
+- **Skills** — **Compatible with OpenClaw skills**: workflows in `skills/` and `external_skills/` (SKILL.md). LLM uses tools and optional `run_skill` to accomplish tasks.
+- **ClawHub import and remove (Portal, CLI, Companion)** — If OpenClaw/ClawHub is installed (`clawhub` on PATH), you can **search and install** skills into `external_skills/` from **Portal → Skills**, the **Companion app** (Settings → Skills: list, search, install, remove), or the CLI: `python -m main skills search ...`, `python -m main skills install <skill>`, `python -m main skills remove <folder>`. Only skills in `external_skills/` can be removed via API/CLI/Companion; built-in skills in `skills/` are protected.
 - **Plugins** — **Built-in** (Python in `plugins/`) and **external in any language** (Node.js, Go, Java, Python, etc.). Register via HTTP; Core routes to them like built-ins. System plugins (e.g. **homeclaw-browser**) extend with browser automation, Canvas, and more.
 
 ### 4. Companion app — All platforms, multi-role (Friend of AI)
@@ -36,9 +36,10 @@
 
 - Run **multiple HomeClaw instances** (e.g. one per user, use case, or “persona”). Each instance is one agent with its own memory and config. Simple multi-agent without a central orchestrator.
 
-### 6. Remote connection — Pinggy, Cloudflare, Ngrok, and all channels
+### 6. Remote connection and API key — Pinggy, Cloudflare, Ngrok, secure Core
 
 - **Companion app remote access** — **Built-in Pinggy** support, **Cloudflare Tunnel**, **Ngrok**, Tailscale, and more. Use the app from anywhere.
+- **API key protection** — When `auth_enabled: true` in `config/core.yml`, Core requires an API key for **/inbound**, **/ws**, **/process**, **/local_chat**, **/shutdown**, and protected **/api/** routes. Send `X-API-Key` or `Authorization: Bearer <key>`. Optional **encrypted storage** for the key: set env **HOMECLAW_AUTH_KEY** so the key is stored as `encrypted:...` in config; see [RemoteAccess.md](docs_design/RemoteAccess.md) and [AuthApiKeyEncryptedStorage.md](docs_design/AuthApiKeyEncryptedStorage.md).
 - **Channels everywhere** — **WhatsApp**, **Google Chat**, **DingTalk**, **Feishu (Lark)**, **Slack**, **Microsoft Teams**, **Telegram**, **Discord**, **Signal**, **WeChat**, **Line**, **Email**, **WebChat**, and more. One Core serves all channels.
 
 ### 7. Social networking — Friends, user-to-user, your own network
@@ -84,7 +85,7 @@ This runs Core and the built-in CLI channel; the web UI opens automatically. Or 
 
 ### Use the Companion app to chat
 
-Install the app from `clients/HomeClawApp/` or a release. Open the app → **Settings** → set **Core URL** to `http://127.0.0.1:9000` when on the same machine as Core, or to your [remote URL](#remote-access-tailscale-cloudflare-tunnel) (Tailscale, Cloudflare Tunnel, Ngrok, etc.) when away. Add your user in `config/user.yml` (or via Portal / **Manage Core** → Users) so Core accepts your messages. Then open **Chat** — the app sends messages to Core; you get the same AI and memory as WebChat and other channels.
+Install the app from `clients/HomeClawApp/` or a release. Open the app → **Settings** → set **Core URL** to `http://127.0.0.1:9000` when on the same machine as Core, or to your [remote URL](#remote-access-tailscale-cloudflare-tunnel) (Tailscale, Cloudflare Tunnel, Ngrok, etc.) when away. If Core has **auth_enabled: true**, set the **API key** in Settings (or scan the QR from Core’s **/pinggy** page to fill URL + key). Add your user in `config/user.yml` (or via Portal / **Manage Core** → Users) so Core accepts your messages. Then open **Chat** — the app sends messages to Core; you get the same AI and memory as WebChat and other channels. From Settings you can also open **Skills** to list, search, install, and remove skills (Companion talks to Core directly).
 
 **How to open the Portal** — For config and onboarding, start the Portal:
 
@@ -133,7 +134,7 @@ Design and security: [UserToUserMessagingViaCompanion.md](docs_design/UserToUser
 
 ## Table of Contents
 
-- [Major Features](#major-features) — Save cost · User sandbox · Skills & plugins · Companion app · Multi-agent · Remote & channels · Social networking
+- [Major Features](#major-features) — Save cost · User sandbox · Skills & plugins · Companion app · Multi-agent · Remote, API key & channels · Social networking
 - [Quick Start](#quick-start) — Run Core · Companion app · Portal · Config & channels · Social networking
 1. [What is HomeClaw?](#1-what-is-homeclaw)
 2. [What Can HomeClaw Do?](#2-what-can-homeclaw-do) — Channels, multi-user, [Social networking (Companion + Core)](#social-networking-companion--core)
@@ -233,16 +234,17 @@ To use the **Companion app** or WebChat from another network (e.g. phone on cell
 
 1. Install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/local/) on the Core host.
 2. Run: `cloudflared tunnel --url http://127.0.0.1:9000` and copy the URL (e.g. `https://xxx.trycloudflare.com`). If Slack or other channels get **502** (tunnel took port 9000), use port **9001** instead: in `config/core.yml` set `port: 9001`, in `channels/.env` set `core_port=9001`, and run `cloudflared tunnel --url http://127.0.0.1:9001` — Companion app keeps using the same tunnel URL; Slack and channels use 9001.
-3. Enable Core auth: in `config/core.yml` set `auth_enabled: true` and `auth_api_key: "<long-random-key>"`.
+3. Enable Core auth: in `config/core.yml` set `auth_enabled: true` and `auth_api_key: "<long-random-key>"` (or use [encrypted storage](docs_design/RemoteAccess.md) with `HOMECLAW_AUTH_KEY`).
 4. In the Companion app **Settings**, set **Core URL** to the tunnel URL and the **API key** to match.
 
 **Ngrok** — Run `ngrok http 9000` (or your Core port) and set **Core URL** in the app to the HTTPS URL Ngrok provides. Enable Core auth when using a public URL.
 
-The app only needs **Core URL** and optional **API key**; no tunnel SDK in the app. For more (SSH tunnel, auth details, Pinggy), see the docs: **[Remote access](https://allenpeng0705.github.io/HomeClaw/remote-access/)** and **docs_design/RemoteAccess.md**.
+The app only needs **Core URL** and optional **API key** (required when Core has `auth_enabled: true`); no tunnel SDK in the app. For more (SSH tunnel, auth details, Pinggy, encrypted API key storage), see the docs: **[Remote access](https://allenpeng0705.github.io/HomeClaw/remote-access/)** and **docs_design/RemoteAccess.md**.
 
-### More: models, database, CLI, platforms
+### More: models, database, CLI, security, platforms
 
-- **CLI** (`python -m main start`): `llm` / `llm set` / `llm cloud`, `channel list` / `channel run <name>`, `reset`. [HOW_TO_USE.md](HOW_TO_USE.md)
+- **CLI** (`python -m main start`): `llm` / `llm set` / `llm cloud`, `channel list` / `channel run <name>`, `reset`, `skills search` / `skills install` / `skills remove`. [HOW_TO_USE.md](HOW_TO_USE.md)
+- **Security & auth** — When `auth_enabled: true`, Core protects /inbound, /ws, /process, /local_chat, /shutdown, and /api/*. Optional encrypted storage for `auth_api_key`: set **HOMECLAW_AUTH_KEY** and save the key via Portal or API. [RemoteAccess.md](docs_design/RemoteAccess.md) · [AuthApiKeyEncryptedStorage.md](docs_design/AuthApiKeyEncryptedStorage.md)
 - **Local GGUF** and **cloud (OpenAI, Gemini, etc.)**: [Models doc](https://allenpeng0705.github.io/HomeClaw/models/) · [llama.cpp releases](https://github.com/ggml-org/llama.cpp/releases) (pre-built binaries) · config in `config/core.yml`.
 - **Postgres, Neo4j, enterprise vector DB**: [MemoryAndDatabase.md](docs_design/MemoryAndDatabase.md)
 - **Windows** (Visual C++ Build Tools, WeChat): [Install VSBuildTools](https://github.com/bycloudai/InstallVSBuildToolsWindows) · **China** (pip mirror): [getting-started](https://allenpeng0705.github.io/HomeClaw/getting-started/).
@@ -253,7 +255,7 @@ The app only needs **Core URL** and optional **API key**; no tunnel SDK in the a
 
 **Companion** is a Flutter app for **Mac, Windows, Linux, Android, and iOS**: chat, voice, attachments, and **Manage Core** (edit core.yml and user.yml from the app). Supports **multi-role** (e.g. AI as **Friend**). [Companion app doc](https://allenpeng0705.github.io/HomeClaw/companion-app/) · [Build from source](clients/HomeClawApp/README.md)
 
-To use it: set **Core URL** in Settings (same machine: `http://127.0.0.1:9000`; remote: see [Remote access](#remote-access-tailscale-cloudflare-tunnel)), ensure your user is in **config/user.yml** (or add via Portal / **Manage Core** → Users), then open **Chat** to talk to HomeClaw. The app talks to Core; same AI and memory as WebChat and other channels. You can also open **Manage Core** in the app to edit config or go to **/portal-ui** when Core is running with `portal_url` set.
+To use it: set **Core URL** in Settings (same machine: `http://127.0.0.1:9000`; remote: see [Remote access](#remote-access-tailscale-cloudflare-tunnel)). If Core has **auth_enabled: true**, set the **API key** (or scan the QR from Core’s /pinggy page). Ensure your user is in **config/user.yml** (or add via Portal / **Manage Core** → Users), then open **Chat** to talk to HomeClaw. The app talks to Core; same AI and memory as WebChat and other channels. From **Settings** you can open **Manage Core** (edit core.yml and user.yml), **Skills** (list, search, install, remove skills via Core), or **/portal-ui** when Core is running with `portal_url` set.
 
 ---
 
@@ -280,7 +282,7 @@ To use it: set **Core URL** in Settings (same machine: `http://127.0.0.1:9000`; 
 
 ## 9. Skills: Extend HomeClaw with Workflows
 
-**Skills** are folders under `skills/` with **SKILL.md** (name, description, workflow). The LLM sees "Available skills" and uses tools (or **run_skill** for scripts) to accomplish them. Set `use_skills: true` in `config/core.yml`. [SkillsGuide.md](docs_design/SkillsGuide.md) · [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md)
+**Skills** are folders under `skills/` and `external_skills/` with **SKILL.md** (name, description, workflow). The LLM sees "Available skills" and uses tools (or **run_skill** for scripts) to accomplish them. Set `use_skills: true` in `config/core.yml`. **ClawHub:** with OpenClaw’s `clawhub` on PATH, search and install skills from **Portal → Skills**, the **Companion app** (Settings → Skills: list, search, install, remove), or CLI: `python -m main skills search <query>`, `python -m main skills install <skill[@version]>`, `python -m main skills remove <folder>`. Installed skills go to `external_skills/`; only those can be removed via API/CLI/Companion. [SkillsGuide.md](docs_design/SkillsGuide.md) · [ToolsSkillsPlugins.md](docs_design/ToolsSkillsPlugins.md) · [OpenClawSkillsInvestigationAndConverter.md](docs_design/OpenClawSkillsInvestigationAndConverter.md)
 
 ---
 

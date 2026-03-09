@@ -23,7 +23,7 @@ CONFIG_CORE_WHITELIST = frozenset({
     "agent_memory_max_chars", "use_agent_memory_search", "agent_memory_vector_collection",
     "agent_memory_bootstrap_max_chars", "agent_memory_bootstrap_max_chars_local",
     "use_daily_memory", "daily_memory_dir", "session", "notify_unknown_request", "outbound_markdown_format",
-    "llm_max_concurrent_local", "llm_max_concurrent_cloud", "compaction", "use_tools", "use_skills", "skills_dir", "external_skills_dir",
+    "llm_max_concurrent_local", "llm_max_concurrent_cloud", "compaction", "use_tools",     "use_skills", "skills_dir", "external_skills_dir", "clawhub_download_dir",
     "skills_max_in_prompt", "plugins_max_in_prompt",
     "plugins_description_max_chars", "skills_use_vector_search", "skills_vector_collection",
     "skills_max_retrieved", "skills_similarity_threshold", "skills_refresh_on_startup", "skills_test_dir",
@@ -140,6 +140,12 @@ def get_api_config_core_patch_handler(core):  # noqa: ARG001
                     _deep_merge(data[k], v)
                 else:
                     data[k] = v
+            if "auth_api_key" in data and isinstance(data["auth_api_key"], str) and data["auth_api_key"].strip() and not data["auth_api_key"].strip().startswith("encrypted:"):
+                try:
+                    from base.auth_api_key_crypto import encrypt_auth_api_key
+                    data["auth_api_key"] = encrypt_auth_api_key(data["auth_api_key"]) or data["auth_api_key"]
+                except Exception:
+                    pass
             Util().update_yaml_preserving_comments(str(path), data)
             return JSONResponse(content={"result": "ok"})
         except Exception as e:
