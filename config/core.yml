@@ -12,7 +12,7 @@ model_path: models
 # When false: log [memory], [tools], [skills], [plugin], [TAM], [orchestrator] activity at INFO (verbose). When true: only INFO to console (less noise). On Windows CMD, use true to avoid huge output and "Press Space to continue" blocking.
 silent: false
 # When false: all logs go only to the log file (logs/core_debug.log); nothing to console. To monitor: "Get-Content logs\core_debug.log -Wait -Tail 50 -Encoding UTF8" (PowerShell; -Encoding UTF8 needed for Chinese/special chars on Windows) or "tail -f logs/core_debug.log" (Unix). When true: logs also go to console.
-log_to_console: false
+log_to_console: true
 # Memory, knowledge base, database: moved to memory_kb.yml. Set path below; edit config/memory_kb.yml.
 memory_kb_config_file: memory_kb.yml
 # default_location: optional fallback when no request/profile location (e.g. "New York, US"); see docs_design/SystemContextDateTimeAndLocation.md

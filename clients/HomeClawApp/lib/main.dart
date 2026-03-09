@@ -30,6 +30,15 @@ void main() async {
     }
   }
   final coreService = CoreService();
+  final navigatorKey = GlobalKey<NavigatorState>();
+  coreService.onSessionExpired = () {
+    navigatorKey.currentState?.pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (context) => LoginScreen(coreService: coreService),
+      ),
+      (route) => false,
+    );
+  };
   try {
     await coreService.loadSettings();
   } catch (_) {
@@ -90,6 +99,7 @@ void main() async {
   }
   runApp(HomeClawCompanionApp(
     coreService: coreService,
+    navigatorKey: navigatorKey,
     initialMessage: initialMessage,
     initialPushFromFriend: initialPushFromFriend,
   ));
@@ -97,12 +107,14 @@ void main() async {
 
 class HomeClawCompanionApp extends StatelessWidget {
   final CoreService coreService;
+  final GlobalKey<NavigatorState> navigatorKey;
   final String? initialMessage;
   final String? initialPushFromFriend;
 
   const HomeClawCompanionApp({
     super.key,
     required this.coreService,
+    required this.navigatorKey,
     this.initialMessage,
     this.initialPushFromFriend,
   });
@@ -110,6 +122,7 @@ class HomeClawCompanionApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       title: 'HomeClaw Companion',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),

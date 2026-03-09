@@ -195,7 +195,7 @@ def get_api_skills_clawhub_login_handler(core):  # noqa: ARG001
                         "ok": False,
                     },
                 )
-            out = clawhub_login(timeout_s=25)
+            out = clawhub_login(timeout_s=120)
             status = 200 if out.get("ok") else 400
             return JSONResponse(
                 status_code=status,

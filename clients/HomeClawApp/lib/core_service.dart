@@ -59,6 +59,15 @@ class CoreService {
   NodeService? _nodeService;
   NodeService? get nodeService => _nodeService;
 
+  /// Called when a companion API returns 401 (session expired). Set by app to e.g. navigate to login and clear stack.
+  void Function()? onSessionExpired;
+
+  /// Clear session and notify so app can force login screen. Call on 401 from companion APIs.
+  Future<void> _handleSessionExpired() async {
+    await clearSession();
+    onSessionExpired?.call();
+  }
+
   /// WebSocket to Core /ws for push: when open, Core can push async inbound results and proactive messages (cron, reminders).
   WebSocketChannel? _coreWsChannel;
   StreamSubscription? _coreWsSubscription;
@@ -243,7 +252,10 @@ class CoreService {
     final response = await http
         .get(url, headers: _authHeaders(forCompanionApi: true))
         .timeout(const Duration(seconds: 10));
-    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
     if (response.statusCode != 200) throw Exception('GET /api/me failed: ${response.body}');
     return jsonDecode(response.body) as Map<String, dynamic>? ?? {};
   }
@@ -254,7 +266,10 @@ class CoreService {
     final response = await http
         .get(url, headers: _authHeaders(forCompanionApi: true))
         .timeout(const Duration(seconds: 10));
-    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
     if (response.statusCode != 200) throw Exception('GET /api/me/friends failed: ${response.body}');
     final map = jsonDecode(response.body) as Map<String, dynamic>?;
     final list = map?['friends'];
@@ -725,7 +740,10 @@ class CoreService {
     final response = await http
         .get(url, headers: _authHeaders(forCompanionApi: true))
         .timeout(const Duration(seconds: 15));
-    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
     if (response.statusCode != 200) throw Exception('Failed to load skills: ${response.body}');
     final map = jsonDecode(response.body) as Map<String, dynamic>?;
     final list = map?['skills'];
@@ -745,18 +763,28 @@ class CoreService {
     final response = await http
         .get(url, headers: _authHeaders(forCompanionApi: true))
         .timeout(const Duration(seconds: 30));
-    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
+    Map<String, dynamic>? map;
+    try {
+      map = jsonDecode(response.body) as Map<String, dynamic>?;
+    } catch (_) {
+      if (response.statusCode != 200) {
+        final body = response.body.trim();
+        throw Exception(body.isEmpty ? 'Search failed (${response.statusCode})' : body);
+      }
+      rethrow;
+    }
     if (response.statusCode == 400) {
-      final map = jsonDecode(response.body) as Map<String, dynamic>?;
       final detail = map?['detail'] ?? 'clawhub not found on PATH. Install with: npm i -g clawhub, then restart Core.';
       throw Exception(detail is String ? detail : 'clawhub not found on PATH');
     }
     if (response.statusCode != 200) {
-      final map = jsonDecode(response.body) as Map<String, dynamic>?;
-      final detail = map?['detail'] ?? response.body;
+      final detail = map?['detail'] ?? map?['stderr'] ?? response.body;
       throw Exception(detail is String ? detail : 'Search failed');
     }
-    final map = jsonDecode(response.body) as Map<String, dynamic>?;
     final list = map?['results'];
     if (list is! List<dynamic>) return [];
     final out = <Map<String, dynamic>>[];
@@ -781,13 +809,25 @@ class CoreService {
           body: jsonEncode(body),
         )
         .timeout(const Duration(seconds: 120));
-    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
+    Map<String, dynamic> map = {};
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) map = decoded;
+    } catch (_) {
+      if (response.statusCode != 200) {
+        final body = response.body.trim();
+        throw Exception(body.isEmpty ? 'Install failed (${response.statusCode})' : body);
+      }
+      rethrow;
+    }
     if (response.statusCode == 400) {
-      final map = jsonDecode(response.body) as Map<String, dynamic>?;
-      final detail = map?['detail'] ?? 'clawhub not found on PATH. Install with: npm i -g clawhub, then restart Core.';
+      final detail = map['detail'] ?? 'clawhub not found on PATH. Install with: npm i -g clawhub, then restart Core.';
       throw Exception(detail is String ? detail : 'clawhub not found on PATH or missing skill id');
     }
-    final map = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
     if (response.statusCode != 200) {
       final detail = map['detail'] ?? map['error'] ?? response.body;
       throw Exception(detail is String ? detail : 'Install failed');
@@ -801,25 +841,44 @@ class CoreService {
     final response = await http
         .get(url, headers: _authHeaders(forCompanionApi: true))
         .timeout(const Duration(seconds: 10));
-    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
-    final map = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
-    return map;
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
+    try {
+      final decoded = jsonDecode(response.body);
+      return decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+    } catch (_) {
+      return {'logged_in': false, 'message': response.body.trim().isEmpty ? 'Request failed' : response.body.trim()};
+    }
   }
 
   /// POST /api/skills/clawhub-login — start ClawHub login; returns URL to open in browser if available. Requires session token.
+  /// Server keeps clawhub login process alive up to ~2 min so user can complete OAuth on the machine running Core.
   Future<Map<String, dynamic>> clawhubLogin() async {
     final url = Uri.parse('$_baseUrl/api/skills/clawhub-login');
     final response = await http
         .post(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 35));
-    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+        .timeout(const Duration(seconds: 130));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
+    Map<String, dynamic>? map;
+    try {
+      map = jsonDecode(response.body) as Map<String, dynamic>?;
+    } catch (_) {
+      if (response.statusCode != 200) {
+        final body = response.body.trim();
+        throw Exception(body.isEmpty ? 'Login failed (${response.statusCode})' : body);
+      }
+      rethrow;
+    }
     if (response.statusCode == 400) {
-      final map = jsonDecode(response.body) as Map<String, dynamic>?;
       final detail = map?['detail'] ?? 'clawhub not found on PATH. Install with: npm i -g clawhub, then restart Core.';
       throw Exception(detail is String ? detail : 'ClawHub login failed');
     }
-    final map = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
-    return map;
+    return map ?? {};
   }
 
   /// POST /api/skills/remove — remove a skill by folder name (only from external_skills). Requires session token.
@@ -833,7 +892,10 @@ class CoreService {
           body: body,
         )
         .timeout(const Duration(seconds: 15));
-    if (response.statusCode == 401) throw Exception('Session expired; please log in again');
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
     Map<String, dynamic> map = {};
     try {
       final decoded = jsonDecode(response.body);

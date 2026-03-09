@@ -65,6 +65,23 @@ def main():
         from core.core import Core
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+
+        def _loop_exception_handler(loop, context):
+            """Log callback exceptions (e.g. ConnectionResetError on Windows). Never raises so the loop stays stable."""
+            try:
+                exc = context.get("exception")
+                msg = context.get("message", "")
+                if exc is not None:
+                    if isinstance(exc, (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
+                        logger.debug("asyncio callback: {} ({})", msg, exc)
+                    else:
+                        logger.warning("asyncio callback: {} — {}", msg, exc)
+                else:
+                    logger.debug("asyncio: {}", msg)
+            except Exception:
+                pass
+
+        loop.set_exception_handler(_loop_exception_handler)
         with Core() as core:
             loop.run_until_complete(core.run())
     except KeyboardInterrupt:
@@ -76,13 +93,20 @@ def main():
         sys.exit(0)
     except Exception as e:
         logger.exception(e)
+        sys.exit(1)
     finally:
         if loop is not None:
-            if core is not None and getattr(core, "server", None) is not None:
-                try:
-                    core.server.should_exit = True
-                    core.server.force_exit = True
-                    loop.run_until_complete(asyncio.sleep(0.5))
-                except Exception:
-                    pass
-            loop.close()
+            try:
+                if core is not None and getattr(core, "server", None) is not None:
+                    try:
+                        core.server.should_exit = True
+                        core.server.force_exit = True
+                        loop.run_until_complete(asyncio.sleep(0.5))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            try:
+                loop.close()
+            except Exception:
+                pass

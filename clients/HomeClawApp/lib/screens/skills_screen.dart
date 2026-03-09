@@ -330,6 +330,11 @@ class _SkillsScreenState extends State<SkillsScreen> {
               ),
             if (_clawhubLoginUrl != null && _clawhubLoginUrl!.isNotEmpty) ...[
               const SizedBox(height: 8),
+              Text(
+                'Complete login on the machine running Core. If a browser opened there, use it. Otherwise open the URL below on that machine only.',
+                style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant, fontStyle: FontStyle.italic),
+              ),
+              const SizedBox(height: 6),
               SelectableText(_clawhubLoginUrl!, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.primary)),
               const SizedBox(height: 6),
               Row(
@@ -346,7 +351,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
                   OutlinedButton.icon(
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: _clawhubLoginUrl!));
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copied')));
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copied — open on the machine running Core')));
                     },
                     icon: const Icon(Icons.copy, size: 18),
                     label: const Text('Copy link'),
