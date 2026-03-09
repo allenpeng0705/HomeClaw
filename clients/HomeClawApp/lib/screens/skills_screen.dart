@@ -331,7 +331,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
             if (_clawhubLoginUrl != null && _clawhubLoginUrl!.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
-                'Complete login on the machine running Core. If a browser opened there, use it. Otherwise open the URL below on that machine only.',
+                'Complete login on the machine running Core. If a browser opened there, use it; otherwise open the URL below on that machine only. Do not open the URL on this device—the OAuth callback must reach the Core machine.',
                 style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant, fontStyle: FontStyle.italic),
               ),
               const SizedBox(height: 6),
