@@ -651,7 +651,7 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              SelectableText(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
               const SizedBox(height: 16),
               FilledButton(onPressed: _load, child: const Text('Retry')),
             ],

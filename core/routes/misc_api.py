@@ -10,6 +10,32 @@ from loguru import logger
 from base.util import Util
 
 
+def _install_failure_detail(out: dict) -> str:
+    """Build a short, readable error message for skill install failure (no raw JSON/stderr dump)."""
+    err = (out.get("error") or "").strip()
+    if err:
+        return err[:600]
+    convert = out.get("convert") or {}
+    install = out.get("install") or {}
+    err = (convert.get("error") or "").strip()
+    if err:
+        return err[:600]
+    err = (install.get("error") or "").strip()
+    if err:
+        return err[:600]
+    stderr = (install.get("stderr") or "").strip()
+    if stderr:
+        lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
+        for ln in lines:
+            ln_lower = ln.lower()
+            if "experimental" in ln_lower or "deprecat" in ln_lower or "warning" in ln_lower:
+                continue
+            if len(ln) > 10:
+                return ln[:600]
+        return (lines[0] if lines else stderr[:400])[:600]
+    return "Install or conversion failed. Check Core logs for details."
+
+
 def get_api_skills_clear_vector_store_handler(core):
     """Return handler for POST /api/skills/clear-vector-store."""
     async def api_skills_clear_vector_store():
@@ -154,6 +180,10 @@ def get_api_skills_install_handler(core):  # noqa: ARG001
                 with_deps=with_deps,
             )
             status = 200 if out.get("ok") else (502 if (out.get("install") or {}).get("ok") else 500)
+            if not out.get("ok"):
+                detail = _install_failure_detail(out)
+                out = dict(out)
+                out["detail"] = detail
             return JSONResponse(status_code=status, content=out)
         except Exception as e:
             logger.exception(e)

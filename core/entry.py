@@ -67,13 +67,14 @@ def main():
         asyncio.set_event_loop(loop)
 
         def _loop_exception_handler(loop, context):
-            """Log callback exceptions (e.g. ConnectionResetError on Windows). Never raises so the loop stays stable."""
+            """Swallow callback exceptions (e.g. ConnectionResetError when client disconnects). Never raises so the loop stays stable."""
             try:
                 exc = context.get("exception")
                 msg = context.get("message", "")
                 if exc is not None:
                     if isinstance(exc, (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
-                        logger.debug("asyncio callback: {} ({})", msg, exc)
+                        # Normal when client closes connection; no log to avoid noise.
+                        pass
                     else:
                         logger.warning("asyncio callback: {} — {}", msg, exc)
                 else:

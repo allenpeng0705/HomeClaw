@@ -230,9 +230,10 @@ class _SkillsScreenState extends State<SkillsScreen> {
       }
     } catch (e) {
       if (mounted) {
+        final msg = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
         setState(() {
           _installing = false;
-          _installMsg = 'Install failed: $e';
+          _installMsg = msg.isNotEmpty ? 'Install failed: $msg' : 'Install failed.';
         });
       }
     }
@@ -257,7 +258,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
             if (_installedLoading)
               const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
             else
-              Text(_installedMsg, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              SelectableText(_installedMsg, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             if (_installed.isNotEmpty) ...[
               const SizedBox(height: 8),
               ..._installed.map((s) {
@@ -276,7 +277,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
                               if (desc.isNotEmpty)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 4),
-                                  child: Text(desc, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                                  child: SelectableText(desc, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                                 ),
                             ],
                           ),
@@ -301,7 +302,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
             if (_clawhubStatusLoading)
               const Text('Checking login status…', style: TextStyle(fontSize: 12))
             else
-              Text(
+              SelectableText(
                 _clawhubLoggedIn == true ? 'Logged in. ${_clawhubStatusMsg.isNotEmpty ? _clawhubStatusMsg : "You can search and install skills."}' : _clawhubStatusMsg,
                 style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
@@ -326,11 +327,11 @@ class _SkillsScreenState extends State<SkillsScreen> {
             if (_clawhubLoginMessage.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text(_clawhubLoginMessage, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                child: SelectableText(_clawhubLoginMessage, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
               ),
             if (_clawhubLoginUrl != null && _clawhubLoginUrl!.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Text(
+              SelectableText(
                 'Complete login on the machine running Core. If a browser opened there, use it; otherwise open the URL below on that machine only. Do not open the URL on this device—the OAuth callback must reach the Core machine.',
                 style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant, fontStyle: FontStyle.italic),
               ),
@@ -365,7 +366,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-            Text(
+            SelectableText(
               'Search and install OpenClaw/ClawHub skills. On the machine running Core, install the CLI: npm i -g clawhub. Restart Core from a terminal where clawhub is on PATH.',
               style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
@@ -393,7 +394,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
             if (_searchMsg.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text(_searchMsg, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                child: SelectableText(_searchMsg, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
               ),
             if (_searchResults.isNotEmpty) ...[
               const SizedBox(height: 12),
@@ -413,7 +414,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
                               if (desc.isNotEmpty)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 4),
-                                  child: Text(desc, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                                  child: SelectableText(desc, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
                                 ),
                             ],
                           ),
@@ -431,7 +432,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
             if (_installMsg != null && _installMsg!.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 16),
-                child: Text(
+                child: SelectableText(
                   _installMsg!,
                   style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary),
                 ),

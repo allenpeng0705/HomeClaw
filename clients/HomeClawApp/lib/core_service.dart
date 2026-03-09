@@ -829,8 +829,18 @@ class CoreService {
       throw Exception(detail is String ? detail : 'clawhub not found on PATH or missing skill id');
     }
     if (response.statusCode != 200) {
-      final detail = map['detail'] ?? map['error'] ?? response.body;
-      throw Exception(detail is String ? detail : 'Install failed');
+      String msg = map['detail'] is String ? map['detail'] as String : '';
+      if (msg.isEmpty) {
+        final conv = map['convert'];
+        if (conv is Map && conv['error'] is String) msg = conv['error'] as String;
+      }
+      if (msg.isEmpty) {
+        final inst = map['install'];
+        if (inst is Map && inst['error'] is String) msg = inst['error'] as String;
+      }
+      if (msg.isEmpty && map['error'] is String) msg = map['error'] as String;
+      if (msg.isEmpty) msg = 'Install failed. Check Core logs for details.';
+      throw Exception(msg.trim().length > 500 ? '${(msg.trim().substring(0, 500))}…' : msg.trim());
     }
     return map;
   }
