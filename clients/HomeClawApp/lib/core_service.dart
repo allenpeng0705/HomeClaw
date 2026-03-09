@@ -930,6 +930,38 @@ class CoreService {
     return map ?? {};
   }
 
+  /// POST /api/skills/clawhub-login with body { "token": "..." } — log in with a token (no browser). Use when browser flow fails with "Missing state".
+  Future<Map<String, dynamic>> clawhubLoginWithToken(String token) async {
+    final url = Uri.parse('$_baseUrl/api/skills/clawhub-login');
+    final body = jsonEncode(<String, String>{'token': token.trim()});
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+          body: body,
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
+    Map<String, dynamic>? map;
+    try {
+      map = jsonDecode(response.body) as Map<String, dynamic>?;
+    } catch (_) {
+      if (response.statusCode != 200) {
+        final respBody = response.body.trim();
+        throw Exception(respBody.isEmpty ? 'Login failed (${response.statusCode})' : respBody);
+      }
+      rethrow;
+    }
+    if (response.statusCode == 400) {
+      final detail = map?['detail'] ?? map?['message'] ?? 'Token login failed';
+      throw Exception(detail is String ? detail : 'ClawHub token login failed');
+    }
+    return map ?? {};
+  }
+
   /// POST /api/skills/remove — remove a skill by folder name (only from external_skills). Requires session token.
   Future<void> removeSkill(String folder) async {
     final url = Uri.parse('$_baseUrl/api/skills/remove');

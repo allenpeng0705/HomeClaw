@@ -952,6 +952,7 @@ class CoreMetadata:
     skills_dir: str = "skills"  # directory to scan for skill folders (each with SKILL.md); project root, same level as plugin
     external_skills_dir: str = "external_skills"  # second folder for skills (e.g. converted OpenClaw skills); same behavior as skills_dir. Empty string to disable.
     clawhub_download_dir: str = "downloads"  # staging dir for clawhub install (OpenClaw format); relative to project root. Install runs with cwd=this dir; converted output goes to external_skills_dir.
+    clawhub_token: str = ""  # optional; when set, Core uses this to log in to ClawHub (get token from clawhub.ai). Enables search/install without browser OAuth.
     skills_extra_dirs: List[str] = field(default_factory=list)  # optional extra dirs (paths relative to project root); user can put more skills here
     skills_disabled: List[str] = field(default_factory=list)  # folder names to not load (e.g. ["x-api-1.0.0"]); case-insensitive match
     skills_max_in_prompt: int = 5  # when skills_use_vector_search=true, cap RAG results to this many in prompt; when false (include all) this is not used
@@ -1399,6 +1400,7 @@ class CoreMetadata:
             skills_dir=(data.get('skills_dir') or 'skills').strip() or 'skills',
             external_skills_dir=(data.get('external_skills_dir') or 'external_skills').strip(),
             clawhub_download_dir=(data.get('clawhub_download_dir') or 'downloads').strip() or 'downloads',
+            clawhub_token=(data.get('clawhub_token') or '').strip(),
             skills_extra_dirs=[str(p).strip() for p in (data.get('skills_extra_dirs') or []) if str(p).strip()],
             skills_disabled=[str(f).strip() for f in (data.get('skills_disabled') or []) if str(f).strip()],
             skills_max_in_prompt=max(0, int(data.get('skills_max_in_prompt', 5) or 5)),
@@ -1502,6 +1504,7 @@ class CoreMetadata:
                 'skills_dir': getattr(core, 'skills_dir', 'skills'),
                 'external_skills_dir': getattr(core, 'external_skills_dir', '') or '',
                 'clawhub_download_dir': getattr(core, 'clawhub_download_dir', 'downloads') or 'downloads',
+                'clawhub_token': getattr(core, 'clawhub_token', '') or '',
                 'skills_extra_dirs': getattr(core, 'skills_extra_dirs', None) or [],
                 'skills_disabled': getattr(core, 'skills_disabled', None) or [],
                 'skills_max_in_prompt': getattr(core, 'skills_max_in_prompt', 0),

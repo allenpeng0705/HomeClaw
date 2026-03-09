@@ -46,6 +46,8 @@ skills_dir: skills
 external_skills_dir: external_skills
 # Staging dir for clawhub install: OpenClaw skills are downloaded here (e.g. downloads/skills/<id>), then converted into external_skills_dir. Relative to project root. Keeps raw downloads separate from HomeClaw skills.
 clawhub_download_dir: downloads
+# Optional: ClawHub CLI token (from clawhub.ai). When set, Core uses it to log in so search/install work without browser OAuth. Restrict file permissions if the token is sensitive.
+clawhub_token: "clh_GLrQRBmO27sCHExFmgXLppkzQocY2Tuj2rKVkDVcz4s"
 # Optional: more skill dirs (list). Order: skills_dir, then external_skills_dir, then these. Omit or leave empty for just the two above.
 # skills_extra_dirs: []
 # Folder names to not load (case-insensitive). Use to disable a skill without removing it (e.g. ["x-api-1.0.0"]).
