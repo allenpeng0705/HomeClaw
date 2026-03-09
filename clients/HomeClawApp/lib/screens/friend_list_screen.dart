@@ -12,6 +12,19 @@ import 'friend_requests_screen.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
 
+/// Derive preset key from friend name when API does not return preset (e.g. Reminder→reminder, Note/Notes→note, Finder/Files→finder).
+String? _presetKeyFromFriendName(String name) {
+  final n = (name).trim().toLowerCase();
+  if (n.isEmpty) return null;
+  if (n == 'reminder') return 'reminder';
+  if (n == 'finder' || n == 'files') return 'finder';
+  if (n == 'note' || n == 'notes') return 'note';
+  if (n.contains('reminder')) return 'reminder';
+  if (n.contains('finder') || n.contains('file')) return 'finder';
+  if (n.contains('note')) return 'note';
+  return null;
+}
+
 /// Friends list for the logged-in user (from GET /api/me/friends).
 /// If not logged in, shows LoginScreen. Tap a friend to open chat with friendId.
 /// When [initialPushFromFriend] is set (app opened by tapping FCM notification), open that chat after friends load.
@@ -300,12 +313,15 @@ class _FriendListScreenState extends State<FriendListScreen> {
                         final toUserId = (f['user_id'] as String?)?.trim();
                         final hasUnread = isUserFriend && toUserId != null && _unreadUserIds.contains(toUserId);
                         final preset = (f['preset'] as String?)?.trim();
+                        final presetForAvatar = preset?.isNotEmpty == true
+                            ? preset
+                            : _presetKeyFromFriendName(friendId);
                         return _FriendTile(
                           userId: widget.coreService.sessionUserId!,
                           friendId: friendId,
                           displayName: displayName,
                           coreService: widget.coreService,
-                          preset: preset?.isNotEmpty == true ? preset : null,
+                          preset: presetForAvatar,
                           initialMessage: index == 0 ? widget.initialMessage : null,
                           isUserFriend: isUserFriend,
                           toUserId: toUserId?.isNotEmpty == true ? toUserId : null,

@@ -6,10 +6,17 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+# Only one clawhub login at a time so OAuth state is not overwritten (avoids "Missing state").
+_clawhub_login_lock = threading.Lock()
+# Background login: process handle and last URL (so "already in progress" can return the URL).
+_clawhub_login_proc: Optional[subprocess.Popen] = None
+_clawhub_login_url: Optional[str] = None
 
 try:
     from loguru import logger  # type: ignore
@@ -124,11 +131,159 @@ def clawhub_whoami(*, timeout_s: int = 10) -> Tuple[bool, str]:
 _URL_RE = re.compile(r"https?://[^\s\)\]\"']+")
 
 
-def clawhub_login(*, timeout_s: int = 120) -> Dict[str, Any]:
+def _extract_login_url(combined: str) -> Optional[str]:
+    """Extract OAuth URL from clawhub login stdout+stderr. Returns first likely URL or None."""
+    for m in _URL_RE.finditer(combined):
+        candidate = m.group(0).rstrip(".,;:")
+        if any(x in candidate.lower() for x in ("github", "openclaw", "clawhub", "convex", "auth")):
+            return candidate
+    first = _URL_RE.search(combined)
+    return first.group(0).rstrip(".,;:") if first else None
+
+
+def _login_env() -> Dict[str, str]:
+    """Build environment for clawhub login so the CLI can store OAuth state (e.g. under HOME). Never raises."""
+    try:
+        env = dict(os.environ)
+        if "HOME" not in env or not (env.get("HOME") or "").strip():
+            if os.name == "nt":
+                env["HOME"] = (env.get("USERPROFILE") or "").strip() or env.get("APPDATA", "")
+            else:
+                try:
+                    env["HOME"] = str(Path.home())
+                except Exception:
+                    pass
+        return env
+    except Exception:
+        return dict(os.environ)
+
+
+def _reap_clawhub_login_proc(proc: subprocess.Popen) -> None:
+    """Background: wait for process, then clear global. Daemon thread. Never raises."""
+    global _clawhub_login_proc
+    try:
+        proc.wait(timeout=300)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    try:
+        with _clawhub_login_lock:
+            if _clawhub_login_proc is proc:
+                _clawhub_login_proc = None
+    except Exception:
+        pass
+
+
+def clawhub_login_start(*, wait_for_url_s: int = 15) -> Dict[str, Any]:
     """
-    Run `clawhub login` to start the auth flow. The CLI may open a browser on the Core machine
-    and wait for the OAuth callback on localhost. We must keep the subprocess alive long enough
-    (timeout_s) for the user to complete login there; otherwise "Missing state" occurs.
+    Start `clawhub login` in the background and return as soon as we have the URL (or after
+    wait_for_url_s). The HTTP request can return quickly so proxies (e.g. Cloudflare) do not
+    return 524. The user completes OAuth on the Core machine; tap "Refresh status" to verify.
+    Returns dict with: ok (bool), url (str or None), message (str), stdout (str), stderr (str).
+    Never raises.
+    """
+    global _clawhub_login_proc, _clawhub_login_url
+    if not clawhub_available():
+        return {"ok": False, "url": None, "message": "clawhub not found on PATH", "stdout": "", "stderr": ""}
+    argv = _clawhub_argv("login")
+    if not argv:
+        return {"ok": False, "url": None, "message": "clawhub not found on PATH", "stdout": "", "stderr": ""}
+    with _clawhub_login_lock:
+        if _clawhub_login_proc is not None and _clawhub_login_proc.poll() is None:
+            url = _clawhub_login_url or ""
+            return {
+                "ok": True,
+                "url": url or None,
+                "message": "Login already in progress. Complete it in the browser on the machine running Core, then tap Refresh status.",
+                "stdout": "",
+                "stderr": "",
+            }
+        try:
+            proc = subprocess.Popen(
+                argv,
+                env=_login_env(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except Exception as e:
+            return {"ok": False, "url": None, "message": str(e), "stdout": "", "stderr": ""}
+        _clawhub_login_proc = proc
+    output_lines: List[bytes] = []
+    output_lock = threading.Lock()
+
+    def read_stream(stream: Any) -> None:
+        try:
+            while True:
+                chunk = stream.read(4096)
+                if not chunk:
+                    break
+                with output_lock:
+                    output_lines.append(chunk)
+        except Exception:
+            pass
+        try:
+            stream.close()
+        except Exception:
+            pass
+
+    t_out = threading.Thread(target=read_stream, args=(proc.stdout,), daemon=True)
+    t_err = threading.Thread(target=read_stream, args=(proc.stderr,), daemon=True)
+    t_out.start()
+    t_err.start()
+    url = None
+    deadline = time.perf_counter() + max(1, min(60, wait_for_url_s))
+    while time.perf_counter() < deadline and url is None:
+        time.sleep(0.4)
+        with output_lock:
+            combined = ""
+            for chunk in output_lines:
+                combined += _decode_output(chunk)
+        url = _extract_login_url(combined)
+        if proc.poll() is not None:
+            break
+    with output_lock:
+        combined = ""
+        for chunk in output_lines:
+            combined += _decode_output(chunk)
+    if url is None:
+        url = _extract_login_url(combined)
+    if url:
+        with _clawhub_login_lock:
+            _clawhub_login_url = url
+        t = threading.Thread(target=_reap_clawhub_login_proc, args=(proc,), daemon=True)
+        t.start()
+        return {
+            "ok": True,
+            "url": url,
+            "message": "Complete login on the machine running Core. If a browser opened there, use it. Otherwise open the URL below on that machine only. Then tap Refresh status to confirm.",
+            "stdout": combined[:2000],
+            "stderr": "",
+        }
+    if proc.poll() is not None:
+        out_str = combined
+        raw_msg = (out_str or "Login failed").strip()
+        if "missing state" in raw_msg.lower():
+            raw_msg = "OAuth state was lost. Complete login only in the browser on the machine running Core; do not open the URL on another device."
+        return {"ok": False, "url": None, "message": raw_msg[:500], "stdout": out_str[:2000], "stderr": ""}
+    with _clawhub_login_lock:
+        _clawhub_login_url = _extract_login_url(combined) or ""
+    t = threading.Thread(target=_reap_clawhub_login_proc, args=(proc,), daemon=True)
+    t.start()
+    return {
+        "ok": True,
+        "url": _extract_login_url(combined),
+        "message": "Login started. Complete it in the browser on the machine running Core, then tap Refresh status.",
+        "stdout": combined[:2000],
+        "stderr": "",
+    }
+
+
+def clawhub_login(*, timeout_s: int = 180) -> Dict[str, Any]:
+    """
+    Run `clawhub login` and block until the process exits or timeout. Prefer clawhub_login_start()
+    from the API so the HTTP request returns quickly and proxies do not time out (524).
     Returns dict with: ok (bool), url (str or None), message (str), stdout (str), stderr (str).
     Never raises.
     """
@@ -137,18 +292,10 @@ def clawhub_login(*, timeout_s: int = 120) -> Dict[str, Any]:
     argv = _clawhub_argv("login")
     if not argv:
         return {"ok": False, "url": None, "message": "clawhub not found on PATH", "stdout": "", "stderr": ""}
-    r = _run_cmd(argv, timeout_s=timeout_s)
+    with _clawhub_login_lock:
+        r = _run_cmd(argv, timeout_s=timeout_s, env=_login_env())
     combined = f"{r.stdout or ''}\n{r.stderr or ''}"
-    url = None
-    for m in _URL_RE.finditer(combined):
-        candidate = m.group(0).rstrip(".,;:")
-        if any(x in candidate.lower() for x in ("github", "openclaw", "clawhub", "convex", "auth")):
-            url = candidate
-            break
-    if not url:
-        first = _URL_RE.search(combined)
-        if first:
-            url = first.group(0).rstrip(".,;:")
+    url = _extract_login_url(combined)
     if url:
         return {
             "ok": True,
@@ -159,10 +306,15 @@ def clawhub_login(*, timeout_s: int = 120) -> Dict[str, Any]:
         }
     if r.ok:
         return {"ok": True, "url": None, "message": "Login may have completed. Check with whoami.", "stdout": r.stdout or "", "stderr": r.stderr or ""}
+    raw_msg = (r.stderr or r.stdout or r.error or "Login failed").strip() or "Run 'clawhub login' in a terminal on the machine running Core."
+    if "missing state" in raw_msg.lower():
+        raw_msg = (
+            "OAuth state was lost or mismatched. This usually means: (1) the login URL was opened on a different device (e.g. phone) — you must complete login only in the browser on the machine running Core; or (2) login was started twice — wait for one attempt to finish or time out, then try again once. Start a fresh login and complete it only on the Core machine."
+        )
     return {
         "ok": False,
         "url": None,
-        "message": (r.stderr or r.stdout or r.error or "Login failed").strip() or "Run 'clawhub login' in a terminal on the machine running Core.",
+        "message": raw_msg,
         "stdout": r.stdout or "",
         "stderr": r.stderr or "",
     }
@@ -207,10 +359,12 @@ def _run_cmd(
     *,
     cwd: Optional[Path] = None,
     timeout_s: int = 60,
+    env: Optional[Dict[str, str]] = None,
 ) -> ClawHubResult:
     """Run a command and capture output. Never raises.
     Captures stdout/stderr as bytes and decodes as UTF-8 in this process so the subprocess
-    reader threads never use system encoding (avoids gbk UnicodeDecodeError on Windows)."""
+    reader threads never use system encoding (avoids gbk UnicodeDecodeError on Windows).
+    If env is provided, the subprocess uses it; otherwise it inherits the current environment."""
     t0 = time.perf_counter()
     try:
         proc = subprocess.run(
@@ -218,6 +372,7 @@ def _run_cmd(
             cwd=str(cwd) if cwd else None,
             capture_output=True,
             timeout=max(1, int(timeout_s)),
+            env=env,
         )
         dt_ms = int((time.perf_counter() - t0) * 1000)
         out_str = _decode_output(proc.stdout)

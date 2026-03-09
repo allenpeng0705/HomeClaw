@@ -903,12 +903,12 @@ class CoreService {
   }
 
   /// POST /api/skills/clawhub-login — start ClawHub login; returns URL to open in browser if available. Requires session token.
-  /// Server keeps clawhub login process alive up to ~2 min so user can complete OAuth on the machine running Core.
+  /// Server starts login and returns the URL quickly (~15 s); complete OAuth on the machine running Core, then tap Refresh status.
   Future<Map<String, dynamic>> clawhubLogin() async {
     final url = Uri.parse('$_baseUrl/api/skills/clawhub-login');
     final response = await http
         .post(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 130));
+        .timeout(const Duration(seconds: 30));
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');

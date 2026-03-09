@@ -229,7 +229,7 @@ def get_api_skills_clawhub_login_handler(core):  # noqa: ARG001
     """POST /api/skills/clawhub-login — start ClawHub login; returns URL to open in browser if available. Companion->Core."""
     async def api_skills_clawhub_login(request: Request):
         try:
-            from base.clawhub_integration import clawhub_available, clawhub_login
+            from base.clawhub_integration import clawhub_available, clawhub_login_start
             if not clawhub_available():
                 return JSONResponse(
                     status_code=400,
@@ -239,7 +239,8 @@ def get_api_skills_clawhub_login_handler(core):  # noqa: ARG001
                         "ok": False,
                     },
                 )
-            out = clawhub_login(timeout_s=120)
+            # Return quickly with URL so proxies (e.g. Cloudflare) do not 524 timeout; user completes OAuth on Core machine.
+            out = clawhub_login_start(wait_for_url_s=15)
             status = 200 if out.get("ok") else 400
             return JSONResponse(
                 status_code=status,
