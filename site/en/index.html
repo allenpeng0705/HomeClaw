@@ -44,13 +44,39 @@
         <a href="https://allenpeng0705.github.io/HomeClaw/" class="btn btn-secondary" target="_blank" rel="noopener">Documentation</a>
         <a href="docs.html" class="btn btn-secondary">Docs on this site</a>
       </div>
+
+      <div class="start-here" style="margin-top:2rem; padding:1.25rem; background:rgba(255,255,255,.06); border-radius:8px; text-align:left;">
+        <h2 style="margin-top:0; font-size:1.1rem;">Start here — find what you need</h2>
+        <div class="feature-grid" style="grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem;">
+          <div class="feature-card">
+            <h3 style="font-size:1rem;">How to install</h3>
+            <p style="margin:.5rem 0;"><strong>First step:</strong> Clone repo, then run the install script. <strong>Mac/Linux:</strong> <code>chmod +x install.sh</code> then <code>./install.sh</code>, or <code>bash install.sh</code>. <strong>Windows:</strong> use <strong>PowerShell</strong>, run <code>.\install.ps1</code> (see install guide if execution policy blocks). Script opens the Portal when done.</p>
+            <a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">Install guide →</a>
+          </div>
+          <div class="feature-card">
+            <h3 style="font-size:1rem;">How to use HomeClaw</h3>
+            <p style="margin:.5rem 0;">Run Core, then chat via Companion app or channels (WebChat, Telegram, etc.).</p>
+            <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">Getting started →</a>
+          </div>
+          <div class="feature-card">
+            <h3 style="font-size:1rem;">Companion app</h3>
+            <p style="margin:.5rem 0;">Where to find it: <strong>clients/HomeClawApp/</strong> in the repo. Mac, Windows, iPhone, Android.</p>
+            <a href="channels-companion.html#companion-platforms">Find &amp; use Companion →</a>
+          </div>
+          <div class="feature-card">
+            <h3 style="font-size:1rem;">Portal</h3>
+            <p style="margin:.5rem 0;">Web UI to manage config and start Core/channels. <code>python -m main portal</code> → http://127.0.0.1:18472</p>
+            <a href="https://allenpeng0705.github.io/HomeClaw/platform/#portal" target="_blank" rel="noopener">Portal guide →</a>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="section container quickstart-section">
       <h2>QuickStart</h2>
       <p class="lead">Run HomeClaw, then chat via the <strong>Companion app</strong> and/or <strong>channels</strong> (WebChat, Telegram, etc.). They all use the same <strong>Core</strong>—run Core once, use the app and any channel together.</p>
       <ol class="quickstart-steps">
-        <li><strong>Install</strong> — <code>git clone https://github.com/allenpeng0705/HomeClaw.git</code>, <code>cd HomeClaw</code>, <code>pip install -r requirements.txt</code>. Or <code>./install.sh</code> (Mac/Linux) / <code>.\install.ps1</code> (Windows) to set up and open the Portal at http://127.0.0.1:18472.</li>
+        <li><strong>Install (first step)</strong> — Run the install script. Clone the repo if you don’t have it: <code>git clone https://github.com/allenpeng0705/HomeClaw.git</code>, <code>cd HomeClaw</code>. Then <strong>Mac/Linux:</strong> <code>chmod +x install.sh</code> (one-time) then <code>./install.sh</code>, or <code>bash install.sh</code>. <strong>Windows:</strong> open <strong>PowerShell</strong> (not CMD), then <code>.\install.ps1</code>; if blocked by execution policy, see the <a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">install guide</a>. The script sets up deps and opens the <strong>Portal</strong> at http://127.0.0.1:18472. (Optional: <a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">manual install</a> with <code>pip install -r requirements.txt</code>.)</li>
         <li><strong>Configure (optional)</strong> — Edit <code>config/core.yml</code> (LLM, memory) and <code>config/user.yml</code> (who can talk). For <strong>cloud</strong> models set API keys in the environment; for <strong>local</strong> models copy llama.cpp binary into <code>llama.cpp-master/&lt;platform&gt;/</code> for your device (see <code>llama.cpp-master/README.md</code>).</li>
         <li><strong>Run Core</strong> — <code>python -m main start</code>. Core (port 9000) is the single backend for the Companion app and all channels.</li>
         <li><strong>Chat</strong> — <strong>Companion app:</strong> Install from <code>clients/HomeClawApp/</code>, set Core URL to <code>http://127.0.0.1:9000</code> in Settings, add your user in user.yml, open Chat. <strong>Channels:</strong> With Core running, <code>python -m channels.run webchat</code> → http://localhost:8014 (set <code>CORE_URL</code> in <code>channels/.env</code>). Use both at the same time; same agent, same memory.</li>
@@ -150,19 +176,34 @@
       <h2>Quick links</h2>
       <div class="feature-grid">
         <div class="feature-card">
+          <h3>How to install</h3>
+          <p><strong>First step:</strong> Clone repo, then <code>chmod +x install.sh</code> + <code>./install.sh</code> or <code>bash install.sh</code> (Mac/Linux); <strong>PowerShell</strong> + <code>.\install.ps1</code> (Windows). See install guide for execution policy / chmod details.</p>
+          <a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">Install →</a>
+        </div>
+        <div class="feature-card">
+          <h3>How to use HomeClaw</h3>
+          <p>Run Core, use Companion app or channels. Same Core, same memory.</p>
+          <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">Getting started →</a>
+        </div>
+        <div class="feature-card">
+          <h3>Companion app — where to find it</h3>
+          <p>Build from <strong>clients/HomeClawApp/</strong> in the repo. Set Core URL in Settings, add user, chat.</p>
+          <a href="channels-companion.html#companion-platforms">Channels &amp; Companion →</a>
+        </div>
+        <div class="feature-card">
+          <h3>Portal</h3>
+          <p>Web UI: manage config, start Core and channels. Run <code>python -m main portal</code>, open http://127.0.0.1:18472</p>
+          <a href="https://allenpeng0705.github.io/HomeClaw/platform/#portal" target="_blank" rel="noopener">Portal →</a>
+        </div>
+        <div class="feature-card">
           <h3>GitHub</h3>
           <p>Source code, issues, and releases.</p>
           <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">Repository →</a>
         </div>
         <div class="feature-card">
-          <h3>Documentation</h3>
-          <p>Full docs: install, config, plugins, mix mode, channels.</p>
+          <h3>Full documentation</h3>
+          <p>Install, config, plugins, mix mode, channels, remote access.</p>
           <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Docs site →</a>
-        </div>
-        <div class="feature-card">
-          <h3>Website docs</h3>
-          <p>Curated intro and getting started on this site.</p>
-          <a href="docs.html">Read here →</a>
         </div>
         <div class="feature-card">
           <h3>Deploy to cloud</h3>

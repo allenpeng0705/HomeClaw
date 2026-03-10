@@ -1,0 +1,2241 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Local-first AI assistant — your home, your AI, your control.">
+      
+      
+      
+        <link rel="canonical" href="https://allenpeng0705.github.io/HomeClaw/site-service-and-cloudflare-tunnel/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
+    
+    
+      
+        <title>Site as a service and Cloudflare Tunnel - HomeClaw</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-orange" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#site-as-a-service-and-cloudflare-tunnel" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="HomeClaw" class="md-header__button md-logo" aria-label="HomeClaw" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            HomeClaw
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Site as a service and Cloudflare Tunnel
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="deep-orange" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="deep-orange" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenpeng0705/HomeClaw" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    HomeClaw
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../introducing-homeclaw/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Introducing HomeClaw
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../story/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Story
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../install/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Install
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../run/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Run
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../deploy-cloud/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Deploy to cloud
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../companion-app/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Companion app
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../companion-app-macos-permissions/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Companion app (macOS permissions)
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../channels/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Channels
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../companion-vs-channels/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Companion vs Channels
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../per-user-sandbox-and-file-links/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Per-user sandbox and file links
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../friends-plugin/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Friends plugin
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../tools/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Tools
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../plugins/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Plugins
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../writing-plugins-and-skills/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Writing plugins and skills
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../models/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Models
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../core-config/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Core config (core.yml)
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../mix-mode-and-reports/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Mix mode and reports
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../hybrid-router-scripts/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Hybrid router scripts
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../platform/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Platform
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../remote-access/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Remote access
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../companion-iphone-cloudflare-tunnel/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Companion on iPhone (Cloudflare Tunnel)
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../help/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Help
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="HomeClaw" class="md-nav__button md-logo" aria-label="HomeClaw" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    HomeClaw
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenpeng0705/HomeClaw" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    HomeClaw
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../introducing-homeclaw/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Introducing HomeClaw
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../story/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Story
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deploy-cloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploy to cloud
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../companion-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Companion app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../companion-app-macos-permissions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Companion app (macOS permissions)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../channels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Channels
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../companion-vs-channels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Companion vs Channels
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../per-user-sandbox-and-file-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Per-user sandbox and file links
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../friends-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Friends plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-plugins-and-skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing plugins and skills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core config (core.yml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mix-mode-and-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mix mode and reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hybrid-router-scripts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hybrid router scripts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../platform/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Platform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../remote-access/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Remote access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../companion-iphone-cloudflare-tunnel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Companion on iPhone (Cloudflare Tunnel)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Help
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#part-1-run-the-site-as-a-systemd-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part 1: Run the site as a systemd service
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part 1: Run the site as a systemd service">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11-choose-a-port-and-repo-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 Choose a port and repo path
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12-make-the-serve-script-executable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 Make the serve script executable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#13-install-the-systemd-unit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.3 Install the systemd unit
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-2-publish-with-cloudflare-tunnel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part 2: Publish with Cloudflare Tunnel
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part 2: Publish with Cloudflare Tunnel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-install-cloudflared" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Install cloudflared
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-option-a-quick-tunnel-random-url-good-for-testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Option A: Quick Tunnel (random URL, good for testing)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-option-b-named-tunnel-stable-url-recommended-for-production" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Option B: Named Tunnel (stable URL, recommended for production)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2.3 Option B: Named Tunnel (stable URL, recommended for production)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#step-1-log-in-and-create-a-tunnel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1: Log in and create a tunnel
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#step-2-run-the-tunnel-as-a-service-auto-restart-and-start-on-boot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2: Run the tunnel as a service (auto-restart and start on boot)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23a-one-tunnel-multiple-routes-core-marketing-site" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3a One tunnel, multiple routes (Core + marketing site)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#24-troubleshooting-tunnel-doesnt-work-proxy-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.4 Troubleshooting: tunnel doesn’t work / proxy issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Summary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#part-3-windows-site-and-tunnel-as-services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Part 3: Windows — site and tunnel as services
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Part 3: Windows — site and tunnel as services">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-run-the-site-test-manually" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Run the site (test manually)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-run-the-site-as-a-windows-service-auto-restart-on-reboot" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Run the site as a Windows service (auto-restart on reboot)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3.2 Run the site as a Windows service (auto-restart on reboot)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#option-a-nssm-non-sucking-service-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option A: NSSM (Non-Sucking Service Manager)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-b-task-scheduler-run-at-logon-or-at-startup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option B: Task Scheduler (run at logon or at startup)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-cloudflare-tunnel-on-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Cloudflare Tunnel on Windows
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="site-as-a-service-and-cloudflare-tunnel">Site as a service and Cloudflare Tunnel</h1>
+<p>This guide explains how to:</p>
+<ol>
+<li>Run the <strong>site</strong> folder (static promo site) as a <strong>service</strong> on your machine so it restarts automatically when the machine restarts.</li>
+<li>Publish it with <strong>Cloudflare Tunnel</strong> so the site is reachable via a public HTTPS URL without opening ports on your router.</li>
+</ol>
+<p><strong>Platforms:</strong></p>
+<ul>
+<li><strong>Linux:</strong> systemd service (Part 1) + cloudflared (Part 2).</li>
+<li><strong>Windows:</strong> Python script + NSSM or Task Scheduler (Part 3) + cloudflared (Part 2 and Part 3).</li>
+</ul>
+<p><strong>Prerequisites:</strong> Python 3 on the machine; for Cloudflare Tunnel, a Cloudflare account (free tier is enough).</p>
+<hr />
+<h2 id="part-1-run-the-site-as-a-systemd-service">Part 1: Run the site as a systemd service</h2>
+<h3 id="11-choose-a-port-and-repo-path">1.1 Choose a port and repo path</h3>
+<ul>
+<li><strong>Port:</strong> Default is <strong>9999</strong>. The site will listen on <code>http://127.0.0.1:9999</code> (localhost only; Cloudflare Tunnel will expose it).</li>
+<li><strong>Repo path:</strong> Use the <strong>absolute path</strong> to your HomeClaw repo, e.g. <code>/opt/HomeClaw</code> or <code>/home/youruser/HomeClaw</code>.</li>
+</ul>
+<h3 id="12-make-the-serve-script-executable">1.2 Make the serve script executable</h3>
+<p>From the repo root:</p>
+<pre><code class="language-bash">chmod +x scripts/serve_site.sh
+</code></pre>
+<p>Test it manually:</p>
+<pre><code class="language-bash">./scripts/serve_site.sh
+# Or: PORT=3000 ./scripts/serve_site.sh
+</code></pre>
+<p>Then open <strong>http://localhost:9999</strong> (or 3000). Stop with Ctrl+C.</p>
+<h3 id="13-install-the-systemd-unit">1.3 Install the systemd unit</h3>
+<ol>
+<li><strong>Copy the unit file</strong> and edit the two paths:</li>
+</ol>
+<p><code>bash
+   sudo cp scripts/systemd/homeclaw-site.service /etc/systemd/system/
+   sudo nano /etc/systemd/system/homeclaw-site.service</code></p>
+<p>Replace <strong>both</strong> occurrences of <code>/path/to/HomeClaw</code> with your repo path, e.g. <code>/opt/HomeClaw</code>:</p>
+<ul>
+<li><code>WorkingDirectory=/opt/HomeClaw</code></li>
+<li><code>ExecStart=/opt/HomeClaw/scripts/serve_site.sh</code></li>
+</ul>
+<p>Optionally change <strong>port</strong> with <code>Environment=PORT=3000</code> and <strong>user</strong> (e.g. <code>User=youruser</code> if you don’t want to use <code>www-data</code>). If you change the user, ensure that user can read the repo (especially the <code>site/</code> directory).</p>
+<ol>
+<li><strong>Reload systemd</strong>, enable the service (start on boot), and start it:</li>
+</ol>
+<p><code>bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable homeclaw-site
+   sudo systemctl start homeclaw-site</code></p>
+<ol>
+<li><strong>Check status:</strong></li>
+</ol>
+<p><code>bash
+   sudo systemctl status homeclaw-site
+   curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9999
+   # Should print 200</code></p>
+<ol>
+<li><strong>After a reboot:</strong> The service should start automatically. Verify with <code>systemctl status homeclaw-site</code> and <code>curl http://127.0.0.1:9999</code>.</li>
+</ol>
+<p><strong>Useful commands:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sudo systemctl status homeclaw-site</code></td>
+<td>Show status and recent logs</td>
+</tr>
+<tr>
+<td><code>sudo systemctl restart homeclaw-site</code></td>
+<td>Restart the site server</td>
+</tr>
+<tr>
+<td><code>sudo systemctl stop homeclaw-site</code></td>
+<td>Stop the service</td>
+</tr>
+<tr>
+<td><code>sudo journalctl -u homeclaw-site -f</code></td>
+<td>Follow logs</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="part-2-publish-with-cloudflare-tunnel">Part 2: Publish with Cloudflare Tunnel</h2>
+<p>Cloudflare Tunnel (<code>cloudflared</code>) creates an outbound connection from your machine to Cloudflare and forwards public HTTPS traffic to your local site server. You do <strong>not</strong> open any port on your router.</p>
+<h3 id="21-install-cloudflared">2.1 Install cloudflared</h3>
+<p><strong>Linux (generic):</strong></p>
+<ul>
+<li>Download from <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/">Developers: Cloudflare Tunnel — Install</a>.</li>
+<li>Or with a package manager, e.g.:</li>
+<li><strong>Debian/Ubuntu:</strong> <code>sudo apt install cloudflared</code> (if in your repos), or use the official <code>.deb</code> from Cloudflare.</li>
+<li><strong>Fedora/RHEL:</strong> See Cloudflare docs for <code>yum</code>/<code>dnf</code>.</li>
+</ul>
+<p><strong>macOS:</strong> <code>brew install cloudflared</code></p>
+<p><strong>Windows:</strong> Download the Windows build from <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/">Cloudflare Tunnel — Install</a> (e.g. <code>cloudflared-windows-amd64.exe</code>). Rename to <code>cloudflared.exe</code>, place it in a folder (e.g. <code>C:\Program Files\cloudflared\</code>), and add that folder to your PATH. Or use <strong>winget</strong>: <code>winget install Cloudflare.cloudflared</code>.</p>
+<p>Verify:</p>
+<pre><code class="language-bash">cloudflared --version
+</code></pre>
+<h3 id="22-option-a-quick-tunnel-random-url-good-for-testing">2.2 Option A: Quick Tunnel (random URL, good for testing)</h3>
+<p>Creates a temporary URL like <code>https://random-words.trycloudflare.com</code> that forwards to your local server.</p>
+<ol>
+<li>
+<p>Ensure the <strong>site service</strong> is running and listening on <code>http://127.0.0.1:9999</code> (or whatever port you used).</p>
+</li>
+<li>
+<p>Run:</p>
+</li>
+</ol>
+<p><code>bash
+   cloudflared tunnel --url http://127.0.0.1:9999</code></p>
+<ol>
+<li>
+<p>In the output you’ll see a line like: <strong>Your quick Tunnel has been created! Visit it at:</strong> <code>https://xxxx.trycloudflare.com</code>. Open that URL in a browser to see your site.</p>
+</li>
+<li>
+<p>Stop the tunnel with Ctrl+C. The URL stops working when the tunnel process stops. For a <strong>permanent</strong> setup, use Option B (named tunnel).</p>
+</li>
+</ol>
+<h3 id="23-option-b-named-tunnel-stable-url-recommended-for-production">2.3 Option B: Named Tunnel (stable URL, recommended for production)</h3>
+<p>Gives you a <strong>stable hostname</strong> (e.g. <code>site.yourdomain.com</code>) and allows running the tunnel as a service so it survives reboots.</p>
+<h4 id="step-1-log-in-and-create-a-tunnel">Step 1: Log in and create a tunnel</h4>
+<ol>
+<li>Log in (opens browser):</li>
+</ol>
+<p><code>bash
+   cloudflared tunnel login</code></p>
+<p>A browser tab opens; choose your Cloudflare account and domain. This saves a credential file (e.g. <code>~/.cloudflared/cert.pem</code>).</p>
+<ol>
+<li>Create a <strong>named tunnel</strong> (e.g. <code>homeclaw-site</code>):</li>
+</ol>
+<p><code>bash
+   cloudflared tunnel create homeclaw-site</code></p>
+<p>This creates a tunnel and an ID. You’ll use the tunnel name in the config file.</p>
+<ol>
+<li>Create a config file, e.g. <code>~/.cloudflared/config.yml</code>:</li>
+</ol>
+<p>```yaml
+   tunnel: homeclaw-site
+   credentials-file: /home/youruser/.cloudflared/<TUNNEL_ID>.json</p>
+<p>ingress:
+     - hostname: site.yourdomain.com
+       service: http://127.0.0.1:9999
+     - service: http_status:404
+   ```</p>
+<p>Replace:</p>
+<ul>
+<li><code>youruser</code> with your Linux username.</li>
+<li><code>&lt;TUNNEL_ID&gt;</code> with the tunnel ID from step 2 (find it with <code>cloudflared tunnel list</code>; the JSON file is in <code>~/.cloudflared/</code>).</li>
+<li>
+<p><code>site.yourdomain.com</code> with the subdomain (or domain) you want for the site.</p>
+</li>
+<li>
+<p><strong>Route the hostname</strong> to this tunnel in Cloudflare:</p>
+</li>
+</ul>
+<p><code>bash
+   cloudflared tunnel route dns homeclaw-site site.yourdomain.com</code></p>
+<p>This creates a CNAME in your Cloudflare DNS pointing to the tunnel. If your domain is not on Cloudflare, use the alternative “Route via Dashboard” in Cloudflare docs.</p>
+<ol>
+<li><strong>Run the tunnel</strong> (foreground, for a quick test):</li>
+</ol>
+<p><code>bash
+   cloudflared tunnel run homeclaw-site</code></p>
+<p>Open <strong>https://site.yourdomain.com</strong> in a browser. Stop with Ctrl+C when done testing.</p>
+<h4 id="step-2-run-the-tunnel-as-a-service-auto-restart-and-start-on-boot">Step 2: Run the tunnel as a service (auto-restart and start on boot)</h4>
+<ol>
+<li><strong>Install cloudflared as a system service</strong> (Linux):</li>
+</ol>
+<p><code>bash
+   sudo cloudflared service install</code></p>
+<p>This may create a unit that runs the <strong>default</strong> config. To make it use your named tunnel and config, you typically need to point the service at your config file.</p>
+<ol>
+<li><strong>Use your config file:</strong> On many setups, the installed service reads <code>~/.cloudflared/config.yml</code> for the <strong>user</strong> that ran <code>service install</code>. If you ran it with <code>sudo</code>, the config might be expected in <code>/etc/cloudflared/config.yml</code>. Copy your config there and set the paths:</li>
+</ol>
+<p><code>bash
+   sudo mkdir -p /etc/cloudflared
+   sudo cp ~/.cloudflared/config.yml /etc/cloudflared/
+   # Edit credentials-file path to the JSON file (e.g. /home/youruser/.cloudflared/xxx.json or copy the json to /etc/cloudflared/ and point there)
+   sudo nano /etc/cloudflared/config.yml</code></p>
+<p>Cloudflare’s official docs describe the exact path and format for your OS: <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/local/#run-the-tunnel-as-a-service">Run as a service</a>.</p>
+<ol>
+<li><strong>Enable and start the cloudflared service:</strong></li>
+</ol>
+<p><code>bash
+   sudo systemctl enable cloudflared
+   sudo systemctl start cloudflared
+   sudo systemctl status cloudflared</code></p>
+<ol>
+<li>After a <strong>reboot</strong>, both the site server and the tunnel should start automatically: the site serves files on localhost:9999, and cloudflared exposes them at https://site.yourdomain.com.</li>
+</ol>
+<h3 id="23a-one-tunnel-multiple-routes-core-marketing-site">2.3a One tunnel, multiple routes (Core + marketing site)</h3>
+<p>If you already run <strong>one</strong> Cloudflare Tunnel for HomeClaw (e.g. Core on port 9000 at homeclaw.online), you can add the <strong>marketing site</strong> (port 9999) as another route on the <strong>same</strong> tunnel. Use <strong>different hostnames</strong> (recommended) or different paths.</p>
+<p><strong>Option A – Different hostnames (recommended)</strong><br />
+Use one hostname for Core and one for the site so each app is at the root of its URL (no path stripping):</p>
+<pre><code class="language-yaml">tunnel: &lt;your-tunnel-id&gt;
+credentials-file: /path/to/&lt;TUNNEL_ID&gt;.json
+
+ingress:
+  - hostname: homeclaw.online
+    service: http://127.0.0.1:9000
+  - hostname: www.homeclaw.online
+    service: http://127.0.0.1:9999
+  - service: http_status:404
+</code></pre>
+<ul>
+<li><strong>homeclaw.online</strong> → Core (9000)  </li>
+<li><strong>www.homeclaw.online</strong> → marketing site (9999)</li>
+</ul>
+<p>Or use a subdomain for the site, e.g. <code>site.homeclaw.online</code> → 9999. Add each hostname in <strong>Zero Trust</strong> → <strong>Tunnels</strong> → your tunnel → <strong>Public Hostname</strong> (or use <code>cloudflared tunnel route dns &lt;tunnel-name&gt; www.homeclaw.online</code> etc.). <strong>Order matters</strong>: the first matching hostname wins.</p>
+<p><strong>Option B – Path-based</strong><br />
+You can route by path (e.g. <code>/site</code> → 9999), but the static site expects to be at <strong>root</strong> (<code>/</code>, <code>/en/</code>, <code>/zh/</code>). So path-based routing only works if you put the site on a <strong>subdomain</strong> (Option A) or run a reverse proxy that strips the path. For the simple Python server, <strong>Option A (subdomain or www)</strong> is the one that works without extra proxy logic.</p>
+<p>After editing ingress, <strong>restart the tunnel</strong> so the new route is active.</p>
+<h3 id="24-troubleshooting-tunnel-doesnt-work-proxy-issues">2.4 Troubleshooting: tunnel doesn’t work / proxy issues</h3>
+<p>If the tunnel URL shows an error (e.g. <strong>502 Bad Gateway</strong>, <strong>Connection refused</strong>, or a blank page), work through these checks.</p>
+<ol>
+<li>
+<p><strong>Confirm the site works locally</strong><br />
+   Before starting the tunnel, ensure the site server is running and the document root is correct:
+   <code>bash
+   python scripts/serve_site.py</code>
+   Then open <strong>http://127.0.0.1:9999</strong> in your browser (and e.g. http://127.0.0.1:9999/en/). If it doesn’t load locally, fix that first (see <a href="../site/README.md#troubleshooting-site-cannot-be-displayed-or-blank-page">site/README.md</a>).</p>
+</li>
+<li>
+<p><strong>Start order</strong><br />
+   Start the <strong>site server first</strong>, then start <strong>cloudflared</strong>. If the tunnel runs but the origin server is not listening, Cloudflare will show <strong>502 Bad Gateway</strong> or similar.</p>
+</li>
+<li>
+<p><strong>Tunnel origin URL</strong><br />
+   Use exactly the URL your site server listens on:</p>
+</li>
+<li><strong>Quick tunnel:</strong> <code>cloudflared tunnel --url http://127.0.0.1:9999</code></li>
+<li>
+<p>In <strong>config.yml</strong> under <code>ingress</code>: <code>service: http://127.0.0.1:9999</code><br />
+   If your server uses another port (e.g. 3000), use that port in the tunnel. Using <code>http://localhost:9999</code> instead of <code>127.0.0.1</code> is fine if you prefer.</p>
+</li>
+<li>
+<p><strong>502 Bad Gateway</strong><br />
+   Usually means cloudflared cannot reach the origin:</p>
+</li>
+<li>Site server not running: start <code>python scripts/serve_site.py</code> (or your systemd/NSSM service).</li>
+<li>Wrong port: confirm the server is on 9999 (or the port you use) with <code>curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9999</code> (expect 200).</li>
+<li>
+<p>Firewall: on the same machine, 127.0.0.1 is rarely blocked; if the tunnel runs on another machine, the origin must listen on a reachable address (e.g. <code>0.0.0.0:9999</code> — see note below).</p>
+</li>
+<li>
+<p><strong>Blank or broken page over the tunnel</strong>  </p>
+</li>
+<li>Open the tunnel URL and try <strong>https://your-tunnel-url/en/</strong> or <strong>/zh/</strong> directly (the root redirects via JavaScript).</li>
+<li>Check the browser dev tools (Network tab): if CSS or assets return 404, the path is wrong (e.g. document root not <code>site/</code>). Run the site with <code>scripts/serve_site.py</code> so the root is <code>site/</code>.</li>
+<li>
+<p>The site is static; no special proxy headers (e.g. <code>X-Forwarded-Host</code>) are required. If you use a <strong>reverse proxy in front</strong> of the site (e.g. nginx), ensure it forwards the path unchanged and the proxy target is <code>http://127.0.0.1:9999</code>.</p>
+</li>
+<li>
+<p><strong>Named tunnel: “tunnel not found” or no traffic</strong>  </p>
+</li>
+<li>Run <code>cloudflared tunnel list</code> and confirm the tunnel name and ID.</li>
+<li>In config, <code>credentials-file</code> must point to the correct JSON file (path for your OS/user).</li>
+<li>Run in the foreground to see errors: <code>cloudflared tunnel run homeclaw-site</code>.</li>
+<li>
+<p>If using a custom hostname, run <code>cloudflared tunnel route dns homeclaw-site site.yourdomain.com</code> and wait for DNS to propagate; the hostname must point to the tunnel (CNAME).</p>
+</li>
+<li>
+<p><strong>Tunnel and site on different machines</strong><br />
+   By default the site binds to <code>127.0.0.1</code>, so only the same machine can connect. To run cloudflared on another host, either run the tunnel on the <strong>same</strong> machine as the site, or make the site listen on all interfaces (e.g. change the serve script to bind <code>0.0.0.0</code> and use a firewall so only cloudflared’s host can reach 9999).</p>
+</li>
+<li>
+<p><strong>Works on 127.0.0.1:9999 but not via custom domain (e.g. homeclaw.online)</strong><br />
+   The site and Python server do <strong>not</strong> need any proxy or Host-header changes; they serve the same content for any hostname. If https://homeclaw.online fails but http://127.0.0.1:9999 works, the problem is <strong>DNS or tunnel routing</strong>, not the web server:</p>
+</li>
+<li>
+<p><strong>DNS must point the domain to the tunnel</strong><br />
+     For a named tunnel with a custom domain (e.g. homeclaw.online), Cloudflare must route that hostname to your tunnel. Either: <strong>(A)</strong> In <strong>Zero Trust</strong> → <strong>Networks</strong> → <strong>Tunnels</strong> → your tunnel → <strong>Public Hostname</strong>, add hostname <code>homeclaw.online</code> with Service <code>http://127.0.0.1:9999</code>; or <strong>(B)</strong> Run <code>cloudflared tunnel route dns &lt;tunnel-name&gt; homeclaw.online</code> so the CNAME for homeclaw.online points to <code>&lt;tunnel-id&gt;.cfargotunnel.com</code>. If the domain uses an A record (your server IP) instead of the tunnel CNAME, traffic never reaches cloudflared.</p>
+</li>
+<li>
+<p><strong>Tunnel must be running</strong><br />
+     Run <code>cloudflared tunnel run homeclaw-site</code> (or your tunnel name) on the same machine as the site server. If the tunnel process is stopped, you get 522 or 502.</p>
+</li>
+<li>
+<p><strong>Ingress hostname</strong><br />
+     In <code>~/.cloudflared/config.yml</code>, the <code>ingress</code> entry must include <code>hostname: homeclaw.online</code> and <code>service: http://127.0.0.1:9999</code>. Restart the tunnel after editing.</p>
+</li>
+<li>
+<p><strong>Quick tunnel test</strong><br />
+     Run <code>cloudflared tunnel --url http://127.0.0.1:9999</code> and open the printed <code>https://xxxx.trycloudflare.com</code> URL. If that works but homeclaw.online does not, the issue is custom-domain routing (DNS or public hostname), not the origin server.</p>
+</li>
+</ol>
+<p><strong>Useful commands:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cloudflared tunnel list</code></td>
+<td>List tunnels and IDs</td>
+</tr>
+<tr>
+<td><code>cloudflared tunnel run homeclaw-site</code></td>
+<td>Run tunnel in foreground (for testing)</td>
+</tr>
+<tr>
+<td><code>sudo systemctl status cloudflared</code></td>
+<td>Status of tunnel service</td>
+</tr>
+<tr>
+<td><code>sudo journalctl -u cloudflared -f</code></td>
+<td>Follow tunnel logs</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="summary">Summary</h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Role</th>
+<th>Restart on reboot</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>homeclaw-site.service</strong></td>
+<td>Serves <code>site/</code> on http://127.0.0.1:9999</td>
+<td>Yes (systemd <code>enable</code>)</td>
+</tr>
+<tr>
+<td><strong>cloudflared</strong> (tunnel)</td>
+<td>Forwards https://site.yourdomain.com → http://127.0.0.1:9999</td>
+<td>Yes (when run as system service)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>You do <strong>not</strong> open port 9999 (or 80/443) on your router; Cloudflare Tunnel uses an outbound connection.</li>
+<li>The site is static (HTML/CSS/images); no API keys or secrets are required for the site itself. If you add auth or sensitive content later, configure it in the site or behind Cloudflare Access.</li>
+</ul>
+<p>For <strong>Cloudflare Pages</strong> (hosting the same static files on Cloudflare’s edge instead of your machine), see <a href="../site/README.md#deploy-to-cloudflare-pages">site/README.md</a>.</p>
+<hr />
+<h2 id="part-3-windows-site-and-tunnel-as-services">Part 3: Windows — site and tunnel as services</h2>
+<p>On <strong>Windows</strong>, use the <strong>Python</strong> site server (no bash) and run it as a Windows service with <strong>NSSM</strong> or <strong>Task Scheduler</strong>. Then run <strong>cloudflared</strong> as a Windows service so the tunnel restarts on reboot.</p>
+<h3 id="31-run-the-site-test-manually">3.1 Run the site (test manually)</h3>
+<p>From the repo root in <strong>PowerShell</strong> or <strong>Command Prompt</strong>:</p>
+<pre><code class="language-powershell">python scripts\serve_site.py
+# Or with a different port: set PORT=3000 &amp;&amp; python scripts\serve_site.py
+# Or: python scripts\serve_site.py 3000
+</code></pre>
+<p>Open <strong>http://127.0.0.1:9999</strong> in a browser. Stop with Ctrl+C.</p>
+<p>The script <code>scripts/serve_site.py</code> finds the repo root from the script's directory (or from <code>HOMECLAW_REPO_ROOT</code> if set) and serves the <code>site/</code> folder. It works on both Windows and Linux.</p>
+<h3 id="32-run-the-site-as-a-windows-service-auto-restart-on-reboot">3.2 Run the site as a Windows service (auto-restart on reboot)</h3>
+<p>You have two options: <strong>NSSM</strong> (recommended) or <strong>Task Scheduler</strong>. Replace <code>D:\mygithub\HomeClaw</code> and <code>C:\Users\YourName\...</code> with your actual paths.</p>
+<hr />
+<h4 id="option-a-nssm-non-sucking-service-manager">Option A: NSSM (Non-Sucking Service Manager)</h4>
+<p><strong>Step 1: Download and extract NSSM</strong></p>
+<ol>
+<li>Go to <a href="https://nssm.cc/download">nssm.cc/download</a>.</li>
+<li>Download the latest release (e.g. <strong>nssm-2.24.zip</strong>).</li>
+<li>Extract the ZIP. Use the <strong>win64</strong> folder (e.g. <code>nssm-2.24\win64\nssm.exe</code>). Remember this path (e.g. <code>C:\Tools\nssm-2.24\win64</code>).</li>
+</ol>
+<p><strong>Step 2: Find your Python path</strong></p>
+<ol>
+<li>Open <strong>Command Prompt</strong> or <strong>PowerShell</strong>.</li>
+<li>Run: <code>where python</code></li>
+<li>Note the first path (e.g. <code>C:\Users\YourName\AppData\Local\Programs\Python\Python311\python.exe</code>). If you use a venv, use that <code>python.exe</code> path instead.</li>
+</ol>
+<p><strong>Step 3: Install the service with NSSM</strong></p>
+<ol>
+<li><strong>Right-click</strong> the <strong>Start</strong> button → <strong>Terminal (Admin)</strong> or <strong>Command Prompt (Admin)</strong> (or <strong>PowerShell (Admin)</strong>).</li>
+<li>
+<p>Go to the NSSM folder:
+   <code>cmd
+   cd C:\Tools\nssm-2.24\win64</code>
+   (Use your actual NSSM path.)</p>
+</li>
+<li>
+<p>Run:
+   <code>cmd
+   nssm install HomeClawSite</code>
+   A window titled <strong>NSSM - Install HomeClawSite service</strong> opens.</p>
+</li>
+<li>
+<p><strong>Application</strong> tab (should be open by default):</p>
+</li>
+<li><strong>Path:</strong> Click <strong>Browse</strong>, go to your Python folder, select <strong>python.exe</strong> (e.g. <code>C:\Users\YourName\AppData\Local\Programs\Python\Python311\python.exe</code>). Or type/paste the full path.</li>
+<li><strong>Startup directory:</strong> Click <strong>Browse</strong>, go to your HomeClaw repo root (e.g. <code>D:\mygithub\HomeClaw</code>), select that folder and confirm. Or type: <code>D:\mygithub\HomeClaw</code>.</li>
+<li>
+<p><strong>Arguments:</strong> Type: <code>scripts\serve_site.py</code></p>
+<ul>
+<li>The site will use port <strong>9999</strong> by default. To use another port, type: <code>scripts\serve_site.py 3000</code></li>
+</ul>
+</li>
+<li>
+<p><strong>Details</strong> tab (optional):</p>
+</li>
+<li><strong>Display name:</strong> <code>HomeClaw Site</code></li>
+<li>
+<p><strong>Description:</strong> e.g. <code>Serves the HomeClaw static site on port 9999</code></p>
+</li>
+<li>
+<p><strong>I/O</strong> tab (optional, for logs):</p>
+</li>
+<li><strong>Output (stdout):</strong> e.g. <code>D:\mygithub\HomeClaw\logs\site-stdout.log</code></li>
+<li><strong>Error (stderr):</strong> e.g. <code>D:\mygithub\HomeClaw\logs\site-stderr.log</code></li>
+<li>
+<p>Create the <code>logs</code> folder first if it doesn’t exist.</p>
+</li>
+<li>
+<p>Click <strong>Install service</strong>. A message says the service was installed. Click <strong>OK</strong> and close the NSSM window.</p>
+</li>
+</ol>
+<p><strong>Step 4: Start the service</strong></p>
+<p>In the same admin Command Prompt (in the NSSM folder):</p>
+<pre><code class="language-cmd">nssm start HomeClawSite
+</code></pre>
+<p>You should see: <code>HomeClawSite: START: The operation completed successfully.</code></p>
+<p><strong>Step 5: Check</strong></p>
+<ol>
+<li>Open a browser and go to <strong>http://127.0.0.1:9999</strong>. You should see the HomeClaw site.</li>
+<li>Optional: In <strong>Services</strong> (Win+R → <code>services.msc</code> → find <strong>HomeClaw Site</strong>), confirm status is <strong>Running</strong> and <strong>Startup type</strong> is <strong>Automatic</strong> so it starts after reboot.</li>
+</ol>
+<p><strong>Useful NSSM commands</strong> (run from the NSSM folder in an admin prompt):</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nssm start HomeClawSite</code></td>
+<td>Start the service</td>
+</tr>
+<tr>
+<td><code>nssm stop HomeClawSite</code></td>
+<td>Stop the service</td>
+</tr>
+<tr>
+<td><code>nssm restart HomeClawSite</code></td>
+<td>Restart the service</td>
+</tr>
+<tr>
+<td><code>nssm status HomeClawSite</code></td>
+<td>Show status</td>
+</tr>
+<tr>
+<td><code>nssm remove HomeClawSite confirm</code></td>
+<td>Remove the service (stops and uninstalls)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h4 id="option-b-task-scheduler-run-at-logon-or-at-startup">Option B: Task Scheduler (run at logon or at startup)</h4>
+<p><strong>Step 1: Find your Python path and repo path</strong></p>
+<ol>
+<li>In Command Prompt or PowerShell, run: <code>where python</code> — note the full path to <code>python.exe</code> (e.g. <code>C:\Users\YourName\AppData\Local\Programs\Python\Python311\python.exe</code>).</li>
+<li>Note your HomeClaw repo root (e.g. <code>D:\mygithub\HomeClaw</code>).</li>
+</ol>
+<p><strong>Step 2: Open Task Scheduler</strong></p>
+<ol>
+<li>Press <strong>Win+R</strong>, type <strong>taskschd.msc</strong>, press <strong>Enter</strong>.</li>
+<li>Or search <strong>Task Scheduler</strong> in the Start menu and open it.</li>
+</ol>
+<p><strong>Step 3: Create a basic task</strong></p>
+<ol>
+<li>In the right panel, click <strong>Create Basic Task...</strong>.</li>
+<li><strong>Name:</strong> e.g. <code>HomeClaw Site</code></li>
+<li><strong>Description (optional):</strong> e.g. <code>Serves the HomeClaw static site on port 9999</code></li>
+<li>Click <strong>Next</strong>.</li>
+</ol>
+<p><strong>Step 4: Set the trigger</strong></p>
+<ol>
+<li>Choose <strong>When I log on</strong> (task runs when you sign in) or <strong>When the computer starts</strong> (runs at boot; useful if the machine runs without a user logging in).</li>
+<li>Click <strong>Next</strong>.</li>
+</ol>
+<p><strong>Step 5: Set the action</strong></p>
+<ol>
+<li>Select <strong>Start a program</strong> → <strong>Next</strong>.</li>
+<li><strong>Program/script:</strong> Enter the <strong>full path</strong> to <code>python.exe</code> (e.g. <code>C:\Users\YourName\AppData\Local\Programs\Python\Python311\python.exe</code>). Or click <strong>Browse</strong> and select it.</li>
+<li><strong>Add arguments (optional):</strong> <code>scripts\serve_site.py</code><br />
+   (If the task runs before the working directory is set, use the full path: <code>D:\mygithub\HomeClaw\scripts\serve_site.py</code>)</li>
+<li><strong>Start in (optional):</strong> Enter the <strong>full path</strong> to your HomeClaw repo root (e.g. <code>D:\mygithub\HomeClaw</code>). This is important so the script finds the <code>site</code> folder.</li>
+<li>Click <strong>Next</strong>.</li>
+</ol>
+<p><strong>Step 6: Finish</strong></p>
+<ol>
+<li>Check <strong>Open the Properties dialog...</strong> if you want to change “Run whether user is logged on or not” or “Run with highest privileges”.</li>
+<li>Click <strong>Finish</strong>.</li>
+</ol>
+<p><strong>Step 7: Optional — run at startup without logging in</strong></p>
+<ol>
+<li>In Task Scheduler, find <strong>HomeClaw Site</strong> in the list, <strong>right-click</strong> → <strong>Properties</strong>.</li>
+<li><strong>General</strong> tab: Check <strong>Run whether user is logged on or not</strong> if the task should run at startup even when no one is logged in. You may be prompted for your password.</li>
+<li><strong>Conditions</strong> tab: Uncheck <strong>Start the task only if the computer is on AC power</strong> if you want it to run on battery (e.g. laptop).</li>
+<li>Click <strong>OK</strong>.</li>
+</ol>
+<p><strong>Step 8: Run the task once to test</strong></p>
+<ol>
+<li>Right-click <strong>HomeClaw Site</strong> → <strong>Run</strong>.</li>
+<li>Open <strong>http://127.0.0.1:9999</strong> in a browser to confirm the site loads.</li>
+</ol>
+<p>After reboot (or next logon, depending on the trigger), the task will run again and the site will be available at http://127.0.0.1:9999.</p>
+<h3 id="33-cloudflare-tunnel-on-windows">3.3 Cloudflare Tunnel on Windows</h3>
+<ol>
+<li>
+<p><strong>Install cloudflared</strong> (see <a href="#21-install-cloudflared">2.1 Install cloudflared</a>) and ensure <code>cloudflared</code> is on your PATH.</p>
+</li>
+<li>
+<p><strong>Quick Tunnel (test):</strong> With the site running (manually or as a service), open PowerShell or Command Prompt:</p>
+</li>
+</ol>
+<p><code>powershell
+   cloudflared tunnel --url http://127.0.0.1:9999</code></p>
+<p>Use the printed URL (e.g. <code>https://xxxx.trycloudflare.com</code>) to open your site. Stop with Ctrl+C.</p>
+<ol>
+<li>
+<p><strong>Named Tunnel (stable URL):</strong> Same as Linux: run <code>cloudflared tunnel login</code>, then <code>cloudflared tunnel create homeclaw-site</code>, create a config file (use Windows paths for <code>credentials-file</code>), and run <code>cloudflared tunnel route dns homeclaw-site site.yourdomain.com</code>. Config path on Windows is often <code>%USERPROFILE%\.cloudflared\config.yml</code>; in the config use <code>credentials-file: C:\Users\YourName\.cloudflared\&lt;TUNNEL_ID&gt;.json</code> and <code>service: http://127.0.0.1:9999</code>.</p>
+</li>
+<li>
+<p><strong>Run cloudflared as a Windows service</strong> so the tunnel restarts on reboot:</p>
+</li>
+<li>
+<p><strong>Option A:</strong> Run <code>cloudflared service install</code> (if your build supports it), then configure it to use your named tunnel (see <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/local/#run-the-tunnel-as-a-service">Cloudflare: Run as a service</a>).</p>
+</li>
+<li><strong>Option B:</strong> Use NSSM to run cloudflared as a service: <strong>Path</strong> = full path to <code>cloudflared.exe</code>, <strong>Arguments</strong> = <code>tunnel run homeclaw-site</code>, <strong>Startup directory</strong> = folder containing your config (e.g. <code>C:\Users\YourName\.cloudflared</code>).</li>
+</ol>
+<p>After reboot, start the <strong>site</strong> service (NSSM or Task Scheduler) and the <strong>cloudflared</strong> service; your site will be available at your tunnel URL.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tabs", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

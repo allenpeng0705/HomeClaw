@@ -1,0 +1,2545 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Local-first AI assistant — your home, your AI, your control.">
+      
+      
+      
+        <link rel="canonical" href="https://allenpeng0705.github.io/HomeClaw/mix-mode-and-reports/">
+      
+      
+        <link rel="prev" href="../core-config/">
+      
+      
+        <link rel="next" href="../hybrid-router-scripts/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
+    
+    
+      
+        <title>Mix mode and reports - HomeClaw</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-orange" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#mix-mode-and-reports" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="HomeClaw" class="md-header__button md-logo" aria-label="HomeClaw" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            HomeClaw
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Mix mode and reports
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="deep-orange" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="deep-orange" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/allenpeng0705/HomeClaw" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    HomeClaw
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../introducing-homeclaw/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Introducing HomeClaw
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../story/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Story
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../install/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Install
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../run/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Run
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../deploy-cloud/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Deploy to cloud
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../companion-app/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Companion app
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../companion-app-macos-permissions/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Companion app (macOS permissions)
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../channels/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Channels
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../companion-vs-channels/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Companion vs Channels
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../per-user-sandbox-and-file-links/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Per-user sandbox and file links
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../friends-plugin/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Friends plugin
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../tools/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Tools
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../plugins/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Plugins
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../writing-plugins-and-skills/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Writing plugins and skills
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../models/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Models
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../core-config/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Core config (core.yml)
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Mix mode and reports
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../hybrid-router-scripts/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Hybrid router scripts
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../platform/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Platform
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../remote-access/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Remote access
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../companion-iphone-cloudflare-tunnel/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Companion on iPhone (Cloudflare Tunnel)
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../help/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Help
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="HomeClaw" class="md-nav__button md-logo" aria-label="HomeClaw" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    HomeClaw
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/allenpeng0705/HomeClaw" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    HomeClaw
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../introducing-homeclaw/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Introducing HomeClaw
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../story/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Story
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deploy-cloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploy to cloud
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../companion-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Companion app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../companion-app-macos-permissions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Companion app (macOS permissions)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../channels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Channels
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../companion-vs-channels/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Companion vs Channels
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../per-user-sandbox-and-file-links/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Per-user sandbox and file links
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../friends-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Friends plugin
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-plugins-and-skills/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing plugins and skills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../core-config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core config (core.yml)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mix mode and reports
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Mix mode and reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-mix-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is mix mode?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-use-mix-mode-step-by-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How to use mix mode (step-by-step)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-see-reports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How to see reports
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How to see reports">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-per-request-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Per-request logs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-are-all-requests-routed-to-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why are all requests routed to local?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-rest-api-aggregate-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. REST API (aggregate report)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-in-chat-usage_report-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. In chat: usage_report tool
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#parameter-reference-and-tuning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parameter reference and tuning
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-to-use-mix-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to use mix mode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#config-mix-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config (mix mode)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-3-layer-router-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The 3-layer router (overview)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#routing-simple-conversation-to-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routing simple conversation to local
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-1-heuristic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1: Heuristic
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-2-semantic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2: Semantic
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-3-classifier-or-perplexity-configurable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 3: Classifier or perplexity (configurable)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#logs-and-metrics-mix-mode-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logs and metrics (mix mode only)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloud-usage-all-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cloud usage (all modes)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reports-structure-and-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reports (structure and options)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reports (structure and options)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#whats-in-the-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What’s in the report
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rest-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        REST API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#built-in-tool-usage_report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Built-in tool: usage_report
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-and-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design and implementation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hybrid-router-scripts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hybrid router scripts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../platform/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Platform
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../remote-access/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Remote access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../companion-iphone-cloudflare-tunnel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Companion on iPhone (Cloudflare Tunnel)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Help
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-mix-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is mix mode?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-use-mix-mode-step-by-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How to use mix mode (step-by-step)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-see-reports" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How to see reports
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How to see reports">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-per-request-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Per-request logs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-are-all-requests-routed-to-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why are all requests routed to local?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-rest-api-aggregate-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. REST API (aggregate report)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-in-chat-usage_report-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. In chat: usage_report tool
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#parameter-reference-and-tuning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Parameter reference and tuning
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-to-use-mix-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When to use mix mode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#config-mix-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config (mix mode)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-3-layer-router-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The 3-layer router (overview)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#routing-simple-conversation-to-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routing simple conversation to local
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-1-heuristic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1: Heuristic
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-2-semantic" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2: Semantic
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#layer-3-classifier-or-perplexity-configurable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 3: Classifier or perplexity (configurable)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#logs-and-metrics-mix-mode-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Logs and metrics (mix mode only)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloud-usage-all-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cloud usage (all modes)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reports-structure-and-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reports (structure and options)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reports (structure and options)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#whats-in-the-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What’s in the report
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rest-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        REST API
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#built-in-tool-usage_report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Built-in tool: usage_report
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#design-and-implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Design and implementation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="mix-mode-and-reports">Mix mode and reports</h1>
+<p><strong>Mix mode</strong> lets HomeClaw choose <strong>per request</strong> whether to use a <strong>local</strong> or <strong>cloud</strong> main model. A <strong>3-layer smart router</strong> runs <em>before</em> tools, skills, and plugins are injected, using only the user message. You get one main model for the whole turn (local or cloud). <strong>Reports</strong> give you usage and cost visibility: router decisions and cloud request counts, via REST API and a built-in tool.</p>
+<p>This page is the <strong>unified guide</strong>: how to use mix mode, how to see reports, and how to adjust parameters.</p>
+<p><strong>In this page:</strong></p>
+<ul>
+<li><a href="#what-is-mix-mode">What is mix mode?</a> — Concepts and required config.</li>
+<li><a href="#how-to-use-mix-mode-step-by-step">How to use mix mode (step-by-step)</a> — Enable, configure, run, verify.</li>
+<li><a href="#how-to-see-reports">How to see reports</a> — Logs, REST API, and <code>usage_report</code> tool.</li>
+<li><a href="#parameter-reference-and-tuning">Parameter reference and tuning</a> — All knobs in one table and how to tune them.</li>
+<li><a href="#when-to-use-mix-mode">When to use mix mode</a> — Use cases.</li>
+<li><a href="#config-mix-mode">Config (mix mode)</a> — Full YAML reference.</li>
+<li><a href="#the-3-layer-router-overview">The 3-layer router</a> — Order and flow.</li>
+<li><a href="#layer-1-heuristic">Layer 1 / 2 / 3</a> — Heuristic, semantic, classifier/perplexity in detail.</li>
+<li><a href="#reports-structure-and-options">Reports (structure)</a> — Report fields and API options.</li>
+<li><a href="#quick-reference">Quick reference</a> — One-page cheat sheet.</li>
+</ul>
+<hr />
+<h2 id="what-is-mix-mode">What is mix mode?</h2>
+<ul>
+<li><strong><code>main_llm_mode</code></strong> in <code>config/core.yml</code> can be:</li>
+<li><strong><code>local</code></strong> — always use the configured main model (local).</li>
+<li><strong><code>cloud</code></strong> — always use the configured main model (cloud).</li>
+<li><strong><code>mix</code></strong> — for each user message, the router picks <strong>local</strong> or <strong>cloud</strong>; then that model is used for the entire turn (including any tool calls).</li>
+</ul>
+<p>When <code>main_llm_mode</code> is <strong>mix</strong>, you must set:</p>
+<ul>
+<li><strong><code>main_llm_local</code></strong> — e.g. <code>local_models/main_vl_model_4B</code>.</li>
+<li><strong><code>main_llm_cloud</code></strong> — e.g. <code>cloud_models/Gemini-2.5-Flash</code>.</li>
+<li><strong><code>hybrid_router</code></strong> — <code>default_route</code>, and optionally layers: <code>heuristic</code>, <code>semantic</code>, <code>slm</code>.</li>
+</ul>
+<p>If you omit <code>main_llm_mode</code>, it is derived from <code>main_llm</code> (cloud_models/ → cloud, else local), so existing configs keep working.</p>
+<hr />
+<h2 id="how-to-use-mix-mode-step-by-step">How to use mix mode (step-by-step)</h2>
+<ol>
+<li><strong>Set main LLMs and mode</strong> in <code>config/core.yml</code>:</li>
+<li><code>main_llm_mode: mix</code></li>
+<li><code>main_llm_local: local_models/&lt;your_local_id&gt;</code> (must exist under <code>local_models</code>)</li>
+<li>
+<p><code>main_llm_cloud: cloud_models/&lt;your_cloud_id&gt;</code> (must exist under <code>cloud_models</code>)</p>
+</li>
+<li>
+<p><strong>Configure the router</strong> under <code>hybrid_router</code>:</p>
+</li>
+<li><code>default_route: local</code> or <code>cloud</code> (used when no layer selects a route).</li>
+<li>
+<p>Enable at least one layer: <code>heuristic</code>, <code>semantic</code>, and/or <code>slm</code> (see <a href="#parameter-reference-and-tuning">Parameter reference</a> below).</p>
+</li>
+<li>
+<p><strong>Prepare rule files</strong> (if you use heuristic or semantic):</p>
+</li>
+<li>Heuristic: <code>config/hybrid/heuristic_rules.yml</code> (create or use <a href="../hybrid-router-scripts/">scripts</a> to generate/merge).</li>
+<li>
+<p>Semantic: <code>config/hybrid/semantic_routes.yml</code> or <code>config/hybrid/generated_utterances.yml</code> (or generate/merge via scripts).</p>
+</li>
+<li>
+<p><strong>Start Core</strong> (and ensure your local model server and, if using classifier, the Layer 3 model are running). Send a few test messages. To see which layer chose the route, use one of the options in the next section.</p>
+</li>
+<li>
+<p><strong>Optional:</strong> Use the <a href="#how-to-see-reports">usage report</a> (API or <code>usage_report</code> tool) to see router and cloud usage over time.</p>
+</li>
+</ol>
+<hr />
+<h2 id="how-to-see-reports">How to see reports</h2>
+<p>You can see router decisions and cloud usage in three ways.</p>
+<h3 id="1-per-request-logs">1. Per-request logs</h3>
+<p>Each mix-mode turn logs one line (JSON) with the routing decision:</p>
+<ul>
+<li><strong>Where:</strong> Core log output (e.g. stdout or your log file).</li>
+<li><strong>Look for:</strong> <code>"event": "hybrid_router_decision"</code> with <code>route</code>, <code>layer</code>, <code>score</code>, <code>latency_ms</code>.</li>
+</ul>
+<p><strong>How to see which layer the routing happened (per request):</strong></p>
+<ol>
+<li><strong>In the reply (easiest):</strong> In <code>config/core.yml</code> set <code>hybrid_router.show_route_in_response: true</code>. Each reply is prefixed with the route and the layer that chose it, e.g. <code>[Local · heuristic]</code>, <code>[Cloud · semantic]</code>, <code>[Local · classifier]</code>, or <code>[Cloud · default_route]</code>.</li>
+<li><strong>In Core logs:</strong> At INFO level, each routing decision is logged as a JSON line: <code>Router decision: {"event": "hybrid_router_decision", "route": "cloud", "layer": "semantic", "score": 0.82, ...}</code>. The <code>layer</code> field is one of: <code>heuristic</code>, <code>semantic</code>, <code>classifier</code>, <code>perplexity</code>, <code>default_route</code>.</li>
+<li><strong>Aggregated (usage report):</strong> Call the usage report API or use the <code>usage_report</code> tool; the response includes <code>router.by_layer</code> with counts per layer (e.g. how many requests were routed by heuristic vs semantic vs default_route).</li>
+<li><strong>Layers:</strong> <code>heuristic</code>, <code>semantic</code>, <code>classifier</code>, <code>perplexity</code>, or <code>default_route</code>.</li>
+</ol>
+<p>Use this to debug why a given message went local or cloud.</p>
+<h3 id="why-are-all-requests-routed-to-local">Why are all requests routed to local?</h3>
+<p>If <strong>every</strong> (or almost every) request goes to the <strong>local</strong> model in mix mode, one or more of the following is usually true:</p>
+<ol>
+<li>
+<p><strong><code>default_route</code> is <code>local</code></strong><br />
+   When no layer (heuristic, semantic, slm) selects a route—or a layer fails—the router uses <code>hybrid_router.default_route</code>. If that is <code>local</code>, ambiguous or low-confidence requests go local.<br />
+<strong>Fix:</strong> Set <code>default_route: cloud</code> in <code>config/core.yml</code> under <code>hybrid_router</code> if you want “when in doubt, use cloud.”</p>
+</li>
+<li>
+<p><strong>Layer 1 (heuristic) matches “local” first</strong><br />
+   Heuristic uses <strong>first match wins</strong>. In the default <code>heuristic_rules.yml</code>, there are many <strong>local</strong> rules (screenshot, clipboard, open app, CPU, keyboard, etc.). A query that contains any of those keywords (or similar) will route to local before semantic or slm run.<br />
+<strong>Fix:</strong> Add more <strong>cloud</strong> rules for the intents you want on cloud (e.g. “search”, “news”, “translate”, “summarize”, “weather”) and place them so they can match; or temporarily set <code>heuristic.enabled: false</code> to rely only on semantic + slm (and default_route).</p>
+</li>
+<li>
+<p><strong>Layer 2 (semantic) rarely picks cloud</strong><br />
+   Semantic compares the user message to <code>local_utterances</code> and <code>cloud_utterances</code>. If <code>semantic.threshold</code> is high (e.g. 0.6–0.7) and your queries are short or generic, similarity may not reach the threshold for either side, so the router falls through to <code>default_route</code> (local).<br />
+<strong>Fix:</strong> Lower <code>semantic.threshold</code> (e.g. 0.5–0.55) so more requests get a semantic decision; or add more cloud example utterances in <code>semantic_routes.yml</code> (or <code>generated_utterances.yml</code>) that are close to your real queries.</p>
+</li>
+<li>
+<p><strong>Layer 3 (slm) is off or failing</strong><br />
+   If <code>slm.enabled</code> is <code>true</code> but the classifier model (e.g. <code>local_models/classifier_0_6b</code>) is not running or not in <code>local_models</code>, Layer 3 throws and the router falls back to <code>default_route</code>.<br />
+<strong>Fix:</strong> Ensure the Layer 3 model is in <code>local_models</code> and its server is up on the configured port; or set <code>slm.enabled: false</code> and rely on heuristic + semantic + default_route.</p>
+</li>
+<li>
+<p><strong><code>main_llm_mode</code> is not actually <code>mix</code></strong><br />
+   If <code>main_llm_mode</code> is missing or misspelled, Core does not run the hybrid router and uses a single main model (often from <code>main_llm</code> or the first available, which may be local).<br />
+<strong>Fix:</strong> In <code>config/core.yml</code> set <code>main_llm_mode: mix</code> and define <code>main_llm_local</code>, <code>main_llm_cloud</code>, and <code>hybrid_router</code>.</p>
+</li>
+</ol>
+<p><strong>Quick check:</strong> Turn on <code>hybrid_router.show_route_in_response: true</code> and look at the prefix on each reply (e.g. <code>[Local · heuristic]</code> or <code>[Cloud · default_route]</code>). That shows which layer chose the route and confirms whether the router is running and what it decided.</p>
+<p><strong>Failure and fallback:</strong> If the chosen model fails (timeout, connection error, bad response), Core does <strong>not</strong> block the whole task by default. When <code>hybrid_router.fallback_on_llm_error</code> is <code>true</code> (default), Core retries <strong>once</strong> with the other route (e.g. local failed → try cloud; cloud failed → try local). If the fallback also fails, the user sees "Sorry, something went wrong...". Set <code>fallback_on_llm_error: false</code> to disable automatic retry and fail immediately when the chosen model fails.</p>
+<h3 id="2-rest-api-aggregate-report">2. REST API (aggregate report)</h3>
+<ul>
+<li><strong>Endpoint:</strong> <code>GET /api/reports/usage</code></li>
+<li><strong>Auth:</strong> Same as other Core APIs (e.g. <code>X-API-Key</code> header when <code>auth_enabled</code>).</li>
+<li><strong>Query:</strong> <code>?format=json</code> (default) or <code>?format=csv</code>.</li>
+</ul>
+<p><strong>Example:</strong></p>
+<pre><code class="language-bash">curl -H &quot;X-API-Key: YOUR_KEY&quot; &quot;http://localhost:9000/api/reports/usage&quot;
+</code></pre>
+<p><strong>What you get:</strong></p>
+<ul>
+<li><strong>router</strong>: <code>total_mix_requests</code>, <code>routed_local</code>, <code>routed_cloud</code>, <code>by_layer</code> (counts per layer).</li>
+<li><strong>cloud_usage</strong>: <code>cloud_requests_total</code> (all cloud completions, mix + single-cloud).</li>
+<li><strong>summary</strong>: high-level totals for cost/tuning.</li>
+</ul>
+<p>Use this for dashboards, billing, or scripts.</p>
+<h3 id="3-in-chat-usage_report-tool">3. In chat: <code>usage_report</code> tool</h3>
+<p>When the user asks for “usage”, “cost”, or “how many requests went to cloud”, the model can call the <strong><code>usage_report</code></strong> tool (no arguments). It returns a short text summary plus the full report as JSON so the model can answer and “review” the numbers.</p>
+<hr />
+<h2 id="parameter-reference-and-tuning">Parameter reference and tuning</h2>
+<p>All mix-mode and router parameters live under <strong><code>config/core.yml</code></strong> → <code>main_llm_*</code> and <code>hybrid_router</code>. Use this table to find and adjust behavior.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Where</th>
+<th>What it does</th>
+<th>How to tune</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>main_llm_mode</strong></td>
+<td>Top-level</td>
+<td><code>local</code> / <code>cloud</code> / <code>mix</code>. Set to <code>mix</code> to enable the router.</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>main_llm_local</strong></td>
+<td>Top-level</td>
+<td>Local model ref (e.g. <code>local_models/main_4B</code>) used when route is local.</td>
+<td>Must match an entry in <code>local_models</code>.</td>
+</tr>
+<tr>
+<td><strong>main_llm_cloud</strong></td>
+<td>Top-level</td>
+<td>Cloud model ref used when route is cloud.</td>
+<td>Must match an entry in <code>cloud_models</code>.</td>
+</tr>
+<tr>
+<td><strong>default_route</strong></td>
+<td><code>hybrid_router</code></td>
+<td>Route when <strong>no</strong> layer selects (e.g. ambiguous or low score).</td>
+<td><code>local</code> = save cost; <code>cloud</code> = safer for unknown.</td>
+</tr>
+<tr>
+<td><strong>show_route_in_response</strong></td>
+<td><code>hybrid_router</code></td>
+<td>When <code>true</code>, prepend route and <strong>layer</strong> to each reply, e.g. <code>[Local · heuristic]</code> or <code>[Cloud · semantic]</code> (for testing).</td>
+<td>Default <code>false</code>. Turn on to see which layer chose the route in the UI without checking logs.</td>
+</tr>
+<tr>
+<td><strong>fallback_on_llm_error</strong></td>
+<td><code>hybrid_router</code></td>
+<td>When <code>true</code> (default): if the chosen model fails (timeout/error), retry <strong>once</strong> with the other route so one model failing does not block the task.</td>
+<td>Set to <code>false</code> to fail fast (no automatic switch to the other model).</td>
+</tr>
+<tr>
+<td><strong>heuristic.enabled</strong></td>
+<td><code>hybrid_router.heuristic</code></td>
+<td>Turn Layer 1 (keyword/long-input) on/off.</td>
+<td>Off if you rely only on semantic + Layer 3.</td>
+</tr>
+<tr>
+<td><strong>heuristic.threshold</strong></td>
+<td><code>hybrid_router.heuristic</code></td>
+<td>Min score to accept a heuristic match (keyword match gives 1.0).</td>
+<td>Usually keep 0.5; rarely need to change.</td>
+</tr>
+<tr>
+<td><strong>heuristic.rules_path</strong></td>
+<td><code>hybrid_router.heuristic</code></td>
+<td>Path to YAML with keywords and long_input_* rules.</td>
+<td>Point to your <code>heuristic_rules.yml</code> (or generate via scripts).</td>
+</tr>
+<tr>
+<td><strong>semantic.enabled</strong></td>
+<td><code>hybrid_router.semantic</code></td>
+<td>Turn Layer 2 (embedding similarity) on/off.</td>
+<td>Off if you use only heuristic + Layer 3.</td>
+</tr>
+<tr>
+<td><strong>semantic.threshold</strong></td>
+<td><code>hybrid_router.semantic</code></td>
+<td>Min similarity score to accept a semantic route.</td>
+<td><strong>Higher</strong> (e.g. 0.75–0.85) = fewer semantic matches, more fallback to Layer 3/default. <strong>Lower</strong> (e.g. 0.55–0.65) = more requests decided by semantic; use when local model is strong.</td>
+</tr>
+<tr>
+<td><strong>semantic.routes_path</strong></td>
+<td><code>hybrid_router.semantic</code></td>
+<td>Path to YAML with local_utterances / cloud_utterances.</td>
+<td>Your <code>semantic_routes.yml</code> or <code>generated_utterances.yml</code>.</td>
+</tr>
+<tr>
+<td><strong>slm.enabled</strong></td>
+<td><code>hybrid_router.slm</code></td>
+<td>Turn Layer 3 on/off.</td>
+<td>Off = after L2, go straight to default_route.</td>
+</tr>
+<tr>
+<td><strong>slm.mode</strong></td>
+<td><code>hybrid_router.slm</code></td>
+<td><code>classifier</code> = small model judge; <code>perplexity</code> = main model confidence probe.</td>
+<td>Use <code>perplexity</code> when your <strong>main local model is strong</strong> and you want it to “vote” by logprob.</td>
+</tr>
+<tr>
+<td><strong>slm.threshold</strong></td>
+<td><code>hybrid_router.slm</code></td>
+<td>For <strong>classifier</strong>: min score to accept Local/Cloud.</td>
+<td>Only for mode=classifier; 0.5 is typical.</td>
+</tr>
+<tr>
+<td><strong>slm.model</strong></td>
+<td><code>hybrid_router.slm</code></td>
+<td>For <strong>classifier</strong>: small model ref (e.g. <code>local_models/classifier_0_5b</code>).</td>
+<td>Required when mode=classifier; must be in <code>local_models</code> with its own port.</td>
+</tr>
+<tr>
+<td><strong>slm.perplexity_max_tokens</strong></td>
+<td><code>hybrid_router.slm</code></td>
+<td>For <strong>perplexity</strong>: how many tokens to generate for the probe.</td>
+<td>Default 5; more = more signal, slower.</td>
+</tr>
+<tr>
+<td><strong>slm.perplexity_threshold</strong></td>
+<td><code>hybrid_router.slm</code></td>
+<td>For <strong>perplexity</strong>: avg logprob above this → local, below → cloud.</td>
+<td><strong>Higher</strong> (e.g. -0.4) = stricter “stay local”. <strong>Lower</strong> (e.g. -0.8) = more stays local. Default -0.6.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Strong local model:</strong> If your local model is powerful, consider: lower <strong>semantic.threshold</strong> (e.g. 0.65), <strong>default_route: local</strong>, and Layer 3 <strong>mode: perplexity</strong> with a <strong>perplexity_threshold</strong> that matches your confidence (e.g. -0.6). See <code>docs_design/StrongLocalModelAndPerplexityRouting.md</code>.</p>
+<hr />
+<h2 id="when-to-use-mix-mode">When to use mix mode</h2>
+<ul>
+<li>You want <strong>local</strong> for simple or private tasks (screenshot, lock screen, reminders) and <strong>cloud</strong> for search, latest news, or complex reasoning.</li>
+<li>You want to <strong>limit cloud cost</strong> by routing only when needed.</li>
+<li>You have both a local model and a cloud model configured and are fine with per-request routing.</li>
+</ul>
+<hr />
+<h2 id="config-mix-mode">Config (mix mode)</h2>
+<p>In <strong><code>config/core.yml</code></strong>:</p>
+<pre><code class="language-yaml">main_llm_mode: mix
+main_llm_local: local_models/main_vl_model_4B
+main_llm_cloud: cloud_models/Gemini-2.5-Flash
+
+hybrid_router:
+  default_route: local   # used when no layer selects a route
+  heuristic:
+    enabled: true
+    threshold: 0.5
+    rules_path: config/hybrid/heuristic_rules.yml
+  semantic:
+    enabled: true
+    threshold: 0.6
+    routes_path: config/hybrid/semantic_routes.yml
+  slm:
+    enabled: false
+    threshold: 0.5
+    model: local_models/classifier_0_5b
+</code></pre>
+<ul>
+<li><strong><code>default_route</code></strong>: <code>local</code> or <code>cloud</code> when no layer returns a selection.</li>
+<li><strong><code>heuristic</code></strong>: keyword and long-input rules; <code>rules_path</code> points to a YAML file (see below).</li>
+<li><strong><code>semantic</code></strong>: semantic similarity over the <strong>existing</strong> embedding model; <code>routes_path</code> points to local/cloud example utterances.</li>
+<li><strong><code>slm</code></strong>: small local classifier on a <strong>separate port</strong>; <code>model</code> is a <code>local_models/&lt;id&gt;</code> entry (e.g. a 0.5B GGUF). Core starts it when mix + slm.enabled.</li>
+</ul>
+<p>You can enable only some layers; the router runs in order: <strong>Layer 1 → Layer 2 → Layer 3 → default_route</strong>.</p>
+<hr />
+<h2 id="the-3-layer-router-overview">The 3-layer router (overview)</h2>
+<p>The router runs <strong>once per user turn</strong>, <strong>before</strong> building the system prompt with tools, skills, plugins, workspace, or routing block. Only the <strong>user message</strong> (and, for semantic/slm, minimal context) is used. No tool or plugin descriptions are sent to the router.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Name</th>
+<th>Input</th>
+<th>Output</th>
+<th>When it runs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Heuristic</td>
+<td>User message</td>
+<td>local / cloud</td>
+<td>If enabled and score ≥ threshold</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Semantic</td>
+<td>User message</td>
+<td>local / cloud</td>
+<td>If L1 did not select and score ≥ threshold</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Classifier</td>
+<td>User message</td>
+<td>local / cloud</td>
+<td>If L2 did not select and score ≥ threshold</td>
+</tr>
+<tr>
+<td>Fallback</td>
+<td>—</td>
+<td>—</td>
+<td>default_route</td>
+<td>If no layer selected</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Scoring</strong>: Each layer returns a <strong>score</strong> and a <strong>selection</strong> (local or cloud). The selection is used only when <strong>score ≥ threshold</strong> for that layer. If a layer’s selection is used, later layers are skipped.</p>
+<hr />
+<h2 id="routing-simple-conversation-to-local">Routing simple conversation to local</h2>
+<p>Short chit-chat (greetings, thanks, bye, “ok”, “got it”) is a good fit for the <strong>local</strong> model: no web or deep reasoning needed. You can handle it in <strong>Layer 1</strong>, <strong>Layer 2</strong>, or rely on <strong>Layer 3 / default</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Where</th>
+<th>How</th>
+<th>Pros / cons</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Layer 1</strong></td>
+<td>Add a <strong>local</strong> rule with keywords: e.g. <code>hello</code>, <code>hi</code>, <code>thanks</code>, <code>bye</code>, <code>how are you</code>, <code>你好</code>, <code>谢谢</code>, <code>再见</code>, <code>ok</code>, <code>okay</code>, <code>got it</code>.</td>
+<td><strong>Fast</strong> (1 ms), explicit. Risk: a phrase like “say hello in an email” might match “hello” and route local; use more specific phrases if that’s a problem.</td>
+</tr>
+<tr>
+<td><strong>Layer 2</strong></td>
+<td>Add many <strong>local_utterances</strong> for chit-chat: “hi”, “hello”, “how are you”, “thanks”, “bye”, “just saying hi”, “what’s up”, “你好”, “谢谢”, “再见”.</td>
+<td>Handles <strong>paraphrases</strong> (“hey there”, “thx”) via similarity; no need to list every variant. Needs enough examples in your routes file.</td>
+</tr>
+<tr>
+<td><strong>Layer 3</strong></td>
+<td>Classifier sees the full message and can learn “short, generic → local”.</td>
+<td>Handles <strong>ambiguous</strong> cases; slower (~300 ms).</td>
+</tr>
+<tr>
+<td><strong>Default</strong></td>
+<td>Set <code>hybrid_router.default_route: local</code>. When no layer selects, the turn goes local.</td>
+<td>Simple conversation that doesn’t match L1/L2 <strong>already</strong> goes local as fallback. Making it explicit in L1/L2 improves metrics (you see “heuristic” or “semantic” instead of “default_route”).</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Recommendation:</strong> Add <strong>simple-conversation</strong> keywords to Layer 1 (and optionally more phrases to Layer 2 local_utterances) so greetings and short replies are clearly routed to local without depending on Layer 3 or default. Use the <a href="../hybrid-router-scripts/">hybrid router scripts</a> to generate or merge these (e.g. “Simple conversation” rule in the heuristic generator, and chit-chat phrases in the utterance generator).</p>
+<hr />
+<h2 id="layer-1-heuristic">Layer 1: Heuristic</h2>
+<ul>
+<li><strong>Config</strong>: <code>hybrid_router.heuristic</code> (<code>enabled</code>, <code>threshold</code>, <code>rules_path</code>).</li>
+<li><strong>Rules file</strong> (e.g. <code>config/hybrid/heuristic_rules.yml</code>):</li>
+<li><strong>Keywords</strong>: lists of phrases per route (multi-language in one list). If any phrase appears in the normalized user message (lowercase + Unicode NFC), that route is chosen with score 1.0.</li>
+<li><strong>Templates</strong> (optional): use <code>tmpl</code> with <code>{{a|b|c}}</code> to expand to all permutations (e.g. <code>{{open|launch}} {{browser|app}}</code>). No greedy <code>{{.*}}</code>. See <code>hybrid_router/template_expander.py</code> and <code>scripts/generate_heuristics.py</code>.</li>
+<li><strong>Long input</strong>: optional <code>long_input_chars</code> and <code>long_input_route</code>; if the message length &gt; <code>long_input_chars</code>, route to <code>long_input_route</code> (e.g. cloud).</li>
+<li><strong>User-editable</strong>: you can add or change keywords in the YAML without code changes.</li>
+<li><strong>Example</strong>: “screenshot”, “截图” → local; “latest news”, “实时新闻” → cloud.</li>
+</ul>
+<hr />
+<h2 id="layer-2-semantic">Layer 2: Semantic</h2>
+<ul>
+<li><strong>Config</strong>: <code>hybrid_router.semantic</code> (<code>enabled</code>, <code>threshold</code>, optional <code>routes_path</code>).</li>
+<li>Uses <strong><a href="https://github.com/aurelio-labs/semantic-router">semantic-router</a></strong> with a <strong>custom encoder</strong> that calls your <strong>existing</strong> embedding model (llama.cpp). No second embedding model.</li>
+<li><strong>Routes</strong>: two routes, “local” and “cloud”, each with example <strong>utterances</strong>. The user message is embedded and compared to these; the best-matching route and its similarity score are used. If score ≥ threshold, that route is selected.</li>
+<li><strong>Utterances</strong>: in <code>config/hybrid/semantic_routes.yml</code> (or defaults in code). You can edit this file to add phrases in any language.</li>
+</ul>
+<hr />
+<h2 id="layer-3-classifier-or-perplexity-configurable">Layer 3: Classifier or perplexity (configurable)</h2>
+<ul>
+<li><strong>Config</strong>: <code>hybrid_router.slm</code> (<code>enabled</code>, <code>threshold</code>, <code>model</code>, <strong><code>mode</code></strong>).</li>
+<li><strong>Mode</strong> (default <code>classifier</code>):</li>
+<li><strong><code>classifier</code></strong>: Small local model (e.g. <code>local_models/classifier_0_5b</code>) on its own port. A short <strong>judge prompt</strong> + user message is sent to <code>/v1/chat/completions</code>; the reply is parsed for “Local” or “Cloud”. Use when you want a dedicated routing model.</li>
+<li><strong><code>perplexity</code></strong>: <strong>Confidence probe</strong> using the <strong>main local model</strong> (same as <code>main_llm_local</code>). Core sends a probe request with <code>max_tokens</code> (e.g. 5) and <code>logprobs=true</code>, then computes the average log probability of the generated tokens. If avg logprob ≥ <strong><code>perplexity_threshold</code></strong> (e.g. -0.6), route stays <strong>local</strong>; otherwise <strong>cloud</strong>. Best when your local model is strong and you want it to “vote” by confidence. See <code>docs_design/StrongLocalModelAndPerplexityRouting.md</code>.</li>
+<li><strong>Perplexity options</strong> (when <code>mode: perplexity</code>): <code>perplexity_max_tokens</code> (default 5), <code>perplexity_threshold</code> (default -0.6; higher = stricter “stay local”).</li>
+<li><strong>Use case</strong>: When L1 and L2 don’t select, Layer 3 decides; classifier is cheap and explicit; perplexity uses the main model’s own confidence.</li>
+</ul>
+<hr />
+<h2 id="logs-and-metrics-mix-mode-only">Logs and metrics (mix mode only)</h2>
+<ul>
+<li><strong>Per-request log</strong>: For each mix-mode routing decision, a structured log line (JSON) is written with:</li>
+<li><code>event</code>: <code>hybrid_router_decision</code></li>
+<li><code>route</code>: <code>local</code> or <code>cloud</code></li>
+<li><code>layer</code>: <code>heuristic</code> | <code>semantic</code> | <code>classifier</code> | <code>default_route</code></li>
+<li><code>score</code>, optional <code>reason</code>, <code>request_id</code>, <code>session_id</code>, <code>latency_ms</code></li>
+<li><strong>Aggregated counts</strong> (in memory):</li>
+<li>Total mix requests, routed to local, routed to cloud.</li>
+<li>Counts <strong>by layer</strong> (how many times each layer decided the route).</li>
+</ul>
+<p>These are <strong>only</strong> updated when <code>main_llm_mode == "mix"</code> and the router runs. Local-only and cloud-only modes are unchanged.</p>
+<hr />
+<h2 id="cloud-usage-all-modes">Cloud usage (all modes)</h2>
+<ul>
+<li><strong>Every</strong> chat completion that uses a <strong>cloud</strong> model (whether in <strong>mix</strong> mode routed to cloud or in <strong>single cloud</strong> mode) increments a <strong>cloud request</strong> counter.</li>
+<li>So you see:</li>
+<li><strong>Mix mode</strong>: router stats (by layer, local vs cloud) <strong>and</strong> total cloud requests (including those routed to cloud by the router).</li>
+<li><strong>Single cloud mode</strong>: no router stats, but <strong>cloud request count</strong> still increases for cost visibility.</li>
+</ul>
+<hr />
+<h2 id="reports-structure-and-options">Reports (structure and options)</h2>
+<p>Reports combine <strong>router stats</strong> (mix) and <strong>cloud usage</strong> into one place. For where to get them (logs, API, tool), see <a href="#how-to-see-reports">How to see reports</a>. Below: exact structure and options.</p>
+<h3 id="whats-in-the-report">What’s in the report</h3>
+<ul>
+<li><strong>generated_at</strong>: UTC timestamp.</li>
+<li><strong>router</strong>: total_mix_requests, routed_local, routed_cloud, by_layer (heuristic, semantic, classifier, perplexity, default_route).</li>
+<li><strong>cloud_usage</strong>: cloud_requests_total.</li>
+<li><strong>summary</strong>: total_cloud_requests, mix_requests, mix_routed_local, mix_routed_cloud.</li>
+</ul>
+<h3 id="rest-api">REST API</h3>
+<ul>
+<li><strong>Endpoint</strong>: <code>GET /api/reports/usage</code></li>
+<li><strong>Auth</strong>: Same as other protected APIs (e.g. <code>X-API-Key</code> or <code>Authorization: Bearer</code> when <code>auth_enabled</code>).</li>
+<li><strong>Query</strong>:</li>
+<li><strong><code>format=json</code></strong> (default): response is JSON (full report object).</li>
+<li><strong><code>format=csv</code></strong>: response is CSV (<code>section</code>, <code>key</code>, <code>value</code>) for dashboards or billing.</li>
+</ul>
+<p><strong>Examples</strong>:</p>
+<pre><code class="language-bash">curl -H &quot;X-API-Key: YOUR_KEY&quot; &quot;http://localhost:9000/api/reports/usage&quot;
+curl -H &quot;X-API-Key: YOUR_KEY&quot; &quot;http://localhost:9000/api/reports/usage?format=csv&quot;
+</code></pre>
+<h3 id="built-in-tool-usage_report">Built-in tool: <code>usage_report</code></h3>
+<ul>
+<li><strong>Name</strong>: <code>usage_report</code></li>
+<li><strong>Parameters</strong>: none.</li>
+<li><strong>Description</strong>: Get the current usage report (router stats + cloud counts). Use when the user asks for cost, usage, or how many requests went to cloud vs local.</li>
+<li><strong>Returns</strong>: A short text summary (generated_at, summary lines, by-layer breakdown) plus the full report as JSON, so the model can answer questions and “review” the report.</li>
+</ul>
+<hr />
+<h2 id="quick-reference">Quick reference</h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Enable mix</td>
+<td><code>main_llm_mode: mix</code>, <code>main_llm_local</code>, <code>main_llm_cloud</code>, <code>hybrid_router</code> in <code>config/core.yml</code></td>
+</tr>
+<tr>
+<td>Heuristic rules</td>
+<td><code>config/hybrid/heuristic_rules.yml</code> (keywords, long_input_chars/route)</td>
+</tr>
+<tr>
+<td>Semantic utterances</td>
+<td><code>config/hybrid/semantic_routes.yml</code> (local_utterances, cloud_utterances)</td>
+</tr>
+<tr>
+<td>Layer 3 mode</td>
+<td><code>hybrid_router.slm.mode</code>: <code>classifier</code> (small model) or <code>perplexity</code> (main model confidence probe). See docs_design/StrongLocalModelAndPerplexityRouting.md</td>
+</tr>
+<tr>
+<td>Classifier model</td>
+<td>When mode=classifier: add a <code>local_models</code> entry (e.g. port 5089), set <code>hybrid_router.slm.model</code></td>
+</tr>
+<tr>
+<td>Report (API)</td>
+<td><code>GET /api/reports/usage</code> or <code>?format=csv</code></td>
+</tr>
+<tr>
+<td>Report (in chat)</td>
+<td>User asks for usage/cost → model calls <strong>usage_report</strong> tool</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="design-and-implementation">Design and implementation</h2>
+<ul>
+<li><strong>Design</strong>: <code>docs_design/HybridLocalCloudLLM.md</code></li>
+<li><strong>Step-by-step implementation plan</strong>: <code>docs_design/HybridRouterImplementationPlan.md</code></li>
+<li><strong>Router runs before</strong>: tools, skills, plugins, workspace, routing block (see implementation plan for the exact call site in <code>core/core.py</code>).</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tabs", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

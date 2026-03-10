@@ -1,0 +1,41 @@
+sequenceDiagram
+  participant User
+  participant Channel
+  participant Core
+  participant Profile
+  participant Memory
+  participant LLM as "LLM (local or cloud)"
+  participant Tools
+  participant Plugin
+
+  User->>Channel: message
+  Channel->>Core: POST /inbound or /ws
+  Core->>Core: Permission (user.yml)
+  alt Non-unified: orchestrator runs first
+    Core->>LLM: Intent + plugin selection (one call)
+    LLM-->>Core: TIME → TAM, or OTHER + plugin_id
+    Core->>Plugin: Run plugin (if selected)
+    Plugin-->>Core: response
+    Core->>Channel: response
+  else Unified (default): main path
+    Core->>Memory: RAG: fetch relevant memories (embedding)
+    Core->>Profile: Load profile (user_id)
+    Core->>Core: Build system prompt: workspace + skills + memories + profile + routing (plugins list)
+    Core->>Core: Load chat history (SQLite)
+    loop Tool loop (LLM may call tools many times)
+      Core->>LLM: messages + tools schema (local or cloud)
+      LLM-->>Core: tool_calls (e.g. route_to_plugin, file_read, run_skill) or final text
+      alt LLM returns tool_calls
+        Core->>Tools: Execute (file_read, memory_search, cron_schedule, route_to_plugin, run_skill, …)
+        Tools->>Plugin: If route_to_plugin → run plugin (params from profile/config)
+        Plugin-->>Tools: plugin result
+        Tools-->>Core: tool result
+        Core->>Core: Append result to messages, repeat
+      else LLM returns final text
+        Core->>Memory: Optionally add to memory (embedding)
+        Core->>Core: Save turn to chat history
+        Core->>Channel: response
+      end
+    end
+  end
+  Channel->>User: reply
