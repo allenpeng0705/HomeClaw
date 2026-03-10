@@ -1650,6 +1650,7 @@ class Core(CoreInterface):
             port = int(getattr(meta, "port", 9000) or 9000)
             auth_enabled = bool(getattr(meta, "auth_enabled", False))
             auth_api_key = (getattr(meta, "auth_api_key", None) or "").strip()
+            # pinggy is optional (not in requirements.txt; install manually if using Pinggy tunnel)
             try:
                 import pinggy
             except ImportError:

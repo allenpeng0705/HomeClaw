@@ -1,11 +1,23 @@
 #!/usr/bin/env bash
 # HomeClaw install script for macOS and Linux.
 # Run from project root (existing clone) or from a parent directory (script will clone).
+# Do NOT use sudo. Run as your normal user:   bash install.sh   (or   chmod +x install.sh   then   ./install.sh).
+# If you see "Permission denied", use   bash install.sh   — it does not require the file to be executable.
 # Steps: Python (3.9+) -> Node.js -> [clone if needed] -> pip install -> llama.cpp -> GGUF/Ollama instructions -> open Portal.
 
 set -e
 REPO_URL="${HOMECLAW_REPO_URL:-https://github.com/allenpeng0705/HomeClaw.git}"
 PORTAL_URL="http://127.0.0.1:18472"
+
+echo "=============================================="
+echo "  HomeClaw Installer (macOS / Linux)"
+echo "=============================================="
+echo ""
+if [ -n "$SUDO_USER" ]; then
+  echo "Note: You ran this with sudo. Prefer running without sudo:  ./install.sh  or  bash install.sh"
+  echo "      (Homebrew and pip work as your user. Use full path if you must use sudo: sudo $(pwd)/install.sh)"
+  echo ""
+fi
 
 # Resolve project root: script may be at project root or we clone into ./HomeClaw
 SCRIPT_DIR=""
@@ -43,12 +55,20 @@ fi
 if [ "$IN_REPO" = 0 ] && [ -d "$CLONE_DIR" ]; then
   cd "$ROOT"
 fi
+# Ensure we are in project root for all following steps (venv, paths, etc.)
+if [ -z "${ROOT:-}" ] || [ ! -d "$ROOT" ]; then
+  echo "Error: could not determine project root."
+  exit 1
+fi
+cd "$ROOT"
+echo "Working directory: $ROOT"
+echo ""
 
 # ----- Step 1: Python 3.9+ -----
 echo ""
 echo "=== Step 1: Python ==="
 PYTHON=""
-for p in python3.12 python3.11 python3.10 python3.9 python3; do
+for p in python3.12 python3.11 python3.10 python3.9 python3 python; do
   if command -v "$p" >/dev/null 2>&1; then
     if "$p" -c "import sys; exit(0 if sys.version_info >= (3, 9) else 1)" 2>/dev/null; then
       PYTHON="$p"
@@ -156,7 +176,7 @@ VMPRINT_MAIN="$ROOT/tools/vmprint-main"
 # If user downloaded GitHub ZIP, folder is vmprint-main; rename to vmprint so config path works
 if [ -d "$VMPRINT_MAIN" ] && [ ! -d "$VMPRINT_DIR" ]; then
   echo "Renaming tools/vmprint-main to tools/vmprint ..."
-  mv "$VMPRINT_MAIN" "$VMPRINT_DIR"
+  mv "$VMPRINT_MAIN" "$VMPRINT_DIR" 2>/dev/null || { echo "Warning: could not rename vmprint-main to vmprint (e.g. permission). You can rename manually."; true; }
 fi
 if [ -d "$VMPRINT_DIR/draft2final" ] && [ -f "$VMPRINT_DIR/package.json" ]; then
   echo "OK: VMPrint already at tools/vmprint"
@@ -197,8 +217,34 @@ if [ -d ".venv" ]; then
   # shellcheck source=/dev/null
   . .venv/bin/activate 2>/dev/null || true
 fi
-"$PYTHON" -m pip install --quiet -r requirements.txt
+# Upgrade pip first (old pip can cause 403 with some mirrors)
+"$PYTHON" -m pip install --quiet --upgrade pip 2>/dev/null || true
+if ! "$PYTHON" -m pip install --quiet -r requirements.txt; then
+  echo "First attempt failed. Retrying automatically with official PyPI (ignoring mirror config)..."
+  echo "This may take a few minutes (downloading from pypi.org). You will see progress below."
+  # Unset mirror env so -i is the only index (pip.conf or PIP_INDEX_URL may point to a mirror that returned 403)
+  # Run without --quiet so user sees download/install progress and knows it is not stuck
+  if ! PIP_INDEX_URL= PIP_EXTRA_INDEX_URL= "$PYTHON" -m pip install -r requirements.txt -i https://pypi.org/simple; then
+    echo "Error: pip install failed."
+    echo "  If you saw 403 Forbidden: your pip index (e.g. Tsinghua mirror) may be blocking. Try:"
+    echo "    $PYTHON -m pip install -r requirements.txt -i https://pypi.org/simple"
+    echo "  If you see permission errors: $PYTHON -m pip install --user -r requirements.txt"
+    exit 1
+  fi
+fi
 echo "OK: requirements installed"
+
+# ----- Step 5b: Cognee (latest from official PyPI) -----
+# Cognee is the default memory backend; many mirrors only have 0.1.x. Install latest from PyPI.
+echo ""
+echo "=== Step 5b: Cognee (memory backend, latest from PyPI) ==="
+echo "Installing cognee from pypi.org (may take a minute)..."
+if PIP_INDEX_URL= PIP_EXTRA_INDEX_URL= "$PYTHON" -m pip install cognee -i https://pypi.org/simple; then
+  echo "OK: cognee installed (latest from pypi.org)"
+else
+  echo "Cognee install from PyPI failed or skipped. To install later: $PYTHON -m pip install cognee -i https://pypi.org/simple"
+fi
+echo "(If pip reported dependency conflicts about semantic-kernel, you can ignore them — HomeClaw does not use that package.)"
 
 # ----- Step 6a: llama.cpp -----
 echo ""
@@ -250,7 +296,8 @@ echo ""
 echo "=== Installation complete ==="
 echo "Starting Portal and opening browser at $PORTAL_URL ..."
 cd "$ROOT"
-"$PYTHON" -m main portal --no-open-browser &
+# Use nohup so Portal keeps running after the script exits (avoids SIGHUP when terminal closes)
+nohup "$PYTHON" -m main portal --no-open-browser </dev/null >>/dev/null 2>&1 &
 PORTAL_PID=$!
 sleep 3
 OS="$(uname -s)"
@@ -260,4 +307,11 @@ elif [ "$OS" = "Linux" ]; then
   xdg-open "$PORTAL_URL" 2>/dev/null || true
 fi
 echo "Portal running (PID $PORTAL_PID). To stop: kill $PORTAL_PID"
-echo "To run Portal again later: cd $ROOT && $PYTHON -m main portal"
+echo ""
+echo "--- Next steps ---"
+echo "  1. In Portal ($PORTAL_URL): create admin account, choose model, add users, start Core."
+echo "  2. Check setup: cd $ROOT && $PYTHON -m main doctor"
+echo "  3. Start Core: cd $ROOT && $PYTHON -m main start"
+echo "  4. Run Portal again: cd $ROOT && $PYTHON -m main portal"
+echo ""
+echo "Docs: https://github.com/allenpeng0705/HomeClaw"

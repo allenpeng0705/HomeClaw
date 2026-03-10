@@ -107,18 +107,26 @@ The **/pinggy** page uses **`core_public_url`** from core.yml when set; otherwis
 
 **Pinggy** gives you a public HTTPS URL that forwards to Core, similar to ngrok or Cloudflare Tunnel. HomeClaw has **built-in support**: when you set a Pinggy token in core.yml, Core starts the tunnel at startup and serves a **/pinggy** page with the public URL and a **QR code** so you can connect the Companion app with one scan.
 
+**Without the pinggy package:** HomeClaw runs normally. The package is optional (not in requirements.txt). If you do not set `pinggy.token` in core.yml, the tunnel is never started. If you set `pinggy.token` but have not installed the package, Core still starts; the **GET /pinggy** page will show an error asking you to run `pip install pinggy`. All other features (chat, memory, tools, plugins, etc.) work regardless.
+
 ### Setup
 
-1. **Get a Pinggy token**  
+1. **Install the Pinggy package (optional)**  
+   The Pinggy Python package is not in the default requirements (some PyPI mirrors do not list it). If you use `pinggy.token` and the /pinggy page shows "pinggy package not installed", run:  
+   `pip install pinggy`  
+   or, if your mirror does not have it:  
+   `pip install pinggy -i https://pypi.org/simple`
+
+2. **Get a Pinggy token**  
    - Sign up at [pinggy.io](https://pinggy.io) (or [dashboard.pinggy.io](https://dashboard.pinggy.io)) and create a token.
 
-2. **Configure Core**  
+3. **Configure Core**  
    - In **`config/core.yml`**, find the **`pinggy`** block and set:
      - **`token`** — Your Pinggy token (e.g. `"your-token-here"`). Leave empty to disable.
      - **`open_browser`** — `true` (default) to open the browser to the /pinggy page when the tunnel is ready.
    - Enable auth when using a public URL: set **`auth_enabled: true`** and **`auth_api_key`** in core.yml.
 
-3. **Start Core**  
+4. **Start Core**  
    - Run `python -m main start` (or start Core however you usually do).  
    - Core starts the Pinggy tunnel in the background. When the tunnel is ready, Core opens **http://127.0.0.1:&lt;port&gt;/pinggy** in your browser (if `open_browser: true`).  
    - The **/pinggy** page shows the **public URL** and a **QR code** encoding the Companion connection link (`homeclaw://connect?url=...&api_key=...`).

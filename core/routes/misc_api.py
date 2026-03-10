@@ -331,7 +331,7 @@ def get_api_skills_sync_vector_store_handler(core):
                 return JSONResponse(content={"synced": 0, "message": "Skills vector store not enabled"})
 
             from base.skills import get_all_skills_dirs, get_skills_dir, sync_skills_to_vector_store
-            root = Path(__file__).resolve().parent.parent.parent
+            root = Path(Util().root_path()).resolve()
             all_dirs = get_all_skills_dirs(
                 getattr(meta, "skills_dir", None) or "skills",
                 (getattr(meta, "external_skills_dir", None) or "").strip(),

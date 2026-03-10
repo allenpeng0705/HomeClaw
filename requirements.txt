@@ -36,8 +36,9 @@ fsspec[http]>=2023.1.0,<=2024.12.0
 # Full browser: use homeclaw-browser Node.js plugin (default). For built-in Python browser tools, optional: pip install playwright && python -m playwright install chromium
 # playwright>=1.40.0
 # Pinggy tunnel (remote access): when pinggy.token set in core.yml, Core starts tunnel and serves /pinggy with QR for Companion.
-pinggy>=0.0.18
-# QR code for /pinggy page (Companion scan-to-connect)
+# Install manually if you use Pinggy (many PyPI mirrors do not list it): pip install pinggy -i https://pypi.org/simple
+# pinggy
+# QR code for /pinggy page (Companion scan-to-connect). Required for the QR code on GET /pinggy (works with core_public_url or with pinggy tunnel).
 qrcode[pil]>=7.4.0
 
 # For Channels
@@ -52,7 +53,8 @@ qrcode[pil]>=7.4.0
 
 
 # Memory: Cognee is default (memory_backend=cognee). Alternative: chroma + optional graph (kuzu/neo4j).
-cognee>=0.3.0   # default memory backend
+# Installed by install.sh/install.ps1 from official PyPI (latest). Commented here so mirrors that only have 0.1.x do not block install.
+# cognee>=0.1.20
 kuzu>=0.4.0   # optional graph for memory_backend=chroma
 protego>=0.1
 # neo4j>=5.0.0   # optional: graph for memory_backend=chroma (uncomment if using Neo4j)
