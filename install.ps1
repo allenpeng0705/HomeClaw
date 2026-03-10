@@ -1,6 +1,6 @@
 # HomeClaw install script for Windows.
 # Run from project root (existing clone) or from a parent directory (script will clone).
-# Steps: Python (3.9+) -> Node.js -> [clone if needed] -> pip install -> llama.cpp -> GGUF/Ollama instructions -> open Portal.
+# Steps (same as install.sh): Python (3.9+) -> Node.js -> tsx -> ClawHub -> [clone if needed] -> VMPrint -> pip install -> Cognee -> document stack -> llama.cpp -> GGUF/Ollama -> open Portal.
 #
 # If you see "cannot be loaded... not digitally signed" (execution policy):
 #   Easiest: run install.bat instead (it uses Bypass automatically).
@@ -227,6 +227,10 @@ if ($VmprintOk) {
 Write-Host ""
 Write-Host "=== Step 5: Python dependencies ==="
 Set-Location $Root
+if (Test-Path (Join-Path $Root ".venv\Scripts\Activate.ps1")) {
+  Write-Host "Using existing .venv"
+  try { . (Join-Path $Root ".venv\Scripts\Activate.ps1") } catch {}
+}
 # Upgrade pip first (old pip can cause 403 with some mirrors)
 $pipUpgradeArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "-q", "--upgrade", "pip") } else { @("-m", "pip", "install", "-q", "--upgrade", "pip") }
 & $PythonExe $pipUpgradeArgs 2>$null
@@ -316,8 +320,9 @@ Write-Host ""
 Write-Host "=== Installation complete ==="
 Write-Host "Starting Portal and opening browser at $PortalUrl ..."
 Set-Location $Root
+# Start Portal in a new window (so it keeps running after this script exits, like nohup on install.sh)
 $portalArgs = if ($PythonExe -eq "py") { @("-3", "-m", "main", "portal", "--no-open-browser") } else { @("-m", "main", "portal", "--no-open-browser") }
-Start-Process -FilePath $PythonExe -ArgumentList $portalArgs -NoNewWindow
+Start-Process -FilePath $PythonExe -ArgumentList $portalArgs -WorkingDirectory $Root
 Start-Sleep -Seconds 3
 Start-Process $PortalUrl
 Write-Host ""

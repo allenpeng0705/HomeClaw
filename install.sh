@@ -3,7 +3,7 @@
 # Run from project root (existing clone) or from a parent directory (script will clone).
 # Do NOT use sudo. Run as your normal user:   bash install.sh   (or   chmod +x install.sh   then   ./install.sh).
 # If you see "Permission denied", use   bash install.sh   — it does not require the file to be executable.
-# Steps: Python (3.9+) -> Node.js -> [clone if needed] -> pip install -> llama.cpp -> GGUF/Ollama instructions -> open Portal.
+# Steps: Python (3.9+) -> Node.js -> tsx -> ClawHub -> [clone if needed] -> VMPrint -> pip install -> Cognee -> document stack -> llama.cpp -> GGUF/Ollama -> open Portal.
 
 set -e
 REPO_URL="${HOMECLAW_REPO_URL:-https://github.com/allenpeng0705/HomeClaw.git}"
