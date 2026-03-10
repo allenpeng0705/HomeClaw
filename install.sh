@@ -249,6 +249,20 @@ else
 fi
 echo "(If pip reported dependency conflicts about semantic-kernel, you can ignore them — HomeClaw does not use that package.)"
 
+# ----- Step 5c: Document stack (unstructured, opencv) — separate to avoid backtracking -----
+echo ""
+echo "=== Step 5c: Document support (document_read: PDF, Word, images) ==="
+if [ -f "$ROOT/requirements-document.txt" ]; then
+  echo "Installing document stack (pinned versions)..."
+  if PIP_INDEX_URL= PIP_EXTRA_INDEX_URL= "$PYTHON" -m pip install -r "$ROOT/requirements-document.txt" -i https://pypi.org/simple; then
+    echo "OK: document stack installed"
+  else
+    echo "Document stack install failed or skipped. To install later: $PYTHON -m pip install -r requirements-document.txt -i https://pypi.org/simple"
+  fi
+else
+  echo "requirements-document.txt not found; skipping."
+fi
+
 # ----- Step 6a: llama.cpp -----
 echo ""
 echo "=== Step 6a: llama.cpp ==="

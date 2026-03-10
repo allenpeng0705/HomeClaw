@@ -255,6 +255,20 @@ $cogneeArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "cognee
 if ($LASTEXITCODE -eq 0) { Write-Host "OK: cognee installed (latest from pypi.org)" } else { Write-Host "Cognee install from PyPI failed or skipped. To install later: $PythonExe -m pip install cognee -i https://pypi.org/simple" }
 Write-Host "(If pip reported dependency conflicts about semantic-kernel, you can ignore them — HomeClaw does not use that package.)"
 
+# ----- Step 5c: Document stack (unstructured, opencv) — separate to avoid backtracking -----
+Write-Host ""
+Write-Host "=== Step 5c: Document support (document_read: PDF, Word, images) ==="
+if (Test-Path (Join-Path $Root "requirements-document.txt")) {
+  Write-Host "Installing document stack (pinned versions)..."
+  $env:PIP_INDEX_URL = $null
+  $env:PIP_EXTRA_INDEX_URL = $null
+  $docArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "-r", (Join-Path $Root "requirements-document.txt"), "-i", "https://pypi.org/simple") } else { @("-m", "pip", "install", "-r", (Join-Path $Root "requirements-document.txt"), "-i", "https://pypi.org/simple") }
+  & $PythonExe $docArgs
+  if ($LASTEXITCODE -eq 0) { Write-Host "OK: document stack installed" } else { Write-Host "Document stack install failed or skipped. To install later: $PythonExe -m pip install -r requirements-document.txt -i https://pypi.org/simple" }
+} else {
+  Write-Host "requirements-document.txt not found; skipping."
+}
+
 # ----- Step 6a: llama.cpp -----
 Write-Host ""
 Write-Host "=== Step 6a: llama.cpp ==="

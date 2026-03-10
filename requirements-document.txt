@@ -1,0 +1,8 @@
+# document_read tool: PDF, PPT, Word, MD, HTML, images (unstructured[all-docs]).
+# Install after main requirements to avoid resolver backtracking:
+#   pip install -r requirements.txt && pip install -r requirements-document.txt
+# install.sh / install.ps1 run this automatically.
+numba>=0.59.0
+opencv-python==4.13.0.90
+unstructured-inference==0.8.1
+unstructured[all-docs]==0.18.2

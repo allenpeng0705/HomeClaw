@@ -69,10 +69,8 @@ firebase-admin>=6.0.0
 # pyjwt[crypto]>=2.0.0   # uncomment for APNs (iOS/macOS push)
 
 # Optional (uncomment if needed):
-# document_read tool: PDF, PPT, Word, MD, HTML, XML, JSON, etc. (one powerful tool)
-# numba>=0.59 required for Python 3.12 (unstructured[all-docs] pulls numba)
-numba>=0.59.0
-unstructured[all-docs]>=0.10.0
+# document_read tool: PDF, PPT, Word, MD, HTML, XML, JSON, etc. Install via:
+#   pip install -r requirements-document.txt   (install.sh/install.ps1 do this after main deps)
 # web_search: provider=duckduckgo (no key) or fallback when other providers fail
 duckduckgo-search>=4.0.0
 # web_extract / web_crawl: better main-content extraction (free; no API key)
