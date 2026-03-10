@@ -1,0 +1,16 @@
+{
+  "name": "homeclaw-docs",
+  "private": true,
+  "description": "Scripts for building docs (e.g. Mermaid diagram export)",
+  "scripts": {
+    "diagrams": "mkdir -p assets && mmdc -i diagrams/system-overview.mmd -o assets/system-overview.svg && mmdc -i diagrams/data-flow.mmd -o assets/data-flow.svg",
+    "diagrams:mac": "PUPPETEER_EXECUTABLE_PATH=\"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" npm run diagrams",
+    "install:no-browser": "PUPPETEER_SKIP_DOWNLOAD=true npm install"
+  },
+  "devDependencies": {
+    "@mermaid-js/mermaid-cli": "^11.0.0"
+  },
+  "overrides": {
+    "puppeteer": ">=24.15.0"
+  }
+}

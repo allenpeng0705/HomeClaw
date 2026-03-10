@@ -44,13 +44,39 @@
         <a href="https://allenpeng0705.github.io/HomeClaw/" class="btn btn-secondary" target="_blank" rel="noopener">文档站</a>
         <a href="docs.html" class="btn btn-secondary">本站文档</a>
       </div>
+
+      <div class="start-here" style="margin-top:2rem; padding:1.25rem; background:rgba(255,255,255,.06); border-radius:8px; text-align:left;">
+        <h2 style="margin-top:0; font-size:1.1rem;">从这里开始 — 快速找到所需</h2>
+        <div class="feature-grid" style="grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem;">
+          <div class="feature-card">
+            <h3 style="font-size:1rem;">如何安装</h3>
+            <p style="margin:.5rem 0;"><strong>第一步：</strong>先克隆仓库，再运行安装脚本。<strong>Mac/Linux：</strong><code>chmod +x install.sh</code> 后 <code>./install.sh</code>，或直接 <code>bash install.sh</code>。<strong>Windows：</strong>使用 <strong>PowerShell</strong> 运行 <code>.\install.ps1</code>（若被执行策略拦截见安装指南）。脚本完成后会打开 Portal。</p>
+            <a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">安装指南 →</a>
+          </div>
+          <div class="feature-card">
+            <h3 style="font-size:1rem;">如何使用 HomeClaw</h3>
+            <p style="margin:.5rem 0;">启动 Core，然后通过伴侣应用或渠道（WebChat、Telegram 等）聊天。</p>
+            <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">入门指南 →</a>
+          </div>
+          <div class="feature-card">
+            <h3 style="font-size:1rem;">伴侣应用</h3>
+            <p style="margin:.5rem 0;">在哪里找：仓库中的 <strong>clients/HomeClawApp/</strong>。支持 Mac、Windows、iPhone、Android。</p>
+            <a href="channels-companion.html#companion-platforms">查找与使用伴侣 →</a>
+          </div>
+          <div class="feature-card">
+            <h3 style="font-size:1rem;">Portal</h3>
+            <p style="margin:.5rem 0;">管理配置、启动 Core/渠道的 Web 界面。<code>python -m main portal</code> → http://127.0.0.1:18472</p>
+            <a href="https://allenpeng0705.github.io/HomeClaw/platform/#portal" target="_blank" rel="noopener">Portal 说明 →</a>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="section container quickstart-section">
       <h2>快速开始</h2>
       <p class="lead">运行 HomeClaw 后，可通过<strong>伴侣应用</strong>和/或<strong>渠道</strong>（WebChat、Telegram 等）聊天。它们都连接同一个 <strong>Core</strong>——只需启动一次 Core，即可同时使用应用和任意渠道。</p>
       <ol class="quickstart-steps">
-        <li><strong>安装</strong> — <code>git clone https://github.com/allenpeng0705/HomeClaw.git</code>，<code>cd HomeClaw</code>，<code>pip install -r requirements.txt</code>。或运行 <code>./install.sh</code>（Mac/Linux）/ <code>.\install.ps1</code>（Windows）完成环境并打开 Portal http://127.0.0.1:18472。</li>
+        <li><strong>安装（第一步）</strong> — 运行安装脚本。若尚未克隆仓库：<code>git clone https://github.com/allenpeng0705/HomeClaw.git</code>，<code>cd HomeClaw</code>。然后 <strong>Mac/Linux：</strong><code>chmod +x install.sh</code>（一次性）再 <code>./install.sh</code>，或 <code>bash install.sh</code>。<strong>Windows：</strong>打开 <strong>PowerShell</strong>（非 CMD），运行 <code>.\install.ps1</code>；若被执行策略拦截请查看<a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">安装指南</a>。脚本会配置依赖并打开 <strong>Portal</strong> http://127.0.0.1:18472。（可选：<a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">手动安装</a> 使用 <code>pip install -r requirements.txt</code>。）</li>
         <li><strong>配置（可选）</strong> — 编辑 <code>config/core.yml</code> 和 <code>config/user.yml</code>，或使用 Portal。云端模型需设 API Key；本地模型见 <code>llama.cpp-master/README.md</code>。</li>
         <li><strong>启动 Core</strong> — <code>python -m main start</code>。Core（端口 9000）是伴侣应用与所有渠道的统一后端。</li>
         <li><strong>聊天</strong> — <strong>伴侣应用：</strong>从 <code>clients/HomeClawApp/</code> 安装，在设置中将 Core URL 设为 <code>http://127.0.0.1:9000</code>，在 user.yml 中添加用户，打开聊天。<strong>渠道：</strong>Core 运行后执行 <code>python -m channels.run webchat</code> → http://localhost:8014（在 <code>channels/.env</code> 中设置 <code>CORE_URL</code>）。可同时使用；同一智能体、同一记忆。</li>
@@ -149,19 +175,34 @@
       <h2>快速链接</h2>
       <div class="feature-grid">
         <div class="feature-card">
+          <h3>如何安装</h3>
+          <p><strong>第一步：</strong>克隆仓库后，<code>chmod +x install.sh</code> + <code>./install.sh</code> 或 <code>bash install.sh</code>（Mac/Linux）；<strong>PowerShell</strong> 下 <code>.\install.ps1</code>（Windows）。执行策略/chmod 详见安装指南。</p>
+          <a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">安装 →</a>
+        </div>
+        <div class="feature-card">
+          <h3>如何使用 HomeClaw</h3>
+          <p>启动 Core，使用伴侣应用或渠道。同一 Core、同一记忆。</p>
+          <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">入门 →</a>
+        </div>
+        <div class="feature-card">
+          <h3>伴侣应用 — 在哪里找</h3>
+          <p>从仓库中的 <strong>clients/HomeClawApp/</strong> 构建。在设置中配置 Core URL，添加用户后即可聊天。</p>
+          <a href="channels-companion.html#companion-platforms">渠道与伴侣 →</a>
+        </div>
+        <div class="feature-card">
+          <h3>Portal</h3>
+          <p>Web 界面：管理配置、启动 Core 与渠道。运行 <code>python -m main portal</code>，打开 http://127.0.0.1:18472</p>
+          <a href="https://allenpeng0705.github.io/HomeClaw/platform/#portal" target="_blank" rel="noopener">Portal →</a>
+        </div>
+        <div class="feature-card">
           <h3>GitHub</h3>
           <p>源码、Issues、发布。</p>
           <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">仓库 →</a>
         </div>
         <div class="feature-card">
           <h3>完整文档</h3>
-          <p>安装、配置、插件、混合模式、渠道等。</p>
+          <p>安装、配置、插件、混合模式、渠道、远程访问。</p>
           <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">文档站 →</a>
-        </div>
-        <div class="feature-card">
-          <h3>本站文档</h3>
-          <p>精选介绍与入门，适合网站阅读。</p>
-          <a href="docs.html">在此阅读 →</a>
         </div>
         <div class="feature-card">
           <h3>部署到云</h3>

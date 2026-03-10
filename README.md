@@ -64,6 +64,9 @@ HomeClaw runs on **macOS**, **Windows**, and **Linux**. You need **Python** 3.10
 
 | OS | Command |
 |----|--------|
+
+**Mac/Linux:** If `./install.sh` fails with "Permission denied", run `chmod +x install.sh` once, or use `bash install.sh` (no chmod needed). **Windows:** Use **PowerShell** (not Command Prompt). If you get an execution policy error ("script cannot be loaded"), run once: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`, or run: `powershell -ExecutionPolicy Bypass -File .\install.ps1`. See [Install](https://allenpeng0705.github.io/HomeClaw/install/) in the docs for details.
+
 | **Mac / Linux** | **`bash install.sh`** (recommended; no sudo). Or `./install.sh` from project root (or parent dir — script clones into `./HomeClaw`). If you see **Permission denied**, use `bash install.sh` or `chmod +x install.sh` then `./install.sh`. |
 | **Windows** | `.\install.ps1` (run from project root, or from a parent directory — the script will clone into `.\HomeClaw` and continue) |
 

@@ -37,12 +37,15 @@
 
 | | |
 |---|---|
-| [**Install**](install.md) | Clone, pip install, optional local/cloud LLM setup |
+| [**Install**](install.md) | **First step:** run `./install.sh` (Mac/Linux) or `.\install.ps1` (Windows). Clone repo first; script opens Portal when done. Manual install also documented. |
 | [**Run**](run.md) | Start Core and a channel (WebChat, Telegram, CLI, Companion app, …) |
+| [**Getting started**](getting-started.md) | Full path: install → configure → run Core → use Companion app or channels |
+| [**Companion app**](companion-app.md) | **Where to find it:** build from **clients/HomeClawApp/** in the repo. Mac, Windows, iPhone, Android. Set Core URL in Settings. |
+| [**Portal**](platform.md#portal) | Web UI to manage config and start Core/channels. Run `python -m main portal` → http://127.0.0.1:18472 |
 | [**Channels**](channels.md) | WhatsApp, Telegram, email, WebHook, and how to allow users |
 | [**Tools**](tools.md) | Built-in tools, plugins, and skills |
 | [**Models**](models.md) | Cloud (LiteLLM) and local (llama.cpp); multimodal (Gemini, etc.); both can work together |
-| [**Platform**](platform.md) | Config files, multi-user, memory backend |
+| [**Platform**](platform.md) | Config files, Portal, multi-user, memory backend |
 | [**Remote access**](remote-access.md) | Tailscale and Cloudflare Tunnel to reach Core from anywhere |
 | [**Companion vs Channels**](companion-vs-channels.md) | How the Companion app and channels differ; how Core handles them |
 | [**Per-user sandbox and file links**](per-user-sandbox-and-file-links.md) | Per-user workspace, output folder, and generate link for reports/files |

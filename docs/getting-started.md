@@ -4,17 +4,18 @@ Quick path from install to chatting with HomeClaw via the **Companion app** and/
 
 ---
 
-1. **Clone and install**
+1. **Install (first step)**
 
-   ```bash
-   git clone https://github.com/allenpeng0705/HomeClaw.git
-   cd HomeClaw
-   pip install -r requirements.txt
-   ```
+   **Recommended:** Run the install script. Clone the repo (`git clone https://github.com/allenpeng0705/HomeClaw.git`, `cd HomeClaw`), then:
 
-   Or use the install script: **Mac/Linux** `./install.sh`, **Windows** `.\install.ps1`. The script sets up dependencies and starts the Portal at http://127.0.0.1:18472.
+   - **Mac/Linux:** Run `chmod +x install.sh` (one-time) then `./install.sh`, or run `bash install.sh` (no chmod needed). If `./install.sh` gives "Permission denied", use one of these.
+   - **Windows:** Use **PowerShell** (not Command Prompt). Run `.\install.ps1`. If you get an execution policy error, run `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser` once, or use `powershell -ExecutionPolicy Bypass -File .\install.ps1`. See [Install](install.md) for details.
 
-2. **Configure** — Edit `config/core.yml` (LLM, memory) and `config/user.yml` (who can talk to the assistant). Or use the **Portal** (`python -m main portal`) to manage settings and users.
+   The script checks Python, installs dependencies, and **opens the Portal** at **http://127.0.0.1:18472** when done.
+
+   **Manual alternative:** `pip install -r requirements.txt` after cloning (see [Install](install.md)).
+
+2. **Configure** — Edit `config/core.yml` (LLM, memory) and `config/user.yml` (who can talk to the assistant). Or use the **Portal**: run `python -m main portal` and open **http://127.0.0.1:18472** in your browser to manage settings and users.
 
    - **Local models:** Copy llama.cpp's **binary distribution** into `llama.cpp-master/<platform>/` for your device (see `llama.cpp-master/README.md` in the repo).
    - **Cloud models:** Set API keys in the environment (e.g. `export GEMINI_API_KEY=...`).
