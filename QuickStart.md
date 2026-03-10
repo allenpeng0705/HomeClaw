@@ -9,7 +9,7 @@ Get from zero to running HomeClaw in a few steps. You can chat via the **Compani
 | OS | Command |
 |----|--------|
 | **Mac / Linux** | `bash install.sh` (always works), or `./install.sh` from project root (or from a parent directory — script will clone into `./HomeClaw` and continue) |
-| **Windows** | `.\install.ps1` (from project root, or from a parent directory — script will clone into `.\HomeClaw` and continue) |
+| **Windows** | `.\install.ps1` (from project root; use **PowerShell**). If you see "not digitally signed", run: `powershell -ExecutionPolicy Bypass -File .\install.ps1` |
 
 **Mac/Linux:** Run as your normal user (do **not** use `sudo`). Use **`bash install.sh`** to avoid permission issues. If you see **Permission denied** with `./install.sh`, either run **`bash install.sh`** or run **`chmod +x install.sh`** then **`./install.sh`**.
 

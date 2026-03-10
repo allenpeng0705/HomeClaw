@@ -9,7 +9,7 @@ Short guide to installing HomeClaw and checking your environment.
 | OS | Command |
 |----|--------|
 | **Mac / Linux** | From project root: `./install.sh` — or from a parent directory: the script will clone into `./HomeClaw` and continue. |
-| **Windows** | From project root: `.\install.ps1` — or from a parent directory: the script will clone into `.\HomeClaw` and continue. |
+| **Windows** | From project root in **PowerShell**: `.\install.ps1`. If you get "cannot be loaded... not digitally signed", run: `powershell -ExecutionPolicy Bypass -File .\install.ps1` or once: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`. |
 
 The script will:
 

@@ -1,6 +1,10 @@
 # HomeClaw install script for Windows.
 # Run from project root (existing clone) or from a parent directory (script will clone).
 # Steps: Python (3.9+) -> Node.js -> [clone if needed] -> pip install -> llama.cpp -> GGUF/Ollama instructions -> open Portal.
+#
+# If you see "cannot be loaded... not digitally signed" (execution policy):
+#   Option A: powershell -ExecutionPolicy Bypass -File .\install.ps1
+#   Option B: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser   (then run .\install.ps1 again)
 
 $ErrorActionPreference = "Stop"
 $RepoUrl = if ($env:HOMECLAW_REPO_URL) { $env:HOMECLAW_REPO_URL } else { "https://github.com/allenpeng0705/HomeClaw.git" }
