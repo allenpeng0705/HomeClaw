@@ -55,8 +55,9 @@ qrcode[pil]>=7.4.0
 # Memory: Cognee is default (memory_backend=cognee). Alternative: chroma + optional graph (kuzu/neo4j).
 # Installed by install.sh/install.ps1 from official PyPI (latest). Commented here so mirrors that only have 0.1.x do not block install.
 # cognee>=0.1.20
-kuzu>=0.4.0   # optional graph for memory_backend=chroma
-protego>=0.1
+# Stricter bounds reduce pip backtracking (avoids "looking at multiple versions" / long resolve times)
+kuzu>=0.10.0,<0.12   # optional graph for memory_backend=chroma
+protego>=0.1.16
 # neo4j>=5.0.0   # optional: graph for memory_backend=chroma (uncomment if using Neo4j)
 
 # Hybrid router Layer 2: semantic routing (mix mode). Uses existing embedding via custom encoder.

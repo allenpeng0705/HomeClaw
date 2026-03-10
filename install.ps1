@@ -30,10 +30,13 @@ if (Test-Path "$PSScriptRoot\main.py") -and (Test-Path "$PSScriptRoot\requiremen
     $InRepo = $true
     Write-Host "Using existing clone at: $Root"
   } else {
-    Write-Host "Cloning HomeClaw into $CloneDir ..."
+    Write-Host "Cloning HomeClaw into $CloneDir from GitHub..."
+    Write-Host "  Repository: $RepoUrl"
+    Write-Host "  This may take a minute depending on your connection. Progress below:"
     try {
-      git clone $RepoUrl $CloneDir 2>&1
+      git clone --progress $RepoUrl $CloneDir 2>&1
       if ($LASTEXITCODE -ne 0) { throw "git clone exited with $LASTEXITCODE" }
+      Write-Host "Clone complete. Continuing with setup..."
     } catch {
       Write-Host "Error: git clone failed. Check network, repo URL ($RepoUrl), and that you have git installed."
       Write-Host $_.Exception.Message
@@ -187,8 +190,8 @@ if ($VmprintOk) {
         Write-Host "Updating VMPrint at tools\vmprint ..."
         Set-Location $VmprintDir; git pull --quiet 2>$null
       } else {
-        Write-Host "Cloning VMPrint into tools\vmprint ..."
-        git clone --depth 1 https://github.com/cosmiciron/vmprint.git $VmprintDir 2>$null
+        Write-Host "Cloning VMPrint from GitHub into tools\vmprint (optional Markdown-to-PDF tool)..."
+        git clone --progress --depth 1 https://github.com/cosmiciron/vmprint.git $VmprintDir 2>&1
       }
       if ((Test-Path (Join-Path $VmprintDir "draft2final")) -and (Get-Command node -ErrorAction SilentlyContinue)) {
         Write-Host "Installing VMPrint dependencies (npm install) ..."

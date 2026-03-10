@@ -42,11 +42,14 @@ else
       IN_REPO=1
       echo "Using existing clone at: $ROOT"
     else
-      echo "Cloning HomeClaw into $CLONE_DIR ..."
-      if ! git clone "$REPO_URL" "$CLONE_DIR" 2>&1; then
+      echo "Cloning HomeClaw into $CLONE_DIR from GitHub..."
+      echo "  Repository: $REPO_URL"
+      echo "  This may take a minute depending on your connection. Progress below:"
+      if ! git clone --progress "$REPO_URL" "$CLONE_DIR" 2>&1; then
         echo "Error: git clone failed. Check network, repo URL ($REPO_URL), and that you have git installed."
         exit 1
       fi
+      echo "Clone complete. Continuing with setup..."
       ROOT="$PWD/$CLONE_DIR"
       cd "$ROOT"
     fi
@@ -187,8 +190,8 @@ else
       echo "Updating VMPrint at tools/vmprint ..."
       (cd "$VMPRINT_DIR" && git pull --quiet 2>/dev/null || true)
     else
-      echo "Cloning VMPrint into tools/vmprint ..."
-      git clone --depth 1 https://github.com/cosmiciron/vmprint.git "$VMPRINT_DIR" 2>/dev/null || true
+      echo "Cloning VMPrint from GitHub into tools/vmprint (optional Markdown-to-PDF tool)..."
+      git clone --progress --depth 1 https://github.com/cosmiciron/vmprint.git "$VMPRINT_DIR" 2>&1 || true
     fi
     if [ -d "$VMPRINT_DIR/draft2final" ] && command -v npm >/dev/null 2>&1; then
       echo "Installing VMPrint dependencies (npm install) ..."
