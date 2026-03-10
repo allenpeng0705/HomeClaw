@@ -719,7 +719,13 @@ async def answer_from_memory(
                     )
                     skills_test_dir_str = (getattr(meta_skills, 'skills_test_dir', None) or "").strip()
                     skills_test_path = get_skills_dir(skills_test_dir_str, root=root) if skills_test_dir_str else None
-                    for hit_id, _ in hits:
+                    for item in (hits or []):
+                        try:
+                            if not isinstance(item, (list, tuple)) or len(item) < 2:
+                                continue
+                            hit_id, _ = item[0], item[1]
+                        except (TypeError, IndexError, ValueError):
+                            continue
                         if hit_id.startswith(TEST_ID_PREFIX):
                             load_path = skills_test_path if skills_test_path and skills_test_path.is_dir() else None
                             folder_name = hit_id[len(TEST_ID_PREFIX):]
@@ -745,18 +751,20 @@ async def answer_from_memory(
                     skills_list = load_skills_from_dirs(skills_dirs, disabled_folders=disabled_folders, include_body=False)
                     if skills_list:
                         _component_log("skills", f"loaded {len(skills_list)} skill(s) from disk (RAG had no hits)")
-                # Force-include: config rules (core.yml) and skill-driven triggers (SKILL.md trigger:). Query-matched skills get instruction + optional auto_invoke.
+                # Special cases only: force-include rules (e.g. reminder, scheduling) and skill-driven triggers add skills/auto_invoke when query matches. For all other cases the LLM decides whether to use run_skill from the available skills list.
                 matched_instructions = []
                 skills_list = skills_list or []
                 q = (query or "").strip().lower()
-                folders_present = {s.get("folder") for s in skills_list}
+                folders_present = {s.get("folder") for s in skills_list if isinstance(s, dict)}
                 for rule in (getattr(meta_skills, "skills_force_include_rules", None) or []):
+                    if not isinstance(rule, dict):
+                        continue
                     # Support single "pattern" (str) or "patterns" (list) for multi-language / general matching
-                    patterns = rule.get("patterns") if isinstance(rule, dict) else None
-                    if patterns is None and isinstance(rule, dict) and rule.get("pattern") is not None:
+                    patterns = rule.get("patterns")
+                    if patterns is None and rule.get("pattern") is not None:
                         patterns = [rule.get("pattern")]
-                    pattern = rule.get("pattern") if isinstance(rule, dict) else None
-                    folders = rule.get("folders") if isinstance(rule, dict) else None
+                    pattern = rule.get("pattern")
+                    folders = rule.get("folders")
                     folders = list(folders) if isinstance(folders, (list, tuple)) else []
                     if not patterns and not pattern:
                         continue
@@ -815,7 +823,9 @@ async def answer_from_memory(
                                 force_include_plugin_ids.add(pid)
                 # Skill-driven triggers: declare trigger.patterns + instruction + auto_invoke in each skill's SKILL.md; no need to repeat in core.yml
                 for skill_dict in load_skills_from_dirs(skills_dirs, disabled_folders=disabled_folders, include_body=False):
-                    trigger = skill_dict.get("trigger") if isinstance(skill_dict, dict) else None
+                    if not isinstance(skill_dict, dict):
+                        continue
+                    trigger = skill_dict.get("trigger") if isinstance(skill_dict.get("trigger"), dict) else None
                     if not isinstance(trigger, dict):
                         continue
                     patterns = trigger.get("patterns")
@@ -875,6 +885,7 @@ async def answer_from_memory(
                                     _component_log("friend_preset", f"filtered skills to preset list ({len(skills_list)} skills)")
                     except Exception as e:
                         logger.debug("Friend preset skills filter failed: {}", e)
+                # Skills list is built from RAG/load + force-include (e.g. reminder/scheduling). LLM decides when to call run_skill; we only force-include for special cases.
                 if skills_list:
                     selected_names = [s.get("folder") or s.get("name") or "?" for s in skills_list]
                     _component_log("skills", f"selected: {', '.join(selected_names)}")
@@ -1507,7 +1518,9 @@ async def answer_from_memory(
                 logger.debug("LLM call returned in {:.1f}s", _elapsed)
                 if msg is not None:
                     _content = (msg.get("content") or "").strip()
-                    if not _content or len(_content) < 10:
+                    _tool_calls = msg.get("tool_calls") if isinstance(msg.get("tool_calls"), list) else []
+                    # Empty content is normal when the model returns tool_calls (many local servers omit text). Only warn when there are no tool_calls.
+                    if (not _content or len(_content) < 10) and not _tool_calls:
                         logger.warning(
                             "Local LLM returned empty or very short content (len={}) in {:.1f}s — ensure the server on the logged host:port is the correct model and fully loaded (e.g. llama-server for main_llm_port).",
                             len(_content), _elapsed,
@@ -1580,7 +1593,9 @@ async def answer_from_memory(
                         # When we have force-include auto_invoke (e.g. image rule), always run it so the skill runs and we return real output instead of model hallucination
                         if run_force_include:
                             ran = False
-                            for inv in force_include_auto_invoke:
+                            for inv in (force_include_auto_invoke or []):
+                                if not isinstance(inv, dict):
+                                    continue
                                 tname = inv.get("tool") or ""
                                 targs = inv.get("arguments") or {}
                                 if not tname or not isinstance(targs, dict):
@@ -1711,7 +1726,7 @@ async def answer_from_memory(
                                 # Fallback: model didn't call a tool (e.g. replied "No"). If user intent is clear, run plugin or run_skill anyway.
                                 unhelpful = not content_str or len(content_str) < 80 or content_str.strip().lower() in ("no", "i can't", "i cannot", "sorry", "nope")
                                 fallback_route = _infer_route_to_plugin_fallback(query) if unhelpful else None
-                                if fallback_route and registry:
+                                if isinstance(fallback_route, dict) and fallback_route and registry:
                                     tool_names = [t.name for t in (registry.list_tools() or [])]
                                     if fallback_route.get("tool") == "run_skill" and "run_skill" in tool_names:
                                         try:
@@ -1993,6 +2008,9 @@ async def answer_from_memory(
                 err_hint = str(err_hint).strip() if err_hint else ""
             except Exception:
                 err_hint = ""
+            # If we ran a tool (e.g. run_skill) but the model then returned empty, show a friendlier message instead of a generic error.
+            if last_tool_name and not err_hint:
+                return "Done. What would you like to do next? (已完成。还需要什么？)"
             if err_hint:
                 try:
                     return "Sorry, something went wrong. {} Please try again. (对不起，出错了，请再试一次)".format(err_hint)

@@ -130,12 +130,21 @@ def load_skills(skills_dir: Optional[Path] = None, include_body: bool = True) ->
     """
     Scan skills_dir for subdirs containing SKILL.md; parse each and return list of skill dicts.
     Each dict has at least: name, description, body (if include_body), path (folder path).
+    Never raises: returns [] on any error so Core does not crash.
     """
-    root = skills_dir if skills_dir is not None else _DEFAULT_SKILLS_DIR
+    try:
+        root = Path(skills_dir) if skills_dir is not None else _DEFAULT_SKILLS_DIR
+    except (TypeError, ValueError):
+        return []
     skills: List[Dict[str, Any]] = []
     if not root.is_dir():
         return skills
-    for item in sorted(root.iterdir()):
+    try:
+        entries = sorted(root.iterdir())
+    except (OSError, PermissionError, ValueError) as e:
+        logger.debug("Could not list skills dir {}: {}", root, e)
+        return skills
+    for item in entries:
         if not item.is_dir():
             continue
         skill_file = item / SKILL_FILENAME
@@ -336,10 +345,16 @@ def load_skills_from_dirs(
     """
     Load skills from multiple directories. First occurrence of each folder name wins.
     Exclude any skill whose folder is in disabled_folders (case-insensitive).
+    Never raises: returns [] if dirs is None or invalid.
     """
+    if not isinstance(dirs, (list, tuple)):
+        return []
     disabled_set: Set[str] = set()
-    if disabled_folders is not None:
-        disabled_set = {_normalize_folder_for_disable(f) for f in disabled_folders if (f or "").strip()}
+    if disabled_folders is not None and isinstance(disabled_folders, (list, tuple)):
+        try:
+            disabled_set = {_normalize_folder_for_disable(f) for f in disabled_folders if (f or "").strip()}
+        except Exception:
+            disabled_set = set()
     seen: Set[str] = set()
     out: List[Dict[str, Any]] = []
     for d in dirs:
@@ -476,6 +491,52 @@ def _skill_keywords_line(skill: Dict[str, Any]) -> str:
         return ""
 
 
+def filter_skills_by_query(skills: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
+    """
+    Return only skills that are relevant to the user query for this turn.
+
+    - If a skill has no trigger (or no trigger.patterns), it is included so the model can still
+      choose it when appropriate.
+    - If a skill has trigger.patterns, it is included only when the query matches at least one
+      pattern (regex search). This prevents run_skill from being offered for greetings or
+      unrelated messages (e.g. "你好" must not match the email skill).
+
+    Never raises. Returns a new list; does not mutate the input.
+    """
+    if not skills:
+        return []
+    q = (query or "").strip()
+    if not q:
+        return list(skills)
+    result: List[Dict[str, Any]] = []
+    for s in skills:
+        if not isinstance(s, dict):
+            continue
+        trigger = s.get("trigger") if isinstance(s.get("trigger"), dict) else None
+        if not trigger:
+            result.append(s)
+            continue
+        patterns = trigger.get("patterns")
+        if patterns is None and trigger.get("pattern") is not None:
+            patterns = [trigger.get("pattern")]
+        if not patterns or not isinstance(patterns, (list, tuple)):
+            result.append(s)
+            continue
+        matched = False
+        for pat in patterns:
+            if not pat or not isinstance(pat, str):
+                continue
+            try:
+                if re.search(pat, q, re.IGNORECASE):
+                    matched = True
+                    break
+            except re.error:
+                continue
+        if matched:
+            result.append(s)
+    return result
+
+
 def build_skills_system_block(
     skills: List[Dict[str, Any]],
     include_body: bool = False,
@@ -491,7 +552,7 @@ def build_skills_system_block(
     When use_location_only is False: inject name, description, keywords, and optionally body.
     Instruction: infer script/args from description/body and call run_skill. Never raises.
     """
-    if not skills:
+    if not isinstance(skills, (list, tuple)) or not skills:
         return ""
     if use_location_only:
         lines = [
@@ -521,8 +582,8 @@ def build_skills_system_block(
 
     lines = [
         "## Available skills",
-        "All information about how to use each skill is in SKILL.md (shown below). Infer the script name and arguments from the skill description and body.",
-        "When a skill has a scripts/ folder, you MUST call run_skill(skill_name=<folder>, script=<filename from SKILL.md>, args=[...] as shown in usage). Short names (e.g. html-slides) resolve to the folder name.",
+        "You decide when to use a skill based on the user's intent. Do not call run_skill for greetings (e.g. 你好, hello, hi), thanks, goodbye, or general chat — reply with a short friendly text only. Call run_skill only when the user clearly asks for something a skill provides (e.g. send email / 发邮件, create slides, search the web, reminder/scheduling). Match the request to the skill's description and keywords below.",
+        "All information about how to use each skill is in SKILL.md (shown below). Infer the script name and arguments from the skill description and body. When a skill has a scripts/ folder, call run_skill(skill_name=<folder>, script=<filename from SKILL.md>, args=[...] as shown in usage). Short names (e.g. html-slides) resolve to the folder name.",
         "",
     ]
     for s in skills:
