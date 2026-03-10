@@ -29,10 +29,10 @@ sqlalchemy>=2.0.0
 tinydb>=4.8.0
 # Pydantic (models; fastapi brings it, but explicit for non-FastAPI paths)
 pydantic>=2.0.0
-# PPT Maker plugin (generate .pptx)
-python-pptx>=0.6.21
-# Constrain fsspec so datasets (transforms/cognee dep) is satisfied: datasets requires fsspec[http]<=2024.12.0
-fsspec[http]>=2023.1.0,<=2024.12.0
+# PPT Maker plugin (generate .pptx). Pinned to avoid resolver backtracking.
+python-pptx==0.6.21
+# datasets (cognee/chromadb dep) requires fsspec[http]<=2024.12.0. Pin to reduce backtracking.
+fsspec[http]==2024.12.0
 # Full browser: use homeclaw-browser Node.js plugin (default). For built-in Python browser tools, optional: pip install playwright && python -m playwright install chromium
 # playwright>=1.40.0
 # Pinggy tunnel (remote access): when pinggy.token set in core.yml, Core starts tunnel and serves /pinggy with QR for Companion.
