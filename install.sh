@@ -42,10 +42,11 @@ else
       IN_REPO=1
       echo "Using existing clone at: $ROOT"
     else
-      echo "Cloning HomeClaw into $CLONE_DIR from GitHub..."
+      echo "Cloning HomeClaw into $CLONE_DIR from GitHub (shallow clone, --depth 1)..."
       echo "  Repository: $REPO_URL"
-      echo "  This may take a minute depending on your connection. Progress below:"
-      if ! git clone --progress "$REPO_URL" "$CLONE_DIR" 2>&1; then
+      echo "  This may take 1-3 minutes; progress will stream below."
+      echo ""
+      if ! git clone --progress --depth 1 "$REPO_URL" "$CLONE_DIR" 2>&1; then
         echo "Error: git clone failed. Check network, repo URL ($REPO_URL), and that you have git installed."
         exit 1
       fi

@@ -1230,7 +1230,8 @@ class Util:
                 _is_conn_err = isinstance(e.__cause__, (ConnectionResetError, ConnectionAbortedError))
             if _is_conn_err:
                 logger.warning(
-                    "LLM unreachable at {}:{} — is the server running? Start the model server (or Core) and try again. Error: {}",
+                    "LLM unreachable at {}:{} — model server may have stopped or connection dropped (e.g. WinError 64). "
+                    "Core can be running while the server on this port is not. Start the model server or restart Core. Timeouts are separate ('timed out after Xs'). Error: {}",
                     model_host, model_port, e,
                 )
             else:
@@ -1452,14 +1453,34 @@ class Util:
             if not _is_conn_err and hasattr(e, "__cause__") and e.__cause__ is not None:
                 _is_conn_err = isinstance(e.__cause__, (ConnectionResetError, ConnectionAbortedError))
             if _is_conn_err:
-                logger.warning(
-                    "Local LLM unreachable at {}:{} — is the server running? Start the model server (or Core so it starts the main LLM) and try again. Error: {}",
-                    model_host, model_port, e,
-                )
+                # Check if Core's main LLM process has exited (crashed) so we can log it and its stderr.
+                _exited = None
                 try:
-                    setattr(self, "_last_llm_error", "The model server at {}:{} was unreachable. Start the LLM server (or Core) and try again.".format(model_host, model_port))
+                    from llm.llmService import LLMServiceManager
+                    _mgr = LLMServiceManager()
+                    _exited = _mgr.get_exited_process_info(model_host, model_port)
                 except Exception:
-                    setattr(self, "_last_llm_error", "The model server was unreachable. Start the LLM server and try again.")
+                    pass
+                if _exited:
+                    logger.error(
+                        "Main LLM process has exited ({}:{}). PID={} exit_code={}. "
+                        "Restart Core to restart the model server. Process stderr (last 500 chars): {}",
+                        model_host, model_port,
+                        _exited.get("pid"), _exited.get("returncode"),
+                        (_exited.get("stderr") or "(none)")[-500:],
+                    )
+                else:
+                    # WinError 64 / "network name is no longer available" = connection was dropped (server not running, crashed, or restarted). Not a timeout — timeouts log "timed out after Xs".
+                    logger.warning(
+                        "Local LLM unreachable at {}:{} — model server may have stopped or the connection dropped (e.g. WinError 64). "
+                        "Core can be running while the server on this port is not. Start the model server (or restart Core so it starts the main LLM), then try again. "
+                        "Timeouts are separate (you would see 'timed out after Xs'). Error: {}",
+                        model_host, model_port, e,
+                    )
+                try:
+                    setattr(self, "_last_llm_error", "The model server at {}:{} was unreachable (connection dropped or server not running). Start the LLM server or restart Core.".format(model_host, model_port))
+                except Exception:
+                    setattr(self, "_last_llm_error", "The model server was unreachable. Start the LLM server or restart Core.")
             else:
                 logger.exception(e)
                 setattr(self, "_last_llm_error", "The model call failed. Check Core logs for details.")

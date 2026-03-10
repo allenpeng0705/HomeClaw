@@ -16,7 +16,7 @@ dependencies:
   hive: ^2.2.3
   hive_flutter: ^1.1.0
   cupertino_icons: ^1.0.6
-  mobile_scanner: ^6.0.2   # QR scan for "Scan to connect" (iOS/Android)
+  mobile_scanner: ^7.0.0   # QR scan for "Scan to connect"; 7.x uses Apple Vision on iOS (no MLKit) for arm64 simulator support
   homeclaw_native:
     path: packages/homeclaw_native
   homeclaw_voice:

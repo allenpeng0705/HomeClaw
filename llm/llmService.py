@@ -109,6 +109,47 @@ class LLMServiceManager:
         """
         return [process_info['name'] for process_info in self.llama_cpp_processes]
 
+    def get_exited_process_info(self, host: str, port: int):
+        """
+        If the llama.cpp process for the given host:port has exited, return a dict with
+        name, pid, returncode, stderr (snippet). Otherwise return None.
+        Used when Core gets a connection error to log why the server is unreachable.
+        """
+        try:
+            port = int(port)
+            host = (host or "127.0.0.1").strip()
+        except (TypeError, ValueError):
+            return None
+        for proc_info in list(self.llama_cpp_processes):
+            p = proc_info.get("process")
+            if p is None:
+                continue
+            pport = proc_info.get("port")
+            phost = (proc_info.get("host") or "127.0.0.1")
+            try:
+                pport = int(pport)
+            except (TypeError, ValueError):
+                continue
+            if pport != port or (phost or "127.0.0.1") != host:
+                continue
+            if p.poll() is None:
+                continue
+            # Process has exited; try to read stderr (communicate() only works once per process; may already have been called at startup)
+            err_text = ""
+            try:
+                _, err = p.communicate(timeout=1)
+                if err:
+                    err_text = (err.decode("utf-8", errors="replace") or "").strip()[-2000:]
+            except (ValueError, TimeoutError, Exception):
+                pass
+            return {
+                "name": proc_info.get("name", "main_llm"),
+                "pid": getattr(p, "pid", None),
+                "returncode": p.returncode,
+                "stderr": err_text,
+            }
+        return None
+
     def start_async_coroutine(self, coroutine):
         """Function to run the coroutine in a new event loop."""
         def run(loop, coroutine):

@@ -10,6 +10,10 @@
   <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
+  <!-- Decorative elements -->
+  <div class="decorative-circle decorative-circle-1"></div>
+  <div class="decorative-circle decorative-circle-2"></div>
+  
   <header class="site-nav-wrap">
   <nav class="site-nav" aria-label="主导航">
     <div class="site-nav-inner">
@@ -17,17 +21,38 @@
         <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
         <span>HomeClaw</span>
       </a>
+      
+      <!-- Mobile menu button -->
+      <button class="mobile-menu-button" aria-label="Toggle menu" aria-expanded="false">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
+      
       <div class="site-links">
-        <a href="index.html">首页</a>
-        <a href="docs.html#quickstart">快速开始</a>
-        <a href="docs.html#deploy-cloud">部署到云</a>
-        <a href="channels-companion.html">渠道与伴侣</a>
-        <a href="plugins-skills.html">插件与技能</a>
-        <a href="core-config.html">Core 配置</a>
-        <a href="docs.html">文档</a>
-        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
-        <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">完整文档</a>
-        <span class="lang-switch"><a href="../en/index.html">EN</a> | 中文</span>
+        <div class="nav-group">
+          <a href="index.html" class="nav-link active">首页</a>
+          <a href="docs.html#quickstart" class="nav-link">快速开始</a>
+          <a href="docs.html" class="nav-link">文档</a>
+        </div>
+        <div class="nav-group">
+          <a href="channels-companion.html" class="nav-link">渠道与伴侣</a>
+          <a href="plugins-skills.html" class="nav-link">插件与技能</a>
+          <a href="core-config.html" class="nav-link">Core 配置</a>
+        </div>
+        <div class="nav-group">
+          <a href="docs.html#deploy-cloud" class="nav-link">部署到云</a>
+          <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener" class="nav-link">完整文档</a>
+          <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener" class="nav-link github-link">
+            <svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            GitHub
+          </a>
+        </div>
+        <div class="nav-group lang-group">
+          <span class="lang-switch"><a href="../en/index.html">EN</a> | 中文</span>
+        </div>
       </div>
     </div>
   </nav>
@@ -227,14 +252,95 @@
       <h2>联系方式</h2>
       <p class="lead">有问题或反馈？欢迎联系。</p>
       <ul class="contact-list">
-        <li><strong>邮箱：</strong> <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a></li>
+        <li><strong>邮箱：</strong> <a href="mailto:shileipeng@gmail.com">shileipeng@gmail.com</a> | <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a></li>
         <li><strong>微信：</strong> shileipeng</li>
       </ul>
     </section>
   </main>
 
   <footer class="site-footer">
-    <p>HomeClaw — 你的家，你的 AI。<a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> · <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">文档</a> · 联系：<a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a> · 微信：shileipeng</p>
+    <p>HomeClaw — 你的家，你的 AI。<a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> · <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">文档</a> · 联系：<a href="mailto:shileipeng@gmail.com">shileipeng@gmail.com</a> | <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a> · 微信：shileipeng</p>
   </footer>
+  
+  <script>
+    // Mobile menu toggle
+    const mobileMenuButton = document.querySelector('.mobile-menu-button');
+    const siteLinks = document.querySelector('.site-links');
+    
+    if (mobileMenuButton && siteLinks) {
+      mobileMenuButton.addEventListener('click', () => {
+        const isExpanded = mobileMenuButton.getAttribute('aria-expanded') === 'true';
+        mobileMenuButton.setAttribute('aria-expanded', !isExpanded);
+        siteLinks.classList.toggle('active');
+      });
+    }
+    
+    // Smooth scrolling for anchor links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function (e) {
+        e.preventDefault();
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          target.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+          });
+        }
+      });
+    });
+    
+    // Scroll animations
+    function handleScrollAnimations() {
+      const elements = document.querySelectorAll('.animate-on-scroll');
+      
+      elements.forEach(element => {
+        const elementTop = element.getBoundingClientRect().top;
+        const windowHeight = window.innerHeight;
+        
+        if (elementTop < windowHeight * 0.85) {
+          element.classList.add('visible');
+        }
+      });
+    }
+    
+    // Initial check
+    handleScrollAnimations();
+    
+    // Add scroll event listener
+    window.addEventListener('scroll', handleScrollAnimations);
+    
+    // Add animation classes to elements
+    document.addEventListener('DOMContentLoaded', function() {
+      // Hero section elements
+      const heroElements = document.querySelectorAll('.hero-text, .hero-image');
+      heroElements.forEach((el, index) => {
+        el.classList.add('animate-on-scroll', `delay-${index * 100}`);
+      });
+      
+      // Feature sections
+      const featureSections = document.querySelectorAll('.feature-section');
+      featureSections.forEach((section, index) => {
+        section.classList.add('animate-on-scroll', `delay-${index * 100}`);
+      });
+      
+      // Feature cards
+      const featureCards = document.querySelectorAll('.feature-card');
+      featureCards.forEach((card, index) => {
+        card.classList.add('animate-on-scroll', `delay-${index * 100}`);
+      });
+      
+      // Quickstart section
+      const quickstartSection = document.querySelector('.quickstart-section');
+      if (quickstartSection) {
+        quickstartSection.classList.add('animate-on-scroll');
+      }
+      
+      // Contact section
+      const contactSection = document.querySelector('#contact');
+      if (contactSection) {
+        contactSection.classList.add('animate-on-scroll');
+      }
+    });
+  </script>
 </body>
 </html>

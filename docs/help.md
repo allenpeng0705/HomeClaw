@@ -34,6 +34,8 @@ Runs checks and suggests fixes for config and LLM connectivity.
 | **Channel connection error** | Start the channel process (e.g. `python -m channels.run webchat`). For full channels (Matrix, etc.), the channel must be running so Core can POST replies to `/get_response`. |
 | **Web search "unconfigured"** | Set `TAVILY_API_KEY` (or another provider) in the environment or in `config/core.yml` under `tools.web.search`. Or use DuckDuckGo fallback (`fallback_no_key: true`). |
 | **Browser tools fail** | Install Playwright browser: `python -m playwright install chromium`. Use the same Python env as Core. |
+| **"Local LLM unreachable" / WinError 64** | Core can be running while the **model server** (e.g. on port 5023) is not. The error means the connection to the LLM server was dropped or the server is not running (crashed, not started, or restarted). **Fix:** Start or restart the model server, or restart Core so it starts the main LLM (llama.cpp). On Windows, "network name is no longer available" is the same. **Timeouts** are separate — you would see "timed out after Xs"; increase `llm_completion_timeout_seconds` in config if needed. |
+| **LLM works for 1–2 rounds then fails** | The main LLM process (llama.cpp) may have **crashed or exited**. After the next failed request, Core logs **"Main LLM process has exited"** with PID, exit code, and the process **stderr** (last 500 chars) so you can see why it died. Check Core logs for that line and the stderr snippet; restart Core to restart the model server. |
 
 ---
 

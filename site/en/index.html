@@ -10,6 +10,10 @@
   <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
+  <!-- Decorative elements -->
+  <div class="decorative-circle decorative-circle-1"></div>
+  <div class="decorative-circle decorative-circle-2"></div>
+  
   <header class="site-nav-wrap">
   <nav class="site-nav" aria-label="Main navigation">
     <div class="site-nav-inner">
@@ -17,17 +21,38 @@
         <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
         <span>HomeClaw</span>
       </a>
+      
+      <!-- Mobile menu button -->
+      <button class="mobile-menu-button" aria-label="Toggle menu" aria-expanded="false">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+      </button>
+      
       <div class="site-links">
-        <a href="index.html">Home</a>
-        <a href="docs.html#quickstart">QuickStart</a>
-        <a href="docs.html#deploy-cloud">Deploy to cloud</a>
-        <a href="channels-companion.html">Channels &amp; Companion</a>
-        <a href="plugins-skills.html">Plugins &amp; skills</a>
-        <a href="core-config.html">Core config</a>
-        <a href="docs.html">Docs</a>
-        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
-        <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Full docs</a>
-        <span class="lang-switch">EN | <a href="../zh/index.html">中文</a></span>
+        <div class="nav-group">
+          <a href="index.html" class="nav-link active">Home</a>
+          <a href="docs.html#quickstart" class="nav-link">QuickStart</a>
+          <a href="docs.html" class="nav-link">Docs</a>
+        </div>
+        <div class="nav-group">
+          <a href="channels-companion.html" class="nav-link">Channels &amp; Companion</a>
+          <a href="plugins-skills.html" class="nav-link">Plugins &amp; Skills</a>
+          <a href="core-config.html" class="nav-link">Core Config</a>
+        </div>
+        <div class="nav-group">
+          <a href="docs.html#deploy-cloud" class="nav-link">Deploy to Cloud</a>
+          <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener" class="nav-link">Full Docs</a>
+          <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener" class="nav-link github-link">
+            <svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            GitHub
+          </a>
+        </div>
+        <div class="nav-group lang-group">
+          <span class="lang-switch">EN | <a href="../zh/index.html">中文</a></span>
+        </div>
       </div>
     </div>
   </nav>
@@ -35,37 +60,88 @@
 
   <main>
     <section class="hero container">
-      <h1>HomeClaw</h1>
-      <p class="tagline">AI assistant that runs on your machine. Your data, your control.</p>
-      <p class="hero-platform">Runs on <strong>Mac, Windows, and Linux</strong> (Python stack). <strong>Companion app</strong> (Mac, Windows, iPhone, Android) for chat, <strong>friends</strong> (AI + user-to-user), and <strong>skills</strong> (install via ClawHub). <strong>Channels</strong> (WebChat, Telegram, Discord, etc.) and plugins in any language.</p>
-      <img src="../assets/homeclaw-promo.png" alt="HomeClaw: Mix mode, Plugins, Skills, Channels, Companion app, Multi-agent" class="hero-img" width="720" height="auto">
-      <div class="hero-cta">
-        <a href="https://github.com/allenpeng0705/HomeClaw" class="btn btn-primary" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://allenpeng0705.github.io/HomeClaw/" class="btn btn-secondary" target="_blank" rel="noopener">Documentation</a>
-        <a href="docs.html" class="btn btn-secondary">Docs on this site</a>
+      <div class="hero-content">
+        <div class="hero-text">
+          <h1 class="hero-title">HomeClaw</h1>
+          <p class="hero-tagline">AI assistant that runs on your machine. Your data, your control.</p>
+          <p class="hero-platform">
+            Runs on <strong>Mac, Windows, and Linux</strong> (Python stack). 
+            <strong>Companion app</strong> (Mac, Windows, iPhone, Android) for chat, 
+            <strong>friends</strong> (AI + user-to-user), and <strong>skills</strong> (install via ClawHub). 
+            <strong>Channels</strong> (WebChat, Telegram, Discord, etc.) and plugins in any language.
+          </p>
+          <div class="hero-cta">
+            <a href="https://github.com/allenpeng0705/HomeClaw" class="btn btn-primary" target="_blank" rel="noopener">
+              <svg class="btn-icon" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+              GitHub
+            </a>
+            <a href="https://allenpeng0705.github.io/HomeClaw/" class="btn btn-secondary" target="_blank" rel="noopener">Documentation</a>
+            <a href="docs.html" class="btn btn-secondary">Docs on this site</a>
+          </div>
+        </div>
+        <div class="hero-image">
+          <div class="hero-img-container">
+            <img src="../assets/homeclaw-promo.png" alt="HomeClaw: Mix mode, Plugins, Skills, Channels, Companion app, Multi-agent" class="hero-img" width="720" height="auto">
+            <div class="hero-img-overlay">
+              <div class="hero-features">
+                <span class="hero-feature-badge">Mix Mode</span>
+                <span class="hero-feature-badge">Plugins</span>
+                <span class="hero-feature-badge">Skills</span>
+                <span class="hero-feature-badge">Channels</span>
+                <span class="hero-feature-badge">Companion App</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div class="start-here" style="margin-top:2rem; padding:1.25rem; background:rgba(255,255,255,.06); border-radius:8px; text-align:left;">
-        <h2 style="margin-top:0; font-size:1.1rem;">Start here — find what you need</h2>
-        <div class="feature-grid" style="grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem;">
+      <div class="start-here">
+        <h2>Start here — find what you need</h2>
+        <div class="feature-grid">
           <div class="feature-card">
-            <h3 style="font-size:1rem;">How to install</h3>
-            <p style="margin:.5rem 0;"><strong>First step:</strong> Clone repo, then run the install script. <strong>Mac/Linux:</strong> <code>chmod +x install.sh</code> then <code>./install.sh</code>, or <code>bash install.sh</code>. <strong>Windows:</strong> use <strong>PowerShell</strong>, run <code>.\install.ps1</code> or <strong><code>install.bat</code></strong> (if &quot;not digitally signed&quot;: use <code>install.bat</code> or <code>powershell -ExecutionPolicy Bypass -File .\install.ps1</code>). Script opens the Portal when done.</p>
+            <div class="feature-card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+              </svg>
+            </div>
+            <h3>How to install</h3>
+            <p><strong>First step:</strong> Clone repo, then run the install script. <strong>Mac/Linux:</strong> <code>chmod +x install.sh</code> then <code>./install.sh</code>. <strong>Windows:</strong> use <strong>PowerShell</strong>, run <code>.\install.ps1</code> or <code>install.bat</code>.</p>
             <a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">Install guide →</a>
           </div>
           <div class="feature-card">
-            <h3 style="font-size:1rem;">How to use HomeClaw</h3>
-            <p style="margin:.5rem 0;">Run Core, then chat via Companion app or channels (WebChat, Telegram, etc.).</p>
+            <div class="feature-card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+              </svg>
+            </div>
+            <h3>How to use HomeClaw</h3>
+            <p>Run Core, then chat via Companion app or channels (WebChat, Telegram, etc.). All use the same Core and memory.</p>
             <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">Getting started →</a>
           </div>
           <div class="feature-card">
-            <h3 style="font-size:1rem;">Companion app</h3>
-            <p style="margin:.5rem 0;">Where to find it: <strong>clients/HomeClawApp/</strong> in the repo. Mac, Windows, iPhone, Android.</p>
+            <div class="feature-card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+            </div>
+            <h3>Companion app</h3>
+            <p>Where to find it: <strong>clients/HomeClawApp/</strong> in the repo. Available for Mac, Windows, iPhone, and Android.</p>
             <a href="channels-companion.html#companion-platforms">Find &amp; use Companion →</a>
           </div>
           <div class="feature-card">
-            <h3 style="font-size:1rem;">Portal</h3>
-            <p style="margin:.5rem 0;">Web UI to manage config and start Core/channels. <code>python -m main portal</code> → http://127.0.0.1:18472</p>
+            <div class="feature-card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+              </svg>
+            </div>
+            <h3>Portal</h3>
+            <p>Web UI to manage config and start Core/channels. Run <code>python -m main portal</code> → http://127.0.0.1:18472</p>
             <a href="https://allenpeng0705.github.io/HomeClaw/platform/#portal" target="_blank" rel="noopener">Portal guide →</a>
           </div>
         </div>
@@ -176,41 +252,48 @@
       <h2>Quick links</h2>
       <div class="feature-grid">
         <div class="feature-card">
-          <h3>How to install</h3>
-          <p><strong>First step:</strong> Clone repo, then <code>chmod +x install.sh</code> + <code>./install.sh</code> or <code>bash install.sh</code> (Mac/Linux); <strong>PowerShell</strong> + <code>.\install.ps1</code> or <strong><code>install.bat</code></strong> (Windows; if &quot;not digitally signed&quot;: use <code>install.bat</code> or <code>powershell -ExecutionPolicy Bypass -File .\install.ps1</code>). See install guide for details.</p>
-          <a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">Install →</a>
-        </div>
-        <div class="feature-card">
-          <h3>How to use HomeClaw</h3>
-          <p>Run Core, use Companion app or channels. Same Core, same memory.</p>
-          <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">Getting started →</a>
-        </div>
-        <div class="feature-card">
-          <h3>Companion app — where to find it</h3>
-          <p>Build from <strong>clients/HomeClawApp/</strong> in the repo. Set Core URL in Settings, add user, chat.</p>
-          <a href="channels-companion.html#companion-platforms">Channels &amp; Companion →</a>
-        </div>
-        <div class="feature-card">
-          <h3>Portal</h3>
-          <p>Web UI: manage config, start Core and channels. Run <code>python -m main portal</code>, open http://127.0.0.1:18472</p>
-          <a href="https://allenpeng0705.github.io/HomeClaw/platform/#portal" target="_blank" rel="noopener">Portal →</a>
-        </div>
-        <div class="feature-card">
+          <div class="feature-card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+          </div>
           <h3>GitHub</h3>
           <p>Source code, issues, and releases.</p>
           <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">Repository →</a>
         </div>
         <div class="feature-card">
+          <div class="feature-card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+            </svg>
+          </div>
           <h3>Full documentation</h3>
           <p>Install, config, plugins, mix mode, channels, remote access.</p>
           <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Docs site →</a>
         </div>
         <div class="feature-card">
+          <div class="feature-card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
+          </div>
           <h3>Deploy to cloud</h3>
           <p>Run on Aliyun ECS, AWS EC2, or any VPS. Always on, same install.</p>
           <a href="docs.html#deploy-cloud">Deploy guide →</a>
         </div>
         <div class="feature-card">
+          <div class="feature-card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </div>
           <h3>Writing plugins &amp; skills</h3>
           <p>How to write plugins (any language) and skills. Examples and future marketplace.</p>
           <a href="plugins-skills.html">Guide →</a>
@@ -228,14 +311,95 @@
       <h2>Contact</h2>
       <p class="lead">Questions or feedback? Get in touch.</p>
       <ul class="contact-list">
-        <li><strong>Email:</strong> <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a></li>
+        <li><strong>Email:</strong> <a href="mailto:shileipeng@gmail.com">shileipeng@gmail.com</a> | <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a></li>
         <li><strong>WeChat:</strong> shileipeng</li>
       </ul>
     </section>
   </main>
 
   <footer class="site-footer">
-    <p>HomeClaw — your home, your AI. <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> · <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Docs</a> · Contact: <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a> · WeChat: shileipeng</p>
+    <p>HomeClaw — your home, your AI. <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> · <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">Docs</a> · Contact: <a href="mailto:shileipeng@gmail.com">shileipeng@gmail.com</a> | <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a> · WeChat: shileipeng</p>
   </footer>
+  
+  <script>
+    // Mobile menu toggle
+    const mobileMenuButton = document.querySelector('.mobile-menu-button');
+    const siteLinks = document.querySelector('.site-links');
+    
+    if (mobileMenuButton && siteLinks) {
+      mobileMenuButton.addEventListener('click', () => {
+        const isExpanded = mobileMenuButton.getAttribute('aria-expanded') === 'true';
+        mobileMenuButton.setAttribute('aria-expanded', !isExpanded);
+        siteLinks.classList.toggle('active');
+      });
+    }
+    
+    // Smooth scrolling for anchor links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function (e) {
+        e.preventDefault();
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          target.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+          });
+        }
+      });
+    });
+    
+    // Scroll animations
+    function handleScrollAnimations() {
+      const elements = document.querySelectorAll('.animate-on-scroll');
+      
+      elements.forEach(element => {
+        const elementTop = element.getBoundingClientRect().top;
+        const windowHeight = window.innerHeight;
+        
+        if (elementTop < windowHeight * 0.85) {
+          element.classList.add('visible');
+        }
+      });
+    }
+    
+    // Initial check
+    handleScrollAnimations();
+    
+    // Add scroll event listener
+    window.addEventListener('scroll', handleScrollAnimations);
+    
+    // Add animation classes to elements
+    document.addEventListener('DOMContentLoaded', function() {
+      // Hero section elements
+      const heroElements = document.querySelectorAll('.hero-text, .hero-image');
+      heroElements.forEach((el, index) => {
+        el.classList.add('animate-on-scroll', `delay-${index * 100}`);
+      });
+      
+      // Feature sections
+      const featureSections = document.querySelectorAll('.feature-section');
+      featureSections.forEach((section, index) => {
+        section.classList.add('animate-on-scroll', `delay-${index * 100}`);
+      });
+      
+      // Feature cards
+      const featureCards = document.querySelectorAll('.feature-card');
+      featureCards.forEach((card, index) => {
+        card.classList.add('animate-on-scroll', `delay-${index * 100}`);
+      });
+      
+      // Quickstart section
+      const quickstartSection = document.querySelector('.quickstart-section');
+      if (quickstartSection) {
+        quickstartSection.classList.add('animate-on-scroll');
+      }
+      
+      // Contact section
+      const contactSection = document.querySelector('#contact');
+      if (contactSection) {
+        contactSection.classList.add('animate-on-scroll');
+      }
+    });
+  </script>
 </body>
 </html>

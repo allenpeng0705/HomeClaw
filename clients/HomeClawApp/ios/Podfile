@@ -45,6 +45,8 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     target.build_configurations.each do |config|
+      # iOS Simulator on Apple Silicon needs arm64; avoid excluding it (some pods set EXCLUDED_ARCHS for simulator).
+      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'i386'
       # permission_handler: enable only the permissions we request (camera, notifications, microphone, speech).
       config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
         '$(inherited)',
