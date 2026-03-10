@@ -1532,21 +1532,34 @@
 <h1 id="install">Install</h1>
 <p>HomeClaw runs on <strong>macOS</strong>, <strong>Windows</strong>, and <strong>Linux</strong>. You need <strong>Python</strong> 3.10–3.12 (recommended).</p>
 <hr />
-<h2 id="1-clone-and-install">1. Clone and install</h2>
+<h2 id="1-install-script-recommended">1. Install script (recommended)</h2>
+<p>From the project root, run the install script. It checks Python (3.9+), installs dependencies, and opens the <strong>Portal</strong> at http://127.0.0.1:18472.</p>
+<p><strong>Mac / Linux:</strong> <code>bash install.sh</code> or <code>chmod +x install.sh</code> then <code>./install.sh</code>.</p>
+<p><strong>Windows:</strong> Use <strong>PowerShell</strong> (not Command Prompt). Run <code>.\install.ps1</code> or <strong><code>install.bat</code></strong>:</p>
+<pre><code class="language-powershell">.\install.ps1</code></pre>
+<p>Or run <code>install.bat</code> (double-click or from CMD).</p>
+<p><strong>If you see &quot;cannot be loaded&quot; or &quot;not digitally signed&quot;</strong> (execution policy):</p>
+<ul>
+<li><strong>Option A:</strong> Run <strong><code>install.bat</code></strong> instead (uses Bypass automatically).</li>
+<li><strong>Option B — this run only:</strong> <code>powershell -ExecutionPolicy Bypass -File .\install.ps1</code></li>
+<li><strong>Option C — allow scripts for your user (one-time):</strong> <code>Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser</code>, then run <code>.\install.ps1</code> again.</li>
+</ul>
+<hr />
+<h2 id="2-manual-install-alternative">2. Manual install (alternative)</h2>
 <pre><code class="language-bash">git clone https://github.com/allenpeng0705/HomeClaw.git
 cd HomeClaw
 pip install -r requirements.txt
 </code></pre>
 <p>For faster installs in China, you can use a mirror (e.g. <code>-i https://pypi.tuna.tsinghua.edu.cn/simple</code>).</p>
 <hr />
-<h2 id="2-optional-cloud-or-local-llm">2. Optional: cloud or local LLM</h2>
+<h2 id="3-optional-cloud-or-local-llm">3. Optional: cloud or local LLM</h2>
 <p>HomeClaw supports <strong>cloud</strong> and <strong>local</strong> models (or both together for better capability and cost).</p>
 <ul>
 <li><strong>Cloud:</strong> Set the API key as an environment variable (e.g. <code>OPENAI_API_KEY</code>, <code>GEMINI_API_KEY</code>) and add the model to <code>cloud_models</code> in <code>config/core.yml</code>. No extra install beyond <code>requirements.txt</code> (LiteLLM is included).</li>
 <li><strong>Local:</strong> To run <strong>local GGUF models</strong>, you need a llama.cpp server. <strong>Copy llama.cpp's binary distribution</strong> into <code>llama.cpp-master/&lt;platform&gt;/</code> for your device type (e.g. <code>mac/</code>, <code>win_cuda/</code>, <code>linux_cpu/</code> — see <code>llama.cpp-master/README.md</code> in the repo); this is used for both main and embedding local models. Download GGUF model files (e.g. from Hugging Face) into a <code>models/</code> folder and configure <code>local_models</code> in <code>config/core.yml</code>. See <a href="../models/">Models</a> for paths and ports.</li>
 </ul>
 <hr />
-<h2 id="3-next-step">3. Next step</h2>
+<h2 id="4-next-step">4. Next step</h2>
 <p>After install, see <a href="../run/">Run</a> to start Core, then use the <strong>Companion app</strong> (set Core URL in Settings, add your user) and/or run a <strong>channel</strong> (e.g. <code>python -m channels.run webchat</code>). Companion and channels use the same Core—run Core once, use both together. For full setup (config, users, memory), see <a href="../getting-started/">Getting started</a> and the main <a href="https://github.com/allenpeng0705/HomeClaw/blob/main/HOW_TO_USE.md">HOW_TO_USE.md</a> in the repo.</p>
 
 

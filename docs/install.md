@@ -36,22 +36,19 @@ If `./install.sh` fails with "Permission denied", use `chmod +x install.sh` or `
    git clone https://github.com/allenpeng0705/HomeClaw.git
    cd HomeClaw
    ```
-3. Run the install script:
+3. Run the install script: **`.\install.ps1`** or **`install.bat`** (double-click in Explorer or run `install.bat` in CMD):
    ```powershell
    .\install.ps1
    ```
 
 **If PowerShell says the script "cannot be loaded" or "is not digitally signed" (execution policy):**
 
-- **Option A:** Allow scripts for your user (one-time). In PowerShell (as yourself, not Admin), run:
-  ```powershell
-  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-  ```
-  Then run `.\install.ps1` again.
-- **Option B:** Bypass policy for this run only:
+- **Option A:** Run **`install.bat`** instead (uses Bypass automatically).
+- **Option B:** Bypass for this run only:
   ```powershell
   powershell -ExecutionPolicy Bypass -File .\install.ps1
   ```
+- **Option C:** Allow scripts for your user (one-time): `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`, then run `.\install.ps1` again.
 
 You can also run the script from a parent directory; it will clone into `.\HomeClaw` if needed. After the script finishes, use the Portal to manage config and start Core, or continue with [Run](run.md) and [Getting started](getting-started.md).
 

@@ -9,7 +9,7 @@ Quick path from install to chatting with HomeClaw via the **Companion app** and/
    **Recommended:** Run the install script. Clone the repo (`git clone https://github.com/allenpeng0705/HomeClaw.git`, `cd HomeClaw`), then:
 
    - **Mac/Linux:** Run `chmod +x install.sh` (one-time) then `./install.sh`, or run `bash install.sh` (no chmod needed). If `./install.sh` gives "Permission denied", use one of these.
-   - **Windows:** Use **PowerShell** (not Command Prompt). Run `.\install.ps1`. If you get an execution policy error, run `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser` once, or use `powershell -ExecutionPolicy Bypass -File .\install.ps1`. See [Install](install.md) for details.
+   - **Windows:** Use **PowerShell** (not Command Prompt). Run `.\install.ps1` or **`install.bat`**. If you get an execution policy error, run `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser` once, or use `powershell -ExecutionPolicy Bypass -File .\install.ps1`, or use `install.bat`. See [Install](install.md) for details.
 
    The script checks Python, installs dependencies, and **opens the Portal** at **http://127.0.0.1:18472** when done.
 

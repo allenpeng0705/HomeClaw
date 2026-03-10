@@ -9,7 +9,7 @@ Short guide to installing HomeClaw and checking your environment.
 | OS | Command |
 |----|--------|
 | **Mac / Linux** | From project root: `./install.sh` — or from a parent directory: the script will clone into `./HomeClaw` and continue. |
-| **Windows** | From project root in **PowerShell**: `.\install.ps1`. If you get "cannot be loaded... not digitally signed", run: `powershell -ExecutionPolicy Bypass -File .\install.ps1` or once: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`. |
+| **Windows** | `.\install.ps1` or **`install.bat`** (from project root). If you see "not digitally signed", use `install.bat` or run: `powershell -ExecutionPolicy Bypass -File .\install.ps1`. |
 
 The script will:
 
@@ -68,7 +68,7 @@ For using the Portal from a **web browser** (same machine) or from the **Compani
 | What | Where |
 |------|--------|
 | **Install script (Mac/Linux)** | `./install.sh` (project root) |
-| **Install script (Windows)** | `.\install.ps1` (project root) |
+| **Install script (Windows)** | `.\install.ps1` or **`install.bat`** (project root) |
 | **Manual install** | Clone → pip install → optional Node, llama.cpp, GGUF/Ollama (see above) |
 | **Environment check** | `python -m main doctor` |
 | **Portal (config & onboarding)** | `python -m main portal` → http://127.0.0.1:18472 |

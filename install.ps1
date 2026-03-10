@@ -3,8 +3,9 @@
 # Steps: Python (3.9+) -> Node.js -> [clone if needed] -> pip install -> llama.cpp -> GGUF/Ollama instructions -> open Portal.
 #
 # If you see "cannot be loaded... not digitally signed" (execution policy):
-#   Option A: powershell -ExecutionPolicy Bypass -File .\install.ps1
-#   Option B: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser   (then run .\install.ps1 again)
+#   Easiest: run install.bat instead (it uses Bypass automatically).
+#   Or: powershell -ExecutionPolicy Bypass -File .\install.ps1
+#   Or: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser   (then run .\install.ps1 again)
 
 $ErrorActionPreference = "Stop"
 $RepoUrl = if ($env:HOMECLAW_REPO_URL) { $env:HOMECLAW_REPO_URL } else { "https://github.com/allenpeng0705/HomeClaw.git" }
@@ -14,16 +15,18 @@ Write-Host "=============================================="
 Write-Host "  HomeClaw Installer (Windows)"
 Write-Host "=============================================="
 Write-Host ""
+Write-Host "Tip: If you see 'not digitally signed' when running .\install.ps1 directly, use install.bat or run: powershell -ExecutionPolicy Bypass -File .\install.ps1"
+Write-Host ""
 
 # Resolve project root
 $InRepo = $false
 $Root = ""
 
-if (Test-Path "$PSScriptRoot\main.py") -and (Test-Path "$PSScriptRoot\requirements.txt") {
+if ((Test-Path "$PSScriptRoot\main.py") -and (Test-Path "$PSScriptRoot\requirements.txt")) {
   $Root = $PSScriptRoot
   $InRepo = $true
   Write-Host "Using existing HomeClaw repo at: $Root"
-} elseif (Test-Path "main.py") -and (Test-Path "requirements.txt") {
+} elseif ((Test-Path "main.py") -and (Test-Path "requirements.txt")) {
   $Root = (Get-Location).Path
   $InRepo = $true
   Write-Host "Using existing HomeClaw repo at: $Root"

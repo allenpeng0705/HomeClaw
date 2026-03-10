@@ -8,7 +8,7 @@ Troubleshooting and where to find more.
 
 | You want to… | Go here |
 |--------------|--------|
-| **Install** HomeClaw | [Install](install.md) — **first step:** Mac/Linux: `chmod +x install.sh` then `./install.sh` (or `bash install.sh`). Windows: run `.\install.ps1` in **PowerShell** (see install guide for execution policy). Or manual clone + pip install. |
+| **Install** HomeClaw | [Install](install.md) — **first step:** Mac/Linux: `chmod +x install.sh` then `./install.sh` (or `bash install.sh`). Windows: run `.\install.ps1` or **`install.bat`** in **PowerShell** (see install guide for execution policy). Or manual clone + pip install. |
 | **Use** HomeClaw (run Core, chat) | [Getting started](getting-started.md) — run Core, then use the Companion app or channels (WebChat, Telegram, etc.). |
 | **Find the Companion app** | [Companion app](companion-app.md) — build from **clients/HomeClawApp/** in the repo; set Core URL in Settings. |
 | **Open the Portal** | [Platform → Portal](platform.md#portal) — run `python -m main portal`, open http://127.0.0.1:18472. |

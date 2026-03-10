@@ -37,7 +37,7 @@
 
 | | |
 |---|---|
-| [**Install**](install.md) | **First step:** run `./install.sh` (Mac/Linux) or `.\install.ps1` (Windows). Clone repo first; script opens Portal when done. Manual install also documented. |
+| [**Install**](install.md) | **First step:** run `./install.sh` (Mac/Linux) or `.\install.ps1` / **`install.bat`** (Windows). Clone repo first; script opens Portal when done. Manual install also documented. |
 | [**Run**](run.md) | Start Core and a channel (WebChat, Telegram, CLI, Companion app, …) |
 | [**Getting started**](getting-started.md) | Full path: install → configure → run Core → use Companion app or channels |
 | [**Companion app**](companion-app.md) | **Where to find it:** build from **clients/HomeClawApp/** in the repo. Mac, Windows, iPhone, Android. Set Core URL in Settings. |

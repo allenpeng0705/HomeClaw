@@ -1643,7 +1643,7 @@
 <p>The <strong>markdown_to_pdf</strong> tool converts Markdown text to a PDF file and saves it under the user's output folder, returning a view link. Used by the <strong>summarize</strong> skill when the summary is long so the user gets both the inline summary and a downloadable PDF without asking.</p>
 <ul>
 <li><strong>Parameters:</strong> <code>content</code> (Markdown string), <code>path</code> (e.g. <code>output/summary.pdf</code>).</li>
-<li><strong>Converter (priority):</strong> (1) <strong>VMPrint</strong> — install via <strong><code>./install.sh</code></strong> or <strong><code>install.ps1</code></strong> (clones into <code>tools/vmprint</code>, runs <code>npm install</code>). Config default: <code>tools.markdown_to_pdf.vmprint_dir: "tools/vmprint"</code>. (2) <strong>pandoc</strong> on PATH. (3) <strong>pip install markdown weasyprint</strong> (Markdown → HTML → PDF).</li>
+<li><strong>Converter (priority):</strong> (1) <strong>VMPrint</strong> — install via <strong><code>./install.sh</code></strong> or <strong><code>.\install.ps1</code></strong> or <strong><code>install.bat</code></strong> (Windows: if &quot;not digitally signed&quot;, use <code>install.bat</code> or run <code>powershell -ExecutionPolicy Bypass -File .\install.ps1</code>). Scripts clone into <code>tools/vmprint</code> and run <code>npm install</code>. Config default: <code>tools.markdown_to_pdf.vmprint_dir: "tools/vmprint"</code>. (2) <strong>pandoc</strong> on PATH. (3) <strong>pip install markdown weasyprint</strong> (Markdown → HTML → PDF).</li>
 </ul>
 <hr />
 <h2 id="plugins">Plugins</h2>

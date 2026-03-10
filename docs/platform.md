@@ -9,7 +9,7 @@ Config, deployment, and multi-user behavior.
 The **Portal** is a web UI to manage HomeClaw: edit config, start Core, start channels, and run the install guide.
 
 - **How to open:** Run `python -m main portal` from the project root. The Portal runs at **http://127.0.0.1:18472** by default (override with `PORTAL_PORT` if needed).
-- **After the install script:** If you use `./install.sh` (Mac/Linux) or `.\install.ps1` (Windows), the script opens the Portal in your browser when setup completes.
+- **After the install script:** If you use `./install.sh` (Mac/Linux) or `.\install.ps1` / `install.bat` (Windows), the script opens the Portal in your browser when setup completes.
 - **Companion app:** From the Companion app, use **Settings → Core setting (Portal)** to log in and open the Portal in a WebView (when Core is reachable and Portal auth is configured).
 
 ---

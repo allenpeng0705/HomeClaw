@@ -1428,7 +1428,7 @@
    git clone https://github.com/allenpeng0705/HomeClaw.git
    cd HomeClaw
    pip install -r requirements.txt</code></p>
-<p>Or use the install script: <strong>Mac/Linux</strong> <code>./install.sh</code>, <strong>Windows</strong> <code>.\install.ps1</code>. The script sets up dependencies and <strong>opens the Portal</strong> at <strong>http://127.0.0.1:18472</strong> when done.</p>
+<p>Or use the install script: <strong>Mac/Linux</strong> <code>./install.sh</code> or <code>bash install.sh</code>; <strong>Windows</strong> (PowerShell) <code>.\install.ps1</code> or <strong><code>install.bat</code></strong> — if you see &quot;not digitally signed&quot;, use <code>install.bat</code> or run <code>powershell -ExecutionPolicy Bypass -File .\install.ps1</code>. The script sets up dependencies and <strong>opens the Portal</strong> at <strong>http://127.0.0.1:18472</strong> when done.</p>
 <ol>
 <li>
 <p><strong>Configure</strong> — Edit <code>config/core.yml</code> (LLM, memory) and <code>config/user.yml</code> (who can talk to the assistant). Or use the <strong>Portal</strong>: run <code>python -m main portal</code> and open <strong>http://127.0.0.1:18472</strong> in your browser to manage settings and users.</p>
