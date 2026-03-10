@@ -64,7 +64,7 @@ HomeClaw runs on **macOS**, **Windows**, and **Linux**. You need **Python** 3.10
 
 | OS | Command |
 |----|--------|
-| **Mac / Linux** | `./install.sh` (run from project root, or from a parent directory — the script will clone into `./HomeClaw` and continue) |
+| **Mac / Linux** | **`bash install.sh`** (recommended; no sudo). Or `./install.sh` from project root (or parent dir — script clones into `./HomeClaw`). If you see **Permission denied**, use `bash install.sh` or `chmod +x install.sh` then `./install.sh`. |
 | **Windows** | `.\install.ps1` (run from project root, or from a parent directory — the script will clone into `.\HomeClaw` and continue) |
 
 The script checks or installs **Python 3.9+**, **Node.js**, **tsx** (for .ts skill scripts), clones the repo if needed, runs `pip install -r requirements.txt`, guides you on **llama.cpp** and **GGUF/Ollama**, then starts the **Portal** at http://127.0.0.1:18472. There you create an admin account, choose your model (and set cloud API keys if needed), add users, and start Core. If **llama.cpp** was installed via brew or winget, you only need to add models (see QuickStart.md).

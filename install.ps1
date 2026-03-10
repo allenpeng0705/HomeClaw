@@ -6,6 +6,11 @@ $ErrorActionPreference = "Stop"
 $RepoUrl = if ($env:HOMECLAW_REPO_URL) { $env:HOMECLAW_REPO_URL } else { "https://github.com/allenpeng0705/HomeClaw.git" }
 $PortalUrl = "http://127.0.0.1:18472"
 
+Write-Host "=============================================="
+Write-Host "  HomeClaw Installer (Windows)"
+Write-Host "=============================================="
+Write-Host ""
+
 # Resolve project root
 $InRepo = $false
 $Root = ""
@@ -38,7 +43,13 @@ if (Test-Path "$PSScriptRoot\main.py") -and (Test-Path "$PSScriptRoot\requiremen
   }
 }
 
+if (-not $Root -or -not (Test-Path -LiteralPath $Root -PathType Container)) {
+  Write-Host "Error: could not determine project root."
+  exit 1
+}
 Set-Location $Root
+Write-Host "Working directory: $Root"
+Write-Host ""
 
 # ----- Step 1: Python 3.9+ -----
 Write-Host ""
@@ -158,7 +169,11 @@ $VmprintMain = Join-Path $Root "tools\vmprint-main"
 # If user downloaded GitHub ZIP, folder is vmprint-main; rename to vmprint so config path works
 if ((Test-Path $VmprintMain) -and -not (Test-Path $VmprintDir)) {
   Write-Host "Renaming tools\vmprint-main to tools\vmprint ..."
-  Rename-Item -Path $VmprintMain -NewName "vmprint"
+  try {
+    Rename-Item -Path $VmprintMain -NewName "vmprint" -ErrorAction Stop
+  } catch {
+    Write-Host "Warning: Could not rename vmprint-main to vmprint. You can rename manually or re-run install."
+  }
 }
 $VmprintOk = (Test-Path (Join-Path $VmprintDir "draft2final")) -and (Test-Path (Join-Path $VmprintDir "package.json"))
 if ($VmprintOk) {
@@ -170,14 +185,14 @@ if ($VmprintOk) {
       New-Item -ItemType Directory -Path (Join-Path $Root "tools") -Force | Out-Null
       if (Test-Path (Join-Path $VmprintDir ".git")) {
         Write-Host "Updating VMPrint at tools\vmprint ..."
-        Set-Location $VmprintDir; git pull --quiet 2>$null; Set-Location $Root
+        Set-Location $VmprintDir; git pull --quiet 2>$null
       } else {
         Write-Host "Cloning VMPrint into tools\vmprint ..."
         git clone --depth 1 https://github.com/cosmiciron/vmprint.git $VmprintDir 2>$null
       }
       if ((Test-Path (Join-Path $VmprintDir "draft2final")) -and (Get-Command node -ErrorAction SilentlyContinue)) {
         Write-Host "Installing VMPrint dependencies (npm install) ..."
-        Set-Location $VmprintDir; npm install --silent 2>$null; Set-Location $Root
+        Set-Location $VmprintDir; npm install --silent 2>$null
         if (Test-Path (Join-Path $VmprintDir "node_modules")) {
           Write-Host "OK: VMPrint installed at tools\vmprint"
         } else {
@@ -193,6 +208,8 @@ if ($VmprintOk) {
     }
   } catch {
     Write-Host "VMPrint skipped. Markdown-to-PDF will use pandoc or weasyprint if available."
+  } finally {
+    Set-Location $Root
   }
 }
 
@@ -200,10 +217,40 @@ if ($VmprintOk) {
 Write-Host ""
 Write-Host "=== Step 5: Python dependencies ==="
 Set-Location $Root
+# Upgrade pip first (old pip can cause 403 with some mirrors)
+$pipUpgradeArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "-q", "--upgrade", "pip") } else { @("-m", "pip", "install", "-q", "--upgrade", "pip") }
+& $PythonExe $pipUpgradeArgs 2>$null
 $pipArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "-q", "-r", "requirements.txt") } else { @("-m", "pip", "install", "-q", "-r", "requirements.txt") }
 & $PythonExe $pipArgs
-if ($LASTEXITCODE -ne 0) { Write-Host "pip install failed."; exit 1 }
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "First attempt failed. Retrying automatically with official PyPI (ignoring mirror config)..."
+  Write-Host "This may take a few minutes (downloading from pypi.org). You will see progress below."
+  $env:PIP_INDEX_URL = $null
+  $env:PIP_EXTRA_INDEX_URL = $null
+  # Retry without -q so user sees download/install progress and knows it is not stuck
+  $pipRetryArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "-r", "requirements.txt", "-i", "https://pypi.org/simple") } else { @("-m", "pip", "install", "-r", "requirements.txt", "-i", "https://pypi.org/simple") }
+  & $PythonExe $pipRetryArgs
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Error: pip install failed."
+    Write-Host "  If you saw 403 Forbidden: your pip index (e.g. mirror) may be blocking. Try:"
+    Write-Host "    $PythonExe -m pip install -r requirements.txt -i https://pypi.org/simple"
+    Write-Host "  If you see permission errors: $PythonExe -m pip install --user -r requirements.txt"
+    exit 1
+  }
+}
 Write-Host "OK: requirements installed"
+
+# ----- Step 5b: Cognee (latest from official PyPI) -----
+# Cognee is the default memory backend; many mirrors only have 0.1.x. Install latest from PyPI.
+Write-Host ""
+Write-Host "=== Step 5b: Cognee (memory backend, latest from PyPI) ==="
+Write-Host "Installing cognee from pypi.org (may take a minute)..."
+$env:PIP_INDEX_URL = $null
+$env:PIP_EXTRA_INDEX_URL = $null
+$cogneeArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "cognee", "-i", "https://pypi.org/simple") } else { @("-m", "pip", "install", "cognee", "-i", "https://pypi.org/simple") }
+& $PythonExe $cogneeArgs
+if ($LASTEXITCODE -eq 0) { Write-Host "OK: cognee installed (latest from pypi.org)" } else { Write-Host "Cognee install from PyPI failed or skipped. To install later: $PythonExe -m pip install cognee -i https://pypi.org/simple" }
+Write-Host "(If pip reported dependency conflicts about semantic-kernel, you can ignore them — HomeClaw does not use that package.)"
 
 # ----- Step 6a: llama.cpp -----
 Write-Host ""
@@ -249,4 +296,11 @@ $portalArgs = if ($PythonExe -eq "py") { @("-3", "-m", "main", "portal", "--no-o
 Start-Process -FilePath $PythonExe -ArgumentList $portalArgs -NoNewWindow
 Start-Sleep -Seconds 3
 Start-Process $PortalUrl
-Write-Host "Portal started. To run again later: cd $Root; $PythonExe -m main portal"
+Write-Host ""
+Write-Host "--- Next steps ---"
+Write-Host "  1. In Portal ($PortalUrl): create admin account, choose model, add users, start Core."
+Write-Host "  2. Check setup: cd $Root; $PythonExe -m main doctor"
+Write-Host "  3. Start Core: cd $Root; $PythonExe -m main start"
+Write-Host "  4. Run Portal again: cd $Root; $PythonExe -m main portal"
+Write-Host ""
+Write-Host "Docs: https://github.com/allenpeng0705/HomeClaw"

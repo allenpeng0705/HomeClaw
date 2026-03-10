@@ -8,8 +8,10 @@ Get from zero to running HomeClaw in a few steps. You can chat via the **Compani
 
 | OS | Command |
 |----|--------|
-| **Mac / Linux** | `./install.sh` (from project root, or from a parent directory — script will clone into `./HomeClaw` and continue) |
+| **Mac / Linux** | `bash install.sh` (always works), or `./install.sh` from project root (or from a parent directory — script will clone into `./HomeClaw` and continue) |
 | **Windows** | `.\install.ps1` (from project root, or from a parent directory — script will clone into `.\HomeClaw` and continue) |
+
+**Mac/Linux:** Run as your normal user (do **not** use `sudo`). Use **`bash install.sh`** to avoid permission issues. If you see **Permission denied** with `./install.sh`, either run **`bash install.sh`** or run **`chmod +x install.sh`** then **`./install.sh`**.
 
 The script sets up **Python 3.9+**, **Node.js**, **tsx** (for TypeScript skill scripts), **pip dependencies**, and optionally **llama.cpp** and **VMPrint**. It then starts the **Portal** and opens your browser at http://127.0.0.1:18472.
 

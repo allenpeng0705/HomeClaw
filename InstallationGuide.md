@@ -23,13 +23,17 @@ The script will:
 
 **Already in the repo?** Run the script from the project root; it will skip cloning and only run the steps that are still needed (Python/Node are skipped if already OK).
 
+**pip 403 Forbidden (e.g. Tsinghua mirror)?** The install script will retry with official PyPI. Or run manually: `pip install -r requirements.txt -i https://pypi.org/simple`.
+
+**Dependency conflicts about semantic-kernel?** Pip may warn that `semantic-kernel` expects older versions of aiofiles, numpy, openai, pydantic, etc. HomeClaw does not use semantic-kernel (it is a transitive dependency of Cognee). You can ignore these warnings; Core and Cognee memory work with the installed versions. If you hit a real runtime error, try a fresh venv or report the issue.
+
 ---
 
 ## Manual install (summary)
 
 1. **Clone:** `git clone https://github.com/allenpeng0705/HomeClaw.git && cd HomeClaw`
 2. **Python:** 3.9+ (3.10–3.12 recommended). Install from python.org or your package manager.
-3. **Dependencies:** `pip install -r requirements.txt` (in China you can use `-i https://pypi.tuna.tsinghua.edu.cn/simple`).
+3. **Dependencies:** `pip install -r requirements.txt`. In China you can use a mirror (e.g. `-i https://pypi.tuna.tsinghua.edu.cn/simple`). If you get **403 Forbidden** from a mirror, use official PyPI: `pip install -r requirements.txt -i https://pypi.org/simple`.
 4. **Node.js** (optional, for some plugins): Install from [nodejs.org](https://nodejs.org).
 5. **llama.cpp** (for local GGUF): Install via [llama.cpp install guide](https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md) (e.g. `brew install llama.cpp`, `winget install llama.cpp`), or download a binary from [releases](https://github.com/ggml-org/llama.cpp/releases) and put `llama-server` (or `llama-server.exe`) in `llama.cpp-master/<platform>/`.
 6. **GGUF models:** Put `.gguf` files in the `models/` folder and add entries in `config/llm.yml` under `local_models`. Or use **Ollama**: install from [ollama.com](https://ollama.com), then `python -m main ollama pull <model>` and set as main in config.

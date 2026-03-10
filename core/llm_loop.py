@@ -896,6 +896,17 @@ async def answer_from_memory(
                 skills_block = build_skills_system_block(skills_list, include_body=include_body, use_location_only=use_location_only)
                 if skills_block:
                     system_parts.append(skills_block)
+                    # Hint so the model can suggest installing more skills via HomeClaw (Companion, Portal, or converter script).
+                    system_parts.append(
+                        "When no available skill fits the user's request, suggest they can search and install more skills using HomeClaw: "
+                        "Companion app (Settings → Skills), Portal (Skills), or the Python script scripts/convert_openclaw_skill.py to convert an OpenClaw skill folder to HomeClaw (output to external_skills). New skills are loaded on next session."
+                    )
+                elif not skills_list:
+                    # use_skills is true but no skills loaded yet: still hint that user can add skills.
+                    system_parts.append(
+                        "No skills are loaded yet. If the user needs a capability you don't have, suggest they can add skills via "
+                        "the Companion app (Settings → Skills), Portal (Skills), or scripts/convert_openclaw_skill.py to convert an OpenClaw skill folder."
+                    )
                 force_include_instructions.extend(matched_instructions)
             except Exception as e:
                 logger.warning("Failed to load skills: {}", e)

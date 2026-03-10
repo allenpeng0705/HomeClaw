@@ -572,12 +572,20 @@ def find_openclaw_installed_skill_dir(skill_id: str, extra_search_dirs: Optional
     """
     Best-effort locate of an installed OpenClaw skill folder.
     When extra_search_dirs is set (e.g. [downloads/skills, downloads]), those are searched first.
+    In extra_search_dirs we also look one level deeper (e.g. downloads/skills/scope/skill-id).
     Never raises; returns None if not found.
     """
     sid = (skill_id or "").strip()
     if not sid:
         return None
     candidates = _candidate_openclaw_skills_dirs(extra_dirs=extra_search_dirs)
+    extra_set: set = set()
+    try:
+        for p in extra_search_dirs or []:
+            if p is not None:
+                extra_set.add(p.resolve())
+    except Exception:
+        pass
     # Prefer exact name match; else newest folder containing sid.
     newest: Tuple[float, Optional[Path]] = (0.0, None)
     for base in candidates:
@@ -600,6 +608,30 @@ def find_openclaw_installed_skill_dir(skill_id: str, extra_search_dirs: Optional
                         mtime = 0.0
                     if mtime >= newest[0]:
                         newest = (mtime, child)
+            # In staging dirs (e.g. downloads/skills), look one level deeper: base/scope/skill-id
+            if extra_set and base.resolve() in extra_set:
+                for sub in base.iterdir():
+                    if not sub.is_dir():
+                        continue
+                    try:
+                        exact_nested = sub / sid
+                        if exact_nested.is_dir():
+                            return exact_nested
+                        for grand in sub.iterdir():
+                            if not grand.is_dir():
+                                continue
+                            gname = grand.name or ""
+                            if sid.lower() == gname.lower():
+                                return grand
+                            if sid.lower() in gname.lower():
+                                try:
+                                    mtime = grand.stat().st_mtime
+                                except Exception:
+                                    mtime = 0.0
+                                if mtime >= newest[0]:
+                                    newest = (mtime, grand)
+                    except Exception:
+                        continue
         except Exception:
             continue
     return newest[1]

@@ -343,12 +343,15 @@ def skills_list():
 def skills_search(query: str = ""):
     """Search ClawHub skills via local clawhub CLI. Requires login (API middleware). Never raises."""
     try:
-        from base.clawhub_integration import clawhub_available, clawhub_search
+        from base.clawhub_integration import clawhub_available, clawhub_ensure_logged_in, clawhub_search
         q = (query or "").strip()
         if not q:
             return JSONResponse(content={"results": []})
         if not clawhub_available():
             return JSONResponse(status_code=400, content={"detail": "clawhub not found on PATH"})
+        core_cfg = config_api.load_config("core") or {}
+        token = (core_cfg.get("clawhub_token") or "").strip()
+        clawhub_ensure_logged_in(token)
         results, raw = clawhub_search(q, limit=20)
         if not raw.ok and raw.error:
             return JSONResponse(status_code=502, content={"detail": raw.error, "stderr": (raw.stderr or "")[-1000:]})
@@ -365,7 +368,7 @@ def skills_install(body: dict = Body(default_factory=dict)):
     Requires login (API middleware). Never raises.
     """
     try:
-        from base.clawhub_integration import clawhub_available, clawhub_install_and_convert
+        from base.clawhub_integration import clawhub_available, clawhub_ensure_logged_in, clawhub_install_and_convert
         if not clawhub_available():
             return JSONResponse(status_code=400, content={"detail": "clawhub not found on PATH"})
         if not isinstance(body, dict):
@@ -379,6 +382,8 @@ def skills_install(body: dict = Body(default_factory=dict)):
         spec = f"{skill_id}@{version}" if version else skill_id
 
         core_cfg = config_api.load_config("core") or {}
+        token = (core_cfg.get("clawhub_token") or "").strip()
+        clawhub_ensure_logged_in(token)
         ext_dir = (core_cfg.get("external_skills_dir") or "external_skills").strip() or "external_skills"
         download_dir = (core_cfg.get("clawhub_download_dir") or "downloads").strip() or "downloads"
         out = clawhub_install_and_convert(
