@@ -56,3 +56,4 @@
 logs/core_debug.log
 # ClawHub staging: raw OpenClaw downloads (converted output goes to external_skills/)
 /downloads/skills
+/system_plugins/homeclaw-browser/node_modules
