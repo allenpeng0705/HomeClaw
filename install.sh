@@ -238,17 +238,21 @@ if ! "$PYTHON" -m pip install --quiet -r requirements.txt; then
 fi
 echo "OK: requirements installed"
 
-# ----- Step 5b: Cognee (latest from official PyPI) -----
-# Cognee is the default memory backend; many mirrors only have 0.1.x. Install latest from PyPI.
+# ----- Step 5b: Cognee dependencies (for memory backend) -----
+# Cognee is the default memory backend. Cognee is part of this repo (customized); we only
+# install its dependencies here. Do not run "pip install cognee" — the package is in the source.
 echo ""
-echo "=== Step 5b: Cognee (memory backend, latest from PyPI) ==="
-echo "Installing cognee from pypi.org (may take a minute)..."
-if PIP_INDEX_URL= PIP_EXTRA_INDEX_URL= "$PYTHON" -m pip install cognee -i https://pypi.org/simple; then
-  echo "OK: cognee installed (latest from pypi.org)"
+echo "=== Step 5b: Cognee dependencies (memory backend) ==="
+if [ -f "$ROOT/requirements-cognee-deps.txt" ]; then
+  echo "Installing Cognee dependencies (instructor, etc.)..."
+  if PIP_INDEX_URL= PIP_EXTRA_INDEX_URL= "$PYTHON" -m pip install -r "$ROOT/requirements-cognee-deps.txt" -i https://pypi.org/simple; then
+    echo "OK: Cognee dependencies installed"
+  else
+    echo "Cognee deps install failed or skipped. To retry: $PYTHON -m pip install -r requirements-cognee-deps.txt -i https://pypi.org/simple"
+  fi
 else
-  echo "Cognee install from PyPI failed or skipped. To install later: $PYTHON -m pip install cognee -i https://pypi.org/simple"
+  echo "requirements-cognee-deps.txt not found; skipping."
 fi
-echo "(If pip reported dependency conflicts about semantic-kernel, you can ignore them — HomeClaw does not use that package.)"
 
 # ----- Step 5c: Document stack (unstructured, opencv) — separate to avoid backtracking -----
 echo ""

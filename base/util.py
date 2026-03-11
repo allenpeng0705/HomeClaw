@@ -1034,8 +1034,9 @@ class Util:
             data_updates["frequency_penalty"] = _float(comp["frequency_penalty"])
         if comp.get("seed") is not None:
             data_updates["seed"] = _int(comp["seed"])
-        if comp.get("stop") is not None:
-            stop = comp["stop"]
+        # stop: completion.stop overrides; fallback to llama_cpp.stop for local models
+        stop = comp.get("stop") if comp.get("stop") is not None else lcpp.get("stop")
+        if stop is not None:
             if isinstance(stop, list):
                 data_updates["stop"] = [str(s) for s in stop]
             else:
@@ -1059,6 +1060,50 @@ class Util:
 
     # Extra-body keys that Google Gemini API does not accept (causes 400 "Unknown name")
     _GEMINI_UNSUPPORTED_EXTRA_KEYS = frozenset({"repeat_penalty"})
+
+    @staticmethod
+    def _get_qwen_model() -> Optional[str]:
+        """
+        One flag for Qwen variants: "qwen3" (8B), "qwen35" (9B), or None (others).
+        Reads tools_config.qwen_model and completion.qwen_model; backward compat: qwen3_mode true -> "qwen3".
+        """
+        try:
+            meta = Util().get_core_metadata()
+            if meta is None:
+                return None
+            tools_cfg = getattr(meta, "tools_config", None) or {}
+            comp = getattr(meta, "completion", None) or {}
+            val = tools_cfg.get("qwen_model") or comp.get("qwen_model")
+            if val is not None:
+                s = str(val).strip().lower()
+                if s in ("qwen3", "qwen35"):
+                    return s
+            if tools_cfg.get("qwen3_mode") or comp.get("qwen3_mode"):
+                return "qwen3"
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def get_qwen35_grammar() -> Optional[str]:
+        """
+        Load Qwen 3.5 GBNF grammar from config path. Used when qwen_model == "qwen35" and tools are present.
+        Returns file content or None if not found. Path: tools_config.qwen35_grammar_path or config/grammars/qwen35_tools.gbnf (relative to project root).
+        """
+        try:
+            meta = Util().get_core_metadata()
+            if meta is None:
+                return None
+            tools_cfg = getattr(meta, "tools_config", None) or {}
+            rel = tools_cfg.get("qwen35_grammar_path") or "config/grammars/qwen35_tools.gbnf"
+            rel = (str(rel).strip() if rel is not None else "") or "config/grammars/qwen35_tools.gbnf"
+            root = Path(__file__).resolve().parent.parent
+            path = (root / rel).resolve()
+            if path.is_file():
+                return path.read_text(encoding="utf-8")
+        except Exception:
+            pass
+        return None
 
     def _filter_extra_body_for_model(self, extra_body_params: dict, model_for_request: Optional[str]) -> dict:
         """Remove extra_body keys that the target model does not support (e.g. Gemini rejects repeat_penalty)."""
@@ -1150,6 +1195,44 @@ class Util:
                 data["function_call"] = function_call
             data_params, extra_body_params = self._get_completion_params()
             data.update(data_params)
+            comp = getattr(Util().get_core_metadata(), "completion", None) or {}
+            tools_cfg = getattr(Util().get_core_metadata(), "tools_config", None) or {}
+            qwen_model = self._get_qwen_model()
+            # When tools are present: qwen_model "qwen3" or "qwen35" -> tool_temperature 0.1, disable thinking; qwen35 -> presence_penalty 1.5, stop </think> and "</tool_call>".
+            if tools:
+                if qwen_model in ("qwen3", "qwen35"):
+                    tool_temp = comp.get("tool_temperature") or tools_cfg.get("tool_temperature") or 0.1
+                    try:
+                        data["temperature"] = float(tool_temp)
+                    except (TypeError, ValueError):
+                        pass
+                    if mtype in ("local", "ollama"):
+                        eb = data.setdefault("extra_body", {})
+                        eb["chat_template_kwargs"] = {"enable_thinking": False}
+                        eb["enable_thinking"] = False
+                else:
+                    tool_temp = comp.get("tool_temperature") or tools_cfg.get("tool_temperature")
+                    if tool_temp is not None:
+                        try:
+                            data["temperature"] = float(tool_temp)
+                        except (TypeError, ValueError):
+                            pass
+                    disable_thinking = comp.get("disable_thinking_when_tools") or tools_cfg.get("disable_thinking_when_tools")
+                    if disable_thinking and mtype in ("local", "ollama"):
+                        eb = data.setdefault("extra_body", {})
+                        eb["chat_template_kwargs"] = {"enable_thinking": False}
+                        eb["enable_thinking"] = False
+                if qwen_model == "qwen35":
+                    data["presence_penalty"] = 1.5
+                    stop_raw = data.get("stop")
+                    if isinstance(stop_raw, list):
+                        stop = [str(x) for x in stop_raw]
+                    else:
+                        stop = [str(stop_raw)] if stop_raw is not None else []
+                    for s in ("</think>", "</tool_call>"):
+                        if s not in stop:
+                            stop.append(s)
+                    data["stop"] = stop
             extra_body_params = self._filter_extra_body_for_model(extra_body_params, model_for_request)
             if extra_body_params:
                 data.setdefault("extra_body", {}).update(extra_body_params)
@@ -1162,7 +1245,9 @@ class Util:
             #logger.debug(f"Message Request to LLM: {data_json}")
             chat_completion_api_url = 'http://' + model_host + ':' + str(model_port) + '/v1/chat/completions'
             meta = Util().get_core_metadata()
-            timeout_sec = max(60, int(getattr(meta, 'llm_completion_timeout_seconds', 300) or 300))
+            _raw = getattr(meta, 'llm_completion_timeout_seconds', 300)
+            _raw = 300 if _raw is None else int(_raw)
+            timeout_sec = None if _raw == 0 else max(60, _raw)  # 0 = no timeout (use with care)
             timeout = aiohttp.ClientTimeout(total=timeout_sec)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(chat_completion_api_url, headers=headers, data=data_json) as resp:
@@ -1209,7 +1294,12 @@ class Util:
                     logger.error("Invalid response structure")
                     return None
         except asyncio.TimeoutError:
-            logger.warning("LLM chat completion timed out after {}s ({}:{})", timeout_sec, model_host, model_port)
+            logger.warning(
+                "LLM chat completion timed out after {}s ({}:{})",
+                timeout_sec if timeout_sec is not None else "(no limit)",
+                model_host,
+                model_port,
+            )
             return None
         except asyncio.CancelledError:
             logger.info("LLM chat completion was cancelled (e.g. client disconnected)")
@@ -1328,13 +1418,52 @@ class Util:
                 data["tool_choice"] = tool_choice
             data_params, extra_body_params = self._get_completion_params()
             data.update(data_params)
+            comp = getattr(Util().get_core_metadata(), "completion", None) or {}
+            tools_cfg = getattr(Util().get_core_metadata(), "tools_config", None) or {}
+            qwen_model = self._get_qwen_model()
+            if tools:
+                if qwen_model in ("qwen3", "qwen35"):
+                    tool_temp = comp.get("tool_temperature") or tools_cfg.get("tool_temperature") or 0.1
+                    try:
+                        data["temperature"] = float(tool_temp)
+                    except (TypeError, ValueError):
+                        pass
+                    if mtype in ("local", "ollama"):
+                        eb = data.setdefault("extra_body", {})
+                        eb["chat_template_kwargs"] = {"enable_thinking": False}
+                        eb["enable_thinking"] = False
+                else:
+                    tool_temp = comp.get("tool_temperature") or tools_cfg.get("tool_temperature")
+                    if tool_temp is not None:
+                        try:
+                            data["temperature"] = float(tool_temp)
+                        except (TypeError, ValueError):
+                            pass
+                    disable_thinking = comp.get("disable_thinking_when_tools") or tools_cfg.get("disable_thinking_when_tools")
+                    if disable_thinking and mtype in ("local", "ollama"):
+                        eb = data.setdefault("extra_body", {})
+                        eb["chat_template_kwargs"] = {"enable_thinking": False}
+                        eb["enable_thinking"] = False
+                if qwen_model == "qwen35":
+                    data["presence_penalty"] = 1.5
+                    stop_raw = data.get("stop")
+                    if isinstance(stop_raw, list):
+                        stop = [str(x) for x in stop_raw]
+                    else:
+                        stop = [str(stop_raw)] if stop_raw is not None else []
+                    for s in ("</think>", "</tool_call>"):
+                        if s not in stop:
+                            stop.append(s)
+                    data["stop"] = stop
             extra_body_params = self._filter_extra_body_for_model(extra_body_params, model_for_request)
             if extra_body_params:
                 data.setdefault("extra_body", {}).update(extra_body_params)
             data_json = json.dumps(data, ensure_ascii=False) if self.is_utf8_compatible(data) else json.dumps(data, ensure_ascii=False).encode("utf-8")
             chat_completion_api_url = "http://" + model_host + ":" + str(model_port) + "/v1/chat/completions"
             meta = Util().get_core_metadata()
-            timeout_sec = max(60, int(getattr(meta, 'llm_completion_timeout_seconds', 300) or 300))
+            _raw = getattr(meta, 'llm_completion_timeout_seconds', 300)
+            _raw = 300 if _raw is None else int(_raw)
+            timeout_sec = None if _raw == 0 else max(60, _raw)  # 0 = no timeout (use with care)
             timeout = aiohttp.ClientTimeout(total=timeout_sec)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(chat_completion_api_url, headers=headers, data=data_json) as resp:
@@ -1368,7 +1497,7 @@ class Util:
                         if not (content_val and str(content_val).strip()):
                             finish = choice0.get("finish_reason", "")
                             logger.debug(
-                                "Local LLM returned empty content ({}:{}). finish_reason=%s message_keys=%s usage=%s",
+                                "Local LLM returned empty content ({}:{}). finish_reason={} message_keys={} usage={}",
                                 model_host, model_port,
                                 finish,
                                 list(msg.keys()) if isinstance(msg, dict) else "?",
@@ -1426,11 +1555,22 @@ class Util:
                         setattr(self, "_last_llm_error", "The model returned no valid response. Check Core logs.")
                     return None
         except asyncio.TimeoutError:
-            logger.warning("LLM chat completion timed out after {}s ({}:{})", timeout_sec, model_host, model_port)
+            logger.warning(
+                "LLM chat completion timed out after {}s ({}:{})",
+                timeout_sec if timeout_sec is not None else "(no limit)",
+                model_host,
+                model_port,
+            )
             try:
-                setattr(self, "_last_llm_error", "Request timed out ({}s). Try again or increase llm_completion_timeout_seconds in config.".format(timeout_sec))
+                setattr(
+                    self,
+                    "_last_llm_error",
+                    "Request timed out ({}s). Try again or increase llm_completion_timeout_seconds in config (0 = no timeout).".format(
+                        timeout_sec if timeout_sec is not None else "no limit"
+                    ),
+                )
             except Exception:
-                setattr(self, "_last_llm_error", "Request timed out. Try again or increase llm_completion_timeout_seconds in config.")
+                setattr(self, "_last_llm_error", "Request timed out. Try again or increase llm_completion_timeout_seconds in config (0 = no timeout).")
             return None
         except asyncio.CancelledError:
             logger.info("LLM chat completion was cancelled (e.g. client disconnected)")

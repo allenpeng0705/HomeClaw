@@ -864,6 +864,29 @@ async def answer_from_memory(
                             "tool": "run_skill",
                             "arguments": {"skill_name": folder, "script": str(auto_invoke["script"]).strip(), "args": args},
                         })
+                # Built-in "list folder" intent: when user asks for local files/folders (e.g. "list documents", "list images", "what files in X"),
+                # add folder_list to force_include_auto_invoke. Images are files; "list images" = list the images folder, same as "list documents".
+                # We use fallbacks as little as possible; when intent is clearly local files, we only run folder_list/file_find (no web_search).
+                _list_folder_phrases = (
+                    "documents folder", "files in documents", "what files in", "in the documents", "list documents",
+                    "list file", "list files", "list directory", "list folder", "what's in my", "files in my",
+                    "folder content", "folder list", "目录", "哪些文件", "列出文件", "目录下", "有什么文件", "文件列表",
+                    "list images", "search images", "image files", "图片", "列出图片", "搜索图片", "我的图片", "local images", "my images",
+                )
+                _q_lo = (query or "").strip().lower()
+                _q_raw = (query or "").strip()
+                if any((p in _q_lo if p.isascii() else p in _q_raw) for p in _list_folder_phrases):
+                    _sandbox_subdirs = ("documents", "downloads", "output", "images", "work", "knowledge", "share")
+                    _inferred_path = "."
+                    for _key in _sandbox_subdirs:
+                        if _key in _q_lo or _key in _q_raw:
+                            _inferred_path = _key
+                            break
+                    force_include_auto_invoke.append({
+                        "tool": "folder_list",
+                        "arguments": {"path": _inferred_path},
+                        "always_run": True,
+                    })
                 if use_vector_search:
                     skills_max = max(0, int(getattr(meta_skills, "skills_max_in_prompt", 5) or 5))
                     if skills_max > 0 and len(skills_list) > skills_max:
@@ -1147,9 +1170,29 @@ async def answer_from_memory(
                     return s[:desc_max] if desc_max > 0 else s
                 plugin_lines = [f"  - {p.get('id', '') or 'plugin'}: {_desc(p.get('description'))}" for p in plugin_list]
             _req_time_24 = getattr(core, "_request_current_time_24", "") or ""
+            # Qwen: qwen_model "qwen3" or "qwen35" (or legacy qwen3_tool_format_instruction) -> <tool_call> format + NO_TOOL_REQUIRED. Qwen 3.5 uses its own block and optional grammar.
+            tool_format_line = ""
+            try:
+                tools_cfg = getattr(Util().get_core_metadata(), "tools_config", None) or {}
+                comp = getattr(Util().get_core_metadata(), "completion", None) or {}
+                qwen_model = Util._get_qwen_model()
+                qwen3_style = qwen_model in ("qwen3", "qwen35") or tools_cfg.get("qwen3_tool_format_instruction", False) or (not qwen_model and (tools_cfg.get("qwen3_mode") or comp.get("qwen3_mode")))
+                if qwen_model == "qwen35":
+                    tool_format_line = (
+                        "<tools> Output only a single tool call per turn. Use exactly: <tool_call>{\"name\": \"tool_name\", \"arguments\": {...}}</tool_call>. "
+                        "If NO tool matches the user's intent, respond with NO_TOOL_REQUIRED. Do not invent parameters. No <think> or conversational text.</tools>\n"
+                    )
+                elif qwen3_style:
+                    tool_format_line = (
+                        "Tool calls: use exactly <tool_call>{\"name\": \"tool_name\", \"arguments\": {...}}</tool_call>. "
+                        "If NO tool matches the user's intent, respond with NO_TOOL_REQUIRED. Do not invent or guess parameters for tools that do not fit.\n"
+                    )
+            except Exception:
+                pass
             routing_block = (
                 "## Routing (choose one)\n"
-                "Do NOT use route_to_tam for: opening URLs, listing nodes, canvas, camera/video on a node, or any non-scheduling request. Use route_to_plugin for those.\n"
+                + tool_format_line
+                + "Do NOT use route_to_tam for: opening URLs, listing nodes, canvas, camera/video on a node, or any non-scheduling request. Use route_to_plugin for those.\n"
                 "Recording a video or taking a photo on a node (e.g. \"record video on test-node-1\", \"take a photo on test-node-1\") -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_camera_clip or node_camera_snap, parameters={\"node_id\": \"<node_id>\"}; for clip add duration and includeAudio). Do NOT use browser_navigate for node ids; test-node-1 is a node id, not a URL.\n"
                 "Opening a URL in a browser (real web URLs only, e.g. https://example.com) -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=browser_navigate, parameters={\"url\": \"<URL>\"}). Node ids like test-node-1 are NOT URLs.\n"
                 "Listing connected nodes or \"what nodes are connected\" -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_list).\n"
@@ -1260,10 +1303,16 @@ async def answer_from_memory(
                             current_flush = list(flush_input)
                             meta_flush = Util().get_core_metadata()
                             tool_timeout_flush = max(0, int(getattr(meta_flush, "tool_timeout_seconds", 120) or 0))
+                            _flush_grammar = None
+                            try:
+                                if all_tools_flush and Util._get_qwen_model() == "qwen35":
+                                    _flush_grammar = Util.get_qwen35_grammar()
+                            except Exception:
+                                pass
                             for _round in range(10):
                                 try:
                                     msg_flush = await Util().openai_chat_completion_message(
-                                        current_flush, tools=all_tools_flush, tool_choice="auto", llm_name=effective_llm_name
+                                        current_flush, tools=all_tools_flush, tool_choice="auto", grammar=_flush_grammar, llm_name=effective_llm_name
                                     )
                                 except Exception as e:
                                     logger.debug("Memory flush LLM call failed: {}", e)
@@ -1436,6 +1485,7 @@ async def answer_from_memory(
                                 "Only these two bases are the search path and working area; their subfolders can be accessed. Any other folder cannot be accessed (sandbox). "
                                 "(1) User sandbox root — omit path or use subdir name; (2) share — path \"share\" or \"share/...\". "
                                 "**User sandbox has these standard folders:** output (generated files, reports, slides), documents, downloads, images, work, knowledge. Use path '' or '.' for root; folder_list(path='documents'), folder_list(path='output'), etc.; use the exact path from the result in document_read or get_file_view_link. "
+                                "**When the user asks for a specific folder by name** (e.g. \"what files in documents folder\", \"list documents\", \"what's in my documents\"): call folder_list(path='documents') (or the folder they said: documents, downloads, output, images, work, knowledge, share). Do NOT use path '.' or omit path — that lists the sandbox root; use the folder name they asked for. "
                                 "**Do not invent or fabricate file names, file paths, or URLs** to complete tasks. Use only: (a) values returned by your tool calls (e.g. path from folder_list, file_find), (b) the exact filename or path the user mentioned (e.g. 1.pdf), (c) links returned by save_result_page or get_file_view_link. If you need a path or URL, call the appropriate tool first and use its result. "
                                 "**Never use absolute paths** (e.g. /mnt/, C:\\, /Users/). Use only relative paths under the sandbox: the filename (e.g. 1.pdf) or the path from folder_list/file_find. "
                                 "Do not use workspace, config, or paths outside these two trees. Put generated files in output/ (path \"output/filename\") and return the link. "
@@ -1445,8 +1495,8 @@ async def answer_from_memory(
                                 "**When folder_list or file_find returns a list,** reply with a short user-friendly numbered list (e.g. \"1. Allen_Peng_resume_en.docx, 2. other.docx\") so the user can say \"file 1\" or \"item 1\"; do not output raw JSON. "
                                 "**Critical:** Each list entry has a **path** field (e.g. documents/1.pdf). Always use that path in document_read(path='...') and get_file_view_link(path='...')—never use only the name (e.g. 1.pdf) if the path is documents/1.pdf, or the file may not be found. "
                                 "folder_list() = list user sandbox; folder_list(path=\"share\") = list share; file_find(pattern=\"*.pdf\") = search user sandbox. "
-                                "To read a file, use **only** the path value from folder_list/file_find in document_read (e.g. path 'documents/1.pdf'). "
-                                "**When the user gives an exact filename** (e.g. \"1.pdf\", \"2.pdf\", \"report.docx\"): use that file — document_read(path='1.pdf') or the path from file_find for that name; do not treat it as \"item 1\" or \"item 2\" from a list. "
+                                "To read a file, use the path from folder_list/file_find in document_read (e.g. path 'documents/1.pdf'), or when the user did not give a path (e.g. \"summarize my resume\", \"the docx file\"): call document_read(path='resume') or document_read(path='filename.docx') — the tool will search the sandbox first and read the file if exactly one match. "
+                                "**When the user gives an exact filename** (e.g. \"1.pdf\", \"report.docx\"): call document_read(path='1.pdf') or document_read(path='report.docx'); the tool will find and read it. Do not treat it as \"item 1\" from a list unless they said \"file 1\" after a list. "
                                 "**When the user refers to an item by ordinal** (e.g. \"file 1\", \"item 1\", \"the first one\", \"number 2\") after you listed files with folder_list or file_find: use the **path** of that position in the list (1 = first, 2 = second, …) in document_read or get_file_view_link — do not ask which file; map the ordinal to the path from your previous result. "
                                 "When the user asks for **HTML slides or PowerPoint/PPT** from a document: use document_read on the file first, then follow the skill instructions (e.g. html-slides or ppt-generation) to generate content and call save_result_page or run_skill; do not reply without calling the tools. "
                                 f"Current homeclaw_root: {base_str}.{paths_json}"
@@ -1477,6 +1527,13 @@ async def answer_from_memory(
             max_tool_rounds = 10
             use_other_model_next_turn = False  # mix mode: when last tool result was error-like, use cloud (or local) for next turn
             last_tool_name = None  # so "no tool_calls" branch can skip remind_me clarifier when we already ran remind_me this turn
+            # Qwen 3.5: when qwen_model == "qwen35" and tools present, pass GBNF grammar to force <tool_call> output only
+            _qwen35_grammar = None
+            try:
+                if openai_tools and Util._get_qwen_model() == "qwen35":
+                    _qwen35_grammar = Util.get_qwen35_grammar()
+            except Exception:
+                pass
             for _ in range(max_tool_rounds):
                 llm_name_this_turn = effective_llm_name
                 if use_other_model_next_turn and mix_route_this_request:
@@ -1509,7 +1566,7 @@ async def answer_from_memory(
                 logger.debug("LLM call started (tools={})", "yes" if openai_tools else "no")
                 try:
                     msg = await Util().openai_chat_completion_message(
-                        current_messages, tools=openai_tools, tool_choice="auto", llm_name=llm_name_this_turn
+                        current_messages, tools=openai_tools, tool_choice="auto", grammar=_qwen35_grammar, llm_name=llm_name_this_turn
                     )
                 except Exception as e:
                     logger.warning("LLM call failed (will try fallback if available): {}", e)
@@ -1536,7 +1593,7 @@ async def answer_from_memory(
                             _component_log("mix", f"first model failed, retrying with {other_route} ({other_llm})")
                             try:
                                 msg = await Util().openai_chat_completion_message(
-                                    current_messages, tools=openai_tools, tool_choice="auto", llm_name=other_llm
+                                    current_messages, tools=openai_tools, tool_choice="auto", grammar=_qwen35_grammar, llm_name=other_llm
                                 )
                                 if msg is not None:
                                     mix_route_this_request = other_route
@@ -1565,22 +1622,48 @@ async def answer_from_memory(
                     else:
                         # Default: use LLM's reply so we never leave response unset (e.g. simple "你好" -> friendly reply)
                         response = content_str if (content_str and content_str.strip()) else None
-                        # Fallback: model didn't call a tool. When we have force_include_auto_invoke (user query matched a rule, e.g. "create an image"), always run it so the skill runs and we return real output instead of model hallucination (e.g. fake "Image saved"). Otherwise run only when the reply looks unhelpful (e.g. "no tool available").
-                        content_lower = (content_str or "").strip().lower()
-                        unhelpful_for_auto_invoke = (
-                            not content_str or len(content_str) < 100
-                            or any(phrase in content_lower for phrase in (
-                                "no tool", "don't have", "doesn't have", "not have", "not available", "no image tool", "no such tool",
-                                "can't generate", "cannot generate", "i'm sorry", "i cannot",
-                                "stderr:", "modulenotfounderror", "traceback", "no module named",
-                                "error occurred while generating", "error while generating", "please try again",
-                            ))
-                        )
-                        # Only run force_include when reply is unhelpful, or the rule has always_run (e.g. image generation). Otherwise we would overwrite a good answer (e.g. file_find image list) with web_search.
-                        any_always_run = any(inv.get("always_run") for inv in (force_include_auto_invoke or []) if isinstance(inv, dict))
-                        run_force_include = bool(force_include_auto_invoke and registry and (unhelpful_for_auto_invoke or any_always_run))
-                        _component_log("tools", "model returned no tool_calls; unhelpful=%s auto_invoke_count=%s run_force_include=%s" % (unhelpful_for_auto_invoke, len(force_include_auto_invoke or []), run_force_include))
-                        # Log when user clearly asked for scheduling but model didn't call any tool — so we can see TAM did not set a schedule (applies to all friends including Reminder).
+                        # When model returned empty after we ran file_find/folder_list, show the list so the user sees the files (e.g. "list images" -> file_find ran but second LLM returned empty).
+                        if (not response or not str(response).strip()) and last_tool_name in ("file_find", "folder_list") and last_tool_result_raw and isinstance(last_tool_result_raw, str):
+                            try:
+                                entries = json.loads(last_tool_result_raw)
+                                if isinstance(entries, list) and entries:
+                                    lines = []
+                                    for e in entries:
+                                        if not isinstance(e, dict) or e.get("path") == "(truncated)":
+                                            continue
+                                        name = e.get("name") or e.get("path") or "?"
+                                        p = (e.get("path") or "").strip()
+                                        if p and p != name and "/" in str(p):
+                                            lines.append(f"- {name} ({e.get('type', 'file')}) — path: {p}")
+                                        else:
+                                            lines.append(f"- {name} ({e.get('type', 'file')})" + (f" — path: {p}" if p else ""))
+                                    if lines:
+                                        header = "找到的文件 / Files found:\n" if last_tool_name == "file_find" else "目录下的内容 / Folder contents:\n"
+                                        response = header + "\n".join(lines)
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                        # When strict_fallback is true (default): do not auto-invoke any tool; let the model drive decisions. Only use model reply or prior tool result (above).
+                        meta_tools = Util().get_core_metadata()
+                        tools_cfg = getattr(meta_tools, "tools_config", None) or {}
+                        _strict_fallback = bool(tools_cfg.get("strict_fallback", True))
+                        if not _strict_fallback:
+                            # Legacy fallbacks: only when strict_fallback is false (opt-in).
+                            content_lower = (content_str or "").strip().lower()
+                            unhelpful_for_auto_invoke = (
+                                not content_str or len(content_str) < 100
+                                or any(phrase in content_lower for phrase in (
+                                    "no tool", "don't have", "doesn't have", "not have", "not available", "no image tool", "no such tool",
+                                    "can't generate", "cannot generate", "i'm sorry", "i cannot",
+                                    "stderr:", "modulenotfounderror", "traceback", "no module named",
+                                    "error occurred while generating", "error while generating", "please try again",
+                                ))
+                            )
+                            any_always_run = any(inv.get("always_run") for inv in (force_include_auto_invoke or []) if isinstance(inv, dict))
+                            run_force_include = bool(force_include_auto_invoke and registry and (unhelpful_for_auto_invoke or any_always_run))
+                            _component_log("tools", "model returned no tool_calls; unhelpful={} auto_invoke_count={} run_force_include={}".format(unhelpful_for_auto_invoke, len(force_include_auto_invoke or []), run_force_include))
+                        else:
+                            run_force_include = False
+                        # Log when user clearly asked for scheduling but model didn't call any tool (informational only; no auto-invoke when strict_fallback).
                         if isinstance(query, str) and _query_looks_like_scheduling(query) and registry:
                             try:
                                 _tool_names = [getattr(t, "name", None) for t in (registry.list_tools() or []) if getattr(t, "name", None)]
@@ -1590,251 +1673,51 @@ async def answer_from_memory(
                                     )
                             except Exception:
                                 pass
-                        # When we have force-include auto_invoke (e.g. image rule), always run it so the skill runs and we return real output instead of model hallucination
-                        if run_force_include:
-                            ran = False
-                            for inv in (force_include_auto_invoke or []):
-                                if not isinstance(inv, dict):
-                                    continue
-                                tname = inv.get("tool") or ""
-                                targs = inv.get("arguments") or {}
-                                if not tname or not isinstance(targs, dict):
-                                    continue
-                                if not any(t.name == tname for t in (registry.list_tools() or [])):
-                                    continue
-                                try:
-                                    _component_log("tools", f"fallback auto_invoke {tname} (model did not call tool)")
-                                    if tname == "run_skill":
-                                        _component_log("tools", "executing run_skill (in_process from run_skill_py_in_process_skills if listed)")
-                                    result = await registry.execute_async(tname, targs, context)
-                                    if result == ROUTING_RESPONSE_ALREADY_SENT:
-                                        return ROUTING_RESPONSE_ALREADY_SENT
-                                    if isinstance(result, str) and result.strip():
-                                        # Format folder_list/file_find JSON as user-friendly text so the user does not see raw JSON
-                                        if tname in ("folder_list", "file_find"):
-                                            try:
-                                                entries = json.loads(result)
-                                                if isinstance(entries, list):
-                                                    lines = []
-                                                    for e in entries:
-                                                        if not isinstance(e, dict) or e.get("path") == "(truncated)":
-                                                            continue
-                                                        name = e.get("name") or e.get("path") or "?"
-                                                        p = (e.get("path") or "").strip()
-                                                        if p and p != name and "/" in p:
-                                                            lines.append(f"- {name} ({e.get('type', '?')}) — path: {p}")
-                                                        else:
-                                                            lines.append(f"- {name} ({e.get('type', '?')})" + (f" — path: {p}" if p else ""))
-                                                    header = "目录下的内容：\n" if tname == "folder_list" else "找到的文件：\n"
-                                                    response = header + "\n".join(lines) if lines else ("目录为空。" if tname == "folder_list" else "无匹配文件。")
-                                                else:
-                                                    response = result
-                                            except (json.JSONDecodeError, TypeError):
-                                                response = result
-                                        elif (result.strip() == "(no output)" or not result.strip()) and (content_str or "").strip():
-                                            # General rule: auto_invoke tool returned empty/placeholder; keep model's existing reply instead of replacing with "(no output)"
-                                            response = content_str.strip()
-                                        else:
-                                            response = result
-                                        ran = True
-                                    break
-                                except Exception as e:
-                                    logger.debug("Fallback auto_invoke {} failed: {}", tname, e)
-                            if not ran:
-                                response = content_str
-                        else:
-                            # Fallback: model didn't call a tool. Check remind_me first (e.g. "15分钟后有个会能提醒一下吗") so we set the reminder and return a clean response instead of messy 2:49 text.
-                            try:
-                                remind_fallback = _infer_remind_me_fallback(query) if query else None
-                            except Exception:
-                                remind_fallback = None
-                            _remind_me_ask_generic = "您希望什么时候提醒？例如：「15分钟后」或「下午3点」。 When would you like to be reminded? E.g. in 15 minutes or at 3:00 PM."
-                            def _remind_me_ask_message():
-                                try:
-                                    q = _remind_me_clarification_question(query) if query else None
-                                    out = (q or _remind_me_ask_generic) or ""
-                                    return str(out).strip()
-                                except Exception:
-                                    return str(_remind_me_ask_generic).strip()
-                            _has_remind_me = False
-                            try:
-                                if registry:
-                                    _tools = registry.list_tools() or []
-                                    _has_remind_me = any(getattr(t, "name", None) == "remind_me" for t in _tools)
-                            except Exception:
-                                pass
-                            if remind_fallback and isinstance(remind_fallback, dict) and _has_remind_me and last_tool_name != "remind_me":
-                                try:
-                                    _component_log("tools", "fallback remind_me (model did not call tool)")
-                                    _args = remind_fallback.get("arguments") if isinstance(remind_fallback.get("arguments"), dict) else {}
-                                    result = await registry.execute_async("remind_me", _args, context)
-                                    if isinstance(result, str) and result.strip():
-                                        if "provide either minutes" in result or "at_time" in result:
-                                            response = _remind_me_ask_message()
-                                        else:
-                                            # If remind_me is in needs_llm_tools, do a second LLM round so the model synthesizes a proper reply (don't trust 1st LLM content when it didn't call the tool).
-                                            meta = Util().get_core_metadata()
-                                            use_result_config = (getattr(meta, "tools_config", None) or {}).get("use_result_as_response") if meta else None
-                                            if not _tool_result_usable_as_final_response("remind_me", result, use_result_config, _args):
-                                                tcid = "fallback_remind_me_1"
-                                                current_messages.append({
-                                                    "role": "assistant",
-                                                    "content": "",
-                                                    "tool_calls": [{
-                                                        "id": tcid,
-                                                        "type": "function",
-                                                        "function": {"name": "remind_me", "arguments": json.dumps(_args)},
-                                                    }],
-                                                })
-                                                current_messages.append({"role": "tool", "tool_call_id": tcid, "content": result})
-                                                last_tool_name = "remind_me"
-                                                last_tool_result_raw = result
-                                                last_tool_args = _args
-                                                continue
-                                            response = result
-                                            if mix_route_this_request and mix_show_route_label:
-                                                layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
-                                                label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
-                                                response = label + (_strip_leading_route_label(response or "") or "")
-                                    else:
-                                        response = content_str or "Reminder set."
-                                except Exception as e:
-                                    logger.debug("Fallback remind_me failed: {}", e)
-                                    response = _remind_me_ask_message()
-                            elif _has_remind_me and last_tool_name != "remind_me":
-                                # Only ask for clarification when we did not already run remind_me this turn (otherwise use LLM's reply)
-                                try:
-                                    if _remind_me_needs_clarification(query):
-                                        response = _remind_me_ask_message()
-                                except Exception:
-                                    pass
-                            # When model didn't call any tool and query looks like recurring (e.g. "every day at 9"), try cron_schedule fallback so the reminder is actually set. Never crash.
-                            if (response is None or response == content_str) and isinstance(query, str) and query.strip() and _query_looks_like_scheduling(query.strip()):
-                                try:
-                                    cron_fallback = _infer_cron_schedule_fallback(query)
-                                    _tools_list = (registry.list_tools() or []) if registry else []
-                                    _has_cron = any(getattr(t, "name", None) == "cron_schedule" for t in _tools_list)
-                                    if cron_fallback and isinstance(cron_fallback.get("arguments"), dict) and registry and _has_cron and last_tool_name != "cron_schedule":
-                                        _component_log("tools", "fallback cron_schedule (model did not call tool)")
-                                        _cargs = cron_fallback.get("arguments") or {}
-                                        result = await registry.execute_async("cron_schedule", _cargs, context)
-                                        if isinstance(result, str) and result.strip() and "Error:" not in result:
-                                            response = result
-                                except Exception as e:
-                                    logger.debug("Fallback cron_schedule failed: {}", e)
-                            if response is None or response == content_str:
-                                # Fallback: model didn't call a tool (e.g. replied "No"). If user intent is clear, run plugin or run_skill anyway.
-                                unhelpful = not content_str or len(content_str) < 80 or content_str.strip().lower() in ("no", "i can't", "i cannot", "sorry", "nope")
-                                fallback_route = _infer_route_to_plugin_fallback(query) if unhelpful else None
-                                if isinstance(fallback_route, dict) and fallback_route and registry:
-                                    tool_names = [t.name for t in (registry.list_tools() or [])]
-                                    if fallback_route.get("tool") == "run_skill" and "run_skill" in tool_names:
-                                        try:
-                                            _component_log("tools", "fallback run_skill (model did not call tool)")
-                                            args = fallback_route.get("arguments") if isinstance(fallback_route.get("arguments"), dict) else {}
-                                            result = await registry.execute_async("run_skill", args or {}, context)
-                                            if isinstance(result, str) and result.strip():
-                                                response = result
-                                            else:
-                                                response = content_str or "Done."
-                                        except Exception as e:
-                                            logger.debug("Fallback run_skill failed: {}", e)
-                                            response = content_str or "The action could not be completed. Try a model that supports tool calling."
-                                    elif "route_to_plugin" in tool_names:
-                                        try:
-                                            _component_log("tools", "fallback route_to_plugin (model did not call tool)")
-                                            result = await registry.execute_async("route_to_plugin", fallback_route, context)
-                                            if result == ROUTING_RESPONSE_ALREADY_SENT:
-                                                return ROUTING_RESPONSE_ALREADY_SENT
-                                            if isinstance(result, str) and result.strip():
-                                                response = result
-                                            else:
-                                                response = content_str or "Done."
-                                        except Exception as e:
-                                            logger.debug("Fallback route_to_plugin failed: {}", e)
-                                            response = content_str or "The action could not be completed. Try a model that supports tool calling."
-                                elif (
-                                    registry
-                                    and any(t.name == "file_find" for t in (registry.list_tools() or []))
-                                    and any(t.name == "document_read" for t in (registry.list_tools() or []))
-                                    and "summarize" in (query or "").lower()
-                                    and (".pdf" in (query or "") or ".docx" in (query or ""))
-                                    and not (content_str and ("/files/out?" in content_str or "已生成" in content_str or "generated" in content_str.lower() or "链接" in content_str or "view link" in content_str.lower()))
-                                ):
-                                    # Fallback: user asked to summarize a document but model didn't call file_find/document_read. Skip if model already returned a success (link or "generated").
+                        if not _strict_fallback:
+                            if isinstance(query, str) and force_include_auto_invoke and any(
+                                inv.get("tool") == "folder_list" for inv in (force_include_auto_invoke or []) if isinstance(inv, dict)
+                            ):
+                                logger.info(
+                                    "User asked to list a folder (e.g. 'what files in documents folder') but model returned no tool_calls; running folder_list via force_include (local models often omit tool calls)."
+                                )
+                            if run_force_include:
+                                _local_file_phrases = (
+                                    "list images", "search images", "image files", "list file", "list files", "list directory", "list folder",
+                                    "documents folder", "files in documents", "what files in", "folder list", "files in my", "what's in my",
+                                    "目录", "哪些文件", "列出文件", "文件列表", "图片", "列出图片", "搜索图片", "我的图片", "local images", "my images",
+                                )
+                                _q_lo_fi = (query or "").strip().lower()
+                                _q_raw_fi = (query or "").strip()
+                                _local_file_intent = any((p in _q_lo_fi if p.isascii() else p in _q_raw_fi) for p in _local_file_phrases)
+                                ran = False
+                                for inv in (force_include_auto_invoke or []):
+                                    if not isinstance(inv, dict):
+                                        continue
+                                    tname = inv.get("tool") or ""
+                                    targs = inv.get("arguments") or {}
+                                    if not tname or not isinstance(targs, dict):
+                                        continue
+                                    if not any(t.name == tname for t in (registry.list_tools() or [])):
+                                        continue
+                                    # When user clearly asked for local files, only run folder_list or file_find; skip run_skill/route_to_plugin so we don't run web search.
+                                    if _local_file_intent and tname not in ("folder_list", "file_find"):
+                                        continue
                                     try:
-                                        _component_log("tools", "fallback summarize document (model did not call tool)")
-                                        ext = ".pdf" if ".pdf" in (query or "") else ".docx"
-                                        pattern = "*" + ext
-                                        roots = [(".", "")]
-                                        if "share" in (query or "").lower():
-                                            roots.append(("share", "share/"))
-                                        files = []
-                                        for path_arg, prefix in roots:
-                                            find_result = await registry.execute_async("file_find", {"path": path_arg, "pattern": pattern}, context)
-                                            if isinstance(find_result, str) and find_result.strip():
-                                                try:
-                                                    entries = json.loads(find_result)
-                                                    if isinstance(entries, list):
-                                                        for e in entries:
-                                                            if isinstance(e, dict) and e.get("type") == "file":
-                                                                p = (e.get("path") or "").strip()
-                                                                if p and p != "(truncated)":
-                                                                    files.append({"path": prefix + p, "name": (e.get("name") or "").strip()})
-                                                except (json.JSONDecodeError, TypeError):
-                                                    pass
-                                        doc_path = None
-                                        if len(files) == 1:
-                                            doc_path = files[0]["path"]
-                                        elif files:
-                                            q_lower = (query or "").lower()
-                                            best = max(
-                                                files,
-                                                key=lambda e: sum(1 for w in q_lower.replace(".", " ").split() if len(w) > 2 and w in (e.get("name") or "").lower()),
-                                            )
-                                            doc_path = best["path"]
-                                        if doc_path:
-                                            doc_content = await registry.execute_async("document_read", {"path": doc_path}, context)
-                                            if isinstance(doc_content, str) and doc_content.strip() and "not found" not in doc_content.lower() and "error" not in doc_content.lower():
-                                                summary_messages = [
-                                                    {"role": "user", "content": (
-                                                        f"The user asked: {query}\n\n"
-                                                        "Provide a concise summary of the following document. Do not invent content; base your summary only on the text below.\n\n"
-                                                        "---\n\n" + (doc_content[:120000] if len(doc_content) > 120000 else doc_content)
-                                                    )},
-                                                ]
-                                                response = await core.openai_chat_completion(summary_messages, llm_name=effective_llm_name)
-                                                if not (response or (response and response.strip())):
-                                                    response = "I read the document but could not generate a summary. You can ask for a specific section."
-                                            else:
-                                                response = content_str or "Could not read the document. It may be empty or in an unsupported format."
-                                        else:
-                                            response = content_str or "No matching PDF or document found in your private folder. Try listing files with folder_list or use a more specific filename. Say 'share folder' if the file is in the shared folder."
-                                    except Exception as e:
-                                        logger.debug("Fallback summarize document failed: {}", e)
-                                        response = content_str or "Could not find or summarize the document. Please try again."
-                                else:
-                                    # Fallback: user may have asked to list directory (e.g. 你的目录下都有哪些文件) but model didn't call folder_list (common when local model returns no tool_calls)
-                                    list_dir_phrases = (
-                                        "目录", "哪些文件", "列出文件", "目录下", "列出", "有什么文件", "文件列表", "我的文件", "看看文件", "显示文件",
-                                        "list file", "list files", "list directory", "list folder", "list content", "what file", "what's in my", "files in my",
-                                        "folder content", "folder list", "file list", "show file", "show files", "show directory", "show folder", "view file", "view directory",
-                                    )
-                                    _query_lower = (query or "").lower()
-                                    _query_raw = query or ""
-                                    if registry and any(t.name == "folder_list" for t in (registry.list_tools() or [])) and any(
-                                        (p in _query_lower if p.isascii() else p in _query_raw) for p in list_dir_phrases
-                                    ):
-                                        try:
-                                            _component_log("tools", "fallback folder_list (model did not call tool)")
-                                            result = await registry.execute_async("folder_list", {"path": "."}, context)
-                                            if isinstance(result, str) and result.strip():
+                                        _component_log("tools", f"fallback auto_invoke {tname} (model did not call tool)")
+                                        if tname == "run_skill":
+                                            _component_log("tools", "executing run_skill (in_process from run_skill_py_in_process_skills if listed)")
+                                        result = await registry.execute_async(tname, targs, context)
+                                        if result == ROUTING_RESPONSE_ALREADY_SENT:
+                                            return ROUTING_RESPONSE_ALREADY_SENT
+                                        if isinstance(result, str) and result.strip():
+                                            # Format folder_list/file_find JSON as user-friendly text so the user does not see raw JSON
+                                            if tname in ("folder_list", "file_find"):
                                                 try:
                                                     entries = json.loads(result)
-                                                    if isinstance(entries, list) and entries:
+                                                    if isinstance(entries, list):
                                                         lines = []
                                                         for e in entries:
-                                                            if not isinstance(e, dict):
+                                                            if not isinstance(e, dict) or e.get("path") == "(truncated)":
                                                                 continue
                                                             name = e.get("name") or e.get("path") or "?"
                                                             p = (e.get("path") or "").strip()
@@ -1842,18 +1725,251 @@ async def answer_from_memory(
                                                                 lines.append(f"- {name} ({e.get('type', '?')}) — path: {p}")
                                                             else:
                                                                 lines.append(f"- {name} ({e.get('type', '?')})" + (f" — path: {p}" if p else ""))
-                                                        response = "目录下的内容：\n" + "\n".join(lines) if lines else result
+                                                        header = "目录下的内容：\n" if tname == "folder_list" else "找到的文件：\n"
+                                                        response = header + "\n".join(lines) if lines else ("目录为空。" if tname == "folder_list" else "无匹配文件。")
                                                     else:
-                                                        response = "目录为空。" if isinstance(entries, list) else result
+                                                        response = result
                                                 except (json.JSONDecodeError, TypeError):
                                                     response = result
+                                            elif (result.strip() == "(no output)" or not result.strip()) and (content_str or "").strip():
+                                                # General rule: auto_invoke tool returned empty/placeholder; keep model's existing reply instead of replacing with "(no output)"
+                                                response = content_str.strip()
                                             else:
-                                                response = content_str or "Directory is empty or could not be listed."
+                                                response = result
+                                            ran = True
+                                        break
+                                    except Exception as e:
+                                        logger.debug("Fallback auto_invoke {} failed: {}", tname, e)
+                                if not ran:
+                                    response = content_str
+                            else:
+                                # Fallback: model didn't call a tool. Check remind_me first (e.g. "15分钟后有个会能提醒一下吗") so we set the reminder and return a clean response instead of messy 2:49 text.
+                                try:
+                                    remind_fallback = _infer_remind_me_fallback(query) if query else None
+                                except Exception:
+                                    remind_fallback = None
+                                _remind_me_ask_generic = "您希望什么时候提醒？例如：「15分钟后」或「下午3点」。 When would you like to be reminded? E.g. in 15 minutes or at 3:00 PM."
+                                def _remind_me_ask_message():
+                                    try:
+                                        q = _remind_me_clarification_question(query) if query else None
+                                        out = (q or _remind_me_ask_generic) or ""
+                                        return str(out).strip()
+                                    except Exception:
+                                        return str(_remind_me_ask_generic).strip()
+                                _has_remind_me = False
+                                try:
+                                    if registry:
+                                        _tools = registry.list_tools() or []
+                                        _has_remind_me = any(getattr(t, "name", None) == "remind_me" for t in _tools)
+                                except Exception:
+                                    pass
+                                if remind_fallback and isinstance(remind_fallback, dict) and _has_remind_me and last_tool_name != "remind_me":
+                                    try:
+                                        _component_log("tools", "fallback remind_me (model did not call tool)")
+                                        _args = remind_fallback.get("arguments") if isinstance(remind_fallback.get("arguments"), dict) else {}
+                                        result = await registry.execute_async("remind_me", _args, context)
+                                        if isinstance(result, str) and result.strip():
+                                            if "provide either minutes" in result or "at_time" in result:
+                                                response = _remind_me_ask_message()
+                                            else:
+                                                # If remind_me is in needs_llm_tools, do a second LLM round so the model synthesizes a proper reply (don't trust 1st LLM content when it didn't call the tool).
+                                                meta = Util().get_core_metadata()
+                                                use_result_config = (getattr(meta, "tools_config", None) or {}).get("use_result_as_response") if meta else None
+                                                if not _tool_result_usable_as_final_response("remind_me", result, use_result_config, _args):
+                                                    tcid = "fallback_remind_me_1"
+                                                    current_messages.append({
+                                                        "role": "assistant",
+                                                        "content": "",
+                                                        "tool_calls": [{
+                                                            "id": tcid,
+                                                            "type": "function",
+                                                            "function": {"name": "remind_me", "arguments": json.dumps(_args)},
+                                                        }],
+                                                    })
+                                                    current_messages.append({"role": "tool", "tool_call_id": tcid, "content": result})
+                                                    last_tool_name = "remind_me"
+                                                    last_tool_result_raw = result
+                                                    last_tool_args = _args
+                                                    continue
+                                                response = result
+                                                if mix_route_this_request and mix_show_route_label:
+                                                    layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
+                                                    label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
+                                                    response = label + (_strip_leading_route_label(response or "") or "")
+                                        else:
+                                            response = content_str or "Reminder set."
+                                    except Exception as e:
+                                        logger.debug("Fallback remind_me failed: {}", e)
+                                        response = _remind_me_ask_message()
+                                elif _has_remind_me and last_tool_name != "remind_me":
+                                    # Only ask for clarification when we did not already run remind_me this turn (otherwise use LLM's reply)
+                                    try:
+                                        if _remind_me_needs_clarification(query):
+                                            response = _remind_me_ask_message()
+                                    except Exception:
+                                        pass
+                                # When model didn't call any tool and query looks like recurring (e.g. "every day at 9"), try cron_schedule fallback so the reminder is actually set. Never crash.
+                                if (response is None or response == content_str) and isinstance(query, str) and query.strip() and _query_looks_like_scheduling(query.strip()):
+                                    try:
+                                        cron_fallback = _infer_cron_schedule_fallback(query)
+                                        _tools_list = (registry.list_tools() or []) if registry else []
+                                        _has_cron = any(getattr(t, "name", None) == "cron_schedule" for t in _tools_list)
+                                        if cron_fallback and isinstance(cron_fallback.get("arguments"), dict) and registry and _has_cron and last_tool_name != "cron_schedule":
+                                            _component_log("tools", "fallback cron_schedule (model did not call tool)")
+                                            _cargs = cron_fallback.get("arguments") or {}
+                                            result = await registry.execute_async("cron_schedule", _cargs, context)
+                                            if isinstance(result, str) and result.strip() and "Error:" not in result:
+                                                response = result
+                                    except Exception as e:
+                                        logger.debug("Fallback cron_schedule failed: {}", e)
+                                if response is None or response == content_str:
+                                    # Fallback: model didn't call a tool. Use as few fallbacks as possible; if no tools, it may really mean no tools.
+                                    unhelpful = not content_str or len(content_str) < 80 or content_str.strip().lower() in ("no", "i can't", "i cannot", "sorry", "nope")
+                                    # Do not run route_to_plugin (e.g. web search) when the user clearly asked for local files/images.
+                                    _local_intent_phrases = (
+                                        "list images", "search images", "image files", "list file", "list files", "list directory", "list folder",
+                                        "documents folder", "files in documents", "what files in", "folder list", "files in my", "目录", "哪些文件", "列出文件", "文件列表", "图片", "列出图片", "搜索图片", "我的图片",
+                                    )
+                                    _ql = (query or "").strip().lower()
+                                    _qr = (query or "").strip()
+                                    _is_local_file_intent = any((p in _ql if p.isascii() else p in _qr) for p in _local_intent_phrases)
+                                    fallback_route = _infer_route_to_plugin_fallback(query) if (unhelpful and not _is_local_file_intent) else None
+                                    if isinstance(fallback_route, dict) and fallback_route and registry:
+                                        tool_names = [t.name for t in (registry.list_tools() or [])]
+                                        if fallback_route.get("tool") == "run_skill" and "run_skill" in tool_names:
+                                            try:
+                                                _component_log("tools", "fallback run_skill (model did not call tool)")
+                                                args = fallback_route.get("arguments") if isinstance(fallback_route.get("arguments"), dict) else {}
+                                                result = await registry.execute_async("run_skill", args or {}, context)
+                                                if isinstance(result, str) and result.strip():
+                                                    response = result
+                                                else:
+                                                    response = content_str or "Done."
+                                            except Exception as e:
+                                                logger.debug("Fallback run_skill failed: {}", e)
+                                                response = content_str or "The action could not be completed. Try a model that supports tool calling."
+                                        elif "route_to_plugin" in tool_names:
+                                            try:
+                                                _component_log("tools", "fallback route_to_plugin (model did not call tool)")
+                                                result = await registry.execute_async("route_to_plugin", fallback_route, context)
+                                                if result == ROUTING_RESPONSE_ALREADY_SENT:
+                                                    return ROUTING_RESPONSE_ALREADY_SENT
+                                                if isinstance(result, str) and result.strip():
+                                                    response = result
+                                                else:
+                                                    response = content_str or "Done."
+                                            except Exception as e:
+                                                logger.debug("Fallback route_to_plugin failed: {}", e)
+                                                response = content_str or "The action could not be completed. Try a model that supports tool calling."
+                                    elif (
+                                        registry
+                                        and any(t.name == "file_find" for t in (registry.list_tools() or []))
+                                        and any(t.name == "document_read" for t in (registry.list_tools() or []))
+                                        and "summarize" in (query or "").lower()
+                                        and (".pdf" in (query or "") or ".docx" in (query or ""))
+                                        and not (content_str and ("/files/out?" in content_str or "已生成" in content_str or "generated" in content_str.lower() or "链接" in content_str or "view link" in content_str.lower()))
+                                    ):
+                                        # Fallback: user asked to summarize a document but model didn't call file_find/document_read. Skip if model already returned a success (link or "generated").
+                                        try:
+                                            _component_log("tools", "fallback summarize document (model did not call tool)")
+                                            ext = ".pdf" if ".pdf" in (query or "") else ".docx"
+                                            pattern = "*" + ext
+                                            roots = [(".", "")]
+                                            if "share" in (query or "").lower():
+                                                roots.append(("share", "share/"))
+                                            files = []
+                                            for path_arg, prefix in roots:
+                                                find_result = await registry.execute_async("file_find", {"path": path_arg, "pattern": pattern}, context)
+                                                if isinstance(find_result, str) and find_result.strip():
+                                                    try:
+                                                        entries = json.loads(find_result)
+                                                        if isinstance(entries, list):
+                                                            for e in entries:
+                                                                if isinstance(e, dict) and e.get("type") == "file":
+                                                                    p = (e.get("path") or "").strip()
+                                                                    if p and p != "(truncated)":
+                                                                        files.append({"path": prefix + p, "name": (e.get("name") or "").strip()})
+                                                    except (json.JSONDecodeError, TypeError):
+                                                        pass
+                                            doc_path = None
+                                            if len(files) == 1:
+                                                doc_path = files[0]["path"]
+                                            elif files:
+                                                q_lower = (query or "").lower()
+                                                best = max(
+                                                    files,
+                                                    key=lambda e: sum(1 for w in q_lower.replace(".", " ").split() if len(w) > 2 and w in (e.get("name") or "").lower()),
+                                                )
+                                                doc_path = best["path"]
+                                            if doc_path:
+                                                doc_content = await registry.execute_async("document_read", {"path": doc_path}, context)
+                                                if isinstance(doc_content, str) and doc_content.strip() and "not found" not in doc_content.lower() and "error" not in doc_content.lower():
+                                                    summary_messages = [
+                                                        {"role": "user", "content": (
+                                                            f"The user asked: {query}\n\n"
+                                                            "Provide a concise summary of the following document. Do not invent content; base your summary only on the text below.\n\n"
+                                                            "---\n\n" + (doc_content[:120000] if len(doc_content) > 120000 else doc_content)
+                                                        )},
+                                                    ]
+                                                    response = await core.openai_chat_completion(summary_messages, llm_name=effective_llm_name)
+                                                    if not (response or (response and response.strip())):
+                                                        response = "I read the document but could not generate a summary. You can ask for a specific section."
+                                                else:
+                                                    response = content_str or "Could not read the document. It may be empty or in an unsupported format."
+                                            else:
+                                                response = content_str or "No matching PDF or document found in your private folder. Try listing files with folder_list or use a more specific filename. Say 'share folder' if the file is in the shared folder."
                                         except Exception as e:
-                                            logger.debug("Fallback folder_list failed: {}", e)
-                                            response = content_str or "Could not list directory. Please try again."
+                                            logger.debug("Fallback summarize document failed: {}", e)
+                                            response = content_str or "Could not find or summarize the document. Please try again."
                                     else:
-                                        response = content_str
+                                        # Fallback: user may have asked to list directory (e.g. 你的目录下都有哪些文件) but model didn't call folder_list (common when local model returns no tool_calls)
+                                        list_dir_phrases = (
+                                            "目录", "哪些文件", "列出文件", "目录下", "列出", "有什么文件", "文件列表", "我的文件", "看看文件", "显示文件",
+                                            "list file", "list files", "list directory", "list folder", "list content", "what file", "what's in my", "files in my",
+                                            "folder content", "folder list", "file list", "show file", "show files", "show directory", "show folder", "view file", "view directory",
+                                            "files in documents", "documents folder", "what files in", "in the documents", "in documents",
+                                        )
+                                        _query_lower = (query or "").lower()
+                                        _query_raw = query or ""
+                                        if registry and any(t.name == "folder_list" for t in (registry.list_tools() or [])) and any(
+                                            (p in _query_lower if p.isascii() else p in _query_raw) for p in list_dir_phrases
+                                        ):
+                                            # Infer subfolder from query so "documents folder" / "files in documents" list documents/, not root
+                                            _fallback_path = "."
+                                            _sandbox_subdirs = ("documents", "downloads", "output", "images", "work", "knowledge", "share")
+                                            for _key in _sandbox_subdirs:
+                                                if _key in _query_lower or _key in _query_raw:
+                                                    _fallback_path = _key
+                                                    break
+                                            try:
+                                                _component_log("tools", "fallback folder_list (model did not call tool)")
+                                                result = await registry.execute_async("folder_list", {"path": _fallback_path}, context)
+                                                if isinstance(result, str) and result.strip():
+                                                    try:
+                                                        entries = json.loads(result)
+                                                        if isinstance(entries, list) and entries:
+                                                            lines = []
+                                                            for e in entries:
+                                                                if not isinstance(e, dict):
+                                                                    continue
+                                                                name = e.get("name") or e.get("path") or "?"
+                                                                p = (e.get("path") or "").strip()
+                                                                if p and p != name and "/" in p:
+                                                                    lines.append(f"- {name} ({e.get('type', '?')}) — path: {p}")
+                                                                else:
+                                                                    lines.append(f"- {name} ({e.get('type', '?')})" + (f" — path: {p}" if p else ""))
+                                                            response = "目录下的内容：\n" + "\n".join(lines) if lines else result
+                                                        else:
+                                                            response = "目录为空。" if isinstance(entries, list) else result
+                                                    except (json.JSONDecodeError, TypeError):
+                                                        response = result
+                                                else:
+                                                    response = content_str or "Directory is empty or could not be listed."
+                                            except Exception as e:
+                                                logger.debug("Fallback folder_list failed: {}", e)
+                                                response = content_str or "Could not list directory. Please try again."
+                                        else:
+                                            response = content_str
                     break
                 routing_sent = False
                 routing_response_text = None  # when route_to_plugin/route_to_tam return text (sync inbound/ws), use as final response
@@ -2008,15 +2124,20 @@ async def answer_from_memory(
                 err_hint = str(err_hint).strip() if err_hint else ""
             except Exception:
                 err_hint = ""
-            # If we ran a tool (e.g. run_skill) but the model then returned empty, show a friendlier message instead of a generic error.
-            if last_tool_name and not err_hint:
-                return "Done. What would you like to do next? (已完成。还需要什么？)"
-            if err_hint:
-                try:
-                    return "Sorry, something went wrong. {} Please try again. (对不起，出错了，请再试一次)".format(err_hint)
-                except Exception:
-                    return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
-            return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
+            # If we ran a tool but the model returned empty: use tool output when it's usable so we don't show "Done..." instead of real results.
+            if last_tool_name and last_tool_result_raw and isinstance(last_tool_result_raw, str) and last_tool_result_raw.strip() and not err_hint:
+                if not _tool_result_looks_like_error(last_tool_result_raw):
+                    response = last_tool_result_raw.strip()
+            # Only show generic "Done..." when we have no usable response (no err_hint, and either no tool ran or tool output was empty/error-like).
+            if response is None or (isinstance(response, str) and len(response.strip()) == 0):
+                if last_tool_name and not err_hint:
+                    return "Done. What would you like to do next? (已完成。还需要什么？)"
+                if err_hint:
+                    try:
+                        return "Sorry, something went wrong. {} Please try again. (对不起，出错了，请再试一次)".format(err_hint)
+                    except Exception:
+                        return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
+                return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
         # If the model echoed raw "[]" (e.g. from empty folder_list/file_find), show a friendly message instead
         if isinstance(response, str) and response.strip() == "[]":
             response = "I couldn't find that file or path. Try asking me to list your files (e.g. 'list my files' or 'what files do I have'), then use the exact filename (e.g. 1.pdf) when you ask about a document."

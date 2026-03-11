@@ -1,0 +1,30 @@
+# Qwen 3.5 9B tool-call grammar for llama.cpp
+# Forces output to exactly: <tool_call>{"name":"...","arguments":{...}}</tool_call>
+# so the model cannot output conversational text or <think> blocks (illegal tokens).
+# Use with enable_thinking: false and presence_penalty 1.5 for Qwen 3.5.
+
+root ::= "<tool_call>" ws object ws "</tool_call>"
+
+value ::= object | array | string | number | ("true" | "false" | "null") ws
+
+object ::=
+  "{" ws (
+    string ":" ws value
+    ("," ws string ":" ws value)*
+  )? "}" ws
+
+array ::=
+  "[" ws (
+    value
+    ("," ws value)*
+  )? "]" ws
+
+string ::=
+  "\"" (
+    [^"\\\x7F\x00-\x1F] |
+    "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4})
+  )* "\"" ws
+
+number ::= ("-"? ([0-9] | [1-9] [0-9]{0,15})) ("." [0-9]+)? ([eE] [-+]? [0-9] [1-9]{0,15})? ws
+
+ws ::= ([ \t\n])*

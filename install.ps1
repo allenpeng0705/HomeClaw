@@ -257,17 +257,22 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "OK: requirements installed"
 
-# ----- Step 5b: Cognee (latest from official PyPI) -----
-# Cognee is the default memory backend; many mirrors only have 0.1.x. Install latest from PyPI.
+# ----- Step 5b: Cognee dependencies (for memory backend) -----
+# Cognee is the default memory backend. Cognee is part of this repo (customized); we only
+# install its dependencies here. Do not run "pip install cognee" — the package is in the source.
 Write-Host ""
-Write-Host "=== Step 5b: Cognee (memory backend, latest from PyPI) ==="
-Write-Host "Installing cognee from pypi.org (may take a minute)..."
-$env:PIP_INDEX_URL = $null
-$env:PIP_EXTRA_INDEX_URL = $null
-$cogneeArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "cognee", "-i", "https://pypi.org/simple") } else { @("-m", "pip", "install", "cognee", "-i", "https://pypi.org/simple") }
-& $PythonExe $cogneeArgs
-if ($LASTEXITCODE -eq 0) { Write-Host "OK: cognee installed (latest from pypi.org)" } else { Write-Host "Cognee install from PyPI failed or skipped. To install later: $PythonExe -m pip install cognee -i https://pypi.org/simple" }
-Write-Host "(If pip reported dependency conflicts about semantic-kernel, you can ignore them — HomeClaw does not use that package.)"
+Write-Host "=== Step 5b: Cognee dependencies (memory backend) ==="
+$cogneeDepsPath = Join-Path $Root "requirements-cognee-deps.txt"
+if (Test-Path $cogneeDepsPath) {
+  Write-Host "Installing Cognee dependencies (instructor, etc.)..."
+  $env:PIP_INDEX_URL = $null
+  $env:PIP_EXTRA_INDEX_URL = $null
+  $cogneeDepsArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "-r", $cogneeDepsPath, "-i", "https://pypi.org/simple") } else { @("-m", "pip", "install", "-r", $cogneeDepsPath, "-i", "https://pypi.org/simple") }
+  & $PythonExe $cogneeDepsArgs
+  if ($LASTEXITCODE -eq 0) { Write-Host "OK: Cognee dependencies installed" } else { Write-Host "Cognee deps install failed or skipped. To retry: pip install -r requirements-cognee-deps.txt -i https://pypi.org/simple" }
+} else {
+  Write-Host "requirements-cognee-deps.txt not found; skipping."
+}
 
 # ----- Step 5c: Document stack (unstructured, opencv) — separate to avoid backtracking -----
 Write-Host ""

@@ -74,8 +74,16 @@ API key can be set via **environment variable** (recommended) or **`api_key`** i
 
 ### llama_cpp and completion
 
-- **`llama_cpp`** — Defaults for **local** llama.cpp servers: `ctx_size` (context window), `predict` (max output tokens), `temp`, `threads`, `n_gpu_layers`, `repeat_penalty`, `function_calling`. Sub-key **`embedding`** for embedding-model-only overrides.
-- **`completion`** — Parameters sent with **every** chat request: `max_tokens`, `temperature`, `top_p`, `repeat_penalty`, `image_max_dimension` (resize images for vision).
+- **`llama_cpp`** — Defaults for **local** llama.cpp servers: `ctx_size` (context window), `predict` (max output tokens), `temp`, `threads`, `n_gpu_layers`, `repeat_penalty`, `function_calling`, `stop` (stop sequences; fallback when completion.stop is not set). **`reasoning_budget`**: set to `0` to disable thinking mode (Qwen: keeps tool selection in main output; no `<think>` blocks). **`enable_reasoning`**: `false` is an alternative to `reasoning_budget: 0`. **`qwen_model`**: `"qwen3"` or `"qwen35"` to apply Qwen-specific server/request behavior (see below). Sub-key **`embedding`** for embedding-model-only overrides.
+- **`completion`** — Parameters sent with **every** chat request: `max_tokens`, `temperature`, `top_p`, `repeat_penalty`, `stop` (list of strings; fallback: `llama_cpp.stop`), `image_max_dimension` (resize images for vision). **`tool_temperature`**: when set, used only when the request includes tools (routing step; e.g. `0.1` for deterministic tool choice). **`disable_thinking_when_tools`**: when `true`, sends `enable_thinking: false` to local/Ollama when tools are present. **`qwen_model`**: same as in llama_cpp; one place is enough.
+
+**One flag for Qwen (qwen_model):** Set **`qwen_model`** in **one** place when using a Qwen model: **tools** in `skills_and_plugins.yml`, or **llama_cpp** in `llm.yml`, or **completion** in `llm.yml`. Values:
+
+- **`false`** or unset (default): no Qwen-specific behavior; safe for Llama, Mistral, and other local models.
+- **`"qwen3"`** (or legacy **`qwen3_mode: true`**): for Qwen3 8B. Server gets `--reasoning-budget 0`, tool requests use temperature 0.1 and `enable_thinking: false`, and the system prompt gets `<tool_call>` format + NO_TOOL_REQUIRED.
+- **`"qwen35"`**: for Qwen 3.5 9B (llama.cpp b8150+). Same as qwen3 plus: **presence_penalty 1.5** (reduces repetitive filler), **stop** sequences `</think>` and `</tool_call>`, a **GBNF grammar** that forces output to only `<tool_call>{"name":"...","arguments":{...}}</tool_call>` (no conversational text or `<think>`), and a dedicated **&lt;tools&gt;…&lt;/tools&gt;** block in the system prompt. Grammar file path: **`tools.qwen35_grammar_path`** (default: `config/grammars/qwen35_tools.gbnf`).
+
+Do not put `<think>` or `</think>` in **`stop`** when using Qwen with reasoning disabled at the server (we add them for qwen35 automatically).
 
 ---
 

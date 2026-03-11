@@ -925,6 +925,7 @@ class CoreMetadata:
     vectorDB: VectorDB
     graphDB: GraphDB
     memory_check_before_add: bool = False  # when True, for small/local models run an extra LLM call to gate what gets added to RAG memory; default False = store every message, rely on retrieval quality
+    memory_add_after_reply: bool = True  # when True (default), enqueue RAG memory add only after main LLM reply is ready so cognify does not compete with main LLM (see MemorySystemSummary §9)
     default_location: str = ""  # optional; fallback location when no request/profile location (e.g. "New York, US"); see SystemContextDateTimeAndLocation.md
     cognee: Dict[str, Any] = field(default_factory=dict)  # optional; when set, applied as Cognee env before Cognee loads (see docs/MemoryAndDatabase.md)
     endpoints: List[Endpoint] = field(default_factory=list)
@@ -1153,7 +1154,7 @@ class CoreMetadata:
         # Optional: merge memory/kb/database config from external file (memory_kb.yml).
         _mem_kb_file = (data.get('memory_kb_config_file') or '').strip()
         _MEMORY_KB_KEYS = frozenset({
-            'use_memory', 'memory_backend', 'memory_check_before_add', 'memory_summarization',
+            'use_memory', 'memory_backend', 'memory_check_before_add', 'memory_add_after_reply', 'memory_summarization',
             'database', 'vectorDB', 'graphDB', 'cognee', 'knowledge_base', 'profile', 'session',
             'use_agent_memory_file', 'agent_memory_path', 'agent_memory_max_chars',
             'use_daily_memory', 'daily_memory_dir', 'use_agent_memory_search',
@@ -1374,6 +1375,7 @@ class CoreMetadata:
             use_memory=data.get('use_memory', True),
             memory_backend=(data.get('memory_backend') or 'cognee').strip().lower(),
             memory_check_before_add=bool(data.get('memory_check_before_add', False)),
+            memory_add_after_reply=bool(data.get('memory_add_after_reply', True)),
             default_location=(data.get('default_location') or '').strip(),
             database=database,
             vectorDB=vectorDB,
@@ -1501,6 +1503,8 @@ class CoreMetadata:
                 'log_to_console': getattr(core, 'log_to_console', False),
                 'use_memory': core.use_memory,
                 'memory_backend': getattr(core, 'memory_backend', 'cognee') or 'cognee',
+                'memory_check_before_add': getattr(core, 'memory_check_before_add', False),
+                'memory_add_after_reply': getattr(core, 'memory_add_after_reply', True),
                 'default_location': getattr(core, 'default_location', '') or '',
                 'use_workspace_bootstrap': getattr(core, 'use_workspace_bootstrap', True),
                 'workspace_dir': getattr(core, 'workspace_dir', 'config/workspace'),
@@ -1587,7 +1591,7 @@ class CoreMetadata:
         # When using external memory_kb config file, do not write memory/kb/database keys into core.yml
         _mem_kb_ext = (getattr(core, 'memory_kb_config_file', None) or '').strip()
         _MEMORY_KB_POP = frozenset({
-            'use_memory', 'memory_backend', 'memory_check_before_add', 'memory_summarization',
+            'use_memory', 'memory_backend', 'memory_check_before_add', 'memory_add_after_reply', 'memory_summarization',
             'database', 'vectorDB', 'graphDB', 'cognee', 'knowledge_base', 'profile', 'session',
             'use_agent_memory_file', 'agent_memory_path', 'agent_memory_max_chars',
             'use_daily_memory', 'daily_memory_dir', 'use_agent_memory_search',

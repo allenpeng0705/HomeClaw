@@ -1,4 +1,5 @@
 from asyncio import subprocess
+import json
 import multiprocessing
 import os
 import socket
@@ -355,6 +356,41 @@ class LLMServiceManager:
                 if s_val >= 1:
                     cmd_list.extend(["--grp-attn-s", str(s_val)])
             except (TypeError, ValueError):
+                pass
+
+        # Qwen: qwen_model "qwen3" or "qwen35" (or legacy qwen3_mode) -> reasoning_budget 0. Or set reasoning_budget/enable_reasoning explicitly.
+        qwen_model = None
+        try:
+            qwen_model = Util._get_qwen_model()
+        except Exception:
+            pass
+        if qwen_model is None and opts:
+            ov = opts.get("qwen_model")
+            if ov is not None and str(ov).strip().lower() in ("qwen3", "qwen35"):
+                qwen_model = str(ov).strip().lower()
+        if qwen_model is None and opts and opts.get("qwen3_mode"):
+            qwen_model = "qwen3"
+        reasoning_budget = opts.get("reasoning_budget")
+        if reasoning_budget is not None:
+            try:
+                rb = int(reasoning_budget)
+                if rb == 0:
+                    cmd_list.append("--reasoning-budget")
+                    cmd_list.append("0")
+                    logger.debug("Reasoning/thinking disabled (reasoning_budget=0) for tool routing.")
+            except (TypeError, ValueError):
+                pass
+        elif qwen_model in ("qwen3", "qwen35") or opts.get("enable_reasoning") is False or str(opts.get("enable_reasoning", "")).lower() in ("false", "0", "no"):
+            cmd_list.append("--reasoning-budget")
+            cmd_list.append("0")
+            logger.debug("Reasoning/thinking disabled (qwen_model=%s or enable_reasoning=false) for tool routing.", qwen_model or "n/a")
+        # Qwen 3.5 / Qwen3: disable thinking at server so tool calls are not lost (--chat-template-kwargs enable_thinking: false)
+        if qwen_model in ("qwen3", "qwen35"):
+            try:
+                cmd_list.append("--chat-template-kwargs")
+                cmd_list.append(json.dumps({"enable_thinking": False}))
+                logger.debug("Qwen: added --chat-template-kwargs enable_thinking=false for llama-server.")
+            except Exception:
                 pass
 
         # Diagnose port in use before starting (common blocker)

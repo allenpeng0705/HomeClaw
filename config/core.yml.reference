@@ -224,6 +224,7 @@ llama_cpp:
   repeat_penalty: 1.5
   chat_format: null
   function_calling: true
+  # stop: null   # optional; list of strings; used when completion.stop is not set. e.g. ["</s>", "Human:", "<|im_end|>"]
 
   embedding:
     ctx_size: 0      # 0 = use model default (recommended; avoids forcing 8192 on models that support less)
@@ -239,7 +240,7 @@ llama_cpp:
 
 # ——— Completion (per-request generation) ———
 # All parameters below are sent with every chat completion call. Omit or comment out to use server default or llama_cpp fallback where noted.
-# Fallbacks: max_tokens → llama_cpp.predict; temperature/top_p/repeat_penalty → llama_cpp.temp / (none) / llama_cpp.repeat_penalty.
+# Fallbacks: max_tokens → llama_cpp.predict; temperature/top_p/repeat_penalty → llama_cpp.temp / (none) / llama_cpp.repeat_penalty; stop → llama_cpp.stop.
 completion:
   max_tokens: 8192          # max tokens to generate per response (fallback: llama_cpp.predict)
   temperature: 0.7          # sampling temperature 0..2 (fallback: llama_cpp.temp)
@@ -248,7 +249,7 @@ completion:
   frequency_penalty: 0      # OpenAI-style; penalize by token frequency
   repeat_penalty: 1.5       # llama.cpp-style; sent in extra_body (fallback: llama_cpp.repeat_penalty)
   seed: null                 # optional; int for reproducible sampling
-  stop: null                 # optional; list of strings, e.g. ["</s>", "Human:"]
+  stop: null                 # optional; list of strings (fallback: llama_cpp.stop). e.g. ["</s>", "Human:", "<|im_end|>"]
   # logit_bias: {}          # optional; dict of token id to bias (-100..100)
   # n: 1                    # number of completions (default 1)
   # response_format: null   # optional; e.g. { "type": "json_object" }
@@ -587,12 +588,17 @@ cognee:
     url: ""
     username: ""
     password: ""
-  # LLM for Cognee (graph completion / search): leave empty to use Core's main_llm. Core patches Instructor for local LLMs; if you still see "Instructor does not support multiple tool calls", set cognee.llm to a cloud endpoint (e.g. OpenAI, OpenRouter).
+  # LLM for Cognee (graph completion / search): leave empty to use Core's main_llm. Local-first: set llm_fallback (e.g. OpenAI) so cognify retries with cloud when local fails (template/Instructor).
   llm:
     provider: ""
     model: ""
     endpoint: ""
     api_key: ""
+  # Optional: use only when cognify fails with primary (local). Same shape as llm. Enables local-first + reliable cognify.
+  # llm_fallback:
+  #   provider: openai
+  #   model: gpt-4o-mini
+  #   api_key: "${OPENAI_API_KEY}"
   # Embedding for Cognee: leave empty to use Core's embedding_llm (embedding_host, embedding_port). Else set provider, model, endpoint, api_key.
   # tokenizer: local path or HuggingFace model id for token counting (silences "Could not automatically map embedding_text_model to a tokeniser").
   embedding:

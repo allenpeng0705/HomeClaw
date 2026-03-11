@@ -12,7 +12,7 @@ fastapi>=0.100.0
 python-multipart>=0.0.6   # Form data for Portal login/setup
 uvicorn>=0.20.0   # run Portal (python -m main portal) and Core
 openai>=1.0.0
-litellm>=1.50.0
+litellm>=1.82.0   # use newest (Ollama/system-role fixes, Cognee cognify compatibility; see MemorySystemSummary §9)
 watchdog>=3.0.0
 alembic>=1.12.0
 schedule>=1.2.0
@@ -53,7 +53,7 @@ qrcode[pil]==7.4.0
 
 
 # Memory: Cognee is default (memory_backend=cognee). Alternative: chroma + optional graph (kuzu/neo4j).
-# Installed by install.sh/install.ps1 from official PyPI (latest). Commented here so mirrors that only have 0.1.x do not block install.
+# Cognee is part of this repo (customized). Install only its deps: pip install -r requirements-cognee-deps.txt (install.sh/install.ps1 do this). Do not pip install cognee.
 # cognee>=0.1.20
 # Used by Cognee (graph + robots). Stricter bounds to reduce pip backtracking.
 kuzu>=0.11.3,<0.12   # graph for memory_backend=chroma / Cognee

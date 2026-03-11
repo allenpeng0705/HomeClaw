@@ -1,18 +1,32 @@
 """
 Cognee memory adapter: implements MemoryBase using Cognee (add -> cognify -> search).
-Use when memory_backend=cognee. Requires: pip install cognee and Cognee env config (.env)
-or cognee section in core.yml (we convert it to env vars before Cognee loads).
+Use when memory_backend=cognee. Cognee is part of this repo (customized); install only its
+dependencies (pip install -r requirements-cognee-deps.txt), not the cognee package.
+Config: Cognee .env and/or cognee section in core.yml (we convert to env vars before Cognee loads).
 Dataset scope: (user_id, agent_id) -> dataset name for add/search.
 Summarization: get_all_async / delete_async use datasets list + get_data + delete_data when available.
 
-Local LLMs: we apply a runtime patch (memory/instructor_patch.py) so Instructor accepts 0 or
-multiple tool_calls; cognify then works with local models. If you still see "Instructor does not
-support multiple tool calls", set cognee.llm to a cloud endpoint in memory_kb.yml as fallback.
+How Cognee works now (system message at the top):
+- At init we apply memory/instructor_patch.py: (1) litellm completion/acompletion are wrapped so
+  every request's messages are normalized to have a system message first (reorder existing system
+  messages to the top, or prepend a minimal system message if none); (2) Instructor Jinja
+  templating is disabled (no-op) so strict "system first" validation never raises; (3) Instructor
+  parse_tools accepts 0 or multiple tool_calls for local LLMs. Cognee/Instructor then call litellm
+  with messages that always start with system, so local backends and Instructor stay happy.
+- add(): we call cognee.add() then cognee.cognify(). All exceptions are caught; we never raise.
+  On cognify template/local failure we optionally retry once with cognee.llm_fallback and restore
+  primary LLM. Memory add is skipped on failure; chat and tools are unaffected.
+- Local LLM "coroutine is not callable" fix: we patch Instructor so our wrapped litellm.acompletion
+  is always treated as async (__homeclaw_force_async__) and instructor.utils.is_async returns True
+  for it; thus cognify uses retry_async and await func(), never retry_sync which would call
+  func() without await. This makes Cognee + local model work without vendoring Cognee.
 """
 import asyncio
 import logging
 import os
 import re
+import sys
+import traceback
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -175,6 +189,31 @@ def apply_cognee_config(config: Dict[str, Any]) -> None:
                 os.environ[str(k)] = str(v)
 
 
+def _apply_llm_only(llm_dict: Optional[Dict[str, Any]]) -> None:
+    """
+    Apply only LLM settings to env and Cognee config (for cognify retry with fallback).
+    Use when switching to fallback LLM or restoring primary. Empty value removes env var.
+    """
+    if llm_dict is None or not isinstance(llm_dict, dict):
+        return
+    for key, env_key in (
+        ("provider", "LLM_PROVIDER"), ("model", "LLM_MODEL"), ("endpoint", "LLM_ENDPOINT"), ("api_key", "LLM_API_KEY"),
+    ):
+        val = llm_dict.get(key)
+        if val is not None and str(val).strip() != "":
+            os.environ[env_key] = str(val).strip()
+        elif env_key in os.environ:
+            os.environ.pop(env_key, None)
+    if llm_dict.get("endpoint") and "LLM_API_KEY" not in os.environ:
+        os.environ["LLM_API_KEY"] = "local"
+    try:
+        import cognee
+        if hasattr(cognee, "config") and hasattr(cognee.config, "set_llm_config"):
+            cognee.config.set_llm_config({k: v for k, v in llm_dict.items() if v is not None and str(v).strip() != ""})
+    except Exception:
+        pass
+
+
 def _dataset_name(user_id: Optional[str] = None, agent_id: Optional[str] = None) -> str:
     u = (user_id or "").strip() or "default"
     a = (agent_id or "").strip() or "default"
@@ -199,8 +238,14 @@ class CogneeMemory(MemoryBase):
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self._config = config or {}
         self._huggingface_tokenizer = None  # re-apply before add() so Cognee sees it at call time
         self._datasets_with_graph = _load_cognee_graph_datasets()  # skip search when dataset never had successful cognify (avoids empty-graph warning)
+        # Optional: use only when cognify fails with local LLM (template/Instructor). Enables local-first + reliable cognify.
+        _fb = self._config.get("llm_fallback")
+        self._cognify_llm_fallback = None
+        if isinstance(_fb, dict) and (_fb.get("model") or _fb.get("endpoint")):
+            self._cognify_llm_fallback = _fb
         if config:
             apply_cognee_config(config)
             emb = config.get("embedding") or {}
@@ -235,8 +280,7 @@ class CogneeMemory(MemoryBase):
                     pass
         except ImportError as e:
             raise ImportError(
-                "Cognee memory backend requires: pip install cognee. "
-                "Configure via .env (LLM_*, EMBEDDING_*, DB_*, etc.). See docs.cognee.ai."
+                "Cognee memory backend requires the cognee package (part of this repo) and its dependencies (pip install -r requirements-cognee-deps.txt). Configure via .env or cognee section in config."
             ) from e
         # When using a custom embedding model (tokenizer set), Cognee/litellm may call tiktoken.encoding_for_model(embedding_model) which throws for unknown models. Fall back to cl100k_base so add/cognify does not fail.
         if self._huggingface_tokenizer:
@@ -270,14 +314,100 @@ class CogneeMemory(MemoryBase):
         dataset = _dataset_name(user_id=user_id, agent_id=agent_id)
         if self._huggingface_tokenizer:
             os.environ["HUGGINGFACE_TOKENIZER"] = self._huggingface_tokenizer
+        logger.debug("Cognee memory add: step=start dataset={} data_len={}", dataset, len(data or ""))
         try:
+            # Step 1: add raw data to Cognee dataset
             await self._cognee.add(data, dataset_name=dataset)
-            await self._cognee.cognify(datasets=[dataset])
-            self._datasets_with_graph.add(dataset)
-            _save_cognee_graph_dataset(dataset)
+            logger.debug("Cognee memory add: step=add_ok dataset={}", dataset)
+            # Step 2: cognify (LLM/graph pipeline) — try primary LLM first; on template/local failure retry with llm_fallback if set
+            cognify_ok = False
+            try:
+                await self._cognee.cognify(datasets=[dataset])
+                cognify_ok = True
+            except Exception as e:
+                exc_type = type(e).__name__
+                msg = str(e).strip()
+                if len(msg) > 400 or "<failed_attempts>" in msg:
+                    if "<last_exception>" in msg:
+                        m = re.search(r"<last_exception>\s*(.+?)\s*</last_exception>", msg, re.DOTALL)
+                        summary = (m.group(1).strip()[:300] if m else None) or "Instructor/cognify error"
+                    else:
+                        first = msg.split("\n")[0].strip()
+                        summary = first[:300] if first else "Cognify failed"
+                    summary = summary or "Cognee add/cognify error"
+                else:
+                    summary = msg or "Cognee add/cognify error"
+                # Always log full traceback at DEBUG for any cognify failure (local LLM debugging)
+                try:
+                    tb_str = "".join(traceback.format_exception(type(e), e, getattr(e, "__traceback__", None)))
+                    _tb_msg = "Cognee cognify failure (full traceback):\n" + (tb_str or "(no traceback)")
+                    logger.debug(_tb_msg)
+                    try:
+                        sys.stderr.write(_tb_msg)
+                        if not _tb_msg.endswith("\n"):
+                            sys.stderr.write("\n")
+                        sys.stderr.flush()
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                msg_lower = msg.lower()
+                summary_lower = summary.lower()
+                step_failed = "cognify" if (
+                    exc_type == "InstructorRetryException"
+                    or "cognify" in msg_lower
+                    or "instructor" in msg_lower
+                    or "template" in msg_lower
+                    or "litellm" in msg_lower
+                    or "raise_exception" in msg_lower
+                    or "jinja" in summary_lower
+                    or "system me" in summary_lower
+                ) else "add"
+                is_template_error = step_failed == "cognify" and (
+                    "Jinja" in summary or "System message" in summary or "raise_exception" in summary or "litellm" in msg or exc_type == "InstructorRetryException"
+                )
+                if step_failed == "cognify" and is_template_error and self._cognify_llm_fallback:
+                    try:
+                        _apply_llm_only(self._cognify_llm_fallback)
+                        await self._cognee.cognify(datasets=[dataset])
+                        cognify_ok = True
+                        logger.info("Cognee memory add: cognify succeeded with fallback LLM dataset={}", dataset)
+                    except Exception as e2:
+                        logger.warning(
+                            "Cognee memory add: cognify retry with fallback failed dataset={} exc={}",
+                            dataset, type(e2).__name__,
+                        )
+                    finally:
+                        _apply_llm_only(self._config.get("llm") or {})
+                if not cognify_ok:
+                    _summary_snippet_inner = (str(summary) if summary is not None else "")[:200]
+                    # "'coroutine' object is not callable" = Instructor/Cognee call litellm.acompletion then something calls the result without await (known Instructor/litellm async mismatch).
+                    if "coroutine" in (summary or "").lower() and "not callable" in (summary or "").lower():
+                        logger.warning(
+                            "Cognee memory add: step=cognify_failed dataset={} exc={} summary={}. "
+                            "Async/coroutine bug in Instructor/Cognee with litellm (acompletion called without await). "
+                            "Patch is applied at memory package load; if this persists, enable DEBUG and check traceback. "
+                            "Optional: set cognee.llm_fallback in memory_kb.yml for cloud retry. Memory add skipped; chat and tools are unaffected.".format(
+                                dataset, exc_type, _summary_snippet_inner
+                            )
+                        )
+                    else:
+                        logger.warning(
+                            "Cognee memory add: step={}_failed dataset={} exc={} summary={}. Memory add skipped; chat and tools are unaffected.".format(
+                                step_failed, dataset, exc_type, _summary_snippet_inner
+                            )
+                        )
+                    if is_template_error and not self._cognify_llm_fallback:
+                        logger.warning(
+                            "Cognee: cognify failed (template/local LLM). Set cognee.llm_fallback in memory_kb.yml to a cloud endpoint to retry automatically, or set cognee.llm to cloud. See docs_design/MemorySystemSummary.md §9."
+                        )
+            if cognify_ok:
+                self._datasets_with_graph.add(dataset)
+                _save_cognee_graph_dataset(dataset)
+                logger.info("Cognee memory add: success dataset={} (add + cognify completed)", dataset)
         except Exception as e:
+            exc_type = type(e).__name__
             msg = str(e).strip()
-            # Never log the full Cognee/Instructor failed_attempts XML (can be huge)
             if len(msg) > 400 or "<failed_attempts>" in msg:
                 if "<last_exception>" in msg:
                     m = re.search(r"<last_exception>\s*(.+?)\s*</last_exception>", msg, re.DOTALL)
@@ -288,14 +418,47 @@ class CogneeMemory(MemoryBase):
                 summary = summary or "Cognee add/cognify error"
             else:
                 summary = msg or "Cognee add/cognify error"
-            # Known Cognee/litellm template errors (e.g. Jinja "System message must be at the beginning") are upstream; log at WARNING so user sees it once.
-            if "Jinja" in summary or "System message must be" in summary or "raise_exception" in summary:
-                logger.warning(
-                    "Cognee add/cognify failed (memory add skipped): %s. This is a known Cognee/litellm template issue; chat and tools are unaffected.",
-                    summary[:200],
-                )
+            try:
+                tb_str = "".join(traceback.format_exception(type(e), e, getattr(e, "__traceback__", None)))
+                _tb_msg = "Cognee memory add failure (full traceback):\n" + (tb_str or "(no traceback)")
+                logger.debug(_tb_msg)
+                # Also write to stderr so traceback is visible even if log layer drops or mangles the message
+                try:
+                    sys.stderr.write(_tb_msg)
+                    if not _tb_msg.endswith("\n"):
+                        sys.stderr.write("\n")
+                    sys.stderr.flush()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            msg_lower = msg.lower()
+            summary_lower = (summary or "").lower()
+            # Exception may come from add() if Cognee runs LLM/template code inside add(); still treat as cognify when it's template/Instructor/litellm
+            step_failed = "cognify" if (
+                exc_type == "InstructorRetryException"
+                or "cognify" in msg_lower
+                or "instructor" in msg_lower
+                or "template" in msg_lower
+                or "litellm" in msg_lower
+                or "raise_exception" in msg_lower
+                or "jinja" in summary_lower
+                or "system me" in summary_lower
+                or "internalservererror" in msg_lower
+            ) else "add"
+            _summary_snippet = (str(summary) if summary is not None else "")[:200]
+            if "coroutine" in (summary or "").lower() and "not callable" in (summary or "").lower():
+                _warn_msg = (
+                    "Cognee memory add: step=cognify_failed dataset={} exc={} summary={}. "
+                    "Async/coroutine bug in Instructor/Cognee with litellm. Enable DEBUG for traceback. "
+                    "Optional: set cognee.llm_fallback for cloud retry. Memory add skipped; chat and tools are unaffected."
+                ).format(dataset, exc_type, _summary_snippet)
+                logger.warning(_warn_msg)
             else:
-                logger.debug("Cognee add/cognify failed: %s", summary)
+                _warn_msg = (
+                    "Cognee memory add: step={}_failed dataset={} exc={} summary={}. Memory add skipped; chat and tools are unaffected."
+                ).format(step_failed, dataset, exc_type, _summary_snippet)
+                logger.warning(_warn_msg)
         return [{"id": memory_id, "event": "add", "data": data}]
 
     async def search(
@@ -309,6 +472,7 @@ class CogneeMemory(MemoryBase):
         filters: Optional[Dict] = None,
     ) -> List[Dict[str, Any]]:
         dataset = _dataset_name(user_id=user_id, agent_id=agent_id)
+        logger.debug("Cognee memory search: step=start dataset={} query_len={}", dataset, len(query or ""))
         # Avoid calling Cognee search when dataset doesn't exist or has never had a successful cognify (avoids "Search attempt on an empty knowledge graph"). Persisted set so we skip correctly after restart.
         if hasattr(self._cognee, "datasets") and hasattr(self._cognee.datasets, "list_datasets"):
             try:
@@ -322,16 +486,21 @@ class CogneeMemory(MemoryBase):
                     if n:
                         names.append(n)
                 if dataset not in names:
+                    logger.debug("Cognee memory search: step=skip dataset not in list dataset={}", dataset)
                     return []
                 if dataset not in self._datasets_with_graph:
+                    logger.debug("Cognee memory search: step=skip no graph yet dataset={}", dataset)
                     return []
-            except (asyncio.TimeoutError, Exception):
-                pass  # fall back to search (may 404 and log; we catch below)
+            except asyncio.TimeoutError:
+                logger.debug("Cognee memory search: step=list_datasets timeout dataset={}", dataset)
+            except Exception as e:
+                logger.debug("Cognee memory search: step=list_datasets error dataset={} exc={}", dataset, type(e).__name__)
         try:
             results = await self._cognee.search(query, datasets=[dataset], top_k=limit or 10)
+            logger.debug("Cognee memory search: step=search_ok dataset={} results={}", dataset, len(results) if isinstance(results, list) else 1)
         except Exception as e:
             # Empty graph can cause Cognee to log "No nodes found" / EntityNotFoundError; we return [] and continue
-            logger.debug("Cognee search: {}", e)
+            logger.debug("Cognee memory search: step=search_failed dataset={} exc={} msg={}", dataset, type(e).__name__, str(e)[:150])
             return []
         out = []
         for i, r in enumerate(results if isinstance(results, list) else [results]):

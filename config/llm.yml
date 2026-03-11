@@ -25,7 +25,7 @@
 # Reduce ctx_size if you don't need long context. Quantized GGUF (Q4_K_M, Q5_K_M) is smaller and faster than F16.
 llama_cpp:
   # 32768
-  ctx_size: 131072 #128K
+  ctx_size: 262144 #128K
   predict: 8192
   temp: 0.7
   threads: 8
@@ -47,6 +47,11 @@ llama_cpp:
   # Self-extend (long context with less slowdown): grp_attn_n = expansion factor (e.g. 4 for 4k→16k), grp_attn_w = window (e.g. 1024).
   #grp_attn_n: 4
   #grp_attn_w: 1024
+  # stop: null   # optional; used when completion.stop is not set. e.g. ["<|im_end|>", "</s>"]
+  # One flag for Qwen: qwen_model "qwen3" | "qwen35" (or qwen3_mode: true for qwen3). Omit = not Qwen.
+  # qwen_model: "qwen3"   # 8B dual-thinking; reasoning_budget 0, tool format in prompt
+  # qwen_model: "qwen35"  # 9B; same + presence_penalty 1.5, GBNF grammar, stop </think> and "</tool_call>"
+  qwen3_mode: true
 
   # ——— Embedding server: fully separate from main model. Only the keys below are used.
   # Uncomment and set any optional key as needed. Defaults when omitted: ctx_size 0, threads 4, n_gpu_layers 20, verbose false.
@@ -69,7 +74,7 @@ llama_cpp:
 
 # ——— Completion (per-request generation) ———
 # All parameters below are sent with every chat completion call. Omit or comment out to use server default or llama_cpp fallback where noted.
-# Fallbacks: max_tokens → llama_cpp.predict; temperature/top_p/repeat_penalty → llama_cpp.temp / (none) / llama_cpp.repeat_penalty.
+# Fallbacks: max_tokens → llama_cpp.predict; temperature/top_p/repeat_penalty → llama_cpp.temp / (none) / llama_cpp.repeat_penalty; stop → llama_cpp.stop.
 completion:
   max_tokens: 8192          # max tokens to generate per response (fallback: llama_cpp.predict)
   temperature: 0.5          # sampling temperature 0..2 (fallback: llama_cpp.temp)
@@ -78,7 +83,11 @@ completion:
   frequency_penalty: 0      # OpenAI-style; penalize by token frequency
   repeat_penalty: 1.5       # llama.cpp-style; sent in extra_body (fallback: llama_cpp.repeat_penalty)
   seed: null                 # optional; int for reproducible sampling
-  stop: null                 # optional; list of strings, e.g. ["</s>", "Human:"]
+  stop: null                 # optional; list (fallback: llama_cpp.stop). e.g. ["<|im_end|>", "</s>"]
+  # One flag for Qwen: qwen_model "qwen3" | "qwen35" (or qwen3_mode: true for qwen3). Tool requests: temp 0.1, enable_thinking false; qwen35 adds presence_penalty 1.5 and grammar.
+  # qwen_model: "qwen3"
+  # qwen3_mode: true
+  # logit_bias: {}          # optional; dict of token id to bias (-100..100)
   # logit_bias: {}          # optional; dict of token id to bias (-100..100)
   # n: 1                    # number of completions (default 1)
   # response_format: null   # optional; e.g. { "type": "json_object" }
@@ -149,20 +158,27 @@ local_models:
     capabilities: [Chat]
     supported_media: [image]
 
-  - id: Qwen3.5-27B-Q4_K_M
-    alias: Qwen3.5-27B-Q4_K_M
-    path: Qwen3.5-27B-Q4_K_M.gguf
-    host: 127.0.0.1
-    port: 5028
-    capabilities: [Chat]
+  # - id: Qwen3.5-27B-Q4_K_M
+  #   alias: Qwen3.5-27B-Q4_K_M
+  #   path: Qwen3.5-27B-Q4_K_M.gguf
+  #   host: 127.0.0.1
+  #   port: 5028
+  #   capabilities: [Chat]
 
-  - id: Qwen3.5-9B-Q5_K_M
-    alias: Qwen3.5-9B-Q5_K_M
-    path: Qwen3.5-9B-Q5_K_M.gguf
+  # - id: Qwen3.5-9B-Q5_K_M
+  #   alias: Qwen3.5-9B-Q5_K_M
+  #   path: Qwen3.5-9B-Q5_K_M.gguf
+  #   host: 127.0.0.1
+  #   port: 5029
+  #   capabilities: [Chat]
+  # Note: was 5024; use a different port so 27B and 9B can run at the same time (only one process per port).
+
+  - id: Qwen3-8B-Q5_K_M
+    alias: Qwen3-8B-Q5_K_M
+    path: Qwen3-8B-Q5_K_M.gguf
     host: 127.0.0.1
     port: 5029
     capabilities: [Chat]
-    # Note: was 5024; use a different port so 27B and 9B can run at the same time (only one process per port).
 
   - id: gemma_3_4b_it_4B
     alias: gemma_3_4b_it_4B
@@ -258,7 +274,7 @@ cloud_models:
 # If the local llama.cpp server is not running (e.g. connection refused to 127.0.0.1:5022), use main_llm_mode: cloud so only cloud is used, or start the local server.
 #main_llm: local_models/main_vl_model_4B
 main_llm_mode: local
-main_llm_local: local_models/Qwen3.5-27B-Q4_K_M
+main_llm_local: local_models/Qwen3-8B-Q5_K_M
 main_llm_cloud: cloud_models/DeepSeek-Chat
 # vision_llm: when main model has no vision (e.g. 27B text-only), use this model to describe images; description is injected into user message and main model replies. E.g. local_models/main_vl_model_2B. Omit or leave empty to save images and return a polite message instead.
 vision_llm: local_models/main_vl_model_2B

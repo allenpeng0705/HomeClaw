@@ -160,7 +160,84 @@ compaction:
 
 ---
 
-## 9. See also
+## 9. Cognee: local LLM, isolation, and model requirements
+
+### Why Cognee uses an LLM
+
+Cognee uses the LLM only in the **cognify** step: to turn raw text (e.g. a user message) into a **knowledge graph** (entities and relationships). So the **target** of the LLM call is **entity/relationship extraction**, not chat. That allows:
+
+- **Local-first and low cost:** You can use a **local** (and optionally **small**) model for cognify; it does not need to be the same as the main chat model.
+- **Security:** Data stays on your machine if both main LLM and cognify LLM are local.
+
+### Keeping cognify from affecting the main LLM
+
+- **RAG memory add runs in a background queue:** The main request flow does `memory_queue.put(request)` and then runs `answer_from_memory()` (main LLM). The **queue worker** runs in parallel and calls `mem_instance.add()` (which runs cognify). So the **user’s reply is not blocked** by cognify: the reply is produced by the main LLM while the queue may still be waiting or processing.
+- **Contention:** If the **same** local LLM (same host:port) is used for both **main chat** and **cognify**, they can run at the same time and **compete for the same process/GPU**, which can slow the main reply.
+- **Options to avoid contention:**
+  1. **memory_add_after_reply: true (recommended):** Enqueue the memory add **after** the main LLM has produced the reply. Then cognify runs **after** the user has already received their answer, so it does not compete with the main LLM. Set in config (e.g. memory_kb.yml): `memory_add_after_reply: true`.
+  2. **Dedicated cognify LLM:** Set **cognee.llm** (or use a small local model on a **different** port) only for Cognee. Then main_llm is used only for chat and cognify uses the other endpoint, so no shared resource.
+
+### Does cognify need a high-level model?
+
+**No.** Cognify is **entity/relationship extraction** (structured output). Cognee’s docs recommend models like **gpt-4o-mini** for “balance of performance and cost.” A **single local small model** (e.g. 1B–7B) that supports **tool/function-style or JSON output** can do this task. You do **not** need the same large model as for chat.
+
+### Why our current local model may not “reply the expected format”
+
+Cognify uses **Instructor** (structured output) and **LiteLLM** to talk to the LLM. Failures with local models are usually:
+
+1. **Tool-call count:** Instructor originally expected **exactly one** tool call. Many local models return **0** (content-only) or **multiple** tool calls. We **patch** this in `memory/instructor_patch.py` so 0 or multiple tool_calls are accepted (content parsed as JSON or first tool call used).
+2. **Message order / system role:** Some backends (e.g. older LiteLLM + Ollama) required a specific message order or rejected a standalone `system` role (“System message must be at the beginning” or “Invalid Message passed in {'role': 'system', ...}”). This is a **provider/template** issue, not a “model intelligence” issue. Fixes: **upgrade LiteLLM** (Ollama fix is in recent versions); or use a **dedicated cognify LLM** (e.g. OpenAI-compatible local server that accepts system message) or **cognee.llm_fallback** (cloud) only when the primary fails.
+
+So: **one local model can do cognify** if it (or the stack: LiteLLM + your server) accepts the message format and returns parseable structured output. Resolving format/order issues (patch, LiteLLM update, or dedicated endpoint) avoids falling back to cloud every time.
+
+### How Cognee works now (system message at the top)
+
+At Cognee adapter init we apply **memory/instructor_patch.py** so cognify works with local LLMs and never crashes Core:
+
+1. **System message first:** We wrap **litellm.completion** and **litellm.acompletion**. Before every call, the `messages` list is normalized: (a) any message with `role="system"` is moved to the top (order preserved), and (b) if there is no system message, we prepend one with minimal content (`"You are a helpful assistant. Follow the user's instructions and respond in the requested format."`). So Instructor’s “System message must be at the beginning” check is always satisfied and local backends receive a valid order.
+2. **Jinja fallback:** Instructor’s **apply_template** is patched to a no-op so Jinja never runs and the strict validation that raised `raise_exception('System message must be at the beginning')` never runs.
+3. **Tool-call flexibility:** Instructor’s **parse_tools** is patched to accept 0 tool_calls (parse content as JSON) or multiple (use the first), so local models that don’t return exactly one tool call still work.
+4. **Async path for cognify:** Our wrapped **litellm.acompletion** is marked with `__homeclaw_force_async__` and Instructor’s **is_async()** is patched to return True for it. So Instructor always uses the **async** retry path (`retry_async` + `await func(...)`), never the sync path that would call the async function without await and raise “‘coroutine’ object is not callable”. This keeps Cognee + local model working without vendoring Cognee.
+
+Cognee/Instructor then call litellm with messages that always start with system. All patch logic is defensive: normalizers never raise (they return a safe list on any error), and the adapter’s **add()** catches every exception and never raises, so Core never crashes due to Cognee memory.
+
+---
+
+## 10. Troubleshooting: Cognee and LLM timeout
+
+### Cognee add/cognify failures
+
+When **memory_backend: cognee**, RAG memory write runs **add(data)** then **cognify(datasets)**. Failures are usually in **cognify** (LLM/graph step). Chat and tools keep working; only memory add is skipped.
+
+**Step-by-step logs** (DEBUG): In `memory/cognee_adapter.py`, each step is logged so you can see where it failed:
+
+- `Cognee memory add: step=start` → about to add
+- `Cognee memory add: step=add_ok` → add() succeeded
+- `Cognee memory add: step=cognify_ok` → cognify() succeeded
+- On failure: `Cognee memory add: step=add_failed` or `step=cognify_failed` with `exc=` and `summary=`
+
+**Common cause:** Cognee/litellm template or Instructor (e.g. “System message must be at the beginning”, Jinja errors). **Local-first fix:** Set **cognee.llm_fallback** in **config/memory_kb.yml** to a cloud endpoint (e.g. OpenAI). Cognify is tried with the primary LLM (local) first; on template/local failure we retry once with the fallback. **Alternative:** Set **cognee.llm** to cloud so cognify always uses cloud. To avoid cognify competing with the main LLM, keep **memory_add_after_reply: true** (default, §9). See `memory/cognee_adapter.py` and docs.cognee.ai.
+
+**“'coroutine' object is not callable”:** This was caused by Instructor using the sync retry path and calling the async completion without await. We fixed it in **memory/instructor_patch.py** by (1) marking our wrapped `litellm.acompletion` with `__homeclaw_force_async__` and (2) patching Instructor’s `is_async()` to return True for that marker so the async path is always used. After updating, local cognify should work without llm_fallback. If you still see this error, ensure the patch runs before Cognee is imported (CogneeMemory applies it in `__init__` before `import cognee`).
+
+**Search:** Similarly, `Cognee memory search: step=start|skip|search_ok|search_failed` show whether the skip (no dataset / no graph) or the search call failed.
+
+### LLM chat completion timeout (e.g. 300s)
+
+If the **first** request (e.g. “summarize this doc”) hits **LLM chat completion timed out after 300s** and a **second** request (e.g. “hello”) succeeds, the local model is simply taking longer than the configured timeout for heavy prompts.
+
+**Is the main LLM handling async?** Yes. The main LLM call uses **async** I/O (`aiohttp` / `await`). While one request is waiting for the model, the event loop can process other tasks (e.g. other channels, health checks). The timeout only limits how long **each** completion request waits; it does not block the process.
+
+**Options when 300s or 600s is not enough:**
+
+1. **Increase the timeout** — Set **llm_completion_timeout_seconds** in config (default 300). Example: `600` or `900` for long summarization.
+2. **Disable timeout (use with care)** — Set **llm_completion_timeout_seconds: 0**. Core will then use **no timeout** for the HTTP call to the model server. Use only if the client/proxy also allows very long waits.
+3. **Use streaming for the client** — Use POST /inbound with **stream: true** (SSE) so the client gets progress/heartbeats and does not close the connection. Set **inbound_request_timeout_seconds** or client/proxy read_timeout high enough (e.g. ≥ 600s) if you allow one very long response.
+4. **Future: token-level streaming** — Streaming tokens from the LLM to the client would avoid one long wait; that would require implementing streamed completion in the LLM path and forwarding chunks over SSE.
+
+---
+
+## 11. See also
 
 - **MemoryFilesUsage.md** — Format and usage of AGENT_MEMORY.md and daily files; when they are loaded; dedup and caps.
 - **SessionAndDualMemoryDesign.md** — Session vs plugin; dual memory (RAG memory + AGENT_MEMORY); Knowledge base is a separate store.

@@ -2942,6 +2942,45 @@ async def _document_read_executor(arguments: Dict[str, Any], context: ToolContex
                 )
             elif len(matches) == 0:
                 return f"No file found matching '{path_arg}'. Use folder_list() or file_find(pattern='*') to see available files in your sandbox."
+        # When path looks like "documents/file.docx" but resolve failed (e.g. path format), try finding by basename so "summarize that file" after listing still works.
+        if r is None and path_arg and ("/" in path_arg or "\\" in path_arg):
+            basename = os.path.basename(path_arg.replace("\\", "/"))
+            if basename:
+                matches = _search_sandbox_for_filename(context, basename)
+                if len(matches) == 1:
+                    path_arg = matches[0]
+                    r = _resolve_file_path(path_arg, context, for_write=False)
+                elif len(matches) > 1:
+                    # Prefer match that starts with same subdir as requested (e.g. documents/Allen_Peng_resume_en.docx)
+                    prefix = path_arg.replace("\\", "/").strip().split("/")[0] + "/"
+                    for m in matches:
+                        if m.replace("\\", "/").startswith(prefix):
+                            path_arg = m
+                            r = _resolve_file_path(path_arg, context, for_write=False)
+                            break
+                    if r is None:
+                        path_arg = matches[0]
+                        r = _resolve_file_path(path_arg, context, for_write=False)
+        # When user refers to a file by name or description without path (e.g. "summarize my resume", "the docx file"), infer: search sandbox by pattern first, then read if exactly one match.
+        if r is None and path_arg:
+            matches = _search_sandbox_for_filename(context, path_arg)
+            if len(matches) == 1:
+                path_arg = matches[0]
+                r = _resolve_file_path(path_arg, context, for_write=False)
+            elif len(matches) > 1:
+                # Prefer document-like extensions so "the docx" or "resume" picks a document
+                doc_ext = (".pdf", ".docx", ".doc", ".pptx", ".ppt", ".txt", ".md", ".html")
+                doc_matches = [m for m in matches if any(m.lower().endswith(ext) for ext in doc_ext)]
+                if len(doc_matches) == 1:
+                    path_arg = doc_matches[0]
+                    r = _resolve_file_path(path_arg, context, for_write=False)
+                else:
+                    return (
+                        f"Found {len(matches)} files matching '{path_arg}'. Use the exact path in document_read: "
+                        + ", ".join(matches[:10])
+                        + (" ..." if len(matches) > 10 else "")
+                        + " — e.g. document_read(path='documents/Allen_Peng_resume_en.docx')."
+                    )
         if r is None:
             return _file_resolve_error_msg(path_arg)
         full, base = r
@@ -3590,7 +3629,7 @@ _FILE_ACCESS_DENIED_MSG = (
 def _file_not_found_msg(context: Optional[Any] = None) -> str:
     """Message when file/path not found. Include current sandbox (user_key) so operator can fix user_id if files live under another user folder."""
     base = "That file or path wasn't found. Only two bases are accessible (sandbox): user sandbox root (omit path) and share (path 'share'), and their subfolders. "
-    hint = "Try: (1) folder_list() or file_find(pattern='*') to list files; (2) use the **path** field from the result (e.g. documents/1.pdf), not the name, in document_read(path='documents/1.pdf') or get_file_view_link."
+    hint = "Use the **path** from your previous folder_list or file_find result in document_read — e.g. if the list showed path 'documents/Allen_Peng_resume_en.docx', call document_read(path='documents/Allen_Peng_resume_en.docx'). Do not use only the file name; use the full path from the list."
     try:
         user_key = _get_file_workspace_subdir(context) if context is not None else "?"
         if user_key and user_key != "?":
@@ -5668,11 +5707,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="document_read",
-            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. When path not given: use user sandbox root or infer (e.g. 'my documents' → documents/). When user mentions a friend (e.g. 'Sabrina\'s document'), use path '{FriendName}/...' or '{FriendName}/output/...'. User sandbox: downloads/, documents/, output/, work/, share/, knowledge/; per friend: {FriendName}/output/, {FriendName}/knowledge/. Use 'share/...' for global share. For long files, increase max_chars.",
+            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. When the user wants to summarize, edit, or use a file but does not give a path: pass the file name or a short description (e.g. 'resume', 'Allen_Peng_resume_en.docx') as path — the tool will search the sandbox first and read the file if exactly one match. When path is a full path: use the **path** from folder_list or file_find. User sandbox: documents/, output/, work/, share/, etc. Use 'share/...' for global share. For long files, increase max_chars.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path under user sandbox (e.g. documents/1.pdf, output/report.pdf). Use the **path** field from folder_list or file_find result (not the name field). Use 'share/...' for global share."},
+                    "path": {"type": "string", "description": "Full path (e.g. documents/1.pdf) from folder_list/file_find, or a file name/description when the user did not give a path — the tool will search the sandbox and read if exactly one match (e.g. path='resume', path='Allen_Peng_resume_en.docx'). Use 'share/...' for global share."},
                     "max_chars": {"type": "integer", "description": "Max characters to return (default from config tools.file_read_max_chars, or 64000).", "default": 64000},
                 },
                 "required": ["path"],
@@ -5747,11 +5786,11 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="folder_list",
-            description="List one level of a directory (subfolders and files). Use when the user asks for **folder structure** or **what folders/directories exist** (e.g. 'what folders are in my sandbox'). When path not given: lists user sandbox root. To list **only files** (e.g. all images), use file_find with path and pattern and files_only=true instead. User sandbox: downloads/, documents/, output/, work/, share/, knowledge/; per friend: {FriendName}/. Use path 'share' for global share. Returned 'path' is the exact path to pass to document_read/file_read.",
+            description="List one level of a directory (subfolders and files). Use when the user asks for **folder structure** or **what folders/directories exist** (e.g. 'what folders are in my sandbox'). When the user asks for a **named folder** (e.g. 'what files in documents folder', 'list documents', 'files in my documents'): pass path='documents' (or the folder they said: documents, downloads, output, images, work, knowledge, share) — do NOT omit path or use '.' or you will list the sandbox root. When path not given: lists user sandbox root. User sandbox: downloads/, documents/, output/, work/, share/, knowledge/; per friend: {FriendName}/. Use path 'share' for global share. Returned 'path' is the exact path to pass to document_read/file_read.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Omit or '' for user sandbox root. Subdir: output, documents, downloads, work, share, knowledge, or FriendName, FriendName/output, FriendName/knowledge. Use 'share' or 'share/...' for global share. Use exact path from result in document_read.", "default": ""},
+                    "path": {"type": "string", "description": "Omit or '' for user sandbox root only. When user says 'documents folder' or 'files in documents': use 'documents'. For 'downloads', 'output', 'images', etc.: use that name. Subdir: output, documents, downloads, work, share, knowledge, or FriendName. Use 'share' for global share. Use exact path from result in document_read.", "default": ""},
                     "max_entries": {"type": "integer", "description": "Max entries to return (default 500).", "default": 500},
                 },
                 "required": [],

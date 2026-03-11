@@ -11,6 +11,13 @@ _project_root = os.path.abspath(os.path.normpath(os.path.dirname(os.path.abspath
 if _project_root and _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+# Apply Instructor/litellm patch before any code imports instructor or cognee (fixes cognify "coroutine not callable" with local LLM).
+try:
+    from memory.instructor_patch import apply_instructor_patch_for_local_llm
+    apply_instructor_patch_for_local_llm()
+except Exception:
+    pass
+
 import httpx
 from loguru import logger
 import requests

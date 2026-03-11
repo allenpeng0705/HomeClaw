@@ -15,6 +15,8 @@ use_memory: true
 memory_backend: cognee
 # When true: extra LLM call per message asks "should we store?" before adding to RAG. Default false = store every message; retrieval filters at read time.
 memory_check_before_add: false
+# When true (default): enqueue RAG memory add only after main LLM reply is ready, so Cognee cognify does not compete with main LLM. Set false to enqueue before reply (cognify can run in parallel with main LLM; may contend if same local server).
+memory_add_after_reply: true
 # RAG memory summarization: batch old memories into long-term summaries; originals TTL then deleted; summaries kept forever. See docs_design/RAGMemorySummarizationDesign.md.
 memory_summarization:
   enabled: false
@@ -140,12 +142,17 @@ cognee:
     url: ""
     username: ""
     password: ""
-  # Local-first: Core patches Instructor so cognify works with local LLMs. If you still see "Instructor does not support multiple tool calls", set llm to a cloud endpoint (e.g. OpenAI/OpenRouter).
+  # Local-first: primary LLM for cognify (empty = main_llm). If cognify fails with local (template/Instructor), we retry once with llm_fallback when set.
   llm:
     provider: ""
     model: ""
     endpoint: ""
     api_key: ""
+  # Optional: use only when cognify fails with primary LLM (e.g. local). Enables local-first + reliable cognify. Same shape as llm (provider, model, endpoint, api_key).
+  # llm_fallback:
+  #   provider: openai
+  #   model: gpt-4o-mini
+  #   api_key: "${OPENAI_API_KEY}"
   embedding:
     provider: ""
     model: ""

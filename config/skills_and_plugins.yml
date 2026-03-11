@@ -242,6 +242,17 @@ system_plugins_env:
 # exec, process_*, run_skill, run_plugin, image, channel_send, etc. Only keys below are read by the tool layer.
 # tool_timeout_seconds: per-tool execution timeout (seconds); 0 = no timeout. Core reads it into CoreMetadata.tool_timeout_seconds.
 tools:
+  # When true (default): never auto-invoke tools when the model returned no tool_calls. Rely on the model to decide; no our own if-else to run tools. When false: allow legacy fallbacks (force_include, remind_me, route_to_plugin, folder_list, etc.) when model didn't call a tool.
+  strict_fallback: true
+  # One flag for Qwen variant: false (default) | "qwen3" (8B) | "qwen35" (9B). Set in tools OR in llama_cpp/completion (llm.yml).
+  # qwen3: server --reasoning-budget 0, tool temp 0.1, enable_thinking false, <tool_call> format + NO_TOOL_REQUIRED in system prompt.
+  # qwen35: same as qwen3 plus presence_penalty 1.5, stop </think> and "</tool_call>", GBNF grammar to force <tool_call> only, and a dedicated <tools> block in the system prompt. Use with Qwen 3.5 9B (llama.cpp b8150+).
+  # Legacy: qwen3_mode: true is equivalent to qwen_model: "qwen3".
+  # qwen_model: false
+  qwen3_mode: false
+  # Qwen 3.5 only: path to GBNF grammar file (relative to project root). Default: config/grammars/qwen35_tools.gbnf
+  # qwen35_grammar_path: "config/grammars/qwen35_tools.gbnf"
+  # Optional overrides when qwen_model is set: qwen3_tool_format_instruction, tool_temperature, disable_thinking_when_tools.
   # exec: allowed command names. Empty = platform default (Unix: ls, cat, pwd; Windows: dir, type, cd).
   exec_allowlist: []
   # markdown_to_pdf: VMPrint (github.com/cosmiciron/vmprint). install.sh/install.ps1 clone it to tools/vmprint and run npm install. Use tools/vmprint (relative to repo root) or an absolute path.

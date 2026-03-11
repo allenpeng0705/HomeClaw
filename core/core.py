@@ -815,7 +815,11 @@ class Core(CoreInterface):
                                     except Exception:
                                         pass
                             # else: no public URL → text only (no images, no image_links)
-                    async_resp: AsyncResponse = AsyncResponse(request_id=request.request_id, request_metadata=request.request_metadata, host=request.host, port=request.port, from_channel=request.channel_name, response_data=resp_data)
+                    # Include user_id in request_metadata so process_response_queue can deliver when host=inbound, port=0 (e.g. /process → Companion)
+                    req_meta = dict(request.request_metadata or {})
+                    if "user_id" not in req_meta and (getattr(request, "user_id", None) or getattr(request, "system_user_id", None)):
+                        req_meta["user_id"] = (getattr(request, "user_id", None) or getattr(request, "system_user_id", None) or "").strip() or "companion"
+                    async_resp: AsyncResponse = AsyncResponse(request_id=request.request_id, request_metadata=req_meta, host=request.host, port=request.port, from_channel=request.channel_name, response_data=resp_data)
                     await self.response_queue.put(async_resp)
                 else:
                     # Unsupported content type (e.g. HTML, OTHER)
@@ -1039,9 +1043,23 @@ class Core(CoreInterface):
                 try:
                     host = response.host if response.host != '0.0.0.0' else '127.0.0.1'
                     port = response.port
-                    # Sync inbound (/inbound or /ws) use host=inbound, port=0; response was already returned in the HTTP/WS response.
+                    # When host=inbound and port=0: sync /inbound and /ws already returned the response in the HTTP/WS body. But when the request came via request_queue (e.g. POST /process), the HTTP response was "Request received" — so we must deliver the reply via WebSocket/push (deliver_to_user) so Companion receives it.
                     if host == "inbound" and (port == 0 or port == "0"):
-                        logger.debug(f"Skip get_response for sync inbound channel {response.from_channel}; response already sent.")
+                        try:
+                            meta = getattr(response, "request_metadata", None) or {}
+                            if not isinstance(meta, dict):
+                                meta = {}
+                            uid = (meta.get("user_id") or meta.get("system_user_id") or "").strip() or "companion"
+                            rdata = getattr(response, "response_data", None)
+                            rdata = rdata if isinstance(rdata, dict) else {}
+                            text = rdata.get("text", "") if isinstance(rdata.get("text"), str) else str(rdata.get("text", "") or "")
+                            imgs = rdata.get("images") if isinstance(rdata.get("images"), list) else ([rdata.get("image")] if rdata.get("image") else None)
+                            if text or imgs:
+                                await self.deliver_to_user(uid, text or "", images=imgs, source="inbound", from_friend="HomeClaw")
+                                logger.info("Core: response delivered to user (inbound/Companion) user_id={}", uid)
+                        except Exception as e:
+                            logger.warning("deliver_to_user for inbound response failed: {}", e)
+                        logger.debug("Skip get_response POST for inbound channel {} (response delivered via WebSocket/push).", response.from_channel)
                     else:
                         path = '/get_response'
                         resp_url = f"http://{host}:{port}{path}"
@@ -1534,7 +1552,8 @@ class Core(CoreInterface):
                     )
                 messages.append({"role": "user", "content": text_only})
             use_memory = Util().has_memory()
-            if use_memory:
+            memory_add_after_reply = getattr(Util().get_core_metadata(), "memory_add_after_reply", True)
+            if use_memory and not memory_add_after_reply:
                 await self.memory_queue.put(request)
             start = time.time()
             answer = await self.answer_from_memory(query=human_message, messages=messages, app_id=app_id, user_name=user_name, user_id=user_id, agent_id=app_id, session_id=session_id, run_id=run_id, request=request)
@@ -1542,6 +1561,8 @@ class Core(CoreInterface):
             elapsed = end - start
             logger.info("Core: response generated in {:.1f}s for user={}", elapsed, user_id)
             logger.debug("LLM handling time: {} seconds", elapsed)
+            if use_memory and memory_add_after_reply:
+                await self.memory_queue.put(request)
             if elapsed > 90:
                 logger.warning(
                     "Inbound request took {:.0f}s. If the client sees 'Connection closed while receiving data', use POST /inbound with stream: true (SSE) or set proxy/client read_timeout >= {:.0f}s (e.g. inbound_request_timeout_seconds in config).",
