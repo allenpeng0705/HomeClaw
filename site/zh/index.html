@@ -60,37 +60,88 @@
 
   <main>
     <section class="hero container">
-      <h1>HomeClaw</h1>
-      <p class="tagline">运行在你机器上的 AI 助手。你的数据，你做主。</p>
-      <p class="hero-platform">支持 <strong>Mac、Windows、Linux</strong>（Python 技术栈）。<strong>伴侣应用</strong>（Mac、Windows、iPhone、Android）用于聊天、<strong>好友</strong>（AI + 用户间）与<strong>技能</strong>（经 ClawHub 安装）。<strong>渠道</strong>（WebChat、Telegram、Discord 等）及任意语言插件。</p>
-      <img src="../assets/homeclaw-promo-zh.png" alt="HomeClaw：混合模式、插件、技能、渠道、伴侣应用、多智能体" class="hero-img" width="720" height="auto">
-      <div class="hero-cta">
-        <a href="https://github.com/allenpeng0705/HomeClaw" class="btn btn-primary" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://allenpeng0705.github.io/HomeClaw/" class="btn btn-secondary" target="_blank" rel="noopener">文档站</a>
-        <a href="docs.html" class="btn btn-secondary">本站文档</a>
+      <div class="hero-content">
+        <div class="hero-text">
+          <h1 class="hero-title">HomeClaw</h1>
+          <p class="hero-tagline">运行在你机器上的 AI 助手。你的数据，你做主。</p>
+          <p class="hero-platform">
+            支持 <strong>Mac、Windows、Linux</strong>（Python 技术栈）。 
+            <strong>伴侣应用</strong>（Mac、Windows、iPhone、Android）用于聊天、 
+            <strong>好友</strong>（AI + 用户间）与 <strong>技能</strong>（经 ClawHub 安装）。 
+            <strong>渠道</strong>（WebChat、Telegram、Discord 等）及任意语言插件。
+          </p>
+          <div class="hero-cta">
+            <a href="https://github.com/allenpeng0705/HomeClaw" class="btn btn-primary" target="_blank" rel="noopener">
+              <svg class="btn-icon" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+              GitHub
+            </a>
+            <a href="https://allenpeng0705.github.io/HomeClaw/" class="btn btn-secondary" target="_blank" rel="noopener">文档站</a>
+            <a href="docs.html" class="btn btn-secondary">本站文档</a>
+          </div>
+        </div>
+        <div class="hero-image">
+          <div class="hero-img-container">
+            <img src="../assets/homeclaw-promo-zh.png" alt="HomeClaw：混合模式、插件、技能、渠道、伴侣应用、多智能体" class="hero-img" width="720" height="auto">
+            <div class="hero-img-overlay">
+              <div class="hero-features">
+                <span class="hero-feature-badge">混合模式</span>
+                <span class="hero-feature-badge">插件</span>
+                <span class="hero-feature-badge">技能</span>
+                <span class="hero-feature-badge">渠道</span>
+                <span class="hero-feature-badge">伴侣应用</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div class="start-here" style="margin-top:2rem; padding:1.25rem; background:rgba(255,255,255,.06); border-radius:8px; text-align:left;">
-        <h2 style="margin-top:0; font-size:1.1rem;">从这里开始 — 快速找到所需</h2>
-        <div class="feature-grid" style="grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem;">
+      <div class="start-here">
+        <h2>从这里开始 — 快速找到所需</h2>
+        <div class="feature-grid">
           <div class="feature-card">
-            <h3 style="font-size:1rem;">如何安装</h3>
-            <p style="margin:.5rem 0;"><strong>第一步：</strong>先克隆仓库，再运行安装脚本。<strong>Mac/Linux：</strong><code>chmod +x install.sh</code> 后 <code>./install.sh</code>，或直接 <code>bash install.sh</code>。<strong>Windows：</strong>使用 <strong>PowerShell</strong> 运行 <code>.\install.ps1</code> 或 <strong><code>install.bat</code></strong>（若提示“未数字签名”：使用 <code>install.bat</code> 或 <code>powershell -ExecutionPolicy Bypass -File .\install.ps1</code>）。脚本完成后会打开 Portal。</p>
+            <div class="feature-card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+              </svg>
+            </div>
+            <h3>如何安装</h3>
+            <p><strong>第一步：</strong>先克隆仓库，再运行安装脚本。<strong>Mac/Linux：</strong><code>chmod +x install.sh</code> 后 <code>./install.sh</code>，或直接 <code>bash install.sh</code>。<strong>Windows：</strong>使用 <strong>PowerShell</strong> 运行 <code>.\install.ps1</code> 或 <strong><code>install.bat</code></strong>（若提示“未数字签名”：使用 <code>install.bat</code> 或 <code>powershell -ExecutionPolicy Bypass -File .\install.ps1</code>）。脚本完成后会打开 Portal。</p>
             <a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">安装指南 →</a>
           </div>
           <div class="feature-card">
-            <h3 style="font-size:1rem;">如何使用 HomeClaw</h3>
-            <p style="margin:.5rem 0;">启动 Core，然后通过伴侣应用或渠道（WebChat、Telegram 等）聊天。</p>
+            <div class="feature-card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+              </svg>
+            </div>
+            <h3>如何使用 HomeClaw</h3>
+            <p>启动 Core，然后通过伴侣应用或渠道（WebChat、Telegram 等）聊天。</p>
             <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">入门指南 →</a>
           </div>
           <div class="feature-card">
-            <h3 style="font-size:1rem;">伴侣应用</h3>
-            <p style="margin:.5rem 0;">在哪里找：仓库中的 <strong>clients/HomeClawApp/</strong>。支持 Mac、Windows、iPhone、Android。</p>
+            <div class="feature-card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+            </div>
+            <h3>伴侣应用</h3>
+            <p>在哪里找：仓库中的 <strong>clients/HomeClawApp/</strong>。支持 Mac、Windows、iPhone、Android。</p>
             <a href="channels-companion.html#companion-platforms">查找与使用伴侣 →</a>
           </div>
           <div class="feature-card">
-            <h3 style="font-size:1rem;">Portal</h3>
-            <p style="margin:.5rem 0;">管理配置、启动 Core/渠道的 Web 界面。<code>python -m main portal</code> → http://127.0.0.1:18472</p>
+            <div class="feature-card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+              </svg>
+            </div>
+            <h3>Portal</h3>
+            <p>管理配置、启动 Core/渠道的 Web 界面。<code>python -m main portal</code> → http://127.0.0.1:18472</p>
             <a href="https://allenpeng0705.github.io/HomeClaw/platform/#portal" target="_blank" rel="noopener">Portal 说明 →</a>
           </div>
         </div>
@@ -200,41 +251,48 @@
       <h2>快速链接</h2>
       <div class="feature-grid">
         <div class="feature-card">
-          <h3>如何安装</h3>
-          <p><strong>第一步：</strong>克隆仓库后，<code>chmod +x install.sh</code> + <code>./install.sh</code> 或 <code>bash install.sh</code>（Mac/Linux）；<strong>PowerShell</strong> 下 <code>.\install.ps1</code> 或 <strong><code>install.bat</code></strong>（Windows；若“未数字签名”：使用 <code>install.bat</code> 或 <code>powershell -ExecutionPolicy Bypass -File .\install.ps1</code>）。详见安装指南。</p>
-          <a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">安装 →</a>
-        </div>
-        <div class="feature-card">
-          <h3>如何使用 HomeClaw</h3>
-          <p>启动 Core，使用伴侣应用或渠道。同一 Core、同一记忆。</p>
-          <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">入门 →</a>
-        </div>
-        <div class="feature-card">
-          <h3>伴侣应用 — 在哪里找</h3>
-          <p>从仓库中的 <strong>clients/HomeClawApp/</strong> 构建。在设置中配置 Core URL，添加用户后即可聊天。</p>
-          <a href="channels-companion.html#companion-platforms">渠道与伴侣 →</a>
-        </div>
-        <div class="feature-card">
-          <h3>Portal</h3>
-          <p>Web 界面：管理配置、启动 Core 与渠道。运行 <code>python -m main portal</code>，打开 http://127.0.0.1:18472</p>
-          <a href="https://allenpeng0705.github.io/HomeClaw/platform/#portal" target="_blank" rel="noopener">Portal →</a>
-        </div>
-        <div class="feature-card">
+          <div class="feature-card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+          </div>
           <h3>GitHub</h3>
           <p>源码、Issues、发布。</p>
           <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">仓库 →</a>
         </div>
         <div class="feature-card">
+          <div class="feature-card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+            </svg>
+          </div>
           <h3>完整文档</h3>
           <p>安装、配置、插件、混合模式、渠道、远程访问。</p>
           <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">文档站 →</a>
         </div>
         <div class="feature-card">
+          <div class="feature-card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
+          </div>
           <h3>部署到云</h3>
           <p>在阿里云 ECS、AWS EC2 或任意 VPS 上运行，常驻在线。</p>
           <a href="docs.html#deploy-cloud">部署指南 →</a>
         </div>
         <div class="feature-card">
+          <div class="feature-card-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </div>
           <h3>编写插件与技能</h3>
           <p>如何编写插件（任意语言）与技能。示例与未来插件/技能站。</p>
           <a href="plugins-skills.html">指南 →</a>
