@@ -21,8 +21,54 @@ plugins_description_max_chars: 0
 
 # --- Skills: vector search (RAG) ---
 # When false (default): include ALL skills in the prompt. When true: create vector store, sync skills_dir, retrieve by query similarity.
+# Kept off by default: RAG for skills often selects wrong skills (cross-lingual, short query). Turn on only when confident. Same policy for tools RAG (when implemented).
 # See docs_design/SkillsAndPluginsSamePolicy.md.
 skills_use_vector_search: false
+# OpenClaw-style skill filter: when set, only these skill folder names are in the prompt. Empty = all skills (or RAG result).
+# skills_filter: [html-slides-1.0.0, ppt-generation-1.0.0]
+
+# --- Intent router (Phase 2/3): LLM-based query -> category -> filter tools and skills ---
+# When enabled: one short LLM call classifies the user message; tools (and optionally skills) are filtered by category. No phrase tables — LLM does the classification.
+# Multi-category: if the request needs several types of actions (e.g. search then save), the router may return two comma-separated categories; Core then uses the union of tools/skills from both. See docs_design/IntentRouter_CategoriesCoverage.md § Multi-category tasks.
+# Phase 3.1: per category use "skills: [folder1, folder2]" to restrict which skills are in the prompt (skill_name enum then matches). Phase 3.3: verify_tool_selection + verify_tools to optionally verify exec/file_write before execution.
+intent_router:
+  enabled: true
+  # Full coverage: see docs_design/IntentRouter_CategoriesCoverage.md. Every category has a mapping so router is enough for tools/skills.
+  categories: [search_web, list_files, read_document, create_slides, schedule_remind, open_url, memory, knowledge_base, image, general_chat, coding]
+  # Short description per category so the router LLM can classify more accurately. Reply must still be the exact category name.
+  category_descriptions:
+    search_web: "User wants to search the web or look up information online."
+    list_files: "User wants to list, browse, or find files or folders."
+    read_document: "User wants to read, summarize, or understand a specific document or file."
+    create_slides: "User wants to create slides, a presentation, or PPT from content."
+    schedule_remind: "User wants to set a reminder, schedule, recurring task, or record a date."
+    open_url: "User wants to open a URL, visit a webpage, or navigate to a link."
+    memory: "User wants to remember something, recall past context, or search memory."
+    knowledge_base: "User wants to search or save something in their knowledge base."
+    image: "User wants to generate, analyze, or describe an image."
+    general_chat: "General conversation, question, or intent that does not fit a specific category above."
+    coding: "User wants to run code, edit files, use dev tools, or automate something."
+  category_tools:
+    search_web: { profile: minimal }
+    list_files: { tools: [folder_list, file_find, document_read] }
+    read_document: { tools: [document_read, file_read, file_understand, folder_list, file_find] }
+    create_slides: { profile: minimal, skills: [html-slides-1.0.0, ppt-generation-1.0.0] }
+    schedule_remind: { tools: [remind_me, cron_schedule, cron_list, cron_remove, cron_update, record_date, recorded_events_list, route_to_tam, time] }
+    open_url: { tools: [fetch_url, route_to_plugin, browser_navigate] }
+    memory: { tools: [memory_search, memory_get, agent_memory_search, agent_memory_get, append_agent_memory, append_daily_memory] }
+    knowledge_base: { tools: [knowledge_base_search, knowledge_base_add, knowledge_base_remove, knowledge_base_list] }
+    image: { tools: [image], skills: [image-generation-1.0.0] }
+    general_chat: { profile: full }
+    coding: { profile: coding }
+  # Optional: include recent chat turns so router can resolve "that document", "it", "the same". Trade-off: helps follow-ups, can dilute current intent. 0 = only current message (default).
+  include_recent_turns: 0
+  # When include_recent_turns > 0: max chars per message in recent context (default 300).
+  # recent_turns_max_chars: 300
+  # Phase 3.3: when true, before executing exec or file_write (or verify_tools list), ask LLM "Does this match user intent? Yes/No"; skip if No.
+  # verify_tool_selection: false
+  # verify_tools: [exec, file_write]
+  # Fallback: add these tools to every category so narrow intents (e.g. search_web) can still save or list. See docs_design/IntentRouter_CategoriesCoverage.md § Fallbacks.
+  # tools_always_included: [save_result_page, file_write, folder_list]
 skills_vector_collection: homeclaw_skills   # Chroma collection name (default: homeclaw_skills)
 skills_max_retrieved: 10                     # When using vector search: max skills from RAG before threshold + cap (default: 10)
 skills_max_in_prompt: 5                      # When skills_use_vector_search=true: cap skills in prompt (default: 5); ignored when false
@@ -242,23 +288,29 @@ system_plugins_env:
 # exec, process_*, run_skill, run_plugin, image, channel_send, etc. Only keys below are read by the tool layer.
 # tool_timeout_seconds: per-tool execution timeout (seconds); 0 = no timeout. Core reads it into CoreMetadata.tool_timeout_seconds.
 tools:
+  # OpenClaw-style tool profiles: only tools in the selected profile(s) are sent to the LLM. Reduces wrong tool selection. Omit or "full" = all tools.
+  # profile: "full"   # full | minimal | messaging | coding. Or use profiles: [messaging, coding] for union.
+  # profiles: []
+  # When > 0: tool descriptions sent to the LLM are shortened (use ToolDefinition.short_description if set, else truncate to this many chars at sentence boundary). Helps local/smaller LLMs select tools more accurately. 0 = full description (default).
+  # description_max_chars: 200
+  # When true (default): inject few-shot tool selection examples (User / Thought / Call) from config/prompts/tools/selection_examples.yml into the system prompt. Helps local/Qwen models map natural language to the right tool.
+  # tool_selection_examples: true
   # When true (default): never auto-invoke tools when the model returned no tool_calls. Rely on the model to decide; no our own if-else to run tools. When false: allow legacy fallbacks (force_include, remind_me, route_to_plugin, folder_list, etc.) when model didn't call a tool.
   strict_fallback: true
-  # One flag for Qwen variant: false (default) | "qwen3" (8B) | "qwen35" (9B). Set in tools OR in llama_cpp/completion (llm.yml).
-  # qwen3: server --reasoning-budget 0, tool temp 0.1, enable_thinking false, <tool_call> format + NO_TOOL_REQUIRED in system prompt.
-  # qwen35: same as qwen3 plus presence_penalty 1.5, stop </think> and "</tool_call>", GBNF grammar to force <tool_call> only, and a dedicated <tools> block in the system prompt. Use with Qwen 3.5 9B (llama.cpp b8150+).
-  # Legacy: qwen3_mode: true is equivalent to qwen_model: "qwen3".
-  # qwen_model: false
-  qwen3_mode: false
-  # Qwen 3.5 only: path to GBNF grammar file (relative to project root). Default: config/grammars/qwen35_tools.gbnf
-  # qwen35_grammar_path: "config/grammars/qwen35_tools.gbnf"
-  # Optional overrides when qwen_model is set: qwen3_tool_format_instruction, tool_temperature, disable_thinking_when_tools.
+  # Phase 3.4: RAG for tools — when true, retrieve tools by query similarity (reuse skills RAG infra). Default false; off by default like skills RAG (low confidence in retrieval).
+  tools_use_vector_search: false
+  # tools_vector_collection: homeclaw_tools
+  # tools_max_retrieved: 10
+  # tools_similarity_threshold: 0.0
+  # tools_refresh_on_startup: true
+  # Qwen / Qwen 3.5: configure in llm.yml under llama_cpp only (qwen_mode, qwen35_grammar_path, qwen35_use_grammar). Do not set qwen_model or qwen35_* here.
+  # Optional when using Qwen: tool_temperature, disable_thinking_when_tools, qwen3_tool_format_instruction.
   # exec: allowed command names. Empty = platform default (Unix: ls, cat, pwd; Windows: dir, type, cd).
   exec_allowlist: []
   # markdown_to_pdf: VMPrint (github.com/cosmiciron/vmprint). install.sh/install.ps1 clone it to tools/vmprint and run npm install. Use tools/vmprint (relative to repo root) or an absolute path.
   markdown_to_pdf:
     vmprint_dir: "tools/vmprint"   # default after install; empty = use pandoc or weasyprint
-  exec_timeout: 30   # seconds
+  exec_timeout: 120   # seconds
   # Max characters returned by file_read when the tool does not pass max_chars. Increase for long PDFs/documents.
   file_read_max_chars: 5000000
   # run_skill: if set, only these script names under skill/scripts/ are allowed. [] = allow all.
@@ -269,6 +321,8 @@ tools:
   # run_plugin: list plugin_ids to run in Core's process (default: subprocess). Subprocess uses a temp file for payload so large parameters work for all plugins; only add here if a plugin needs Core refs or must run in-process.
   run_plugin_in_process_plugins: []
   run_plugin_timeout: 300   # seconds
+
+  max_tool_rounds: 30
   # web_search: provider (tavily, duckduckgo, google_cse, bing, brave, serpapi). Tavily/brave need api_key here or env.
   web:
     search:
@@ -297,6 +351,7 @@ tools:
   browser_enabled: true   # when browser_use_plugin false: built-in tools only if true
   browser_headless: false # when using built-in tools: false to show window (local testing)
   tool_timeout_seconds: 0   # per-tool timeout (seconds); 0 = no timeout. For long PDF/summarize use 300–600.
+  # max_tool_rounds: max LLM rounds in the tool loop (default 30). Complex tasks (e.g. document_read → run_skill → save_result_page) may need many rounds; set higher if needed.
   # Use tool result as final response and skip the second LLM call. These are the default lists (Core uses same if omitted).
   # Plugins (e.g. homeclaw-browser): invoked via route_to_plugin; result is always used as final response (no second LLM). PPT is now a skill (ppt-generation-1.0.0) invoked via run_skill.
   use_result_as_response:
@@ -338,7 +393,6 @@ tools:
     # Exclude folder_list and file_find: they return JSON; we need a second LLM turn to format it (or post-process), so the user does not see raw JSON.
     self_contained_tools:
       - run_skill
-      - echo
       - time
       - profile_get
       - profile_list

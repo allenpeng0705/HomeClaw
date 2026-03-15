@@ -10,6 +10,13 @@ from time import sleep
 _project_root = os.path.abspath(os.path.normpath(os.path.dirname(os.path.abspath(__file__))))
 if _project_root and _project_root not in sys.path:
     sys.path.insert(0, _project_root)
+# Cognee is vendored in vendor/cognee; add it so "import cognee" finds vendor/cognee/cognee.
+_vendor_cognee = os.path.join(_project_root, "vendor", "cognee")
+if os.path.isdir(_vendor_cognee) and _vendor_cognee not in sys.path:
+    sys.path.insert(0, _vendor_cognee)
+
+# LiteLLM: use local model cost map only (avoids "Failed to fetch remote model cost map... timed out" warning when offline/slow).
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 # Apply Instructor/litellm patch before any code imports instructor or cognee (fixes cognify "coroutine not callable" with local LLM).
 try:

@@ -27,7 +27,7 @@ from memory.util import get_update_memory_messages, get_add_memory_messages
 from memory.storage import SQLiteManager
 from memory.configs import MemoryItem, MemoryConfig
 from loguru import logger
-from base.util import Util
+from base.util import Util, strip_reasoning_from_assistant_text
 
 
 # Setup user config
@@ -76,6 +76,34 @@ class Memory(MemoryBase):
         """
         if metadata is None:
             metadata = {}
+        # Accept list of messages (full turn) like Cognee/Memos: normalize to a single string for embed and graph.
+        # Filter: no full tool dumps (PDF/text/skill output); no reasoning blocks in assistant text.
+        if isinstance(data, list):
+            parts = []
+            for m in data:
+                if not isinstance(m, dict):
+                    continue
+                role = (str(m.get("role") or "user").strip() or "user").lower()
+                content = str(m.get("content") or "").strip()
+                if not content:
+                    continue
+                if role == "user":
+                    parts.append("User: " + content)
+                elif role == "assistant":
+                    content = strip_reasoning_from_assistant_text(content)
+                    if not content:
+                        continue
+                    _cap = 4000
+                    parts.append("Assistant: " + (content if len(content) <= _cap else content[:_cap] + "\n[Truncated.]"))
+                elif role == "tool":
+                    name = str(m.get("toolName") or m.get("tool_name") or "tool").strip() or "tool"
+                    # Keep only a short hint per tool so memory is not flooded with PDF/text/skill output
+                    _tool_cap = 120
+                    content = content if len(content) <= _tool_cap else content[:_tool_cap] + " [Truncated.]"
+                    parts.append("Tool (" + name + "): " + content)
+            data = "\n\n".join(parts) if parts else (str(data[0].get("content", "")) if data and isinstance(data[0], dict) else "")
+        if not isinstance(data, str):
+            data = str(data or "")
         logger.debug(f"#########Data send to embedding: {data}#########")
 
         filters = filters or {}

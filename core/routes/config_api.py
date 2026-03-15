@@ -34,7 +34,8 @@ CONFIG_CORE_WHITELIST = frozenset({
     "prompt_cache_ttl_seconds", "auth_enabled", "auth_api_key", "core_public_url", "tools", "result_viewer", "knowledge_base",
     "file_understanding", "llama_cpp", "completion", "local_models", "cloud_models", "main_llm",
     "embedding_llm", "main_llm_language", "embedding_host", "embedding_port", "main_llm_host", "main_llm_port",
-    "vision_llm", "vision_llm_host", "vision_llm_port", "vision_image_max_dimension",
+    "vision_llm", "vision_llm_host", "vision_llm_port", "vision_llm_start_on_demand", "vision_llm_idle_stop_seconds", "vision_image_max_dimension",
+    "completion_vision", "completion_tool_selection",
     "database", "vectorDB", "graphDB", "cognee", "memory_summarization",
 })
 CONFIG_CORE_BOOL_KEYS = frozenset({

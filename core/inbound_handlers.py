@@ -33,7 +33,7 @@ async def handle_inbound_request(
 
 
 async def run_async_inbound(core: Any, request_id: str, request: InboundRequest) -> None:
-    """Background task for async /inbound: run the request and store result for GET /inbound/result. Same response shape as sync /inbound. Respects reply_accepts: text-only clients get only text or image_links."""
+    """Background task for async /inbound: run the request and store result for GET /inbound/result. Same response shape as sync /inbound. Respects reply_accepts: text-only clients get only text or image_links. Supports cancellation via POST /inbound/cancel."""
     try:
         ok, text, status, image_paths = await handle_inbound_request(core, request)
         try:
@@ -96,6 +96,16 @@ async def run_async_inbound(core: Any, request_id: str, request: InboundRequest)
             except Exception:
                 pass
         core._inbound_async_results[request_id] = entry
+    except asyncio.CancelledError:
+        core._inbound_async_results[request_id] = {
+            "status": "cancelled",
+            "ok": False,
+            "text": "",
+            "format": "plain",
+            "error": "Request was cancelled by the client.",
+            "created_at": time.time(),
+        }
+        logger.info("Async inbound request_id=%s was cancelled", request_id)
     except Exception as e:
         logger.exception(e)
         core._inbound_async_results[request_id] = {
@@ -106,17 +116,21 @@ async def run_async_inbound(core: Any, request_id: str, request: InboundRequest)
             "error": (str(e) or "Internal error")[:2000],
             "created_at": time.time(),
         }
+    finally:
+        tasks = getattr(core, "_inbound_async_tasks", None)
+        if isinstance(tasks, dict):
+            tasks.pop(request_id, None)
     try:
         push_sid = getattr(request, "push_ws_session_id", None)
         if isinstance(push_sid, str) and push_sid.strip():
             ws = core._ws_sessions.get(push_sid.strip())
             if ws is not None:
                 entry = core._inbound_async_results.get(request_id)
-                if entry and entry.get("status") == "done":
+                if entry and entry.get("status") in ("done", "cancelled"):
                     push_payload = {
                         "event": "inbound_result",
                         "request_id": request_id,
-                        "status": "done",
+                        "status": entry.get("status", "done"),
                         "text": entry.get("text", ""),
                         "format": entry.get("format", "plain"),
                         "ok": entry.get("ok", True),

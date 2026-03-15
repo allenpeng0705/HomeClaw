@@ -1,0 +1,24 @@
+name: community | Greetings
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  greeting:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/first-interaction@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        pr-message:  'Hello @${{ github.actor }}, thank you for submitting a PR! We will respond as soon as possible.'
+        issue-message: |
+          Hello @${{ github.actor }}, thank you for your interest in our work!
+
+          If this is a bug report, please provide screenshots and **minimum viable code to reproduce your issue**, otherwise we can not help you.

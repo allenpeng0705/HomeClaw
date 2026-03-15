@@ -1068,6 +1068,234 @@ async def _memory_get_executor(arguments: Dict[str, Any], context: ToolContext) 
     return json.dumps({"memory": mem.get("memory"), "id": mem.get("id"), "metadata": {k: v for k, v in mem.items() if k not in ("memory", "id")}})
 
 
+def _get_memos_adapter(core: Any) -> Any:
+    """Return MemOS adapter when memory_backend is memos or composite with memos backend. Never raises."""
+    try:
+        if core is None:
+            return None
+        mem = getattr(core, "mem_instance", None)
+        if mem is None:
+            return None
+        from memory.memos_adapter import MemosMemoryAdapter
+        if isinstance(mem, MemosMemoryAdapter):
+            return mem
+        if type(mem).__name__ == "CompositeMemory" and hasattr(mem, "get_memos_adapter"):
+            adapter = getattr(mem, "get_memos_adapter")
+            if callable(adapter):
+                return adapter()
+    except Exception:
+        pass
+    return None
+
+
+def _safe_json(d: Dict[str, Any], default: str = '{"ok":false,"error":"Serialization error"}') -> str:
+    """Serialize to JSON; on failure return default so the tool never crashes."""
+    try:
+        return json.dumps(d, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return default
+
+
+async def _memory_task_summary_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Get a MemOS task summary by task_id (Goal, Key Steps, Result, Key Details). Only available when MemOS is in use (memory_backend memos or composite)."""
+    try:
+        core = getattr(context, "core", None)
+        adapter = _get_memos_adapter(core)
+        if adapter is None:
+            return _safe_json({"ok": False, "message": "MemOS is not in use. Set memory_backend to memos or composite (with memos backend) and run the MemOS standalone server to use memory_task_summary."})
+        task_id = (arguments.get("task_id") or arguments.get("id") or "").strip()
+        if not task_id:
+            return "Error: task_id is required"
+        try:
+            out = await adapter.get_task_summary_async(
+                task_id=task_id,
+                user_id=getattr(context, "user_id", None),
+                agent_id=getattr(context, "friend_id", None),
+            )
+        except Exception as e:
+            return _safe_json({"ok": False, "error": str(e)})
+        if out is None:
+            return _safe_json({"ok": False, "message": "Task not found or MemOS server error.", "task_id": task_id})
+        return _safe_json({"ok": True, "task": out})
+    except Exception as e:
+        logger.debug("memory_task_summary executor error: {}", e)
+        return _safe_json({"ok": False, "error": str(e)})
+
+
+async def _memory_skill_search_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Search MemOS skills by query (FTS + vector + LLM relevance). Returns skill ids, names, descriptions. Only available when MemOS is in use."""
+    try:
+        core = getattr(context, "core", None)
+        adapter = _get_memos_adapter(core)
+        if adapter is None:
+            return _safe_json({"ok": False, "hits": [], "message": "MemOS is not in use. Set memory_backend to memos or composite and run the MemOS standalone server to use memory_skill_search."})
+        query = (arguments.get("query") or "").strip()
+        if not query:
+            return "Error: query is required"
+        scope = (arguments.get("scope") or "mix").strip().lower()
+        if scope not in ("self", "public", "mix"):
+            scope = "mix"
+        try:
+            hits = await adapter.skill_search_async(
+                query=query,
+                scope=scope,
+                user_id=getattr(context, "user_id", None),
+                agent_id=getattr(context, "friend_id", None),
+            )
+        except Exception as e:
+            return _safe_json({"ok": False, "hits": [], "error": str(e)})
+        return _safe_json({"ok": True, "hits": hits if isinstance(hits, list) else []})
+    except Exception as e:
+        logger.debug("memory_skill_search executor error: {}", e)
+        return _safe_json({"ok": False, "hits": [], "error": str(e)})
+
+
+async def _memory_skill_get_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Get a MemOS skill by id (metadata + SKILL.md content). Only available when MemOS is in use."""
+    try:
+        core = getattr(context, "core", None)
+        adapter = _get_memos_adapter(core)
+        if adapter is None:
+            return _safe_json({"ok": False, "message": "MemOS is not in use. Set memory_backend to memos or composite and run the MemOS standalone server to use memory_skill_get."})
+        skill_id = (arguments.get("skill_id") or arguments.get("id") or "").strip()
+        if not skill_id:
+            return "Error: skill_id is required"
+        try:
+            out = await adapter.skill_get_async(skill_id=skill_id)
+        except Exception as e:
+            return _safe_json({"ok": False, "error": str(e)})
+        if out is None:
+            return _safe_json({"ok": False, "message": "Skill not found or MemOS server error.", "skill_id": skill_id})
+        return _safe_json({"ok": True, "skill": out})
+    except Exception as e:
+        logger.debug("memory_skill_get executor error: {}", e)
+        return _safe_json({"ok": False, "error": str(e)})
+
+
+async def _memory_task_list_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """List MemOS tasks for the current agent. Only available when MemOS is in use."""
+    try:
+        core = getattr(context, "core", None)
+        adapter = _get_memos_adapter(core)
+        if adapter is None:
+            return _safe_json({"ok": False, "tasks": [], "total": 0, "message": "MemOS is not in use. Set memory_backend to memos or composite and run the MemOS standalone server to use memory_task_list."})
+        status = (arguments.get("status") or "").strip() or None
+        try:
+            limit = min(100, max(1, int(arguments.get("limit", 50))))
+        except (TypeError, ValueError):
+            limit = 50
+        try:
+            offset = max(0, int(arguments.get("offset", 0)))
+        except (TypeError, ValueError):
+            offset = 0
+        try:
+            out = await adapter.list_tasks_async(
+                user_id=getattr(context, "user_id", None),
+                agent_id=getattr(context, "friend_id", None),
+                status=status,
+                limit=limit,
+                offset=offset,
+            )
+        except Exception as e:
+            return _safe_json({"ok": False, "tasks": [], "total": 0, "error": str(e)})
+        tasks = out.get("tasks") if isinstance(out, dict) else []
+        total = out.get("total") if isinstance(out, dict) else 0
+        return _safe_json({"ok": True, "tasks": list(tasks) if isinstance(tasks, list) else [], "total": int(total) if isinstance(total, (int, float)) else 0})
+    except Exception as e:
+        logger.debug("memory_task_list executor error: {}", e)
+        return _safe_json({"ok": False, "tasks": [], "total": 0, "error": str(e)})
+
+
+async def _memory_write_public_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Write content to public memory (visible to all agents). Only available when MemOS is in use."""
+    try:
+        core = getattr(context, "core", None)
+        adapter = _get_memos_adapter(core)
+        if adapter is None:
+            return _safe_json({"ok": False, "message": "MemOS is not in use. Set memory_backend to memos or composite and run the MemOS standalone server to use memory_write_public."})
+        content = (arguments.get("content") or "").strip()
+        if not content:
+            return "Error: content is required"
+        summary = (arguments.get("summary") or "").strip() or None
+        try:
+            out = await adapter.write_public_async(content=content, summary=summary)
+        except Exception as e:
+            return _safe_json({"ok": False, "error": str(e)})
+        if out is None:
+            return _safe_json({"ok": False, "message": "Write failed or MemOS server error."})
+        return _safe_json({"ok": True, "id": out.get("id"), "message": out.get("message", "Public memory written.")})
+    except Exception as e:
+        logger.debug("memory_write_public executor error: {}", e)
+        return _safe_json({"ok": False, "error": str(e)})
+
+
+async def _memory_skill_publish_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Set a MemOS skill visibility to public (so other agents can find it). Only available when MemOS is in use."""
+    try:
+        core = getattr(context, "core", None)
+        adapter = _get_memos_adapter(core)
+        if adapter is None:
+            return _safe_json({"ok": False, "message": "MemOS is not in use. Set memory_backend to memos or composite and run the MemOS standalone server to use memory_skill_publish."})
+        skill_id = (arguments.get("skill_id") or arguments.get("id") or "").strip()
+        if not skill_id:
+            return "Error: skill_id is required"
+        try:
+            out = await adapter.skill_set_visibility_async(skill_id=skill_id, visibility="public")
+        except Exception as e:
+            return _safe_json({"ok": False, "error": str(e)})
+        if out is None:
+            return _safe_json({"ok": False, "message": "Skill not found or update failed.", "skill_id": skill_id})
+        return _safe_json({"ok": True, "skill_id": skill_id, "visibility": "public"})
+    except Exception as e:
+        logger.debug("memory_skill_publish executor error: {}", e)
+        return _safe_json({"ok": False, "error": str(e)})
+
+
+async def _memory_skill_unpublish_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Set a MemOS skill visibility to private (only current agent can see it). Only available when MemOS is in use."""
+    try:
+        core = getattr(context, "core", None)
+        adapter = _get_memos_adapter(core)
+        if adapter is None:
+            return _safe_json({"ok": False, "message": "MemOS is not in use. Set memory_backend to memos or composite and run the MemOS standalone server to use memory_skill_unpublish."})
+        skill_id = (arguments.get("skill_id") or arguments.get("id") or "").strip()
+        if not skill_id:
+            return "Error: skill_id is required"
+        try:
+            out = await adapter.skill_set_visibility_async(skill_id=skill_id, visibility="private")
+        except Exception as e:
+            return _safe_json({"ok": False, "error": str(e)})
+        if out is None:
+            return _safe_json({"ok": False, "message": "Skill not found or update failed.", "skill_id": skill_id})
+        return _safe_json({"ok": True, "skill_id": skill_id, "visibility": "private"})
+    except Exception as e:
+        logger.debug("memory_skill_unpublish executor error: {}", e)
+        return _safe_json({"ok": False, "error": str(e)})
+
+
+async def _memory_viewer_url_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Return the MemOS Memory Viewer URL when MemOS is in use and viewer_port is configured. Use when the user asks how to view or manage memories in the MemOS UI."""
+    try:
+        core = getattr(context, "core", None)
+        adapter = _get_memos_adapter(core)
+        if adapter is None:
+            return _safe_json({"ok": False, "url": "", "message": "MemOS is not in use. Set memory_backend to memos or composite and run the MemOS standalone server with MEMOS_VIEWER_PORT=18799 to use the Memory Viewer."})
+        try:
+            meta = Util().get_core_metadata()
+            memos_cfg = getattr(meta, "memos", None) or {}
+            port = memos_cfg.get("viewer_port") if isinstance(memos_cfg, dict) else getattr(memos_cfg, "viewer_port", None)
+            if port is None or (isinstance(port, (int, float)) and int(port) <= 0):
+                return _safe_json({"ok": True, "url": "", "message": "MemOS is in use but viewer_port is not set. Start the standalone server with MEMOS_VIEWER_PORT=18799 and set memos.viewer_port: 18799 in config/memory_kb.yml to get the Memory Viewer URL."})
+            port = int(port)
+            url = f"http://127.0.0.1:{port}"
+            return _safe_json({"ok": True, "url": url, "message": f"MemOS Memory Viewer: {url}. Open in a browser to manage memories, tasks, and skills."})
+        except Exception as e:
+            return _safe_json({"ok": False, "url": "", "message": str(e)})
+    except Exception as e:
+        logger.debug("memory_viewer_url executor error: {}", e)
+        return _safe_json({"ok": False, "url": "", "message": str(e)})
+
+
 async def _append_agent_memory_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Append content to AGENT_MEMORY.md (curated long-term memory). Only works when use_agent_memory_file is enabled."""
     content = (arguments.get("content") or "").strip()
@@ -3268,6 +3496,15 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
                     "Error: content for format=html is too short. Use the **previous document_read result** to build the full HTML (all slides with content), then call save_result_page with that HTML. "
                     "**Stop calling tools now.** Reply to the user: explain that the slide needs full content from the document and ask them to try again or wait for you to generate it."
                 )
+            # Reject truncated HTML (tool-call output was cut off by token limit): must contain closing </html>
+            if len(content_str) > 500 and (
+                content_str.lstrip().lower().startswith("<!doctype") or content_str.lstrip().lower().startswith("<html")
+            ):
+                if "</html>" not in content_str.lower():
+                    return (
+                        "Error: the HTML content was truncated (missing </html>). The tool-call output was cut off. "
+                        "Put the **full** HTML in your **message content** inside a ```html ... ``` block instead of in save_result_page; the system will save it and return the link. Or generate a shorter slide deck and call save_result_page again."
+                    )
         content = content_str or content
         scope = _get_file_workspace_subdir(context)
         file_id = uuid.uuid4().hex[:16]
@@ -3751,7 +3988,7 @@ def _get_file_workspace_subdir(context: Optional[Any]) -> str:
 
 
 def _normalize_relative_path(path_arg: Optional[str]) -> str:
-    """Normalize relative path: strip leading './' or '.\\\\', collapse to '.' if empty. Used before joining with absolute base from sandbox_paths.json. Never raises."""
+    """Normalize relative path for cross-platform use: strip leading './' or '.\\\\' or '/' or '\\\\', collapse to '.' if empty. Used before joining with absolute base from sandbox_paths.json. Never raises."""
     try:
         rest = (str(path_arg).strip() if path_arg is not None else "")
     except Exception:
@@ -3760,7 +3997,9 @@ def _normalize_relative_path(path_arg: Optional[str]) -> str:
         return "."
     if rest.startswith("./") or rest.startswith(".\\"):
         rest = rest[2:].lstrip("/\\")
-    return rest or "."
+    # Strip leading slashes so "documents/file" and "/documents/file" both work (Windows/Unix)
+    rest = rest.lstrip("/\\") or "."
+    return rest
 
 
 def _resolve_relative_to_absolute_via_sandbox_json(
@@ -4030,9 +4269,22 @@ async def _apply_patch_executor(arguments: Dict[str, Any], context: ToolContext)
 
 
 # ---- Folder / file explore (cross-platform) ----
+def _safe_int(value: Any, default: int, min_val: int, max_val: int) -> int:
+    """Parse int from config; clamp to [min_val, max_val]. Never raises."""
+    try:
+        n = int(value) if value not in (None, "") else 0
+        n = n or default
+        return max(min_val, min(max_val, n))
+    except (TypeError, ValueError):
+        return default
+
+
 async def _folder_list_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """List directory contents. Omit path for user sandbox root; use 'share' or 'share/' for shared folder; or subdir name. When base not set, absolute path allowed."""
-    path_arg = (arguments.get("path") or "").strip() or "."
+    """List directory contents. Omit path for user sandbox root; use 'share' or 'share/' for shared folder; or subdir name. When base not set, absolute path allowed. Never raises."""
+    arguments = arguments or {}
+    path_arg = (arguments.get("path") or "").strip()
+    if path_arg == "":
+        path_arg = "."
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
         if r is None:
@@ -4042,34 +4294,46 @@ async def _folder_list_executor(arguments: Dict[str, Any], context: ToolContext)
             return _FILE_ACCESS_DENIED_MSG
         if not full.is_dir():
             return _file_not_found_msg(context)
-        max_entries = int(arguments.get("max_entries", 0)) or 500
+        max_entries = _safe_int(arguments.get("max_entries"), 500, 1, 2000)
         entries = []
-        # Paths must be relative to the user sandbox (effective_base) so file_read/document_read(path=...) resolve to the same file.
         path_arg_normalized = (path_arg or ".").strip() in (".", "")
         base_for_rel = full if path_arg_normalized else full.parent
-        for i, p in enumerate(sorted(full.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))):
+        try:
+            children = list(full.iterdir())
+        except OSError as e:
+            logger.debug("folder_list iterdir failed: %s", e)
+            return "Could not list this folder (permission or I/O error). Try another path or check sandbox permissions."
+        children.sort(key=lambda x: (not x.is_dir(), (x.name or "").lower()))
+        for i, p in enumerate(children):
             if i >= max_entries:
                 entries.append({"name": "...", "type": "(truncated)", "path": ""})
                 break
             try:
                 rel = str(p.relative_to(base_for_rel)).replace("\\", "/")
             except ValueError:
-                rel = p.name
-            entries.append({
-                "name": p.name,
-                "type": "dir" if p.is_dir() else "file",
-                "path": rel,
-            })
+                rel = getattr(p, "name", "") or ""
+            try:
+                entries.append({
+                    "name": getattr(p, "name", "") or rel or "?",
+                    "type": "dir" if p.is_dir() else "file",
+                    "path": rel,
+                })
+            except OSError:
+                continue
         if not entries:
             return "No entries (directory is empty). Use path '' or '.' for user sandbox root; path 'share' for shared folder. Then use document_read(path='...') with the **path** value from the list (not the name)."
         return json.dumps(entries, ensure_ascii=False, indent=0)
     except Exception as e:
         logger.debug("folder_list failed: %s", e)
-        return _file_not_found_msg(context)
+        try:
+            return _file_not_found_msg(context)
+        except Exception:
+            return "Could not list folder. Please check the path and try again."
 
 
 async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Find files by pattern (glob). Omit path for user sandbox root; use 'share' for shared folder. When base not set, path can be absolute."""
+    """Find files by pattern (glob). Omit path for user sandbox root; use 'share' for shared folder. When base not set, path can be absolute. Never raises."""
+    arguments = arguments or {}
     path_arg = (arguments.get("path") or "").strip() or "."
     pattern = (arguments.get("pattern") or arguments.get("name") or "*").strip()
     if not pattern:
@@ -4084,10 +4348,15 @@ async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -
             return _FILE_ACCESS_DENIED_MSG
         if not full_dir.is_dir():
             return _file_not_found_msg(context)
-        max_results = int(arguments.get("max_results", 0)) or 200
+        max_results = _safe_int(arguments.get("max_results"), 200, 1, 2000)
         results = []
         base_for_rel = base if base is not None else full_dir
-        for p in full_dir.rglob(pattern):
+        try:
+            candidates = list(full_dir.rglob(pattern))
+        except OSError as e:
+            logger.debug("file_find rglob failed: %s", e)
+            return "Could not search this folder (permission or I/O error). Try folder_list(path='...') to list the directory first."
+        for p in candidates:
             if files_only and not p.is_file():
                 continue
             if len(results) >= max_results:
@@ -4096,18 +4365,24 @@ async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -
             try:
                 rel = str(p.relative_to(base_for_rel)).replace("\\", "/")
             except ValueError:
-                rel = p.name
-            results.append({
-                "path": rel,
-                "type": "dir" if p.is_dir() else "file",
-                "name": p.name,
-            })
+                rel = getattr(p, "name", "") or ""
+            try:
+                results.append({
+                    "path": rel,
+                    "type": "dir" if p.is_dir() else "file",
+                    "name": getattr(p, "name", "") or rel or "?",
+                })
+            except OSError:
+                continue
         if not results:
             return "No files or folders matched the pattern. Try file_find(pattern='*') to list all files in the sandbox, or folder_list() to see the directory. Then use document_read(path='exact_path') with the **path** value from the result (not the name)."
         return json.dumps(results, ensure_ascii=False, indent=0)
     except Exception as e:
         logger.debug("file_find failed: %s", e)
-        return _file_not_found_msg(context)
+        try:
+            return _file_not_found_msg(context)
+        except Exception:
+            return "Could not search files. Please check the path and pattern, then try again."
 
 
 # ---- Browser: fetch URL (lightweight, no JS) and optional full browser (Playwright) ----
@@ -4948,6 +5223,7 @@ def register_routing_tools(registry: ToolRegistry, core: Any) -> None:
             description="Route to TAM (time/scheduling) when time-related and too complex for remind_me/record_date/cron_schedule. Prefer: remind_me (one-shot), record_date (record event), cron_schedule (recurring) to avoid a second LLM parse.",
             parameters={"type": "object", "properties": {}, "required": []},
             execute_async=_route_to_tam_executor,
+            short_description="Use when: time/scheduling is too complex for remind_me, record_date, or cron_schedule. Prefer those tools first.",
         )
     )
     registry.register(
@@ -4964,6 +5240,7 @@ def register_routing_tools(registry: ToolRegistry, core: Any) -> None:
                 "required": ["plugin_id"],
             },
             execute_async=_route_to_plugin_executor,
+            short_description="Use when: user intent matches an available plugin (browser, camera, node, etc.). Call with plugin_id and optional capability_id/parameters.",
         )
     )
 
@@ -5166,14 +5443,14 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="channel_send",
-            description="Send an additional message to the channel that last sent a request (same conversation channel). Use when you want to send more than one continuous message to the user in that channel. Works with full channels (async delivery); for sync /inbound the client only gets one response per request.",
+            description="Send an additional message to the channel that last sent a request. You MUST pass text (or message): the message to send. Extract or compose from context; do not call with empty text.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "description": "Message text to send to the user's channel."},
+                    "text": {"type": "string", "description": "Required. Message text to send. Or use message as alias. Do not omit."},
                     "message": {"type": "string", "description": "Alias for text."},
                 },
-                "required": [],
+                "required": ["text"],
             },
             execute_async=_channel_send_executor,
         )
@@ -5204,6 +5481,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["skill_name"],
             },
             execute_async=_run_skill_executor,
+            short_description="Use when: user asks for a skill (email, slides, HTML report, image, etc.). Pass skill_name and script (or skill_name only for instruction-only skills); then continue with document_read/save_result_page.",
         )
     )
 
@@ -5246,6 +5524,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["cron_expr"],
             },
             execute_async=_cron_schedule_executor,
+            short_description="Use when: recurring reminder — 'every day at 9am', 'every N hours', '每天早上'. Not one-shot → use remind_me. cron_expr required.",
         )
     )
     registry.register(
@@ -5324,6 +5603,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["message"],
             },
             execute_async=_remind_me_executor,
+            short_description="Use when: user says 'remind me in N minutes', 'N分钟后提醒', 'at 9am', one-shot reminder. Pass minutes OR at_time; message = short label. Not for recurring → use cron_schedule.",
         )
     )
     registry.register(
@@ -5343,6 +5623,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["event_name", "when"],
             },
             execute_async=_record_date_executor,
+            short_description="Use when: user wants to record a date/event (e.g. 'girlfriend birthday in two weeks', 'tomorrow is holiday'). Optional: remind_on for reminder.",
         )
     )
     registry.register(
@@ -5492,8 +5773,123 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     )
     registry.register(
         ToolDefinition(
+            name="memory_task_summary",
+            description="Get a MemOS task summary by task_id (Goal, Key Steps, Result, Key Details). Use when memory_search returns a hit with task_id and you need the full structured summary. Only available when MemOS is in use (memory_backend memos or composite).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "string", "description": "Task id (from memory_search hit task_id or known id)."},
+                    "id": {"type": "string", "description": "Alias for task_id."},
+                },
+                "required": [],
+            },
+            execute_async=_memory_task_summary_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="memory_skill_search",
+            description="Search MemOS skills by query (FTS + vector + LLM relevance). Returns skill ids, names, descriptions. Use to find a skill that does X before running it. Only available when MemOS is in use (memory_backend memos or composite).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query (e.g. 'create slides', 'browser automation')."},
+                    "scope": {"type": "string", "description": "Scope: mix (self + public), self, or public. Default mix.", "default": "mix"},
+                },
+                "required": ["query"],
+            },
+            execute_async=_memory_skill_search_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="memory_skill_get",
+            description="Get a MemOS skill by id (metadata + SKILL.md content). Use after memory_skill_search to load full skill content. Only available when MemOS is in use (memory_backend memos or composite).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "skill_id": {"type": "string", "description": "Skill id (from memory_skill_search hit skillId)."},
+                    "id": {"type": "string", "description": "Alias for skill_id."},
+                },
+                "required": [],
+            },
+            execute_async=_memory_skill_get_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="memory_task_list",
+            description="List MemOS tasks for the current agent (active, completed, or skipped). Use to see recent tasks and get task_id for memory_task_summary. Only available when MemOS is in use.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "description": "Filter by status: active, completed, or skipped. Omit for all."},
+                    "limit": {"type": "integer", "description": "Max tasks to return (default 50, max 100).", "default": 50},
+                    "offset": {"type": "integer", "description": "Offset for pagination (default 0).", "default": 0},
+                },
+                "required": [],
+            },
+            execute_async=_memory_task_list_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="memory_write_public",
+            description="Write content to public memory. Public memories are visible to all agents in memory_search. Use for shared knowledge, team decisions, or cross-agent coordination. Only available when MemOS is in use.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "The content to write to public memory."},
+                    "summary": {"type": "string", "description": "Optional short summary (default: first 200 chars of content)."},
+                },
+                "required": ["content"],
+            },
+            execute_async=_memory_write_public_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="memory_skill_publish",
+            description="Set a MemOS skill to public so other agents can discover it via memory_skill_search(scope=public or mix). Only available when MemOS is in use.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "skill_id": {"type": "string", "description": "Skill id (from memory_skill_search)."},
+                    "id": {"type": "string", "description": "Alias for skill_id."},
+                },
+                "required": [],
+            },
+            execute_async=_memory_skill_publish_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="memory_skill_unpublish",
+            description="Set a MemOS skill to private (only current agent can see it). Only available when MemOS is in use.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "skill_id": {"type": "string", "description": "Skill id."},
+                    "id": {"type": "string", "description": "Alias for skill_id."},
+                },
+                "required": [],
+            },
+            execute_async=_memory_skill_unpublish_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="memory_viewer_url",
+            description="Get the MemOS Memory Viewer URL (web UI for memories, tasks, skills). Use when the user asks how to view or manage their MemOS data in a browser. Only returns a URL when MemOS is in use and memos.viewer_port is set.",
+            parameters={"type": "object", "properties": {}, "required": []},
+            execute_async=_memory_viewer_url_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
             name="web_search",
-            description="Search the web (generic). Use for 'search the web', 'search for X', 'search the latest sports news'. For 'search the latest sports news every 7 am' use cron_schedule with task_type=run_tool, tool_name=web_search, tool_arguments={query: 'latest sports news', count: 10} — do NOT use run_plugin headlines. Free (no key): duckduckgo. Free tier: google_cse, bing, tavily. Set provider in config; pass search_type for Brave, engine for SerpAPI.",
+            description="Search the web (default for user wanting to search something online). Use by default for 'search the web', '上网搜', 'search for X', 'latest news', 'find X'. Provider can be duckduckgo (no key), google_cse, bing, tavily (set in config). For recurring search use cron_schedule with task_type=run_tool, tool_name=web_search, tool_arguments={query: '...', count: 10}. Do NOT use tavily_crawl for search — that is for crawling pages at a URL only.",
+            short_description="Use when: user asks to search the web (e.g. 'search for X', 'latest news'). Pass query; for recurring search use cron_schedule with run_tool.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -5510,18 +5906,18 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="tavily_extract",
-            description="Extract content from one or more URLs using Tavily Extract. Use when the user wants to read or summarize specific web pages (by URL). Requires TAVILY_API_KEY or tools.web.search.tavily.api_key (same as web_search).",
+            description="Extract content from one or more URLs using Tavily Extract. You MUST pass urls (or url for single URL): extract from the user's message (e.g. 'read https://example.com'). Never call without a URL. Requires TAVILY_API_KEY or tools.web.search.tavily.api_key.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "urls": {"type": "string", "description": "Comma- or space-separated list of URLs to extract (max 20)."},
-                    "url": {"type": "string", "description": "Single URL (alternative to urls)."},
+                    "urls": {"type": "string", "description": "Required. Comma-separated URLs or a single URL. Extract from the user's message. For one URL, pass it as urls with that value."},
+                    "url": {"type": "string", "description": "Single URL (alternative to urls). Extract from the user's message."},
                     "query": {"type": "string", "description": "Optional: user intent for reranking chunks; when provided, chunks_per_source applies."},
                     "extract_depth": {"type": "string", "description": "basic (default) or advanced.", "default": "basic"},
                     "format": {"type": "string", "description": "markdown (default) or text.", "default": "markdown"},
                     "chunks_per_source": {"type": "integer", "description": "When query is set: 1-5 chunks per URL (default 3)."},
                 },
-                "required": [],
+                "required": ["urls"],
             },
             execute_async=_tavily_extract_executor,
         )
@@ -5529,7 +5925,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="tavily_crawl",
-            description="Crawl a website from a base URL using Tavily Crawl. Use when the user wants to explore or map a site (e.g. 'crawl this docs site'). Requires TAVILY_API_KEY or tools.web.search.tavily.api_key.",
+            description="Crawl pages at a given URL (Tavily Crawl). Use only for crawling a specific site the user provided (e.g. 'crawl https://docs.example.com'). Not for search at all — when the user wants to search the web, use web_search (or Tavily as provider via web_search) by default. Requires TAVILY_API_KEY or tools.web.search.tavily.api_key.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -5549,18 +5945,18 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="tavily_research",
-            description="Run a deep research task on a topic using Tavily Research. Use when the user wants a comprehensive report (e.g. 'research X', 'write a report on Y'). Creates a task and polls until done; returns content and sources. Requires TAVILY_API_KEY or tools.web.search.tavily.api_key.",
+            description="Run a deep research task on a topic. You MUST pass input (or query/question): extract the research topic from the user's message (e.g. 'research the best LLMs in 2025' → input='best LLMs in 2025'). Never call without a topic. Requires TAVILY_API_KEY or tools.web.search.tavily.api_key.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "input": {"type": "string", "description": "Research question or topic (or use query/question)."},
+                    "input": {"type": "string", "description": "Required. Research question or topic. Extract from the user's message. Or use query/question as alias. Do not omit."},
                     "query": {"type": "string", "description": "Alias for input."},
                     "question": {"type": "string", "description": "Alias for input."},
                     "model": {"type": "string", "description": "mini (targeted) | pro (comprehensive) | auto (default).", "default": "auto"},
                     "max_wait_seconds": {"type": "integer", "description": "Max time to wait for completion (default 120).", "default": 120},
                     "poll_interval_seconds": {"type": "integer", "description": "Poll interval (default 5).", "default": 5},
                 },
-                "required": [],
+                "required": ["input"],
             },
             execute_async=_tavily_research_executor,
         )
@@ -5584,13 +5980,13 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="image",
-            description="Analyze an image with the vision/multimodal model. Provide image as path (relative to homeclaw_root) or url, and optional prompt (e.g. 'What is in this image?'). Requires a vision-capable LLM.",
+            description="Analyze an image with the vision/multimodal model. You MUST pass path (file in sandbox, from folder_list/file_find) or url (image URL). Extract from the user's message or attachment context. Do not call without an image source. Optional prompt for the vision question (default: Describe the image). Requires a vision-capable LLM.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path to image file (or use 'image')."},
+                    "path": {"type": "string", "description": "Path to image file in sandbox (from folder_list/file_find), or use image as alias. Required if url is not provided."},
                     "image": {"type": "string", "description": "Alias for path."},
-                    "url": {"type": "string", "description": "URL of image (alternative to path)."},
+                    "url": {"type": "string", "description": "URL of image. Required if path/image is not provided. Extract from user message or context."},
                     "prompt": {"type": "string", "description": "Question or instruction for the vision model (default: Describe the image).", "default": "Describe the image."},
                 },
                 "required": [],
@@ -5602,6 +5998,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
         ToolDefinition(
             name="echo",
             description="Echo back the given text. Useful for testing.",
+            short_description="Echo text (testing only). Do not use for greetings or simple replies—reply in message content instead.",
             parameters={
                 "type": "object",
                 "properties": {"text": {"type": "string", "description": "Text to echo back."}},
@@ -5717,6 +6114,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path"],
             },
             execute_async=_document_read_executor,
+            short_description="Use when: user wants to read/summarize a document (PDF, Word, etc.). Pass path from folder_list/file_find or a filename (e.g. 'resume') to search sandbox.",
         )
     )
     registry.register(
@@ -5769,14 +6167,14 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="apply_patch",
-            description="Apply a unified diff patch to a file. Patch should be a single-file unified diff (---/+++ and @@ hunks). Path in patch is relative to user sandbox (e.g. output/file.txt, documents/readme.md); use 'share/...' when user says share folder. Provide patch or content.",
+            description="Apply a unified diff patch to a file. You MUST pass patch (or content): the unified diff content (---/+++ and @@ hunks). Do not call without patch content. Path in patch is relative to user sandbox.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "patch": {"type": "string", "description": "Unified diff patch content (or use content)."},
+                    "patch": {"type": "string", "description": "Required. Unified diff patch content. Or use content as alias. Do not omit."},
                     "content": {"type": "string", "description": "Alias for patch."},
                 },
-                "required": [],
+                "required": ["patch"],
             },
             execute_async=_apply_patch_executor,
         )
@@ -5786,31 +6184,33 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="folder_list",
-            description="List one level of a directory (subfolders and files). Use when the user asks for **folder structure** or **what folders/directories exist** (e.g. 'what folders are in my sandbox'). When the user asks for a **named folder** (e.g. 'what files in documents folder', 'list documents', 'files in my documents'): pass path='documents' (or the folder they said: documents, downloads, output, images, work, knowledge, share) — do NOT omit path or use '.' or you will list the sandbox root. When path not given: lists user sandbox root. User sandbox: downloads/, documents/, output/, work/, share/, knowledge/; per friend: {FriendName}/. Use path 'share' for global share. Returned 'path' is the exact path to pass to document_read/file_read.",
+            description="List one level of a directory (subfolders and files). You MUST call this tool when the user asks to list files or what is in a folder (any wording or language). You MUST pass the path argument: extract the folder name from the user's message (e.g. 'images里有哪些文件' → path='images'; 'documents folder' → path='documents'; '看下output里有什么' → path='output'). If the user did not name a folder, use path='.'. User sandbox folders: documents, downloads, output, images, work, knowledge, share. Never call folder_list without the path argument.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Omit or '' for user sandbox root only. When user says 'documents folder' or 'files in documents': use 'documents'. For 'downloads', 'output', 'images', etc.: use that name. Subdir: output, documents, downloads, work, share, knowledge, or FriendName. Use 'share' for global share. Use exact path from result in document_read.", "default": ""},
+                    "path": {"type": "string", "description": "Required. The folder to list. Extract from the user's message: the exact folder name they said (e.g. images, documents, output, work, downloads, knowledge, share), or '.' if they did not name a folder (e.g. 'list my files', '我都有哪些文件'). Examples: 'images里有哪些文件' → 'images'; 'documents里有哪些文件' → 'documents'; 'what's in the work folder' → 'work'. Do not omit."},
                     "max_entries": {"type": "integer", "description": "Max entries to return (default 500).", "default": 500},
                 },
-                "required": [],
+                "required": ["path"],
             },
             execute_async=_folder_list_executor,
+            short_description="List files in a folder. You MUST pass path: use the folder name from the user's message (e.g. images, documents) or '.' for root. Never call with empty path.",
         )
     )
     registry.register(
         ToolDefinition(
             name="file_find",
-            description="Find or list files by name pattern (glob). Use when the user asks to **list files**, **list images**, **search for files**, or **list all images** — use path (e.g. 'images') and pattern (e.g. '*' or '*.png'), and set files_only=true to return only files (not folders). Use folder_list when they ask for **folder structure** or **what folders exist**. When path not given: search user sandbox root. User sandbox: downloads/, documents/, output/, images/, work/, share/, knowledge/. Use path 'share' for global share. Use the **exact path** from the result in document_read.",
+            description="Find or list files by name pattern (glob). You MUST pass the path argument: extract the folder from the user's message (e.g. 'find PDFs in documents' → path='documents'; 'search images folder' → path='images') or use '.' for sandbox root. Use pattern for glob (e.g. '*.pdf', '*.png'). For 'what files are in folder X' use folder_list(path='X') instead. Never call file_find without path.",
+            short_description="Search files by pattern in a folder. Pass path = folder from user message (e.g. images, documents) or '.' for root; pass pattern (e.g. *.pdf).",
             parameters={
                 "type": "object",
                 "properties": {
-                    "pattern": {"type": "string", "description": "Glob pattern (e.g. '*.pdf', '*.png', '*'). Default '*' lists all. Use '*.jpg' or '*.png' for images.", "default": "*"},
-                    "path": {"type": "string", "description": "Omit or '' = user sandbox root. Or subdir: images, output, documents, share, FriendName/output, etc. Use 'images' to list image files in the images folder.", "default": ""},
-                    "files_only": {"type": "boolean", "description": "If true, return only files (exclude directories). Use for 'list all images' or 'list files' so the result is file paths only.", "default": False},
+                    "path": {"type": "string", "description": "Required. Folder to search in. Extract from the user's message (e.g. 'documents', 'images', 'output') or use '.' for sandbox root. Do not omit."},
+                    "pattern": {"type": "string", "description": "Glob pattern (e.g. '*.pdf', '*.png', '*'). Default '*' lists all.", "default": "*"},
+                    "files_only": {"type": "boolean", "description": "If true, return only files (exclude directories).", "default": False},
                     "max_results": {"type": "integer", "description": "Max results to return (default 200).", "default": 200},
                 },
-                "required": [],
+                "required": ["path"],
             },
             execute_async=_file_find_executor,
         )
@@ -5835,12 +6235,12 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="web_extract",
-            description="Extract main content from one or more URLs using free Python libs (trafilatura or BeautifulSoup). No API key. Use when you have specific URLs to read or summarize. Prefer over fetch_url for article-style pages. Optional: pip install trafilatura (better) or beautifulsoup4.",
+            description="Extract main content from one or more URLs. You MUST pass urls or url: extract the URL(s) from the user's message (e.g. 'summarize https://example.com/article'). Never call without a URL. Use urls for one or more URLs, or url for a single URL. No API key. Optional: pip install trafilatura (better) or beautifulsoup4.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "urls": {"type": "string", "description": "Comma- or space-separated list of URLs to extract."},
-                    "url": {"type": "string", "description": "Single URL (alternative to urls)."},
+                    "urls": {"type": "string", "description": "Comma- or space-separated URLs, or a single URL. Extract from the user's message. Required if url is not provided."},
+                    "url": {"type": "string", "description": "Single URL. Extract from the user's message. Required if urls is not provided."},
                     "max_chars": {"type": "integer", "description": "Max characters per page (default 60000).", "default": 60000},
                     "max_urls": {"type": "integer", "description": "Max URLs to process (default 10, max 20).", "default": 10},
                 },
@@ -5852,18 +6252,18 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="web_crawl",
-            description="Crawl from a start URL: fetch pages, follow links up to max_pages and max_depth. Free; no API key. Uses same extract as web_extract. Use when the user wants to explore or map a site. same_domain_only=true (default) limits to same domain.",
+            description="Crawl from a start URL: fetch pages, follow links. You MUST pass url (or start_url): extract the start URL from the user's message (e.g. 'crawl docs.example.com'). Never call without a URL. Free; no API key.",
             parameters={
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "Start URL (root to crawl)."},
+                    "url": {"type": "string", "description": "Required. Start URL to crawl. Extract from the user's message. Do not omit."},
                     "start_url": {"type": "string", "description": "Alias for url."},
                     "max_pages": {"type": "integer", "description": "Max pages to fetch (default 10, max 50).", "default": 10},
                     "max_depth": {"type": "integer", "description": "Max link depth (default 2, max 5).", "default": 2},
                     "same_domain_only": {"type": "boolean", "description": "Only follow links on same domain (default true).", "default": True},
                     "max_chars": {"type": "integer", "description": "Max characters per page (default 30000).", "default": 30000},
                 },
-                "required": [],
+                "required": ["url"],
             },
             execute_async=_web_crawl_executor,
         )
@@ -5974,6 +6374,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
         ToolDefinition(
             name="save_result_page",
             description="Save the result as a page and get a shareable link. **format=markdown:** Saves as .md; the tool returns the content so the companion app can display it directly in chat (include the returned content in your reply). **format=html:** Saves as .html; the tool returns only the link—share that link with the user so they can open the page in a browser. For html slide requests use format='html' and full HTML content. Link when auth_api_key is set.",
+            short_description="Use when: you generated a report, slides, or long content and need to save it and give the user a link. format=html for slides/report; format=markdown for chat display.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -5990,6 +6391,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
         ToolDefinition(
             name="get_file_view_link",
             description="Get a view/download link for any file in the user sandbox or share. Use when the user asks to send or get a file (e.g. 'send me that file', '发给我 ID1.jpg'). Pass the **path** value from folder_list/file_find (not the name). For images, the image is also sent inline. Reply with only the URL from this tool.",
+            short_description="Use when: user asks to send/get a file (e.g. 'send me that file'). Pass path from folder_list/file_find; reply with only the URL returned.",
             parameters={
                 "type": "object",
                 "properties": {

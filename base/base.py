@@ -71,6 +71,8 @@ class PromptRequest(BaseModel):
     timestamp: float
     # Reply-accepts: list of content types the channel can receive (e.g. ["text", "image"]). Omitted or ["text"] = text-only. See docs_design/ReplyAcceptsPattern.md.
     reply_accepts: Optional[List[str]] = None
+    # Optional full-turn data for RAG memory (user_message, assistant_message, tool_messages). Set by Core after LLM reply; consumed by process_memory_queue. Not sent by channels.
+    memory_turn_data: Optional[dict] = None
 
 
 class InboundRequest(BaseModel):
@@ -926,11 +928,14 @@ class CoreMetadata:
     graphDB: GraphDB
     memory_check_before_add: bool = False  # when True, for small/local models run an extra LLM call to gate what gets added to RAG memory; default False = store every message, rely on retrieval quality
     memory_add_after_reply: bool = True  # when True (default), enqueue RAG memory add only after main LLM reply is ready so cognify does not compete with main LLM (see MemorySystemSummary §9)
+    memory_context_order: str = "relevance"  # order of RAG memories in prompt: "relevance" (default, highest score first) or "newest_first" (most recent first when created_at available)
     default_location: str = ""  # optional; fallback location when no request/profile location (e.g. "New York, US"); see SystemContextDateTimeAndLocation.md
     cognee: Dict[str, Any] = field(default_factory=dict)  # optional; when set, applied as Cognee env before Cognee loads (see docs/MemoryAndDatabase.md)
     endpoints: List[Endpoint] = field(default_factory=list)
-    llama_cpp: Dict[str, Any] = field(default_factory=dict)
+    llama_cpp: Dict[str, Any] = field(default_factory=dict)  # use nested .embedding, .vision, .tool_selection for per-role overrides (see llm.yml)
     completion: Dict[str, Any] = field(default_factory=dict)  # max_tokens, temperature for chat completion (overrides llama_cpp when set)
+    completion_vision: Dict[str, Any] = field(default_factory=dict)  # merged with completion when calling vision_llm
+    completion_tool_selection: Dict[str, Any] = field(default_factory=dict)  # merged with completion when calling tool_selection_llm
     local_models: List[Dict[str, Any]] = field(default_factory=list)   # [{ id, path, host, port, alias?, capabilities? }]
     cloud_models: List[Dict[str, Any]] = field(default_factory=list)    # [{ id, path, host, port, api_key_name?, capabilities? }]
     use_workspace_bootstrap: bool = True  # inject config/workspace (IDENTITY.md, AGENTS.md, TOOLS.md) into system prompt
@@ -977,6 +982,8 @@ class CoreMetadata:
     skills_use_location_only: bool = False
     # Optional: when user query matches a regex, ensure these skill folders are in the prompt and optionally append an instruction. List of { pattern: str, folders: [str], instruction?: str }.
     skills_force_include_rules: List[Dict[str, Any]] = field(default_factory=list)
+    # OpenClaw-style skill filter: when non-empty, only these skill folder names are included in the prompt. Empty = all skills (or RAG result).
+    skills_filter: List[str] = field(default_factory=list)
     # Optional: when user query matches a regex, ensure these plugin ids are in the routing block and optionally append an instruction. List of { pattern: str, plugins: [str], instruction?: str }.
     plugins_force_include_rules: List[Dict[str, Any]] = field(default_factory=list)
     # Optional: path to a YAML file (relative to config dir) with skills_*, plugins_*, system_plugins* keys. When set, those keys are loaded from that file and core.yml stays short.
@@ -990,6 +997,8 @@ class CoreMetadata:
     orchestrator_timeout_seconds: int = 60  # timeout for intent/plugin call and plugin.run() when unified is false; 0 = no timeout. Default when missing: 60.
     tool_timeout_seconds: int = 120  # per-tool execution timeout; prevents one tool from hanging the system; 0 = no timeout (from config tools.tool_timeout_seconds)
     tools_config: Dict[str, Any] = field(default_factory=dict)  # merged tools dict from core.yml + optional skills_and_plugins file; used by tool layer (exec_allowlist, web.search, etc.)
+    # Intent router (Phase 2): when enabled, one short LLM call classifies query -> category; tools/skills filtered by category. Config: enabled, categories, category_tools (profile or tools list).
+    intent_router_config: Dict[str, Any] = field(default_factory=dict)
     orchestrator_unified_with_tools: bool = True  # when True (default), main LLM with tools routes TAM/plugin/chat; when False, separate orchestrator_handler runs first (one LLM for intent+plugin)
     inbound_request_timeout_seconds: int = 0  # recommended max seconds for clients/proxies waiting for Core; 0 = unlimited. Default when missing: 0. Not enforced by Core; set proxies read_timeout >= this when >0.
     llm_completion_timeout_seconds: int = 300  # HTTP timeout for each LLM chat completion call (local or cloud). Increase (e.g. 600, 900) if large local models often time out; 0 = no timeout (not recommended).
@@ -1024,10 +1033,25 @@ class CoreMetadata:
     main_llm_mode: str = ""
     main_llm_local: str = ""   # e.g. local_models/main_vl_model_4B; required when main_llm_mode == "mix"
     main_llm_cloud: str = ""  # e.g. cloud_models/Gemini-2.5-Flash; required when main_llm_mode == "mix"
+    # Optional: use this model for every LLM call in the tool loop when use_tool_selection_llm is true (tool selection + parameter extraction). E.g. local_models/Qwen3-4B-toolcalling. Leave empty to use main_llm for all turns.
+    tool_selection_llm: str = ""
+    # When true and tool_selection_llm is set, use that model for all tool turns; when false or unset (default), use main_llm for everything.
+    use_tool_selection_llm: bool = False
+    # When true (default) and tool_selection_llm returned content only (no tool_calls), call main_llm with same messages (no tools) and use that reply; false = use tool_selection_llm reply as-is.
+    use_main_llm_for_direct_reply: bool = True
+    # Host/port for tool_selection_llm when set. Core uses these when calling the tool-selection model (like main_llm_host/port for main LLM).
+    tool_selection_llm_host: str = "127.0.0.1"
+    tool_selection_llm_port: int = 5031
     # Optional: when main model has no vision, use this model (e.g. local_models/main_vl_model_2B) to describe images; description is injected into the user message and main model replies. See docs_design/Multimodal.md.
     vision_llm: str = ""
     vision_llm_host: str = "127.0.0.1"   # host for vision sidecar; Core always uses this when calling vision_llm
     vision_llm_port: int = 5024           # port for vision sidecar; set in llm.yml so you always know which port it uses
+    # When true (default), Core does not start vision at startup; starts the vision server when first needed and stops it after use (or after vision_llm_idle_stop_seconds). Saves memory when vision is used rarely. Set false to manage vision server yourself (Core never starts/stops it).
+    vision_llm_start_on_demand: bool = True
+    # After last vision use, stop the vision server after this many seconds (0 = stop as soon as the request that used vision finishes). Only when vision_llm_start_on_demand is true.
+    vision_llm_idle_stop_seconds: int = 300
+    cloud_llm_host: str = "127.0.0.1"    # host for cloud (LiteLLM) proxy; used in cloud-only and mix when route=cloud
+    cloud_llm_port: int = 14005          # port for cloud (LiteLLM) proxy; set in llm.yml
     vision_image_max_dimension: int = 0   # when > 0, resize images to max(w,h) <= this before sending to vision_llm sidecar; 0 = use completion.image_max_dimension only
     hybrid_router: Dict[str, Any] = field(default_factory=dict)  # default_route, heuristic, semantic, slm (enabled, threshold, paths/model)
     # Companion: config kept for backward compat; Core no longer routes to Friends plugin. All users (normal + companion type) use the same main flow. See docs_design/CompanionFeatureDesign.md.
@@ -1113,10 +1137,13 @@ class CoreMetadata:
                         _ext_data = yaml.safe_load(_f)
                     if isinstance(_ext_data, dict):
                         for _k, _v in _ext_data.items():
-                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k == 'tools' or _k == 'external_skills_dir' or _k == 'clawhub_download_dir'):
+                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k == 'tools' or _k == 'external_skills_dir' or _k == 'clawhub_download_dir' or _k == 'intent_router'):
+                                continue
+                            if _k == 'intent_router' and not isinstance(_v, dict):
+                                logging.warning("skills_and_plugins config %s: intent_router must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
                                 continue
                             # Avoid injecting wrong types so later from_yaml never raises on this key
-                            if _k in ('skills_force_include_rules', 'plugins_force_include_rules', 'system_plugins', 'skills_include_body_for', 'skills_extra_dirs', 'skills_disabled', 'plugins_extra_dirs') and not isinstance(_v, list):
+                            if _k in ('skills_force_include_rules', 'plugins_force_include_rules', 'system_plugins', 'skills_include_body_for', 'skills_extra_dirs', 'skills_disabled', 'plugins_extra_dirs', 'skills_filter') and not isinstance(_v, list):
                                 logging.warning("skills_and_plugins config %s: %s must be a list, got %s; skipping", _ext_path, _k, type(_v).__name__)
                                 continue
                             if _k == 'system_plugins_env' and not isinstance(_v, dict):
@@ -1154,7 +1181,7 @@ class CoreMetadata:
         # Optional: merge memory/kb/database config from external file (memory_kb.yml).
         _mem_kb_file = (data.get('memory_kb_config_file') or '').strip()
         _MEMORY_KB_KEYS = frozenset({
-            'use_memory', 'memory_backend', 'memory_check_before_add', 'memory_add_after_reply', 'memory_summarization',
+            'use_memory', 'memory_backend', 'memory_check_before_add', 'memory_add_after_reply', 'memory_context_order', 'memory_summarization',
             'database', 'vectorDB', 'graphDB', 'cognee', 'knowledge_base', 'profile', 'session',
             'use_agent_memory_file', 'agent_memory_path', 'agent_memory_max_chars',
             'use_daily_memory', 'daily_memory_dir', 'use_agent_memory_search',
@@ -1188,11 +1215,12 @@ class CoreMetadata:
         # Optional: merge LLM config from external file (llm.yml).
         _llm_file = (data.get('llm_config_file') or '').strip()
         _LLM_KEYS = frozenset({
-            'local_models', 'cloud_models', 'main_llm', 'main_llm_mode', 'main_llm_local', 'main_llm_cloud', 'vision_llm',
+            'local_models', 'cloud_models', 'main_llm', 'main_llm_mode', 'main_llm_local', 'main_llm_cloud', 'tool_selection_llm', 'use_tool_selection_llm', 'use_main_llm_for_direct_reply', 'vision_llm',
             'hybrid_router', 'main_llm_language', 'embedding_llm',
-            'embedding_host', 'embedding_port', 'main_llm_host', 'main_llm_port', 'embedding_health_check_timeout_sec',
-            'vision_llm_host', 'vision_llm_port', 'vision_image_max_dimension',
-            'llama_cpp', 'completion',
+            'embedding_host', 'embedding_port', 'main_llm_host', 'main_llm_port', 'tool_selection_llm_host', 'tool_selection_llm_port', 'cloud_llm_host', 'cloud_llm_port',
+            'embedding_health_check_timeout_sec',
+            'vision_llm_host', 'vision_llm_port', 'vision_llm_start_on_demand', 'vision_llm_idle_stop_seconds', 'vision_image_max_dimension',
+            'llama_cpp', 'completion', 'completion_vision', 'completion_tool_selection',
         })
         if _llm_file:
             _config_dir = os.path.dirname(os.path.abspath(yaml_file))
@@ -1211,10 +1239,10 @@ class CoreMetadata:
                             if _k == 'hybrid_router' and not isinstance(_v, dict):
                                 logging.warning("llm config %s: hybrid_router must be a dict, got %s; skipping", _llm_path, type(_v).__name__)
                                 continue
-                            if _k in ('llama_cpp', 'completion') and not isinstance(_v, dict):
+                            if _k in ('llama_cpp', 'completion', 'completion_vision', 'completion_tool_selection') and not isinstance(_v, dict):
                                 logging.warning("llm config %s: %s must be a dict, got %s; skipping", _llm_path, _k, type(_v).__name__)
                                 continue
-                            if _k in ('embedding_port', 'main_llm_port', 'vision_llm_port', 'vision_image_max_dimension'):
+                            if _k in ('embedding_port', 'main_llm_port', 'tool_selection_llm_port', 'cloud_llm_port', 'vision_llm_port', 'vision_llm_idle_stop_seconds', 'vision_image_max_dimension'):
                                 try:
                                     _ = int(_v) if _v is not None else 0
                                 except (TypeError, ValueError):
@@ -1376,6 +1404,7 @@ class CoreMetadata:
             memory_backend=(data.get('memory_backend') or 'cognee').strip().lower(),
             memory_check_before_add=bool(data.get('memory_check_before_add', False)),
             memory_add_after_reply=bool(data.get('memory_add_after_reply', True)),
+            memory_context_order=(data.get('memory_context_order') or 'relevance').strip().lower() or 'relevance',
             default_location=(data.get('default_location') or '').strip(),
             database=database,
             vectorDB=vectorDB,
@@ -1384,6 +1413,8 @@ class CoreMetadata:
             endpoints=endpoints,
             llama_cpp=llama_cpp,
             completion=completion,
+            completion_vision=(data.get('completion_vision') if isinstance(data.get('completion_vision'), dict) else {}),
+            completion_tool_selection=(data.get('completion_tool_selection') if isinstance(data.get('completion_tool_selection'), dict) else {}),
             local_models=local_models,
             cloud_models=cloud_models,
             use_workspace_bootstrap=data.get('use_workspace_bootstrap', True),
@@ -1424,6 +1455,7 @@ class CoreMetadata:
             skills_include_body_max_chars=max(0, int(data.get('skills_include_body_max_chars', 0) or 0)),
             skills_use_location_only=bool(data.get('skills_use_location_only', False)),
             skills_force_include_rules=[r for r in (data.get('skills_force_include_rules') or []) if isinstance(r, dict) and (r.get('pattern') or r.get('patterns')) and (r.get('folders') is not None or r.get('auto_invoke'))],
+            skills_filter=[str(f).strip() for f in (data.get('skills_filter') or []) if str(f).strip()],
             plugins_force_include_rules=[r for r in (data.get('plugins_force_include_rules') or []) if isinstance(r, dict) and r.get('pattern') and r.get('plugins')],
             skills_and_plugins_config_file=(data.get('skills_and_plugins_config_file') or '').strip(),
             memory_kb_config_file=(data.get('memory_kb_config_file') or '').strip(),
@@ -1432,9 +1464,10 @@ class CoreMetadata:
             orchestrator_timeout_seconds=(lambda v: max(0, int(v)) if v is not None else 60)(data.get('orchestrator_timeout_seconds', 60)),
             tool_timeout_seconds=int((data.get('tools') or {}).get('tool_timeout_seconds', 120) or 0),
             tools_config=copy.deepcopy(data.get('tools')) if isinstance(data.get('tools'), dict) else {},
+            intent_router_config=dict(data.get('intent_router')) if isinstance(data.get('intent_router'), dict) else {},
             orchestrator_unified_with_tools=data.get('orchestrator_unified_with_tools', True),
             inbound_request_timeout_seconds=max(0, int(data.get('inbound_request_timeout_seconds', 0) or 0)),
-            llm_completion_timeout_seconds=max(60, int(data.get('llm_completion_timeout_seconds', 300) or 300)),
+            llm_completion_timeout_seconds=(lambda v: 0 if v == 0 else max(60, int(v or 300)))(data.get('llm_completion_timeout_seconds', 300)),
             use_prompt_manager=data.get('use_prompt_manager', True),
             prompts_dir=(data.get('prompts_dir') or 'config/prompts').strip(),
             prompt_default_language=(data.get('prompt_default_language') or 'en').strip() or 'en',
@@ -1464,10 +1497,19 @@ class CoreMetadata:
             main_llm_mode=main_llm_mode_val,
             main_llm_local=main_llm_local_val,
             main_llm_cloud=main_llm_cloud_val,
+            tool_selection_llm=(str(data.get('tool_selection_llm') or '').strip()),
+            use_tool_selection_llm=bool(data.get('use_tool_selection_llm', False)),
+            use_main_llm_for_direct_reply=bool(data.get('use_main_llm_for_direct_reply', True)),
+            tool_selection_llm_host=(str(data.get('tool_selection_llm_host') or '127.0.0.1').strip()) or '127.0.0.1',
+            tool_selection_llm_port=max(1, min(65535, int(data.get('tool_selection_llm_port') or 5031))),
             vision_llm=(str(data.get('vision_llm') or '').strip()),
             vision_llm_host=(str(data.get('vision_llm_host') or '127.0.0.1').strip()) or '127.0.0.1',
             vision_llm_port=max(1, min(65535, int(data.get('vision_llm_port') or 5024))),
+            vision_llm_start_on_demand=bool(data.get('vision_llm_start_on_demand', True)),
+            vision_llm_idle_stop_seconds=max(0, int(data.get('vision_llm_idle_stop_seconds') or 300)),
             vision_image_max_dimension=max(0, int(data.get('vision_image_max_dimension') or 0)),
+            cloud_llm_host=(str(data.get('cloud_llm_host') or '127.0.0.1').strip()) or '127.0.0.1',
+            cloud_llm_port=max(1, min(65535, int(data.get('cloud_llm_port') or 14005))),
             hybrid_router=hybrid_router_val,
             companion=data.get('companion') if isinstance(data.get('companion'), dict) else {},
             memory_summarization=data.get('memory_summarization') if isinstance(data.get('memory_summarization'), dict) else {},
@@ -1497,6 +1539,8 @@ class CoreMetadata:
                 'embedding_health_check_timeout_sec': getattr(core, 'embedding_health_check_timeout_sec', 120),
                 'main_llm_host': core.main_llm_host,
                 'main_llm_port': core.main_llm_port,
+                'cloud_llm_host': getattr(core, 'cloud_llm_host', '127.0.0.1'),
+                'cloud_llm_port': getattr(core, 'cloud_llm_port', 14005),
                 'main_llm_language': core.main_llm_language,
                 'main_llm': core.main_llm,
                 'silent': core.silent,
@@ -1505,6 +1549,7 @@ class CoreMetadata:
                 'memory_backend': getattr(core, 'memory_backend', 'cognee') or 'cognee',
                 'memory_check_before_add': getattr(core, 'memory_check_before_add', False),
                 'memory_add_after_reply': getattr(core, 'memory_add_after_reply', True),
+                'memory_context_order': getattr(core, 'memory_context_order', 'relevance') or 'relevance',
                 'default_location': getattr(core, 'default_location', '') or '',
                 'use_workspace_bootstrap': getattr(core, 'use_workspace_bootstrap', True),
                 'workspace_dir': getattr(core, 'workspace_dir', 'config/workspace'),
@@ -1559,6 +1604,8 @@ class CoreMetadata:
                 'embedding_llm': core.embedding_llm,
                 'llama_cpp': core.llama_cpp or {},
                 'completion': getattr(core, 'completion', {}) or {},
+                'completion_vision': _cv if isinstance(_cv := getattr(core, 'completion_vision', None), dict) else {},
+                'completion_tool_selection': _ct if isinstance(_ct := getattr(core, 'completion_tool_selection', None), dict) else {},
                 'local_models': core.local_models or [],
                 # Write actual api_key from config (do not redact); redaction is for logs only.
                 'cloud_models': list(core.cloud_models or []),
@@ -1591,7 +1638,7 @@ class CoreMetadata:
         # When using external memory_kb config file, do not write memory/kb/database keys into core.yml
         _mem_kb_ext = (getattr(core, 'memory_kb_config_file', None) or '').strip()
         _MEMORY_KB_POP = frozenset({
-            'use_memory', 'memory_backend', 'memory_check_before_add', 'memory_add_after_reply', 'memory_summarization',
+            'use_memory', 'memory_backend', 'memory_check_before_add', 'memory_add_after_reply', 'memory_context_order', 'memory_summarization',
             'database', 'vectorDB', 'graphDB', 'cognee', 'knowledge_base', 'profile', 'session',
             'use_agent_memory_file', 'agent_memory_path', 'agent_memory_max_chars',
             'use_daily_memory', 'daily_memory_dir', 'use_agent_memory_search',
@@ -1605,10 +1652,10 @@ class CoreMetadata:
         # When using external llm config file, do not write LLM keys into core.yml
         _llm_ext = (getattr(core, 'llm_config_file', None) or '').strip()
         _LLM_POP = frozenset({
-            'local_models', 'cloud_models', 'main_llm', 'main_llm_mode', 'main_llm_local', 'main_llm_cloud',
+            'local_models', 'cloud_models', 'main_llm', 'main_llm_mode', 'main_llm_local', 'main_llm_cloud', 'tool_selection_llm', 'use_tool_selection_llm', 'use_main_llm_for_direct_reply',
             'hybrid_router', 'main_llm_language', 'embedding_llm', 'vision_llm',
-            'embedding_host', 'embedding_port', 'main_llm_host', 'main_llm_port', 'embedding_health_check_timeout_sec',
-            'vision_llm_host', 'vision_llm_port', 'vision_image_max_dimension',
+            'embedding_host', 'embedding_port', 'main_llm_host', 'main_llm_port', 'tool_selection_llm_host', 'tool_selection_llm_port', 'cloud_llm_host', 'cloud_llm_port', 'embedding_health_check_timeout_sec',
+            'vision_llm_host', 'vision_llm_port', 'vision_llm_start_on_demand', 'vision_llm_idle_stop_seconds', 'vision_image_max_dimension',
         })
         if _llm_ext:
             for _k in list(core_dict.keys()):
@@ -1627,6 +1674,15 @@ class CoreMetadata:
                 core_dict['main_llm_local'] = (core.main_llm_local or '').strip()
             if (getattr(core, 'main_llm_cloud', None) or '').strip():
                 core_dict['main_llm_cloud'] = (core.main_llm_cloud or '').strip()
+            if (getattr(core, 'tool_selection_llm', None) or '').strip():
+                core_dict['tool_selection_llm'] = (core.tool_selection_llm or '').strip()
+                core_dict['tool_selection_llm_host'] = (getattr(core, 'tool_selection_llm_host', None) or '127.0.0.1').strip()
+                core_dict['tool_selection_llm_port'] = max(1, min(65535, int(getattr(core, 'tool_selection_llm_port', 5031) or 5031)))
+            if getattr(core, 'use_tool_selection_llm', False):
+                core_dict['use_tool_selection_llm'] = True
+            # Always persist so default True vs explicit False is clear
+            if (getattr(core, 'tool_selection_llm', None) or '').strip() or getattr(core, 'use_tool_selection_llm', False):
+                core_dict['use_main_llm_for_direct_reply'] = getattr(core, 'use_main_llm_for_direct_reply', True)
             if getattr(core, 'hybrid_router', None) and isinstance(core.hybrid_router, dict) and core.hybrid_router:
                 core_dict['hybrid_router'] = core.hybrid_router
         if (getattr(core, 'portal_url', None) or '').strip():

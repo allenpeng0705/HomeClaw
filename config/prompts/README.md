@@ -41,6 +41,7 @@ Placeholders in `content` or in each message `content` are filled via `get_conte
 | chat        | response           | context                   | answer_from_memory (RAG)   |
 | memory      | memory_check       | user_input                | process_memory_queue       |
 | tam         | scheduling         | text, chat_history, ...  | TAM (future)               |
+| tools       | selection_examples | (none)                    | answer_from_memory (few-shot tool selection when tools present; config: tools.tool_selection_examples) |
 
 ## Adding a new prompt
 

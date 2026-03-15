@@ -1,0 +1,256 @@
+import os
+import pathlib
+import cognee
+from cognee.infrastructure.files.storage import get_storage_config
+from cognee.modules.search.operations import get_history
+from cognee.shared.logging_utils import get_logger
+from cognee.modules.data.models import Data
+from cognee.modules.search.types import SearchType
+from cognee.modules.users.methods import get_default_user
+
+logger = get_logger()
+
+
+async def test_local_file_deletion(data_text, file_location, dataset_1_id, dataset_2_id):
+    from sqlalchemy import select
+    import hashlib
+    from cognee.infrastructure.databases.relational import get_relational_engine
+
+    engine = get_relational_engine()
+
+    async with engine.get_async_session() as session:
+        # Get hash of data contents
+        encoded_text = data_text.encode("utf-8")
+        data_hash = hashlib.md5(encoded_text).hexdigest()
+        # Get data entry from database based on hash contents
+        data = (await session.scalars(select(Data).where(Data.content_hash == data_hash))).one()
+        assert os.path.isfile(data.raw_data_location.replace("file://", "")), (
+            f"Data location doesn't exist: {data.raw_data_location}"
+        )
+        # Test deletion of data along with local files created by cognee
+        await engine.delete_data_entity(data.id, dataset_id=dataset_2_id)
+        assert not os.path.exists(data.raw_data_location.replace("file://", "")), (
+            f"Data location still exists after deletion: {data.raw_data_location}"
+        )
+
+    async with engine.get_async_session() as session:
+        # Get data entry from database based on file path
+        data = (
+            await session.scalars(
+                select(Data).where(Data.original_data_location == "file://" + file_location)
+            )
+        ).one()
+        assert os.path.isfile(data.original_data_location.replace("file://", "")), (
+            f"Data location doesn't exist: {data.original_data_location}"
+        )
+        # Test local files not created by cognee won't get deleted
+        await engine.delete_data_entity(data.id, dataset_id=dataset_1_id)
+        assert os.path.exists(data.original_data_location.replace("file://", "")), (
+            f"Data location doesn't exists: {data.original_data_location}"
+        )
+
+
+async def test_getting_of_documents(dataset_name_1):
+    # Test getting of documents for search per dataset
+    from cognee.modules.users.permissions.methods import get_document_ids_for_user
+
+    user = await get_default_user()
+    document_ids = await get_document_ids_for_user(user.id, [dataset_name_1])
+    assert len(document_ids) == 1, (
+        f"Number of expected documents doesn't match {len(document_ids)} != 1"
+    )
+
+    # Test getting of documents for search when no dataset is provided
+    user = await get_default_user()
+    document_ids = await get_document_ids_for_user(user.id)
+    assert len(document_ids) == 2, (
+        f"Number of expected documents doesn't match {len(document_ids)} != 2"
+    )
+
+
+async def test_vector_engine_search_none_limit():
+    query_text = "Tell me about Quantum computers"
+
+    from cognee.infrastructure.databases.vector import get_vector_engine
+
+    vector_engine = get_vector_engine()
+
+    collection_name = "Entity_name"
+
+    query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
+
+    result = await vector_engine.search(
+        collection_name=collection_name, query_vector=query_vector, limit=None
+    )
+
+    # Check that we did not accidentally use any default value for limit
+    # in vector search along the way (like 5, 10, or 15)
+    assert len(result) > 15
+
+
+async def test_vector_engine_search_with_nodeset_filtering():
+    node_set = ["Quantum", "Computers"]
+    query_text = "Tell me about Quantum computers"
+
+    from cognee.infrastructure.databases.vector import get_vector_engine
+
+    vector_engine = get_vector_engine()
+    query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
+
+    result = await vector_engine.search(
+        collection_name="DocumentChunk_text",
+        query_vector=query_vector,
+        include_payload=True,
+        node_name=node_set,
+    )
+
+    assert all(nodeset in node_set for nodeset in result[0].payload["belongs_to_set"]), (
+        "Only results from relevant nodesets should be returned"
+    )
+
+
+async def test_vector_nodeset_filtering_retriever_integration():
+    node_set_a = ["NLP"]
+    query_text = "Tell me about Quantum computers"
+
+    from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+
+    retriever = GraphCompletionRetriever(node_name=node_set_a)
+    retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
+    context = await retriever.get_context_from_objects(
+        query=query_text, retrieved_objects=retrieved_objects
+    )
+
+    assert "Quantum" not in context
+    assert "NLP" in context
+
+
+async def main():
+    cognee.config.set_vector_db_config(
+        {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "pgvector"}
+    )
+    cognee.config.set_relational_db_config(
+        {
+            "db_path": "",
+            "db_name": "cognee_db",
+            "db_host": os.environ.get("DB_HOST", "127.0.0.1"),
+            "db_port": "5432",
+            "db_username": "cognee",
+            "db_password": "cognee",
+            "db_provider": "postgres",
+        }
+    )
+
+    data_directory_path = str(
+        pathlib.Path(
+            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_pgvector")
+        ).resolve()
+    )
+    cognee.config.data_root_directory(data_directory_path)
+    cognee_directory_path = str(
+        pathlib.Path(
+            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_pgvector")
+        ).resolve()
+    )
+    cognee.config.system_root_directory(cognee_directory_path)
+
+    node_set_a = ["NLP"]
+    node_set_b = ["Quantum", "Computers"]
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    dataset_name_1 = "natural_language"
+    dataset_name_2 = "quantum"
+
+    explanation_file_path_nlp = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
+    )
+    add_1_payload = await cognee.add(
+        [explanation_file_path_nlp], dataset_name_1, node_set=node_set_a
+    )
+
+    text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
+    At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the preparation and manipulation of quantum states.
+    Classical physics cannot explain the operation of these quantum devices, and a scalable quantum computer could perform some calculations exponentially faster (with respect to input size scaling) than any modern "classical" computer. In particular, a large-scale quantum computer could break widely used encryption schemes and aid physicists in performing physical simulations; however, the current state of the technology is largely experimental and impractical, with several obstacles to useful applications. Moreover, scalable quantum computers do not hold promise for many practical tasks, and for many important tasks quantum speedups are proven impossible.
+    The basic unit of information in quantum computing is the qubit, similar to the bit in traditional digital electronics. Unlike a classical bit, a qubit can exist in a superposition of its two "basis" states. When measuring a qubit, the result is a probabilistic output of a classical bit, therefore making quantum computers nondeterministic in general. If a quantum computer manipulates the qubit in a particular way, wave interference effects can amplify the desired measurement results. The design of quantum algorithms involves creating procedures that allow a quantum computer to perform calculations efficiently and quickly.
+    Physically engineering high-quality qubits has proven challenging. If a physical qubit is not sufficiently isolated from its environment, it suffers from quantum decoherence, introducing noise into calculations. Paradoxically, perfectly isolating qubits is also undesirable because quantum computations typically need to initialize qubits, perform controlled qubit interactions, and measure the resulting quantum states. Each of those operations introduces errors and suffers from noise, and such inaccuracies accumulate.
+    In principle, a non-quantum (classical) computer can solve the same computational problems as a quantum computer, given enough time. Quantum advantage comes in the form of time complexity rather than computability, and quantum complexity theory shows that some quantum algorithms for carefully selected tasks require exponentially fewer computational steps than the best known non-quantum algorithms. Such tasks can in theory be solved on a large-scale quantum computer whereas classical computers would not finish computations in any reasonable amount of time. However, quantum speedup is not universal or even typical across computational tasks, since basic tasks such as sorting are proven to not allow any asymptotic quantum speedup. Claims of quantum supremacy have drawn significant attention to the discipline, but are demonstrated on contrived tasks, while near-term practical use cases remain limited.
+    """
+
+    add_2_payload = await cognee.add([text], dataset_name_2, node_set=node_set_b)
+
+    await cognee.cognify([dataset_name_2, dataset_name_1])
+
+    from cognee.infrastructure.databases.vector import get_vector_engine
+
+    await test_getting_of_documents(dataset_name_1)
+
+    vector_engine = get_vector_engine()
+    random_node = (
+        await vector_engine.search("Entity_name", "Quantum computer", include_payload=True)
+    )[0]
+    random_node_name = random_node.payload["text"]
+
+    search_results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION, query_text=random_node_name
+    )
+    assert len(search_results) != 0, "The search results list is empty."
+    print("\n\nExtracted sentences are:\n")
+    for result in search_results:
+        print(f"{result}\n")
+
+    search_results = await cognee.search(
+        query_type=SearchType.CHUNKS, query_text=random_node_name, datasets=[dataset_name_2]
+    )
+    assert len(search_results) != 0, "The search results list is empty."
+    print("\n\nExtracted chunks are:\n")
+    for result in search_results:
+        print(f"{result}\n")
+
+    graph_completion = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text=random_node_name,
+    )
+    assert len(graph_completion) != 0, "Completion result is empty."
+    print("Completion result is:")
+    print(graph_completion)
+
+    search_results = await cognee.search(
+        query_type=SearchType.SUMMARIES, query_text=random_node_name
+    )
+    assert len(search_results) != 0, "Query related summaries don't exist."
+    print("\n\nExtracted summaries are:\n")
+    for result in search_results:
+        print(f"{result}\n")
+
+    user = await get_default_user()
+    history = await get_history(user.id)
+    assert len(history) == 8, "Search history is not correct."
+
+    await test_vector_engine_search_none_limit()
+
+    await test_vector_engine_search_with_nodeset_filtering()
+
+    await test_vector_nodeset_filtering_retriever_integration()
+
+    await test_local_file_deletion(
+        text,
+        explanation_file_path_nlp,
+        dataset_1_id=add_1_payload.dataset_id,
+        dataset_2_id=add_2_payload.dataset_id,
+    )
+
+    await cognee.prune.prune_data()
+    data_root_directory = get_storage_config()["data_root_directory"]
+    assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
+
+    await cognee.prune.prune_system(metadata=True)
+    tables_in_database = await vector_engine.get_table_names()
+    assert len(tables_in_database) == 0, "PostgreSQL database is not empty"
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    asyncio.run(main())

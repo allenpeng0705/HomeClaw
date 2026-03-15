@@ -11,6 +11,10 @@ except ImportError:
         "Chromadb requires extra dependencies. Install with `pip install chromadb`"
     ) from None
 
+# Use name check so we work with any chromadb version; avoid import so we never crash at import time.
+def _is_invalid_collection_exception(e: BaseException) -> bool:
+    return type(e).__name__ == "InvalidCollectionException"
+
 from memory.base import VectorStoreBase
 
 
@@ -61,6 +65,11 @@ class ChromaDB(VectorStoreBase):
 
         #col_name = self.create_col(name=collection_name)
         self.collection = self.client.get_or_create_collection(name=collection_name)
+
+    def _refresh_collection(self) -> None:
+        """Re-get or create the collection. Use after InvalidCollectionException when the DB was recreated or the collection reference is stale."""
+        self.collection = self.client.get_or_create_collection(name=self.collection_name)
+        logger.debug("ChromaDB collection refreshed: name=%s", self.collection_name)
 
     def _parse_output(self, data: Dict) -> List[OutputData]:
         """
@@ -145,7 +154,13 @@ class ChromaDB(VectorStoreBase):
             payloads (Optional[List[Dict]], optional): List of payloads corresponding to vectors. Defaults to None.
             ids (Optional[List[str]], optional): List of IDs corresponding to vectors. Defaults to None.
         """
-        self.collection.add(ids=ids, embeddings=vectors, metadatas=payloads)
+        try:
+            self.collection.add(ids=ids, embeddings=vectors, metadatas=payloads)
+        except Exception as e:
+            if not _is_invalid_collection_exception(e):
+                raise
+            self._refresh_collection()
+            self.collection.add(ids=ids, embeddings=vectors, metadatas=payloads)
 
     def search(
         self, query: List[list], limit: int = 5, filters: Optional[Dict] = None
@@ -163,8 +178,16 @@ class ChromaDB(VectorStoreBase):
         """
         kwargs = {"query_embeddings": query, "n_results": limit}
         if filters and len(filters) > 0:
-            kwargs["where"] = {"$and": [{k: v} for k, v in filters.items()]}
-        results = self.collection.query(**kwargs)
+            # ChromaDB requires $and/$or to have at least two expressions; single filter use plain dict.
+            items = [dict([(k, v)]) for k, v in filters.items()]
+            kwargs["where"] = items[0] if len(items) == 1 else {"$and": items}
+        try:
+            results = self.collection.query(**kwargs)
+        except Exception as e:
+            if not _is_invalid_collection_exception(e):
+                raise
+            self._refresh_collection()
+            results = self.collection.query(**kwargs)
         final_results = self._parse_output(results)
         return final_results
 
@@ -175,18 +198,36 @@ class ChromaDB(VectorStoreBase):
         Args:
             vector_id (str): ID of the vector to delete.
         """
-        self.collection.delete(ids=vector_id)
+        try:
+            self.collection.delete(ids=vector_id)
+        except Exception as e:
+            if not _is_invalid_collection_exception(e):
+                raise
+            self._refresh_collection()
+            self.collection.delete(ids=vector_id)
 
     def delete_where(self, where: Dict):
         """
         Delete all vectors matching the metadata where clause (e.g. {"source_id": "x", "user_id": "y"}).
         Uses Chroma's native where filter so no need to fetch ids first.
         """
-        self.collection.delete(where=where)
+        try:
+            self.collection.delete(where=where)
+        except Exception as e:
+            if not _is_invalid_collection_exception(e):
+                raise
+            self._refresh_collection()
+            self.collection.delete(where=where)
 
     def get_all_ids(self, limit: int = 10000) -> List[str]:
         """Get up to `limit` vector ids from the collection (for reset/clear-all)."""
-        result = self.collection.get(limit=limit, include=[])
+        try:
+            result = self.collection.get(limit=limit, include=[])
+        except Exception as e:
+            if not _is_invalid_collection_exception(e):
+                raise
+            self._refresh_collection()
+            result = self.collection.get(limit=limit, include=[])
         ids = result.get("ids") or []
         if isinstance(ids, list) and ids and isinstance(ids[0], list):
             ids = ids[0]
@@ -195,7 +236,13 @@ class ChromaDB(VectorStoreBase):
     def delete_ids(self, ids: List[str]) -> None:
         """Delete multiple vectors by id."""
         if ids:
-            self.collection.delete(ids=ids)
+            try:
+                self.collection.delete(ids=ids)
+            except Exception as e:
+                if not _is_invalid_collection_exception(e):
+                    raise
+                self._refresh_collection()
+                self.collection.delete(ids=ids)
 
     def get_where(self, where: Dict, limit: int = 10000, include_metadatas: bool = True):
         """
@@ -203,7 +250,13 @@ class ChromaDB(VectorStoreBase):
         Returns list of (id, metadata_dict). Used e.g. for cleanup (find chunks by last_used_timestamp).
         """
         include = ["metadatas"] if include_metadatas else []
-        result = self.collection.get(where=where, limit=limit, include=include or [])
+        try:
+            result = self.collection.get(where=where, limit=limit, include=include or [])
+        except Exception as e:
+            if not _is_invalid_collection_exception(e):
+                raise
+            self._refresh_collection()
+            result = self.collection.get(where=where, limit=limit, include=include or [])
         ids = result.get("ids") or []
         metadatas = result.get("metadatas") or []
         if isinstance(ids, list) and ids and isinstance(ids[0], list):
@@ -226,7 +279,13 @@ class ChromaDB(VectorStoreBase):
             vector (Optional[List[float]], optional): Updated vector. Defaults to None.
             payload (Optional[Dict], optional): Updated payload. Defaults to None.
         """
-        self.collection.update(ids=vector_id, embeddings=vector, metadatas=payload)
+        try:
+            self.collection.update(ids=vector_id, embeddings=vector, metadatas=payload)
+        except Exception as e:
+            if not _is_invalid_collection_exception(e):
+                raise
+            self._refresh_collection()
+            self.collection.update(ids=vector_id, embeddings=vector, metadatas=payload)
 
     def get(self, vector_id: str) -> OutputData | None:
         """
@@ -238,7 +297,13 @@ class ChromaDB(VectorStoreBase):
         Returns:
             OutputData: Retrieved vector.
         """
-        result = self.collection.get(ids=[vector_id])
+        try:
+            result = self.collection.get(ids=[vector_id])
+        except Exception as e:
+            if not _is_invalid_collection_exception(e):
+                raise
+            self._refresh_collection()
+            result = self.collection.get(ids=[vector_id])
         if result.get('ids', []) == [] or result is None:
             return None
         return self._parse_output(result)[0]
@@ -280,17 +345,32 @@ class ChromaDB(VectorStoreBase):
         Returns:
             List[OutputData]: List of vectors.
         """
-        if filters and len(filters) > 0:
-            results = self.collection.get(where=filters, limit=limit)
-        else:
-            results = self.collection.get(limit=limit)
+        try:
+            if filters and len(filters) > 0:
+                results = self.collection.get(where=filters, limit=limit)
+            else:
+                results = self.collection.get(limit=limit)
+        except Exception as e:
+            if not _is_invalid_collection_exception(e):
+                raise
+            self._refresh_collection()
+            if filters and len(filters) > 0:
+                results = self.collection.get(where=filters, limit=limit)
+            else:
+                results = self.collection.get(limit=limit)
         return [self._parse_output(results)]
 
     def list_ids(self, limit: int = 10000) -> List[str]:
         """
         Return all document ids in the collection (up to limit). Used e.g. to find stale test skill ids.
         """
-        result = self.collection.get(limit=limit, include=[])
+        try:
+            result = self.collection.get(limit=limit, include=[])
+        except Exception as e:
+            if not _is_invalid_collection_exception(e):
+                raise
+            self._refresh_collection()
+            result = self.collection.get(limit=limit, include=[])
         ids = result.get("ids") or []
         if isinstance(ids, list) and ids and isinstance(ids[0], list):
             ids = ids[0]

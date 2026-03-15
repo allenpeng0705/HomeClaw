@@ -1,0 +1,20 @@
+{
+  "storage": {
+    "dbPath": ""
+  },
+  "embedding": {
+    "provider": "local",
+    "model": ""
+  },
+  "summarizer": {
+    "provider": "openai_compatible",
+    "endpoint": "http://127.0.0.1:5088/v1",
+    "apiKey": "local",
+    "model": "local",
+    "temperature": 0
+  },
+  "recall": {
+    "maxResultsDefault": 20,
+    "minScoreDefault": 0.45
+  }
+}

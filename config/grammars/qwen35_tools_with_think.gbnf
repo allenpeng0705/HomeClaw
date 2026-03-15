@@ -1,0 +1,32 @@
+# Qwen 3.5 9B tool-call grammar for llama.cpp (with optional <think> block)
+# Used when reasoning_budget is not 0 (e.g. -1): model may output <think>...</think> then <tool_call> or NO_TOOL_REQUIRED.
+# With reasoning_budget != 0 the model can think before the tool decision; we strip <think> and remove </think> from stop elsewhere.
+# We do NOT add "</tool_call>" to stop (see llm_loop: _stop_extra=None); grammar stops when root is satisfied.
+# Root: optional think, then either NO_TOOL_REQUIRED or one or more tool_call blocks.
+
+root ::= (think_block)? ("NO_TOOL_REQUIRED" | (tool_call_block (ws tool_call_block)*))
+
+# Optional thinking block: <think> (content that does not contain </think>) </think>
+think_block   ::= "<think>" think_inner "</think>" ws
+think_inner   ::= ( [^<] | "<" [^/] | "</" [^t] | "</t" [^h] | "</th" [^i] | "</thi" [^n] | "</thin" [^k] | "</think" [^>] )*
+
+tool_call_block ::= "<tool_call>" object "</tool_call>"
+
+# Core object structure
+object ::= "{" ws (kv ("," ws kv)*)? "}" ws
+kv     ::= string ":" ws value
+
+# Values
+value ::= object | array | string | number | ("true" | "false" | "null") ws
+
+# Arrays
+array ::= "[" ws (value ("," ws value)*)? "]" ws
+
+# String (handles escapes; \x00-\x1F excluded per JSON)
+string ::= "\"" ([^"\\\x00-\x1F] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4}))* "\"" ws
+
+# Robust JSON number
+number ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? ([eE] [-+]? [0-9]+)? ws
+
+# Whitespace
+ws     ::= [ \t\n]*

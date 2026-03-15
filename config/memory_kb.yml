@@ -11,12 +11,14 @@
 # --- RAG memory ---
 # When true, Core stores and retrieves conversation memories (RAG). Reset: GET /memory/reset
 use_memory: true
-# cognee (default) | chroma. Cognee: configure via cognee: below or Cognee .env. Chroma: in-house RAG via database, vectorDB, graphDB below.
-memory_backend: cognee
+# cognee (default) | chroma | memos | composite. composite: use cognee and memos together (add to both, search merges results). Set composite.backends: [cognee, memos].
+memory_backend: composite
 # When true: extra LLM call per message asks "should we store?" before adding to RAG. Default false = store every message; retrieval filters at read time.
 memory_check_before_add: false
 # When true (default): enqueue RAG memory add only after main LLM reply is ready, so Cognee cognify does not compete with main LLM. Set false to enqueue before reply (cognify can run in parallel with main LLM; may contend if same local server).
 memory_add_after_reply: true
+# Order of RAG memories in the prompt: relevance (default = highest score first) or newest_first (most recent first when backend returns created_at). Use newest_first if you want "RelevantMemory 1" to be the most recent conversation.
+# memory_context_order: relevance
 # RAG memory summarization: batch old memories into long-term summaries; originals TTL then deleted; summaries kept forever. See docs_design/RAGMemorySummarizationDesign.md.
 memory_summarization:
   enabled: false
@@ -123,7 +125,8 @@ graphDB:
     password: ""
 
 # --- Cognee (when memory_backend: cognee). Converted to Cognee env at runtime. See docs/MemoryAndDatabase.md. ---
-# Leave llm/embedding empty to use Core's main_llm and embedding_llm. ENABLE_BACKEND_ACCESS_CONTROL=false by default (avoids UserNotFoundError).
+# With local llama.cpp: leave cognee.llm and cognee.embedding empty so Core fills them from main_llm + main_llm_host/main_llm_port and embedding_llm. Cognee then uses the same llama-server (and embedding server) for add/cognify. See docs_design/CogneeLocalLLM.md §11.
+# ENABLE_BACKEND_ACCESS_CONTROL=false by default (avoids UserNotFoundError).
 cognee:
   relational:
     provider: sqlite           # sqlite | postgres (set host, port, username, password)
@@ -159,3 +162,16 @@ cognee:
     endpoint: ""
     api_key: ""
     tokenizer: "./models/tokenizer/Qwen3_0.6B"   # local path for token counting (no HuggingFace at runtime)
+
+# --- MemOS (when memory_backend: memos or composite). See vendor/memos/HOMECLAW-STANDALONE.md. ---
+# Install adds MemOS to vendor/memos; Core can auto-start the server when memos.url is local and auto_start is true.
+memos:
+  url: http://127.0.0.1:39201
+  timeout: 60
+  auto_start: true     # when true (default), Core starts the MemOS server if not running (localhost only)
+  viewer_port: 18799   # optional; when set, memory_viewer_url tool returns this URL for the MemOS web UI
+
+# --- Composite (when memory_backend: composite). Use Cognee and MemOS together: add writes to both, search merges and dedupes by score. ---
+composite:
+  backends: [cognee, memos]   # order optional; both need their config (cognee: above, memos: above)
+  search_merge: union_by_score   # default: merge results, sort by score. Set primary_only to use only first backend for search.

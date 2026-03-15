@@ -226,8 +226,7 @@ class CogneeKnowledgeBase:
             self._cognee = cognee
         except ImportError as e:
             raise ImportError(
-                "Cognee knowledge base requires: pip install cognee. "
-                "Configure via cognee section in core.yml or .env."
+                "Cognee knowledge base requires the cognee package (vendored in vendor/cognee) and its dependencies (pip install -r requirements-cognee-deps.txt). Configure via cognee section in config or .env."
             ) from e
         kbc = kb_config or {}
         self._unused_ttl_days = float(kbc.get("unused_ttl_days", 30) or 30)

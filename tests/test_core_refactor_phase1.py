@@ -82,13 +82,15 @@ def test_tool_helpers_fallback_import():
 
 
 def test_tool_result_looks_like_error():
-    """tool_result_looks_like_error identifies error-like and instruction-only results."""
+    """tool_result_looks_like_error identifies error-like; run_skill instruction-only is not an error (no mix retry)."""
     from core.tool_helpers_fallback import tool_result_looks_like_error
     assert tool_result_looks_like_error("file not found") is True
     assert tool_result_looks_like_error("wasn't found") is True
     assert tool_result_looks_like_error("[]") is True
     assert tool_result_looks_like_error("error: something") is True
     assert tool_result_looks_like_error("do not reply with only this line") is True
+    # run_skill instruction-only: same model should continue (second LLM round), not trigger mix retry
+    assert tool_result_looks_like_error("Instruction-only skill confirmed: html-slides-1.0.0. Do NOT reply with only this line. You MUST in this turn: (1) document ...") is False
     assert tool_result_looks_like_error("ok") is False
     assert tool_result_looks_like_error("Here is the result.") is False
     assert tool_result_looks_like_error(None) is False
@@ -117,13 +119,30 @@ def test_remind_me_needs_clarification():
 
 
 def test_parse_raw_tool_calls_from_content():
-    """parse_raw_tool_calls_from_content parses <tool_call>{...}</tool_call> blocks."""
+    """parse_raw_tool_calls_from_content parses <tool_call>{...}</tool_call> and XML-style blocks."""
     from core.tool_helpers_fallback import parse_raw_tool_calls_from_content
     raw = 'Before <tool_call>{"name": "echo", "arguments": {"x": 1}}</tool_call> after'
     out = parse_raw_tool_calls_from_content(raw)
     assert out is not None
     assert len(out) == 1
     assert out[0].get("function", {}).get("name") == "echo"
+    # XML-style / truncated (e.g. Qwen 3.5 sometimes outputs <function=name><pattern>...</p)
+    xml_raw = "<tool_call><function=file_find>\n</parameter><pattern>*.png</pattern></tool_call>"
+    xml_out = parse_raw_tool_calls_from_content(xml_raw)
+    assert xml_out is not None
+    assert len(xml_out) == 1
+    assert xml_out[0].get("function", {}).get("name") == "file_find"
+    import json
+    args = json.loads(xml_out[0].get("function", {}).get("arguments", "{}"))
+    assert args.get("pattern") == "*.png"
+    # Truncated (no </tool_call>)
+    trunc = "<tool_call><function=file_find>\n</parameter><pattern>*.{png,jpg,gif}*</p"
+    trunc_out = parse_raw_tool_calls_from_content(trunc)
+    assert trunc_out is not None
+    assert len(trunc_out) == 1
+    assert trunc_out[0].get("function", {}).get("name") == "file_find"
+    trunc_args = json.loads(trunc_out[0].get("function", {}).get("arguments", "{}"))
+    assert trunc_args.get("pattern") == "*.{png,jpg,gif}*"
     assert parse_raw_tool_calls_from_content("no tool call") is None
     assert parse_raw_tool_calls_from_content("") is None
     assert parse_raw_tool_calls_from_content(None) is None

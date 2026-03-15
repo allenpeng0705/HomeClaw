@@ -12,11 +12,16 @@ try:
     from semantic_router import SemanticRouter
     from semantic_router.route import Route
     from semantic_router.encoders.base import DenseEncoder
+    try:
+        from semantic_router.index import LocalIndex
+    except ImportError:
+        LocalIndex = None  # type: ignore[misc, assignment]
     _has_semantic_router = True
 except ImportError:
     SemanticRouter = None  # type: ignore
     Route = None  # type: ignore
     DenseEncoder = None  # type: ignore
+    LocalIndex = None  # type: ignore[misc, assignment]
     _has_semantic_router = False
 
 
@@ -160,7 +165,9 @@ def build_semantic_router(
         Route(name="local", utterances=loc),
         Route(name="cloud", utterances=cloud),
     ]
-    router = SemanticRouter(encoder=encoder, routes=routes)
+    # Pass index explicitly to avoid library WARNING "No index provided. Using default LocalIndex."
+    index_kw = {"index": LocalIndex()} if LocalIndex is not None else {}
+    router = SemanticRouter(encoder=encoder, routes=routes, **index_kw)
     if use_cache:
         _semantic_router_cache[cache_key] = router
     return router

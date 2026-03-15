@@ -112,7 +112,10 @@ def get_memory_reset_handler(core):
         if mem is None:
             return JSONResponse(status_code=404, content={"detail": "Memory not enabled or not initialized."})
         try:
-            mem.reset()
+            try:
+                mem.reset()
+            except Exception as e:
+                logger.warning("Memory backend reset failed (continuing with other clears): {}", e)
             logger.info("Memory reset completed (backend={})", type(mem).__name__)
             message = "Memory cleared."
             chat_cleared = False

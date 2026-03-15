@@ -1,5 +1,5 @@
 # Dependencies required by Cognee (memory backend when memory_backend=cognee).
-# Cognee is part of this repo; we only install these dependencies. Do not add cognee here.
+# Cognee is vendored in vendor/cognee; we only install these dependencies. Do not add cognee here.
 #
 # Core already installs from requirements.txt: litellm, chromadb, kuzu, protego, sqlalchemy, pydantic, etc.
 # This file adds Cognee-specific runtime deps (e.g. instructor) that Cognee needs.

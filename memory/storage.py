@@ -97,6 +97,7 @@ class SQLiteManager:
         updated_at=None,
         is_deleted=0,
     ):
+        self._create_history_table()  # ensure table exists (e.g. after reset() or fresh DB)
         with self.connection:
             self.connection.execute(
                 """
@@ -116,6 +117,7 @@ class SQLiteManager:
             )
 
     def get_history(self, memory_id):
+        self._create_history_table()  # ensure table exists (e.g. after reset() or fresh DB)
         cursor = self.connection.execute(
             """
             SELECT id, memory_id, old_memory, new_memory, event, created_at, updated_at
@@ -142,4 +144,4 @@ class SQLiteManager:
     def reset(self):
         with self.connection:
             self.connection.execute("DROP TABLE IF EXISTS history")
-            
+        self._create_history_table()  # recreate so subsequent add_history/get_history do not fail

@@ -3,7 +3,7 @@
 # Run from project root (existing clone) or from a parent directory (script will clone).
 # Do NOT use sudo. Run as your normal user:   bash install.sh   (or   chmod +x install.sh   then   ./install.sh).
 # If you see "Permission denied", use   bash install.sh   — it does not require the file to be executable.
-# Steps: Python (3.9+) -> Node.js -> tsx -> ClawHub -> [clone if needed] -> VMPrint -> pip install -> Cognee -> document stack -> llama.cpp -> GGUF/Ollama -> open Portal.
+# Steps: Python (3.9+) -> Node.js -> tsx -> ClawHub -> [clone if needed] -> VMPrint -> pip install -> Cognee deps (cognee in vendor/) -> document stack -> MemOS (vendor/memos) -> llama.cpp -> GGUF/Ollama -> open Portal.
 
 set -e
 REPO_URL="${HOMECLAW_REPO_URL:-https://github.com/allenpeng0705/HomeClaw.git}"
@@ -239,8 +239,8 @@ fi
 echo "OK: requirements installed"
 
 # ----- Step 5b: Cognee dependencies (for memory backend) -----
-# Cognee is the default memory backend. Cognee is part of this repo (customized); we only
-# install its dependencies here. Do not run "pip install cognee" — the package is in the source.
+# Cognee is the default memory backend. Cognee is vendored in vendor/cognee; we only
+# install its dependencies here. Do not run "pip install cognee".
 echo ""
 echo "=== Step 5b: Cognee dependencies (memory backend) ==="
 if [ -f "$ROOT/requirements-cognee-deps.txt" ]; then
@@ -266,6 +266,73 @@ if [ -f "$ROOT/requirements-document.txt" ]; then
   fi
 else
   echo "requirements-document.txt not found; skipping."
+fi
+
+# ----- Step 5d: MemOS (memory backend, optional) -----
+# MemOS is a built-in memory backend (like Cognee). Clone MemOS app into vendor/memos, add standalone server script, npm install.
+# When memory_backend is memos or composite, Core can auto-start the MemOS server if memos.url is local and memos.auto_start is true.
+echo ""
+echo "=== Step 5d: MemOS (memory backend) ==="
+MEMOS_DIR="$ROOT/vendor/memos"
+if [ -f "$MEMOS_DIR/server-standalone.ts" ]; then
+  if [ ! -d "$MEMOS_DIR/src" ] || [ ! -f "$MEMOS_DIR/package.json" ]; then
+    echo "MemOS app source missing in vendor/memos. Cloning MemOS and copying app..."
+    if command -v git >/dev/null 2>&1; then
+      MEMOS_TMP="${ROOT:?}/.tmp_memos_clone"
+      [ ! -d "$MEMOS_TMP" ] || rm -rf "$MEMOS_TMP"
+      if git clone --depth 1 https://github.com/MemTensor/MemOS.git "$MEMOS_TMP" 2>/dev/null; then
+        MEMOS_APP="$MEMOS_TMP/apps/memos-local-openclaw"
+        if [ -d "$MEMOS_APP" ]; then
+          for f in "$MEMOS_APP"/*; do
+            [ -e "$f" ] || continue
+            fn="$(basename "$f")"
+            if [ "$fn" = "server-standalone.ts" ] || [ "$fn" = "HOMECLAW-STANDALONE.md" ] || [ "$fn" = "memos-standalone.json.example" ]; then
+              continue
+            fi
+            cp -R "$f" "$MEMOS_DIR/" 2>/dev/null || true
+          done
+          echo "MemOS app copied to vendor/memos"
+        fi
+        rm -rf "$MEMOS_TMP"
+      else
+        echo "MemOS clone failed (network or repo). To use MemOS later: git clone https://github.com/MemTensor/MemOS.git /tmp/MemOS && cp -r /tmp/MemOS/apps/memos-local-openclaw/* $MEMOS_DIR/"
+      fi
+    else
+      echo "git not found; skipping MemOS app copy. See vendor/memos/HOMECLAW-STANDALONE.md for manual setup."
+    fi
+  fi
+  if [ -f "$MEMOS_DIR/package.json" ] && command -v npm >/dev/null 2>&1; then
+    if ! grep -q '"standalone"' "$MEMOS_DIR/package.json" 2>/dev/null; then
+      if command -v node >/dev/null 2>&1; then
+        MEMOS_DIR="$MEMOS_DIR" node -e '
+        const fs = require("fs");
+        const path = require("path");
+        const d = process.env.MEMOS_DIR;
+        if (!d) process.exit(1);
+        const p = path.join(d, "package.json");
+        try {
+          const j = JSON.parse(fs.readFileSync(p, "utf8"));
+          j.scripts = j.scripts || {};
+          j.scripts.standalone = "tsx server-standalone.ts";
+          fs.writeFileSync(p, JSON.stringify(j, null, 2));
+        } catch (e) { process.exit(1); }
+        ' 2>/dev/null && echo "Added standalone script to MemOS package.json" || true
+      fi
+    fi
+    echo "Installing MemOS dependencies (npm install in vendor/memos)..."
+    (cd "$MEMOS_DIR" && npm install --silent 2>/dev/null) || true
+    if [ -d "$MEMOS_DIR/node_modules" ]; then
+      echo "OK: MemOS installed at vendor/memos (run automatically with Core when memory_backend is memos or composite)"
+    else
+      echo "MemOS npm install failed or skipped. To retry: cd $MEMOS_DIR && npm install"
+    fi
+  elif [ ! -f "$MEMOS_DIR/package.json" ]; then
+    echo "MemOS package.json missing; run Step 5d again after copying MemOS app (see vendor/memos/HOMECLAW-STANDALONE.md)"
+  else
+    echo "npm not found; skipping MemOS dependencies. Install Node.js then: cd $MEMOS_DIR && npm install"
+  fi
+else
+  echo "vendor/memos/server-standalone.ts not found; skipping MemOS (optional memory backend)"
 fi
 
 # ----- Step 6a: llama.cpp -----

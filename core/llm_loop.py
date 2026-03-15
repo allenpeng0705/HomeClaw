@@ -16,7 +16,7 @@ from loguru import logger
 from base.base import PromptRequest, PluginResult
 from base.prompt_manager import get_prompt_manager
 from base.tools import ToolContext, get_tool_registry, ROUTING_RESPONSE_ALREADY_SENT
-from base.util import Util, redact_params_for_log
+from base.util import Util, redact_params_for_log, strip_reasoning_from_assistant_text, _sanitize_tool_calls
 from base.workspace import (
     get_workspace_dir,
     load_workspace,
@@ -32,6 +32,17 @@ from base.friend_presets import (
     get_friend_preset_config,
     trim_messages_to_last_n_turns,
 )
+from base.tool_profiles import get_tools_for_llm
+from base.tools_rag import search_tools_by_query as tools_rag_search
+from base.intent_router import (
+    route as intent_router_route,
+    get_tools_filter_for_category,
+    get_tools_filter_for_categories,
+    get_skills_filter_for_category,
+    get_skills_filter_for_categories,
+    verify_tool_selection as intent_verify_tool_selection,
+    DEFAULT_VERIFY_TOOLS as INTENT_VERIFY_TOOLS_DEFAULT,
+)
 from base.skills import (
     get_all_skills_dirs,
     get_skills_dir,
@@ -42,7 +53,49 @@ from base.skills import (
 from memory.prompts import RESPONSE_TEMPLATE
 from memory.chat.message import ChatMessage
 from tools.builtin import close_browser_session
-from core.log_helpers import _component_log, _truncate_for_log, _strip_leading_route_label
+from core.log_helpers import (
+    _component_log,
+    _truncate_for_log,
+    _strip_leading_route_label,
+    format_folder_list_file_find_result,
+    format_json_for_user,
+)
+
+
+def _messages_sanitized_for_tool_role(messages: List[dict]) -> List[dict]:
+    """
+    Ensure every message with role 'tool' is preceded by an assistant message with 'tool_calls'.
+    Some cloud APIs (e.g. DeepSeek) reject requests where a 'tool' message is not a response to
+    a preceding message with 'tool_calls'. Strip any orphaned tool messages (e.g. after fallback
+    when the assistant message lost tool_calls in serialization, or malformed history).
+    Returns a new list; does not mutate the input.
+    """
+    if not messages or not isinstance(messages, list):
+        return list(messages) if isinstance(messages, list) else []
+    out: List[dict] = []
+    for i, m in enumerate(messages):
+        if not isinstance(m, dict):
+            out.append(m)
+            continue
+        role = (m.get("role") or "").strip().lower()
+        if role != "tool":
+            out.append(m)
+            continue
+        # This message is role='tool'; the previous must be assistant with tool_calls
+        prev = out[-1] if out else None
+        if not isinstance(prev, dict):
+            logger.debug("messages_sanitized: dropping orphan 'tool' message (no valid preceding assistant)")
+            continue
+        prev_role = (prev.get("role") or "").strip().lower()
+        prev_tool_calls = prev.get("tool_calls") if isinstance(prev.get("tool_calls"), list) else []
+        if prev_role == "assistant" and prev_tool_calls:
+            out.append(m)
+        else:
+            logger.debug(
+                "messages_sanitized: dropping orphan 'tool' message (preceding role=%s has tool_calls=%s)",
+                prev_role, bool(prev_tool_calls),
+            )
+    return out
 
 
 # Tokens that suggest scheduling/reminder intent across languages (for logging when model didn't call a tool).
@@ -98,7 +151,6 @@ def _query_looks_like_scheduling(q: Optional[str]) -> bool:
 
 try:
     from core.services.tool_helpers import (
-        tool_result_looks_like_error as _tool_result_looks_like_error,
         tool_result_usable_as_final_response as _tool_result_usable_as_final_response,
         parse_raw_tool_calls_from_content as _parse_raw_tool_calls_from_content,
         infer_route_to_plugin_fallback as _infer_route_to_plugin_fallback,
@@ -109,7 +161,6 @@ try:
     )
 except Exception:
     from core.tool_helpers_fallback import (
-        tool_result_looks_like_error as _tool_result_looks_like_error,
         tool_result_usable_as_final_response as _tool_result_usable_as_final_response,
         parse_raw_tool_calls_from_content as _parse_raw_tool_calls_from_content,
         infer_route_to_plugin_fallback as _infer_route_to_plugin_fallback,
@@ -336,6 +387,7 @@ async def answer_from_memory(
                 effective_llm_name = (getattr(Util().core_metadata, "main_llm_cloud", None) or "").strip()
             if not effective_llm_name:
                 effective_llm_name = None
+            logger.info("Mix mode: route=%s (layer=%s)", route, route_layer)
             # Per-request log and aggregated counts (mix mode only)
             try:
                 from hybrid_router.metrics import log_router_decision
@@ -356,10 +408,12 @@ async def answer_from_memory(
         use_memory = Util().has_memory()
         llm_input = []
         response = ''
+        memory_turn_tool_messages = []  # collect tool name + result per turn for MemOS full-turn add (user+assistant+tool)
         system_parts = []
         force_include_instructions = []  # collected from skills_force_include_rules and plugins_force_include_rules; appended at end of system so model sees it last
         force_include_auto_invoke = []  # when model returns no tool_calls, run these (e.g. run_skill) so the skill runs anyway; each item: {"tool": str, "arguments": dict}
         force_include_plugin_ids = set()  # plugin ids to add to plugin list when skills_force_include_rules match (optional "plugins" in rule)
+        _injected_skill_folders = []  # skill folder names in prompt; used to constrain run_skill skill_name to enum (Phase 1.1)
 
         # Resolve current user once: used to decide workspace Identity vs who-based identity and for who injection.
         _sys_uid = getattr(request, "system_user_id", None) or user_id
@@ -475,6 +529,12 @@ async def answer_from_memory(
                                 _lines.append("")
                                 _lines.append(_ident_content)
                     system_parts.append("\n".join(_lines) + "\n\n")
+                else:
+                    # Default HomeClaw: no custom who/identity — give a minimal identity line so the model can generate greetings by itself (name + reply in user's language).
+                    _default_name = (getattr(_current_friend, "name", "") or "").strip() or "HomeClaw"
+                    system_parts.append(
+                        f"## Identity\nYou are {_default_name}, a friendly home assistant. When the user greets you (e.g. 你好, hi, hello), reply naturally and briefly in their language. Do not mix grammar across languages.\n\n"
+                    )
             except Exception as e:
                 logger.debug("Companion identity (who) inject failed: {}", e)
 
@@ -689,6 +749,30 @@ async def answer_from_memory(
                         system_parts.append("You can add to today's daily memory with append_daily_memory when useful (e.g. session summary, today's context).\n\n")
                 except Exception as e:
                     logger.warning("Skipping daily memory injection due to error: {}", e, exc_info=False)
+
+        # Phase 3: call intent router once early so we can filter both skills (3.1) and tools by category.
+        _intent_router_category = None
+        _intent_router_config = getattr(Util().get_core_metadata(), "intent_router_config", None) or {}
+        if not isinstance(_intent_router_config, dict):
+            _intent_router_config = {}
+        if _intent_router_config.get("enabled") and (query or "").strip():
+            try:
+                _intent_router_category = await intent_router_route(
+                    query=(query or "").strip(),
+                    config=_intent_router_config,
+                    completion_fn=core,
+                    llm_name=None,
+                    recent_messages=messages if isinstance(messages, list) else None,
+                )
+                _component_log("intent_router", f"category={_intent_router_category}")
+            except Exception as _e:
+                logger.debug("Intent router failed (early): {}; fallback general_chat", _e)
+                _intent_router_category = "general_chat"
+        # Parse comma-separated categories for multi-category tasks (union of tools/skills).
+        _intent_router_categories = [
+            c.strip() for c in ((_intent_router_category or "").split(","))
+            if (c or "").strip()
+        ] if _intent_router_category else []
 
         # Skills (SKILL.md from skills_dir + skills_extra_dirs); skills_disabled excluded
         if getattr(Util().core_metadata, 'use_skills', True):
@@ -908,6 +992,47 @@ async def answer_from_memory(
                                     _component_log("friend_preset", f"filtered skills to preset list ({len(skills_list)} skills)")
                     except Exception as e:
                         logger.debug("Friend preset skills filter failed: {}", e)
+                # OpenClaw-style skills_filter: when set, only these skill folders are in the prompt.
+                _skills_filter = getattr(meta_skills, "skills_filter", None) or []
+                if _skills_filter and skills_list:
+                    allowed_folders = {str(f).strip().lower() for f in _skills_filter if f and str(f).strip()}
+                    if allowed_folders:
+                        skills_list = [
+                            s for s in skills_list
+                            if ((s.get("folder") or s.get("name") or "").strip().lower() in allowed_folders)
+                        ]
+                        _component_log("skills_filter", f"filtered to {len(skills_list)} skill(s)")
+                # Phase 3.1: if router provided a category with category_skills, filter skills so skill_name enum matches router output.
+                # Multi-category: when router returns comma-separated categories, use union of skills from all.
+                if _intent_router_categories and skills_list:
+                    try:
+                        if len(_intent_router_categories) > 1:
+                            _cat_skills = get_skills_filter_for_categories(_intent_router_config, _intent_router_categories)
+                        elif len(_intent_router_categories) == 1 and _intent_router_categories[0]:
+                            _cat_skills = get_skills_filter_for_category(_intent_router_config, (_intent_router_categories[0] or "").strip())
+                        else:
+                            _cat_skills = None
+                        if _cat_skills:
+                            _allowed_skill_folders = {str(s).strip().lower() for s in _cat_skills if s is not None and str(s).strip()}
+                            if _allowed_skill_folders:
+                                _new_list = []
+                                for s in skills_list:
+                                    if not isinstance(s, dict):
+                                        _new_list.append(s)
+                                        continue
+                                    folder = (s.get("folder") or s.get("name") or "").strip().lower()
+                                    if folder in _allowed_skill_folders:
+                                        _new_list.append(s)
+                                skills_list = _new_list
+                                _component_log("intent_router", f"filtered skills by category: {len(skills_list)} skill(s)")
+                    except Exception as _e:
+                        logger.debug("Phase 3.1 category skills filter failed: {}", _e)
+                # Phase 1.1: list of skill folder names in prompt; used to constrain run_skill skill_name to enum when building tools for LLM.
+                _injected_skill_folders = [
+                    (s.get("folder") or s.get("name") or "").strip()
+                    for s in (skills_list or [])
+                    if isinstance(s, dict) and ((s.get("folder") or s.get("name") or "").strip())
+                ]
                 # Skills list is built from RAG/load + force-include (e.g. reminder/scheduling). LLM decides when to call run_skill; we only force-include for special cases.
                 if skills_list:
                     selected_names = [s.get("folder") or s.get("name") or "?" for s in skills_list]
@@ -950,6 +1075,22 @@ async def answer_from_memory(
                 relevant_memories = await core._fetch_relevant_memories(query,
                     messages, user_name, user_id, _mem_scope, run_id, filters, 10
                 )
+                # Optional: sort by newest first so "1" in the prompt is most recent (default is relevance order from vector search).
+                try:
+                    _mem_order = getattr(Util().get_core_metadata(), "memory_context_order", None) or "relevance"
+                    if _mem_order == "newest_first" and relevant_memories:
+                        def _ts_key(m):
+                            ca = m.get("created_at") if isinstance(m, dict) else None
+                            if ca is None:
+                                return (1, 0)
+                            if hasattr(ca, "timestamp"):
+                                return (0, -ca.timestamp())
+                            if isinstance(ca, (int, float)):
+                                return (0, -float(ca))
+                            return (1, 0)
+                        relevant_memories = sorted(relevant_memories or [], key=_ts_key)
+                except Exception as _e:
+                    logger.debug("memory_context_order sort failed (non-fatal): {}", _e)
                 memories_text = ""
                 if relevant_memories:
                     i = 1
@@ -1170,22 +1311,38 @@ async def answer_from_memory(
                     return s[:desc_max] if desc_max > 0 else s
                 plugin_lines = [f"  - {p.get('id', '') or 'plugin'}: {_desc(p.get('description'))}" for p in plugin_list]
             _req_time_24 = getattr(core, "_request_current_time_24", "") or ""
-            # Qwen: qwen_model "qwen3" or "qwen35" (or legacy qwen3_tool_format_instruction) -> <tool_call> format + NO_TOOL_REQUIRED. Qwen 3.5 uses its own block and optional grammar.
+            # Qwen: llm.yml → llama_cpp.qwen_mode only. qwen3/qwen35 -> <tool_call> format + NO_TOOL_REQUIRED; qwen35 uses dedicated block + optional grammar.
             tool_format_line = ""
             try:
-                tools_cfg = getattr(Util().get_core_metadata(), "tools_config", None) or {}
-                comp = getattr(Util().get_core_metadata(), "completion", None) or {}
+                meta = Util().get_core_metadata()
+                llama_cpp = getattr(meta, "llama_cpp", None) if meta is not None else None
+                if not isinstance(llama_cpp, dict):
+                    llama_cpp = {}
                 qwen_model = Util._get_qwen_model()
-                qwen3_style = qwen_model in ("qwen3", "qwen35") or tools_cfg.get("qwen3_tool_format_instruction", False) or (not qwen_model and (tools_cfg.get("qwen3_mode") or comp.get("qwen3_mode")))
+                qwen3_style = qwen_model in ("qwen3", "qwen35") or bool(llama_cpp.get("qwen3_tool_format_instruction"))
                 if qwen_model == "qwen35":
                     tool_format_line = (
-                        "<tools> Output only a single tool call per turn. Use exactly: <tool_call>{\"name\": \"tool_name\", \"arguments\": {...}}</tool_call>. "
-                        "If NO tool matches the user's intent, respond with NO_TOOL_REQUIRED. Do not invent parameters. No <think> or conversational text.</tools>\n"
+                        "<tools> Output one or more tool calls per turn when the task needs multiple steps (e.g. document_read then save_result_page). "
+                        "Exact format required (the system only parses these): "
+                        "JSON: <tool_call>{\"name\": \"tool_name\", \"arguments\": {\"key\": \"value\"}}</tool_call> "
+                        "or XML: <tool_call><function>tool_name</function><key>value</key></tool_call>. "
+                        "Example: <tool_call>{\"name\": \"time\", \"arguments\": {}}</tool_call> or <tool_call><function>folder_list</function><path>.</path></tool_call>. "
+                        "Use <function> for the tool name in XML (not <tool>). Use JSON \"arguments\" or XML child tags; do NOT use (key=value) or (text=\"...\") syntax. Always close with </tool_call>. "
+                        "When you call a tool, you MUST output the <tool_call>...</tool_call> block in your response content (the main message body) so the system can parse and execute it—do not put only reasoning or narrative text like \"I'll call folder_list\"; output the actual <tool_call> block. "
+                        "If NO tool matches the user's intent, respond with plain text only—do NOT output any <tool_call>. "
+                        "For simple greetings (e.g. 你好, hello, hi, 嗨, thanks, 谢谢) or short identity/thanks: reply directly in your message content with a short friendly response—do NOT call any tool. "
+                        "When the user asks what you can do, your capabilities, or 你能为我做什么/你能做什么, answer with plain text only from your role and system prompt—do not call any tool (no agent_memory_search or other tools for capability questions). "
+                        "Never output <tool_call> with empty name or mix <response> or other tags with <tool_call>. Do not invent parameters. No <think> or conversational text.</tools>\n"
                     )
                 elif qwen3_style:
                     tool_format_line = (
-                        "Tool calls: use exactly <tool_call>{\"name\": \"tool_name\", \"arguments\": {...}}</tool_call>. "
-                        "If NO tool matches the user's intent, respond with NO_TOOL_REQUIRED. Do not invent or guess parameters for tools that do not fit.\n"
+                        "Tool calls: one or more per turn when needed. Exact format (system only parses these): "
+                        "JSON <tool_call>{\"name\": \"tool_name\", \"arguments\": {\"key\": \"value\"}}</tool_call> or "
+                        "XML <tool_call><function>tool_name</function><key>value</key></tool_call>. "
+                        "Example: <tool_call>{\"name\": \"time\", \"arguments\": {}}</tool_call>. Use <function> in XML (not <tool>); use JSON/XML for arguments, not (key=value). Always close with </tool_call>. "
+                        "When you call a tool, output the <tool_call>...</tool_call> block in your response content (main message body), not only in reasoning—the system parses it from content to execute the tool. "
+                        "If NO tool matches the user's intent, respond with plain text only—do NOT output <tool_call>. For simple greetings (你好, hello, hi, 谢谢) or short thanks: reply directly in message content—do not call any tool. For capability questions (你能为我做什么, what can you do), answer in plain text only—do not call any tool. Never use empty name or mix other tags. "
+                        "Do not invent or guess parameters for tools that do not fit.\n"
                     )
             except Exception:
                 pass
@@ -1201,13 +1358,42 @@ async def answer_from_memory(
                 "For time-related requests: one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only when the user clearly asks to schedule or remind.\n"
                 f"When the user asks to be reminded in N minutes (any phrasing: \"N分钟后\", \"N分钟提醒\", \"remind me in N minutes\", \"in N min\"), you MUST call remind_me with minutes=N (use the number from the user's message) and message= a short label only (e.g. \"喝水\", \"会议提醒\"; do NOT put date/time in message). Current time: {_req_time_24}. Use only this time; never invent times (e.g. never 2:49 PM, 明天下午7点).\n"
                 "For script-based workflows use run_skill(skill_name, script, ...). For instruction-only skills (no scripts/) use run_skill(skill_name) with no script—then you MUST continue in the same turn (document_read, generate content, file_write or save_result_page, return link); do not reply with only the confirmation. skill_name can be folder or short name (e.g. html-slides).\n"
-                "When the user asks to generate an HTML slide or report from a document/file: (1) call document_read(path) to get the file content, (2) use that returned text as the source and generate the full HTML yourself, (3) call save_result_page(title=..., content=<your generated full HTML>, format='html'). For HTML slides do NOT use format='markdown'—use format='html'. Never pass empty or minimal content; content must be the full slide deck/report HTML.\n"
+                "When the user asks to generate an HTML slide or report from a document/file: (1) call document_read(path) to get the file content, (2) use that returned text as the source and generate the full HTML yourself, (3) call save_result_page(title=..., content=<your generated full HTML>, format='html') so the user gets a view link. You MUST call save_result_page—do NOT return the raw HTML in your message. The user must receive the link (e.g. /files/out?token=...) so they can open the slides; returning HTML as text does not save it to the output folder. For HTML slides use format='html' not 'markdown'. Never pass empty or minimal content; content must be the full slide deck/report HTML.\n"
+                "CRITICAL for long HTML (especially on local models): Do NOT put very long HTML inside the save_result_page tool arguments; long JSON tool_call arguments can be truncated. Instead, put the full HTML in your **message content** inside a ```html ... ``` block, then call save_result_page(title=..., content=<short label like \"see html block above\">, format='html'). The system will detect the ```html``` block in your message and save that HTML to a file and return the link. Do not try to stuff hundreds of lines of HTML directly into the JSON content argument.\n"
                 "Using an external service (Slack, LinkedIn, Outlook, HubSpot, Notion, Gmail, Stripe, Google Calendar, Salesforce, Airtable, etc.) -> use run_skill(skill_name='maton-api-gateway-1.0.0', script='request.py') with app and path from the maton skill body (Supported Services table and references/). Do not claim the action was done without calling the skill. For LinkedIn post: GET linkedin/rest/me then POST linkedin/rest/posts with commentary.\n"
                 "When a tool returns a view/open link (URL containing /files/out?token=), you MUST output that URL exactly as given: character-for-character, no truncation, no added text, no character changes. Do not combine the URL with any other content. Copy only the URL line. One wrong or extra character makes the link invalid.\n"
+                "**Web search (default) vs crawl:** When the user wants to search something on the web, use **web_search**(query=<topic>) by default (Tavily can be the provider in config). Do NOT use tavily_crawl or exec for search — **tavily_crawl** is for crawling pages at a URL only; **exec** is for shell commands, not web search. For any \"search the web\", \"上网搜\", \"just search\", \"give me results\" use web_search only.\n"
                 "Otherwise respond or use other tools.\n"
                 + ("Available plugins:\n" + "\n".join(plugin_lines) if plugin_lines else "")
             )
             system_parts.append(routing_block)
+            # Optional: few-shot tool selection examples (User/Thought/Call) for document and file tools; helps local/Qwen select tools accurately.
+            _tools_cfg = getattr(Util().get_core_metadata(), "tools_config", None) or {}
+            if _tools_cfg.get("tool_selection_examples", True):
+                try:
+                    pm = get_prompt_manager(
+                        prompts_dir=getattr(Util().get_core_metadata(), "prompts_dir", None),
+                        default_language=getattr(Util().get_core_metadata(), "prompt_default_language", "en"),
+                    )
+                    _lang = (Util().main_llm_language() or "en") if callable(getattr(Util(), "main_llm_language", None)) else "en"
+                    _examples = pm.get_content("tools", "selection_examples", lang=_lang) if pm else None
+                    if _examples and isinstance(_examples, str) and _examples.strip():
+                        system_parts.append("\n\n" + _examples.strip())
+                        _component_log("tools", "injected tool selection examples")
+                except Exception as e:
+                    logger.debug("Tool selection examples load failed: {}", e)
+            # Phase 1.2: instruct model not to call a tool when none fits.
+            try:
+                _meta = Util().get_core_metadata()
+                _use_tools = getattr(_meta, "use_tools", True)
+                _use_skills = getattr(_meta, "use_skills", True)
+                if _use_tools or (_use_skills and _injected_skill_folders):
+                    system_parts.append(
+                        "\n\n## When no tool or skill fits\n\n"
+                        "If the user's request does not match any of the available skills or tools above, do NOT call run_skill or any tool; reply in natural language."
+                    )
+            except Exception:
+                pass
             force_include_instructions.extend(plugin_force_instructions)
 
         # When user message looks like a reminder/schedule request, add a short instruction so the model prefers calling the tool.
@@ -1215,6 +1401,44 @@ async def answer_from_memory(
             force_include_instructions.append(
                 "This message is a reminder or schedule request. You MUST call one of: remind_me (one-shot in N min or at a time), cron_schedule (recurring), or record_date (record event). Do not reply with text only—text does not create a reminder."
             )
+
+        # When user asks to list files or folder contents (any wording/language), require calling folder_list so the model selects the tool instead of replying with text only.
+        _list_dir_instruction_phrases = (
+            "目录", "哪些文件", "列出文件", "目录下", "列出", "有什么文件", "文件列表", "我的文件", "看看文件", "显示文件", "我都有哪些文件",
+            "list file", "list files", "list directory", "list folder", "list content", "what file", "what's in my", "files in my", "list my files", "what files do i have",
+            "folder content", "folder list", "file list", "show file", "show files", "show directory", "show folder", "view file", "view directory",
+            "files in documents", "documents folder", "what files in", "in the documents", "in documents",
+        )
+        if query and isinstance(query, str):
+            _reg = None
+            try:
+                _reg = get_tool_registry()
+                _has_folder_list = _reg and any(t.name == "folder_list" for t in (_reg.list_tools() or []))
+            except Exception:
+                _has_folder_list = False
+            if _has_folder_list and any((p in (query or "").strip().lower() if p.isascii() else p in (query or "").strip()) for p in _list_dir_instruction_phrases):
+                _q_li = (query or "").strip().lower()
+                _q_ri = (query or "").strip()
+                _folder_hint = "."
+                for _k in ("documents", "downloads", "output", "images", "work", "knowledge", "share"):
+                    if _k in _q_li or _k in _q_ri:
+                        _folder_hint = _k
+                        break
+                force_include_instructions.append(
+                    "This message asks to list files or folder contents. You MUST call folder_list and you MUST include the path argument. Extract the folder name from the user's message: if they said a folder name (e.g. images, documents, output, work), use that as path; if they did not name a folder, use path '.' Do not reply with text only. Never call folder_list with empty or missing path."
+                    + (f" For this message the user referred to a folder: use path='{_folder_hint}'." if _folder_hint and _folder_hint != "." else " For this message no folder was named: use path='.'.")
+                )
+                # When user asks to search the web (any language), require web_search — not tavily_crawl (crawl is for a specific URL only).
+                _search_web_phrases = (
+                    "上网搜", "搜一下", "搜索", "查一下", "有什么好看", "有什么好听的", "最新", "latest", "search the web", "search for ",
+                    "find information", "look up", "what is the", "current news", "recent news", "good movies", "popular movies",
+                    "just search", "give me results", "直接给结果", "搜一下结果", "search and ",
+                )
+                _has_web_search = _reg is not None and any(t.name == "web_search" for t in (_reg.list_tools() or []))
+                if _has_web_search and any((p in (query or "").strip().lower() if p.isascii() else p in (query or "").strip()) for p in _search_web_phrases):
+                    force_include_instructions.append(
+                        "This message asks to search something on the web. You MUST call web_search(query=<topic>) in this turn — do not reply with only text or 'I will use web_search'. Do NOT use exec or tavily_crawl; use web_search only."
+                    )
 
         # Optional: surface recorded events (TAM) in context so model knows what's coming up (per-user)
         if getattr(core, "orchestratorInst", None) and getattr(core.orchestratorInst, "tam", None):
@@ -1283,7 +1507,9 @@ async def answer_from_memory(
                     if registry_flush is None:
                         _component_log("compaction", "memory flush skipped: no tool registry")
                     else:
-                        all_tools_flush = registry_flush.get_openai_tools() if registry_flush.list_tools() else None
+                        _tc = getattr(Util().get_core_metadata(), "tools_config", None) or {}
+                        _max_desc = max(0, int(_tc.get("description_max_chars") or 0))
+                        all_tools_flush = registry_flush.get_openai_tools(_max_desc if _max_desc > 0 else None) if registry_flush.list_tools() else None
                         if not unified and all_tools_flush:
                             all_tools_flush = [t for t in all_tools_flush if (t.get("function") or {}).get("name") not in ("route_to_tam", "route_to_plugin")]
                         if not all_tools_flush:
@@ -1305,14 +1531,15 @@ async def answer_from_memory(
                             tool_timeout_flush = max(0, int(getattr(meta_flush, "tool_timeout_seconds", 120) or 0))
                             _flush_grammar = None
                             try:
-                                if all_tools_flush and Util._get_qwen_model() == "qwen35":
+                                if all_tools_flush and Util._get_qwen_model() == "qwen35" and Util._qwen35_use_grammar():
                                     _flush_grammar = Util.get_qwen35_grammar()
                             except Exception:
                                 pass
                             for _round in range(10):
                                 try:
                                     msg_flush = await Util().openai_chat_completion_message(
-                                        current_flush, tools=all_tools_flush, tool_choice="auto", grammar=_flush_grammar, llm_name=effective_llm_name
+                                        current_flush, tools=all_tools_flush, tool_choice="auto", grammar=_flush_grammar, llm_name=effective_llm_name,
+                                        stop_extra=None,
                                     )
                                 except Exception as e:
                                     logger.debug("Memory flush LLM call failed: {}", e)
@@ -1334,7 +1561,8 @@ async def answer_from_memory(
                                     if not isinstance(tc, dict):
                                         continue
                                     tcid = tc.get("id") or ""
-                                    fn = tc.get("function") or {}
+                                    fn = tc.get("function")
+                                    fn = fn if isinstance(fn, dict) else {}
                                     name = (fn.get("name") or "").strip()
                                     if not name:
                                         continue
@@ -1417,7 +1645,84 @@ async def answer_from_memory(
 
         use_tools = getattr(Util().get_core_metadata(), "use_tools", True)
         registry = get_tool_registry()
-        all_tools = registry.get_openai_tools() if use_tools and registry.list_tools() else None
+        tools_cfg_for_desc = getattr(Util().get_core_metadata(), "tools_config", None) or {}
+        description_max_chars = max(0, int(tools_cfg_for_desc.get("description_max_chars") or 0))
+        # OpenClaw-style: when tools.profile or tools.profiles is set, only tools in that profile are sent to the LLM.
+        _tool_defs = (registry.list_tools() or []) if use_tools else []
+        # Phase 3.4: RAG for tools — when tools_use_vector_search is true, retrieve tools by query similarity (off by default).
+        if use_tools and _tool_defs and tools_cfg_for_desc.get("tools_use_vector_search", False):
+            if getattr(core, "tools_vector_store", None) and getattr(core, "embedder", None) and (query or "").strip():
+                try:
+                    _rag_limit = max(1, min(50, int(tools_cfg_for_desc.get("tools_max_retrieved", 10) or 10)))
+                    _rag_threshold = float(tools_cfg_for_desc.get("tools_similarity_threshold", 0.0) or 0.0)
+                    _rag_hits = await tools_rag_search(
+                        core.tools_vector_store,
+                        core.embedder,
+                        (query or "").strip(),
+                        limit=_rag_limit,
+                        min_similarity=_rag_threshold,
+                    )
+                    if _rag_hits:
+                        _rag_names = {name for name, _ in _rag_hits}
+                        _tool_defs_rag = [t for t in _tool_defs if getattr(t, "name", None) in _rag_names]
+                        if _tool_defs_rag:
+                            _tool_defs = _tool_defs_rag
+                            _component_log("tools_rag", f"filtered to {len(_tool_defs)} tool(s) by query similarity")
+                        # else: RAG returned no matches; keep full list to avoid sending zero tools
+                except Exception as _e:
+                    logger.debug("Tools RAG search failed: {}; using all tools", _e)
+        # Phase 2/3: filter tools by intent router category (router was called early; reuse _intent_router_categories).
+        # Multi-category: when router returns comma-separated categories, use union of tools from all.
+        try:
+            if _intent_router_categories:
+                if len(_intent_router_categories) > 1:
+                    _cat_filter = get_tools_filter_for_categories(_intent_router_config, _intent_router_categories)
+                elif len(_intent_router_categories) == 1 and _intent_router_categories[0]:
+                    _cat_filter = get_tools_filter_for_category(_intent_router_config, (_intent_router_categories[0] or "").strip())
+                else:
+                    _cat_filter = None
+                if _cat_filter and isinstance(_cat_filter, dict) and _cat_filter.get("profile"):
+                    _tool_defs_filtered = get_tools_for_llm(_tool_defs, {"profile": _cat_filter.get("profile")})
+                    _component_log("intent_router", f"filtered tools by profile '{_cat_filter.get('profile')}': {len(_tool_defs_filtered)} tools")
+                elif _cat_filter and isinstance(_cat_filter, dict) and isinstance(_cat_filter.get("tools"), list):
+                    _allowed = {str(n).strip() for n in _cat_filter["tools"] if n is not None and str(n).strip()}
+                    _tool_defs_filtered = [t for t in _tool_defs if getattr(t, "name", None) in _allowed]
+                    _component_log("intent_router", f"filtered tools by allowlist: {len(_tool_defs_filtered)} tools")
+                else:
+                    _tool_defs_filtered = get_tools_for_llm(_tool_defs, tools_cfg_for_desc)
+            else:
+                _tool_defs_filtered = get_tools_for_llm(_tool_defs, tools_cfg_for_desc)
+        except Exception as _e:
+            logger.debug("Intent router tool filter failed: {}; using config profile", _e)
+            _tool_defs_filtered = get_tools_for_llm(_tool_defs, tools_cfg_for_desc)
+        # Fallback: tools_always_included — add these tools to every category so narrow intents can still save/list (e.g. search_web + save_result_page).
+        try:
+            _always = _intent_router_config.get("tools_always_included") if isinstance(_intent_router_config, dict) else None
+            if isinstance(_always, list) and _always and _tool_defs_filtered is not None:
+                _by_name = {getattr(t, "name", None): t for t in _tool_defs if getattr(t, "name", None)}
+                _filtered_names = {getattr(t, "name", None) for t in _tool_defs_filtered if getattr(t, "name", None)}
+                _added = []
+                for _n in _always:
+                    if not _n or not str(_n).strip():
+                        continue
+                    _n = str(_n).strip()
+                    if _n in _filtered_names:
+                        continue
+                    if _n in _by_name:
+                        _tool_defs_filtered = list(_tool_defs_filtered) + [ _by_name[_n] ]
+                        _filtered_names.add(_n)
+                        _added.append(_n)
+                if _added:
+                    _component_log("intent_router", f"tools_always_included added: {_added}")
+        except Exception as _e:
+            logger.debug("tools_always_included failed: {}", _e)
+        # Ensure we never pass None to iteration/len (get_tools_for_llm could theoretically return None).
+        if _tool_defs_filtered is None:
+            _tool_defs_filtered = _tool_defs if isinstance(_tool_defs, list) else []
+        if _tool_defs_filtered is not _tool_defs and isinstance(_tool_defs_filtered, list) and isinstance(_tool_defs, list) and len(_tool_defs_filtered) < len(_tool_defs):
+            _component_log("tool_profile", f"filtered to profile: {len(_tool_defs_filtered)} tools (from {len(_tool_defs)})")
+        _max_desc = description_max_chars if description_max_chars > 0 else None
+        all_tools = [t.to_openai_function(_max_desc) for t in _tool_defs_filtered] if use_tools and _tool_defs_filtered else None
         _filtered_by_preset = False
         # Friend preset: when current friend has a preset, restrict tools to that preset's list (Step 2).
         # tools_preset in config can be a string (single preset) or array of preset names (union of tool sets).
@@ -1440,6 +1745,34 @@ async def answer_from_memory(
                 logger.debug("Friend preset tool filter failed: {}", e)
         if all_tools and not unified and not _filtered_by_preset:
             all_tools = [t for t in all_tools if (t.get("function") or {}).get("name") not in ("route_to_tam", "route_to_plugin")]
+        # Phase 1.1: constrain run_skill skill_name to enum of injected skill folders so the LLM can only choose from skills in the prompt.
+        if all_tools and _injected_skill_folders:
+            try:
+                for t in all_tools:
+                    if not isinstance(t, dict):
+                        continue
+                    fn = t.get("function") or {}
+                    if not isinstance(fn, dict):
+                        continue
+                    if fn.get("name") != "run_skill":
+                        continue
+                    params = fn.get("parameters") or {}
+                    if not isinstance(params, dict):
+                        params = {}
+                    props = params.get("properties") or {}
+                    if not isinstance(props, dict):
+                        props = {}
+                    if "skill_name" in props:
+                        props["skill_name"] = {
+                            "type": "string",
+                            "description": "Skill name: must be one of the Available skills in the prompt (exact folder name).",
+                            "enum": list(_injected_skill_folders),
+                        }
+                    params["properties"] = props
+                    fn["parameters"] = params
+                    break
+            except Exception as _e:
+                logger.debug("Phase 1.1 run_skill enum patch failed: {}", _e)
         openai_tools = all_tools if (all_tools and (unified or len(all_tools) > 0)) else None
         tool_names = [((t or {}).get("function") or {}).get("name") for t in (openai_tools or []) if isinstance(t, dict)]
         logger.debug(
@@ -1485,10 +1818,12 @@ async def answer_from_memory(
                                 "Only these two bases are the search path and working area; their subfolders can be accessed. Any other folder cannot be accessed (sandbox). "
                                 "(1) User sandbox root — omit path or use subdir name; (2) share — path \"share\" or \"share/...\". "
                                 "**User sandbox has these standard folders:** output (generated files, reports, slides), documents, downloads, images, work, knowledge. Use path '' or '.' for root; folder_list(path='documents'), folder_list(path='output'), etc.; use the exact path from the result in document_read or get_file_view_link. "
-                                "**When the user asks for a specific folder by name** (e.g. \"what files in documents folder\", \"list documents\", \"what's in my documents\"): call folder_list(path='documents') (or the folder they said: documents, downloads, output, images, work, knowledge, share). Do NOT use path '.' or omit path — that lists the sandbox root; use the folder name they asked for. "
+                                "**Whenever the user asks to list files or what is in a folder** (any wording or language): you MUST call folder_list(path='<folder>'). Use the folder name they said (documents, images, output, work, downloads, knowledge, share), or path '' or '.' for sandbox root if they did not name a folder. Do NOT reply with text only—the user expects the actual list. "
+                                "**If they name a folder** (e.g. documents, images, output, work): call folder_list(path='that_name'). If they do not name a folder: call folder_list(path='') or folder_list(path='.'). "
                                 "**Do not invent or fabricate file names, file paths, or URLs** to complete tasks. Use only: (a) values returned by your tool calls (e.g. path from folder_list, file_find), (b) the exact filename or path the user mentioned (e.g. 1.pdf), (c) links returned by save_result_page or get_file_view_link. If you need a path or URL, call the appropriate tool first and use its result. "
                                 "**Never use absolute paths** (e.g. /mnt/, C:\\, /Users/). Use only relative paths under the sandbox: the filename (e.g. 1.pdf) or the path from folder_list/file_find. "
                                 "Do not use workspace, config, or paths outside these two trees. Put generated files in output/ (path \"output/filename\") and return the link. "
+                                "**When your reply would be a long document or a file** (report, HTML, markdown, slides, PDF summary, etc.): do NOT paste the full content in the message. Call save_result_page(title=..., content=<full content>, format='html' or 'markdown') or file_write(path='output/...', content=...); then return the view link to the user (the tool gives you the link when core_public_url is set). The user gets a link to open the file; long text stays in the file, not in chat. "
                                 "When the user asks about a **specific file by name** (e.g. \"能告诉我1.pdf都讲了什么吗\", \"what is in 1.pdf\"): (1) call folder_list() or file_find(pattern='*1.pdf*') to list/search user sandbox; (2) use the **exact path** from the result that matches the requested name in document_read — e.g. if the user asked for 1.pdf, use path \"1.pdf\" only. Do **not** use absolute paths or invent paths. "
                                 "When the user asks to **send or get a file** (e.g. \"发给我 ID1.jpg\", \"send me that file\", \"把XX发给我\"): call get_file_view_link(path=<exact path>) with the path from folder_list/file_find that matches the requested file, then output **only** the URL from the tool—do not ask for confirmation or give long explanations. "
                                 "When the user asks for file search, list, or read without a specific name: omit path for user sandbox; if user says \"share\", use path \"share\" or \"share/...\". "
@@ -1504,7 +1839,7 @@ async def answer_from_memory(
                         llm_input[0]["content"] = (llm_input[0].get("content") or "") + block
                 except Exception as e:
                     logger.debug("Inject homeclaw_root into system prompt failed: {}", e)
-            # General rule when tools are present: do not invent paths, filenames, or URLs
+            # Paths/URLs rule in system for all tool turns; "Handling tool results" is injected only when last message is a tool result (any continuation after tools, below).
             if llm_input and llm_input[0].get("role") == "system":
                 tool_rule = (
                     "\n\n## Tool use — paths and URLs\n"
@@ -1524,36 +1859,129 @@ async def answer_from_memory(
                 request=request,
             )
             current_messages = list(llm_input)
-            max_tool_rounds = 10
-            use_other_model_next_turn = False  # mix mode: when last tool result was error-like, use cloud (or local) for next turn
+            try:
+                _tc = getattr(Util().get_core_metadata(), "tools_config", None) or {}
+                _n = _tc.get("max_tool_rounds")
+                max_tool_rounds = max(1, int(_n)) if (_n is not None and int(_n) >= 1) else 30
+            except (TypeError, ValueError):
+                max_tool_rounds = 30
+            # config: tools.max_tool_rounds (default 30); no hard cap so complex multi-step tasks can finish
+            # Same model for whole chain; mix fallback only on failure (below).
             last_tool_name = None  # so "no tool_calls" branch can skip remind_me clarifier when we already ran remind_me this turn
-            # Qwen 3.5: when qwen_model == "qwen35" and tools present, pass GBNF grammar to force <tool_call> output only
+            last_file_link_result = None  # when save_result_page/get_file_view_link return a link; must be defined before loop so "no tool_calls" branch can read it
+            last_tool_result_raw = None
+            # Qwen 3.5: when qwen_model == "qwen35" and tools present, pass GBNF grammar on tool-decision turns only (not after tool results). Set qwen35_use_grammar: false to disable.
             _qwen35_grammar = None
             try:
-                if openai_tools and Util._get_qwen_model() == "qwen35":
+                if openai_tools and Util._get_qwen_model() == "qwen35" and Util._qwen35_use_grammar():
                     _qwen35_grammar = Util.get_qwen35_grammar()
             except Exception:
                 pass
+            # Qwen3 xLAM/Codex (e.g. Qwen3-4B-toolcalling-gguf-codex): when tool_selection_llm and qwen3_xlam_style, use xLAM grammar + stop </tool_call> on tool-decision turns.
+            _qwen3_xlam_grammar = None
+            try:
+                _tool_sel_ref = (getattr(Util().get_core_metadata(), "tool_selection_llm", None) or "").strip()
+                if (
+                    openai_tools
+                    and _tool_sel_ref
+                    and getattr(Util().get_core_metadata(), "use_tool_selection_llm", False)
+                    and Util._qwen3_xlam_style_for_llm(_tool_sel_ref)
+                ):
+                    _qwen3_xlam_grammar = Util.get_qwen3_xlam_grammar()
+            except Exception:
+                pass
             for _ in range(max_tool_rounds):
+                # Default: main model (effective_llm_name) for every turn — tool selection, parameter extraction, and final reply. Override only when tool_selection_llm is configured and use_tool_selection_llm is true.
                 llm_name_this_turn = effective_llm_name
-                if use_other_model_next_turn and mix_route_this_request:
-                    try:
-                        meta_hr = Util().get_core_metadata()
-                        main_local = (getattr(meta_hr, "main_llm_local", None) or "").strip()
-                        main_cloud = (getattr(meta_hr, "main_llm_cloud", None) or "").strip()
-                        if main_local and main_cloud:
-                            other_route = "cloud" if (mix_route_this_request == "local") else "local"
-                            other_llm = main_cloud if other_route == "cloud" else main_local
-                            if other_llm:
-                                llm_name_this_turn = other_llm
-                                mix_route_this_request = other_route
-                                mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_error_retry" if mix_route_layer_this_request else "error_retry"
-                                _component_log("mix", f"tool result was error-like, retrying with {other_route} ({other_llm})")
-                    except Exception as e:
-                        logger.debug("mix error_retry resolve failed: {}", e)
-                    use_other_model_next_turn = False
+                # Sync mix_route_this_request with effective_llm_name each iteration so override applies only for one turn and fallback knows the current route. Defensive: never crash on metadata/config access.
+                try:
+                    if main_llm_mode == "mix" and effective_llm_name and isinstance(effective_llm_name, str):
+                        _meta = getattr(Util(), "get_core_metadata", None)
+                        _meta = _meta() if callable(_meta) else None
+                        if _meta is not None:
+                            _ml = (getattr(_meta, "main_llm_local", None) or "").strip() if hasattr(_meta, "main_llm_local") else ""
+                            _mc = (getattr(_meta, "main_llm_cloud", None) or "").strip() if hasattr(_meta, "main_llm_cloud") else ""
+                            if _ml and effective_llm_name == _ml:
+                                mix_route_this_request = "local"
+                            elif _mc and effective_llm_name == _mc:
+                                mix_route_this_request = "cloud"
+                except Exception as _sync_err:
+                    logger.debug("mix route sync failed (non-fatal): {}", _sync_err)
+                _last_role = (current_messages[-1].get("role") or "").strip() if (isinstance(current_messages, list) and current_messages and isinstance(current_messages[-1], dict)) else ""
+                # Optional: use a dedicated tool-calling model for every tool turn when use_tool_selection_llm is true (tool selection + parameter extraction). When not used, main_llm handles all tool-call-related turns.
+                _tool_sel = (getattr(Util().get_core_metadata(), "tool_selection_llm", None) or "").strip()
+                _use_tool_sel = getattr(Util().get_core_metadata(), "use_tool_selection_llm", False)
+                if openai_tools and _tool_sel and _use_tool_sel:
+                    llm_name_this_turn = _tool_sel
+                # Per-tool route override (tool loop only, mix mode): when the last message is a tool result and that tool is in tool_loop_route_overrides, use the override for this turn only (do not set effective_llm_name so next turn uses original route). If the overridden model fails, fallback (below) retries with the other model.
+                try:
+                    _meta = getattr(Util(), "get_core_metadata", None)
+                    _meta = _meta() if callable(_meta) else None
+                    if _meta is not None:
+                        _mode = (getattr(_meta, "main_llm_mode", None) or "").strip().lower() if hasattr(_meta, "main_llm_mode") else ""
+                        if _mode == "mix":
+                            _hr = getattr(_meta, "hybrid_router", None) if hasattr(_meta, "hybrid_router") else None
+                            _hr = _hr if isinstance(_hr, dict) else {}
+                            _overrides = _hr.get("tool_loop_route_overrides") if isinstance(_hr.get("tool_loop_route_overrides"), dict) else {}
+                            # Only override when this tool is in the map; override applies for this turn only (effective_llm_name unchanged so next iteration uses original selected model).
+                            if _last_role == "tool" and last_tool_name is not None and _overrides and last_tool_name in _overrides:
+                                _route_override = (str(_overrides.get(last_tool_name) or "").strip().lower())
+                                if _route_override in ("local", "cloud"):
+                                    _ref = (getattr(_meta, "main_llm_local", None) or "").strip() if _route_override == "local" else (getattr(_meta, "main_llm_cloud", None) or "").strip()
+                                    if _ref:
+                                        llm_name_this_turn = _ref
+                                        mix_route_this_request = _route_override
+                                        _layer_prev = mix_route_layer_this_request if isinstance(mix_route_layer_this_request, str) else ""
+                                        mix_route_layer_this_request = (_layer_prev + "_tool_override") if _layer_prev else "tool_override"
+                                        _component_log("mix", "tool loop: use {} for this turn only (after {}); if it fails, fallback to other model".format(_route_override, last_tool_name))
+                except Exception as _e:
+                    logger.debug("tool_loop_route_overrides check failed: {}", _e)
+                # Prefer local for long-output turns: cloud has a hard 8192 max_tokens cap; when we're about to generate (after document_read or run_skill), use local so max_tokens (e.g. 32768) is honored and slides/reports don't truncate.
+                try:
+                    if (
+                        _last_role == "tool"
+                        and last_tool_name in ("document_read", "run_skill")
+                        and mix_route_this_request == "cloud"
+                    ):
+                        _meta_lo = getattr(Util(), "get_core_metadata", None)
+                        _meta_lo = _meta_lo() if callable(_meta_lo) else None
+                        _local_ref = (getattr(_meta_lo, "main_llm_local", None) or "").strip() if _meta_lo is not None else ""
+                        if _local_ref:
+                            llm_name_this_turn = _local_ref
+                            effective_llm_name = _local_ref
+                            mix_route_this_request = "local"
+                            _layer_prev = mix_route_layer_this_request if isinstance(mix_route_layer_this_request, str) else ""
+                            mix_route_layer_this_request = (_layer_prev + "_long_output") if _layer_prev else "long_output"
+                            _component_log("mix", "prefer local for this turn (long output after {}); cloud cap 8192 would truncate".format(last_tool_name))
+                except Exception as _e:
+                    logger.debug("prefer local for long-output turn check failed: {}", _e)
+                # When last message is a tool result (any continuation after tools—round 2, 3, … until return or switch): inject "Handling tool results" once so the LLM knows how to treat errors vs instructions and to call the next tool when user asked for generated output.
+                try:
+                    if _last_role == "tool" and current_messages and len(current_messages) > 0 and isinstance(current_messages[0], dict) and (current_messages[0].get("role") or "").strip() == "system":
+                        _sys_content = current_messages[0].get("content") or ""
+                        if "## Handling tool results" not in _sys_content:
+                            _handling = (
+                                "\n\n## Handling tool results\n"
+                                "**When a tool result looks like an error** (e.g. starts with \"Error:\", or contains \"not found\", \"could not find\", \"file not found\", \"not readable\", \"path is required\"): Acknowledge to the user what went wrong in plain language. Suggest a concrete next step (e.g. list the directory with folder_list, try a different path, or ask the user for the correct path). Do not claim the operation succeeded; do not invent or fabricate successful content.\n"
+                                "**When a tool result is an instruction for you** (e.g. \"Instruction-only skill confirmed\", \"You MUST in this turn\", \"Do NOT reply with only this line\"): The tool is telling you what to do in this turn. Perform those steps now: call the tools it asks for (e.g. document_read, then generate content, then save_result_page) or generate the content it specifies. Do not reply with only a confirmation or \"I will do that\"—actually make the tool calls or produce the output in this same turn.\n"
+                                "**When the user asked for generated output** (e.g. HTML slides, report, summary to file) and a tool already returned the source content (e.g. document_read): you MUST call the next tool in this turn (e.g. run_skill(html-slides), save_result_page with the generated content)—do not reply with only a plan or \"I will generate...\"; actually invoke the tool. If you have already generated full HTML in your reply: you MUST call save_result_page(title=..., content=<that HTML>, format='html') so the user gets a view link; do not send the raw HTML as the final message—the user must receive the link to open the slides in the output folder.\n"
+                                "**CRITICAL:** If a previous message in this conversation is a tool result that already contains document/content (e.g. from document_read), do NOT respond with a plan like \"我将现在生成\" or \"首先，我需要调用 document_read\" or \"I will call document_read then...\". You already have the content—either call the next tool (save_result_page, run_skill) with your generated output in this turn, or output the full generated content in your message. Never return only a plan or intention.\n"
+                                "**CRITICAL for HTML slides:** If the user asked for HTML slides (or \"生成html slides\", \"总结...生成幻灯片\") and the tool result above is document content: you MUST call run_skill(skill_name='html-slides') in this turn. Do not reply with only text, a plan, or \"Let first generate\"—make the tool call now.\n"
+                                "**In general:** Only use or cite content that tools actually returned. Do not invent file contents, error messages, or tool outputs."
+                            )
+                            current_messages[0]["content"] = _sys_content + _handling
+                        if mix_route_this_request and "continuing after tools ran" not in (current_messages[0].get("content") or ""):
+                            _use2 = (
+                                "\n\n## Your role this turn\n"
+                                "You are continuing after tools ran. Use the tool result(s) above to decide: respond to the user, retry with different parameters, or call more tools. Do not invent outcomes.\n"
+                                "If the user asked for generated output (e.g. HTML slides, report, summary to file) and a tool already returned the source content (e.g. document_read): you MUST call the next tool in this turn (e.g. run_skill(html-slides), save_result_page with generated content)—do not reply with only a plan or \"I will generate...\"; actually invoke the tool. If the conversation already has document content from a previous tool result, do NOT say \"首先我需要调用 document_read\" or \"I will call document_read\"—you have the content; produce the output or call save_result_page/run_skill now. CRITICAL: If the user asked for HTML slides and the tool result above is document content, call run_skill(skill_name='html-slides') now—do not respond with only text."
+                            )
+                            current_messages[0]["content"] = (current_messages[0].get("content") or "") + _use2
+                except Exception as _e:
+                    logger.debug("Inject handling-tool-results prompt failed (continuing): {}", _e)
                 _t0 = time.time()
                 _resolved = Util()._resolve_llm(llm_name_this_turn) or Util().main_llm()
+                _mtype = ""
                 if _resolved and len(_resolved) >= 5:
                     _path, _raw_id, _mtype, _host, _port = _resolved[0], _resolved[1], _resolved[2], _resolved[3], _resolved[4]
                     logger.info(
@@ -1564,9 +1992,36 @@ async def answer_from_memory(
                         _mtype,
                     )
                 logger.debug("LLM call started (tools={})", "yes" if openai_tools else "no")
+                # Use completion.max_tokens for every turn (no separate max_tokens_long). Set max_tokens high (e.g. 32768) in config to avoid truncation of slides/reports.
+                _max_tokens_override = None
+                # For cloud providers that enforce strict tool message ordering (e.g. DeepSeek),
+                # sanitize messages so every role='tool' is preceded by an assistant with tool_calls.
+                _msgs_for_llm: List[dict] = current_messages
+                try:
+                    if (_mtype or "").strip().lower() == "litellm":
+                        _msgs_for_llm = _messages_sanitized_for_tool_role(current_messages)
+                except Exception as _e:
+                    logger.debug("messages_sanitized_for_tool_role failed (non-fatal): {}", _e)
+                # Only pass Qwen 3.5 grammar when last message is from user (tool-decision turn). When last message is a tool result, we do not send the grammar so the model’s normal reply (e.g. final answer, summary) is never constrained by the GBNF.
+                if _last_role == "tool":
+                    _use_grammar = None
+                    _stop_extra = None
+                elif (
+                    _tool_sel
+                    and (llm_name_this_turn or "").strip() == _tool_sel
+                    and _qwen3_xlam_grammar
+                    and isinstance(_qwen3_xlam_grammar, str)
+                    and len(_qwen3_xlam_grammar) > 0
+                ):
+                    _use_grammar = _qwen3_xlam_grammar
+                    _stop_extra = ["</tool_call>"]
+                else:
+                    _use_grammar = _qwen35_grammar
+                    _stop_extra = None  # Do not add "</tool_call>" for Qwen 3.5 — can truncate; we parse <tool_call>... from full response
                 try:
                     msg = await Util().openai_chat_completion_message(
-                        current_messages, tools=openai_tools, tool_choice="auto", grammar=_qwen35_grammar, llm_name=llm_name_this_turn
+                        _msgs_for_llm, tools=openai_tools, tool_choice="auto", grammar=_use_grammar, llm_name=llm_name_this_turn,
+                        max_tokens_override=_max_tokens_override, stop_extra=_stop_extra,
                     )
                 except Exception as e:
                     logger.warning("LLM call failed (will try fallback if available): {}", e)
@@ -1576,72 +2031,417 @@ async def answer_from_memory(
                 if msg is not None:
                     _content = (msg.get("content") or "").strip()
                     _tool_calls = msg.get("tool_calls") if isinstance(msg.get("tool_calls"), list) else []
+                    # Count usable tool_calls (have function.name) so we can treat "truncated/malformed" as no tool_calls
+                    _usable_tool_calls = [tc for tc in (_tool_calls or []) if isinstance(tc, dict) and isinstance((tc.get("function") or {}), dict) and ((tc.get("function") or {}).get("name") or "").strip()]
                     # Empty content is normal when the model returns tool_calls (many local servers omit text). Only warn when there are no tool_calls.
-                    if (not _content or len(_content) < 10) and not _tool_calls:
-                        logger.warning(
+                    if (not _content or len(_content) < 10) and not _usable_tool_calls:
+                        _log_empty = logger.debug if mix_route_this_request else logger.warning
+                        _log_empty(
                             "Local LLM returned empty or very short content (len={}) in {:.1f}s — ensure the server on the logged host:port is the correct model and fully loaded (e.g. llama-server for main_llm_port).",
                             len(_content), _elapsed,
                         )
-                if msg is None:
-                    # Mix fallback: one model failed (timeout/error/exception); retry once with the other route so the task is not blocked.
-                    hr = getattr(Util().get_core_metadata(), "hybrid_router", None) or {}
-                    fallback_ok = bool(hr.get("fallback_on_llm_error", True)) and mix_route_this_request
-                    if fallback_ok and (getattr(Util().get_core_metadata(), "main_llm_local", None) or "").strip() and (getattr(Util().get_core_metadata(), "main_llm_cloud", None) or "").strip():
-                        other_route = "cloud" if mix_route_this_request == "local" else "local"
-                        other_llm = (getattr(Util().get_core_metadata(), "main_llm_cloud", None) or "").strip() if other_route == "cloud" else (getattr(Util().get_core_metadata(), "main_llm_local", None) or "").strip()
-                        if other_llm:
-                            _component_log("mix", f"first model failed, retrying with {other_route} ({other_llm})")
-                            try:
-                                msg = await Util().openai_chat_completion_message(
-                                    current_messages, tools=openai_tools, tool_choice="auto", grammar=_qwen35_grammar, llm_name=other_llm
-                                )
-                                if msg is not None:
-                                    mix_route_this_request = other_route
-                                    effective_llm_name = other_llm  # use working model for rest of tool rounds
-                                    mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_fallback" if mix_route_layer_this_request else "fallback"
-                            except Exception as e2:
-                                logger.warning("Fallback LLM call also failed: {}", e2)
-                                msg = None
+                    # When tool_selection_llm returned content only (no tool call), optionally use main_llm for the reply so the final response to the user comes from the main model (first turn or after tools). Default true.
+                    if (
+                        msg is not None
+                        and openai_tools
+                        and _tool_sel
+                        and _use_tool_sel
+                        and not _usable_tool_calls
+                        and getattr(Util().get_core_metadata(), "use_main_llm_for_direct_reply", True)
+                    ):
+                        try:
+                            msg_main = await Util().openai_chat_completion_message(
+                                _msgs_for_llm, tools=None, tool_choice="auto", grammar=None, llm_name=effective_llm_name,
+                                max_tokens_override=_max_tokens_override, stop_extra=_stop_extra,
+                            )
+                            if msg_main is not None and isinstance(msg_main, dict):
+                                msg = msg_main
+                                _content = (msg.get("content") or "").strip()
+                                _tool_calls = msg.get("tool_calls") if isinstance(msg.get("tool_calls"), list) else []
+                                _usable_tool_calls = [tc for tc in (_tool_calls or []) if isinstance(tc, dict) and isinstance((tc.get("function") or {}), dict) and ((tc.get("function") or {}).get("name") or "").strip()]
+                        except Exception as e_main:
+                            logger.debug("use_main_llm_for_direct_reply call failed: {}", e_main)
+                # Mix fallback: retry with the other route when (1) first model raised / returned None (e.g. 4xx), (2) first model returned empty content and no usable tool_calls, or (3) cloud returned finish_reason=length (truncation) — retry that turn with local so we get higher max_tokens.
+                _truncated = isinstance(msg, dict) and (msg.get("_finish_reason") or "").strip() == "length"
+                _should_fallback = msg is None or (
+                    isinstance(msg, dict)
+                    and (not (msg.get("content") or "").strip() or len((msg.get("content") or "").strip()) < 10)
+                    and not [tc for tc in (msg.get("tool_calls") or []) if isinstance(tc, dict) and isinstance((tc.get("function") or {}), dict) and ((tc.get("function") or {}).get("name") or "").strip()]
+                ) or (mix_route_this_request == "cloud" and _truncated)
+                if _should_fallback:
+                    _meta_fb = None
+                    hr = {}
+                    try:
+                        _meta_fb = getattr(Util(), "get_core_metadata", None)
+                        _meta_fb = _meta_fb() if callable(_meta_fb) else None
+                        if _meta_fb is not None:
+                            _hr_val = getattr(_meta_fb, "hybrid_router", None)
+                            hr = _hr_val if isinstance(_hr_val, dict) else {}
+                    except Exception:
+                        hr = {}
+                    _current_route = mix_route_this_request if mix_route_this_request in ("local", "cloud") else None
+                    fallback_ok = bool(hr.get("fallback_on_llm_error", True)) and _current_route is not None
+                    if fallback_ok and _meta_fb is not None:
+                        _local_ref = (getattr(_meta_fb, "main_llm_local", None) or "").strip()
+                        _cloud_ref = (getattr(_meta_fb, "main_llm_cloud", None) or "").strip()
+                        if _local_ref and _cloud_ref:
+                            other_route = "cloud" if _current_route == "local" else "local"
+                            other_llm = _cloud_ref if other_route == "cloud" else _local_ref
+                            # Retry with other model (local->cloud or cloud->local); applies when override model failed or any model returned empty/truncated
+                            if other_llm:
+                                _reason = "first model failed" if msg is None else ("cloud truncated (finish_reason=length); retrying with local" if _truncated else "local returned empty or no usable tool_calls (e.g. truncated); retrying with cloud")
+                                _component_log("mix", "{} — retrying with {} ({})".format(_reason, other_route, other_llm))
+                                # Sanitize so cloud API never sees orphaned 'tool' messages (DeepSeek etc. require tool to follow assistant with tool_calls)
+                                _msgs_for_cloud = _messages_sanitized_for_tool_role(current_messages)
+                                try:
+                                    msg = await Util().openai_chat_completion_message(
+                                        _msgs_for_cloud, tools=openai_tools, tool_choice="auto", grammar=_use_grammar, llm_name=other_llm,
+                                        stop_extra=_stop_extra,
+                                    )
+                                    if msg is not None:
+                                        mix_route_this_request = other_route
+                                        effective_llm_name = other_llm  # use working model for rest of tool rounds
+                                        _layer_prev = mix_route_layer_this_request if isinstance(mix_route_layer_this_request, str) else ""
+                                        mix_route_layer_this_request = (_layer_prev + "_fallback") if _layer_prev else "fallback"
+                                except Exception as e2:
+                                    logger.warning("Fallback LLM call also failed: {}", e2)
+                                    msg = None
                     if msg is None:
                         response = None
                         break
-                current_messages.append(msg)
+                if msg is None or not isinstance(msg, dict):
+                    response = None
+                    break
+                _last_finish_reason = msg.get("_finish_reason") if isinstance(msg, dict) else None
+                _msg_to_append = {k: v for k, v in msg.items() if k != "_finish_reason"} if isinstance(msg, dict) else msg
+                current_messages.append(_msg_to_append)
                 tool_calls = msg.get("tool_calls") if isinstance(msg.get("tool_calls"), list) else None
-                content_str = (msg.get("content") or "").strip()
-                # Some backends return tool_call as raw text in content instead of structured tool_calls
+                content_str = (msg.get("content") or "").strip() if isinstance(msg.get("content"), str) else ""
+                # On tool-selection rounds the server may put output in reasoning_content and leave content empty; use it only for parsing <tool_call>, never as the user-facing reply.
+                content_str_from_reasoning = False
+                try:
+                    _rc = msg.get("reasoning_content") if isinstance(msg, dict) else None
+                    if not content_str and _rc is not None and isinstance(_rc, str) and _rc.strip() and "<tool_call>" in _rc:
+                        content_str = _rc.strip()
+                        content_str_from_reasoning = True
+                except Exception:
+                    pass
+                # Some backends return tool_call as raw text in content instead of structured tool_calls (supports multiple <tool_call>...</tool_call> in one turn)
                 if not tool_calls and content_str and _parse_raw_tool_calls_from_content(content_str):
                     tool_calls = _parse_raw_tool_calls_from_content(content_str)
+                    # So the next LLM round sees a proper assistant message with tool_calls (ids must match tool result messages). Sanitize so each item has type="function" (required by OpenAI/llama.cpp/DeepSeek).
+                    if tool_calls and current_messages and isinstance(current_messages[-1], dict) and (current_messages[-1].get("role") or "").strip() == "assistant":
+                        current_messages[-1] = dict(current_messages[-1])
+                        current_messages[-1]["tool_calls"] = _sanitize_tool_calls(tool_calls)
+                # For search-intent queries, ignore wrong tool (e.g. exec) parsed from content so web_search fallback can run
+                if tool_calls and isinstance(query, str) and len(tool_calls) == 1:
+                    _fn = tool_calls[0].get("function") if isinstance(tool_calls[0], dict) else {}
+                    _name = (_fn.get("name") or "").strip().lower() if isinstance(_fn, dict) else ""
+                    if _name == "exec":
+                        _search_q = (query or "").strip().lower()
+                        if any(p in _search_q for p in ("搜", "search", "上网", "find", "look up", "latest", "news", "movies", "结果", "results")):
+                            tool_calls = None
+                            logger.debug("Ignoring parsed exec tool_call for search-intent query; web_search fallback will run if model does not call tool.")
                 if not tool_calls:
                     logger.debug(
                         "LLM returned no tool_calls (content={})",
                         _truncate_for_log(content_str or "(empty)", 120),
                     )
-                    # If content looks like raw tool_call but we didn't parse it, don't send that to the user
+                    # Grammar returned literal NO_TOOL_REQUIRED: get the actual reply by retrying without tools so the user doesn't see that string.
+                    if content_str and (content_str.strip() == "NO_TOOL_REQUIRED"):
+                        try:
+                            msg_no_tools = await Util().openai_chat_completion_message(
+                                _msgs_for_llm, tools=None, tool_choice="auto", grammar=None, llm_name=llm_name_this_turn,
+                                max_tokens_override=_max_tokens_override, stop_extra=None,
+                            )
+                            if msg_no_tools and isinstance(msg_no_tools.get("content"), str) and msg_no_tools.get("content").strip():
+                                _tc = msg_no_tools.get("tool_calls") or []
+                                if not any((t.get("function") or {}).get("name") for t in _tc if isinstance(t, dict)):
+                                    response = (msg_no_tools.get("content") or "").strip()
+                                    if "<think>" in response or "</think>" in response:
+                                        response = strip_reasoning_from_assistant_text(response)
+                                    if response and len(response.strip()) > 0:
+                                        logger.debug("NO_TOOL_REQUIRED: using plain reply from no-tools retry (len=%s)", len(response))
+                                        break
+                        except Exception as _e:
+                            logger.debug("NO_TOOL_REQUIRED retry without tools failed: {}", _e)
+                        # Fallback so user never sees literal NO_TOOL_REQUIRED (retry failed or returned empty)
+                        if not response or str(response).strip() == "NO_TOOL_REQUIRED":
+                            response = "What can I help you with?"
+                    # If content looks like raw tool_call but we didn't parse it, avoid sending raw tags to the user.
+                    # Model may output valid text then a stray <tool_call> (e.g. reasoning or incomplete tag); use text before <tool_call> if substantial.
                     if content_str and ("<tool_call>" in content_str or "</tool_call>" in content_str):
-                        response = "The assistant tried to use a tool but the response format was not recognized. Please try again."
+                        _before_tag = content_str.split("<tool_call>")[0].strip()
+                        # Strip <think>...</think> so user never sees reasoning (model may still emit it even with reasoning_budget: 0)
+                        if "<think>" in _before_tag or "</think>" in _before_tag:
+                            _before_tag = strip_reasoning_from_assistant_text(_before_tag)
+                        if len(_before_tag) >= 20:
+                            response = _before_tag
+                            logger.debug("Using content before stray <tool_call> as response (len=%s)", len(_before_tag))
+                            # If we already ran folder_list/file_find, append the formatted list so the user sees the actual files
+                            if last_tool_name in ("file_find", "folder_list") and last_tool_result_raw and isinstance(last_tool_result_raw, str):
+                                _formatted = format_folder_list_file_find_result(last_tool_result_raw, is_file_find=(last_tool_name == "file_find"))
+                                if _formatted:
+                                    response = (response or "").strip() + "\n\n" + _formatted
+                            # Same as below: if user asked for slides and _before_tag has a real ```html block, extract and save so user gets a link
+                            if (
+                                response and not last_file_link_result and registry
+                                and ("```html" in (response or "") or "```HTML" in (response or ""))
+                            ):
+                                _q_lower = (query or "").strip().lower()
+                                _q_raw = (query or "").strip()
+                                _slides_ask = any(p in _q_lower for p in ("slide", "slides", "html", "report", "ppt")) or any(
+                                    p in _q_raw for p in ("总结", "生成", "幻灯片")
+                                )
+                                if _slides_ask:
+                                    try:
+                                        _m = re.search(r"```(?:html|HTML)\s*([\s\S]*?)```", response)
+                                        if _m and _m.group(1):
+                                            _html = _m.group(1).strip()
+                                            # Skip placeholder blocks (e.g. "(full 乔布斯-style... layout) ... </ body ></html")
+                                            _placeholder = ("(full " in _html or "..." in _html) and len(_html) < 800
+                                            if len(_html) > 200 and "</html>" in _html.lower() and not _placeholder:
+                                                _title = "Slides"
+                                                _save_args = {"title": _title, "content": _html, "format": "html"}
+                                                _link_result = await registry.execute_async("save_result_page", _save_args, context)
+                                                if isinstance(_link_result, str) and (
+                                                    "/files/out" in _link_result or ("http" in _link_result and "/files/" in _link_result)
+                                                ):
+                                                    for _line in _link_result.splitlines():
+                                                        if "token=" in _line or ("http" in _line and "/files/" in _line):
+                                                            _link_result = _line.strip()
+                                                            break
+                                                    response = _link_result
+                                                    _component_log("tools", "save_result_page fallback: extracted HTML from content-before-tool_call; returning link")
+                                    except Exception as _e:
+                                        logger.debug("save_result_page fallback (html from content before <tool_call>) failed: {}", _e)
+                        else:
+                            # Content before <tool_call> was short (truncated or malformed). Before showing generic error: retry with other model if mix + document_read + slides intent (same as mix fallback in default branch).
+                            _slides_retry = False
+                            if mix_route_this_request and last_tool_name == "document_read" and registry and isinstance(current_messages, list) and len(current_messages) > 0:
+                                _last_msg = current_messages[-1] if current_messages else None
+                                if isinstance(_last_msg, dict) and (_last_msg.get("role") or "").strip() == "assistant":
+                                    _q = (query or "").strip().lower()
+                                    _q_raw = (query or "").strip()
+                                    _slides_intent = any(p in _q for p in ("slide", "slides", "html", "report", "ppt")) or any(p in _q_raw for p in ("总结", "生成", "幻灯片"))
+                                    if _slides_intent:
+                                        try:
+                                            _meta = Util().get_core_metadata()
+                                            _cloud = (getattr(_meta, "main_llm_cloud", None) or "").strip()
+                                            _local = (getattr(_meta, "main_llm_local", None) or "").strip()
+                                            _is_local = mix_route_this_request == "local"
+                                            if _is_local and _cloud:
+                                                current_messages.pop()
+                                                effective_llm_name = _cloud
+                                                mix_route_this_request = "cloud"
+                                                mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_slides_fallback"
+                                                response = None
+                                                _slides_retry = True
+                                                _component_log("tools", "stray/truncated tool_call after document_read; retrying turn with cloud for slides")
+                                                continue
+                                            if not _is_local and _local:
+                                                current_messages.pop()
+                                                effective_llm_name = _local
+                                                mix_route_this_request = "local"
+                                                mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_slides_fallback"
+                                                response = None
+                                                _slides_retry = True
+                                                continue
+                                        except Exception as _e:
+                                            logger.debug("Mix slides_fallback (stray tool_call branch) failed: {}", _e)
+                            if not _slides_retry:
+                                # Short greeting with malformed tool output: retry this turn without tools so the model returns plain text.
+                                _q = (query or "").strip()
+                                _greeting = len(_q) <= 40 and any(
+                                    (p in _q.lower() if p.isascii() else p in _q) for p in ("你好", "hi", "hello", "嗨", "hey", "help")
+                                )
+                                if _greeting:
+                                    try:
+                                        msg_no_tools = await Util().openai_chat_completion_message(
+                                            _msgs_for_llm, tools=None, tool_choice="auto", grammar=None, llm_name=llm_name_this_turn,
+                                            max_tokens_override=_max_tokens_override, stop_extra=None,
+                                        )
+                                        if msg_no_tools and isinstance(msg_no_tools.get("content"), str) and msg_no_tools.get("content").strip():
+                                            _tc = msg_no_tools.get("tool_calls") or []
+                                            if not any((t.get("function") or {}).get("name") for t in _tc if isinstance(t, dict)):
+                                                response = (msg_no_tools.get("content") or "").strip()
+                                                if "<think>" in response or "</think>" in response:
+                                                    response = strip_reasoning_from_assistant_text(response)
+                                                if response and len(response.strip()) > 0:
+                                                    logger.debug("Greeting/no-tool retry: using plain reply (len=%s)", len(response))
+                                                    break
+                                    except Exception as _e:
+                                        logger.debug("Greeting retry without tools failed: {}", _e)
+                                # Malformed tool_call (e.g. name="") but model may have put the actual reply in <response>...</response> or similar
+                                _extracted = None
+                                try:
+                                    _m = re.search(r"<response\s*>([\s\S]*?)</re?sponse\s*>", content_str or "", re.IGNORECASE)
+                                    if _m and _m.group(1):
+                                        _extracted = _m.group(1).strip()
+                                    if not _extracted and content_str:
+                                        # After first </tool_call>, take short text that looks like a reply (e.g. 我是Homecl)
+                                        _parts = (content_str or "").split("</tool_call>", 1)
+                                        if len(_parts) > 1:
+                                            _after = _parts[1].strip()
+                                            _after = re.sub(r"<[^>]+>", " ", _after).strip()
+                                            _after = _after.split("<")[0].strip() if "<" in _after else _after
+                                            if 2 <= len(_after) <= 300 and any(p in _after for p in ("我是", "你好", "hello", "hi", "help")):
+                                                _extracted = _after
+                                        # Malformed tool_call without </tool_call>, e.g. <tool_call><tool>echo</tools>(text="我是 HomeClaw") — extract (text="...") as reply
+                                        if not _extracted and content_str and "<tool_call>" in content_str:
+                                            _m_echo = re.search(r'\(\s*text\s*=\s*["\']([^"\']*)["\']\s*\)', content_str)
+                                            if _m_echo and 2 <= len(_m_echo.group(1)) <= 300:
+                                                _extracted = _m_echo.group(1).strip()
+                                    if _extracted and 2 <= len(_extracted) <= 500:
+                                        response = _extracted
+                                        logger.debug("Using extracted reply from malformed tool_call content (len=%s)", len(_extracted))
+                                    else:
+                                        response = "The assistant tried to use a tool but the response format was not recognized. Please try again."
+                                except Exception:
+                                    response = "The assistant tried to use a tool but the response format was not recognized. Please try again."
                     else:
                         # Default: use LLM's reply so we never leave response unset (e.g. simple "你好" -> friendly reply)
-                        response = content_str if (content_str and content_str.strip()) else None
+                        # Do not surface content that came from reasoning_content on tool-selection rounds (it was used only for parsing <tool_call>).
+                        if content_str_from_reasoning:
+                            response = None
+                        else:
+                            # Strip <think>...</think> so user never sees reasoning (model may still emit it even with reasoning_budget: 0)
+                            if content_str and ("<think>" in content_str or "</think>" in content_str):
+                                content_str = strip_reasoning_from_assistant_text(content_str)
+                            # Never show literal NO_TOOL_REQUIRED to user (grammar output); keep existing response or friendly fallback
+                            if content_str and content_str.strip() == "NO_TOOL_REQUIRED":
+                                if not response or str(response).strip() == "NO_TOOL_REQUIRED":
+                                    response = "What can I help you with?"
+                            else:
+                                response = content_str if (content_str and content_str.strip()) else None
+                        # Fallback: model returned full HTML in content instead of calling save_result_page — extract and save so user gets a link.
+                        if (
+                            response
+                            and not last_file_link_result
+                            and ("```html" in (response or "") or "```HTML" in (response or ""))
+                            and registry
+                        ):
+                            _q_lower = (query or "").strip().lower()
+                            _q_raw = (query or "").strip()
+                            _slides_ask = any(p in _q_lower for p in ("slide", "slides", "html", "report", "ppt")) or any(
+                                p in _q_raw for p in ("总结", "生成", "幻灯片")
+                            )
+                            if _slides_ask:
+                                try:
+                                    _m = re.search(r"```(?:html|HTML)\s*([\s\S]*?)```", response)
+                                    if _m and _m.group(1):
+                                        _html = _m.group(1).strip()
+                                        _ph = ("(full " in _html or "..." in _html) and len(_html) < 800
+                                        if len(_html) > 200 and "</html>" in _html.lower() and not _ph:
+                                            _title = "Slides"  # or from query; keep short
+                                            _save_args = {"title": _title, "content": _html, "format": "html"}
+                                            _link_result = await registry.execute_async("save_result_page", _save_args, context)
+                                            if isinstance(_link_result, str) and (
+                                                "/files/out" in _link_result or ("http" in _link_result and "/files/" in _link_result)
+                                            ):
+                                                for _line in _link_result.splitlines():
+                                                    if "token=" in _line or ("http" in _line and "/files/" in _line):
+                                                        _link_result = _line.strip()
+                                                        break
+                                                response = _link_result
+                                                _component_log("tools", "save_result_page fallback: extracted HTML from reply and saved; returning link")
+                                except Exception as _e:
+                                    logger.debug("save_result_page fallback (extract HTML from reply) failed: {}", _e)
+                        # Fallback: long Markdown or document-like text in content — save to file and return link (avoids truncation when model puts long output in message instead of tool call).
+                        if (
+                            response
+                            and not last_file_link_result
+                            and registry
+                            and len((response or "").strip()) > 250
+                        ):
+                            _to_save = None
+                            _fmt = "markdown"
+                            _title = "Report"
+                            if "```markdown" in (response or "") or "```md" in (response or "").lower():
+                                _m = re.search(r"```(?:markdown|md)\s*([\s\S]*?)```", response, re.IGNORECASE)
+                                if _m and _m.group(1) and len(_m.group(1).strip()) > 500:
+                                    _to_save = _m.group(1).strip()
+                            elif len((response or "").strip()) > 4000 and (
+                                (response or "").strip().startswith("#") or "## " in (response or "")
+                            ):
+                                _to_save = (response or "").strip()
+                            if _to_save:
+                                try:
+                                    _save_args = {"title": _title, "content": _to_save, "format": "markdown"}
+                                    _link_result = await registry.execute_async("save_result_page", _save_args, context)
+                                    if isinstance(_link_result, str) and (
+                                        "/files/out" in _link_result or ("http" in _link_result and "/files/" in _link_result)
+                                    ):
+                                        for _line in _link_result.splitlines():
+                                            if "token=" in _line or ("http" in _line and "/files/" in _line):
+                                                _link_result = _line.strip()
+                                                break
+                                        response = _link_result
+                                        _component_log("tools", "save_result_page fallback: saved long markdown/document from reply; returning link")
+                                except Exception as _e:
+                                    logger.debug("save_result_page fallback (markdown from reply) failed: {}", _e)
+                        # Mix fallback: user asked for slides/report, last tool was document_read, but model returned a plan (no tool_calls)—retry this turn with the other model so it can call run_skill(html-slides) / save_result_page.
+                        if mix_route_this_request and last_tool_name == "document_read" and (content_str or "").strip():
+                            _q = (query or "").strip().lower()
+                            _q_raw = (query or "").strip()
+                            _slides_intent = any(
+                                p in _q for p in ("slide", "slides", "html", "report", "ppt")
+                            ) or any(p in _q_raw for p in ("总结", "生成", "幻灯片"))
+                            if _slides_intent:
+                                try:
+                                    _meta = Util().get_core_metadata()
+                                    _cloud = (getattr(_meta, "main_llm_cloud", None) or "").strip()
+                                    _local = (getattr(_meta, "main_llm_local", None) or "").strip()
+                                    _is_local = mix_route_this_request == "local"
+                                    if _is_local and _cloud and current_messages and len(current_messages) > 0 and current_messages[-1].get("role") == "assistant":
+                                        current_messages.pop()
+                                        effective_llm_name = _cloud
+                                        mix_route_this_request = "cloud"
+                                        mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_slides_fallback"
+                                        response = None
+                                        continue
+                                    if not _is_local and _local and current_messages and len(current_messages) > 0 and current_messages[-1].get("role") == "assistant":
+                                        current_messages.pop()
+                                        effective_llm_name = _local
+                                        mix_route_this_request = "local"
+                                        mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_slides_fallback"
+                                        response = None
+                                        continue
+                                except Exception as _e:
+                                    logger.debug("Mix slides_fallback check failed: {}", _e)
+                        # After run_skill(html-slides) the skill returns "Instruction-only... You MUST in this turn: generate and save_result_page". If local returned plan-like text (e.g. "我将现在生成...首先，我需要调用 document_read") with no tool_calls, retry this turn with cloud so cloud can actually generate and call save_result_page.
+                        if (
+                            mix_route_this_request == "local"
+                            and last_tool_name == "run_skill"
+                            and response
+                            and isinstance(last_tool_result_raw, str)
+                            and ("Instruction-only skill" in last_tool_result_raw or "You MUST in this turn" in last_tool_result_raw)
+                            and any(
+                                p in (response or "")
+                                for p in ("我将现在生成", "首先，我需要调用", "I will call document_read", "First, I need to call document_read")
+                            )
+                            and current_messages
+                            and isinstance(current_messages[-1], dict)
+                            and (current_messages[-1].get("role") or "").strip() == "assistant"
+                        ):
+                            try:
+                                _cloud = (getattr(Util().get_core_metadata(), "main_llm_cloud", None) or "").strip()
+                                if _cloud:
+                                    current_messages.pop()
+                                    effective_llm_name = _cloud
+                                    mix_route_this_request = "cloud"
+                                    mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_slides_fallback"
+                                    response = None
+                                    _component_log("mix", "local returned plan after run_skill(instruction-only); retrying with cloud to generate and save_result_page")
+                                    continue
+                            except Exception as _e:
+                                logger.debug("Mix run_skill plan fallback failed: {}", _e)
                         # When model returned empty after we ran file_find/folder_list, show the list so the user sees the files (e.g. "list images" -> file_find ran but second LLM returned empty).
                         if (not response or not str(response).strip()) and last_tool_name in ("file_find", "folder_list") and last_tool_result_raw and isinstance(last_tool_result_raw, str):
-                            try:
-                                entries = json.loads(last_tool_result_raw)
-                                if isinstance(entries, list) and entries:
-                                    lines = []
-                                    for e in entries:
-                                        if not isinstance(e, dict) or e.get("path") == "(truncated)":
-                                            continue
-                                        name = e.get("name") or e.get("path") or "?"
-                                        p = (e.get("path") or "").strip()
-                                        if p and p != name and "/" in str(p):
-                                            lines.append(f"- {name} ({e.get('type', 'file')}) — path: {p}")
-                                        else:
-                                            lines.append(f"- {name} ({e.get('type', 'file')})" + (f" — path: {p}" if p else ""))
-                                    if lines:
-                                        header = "找到的文件 / Files found:\n" if last_tool_name == "file_find" else "目录下的内容 / Folder contents:\n"
-                                        response = header + "\n".join(lines)
-                            except (json.JSONDecodeError, TypeError):
-                                pass
+                            formatted = format_folder_list_file_find_result(last_tool_result_raw, is_file_find=(last_tool_name == "file_find"))
+                            if formatted:
+                                response = formatted
+                            # If formatted is None (error message or invalid JSON), leave response as-is; user may see tool error message in next fallback or we show generic below
                         # When strict_fallback is true (default): do not auto-invoke any tool; let the model drive decisions. Only use model reply or prior tool result (above).
                         meta_tools = Util().get_core_metadata()
                         tools_cfg = getattr(meta_tools, "tools_config", None) or {}
@@ -1663,6 +2463,54 @@ async def answer_from_memory(
                             _component_log("tools", "model returned no tool_calls; unhelpful={} auto_invoke_count={} run_force_include={}".format(unhelpful_for_auto_invoke, len(force_include_auto_invoke or []), run_force_include))
                         else:
                             run_force_include = False
+                        # When strict_fallback is True, still run folder_list fallback for clear "list directory" queries so user gets file list even if model returned only reasoning/no tool_calls.
+                        if _strict_fallback and isinstance(query, str) and registry and any(t.name == "folder_list" for t in (registry.list_tools() or [])):
+                            _list_dir_phrases = (
+                                "目录", "哪些文件", "列出文件", "目录下", "列出", "有什么文件", "文件列表", "我的文件", "看看文件", "显示文件", "我都有哪些文件",
+                                "list file", "list files", "list directory", "list folder", "list content", "what file", "what's in my", "files in my", "list my files", "what files do i have",
+                                "folder content", "folder list", "file list", "show file", "show files", "show directory", "show folder", "view file", "view directory",
+                                "files in documents", "documents folder", "what files in", "in the documents", "in documents",
+                            )
+                            _q_lo = (query or "").strip().lower()
+                            _q_raw = (query or "").strip()
+                            if any((p in _q_lo if p.isascii() else p in _q_raw) for p in _list_dir_phrases):
+                                _fallback_path = "."
+                                for _key in ("documents", "downloads", "output", "images", "work", "knowledge", "share"):
+                                    if _key in _q_lo or _key in _q_raw:
+                                        _fallback_path = _key
+                                        break
+                                try:
+                                    _component_log("tools", "fallback folder_list (strict_fallback=True; model did not call tool)")
+                                    _res = await registry.execute_async("folder_list", {"path": _fallback_path}, context)
+                                    if isinstance(_res, str) and _res.strip():
+                                        _fmt = format_folder_list_file_find_result(_res, is_file_find=False)
+                                        response = _fmt if _fmt else _res
+                                    else:
+                                        response = "Directory is empty or could not be listed."
+                                except Exception as e:
+                                    logger.debug("Fallback folder_list failed: {}", e)
+                        # When strict_fallback is True, run web_search fallback for clear "search the web" queries when model returned no tool_calls (e.g. model said "I will use web_search" but didn't call it).
+                        if _strict_fallback and isinstance(query, str) and registry and any(t.name == "web_search" for t in (registry.list_tools() or [])):
+                            _search_phrases = (
+                                "上网搜", "搜一下", "搜索", "查一下", "有什么好看", "有什么好听的", "最新", "latest", "search the web", "search for ",
+                                "find information", "look up", "current news", "recent news", "good movies", "popular movies",
+                                "just search", "give me results", "直接给结果", "搜一下结果", "search and ",
+                            )
+                            _q_lo_sw = (query or "").strip().lower()
+                            _q_raw_sw = (query or "").strip()
+                            if any((p in _q_lo_sw if p.isascii() else p in _q_raw_sw) for p in _search_phrases):
+                                try:
+                                    _search_query = (query or "").strip() or "trending now"
+                                    if len(_search_query) < 5 and "result" in _q_lo_sw:
+                                        _search_query = "popular movies and trending topics"
+                                    _component_log("tools", "fallback web_search (strict_fallback=True; model did not call tool)")
+                                    _res = await registry.execute_async("web_search", {"query": _search_query, "count": 8}, context)
+                                    if isinstance(_res, str) and _res.strip() and "error" not in _res[:200].lower():
+                                        response = format_json_for_user(_res) or _res.strip()
+                                    elif isinstance(_res, str) and _res.strip():
+                                        response = _res.strip()
+                                except Exception as e_sw:
+                                    logger.debug("Fallback web_search failed: {}", e_sw)
                         # Log when user clearly asked for scheduling but model didn't call any tool (informational only; no auto-invoke when strict_fallback).
                         if isinstance(query, str) and _query_looks_like_scheduling(query) and registry:
                             try:
@@ -1712,25 +2560,8 @@ async def answer_from_memory(
                                         if isinstance(result, str) and result.strip():
                                             # Format folder_list/file_find JSON as user-friendly text so the user does not see raw JSON
                                             if tname in ("folder_list", "file_find"):
-                                                try:
-                                                    entries = json.loads(result)
-                                                    if isinstance(entries, list):
-                                                        lines = []
-                                                        for e in entries:
-                                                            if not isinstance(e, dict) or e.get("path") == "(truncated)":
-                                                                continue
-                                                            name = e.get("name") or e.get("path") or "?"
-                                                            p = (e.get("path") or "").strip()
-                                                            if p and p != name and "/" in p:
-                                                                lines.append(f"- {name} ({e.get('type', '?')}) — path: {p}")
-                                                            else:
-                                                                lines.append(f"- {name} ({e.get('type', '?')})" + (f" — path: {p}" if p else ""))
-                                                        header = "目录下的内容：\n" if tname == "folder_list" else "找到的文件：\n"
-                                                        response = header + "\n".join(lines) if lines else ("目录为空。" if tname == "folder_list" else "无匹配文件。")
-                                                    else:
-                                                        response = result
-                                                except (json.JSONDecodeError, TypeError):
-                                                    response = result
+                                                formatted = format_folder_list_file_find_result(result, is_file_find=(tname == "file_find"))
+                                                response = formatted if formatted else result
                                             elif (result.strip() == "(no output)" or not result.strip()) and (content_str or "").strip():
                                                 # General rule: auto_invoke tool returned empty/placeholder; keep model's existing reply instead of replacing with "(no output)"
                                                 response = content_str.strip()
@@ -1743,11 +2574,43 @@ async def answer_from_memory(
                                 if not ran:
                                     response = content_str
                             else:
-                                # Fallback: model didn't call a tool. Check remind_me first (e.g. "15分钟后有个会能提醒一下吗") so we set the reminder and return a clean response instead of messy 2:49 text.
-                                try:
-                                    remind_fallback = _infer_remind_me_fallback(query) if query else None
-                                except Exception:
-                                    remind_fallback = None
+                                # Fallback: model didn't call a tool.
+                                remind_fallback = None
+                                # Run folder_list fallback first when user asked to list files/folder, so we don't overwrite with remind_me clarification (e.g. "images里有哪些文件" matched remind_me_needs_clarification and never got the list).
+                                _list_dir_phrases_first = (
+                                    "目录", "哪些文件", "列出文件", "目录下", "列出", "有什么文件", "文件列表", "我的文件", "看看文件", "显示文件", "我都有哪些文件",
+                                    "list file", "list files", "list directory", "list folder", "list content", "what file", "what's in my", "files in my", "list my files", "what files do i have",
+                                    "folder content", "folder list", "file list", "show file", "show files", "show directory", "show folder", "view file", "view directory",
+                                    "files in documents", "documents folder", "what files in", "in the documents", "in documents",
+                                )
+                                _ql_first = (query or "").strip().lower()
+                                _qr_first = (query or "").strip()
+                                _list_dir_match = registry and any(t.name == "folder_list" for t in (registry.list_tools() or [])) and any(
+                                    (p in _ql_first if p.isascii() else p in _qr_first) for p in _list_dir_phrases_first
+                                )
+                                if _list_dir_match:
+                                    _fallback_path = "."
+                                    for _key in ("documents", "downloads", "output", "images", "work", "knowledge", "share"):
+                                        if _key in _ql_first or _key in _qr_first:
+                                            _fallback_path = _key
+                                            break
+                                    try:
+                                        _component_log("tools", "fallback folder_list (model did not call tool)")
+                                        _res = await registry.execute_async("folder_list", {"path": _fallback_path}, context)
+                                        if isinstance(_res, str) and _res.strip():
+                                            _fmt = format_folder_list_file_find_result(_res, is_file_find=False)
+                                            response = _fmt if _fmt else _res
+                                        else:
+                                            response = content_str or "Directory is empty or could not be listed."
+                                    except Exception as e:
+                                        logger.debug("Fallback folder_list failed: {}", e)
+                                        response = content_str or "Could not list directory. Please try again."
+                                # Check remind_me (e.g. "15分钟后有个会能提醒一下吗") so we set the reminder and return a clean response instead of messy 2:49 text.
+                                if response is None or (response == content_str and not _list_dir_match):
+                                    try:
+                                        remind_fallback = _infer_remind_me_fallback(query) if query else None
+                                    except Exception:
+                                        remind_fallback = None
                                 _remind_me_ask_generic = "您希望什么时候提醒？例如：「15分钟后」或「下午3点」。 When would you like to be reminded? E.g. in 15 minutes or at 3:00 PM."
                                 def _remind_me_ask_message():
                                     try:
@@ -1924,8 +2787,8 @@ async def answer_from_memory(
                                     else:
                                         # Fallback: user may have asked to list directory (e.g. 你的目录下都有哪些文件) but model didn't call folder_list (common when local model returns no tool_calls)
                                         list_dir_phrases = (
-                                            "目录", "哪些文件", "列出文件", "目录下", "列出", "有什么文件", "文件列表", "我的文件", "看看文件", "显示文件",
-                                            "list file", "list files", "list directory", "list folder", "list content", "what file", "what's in my", "files in my",
+                                            "目录", "哪些文件", "列出文件", "目录下", "列出", "有什么文件", "文件列表", "我的文件", "看看文件", "显示文件", "我都有哪些文件",
+                                            "list file", "list files", "list directory", "list folder", "list content", "what file", "what's in my", "files in my", "list my files", "what files do i have",
                                             "folder content", "folder list", "file list", "show file", "show files", "show directory", "show folder", "view file", "view directory",
                                             "files in documents", "documents folder", "what files in", "in the documents", "in documents",
                                         )
@@ -1945,24 +2808,8 @@ async def answer_from_memory(
                                                 _component_log("tools", "fallback folder_list (model did not call tool)")
                                                 result = await registry.execute_async("folder_list", {"path": _fallback_path}, context)
                                                 if isinstance(result, str) and result.strip():
-                                                    try:
-                                                        entries = json.loads(result)
-                                                        if isinstance(entries, list) and entries:
-                                                            lines = []
-                                                            for e in entries:
-                                                                if not isinstance(e, dict):
-                                                                    continue
-                                                                name = e.get("name") or e.get("path") or "?"
-                                                                p = (e.get("path") or "").strip()
-                                                                if p and p != name and "/" in p:
-                                                                    lines.append(f"- {name} ({e.get('type', '?')}) — path: {p}")
-                                                                else:
-                                                                    lines.append(f"- {name} ({e.get('type', '?')})" + (f" — path: {p}" if p else ""))
-                                                            response = "目录下的内容：\n" + "\n".join(lines) if lines else result
-                                                        else:
-                                                            response = "目录为空。" if isinstance(entries, list) else result
-                                                    except (json.JSONDecodeError, TypeError):
-                                                        response = result
+                                                    formatted = format_folder_list_file_find_result(result, is_file_find=False)
+                                                    response = formatted if formatted else result
                                                 else:
                                                     response = content_str or "Directory is empty or could not be listed."
                                             except Exception as e:
@@ -1974,23 +2821,65 @@ async def answer_from_memory(
                 routing_sent = False
                 routing_response_text = None  # when route_to_plugin/route_to_tam return text (sync inbound/ws), use as final response
                 last_file_link_result = None  # when save_result_page/get_file_view_link return a link, use as final response so model cannot corrupt it
-                last_tool_name = None  # for _tool_result_usable_as_final_response: skip second LLM when tool result is core-contained
+                last_tool_name = None  # for remind_me and fallback when 2nd LLM returns empty
                 last_tool_result_raw = None
                 last_tool_args = None  # for run_skill: skills_results_need_llm per-skill override
                 meta = Util().get_core_metadata()
                 tool_timeout_sec = max(0, int(getattr(meta, "tool_timeout_seconds", 120) or 0))
+                # Safeguard: if the model keeps calling the same run_skill (e.g. html-slides) and the skill returns instruction-only, we'd loop until max_tool_rounds. Break early after 2+ prior runs of the same skill.
+                if len(tool_calls) == 1:
+                    _tc0 = tool_calls[0]
+                    _fn0 = (_tc0.get("function") or {}) if isinstance(_tc0, dict) else {}
+                    _name0 = (_fn0.get("name") or "").strip()
+                    if _name0 == "run_skill":
+                        try:
+                            _a0 = json.loads(_fn0.get("arguments") or "{}")
+                            _skill = (str(_a0.get("skill_name") or "").strip() if isinstance(_a0, dict) else "") or ""
+                            if _skill:
+                                _same_skill_count = 0
+                                for _m in (current_messages or []):
+                                    if not isinstance(_m, dict) or (_m.get("role") or "").strip() != "assistant":
+                                        continue
+                                    for _t in (_m.get("tool_calls") or []):
+                                        if not isinstance(_t, dict):
+                                            continue
+                                        _f = _t.get("function") or {}
+                                        if (_f.get("name") or "").strip() == "run_skill":
+                                            try:
+                                                _ar = json.loads(_f.get("arguments") or "{}")
+                                                if isinstance(_ar, dict) and (str(_ar.get("skill_name") or "").strip() == _skill):
+                                                    _same_skill_count += 1
+                                                    break
+                                            except (json.JSONDecodeError, TypeError):
+                                                pass
+                                if _same_skill_count >= 2:
+                                    response = "The task could not be completed in this turn (same step was repeated). Try again or use a cloud model for long outputs. (本次未能完成，请重试或使用云端模型。)"
+                                    logger.info("Stopping tool loop: run_skill(%s) already ran %s times in this turn", _skill, _same_skill_count)
+                                    break
+                        except (json.JSONDecodeError, TypeError, KeyError):
+                            pass
                 for tc in tool_calls:
+                    if not isinstance(tc, dict):
+                        continue
                     tcid = tc.get("id") or ""
-                    fn = tc.get("function") or {}
-                    name = fn.get("name") or ""
+                    fn = tc.get("function")
+                    fn = fn if isinstance(fn, dict) else {}
+                    name = (fn.get("name") or "").strip()
                     try:
                         args = json.loads(fn.get("arguments") or "{}")
-                    except json.JSONDecodeError:
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    if not isinstance(args, dict):
                         args = {}
                     args_redacted = redact_params_for_log(args) if isinstance(args, dict) else args
                     logger.info("Tool selected: name={} parameters={}", name, args_redacted)
                     if name == "run_skill":
                         _component_log("tools", "executing run_skill (in_process from run_skill_py_in_process_skills if listed)")
+                    # When response was truncated (finish_reason=length), tool_call arguments (e.g. save_result_page content) may be cut off; executor will reject bad HTML.
+                    if name == "save_result_page" and _last_finish_reason == "length":
+                        logger.warning(
+                            "Executing save_result_page after truncated response (finish_reason=length). Content may be incomplete; if so, put full HTML/Markdown in message content (e.g. ```html or ```markdown block)."
+                        )
                     if name == "route_to_plugin" and isinstance(args, dict):
                         logger.info(
                             "Plugin routing: plugin_id={} capability_id={} parameters={}",
@@ -2018,8 +2907,54 @@ async def answer_from_memory(
                             progress_queue.put_nowait({"event": "progress", "message": msg, "tool": name})
                         except Exception:
                             pass
+                    # save_result_page: if tool-call content was truncated (no </html>), try to recover full HTML from assistant message content (```html ... ```)
+                    if name == "save_result_page" and isinstance(args, dict):
+                        _cnt = (args.get("content") or "").strip()
+                        _fmt = (args.get("format") or "").strip().lower() or "html"
+                        if _fmt == "html" and _cnt and len(_cnt) > 500 and ("</html>" not in _cnt.lower()) and (
+                            _cnt.lstrip().lower().startswith("<!doctype") or _cnt.lstrip().lower().startswith("<html")
+                        ):
+                            _assistant = current_messages[-1] if current_messages and isinstance(current_messages[-1], dict) else None
+                            _body = (_assistant.get("content") or "").strip() if _assistant else ""
+                            if _body and "```html" in _body.lower():
+                                try:
+                                    _m = re.search(r"```(?:html|HTML)\s*([\s\S]*?)```", _body, re.IGNORECASE)
+                                    if _m and _m.group(1):
+                                        _extracted = _m.group(1).strip()
+                                        if "</html>" in _extracted.lower() and len(_extracted) > len(_cnt):
+                                            args = dict(args)
+                                            args["content"] = _extracted
+                                            _component_log("tools", "save_result_page: using full HTML from message content (tool call was truncated)")
+                                except Exception as _e:
+                                    logger.debug("save_result_page recover HTML from content failed: {}", _e)
+                    # Phase 3.3: optional verification — ask LLM if tool matches user intent before executing (e.g. exec, file_write).
+                    _tool_verified_skip = False
                     try:
-                        if tool_timeout_sec > 0:
+                        _ir_cfg = _intent_router_config if isinstance(_intent_router_config, dict) else {}
+                        _verify_cfg = _ir_cfg.get("verify_tool_selection")
+                        _verify_tools = _ir_cfg.get("verify_tools") or list(INTENT_VERIFY_TOOLS_DEFAULT)
+                        if not isinstance(_verify_tools, (list, tuple)):
+                            _verify_tools = list(INTENT_VERIFY_TOOLS_DEFAULT)
+                    except Exception:
+                        _verify_cfg = False
+                        _verify_tools = list(INTENT_VERIFY_TOOLS_DEFAULT)
+                    if _verify_cfg and name in _verify_tools and (query or "").strip():
+                        try:
+                            _verified = await intent_verify_tool_selection(
+                                query=(query or "").strip(),
+                                tool_name=name,
+                                tool_args=args,
+                                completion_fn=core,
+                            )
+                            if not _verified:
+                                _tool_verified_skip = True
+                                logger.info("Tool {} skipped by verification (Phase 3.3)", name)
+                        except Exception:
+                            pass  # on error allow execution
+                    try:
+                        if _tool_verified_skip:
+                            result = "Verification: tool selection did not match user intent; execution skipped."
+                        elif tool_timeout_sec > 0:
                             result = await asyncio.wait_for(
                                 registry.execute_async(name, args, context),
                                 timeout=tool_timeout_sec,
@@ -2052,6 +2987,14 @@ async def answer_from_memory(
                     last_tool_result_raw = result if isinstance(result, str) else None
                     last_tool_args = args if isinstance(args, dict) else None
                     tool_content = result
+                    # Collect for memory full-turn (MemOS user+assistant+tool)
+                    try:
+                        _tr = str(result) if result is not None else ""
+                        if len(_tr) > 2000:
+                            _tr = _tr[:2000] + "\n[Output truncated for memory.]"
+                        memory_turn_tool_messages.append({"role": "tool", "content": _tr, "toolName": name})
+                    except Exception:
+                        pass
                     if compaction_cfg.get("compact_tool_results") and isinstance(tool_content, str):
                         # document_read: keep more context so the model can generate HTML/summary from it; other tools: 4000
                         limit = 28000 if name == "document_read" else 4000
@@ -2064,7 +3007,7 @@ async def answer_from_memory(
                         layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
                         label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
                         out = label + (_strip_leading_route_label(out or "") or "")
-                    return out
+                    return (out, None)
                 # Use exact tool result as response when it contains a file view link, so the model cannot corrupt the URL in a follow-up reply
                 if last_file_link_result:
                     out = last_file_link_result
@@ -2074,24 +3017,18 @@ async def answer_from_memory(
                         out = label + (_strip_leading_route_label(out or "") or "")
                     response = out
                     break
-                # Skip second LLM when tool result is core-contained (deterministic check, no LLM). Config: tools.use_result_as_response.
-                try:
-                    use_result_config = (getattr(meta, "tools_config", None) or {}).get("use_result_as_response") if meta else None
-                    if last_tool_name and last_tool_result_raw and _tool_result_usable_as_final_response(last_tool_name, last_tool_result_raw, use_result_config, last_tool_args):
-                        out = last_tool_result_raw
-                        if mix_route_this_request and mix_show_route_label and isinstance(out, str):
-                            layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
-                            label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
-                            out = label + (_strip_leading_route_label(out or "") or "")
-                        response = out
-                        break
-                    elif last_tool_name and last_tool_result_raw and _tool_result_looks_like_error(last_tool_result_raw) and mix_route_this_request:
-                        # Don't use error-like result; in mix mode use the other model for the next turn
-                        use_other_model_next_turn = True
-                except Exception as e:
-                    logger.debug("use_result_as_response check failed (continuing to second LLM): {}", e)
+                # Always run 2nd LLM round after tools; let the LLM decide whether the output is fine, how to refine it, or how to respond to errors (no if/else on tool result content).
             else:
-                response = (current_messages[-1].get("content") or "").strip() if current_messages else None
+                # Loop exhausted (e.g. max_tool_rounds). Use last message content only if it is from the assistant; never use a tool result as the user-facing response.
+                if current_messages:
+                    _last = current_messages[-1]
+                    if isinstance(_last, dict) and (_last.get("role") or "").strip() == "assistant":
+                        _c = _last.get("content")
+                        response = (_c if isinstance(_c, str) else (str(_c) if _c is not None else "")).strip() or None
+                    else:
+                        response = None
+                else:
+                    response = None
             await close_browser_session(context)
         else:
             try:
@@ -2124,20 +3061,40 @@ async def answer_from_memory(
                 err_hint = str(err_hint).strip() if err_hint else ""
             except Exception:
                 err_hint = ""
-            # If we ran a tool but the model returned empty: use tool output when it's usable so we don't show "Done..." instead of real results.
+            # If we ran a tool but the 2nd LLM returned empty: use tool output so we don't show "Done..." instead of real results (LLM had its chance to refine).
+            # Do not use instruction-only skill output as the final response (e.g. "Instruction-only skill confirmed... You MUST in this turn").
             if last_tool_name and last_tool_result_raw and isinstance(last_tool_result_raw, str) and last_tool_result_raw.strip() and not err_hint:
-                if not _tool_result_looks_like_error(last_tool_result_raw):
-                    response = last_tool_result_raw.strip()
+                _raw = last_tool_result_raw.strip()
+                _is_instruction_only = (
+                    "Instruction-only skill confirmed" in _raw or "Instruction-only skill" in _raw
+                ) and ("You MUST in this turn" in _raw or "Do NOT reply with only this line" in _raw)
+                if not _is_instruction_only:
+                    response = format_json_for_user(last_tool_result_raw) or _raw
             # Only show generic "Done..." when we have no usable response (no err_hint, and either no tool ran or tool output was empty/error-like).
             if response is None or (isinstance(response, str) and len(response.strip()) == 0):
                 if last_tool_name and not err_hint:
-                    return "Done. What would you like to do next? (已完成。还需要什么？)"
-                if err_hint:
+                    # If the last tool was instruction-only (e.g. run_skill html-slides) and we skipped it, suggest retry or cloud.
+                    _instruction_only = (
+                        last_tool_result_raw
+                        and isinstance(last_tool_result_raw, str)
+                        and ("Instruction-only skill" in last_tool_result_raw or "You MUST in this turn" in last_tool_result_raw)
+                    )
+                    if _instruction_only and last_tool_name == "run_skill":
+                        out = "The task could not be completed in this turn (e.g. slides generation). Try again or use a cloud model for long outputs. (本次未能完成，请重试或使用云端模型生成长内容。)"
+                    else:
+                        out = "Done. What would you like to do next? (已完成。还需要什么？)"
+                elif err_hint:
                     try:
-                        return "Sorry, something went wrong. {} Please try again. (对不起，出错了，请再试一次)".format(err_hint)
+                        out = "Sorry, something went wrong. {} Please try again. (对不起，出错了，请再试一次)".format(err_hint)
                     except Exception:
-                        return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
-                return "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
+                        out = "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
+                else:
+                    out = "Sorry, something went wrong and please try again. (对不起，出错了，请再试一次)"
+                if mix_route_this_request and mix_show_route_label and isinstance(out, str):
+                    layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
+                    label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
+                    out = label + (_strip_leading_route_label(out or "") or "")
+                return (out, None)
         # If the model echoed raw "[]" (e.g. from empty folder_list/file_find), show a friendly message instead
         if isinstance(response, str) and response.strip() == "[]":
             response = "I couldn't find that file or path. Try asking me to list your files (e.g. 'list my files' or 'what files do I have'), then use the exact filename (e.g. 1.pdf) when you ask about a document."
@@ -2158,14 +3115,18 @@ async def answer_from_memory(
                         for e in parsed:
                             if not isinstance(e, dict) or (e.get("path") or e.get("name")) == "(truncated)":
                                 continue
-                            name = e.get("name", e.get("path", "?"))
-                            p = (e.get("path") or "").strip()
+                            try:
+                                name = str(e.get("name") or e.get("path") or "?").strip() or "?"
+                                p = str(e.get("path") or "").strip()
+                                typ = str(e.get("type") or "file")
+                            except (TypeError, AttributeError, ValueError):
+                                continue
                             if p and p != name and "/" in p:
-                                lines.append(f"- {name} ({e.get('type', 'file')}) — path: {p}")
+                                lines.append(f"- **{name}** ({typ}) — `{p}`")
                             else:
-                                lines.append(f"- {name} ({e.get('type', 'file')})" + (f" — path: {p}" if p else ""))
+                                lines.append(f"- **{name}** ({typ})" + (f" — `{p}`" if p else ""))
                         if lines:
-                            response = label_prefix + "Here are the items:\n\n" + "\n".join(lines)
+                            response = label_prefix + "## Here are the items\n\n" + "\n".join(lines)
             except (json.JSONDecodeError, TypeError):
                 pass
         # If the model echoed raw JSON from a scheduling tool (cron_schedule, record_date), show a short friendly line so the user never sees raw JSON. Never crash.
@@ -2175,11 +3136,22 @@ async def answer_from_memory(
                 if isinstance(obj, dict):
                     if obj.get("scheduled") and ("job_id" in obj or "cron_expr" in obj):
                         msg = str(obj.get("message", "Scheduled reminder") or "Scheduled reminder")
-                        response = f"Recurring reminder scheduled. I'll remind you: {msg}."
+                        response = f"**Recurring reminder scheduled.** I'll remind you: {msg}."
                     elif obj.get("recorded") and ("event_name" in obj or "when" in obj):
                         ev = str(obj.get("event_name") or "event")
                         wh = str(obj.get("when") or "")
-                        response = f"Recorded: {ev} on {wh}."
+                        response = f"**Recorded:** {ev} on {wh}."
+                    elif "session_id" in obj and "app_id" in obj and "user_name" in obj:
+                        # session_status-style JSON: internal context; show friendly line so we never surface raw JSON. Never crash.
+                        try:
+                            app_id_val = str(obj.get("app_id") or "HomeClaw")
+                            user_name_val = str(obj.get("user_name") or "")
+                            if user_name_val:
+                                response = f"You're chatting with **{app_id_val}** as **{user_name_val}**. How can I help? （你正在与 {app_id_val} 对话，用户 {user_name_val}。需要什么帮助？）"
+                            else:
+                                response = f"You're chatting with **{app_id_val}**. How can I help? （你正在与 {app_id_val} 对话。需要什么帮助？）"
+                        except (TypeError, ValueError, KeyError, AttributeError):
+                            pass  # leave response unchanged on any error
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass
         # If the model echoed the internal file_write/save_result_page empty-content message, show a short user-facing message instead
@@ -2189,6 +3161,14 @@ async def answer_from_memory(
             layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
             label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
             response = label + (_strip_leading_route_label(response or "") or "")
+        # Never surface raw JSON to the end user: convert to readable text if it still looks like JSON
+        # Strip reasoning blocks (e.g. <think>...</think>) so they are not stored in chat history, memory, or embeddings
+        if isinstance(response, str) and response.strip():
+            response = strip_reasoning_from_assistant_text(response)
+        if isinstance(response, str) and response.strip() and (response.strip().startswith("[") or response.strip().startswith("{")):
+            _fmt = format_json_for_user(response)
+            if _fmt:
+                response = _fmt
         logger.info("Main LLM output (final response): {}", _truncate_for_log(response, 2000))
         message: ChatMessage = ChatMessage()
         message.add_user_message(query)
@@ -2208,9 +3188,30 @@ async def answer_from_memory(
         #if use_memory:
         #    await core.mem_instance.add(query, user_name=user_name, user_id=user_id, agent_id=agent_id, run_id=run_id, metadata=metadata, filters=filters)
 
-        return response
+        # Build full-turn data for MemOS (user + assistant + tool messages)
+        memory_turn_data = None
+        if response is not None and isinstance(response, str) and (response.strip() or memory_turn_tool_messages):
+            _assistant = str(response or "").strip()
+            # Don't store instruction-only boilerplate as assistant message (pollutes memory and embeddings).
+            if _assistant and ("Instruction-only skill confirmed" in _assistant or "Instruction-only skill" in _assistant) and "You MUST in this turn" in _assistant:
+                _assistant = "[Task could not be completed in this turn; instruction-only skill result.]"
+            # Trim tool_messages when there are many (e.g. repeated run_skill rounds) so memory stays useful.
+            _tool_msgs = list(memory_turn_tool_messages)
+            if len(_tool_msgs) > 12:
+                _keep_first, _keep_last = 5, 5
+                _tool_msgs = (
+                    _tool_msgs[:_keep_first]
+                    + [{"role": "tool", "content": f"[... {len(memory_turn_tool_messages) - _keep_first - _keep_last} tool results omitted ...]", "toolName": "..."}]
+                    + _tool_msgs[-_keep_last:]
+                )
+            memory_turn_data = {
+                "user_message": str(query or "").strip(),
+                "assistant_message": _assistant,
+                "tool_messages": _tool_msgs,
+            }
+        return (response, memory_turn_data)
     except Exception as e:
         logger.exception(e)
-        return None
+        return (None, None)
 
 

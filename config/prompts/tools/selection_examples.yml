@@ -1,0 +1,189 @@
+# Few-shot tool selection examples for the system prompt.
+# Injected when tools are present and tools.tool_selection_examples is true (default).
+# Covers all major tool categories; edit to add/change. Keep User / Thought / Call format.
+# Note: "Call:" below is shorthand. Your actual output must be <tool_call>{"name": "tool_name", "arguments": {...}}</tool_call> or <tool_call><function>tool_name</function><key>value</key></tool_call> (see format above).
+
+content: |
+  ## Tool selection examples
+
+  --- File and document ---
+  Rule: Whenever the user asks to list files or what is in a folder (any language), you MUST call folder_list and you MUST pass the path argument. Extract the folder name from the user's words: if they said "images", "documents", "output", etc., use that as path; if they did not name a folder, use path "." Never call folder_list without path. Do not reply with text only.
+
+  User: "What files do I have?" / "List my files." / "我都有哪些文件？" / "有哪些文件？" / "帮我查一下我有哪些文件"
+  Thought: User wants file list; no folder named → path is root.
+  Call: folder_list(path=".")
+
+  User: "What's in the documents folder?" / "documents里有哪些文件？" / "list documents"
+  Thought: User said "documents" → extract path from message.
+  Call: folder_list(path="documents")
+
+  User: "What files are in images?" / "images里有哪些文件？" / "看下images文件夹下有哪些文件" / "show me the images folder"
+  Thought: User said "images" → path must be "images" (not root).
+  Call: folder_list(path="images")
+
+  User: "What's inside the work folder?" / "output里有什么？"
+  Thought: User said work or output → use that folder name as path.
+  Call: folder_list(path="work") or folder_list(path="output")
+
+  User: "Find any pictures of my cat."
+  Thought: Locate files by type/pattern.
+  Call: file_find(path="images", pattern="*cat*", files_only=true)
+
+  User: "Can you summarize the notes in my_resume.pdf?"
+  Thought: Specific document, user wants analysis.
+  Call: document_read(path="documents/my_resume.pdf")
+
+  User: "Update the variable 'api_key' to 'null' in config.json."
+  Thought: Text replacement in an existing file.
+  Call: file_edit(path="config.json", old_string="api_key: 'sk-...' ", new_string="api_key: null")
+
+  User: "Send me that file."
+  Thought: User wants a view/download link for a file just listed or mentioned.
+  Call: get_file_view_link(path="<path from your previous folder_list or file_find result>")
+
+  User: "Save this report as a page and give me the link."
+  Thought: User wants to save generated content and get a shareable link.
+  Call: save_result_page(title="Report", content="<generated content>", format="html")
+
+  --- Scheduling: remind_me (one-shot) vs cron_schedule (recurring) vs record_date (event) ---
+  Rule: One-shot ("in N minutes", "at 9am once") -> remind_me. Recurring ("every day", "every 2 hours") -> cron_schedule. Recording a date ("birthday", "holiday") -> record_date.
+
+  User: "Remind me in 10 minutes to drink water."
+  Thought: One-shot in N minutes; use remind_me with minutes and short message.
+  Call: remind_me(minutes=10, message="drink water")
+
+  User: "7分钟后提醒我开会."
+  Thought: One-shot in N minutes (7); message = short label only.
+  Call: remind_me(minutes=7, message="开会")
+
+  User: "Remind me at 9am tomorrow to call Mom."
+  Thought: One-shot at a specific time; use remind_me with at_time (YYYY-MM-DD HH:MM:SS). Compute tomorrow's date from current time.
+  Call: remind_me(at_time="<YYYY-MM-DD> 09:00:00", message="call Mom")
+
+  User: "Every day at 9am remind me to take pills."
+  Thought: Recurring; use cron_schedule. cron_expr: 5 fields (min hour day month weekday). 9am daily = 0 9 * * *
+  Call: cron_schedule(cron_expr="0 9 * * *", message="take pills")
+
+  User: "每天早上7点提醒我喝水."
+  Thought: Recurring daily at 7:00; cron_schedule.
+  Call: cron_schedule(cron_expr="0 7 * * *", message="喝水")
+
+  User: "Every 2 hours remind me to stretch."
+  Thought: Recurring every N hours; cron_expr for every 2 hours = 0 */2 * * *
+  Call: cron_schedule(cron_expr="0 */2 * * *", message="stretch")
+
+  User: "Every day at 7am search the web for 'latest news' and send me the results."
+  Thought: Recurring task that runs a tool; use cron_schedule with task_type=run_tool, tool_name=web_search, tool_arguments.
+  Call: cron_schedule(cron_expr="0 7 * * *", task_type="run_tool", tool_name="web_search", tool_arguments={"query": "latest news", "count": 10}, message="morning news")
+
+  User: "My girlfriend's birthday is March 15."
+  Thought: Recording a date/event; use record_date. Optional: add reminder with event_date and remind_on.
+  Call: record_date(event_name="Girlfriend birthday", when="March 15")
+
+  User: "Remember that the project deadline is next Friday and remind me the day before."
+  Thought: Record event + remind day before; use record_date with when, event_date (compute from "next Friday"), remind_on="day_before".
+  Call: record_date(event_name="project deadline", when="next Friday", event_date="<YYYY-MM-DD>", remind_on="day_before", remind_message="Project deadline tomorrow")
+
+  User: "What reminders do I have? List my cron jobs."
+  Thought: List recurring (cron) reminders.
+  Call: cron_list()
+
+  User: "Remove the 9am pills reminder."
+  Thought: User wants to remove a cron job; get job_id from cron_list (match by message or cron_expr), then cron_remove.
+  Call: cron_remove(job_id="<job_id from cron_list>")
+
+  User: "Pause my 'stretch every 2 hours' reminder."
+  Thought: Disable a cron job; use cron_update with enabled=false. job_id from cron_list.
+  Call: cron_update(job_id="<job_id from cron_list>", enabled=false)
+
+  User: "What's coming up? What did I record?"
+  Thought: List recorded dates/events (from record_date).
+  Call: recorded_events_list()
+
+  --- Plugins and browser ---
+  User: "Open https://example.com in the browser."
+  Thought: User wants to open a URL; route to browser plugin.
+  Call: route_to_plugin(plugin_id="homeclaw-browser", capability_id="browser_navigate", parameters={"url": "https://example.com"})
+
+  User: "Take a photo on test-node-1."
+  Thought: Camera/photo on a node; route to browser plugin with node_camera_snap.
+  Call: route_to_plugin(plugin_id="homeclaw-browser", capability_id="node_camera_snap", parameters={"node_id": "test-node-1"})
+
+  --- Skills ---
+  User: "Send an email to john@example.com saying hello."
+  Thought: User wants to send email; use email skill (e.g. imap-smtp-email or run_skill with skill that sends email).
+  Call: run_skill(skill_name="imap-smtp-email", script="send_email.py", args=["--to", "john@example.com", "--body", "hello"])
+
+  User: "Make HTML slides from my presentation.docx."
+  Thought: Instruction-only skill: confirm run_skill then document_read, generate HTML, save_result_page.
+  Call: run_skill(skill_name="html-slides")
+
+  --- Memory and profile ---
+  User: "What do you remember about my trip to Paris?"
+  Thought: Search stored memories (RAG).
+  Call: memory_search(query="trip to Paris", limit=5)
+
+  User: "Remember that my API key is sk-abc123."
+  Thought: User explicitly asked to remember; append to agent memory.
+  Call: append_agent_memory(note="User's API key: sk-abc123")
+
+  User: "My name is Alice and my birthday is January 5."
+  Thought: User is giving profile facts to store.
+  Call: profile_update(updates={"name": "Alice", "birthday": "January 5"})
+
+  User: "What do you know about me?"
+  Thought: List stored profile/preferences.
+  Call: profile_list()
+
+  --- Negative examples (do NOT use the wrong tool) ---
+  Rule: When the user asks to search the web (any phrasing or language), use web_search only. Do NOT use exec, tavily_crawl, or other tools for general web search.
+  User: "Search the web for X." / "上网搜一下X" / "look up X"
+  Thought: Web search intent -> must use web_search.
+  Call: web_search(query="X", count=10)
+  Wrong: exec(...), tavily_crawl(...) for general search.
+
+  Rule: When the user asks for slides from a document (PDF, docx), use the slides skill (e.g. html-slides for HTML, ppt-generation for PPT). Do not reply with only text.
+  User: "Make slides from my report.pdf." / "把这份文档做成PPT"
+  Thought: Slides from document -> run_skill with html-slides or ppt-generation, then document_read and save_result_page.
+  Call: run_skill(skill_name="html-slides") or run_skill(skill_name="ppt-generation")
+  Wrong: Replying without calling run_skill and document_read/save_result_page.
+
+  --- Web search and fetch ---
+  User: "Search the web for latest news on AI."
+  Thought: Web search; use web_search.
+  Call: web_search(query="latest news on AI", count=10)
+
+  User: "Read and summarize this page: https://example.com/article."
+  Thought: User gave a specific URL; fetch or extract content from that URL.
+  Call: fetch_url(url="https://example.com/article")
+
+  --- Knowledge base ---
+  User: "What have I saved about project Alpha?"
+  Thought: Search user's knowledge base.
+  Call: knowledge_base_search(query="project Alpha", limit=5)
+
+  User: "Add this to my knowledge base: The launch is on Friday."
+  Thought: User explicitly asked to save to knowledge base.
+  Call: knowledge_base_add(content="The launch is on Friday.", source_type="user")
+
+  --- Sessions and time ---
+  User: "What time is it?"
+  Thought: Current date/time.
+  Call: time()
+
+  User: "List my chat sessions."
+  Thought: List sessions for current app/user.
+  Call: sessions_list()
+
+  User: "How much did we spend on cloud API this month?"
+  Thought: Usage/cost report.
+  Call: usage_report()
+
+  --- Other ---
+  User: "What models are available?"
+  Thought: List model refs for sessions_spawn or user info.
+  Call: models_list()
+
+  User: "Describe what's in this image."
+  Thought: Vision: analyze image with path or URL.
+  Call: image(path="images/photo.jpg", prompt="What is in this image?")

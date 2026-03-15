@@ -39,29 +39,60 @@ class ToolContext:
 ToolExecutor = Callable[[Dict[str, Any], ToolContext], Awaitable[str]]
 
 
+def _truncate_description(desc: str, max_chars: int) -> str:
+    """Truncate description for local LLMs; prefer sentence or word boundary. Never raises."""
+    if not isinstance(desc, str):
+        return (desc or "") if desc is not None else ""
+    try:
+        mc = int(max_chars) if max_chars is not None else 0
+    except (TypeError, ValueError):
+        mc = 0
+    if not desc or mc <= 0 or len(desc) <= mc:
+        return desc
+    cut = desc[: mc + 1]
+    for sep in (". ", "。", "! ", "? ", "; ", " "):
+        idx = cut.rfind(sep)
+        if idx > mc // 2:
+            return (cut[: idx + len(sep)].rstrip() + "…") if idx + len(sep) < len(desc) else cut[: idx + len(sep)].rstrip()
+    return cut.rstrip() + "…"
+
+
 @dataclass
 class ToolDefinition:
     """
     One callable tool: name, description, JSON Schema for parameters, and async executor.
     To add a new tool: create ToolDefinition(...) and registry.register(tool).
+    optional short_description: used when tools.description_max_chars is set (local LLM mode) for more accurate tool selection.
     """
 
     name: str
     description: str
     parameters: Dict[str, Any]  # JSON Schema for the tool's arguments (e.g. {"type": "object", "properties": {...}})
     execute_async: ToolExecutor
+    short_description: Optional[str] = None  # One-line cue for local LLMs; used when description_max_chars > 0
 
-    def to_openai_function(self) -> Dict[str, Any]:
-        """OpenAI/OpenAI-compatible function descriptor for chat API."""
+    def to_openai_function(self, max_description_chars: Optional[int] = None) -> Dict[str, Any]:
+        """OpenAI/OpenAI-compatible function descriptor for chat API. When max_description_chars > 0, use short_description or truncate for local LLM."""
+        desc = self.description if isinstance(self.description, str) else (self.description or "")
+        try:
+            mc = int(max_description_chars) if max_description_chars is not None else 0
+        except (TypeError, ValueError):
+            mc = 0
+        if mc > 0:
+            if self.short_description and isinstance(self.short_description, str) and len(self.short_description) <= mc:
+                desc = self.short_description
+            else:
+                desc = _truncate_description(desc, mc)
+        params = self.parameters if isinstance(self.parameters, dict) else {}
         return {
             "type": "function",
             "function": {
-                "name": self.name,
-                "description": self.description,
+                "name": str(self.name) if self.name is not None else "",
+                "description": desc,
                 "parameters": {
                     "type": "object",
-                    "properties": self.parameters.get("properties", {}),
-                    "required": self.parameters.get("required", []),
+                    "properties": params.get("properties", {}),
+                    "required": params.get("required", []) if isinstance(params.get("required"), list) else [],
                 },
             },
         }
@@ -97,9 +128,9 @@ class ToolRegistry:
     def list_tools(self) -> List[ToolDefinition]:
         return list(self._tools.values())
 
-    def get_openai_tools(self) -> List[Dict[str, Any]]:
-        """List of tool descriptors for OpenAI-compatible chat API (tools=...)."""
-        return [t.to_openai_function() for t in self._tools.values()]
+    def get_openai_tools(self, max_description_chars: Optional[int] = None) -> List[Dict[str, Any]]:
+        """List of tool descriptors for OpenAI-compatible chat API (tools=...). When max_description_chars > 0, use short_description or truncate so local LLMs get concise cues."""
+        return [t.to_openai_function(max_description_chars) for t in self._tools.values()]
 
     async def execute_async(
         self,

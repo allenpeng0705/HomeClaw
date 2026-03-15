@@ -9,8 +9,10 @@
 # =============================================================================
 
 # ——— 1. llama.cpp server settings (for local models) ———
-# ctx_size, predict, temp are used when starting the llama.cpp server.
+# One global block: same ctx_size, predict, temp, function_calling, etc. for every local model Core starts (main_llm, classifier, vision when on-demand). To use different settings for e.g. gpt-oss-20b vs Qwen3-4B, either set shared values that work for both or run one model yourself with a different config.
+# ctx_size, predict, temp are used when starting the llama.cpp server (e.g. --predict 8192).
 # For chat completions, max_tokens and temperature are sent per request (see completion below).
+# predict vs max_tokens: predict = server default (llama-server --predict N); max_tokens = sent with each completion request (completion section). Core uses completion.max_tokens when present, else llama_cpp.predict, so per-request limit is what actually caps the reply length.
 # ctx_size: total context window (input + output). Typical values: 8192, 16384, 32768 (32K), 65536 (64K).
 # Higher = more VRAM/RAM and can slow inference; check your model's native max context.
 #
@@ -25,14 +27,15 @@
 # Reduce ctx_size if you don't need long context. Quantized GGUF (Q4_K_M, Q5_K_M) is smaller and faster than F16.
 llama_cpp:
   # 32768
-  ctx_size: 262144 #128K
-  predict: 8192
-  temp: 0.7
-  threads: 8
+  ctx_size: 262142 #128K
+  predict: 131071   # server default max tokens (--predict); overridden per request by completion.max_tokens when Core sends it
+  temp: 0.5
+  threads: 4
   n_gpu_layers: 99
   verbose: false
   repeat_penalty: 1.5
   chat_format: null
+  # true = enable tool/function calling (--jinja) for main_llm and any local model Core starts. Use true whether or not you use tool_selection_llm: main_llm still does tool turns (or continuation/direct reply). If you run tool_selection_llm yourself on its port, start that server with function calling too (e.g. --jinja or same llama_cpp config).
   function_calling: true
   cache_type_k: q4_0
   cache_type_v: q4_0
@@ -47,11 +50,29 @@ llama_cpp:
   # Self-extend (long context with less slowdown): grp_attn_n = expansion factor (e.g. 4 for 4k→16k), grp_attn_w = window (e.g. 1024).
   #grp_attn_n: 4
   #grp_attn_w: 1024
-  # stop: null   # optional; used when completion.stop is not set. e.g. ["<|im_end|>", "</s>"]
-  # One flag for Qwen: qwen_model "qwen3" | "qwen35" (or qwen3_mode: true for qwen3). Omit = not Qwen.
-  # qwen_model: "qwen3"   # 8B dual-thinking; reasoning_budget 0, tool format in prompt
-  # qwen_model: "qwen35"  # 9B; same + presence_penalty 1.5, GBNF grammar, stop </think> and "</tool_call>"
-  qwen3_mode: true
+  #qwen_mode: qwen35
+  # stop: null   # optional; fallback when completion.stop not set. e.g. ["<|im_end|>", "</s>"]. For Qwen see completion.stop.
+  # ——— Qwen / Qwen 3.5 (single entry point: all Qwen settings here only) ———
+  # qwen_mode: "qwen3" | "qwen35" — applies to main_llm when set here. tool_selection_llm and vision_llm use root unless overridden in llama_cpp.tool_selection / llama_cpp.vision.
+  # • Main_llm = Qwen: set qwen_mode here (e.g. qwen3). Optionally override in tool_selection/vision if those use a different model.
+  # • Main_llm = GPT, tool_selection_llm = Qwen: leave root qwen_mode unset (comment out below); set qwen_mode only under llama_cpp.tool_selection so only tool_selection requests get Qwen params (enable_thinking, etc.).
+  # qwen_mode: qwen3   # set when main_llm is Qwen; omit/comment out when main_llm is GPT and only tool_selection_llm is Qwen (set qwen_mode under tool_selection instead)
+  # Optional when qwen_mode: qwen35: grammar path (default: config/grammars/qwen35_tools.gbnf). Uncomment only to use a different file.
+  # qwen35_grammar_path: "config/grammars/qwen35_tools.gbnf"
+  # Optional when qwen_mode: qwen35: set to true to enable GBNF grammar. Default: false (we parse both JSON and XML <tool_call> from prompt + stop).
+  # When true: we inject tool definitions into the system prompt and do not send the tools array, so grammar can be used with tools (llama-server would return 400 if both were sent).
+  #qwen35_use_grammar: true
+  # ——— Qwen 3.5 performance (reasoning models): optional server defaults. Restart server after changing.
+  # min_p: 0.05        # min-p sampling; reasoning models need a little room (0.05); 0 = disabled. Passed as --min-p to llama-server.
+  # temp: 0.6          # for Qwen 3.5: 0.6 recommended (temp 0 hurts reasoning; too high breaks tool calls). Override in completion.temperature per-request.
+  # repeat_penalty: 1.1   # Qwen tends to loop "thinking" phrases; 1.1 helps. Default above is 1.5; use 1.1 for Qwen 3.5 if you see repetition.
+  # <think> control: reasoning_budget: 0 = disable <think> (grammar: qwen35_tools.gbnf, no <think>). -1 or omit = allow <think> (grammar: qwen35_tools_with_think.gbnf; server gets -1; we strip <think> and remove </think> from stop). Server accepts only 0 or -1. Restart Core after changing so the model server gets the flag.
+  #
+  # Tradeoff (neither is perfect):
+  # • reasoning_budget: -1 (recommended): Fewer truncation issues; we remove </think> from stop so the answer after <think> is not cut off. Downside: some servers put the full reply in reasoning_content and leave content empty — we use reasoning_content as the reply and strip <think>, so empty-content issues are reduced. If you still see empty replies, set qwen_always_use_fallback_for_empty: true under completion (or tools_config).
+  # • reasoning_budget: 0: Thinking disabled; server is asked to put output in content. Downside: with 0 some setups produce more malformed tool output or truncation. Prefer -1 unless you must disable <think>.
+  # • disable_thinking_when_tools: default false. When false we do NOT send enable_thinking: false on tool turns (server keeps thinking on). This restores the previous stable behavior with Qwen VL (tool_calls work, no truncation). Set to true in completion or llama_cpp only if you see empty content with reasoning_content full (e.g. 4B).
+  # reasoning_budget: -1   # -1 = allow thinking (recommended); 0 = disable <think> (may increase malformed tool calls or truncation)
 
   # ——— Embedding server: fully separate from main model. Only the keys below are used.
   # Uncomment and set any optional key as needed. Defaults when omitted: ctx_size 0, threads 4, n_gpu_layers 20, verbose false.
@@ -72,27 +93,87 @@ llama_cpp:
     # temp: 0.8              # temperature
     # repeat_penalty: 1.5    # (embedding server may ignore when pooling)
 
+  # ——— Vision LLM (when Core starts vision on demand): overrides merged with root. Same keys as root (ctx_size, predict, function_calling, stop, etc.). Omit to use root.
+  vision:
+    ctx_size: 8192
+    predict: 2048
+    function_calling: true
+    stop: ["<|im_end|>"]
+
+  # ——— Tool-selection LLM (when you run it and Core starts it, or for reference when you start it yourself): overrides merged with root.
+  # When main_llm is GPT but tool_selection_llm is Qwen: leave root qwen_mode unset and set qwen_mode here so only tool_selection requests get Qwen behavior (enable_thinking: false, tool_temperature, etc.). Also set completion_tool_selection.stop (e.g. ["<|im_end|>"]) and optionally temperature.
+  tool_selection:
+    ctx_size: 262142
+    predict: 8192
+    function_calling: true
+    stop: ["<|im_end|>"]
+    qwen_mode: qwen3    # set when tool_selection_llm is Qwen and main_llm is not (e.g. GPT main + Qwen tool_selection). Omit to use root qwen_mode.
+    # ——— Qwen3-4B xLAM/Codex (e.g. Manojb/Qwen3-4B-toolcalling-gguf-codex): model uses <tool_call> XML and conflicts with native toolcall parser. Set qwen3_xlam_style: true so Core injects tools in prompt, sends grammar, and omits tools array; we add "</tool_call>" to stop.
+    qwen3_xlam_style: true
+    # qwen3_xlam_grammar_path: "config/grammars/qwen3_xlam.gbnf"   # optional; default above. When self-hosting: use --grammar-file and --reverse-prompt "</tool_call>".
+
 # ——— Completion (per-request generation) ———
+# Root completion applies to main_llm. Use completion_vision and completion_tool_selection (same keys as completion) to override when calling vision_llm or tool_selection_llm; they are merged with completion.
 # All parameters below are sent with every chat completion call. Omit or comment out to use server default or llama_cpp fallback where noted.
-# Fallbacks: max_tokens → llama_cpp.predict; temperature/top_p/repeat_penalty → llama_cpp.temp / (none) / llama_cpp.repeat_penalty; stop → llama_cpp.stop.
+# Fallbacks: max_tokens → llama_cpp.predict (so predict is the server default; completion.max_tokens overrides it per request); temperature/top_p/repeat_penalty → llama_cpp.temp / (none) / llama_cpp.repeat_penalty; stop → llama_cpp.stop.
+# To reduce repetition (e.g. model echoing same footer): raise repeat_penalty, set presence_penalty/frequency_penalty > 0, or lower max_tokens.
+# Single limit: max_tokens controls output length for every turn. Use 32768 (or higher) to avoid truncation of HTML slides, reports, long answers. If you omit max_tokens: Core uses llama_cpp.predict (server default), then 8192. Cloud providers (e.g. DeepSeek) may cap at 8192; Core does not override that.
+# If replies still look truncated: (1) when reasoning_budget is not 0 we remove </think> from stop so the answer after <think> is generated; (2) raise max_tokens and llama_cpp.predict if finish_reason=length in logs.
+#
+# ——— Truncation checklist ———
+# • finish_reason=length in logs → hit max_tokens; raise completion.max_tokens and llama_cpp.predict; ensure ctx_size >= prompt_tokens + max_tokens.
+# • Cloud (mix mode): requests to cloud are capped at cloud_max_tokens_cap (default 8192). For long outputs we prefer local after document_read/run_skill; if you still get truncated on cloud, set cloud_max_tokens_cap higher only if your provider allows, or use main_llm_mode: local for long generations.
+# • Stop sequences: completion.stop (e.g. <|im_end|>) can cut replies if the model emits them early. For Qwen with reasoning_budget != 0, </think> is removed from stop automatically.
+# • Restart Core after changing llama_cpp.predict or ctx_size so the llama-server process is started with the new --predict and --ctx-size.
 completion:
-  max_tokens: 8192          # max tokens to generate per response (fallback: llama_cpp.predict)
+  max_tokens: 131071         # max tokens per response for all turns; 32768 helps avoid truncation on local. For cloud (DeepSeek, etc.) Core caps at cloud_max_tokens_cap (default 8192); set higher only if your provider allows (e.g. DeepSeek supports up to 32768).
+  # cloud_max_tokens_cap: 8192   # optional; max_tokens sent to cloud = min(max_tokens, this). Default 8192. Set e.g. 32768 if your cloud provider allows and you want longer cloud replies (reduces truncation in mix mode).
   temperature: 0.5          # sampling temperature 0..2 (fallback: llama_cpp.temp)
   top_p: 1.0                # nucleus sampling 0..1
-  presence_penalty: 0       # OpenAI-style; penalize tokens that appear in text so far
-  frequency_penalty: 0      # OpenAI-style; penalize by token frequency
-  repeat_penalty: 1.5       # llama.cpp-style; sent in extra_body (fallback: llama_cpp.repeat_penalty)
+  presence_penalty: 0.4     # penalize tokens already in text (reduces repeated phrases; 0 = off)
+  frequency_penalty: 0.3    # penalize by token frequency (reduces repetition; 0 = off)
+  repeat_penalty: 2.0       # llama.cpp-style; higher = stronger anti-repetition (e.g. 1.5 → 2.0)
   seed: null                 # optional; int for reproducible sampling
-  stop: null                 # optional; list (fallback: llama_cpp.stop). e.g. ["<|im_end|>", "</s>"]
-  # One flag for Qwen: qwen_model "qwen3" | "qwen35" (or qwen3_mode: true for qwen3). Tool requests: temp 0.1, enable_thinking false; qwen35 adds presence_penalty 1.5 and grammar.
-  # qwen_model: "qwen3"
-  # qwen3_mode: true
+  # Stop sequences: base list from config. Fallback: llama_cpp.stop when completion.stop not set. Same list is sent to every model (main_llm, tool_selection_llm, etc.).
+  # "</tool_call>" is added automatically only on tool-decision turns. Omit it here to avoid truncating normal replies.
+  # Qwen (e.g. Qwen3-4B-Function-Calling-Pro): use <|im_end|>. If using <think>, Core removes </think> from stop automatically — do not add </think> here.
+  # gpt_oss (e.g. gpt-oss-20b): EOS is <|return|>; optional fallback <|endoftext|>. Use stop: ["<|return|>"] or ["<|return|>", "<|endoftext|>"].
+  # Other GPT-style: may use </s> or <|endoftext|> depending on chat template. To support both Qwen and gpt_oss, use e.g. ["<|im_end|>", "<|return|>"].
+  stop: ["<|im_end|>"]  #["<|return|>", "<|endoftext|>"]
+  # Qwen / Qwen 3.5: configure in llama_cpp above (qwen_mode, qwen35_grammar_path, qwen35_use_grammar, reasoning_budget). Do not duplicate here.
+  # disable_thinking_when_tools: false   # default: do NOT send enable_thinking: false (preserves server default; Qwen VL and others stay stable — tool_calls and no truncation). Set true only if you see empty content with reasoning_content full (e.g. 4B).
+  # qwen_always_use_fallback_for_empty: true   # if reasoning_budget: -1 and you still see empty replies, set true to always use reasoning_content (or other alt keys) when content is empty. May occasionally show one line of internal reasoning. Default: false.
   # logit_bias: {}          # optional; dict of token id to bias (-100..100)
   # logit_bias: {}          # optional; dict of token id to bias (-100..100)
   # n: 1                    # number of completions (default 1)
   # response_format: null   # optional; e.g. { "type": "json_object" }
   # timeout: null            # optional; Unit: seconds
-  image_max_dimension: 512   # 0 = no resize. Set e.g. 1024 to resize images before sending to vision model (keeps aspect ratio; requires Pillow)
+  #image_max_dimension: 512   # 0 = no resize. Set e.g. 1024 to resize images before sending to vision model (keeps aspect ratio; requires Pillow)
+
+# Merged with completion when calling vision_llm. Same keys as completion; only set keys you want to override.
+completion_vision:
+  max_tokens: 2048           # vision replies often shorter; omit to use completion.max_tokens
+  # cloud_max_tokens_cap: 8192
+  temperature: 0.3           # slightly lower for concise image answers
+  top_p: 1.0
+  presence_penalty: 0.4
+  frequency_penalty: 0.3
+  repeat_penalty: 2.0
+  seed: null
+  stop: ["<|im_end|>"]       # match your vision model's EOS (e.g. ["<|return|>"] for gpt_oss)
+  image_max_dimension: 512  # optional; overrides completion.image_max_dimension for vision only
+
+# Merged with completion when calling tool_selection_llm. Same keys as completion; only set keys you want to override.
+# completion_tool_selection:
+#   max_tokens: 131071          # tool decisions usually short; omit to use completion.max_tokens
+#   # cloud_max_tokens_cap: 8192
+#   temperature: 0.2            # lower for more deterministic tool choice
+#   top_p: 1.0
+#   presence_penalty: 0.2
+#   frequency_penalty: 0.2
+#   repeat_penalty: 1.5
+#   seed: null
+#   stop: ["<|im_end|>"]       # match your tool_selection model (e.g. ["<|return|>"] for gpt_oss)
 
 # ——— 2. Local models (llama.cpp server per model, or Ollama) ———
 # Default: llama.cpp — path = GGUF path relative to model_path; Core starts one server per model.
@@ -158,6 +239,20 @@ local_models:
     capabilities: [Chat]
     supported_media: [image]
 
+  - id: gpt-oss-20b-Q4_K_M
+    alias: gpt-oss-20b-Q4_K_M
+    path: gpt-oss-20b-Q4_K_M.gguf
+    host: 127.0.0.1
+    port: 5050
+    capabilities: [Chat]
+
+  - id: Qwen3-4B-Function-Calling-Pro
+    alias: Qwen3-4B-Function-Calling-Pro
+    path: Qwen3-4B-Function-Calling-Pro.gguf
+    host: 127.0.0.1
+    port: 5051
+    capabilities: [Chat]
+
   # - id: Qwen3.5-27B-Q4_K_M
   #   alias: Qwen3.5-27B-Q4_K_M
   #   path: Qwen3.5-27B-Q4_K_M.gguf
@@ -165,12 +260,19 @@ local_models:
   #   port: 5028
   #   capabilities: [Chat]
 
-  # - id: Qwen3.5-9B-Q5_K_M
-  #   alias: Qwen3.5-9B-Q5_K_M
-  #   path: Qwen3.5-9B-Q5_K_M.gguf
+  # - id: Qwen3.5-14B-A3B-Claud-4.6-Opus_q4_k_m
+  #   alias: Qwen3.5-14B-A3B-Claud-4.6-Opus_q4_k_m
+  #   path: Qwen3.5-14B-A3B-Claud-4.6-Opus_q4_k_m.gguf
   #   host: 127.0.0.1
-  #   port: 5029
+  #   port: 5028
   #   capabilities: [Chat]
+
+  - id: Qwen3.5-9B-Q5_K_M
+    alias: Qwen3.5-9B-Q5_K_M
+    path: Qwen3.5-9B-Q5_K_M.gguf
+    host: 127.0.0.1
+    port: 5029
+    capabilities: [Chat]
   # Note: was 5024; use a different port so 27B and 9B can run at the same time (only one process per port).
 
   - id: Qwen3-8B-Q5_K_M
@@ -259,9 +361,9 @@ cloud_models:
     alias: DeepSeek Chat
     path: deepseek/deepseek-chat
     host: 127.0.0.1
-    port: 4005
+    port: 14005
     api_key_name: DEEPSEEK_API_KEY
-    api_key: sk-c2ee041134f64b5fb18ec9465b2c4c27
+    api_key: sk-71daaa97df384e27bdd5741bae0edbf3
     capabilities: [Chat]
   # Alibaba Qwen (Dashscope), Groq, Mistral, xAI, OpenRouter, Cohere, Perplexity: uncomment and set api_key_name as needed.
 
@@ -273,30 +375,220 @@ cloud_models:
 # main_llm: optional when main_llm_mode is set. When mode is "local" we use main_llm_local; when "cloud" we use main_llm_cloud; when "mix" we use both per request.
 # If the local llama.cpp server is not running (e.g. connection refused to 127.0.0.1:5022), use main_llm_mode: cloud so only cloud is used, or start the local server.
 #main_llm: local_models/main_vl_model_4B
-main_llm_mode: local
-main_llm_local: local_models/Qwen3-8B-Q5_K_M
+main_llm_mode: mix
+main_llm_local: local_models/main_vl_model_4B
 main_llm_cloud: cloud_models/DeepSeek-Chat
+# ——— Stability: if tool turns often fail (empty content, 500s, cloud errors), set use_tool_selection_llm: false so main_llm does every turn, or set tool_selection_llm to the same as main_llm_local (e.g. 8B) so one model handles both "which tool" and "after tool result".
+# tool_selection_llm: optional. When use_tool_selection_llm is true, every LLM call in the tool loop uses this model (tool selection + parameter extraction). Good for models fine-tuned on function calling (e.g. Qwen3-4B-toolcalling). When not used (default): main_llm handles everything — all tool selection, parameter extraction, and final replies.
+# When using tool_selection_llm, the main model is still used for: (1) requests that have no tools (chat-only); (2) use_main_llm_for_direct_reply: true — direct (no-tool) replies; (3) long-output turn after document_read/run_skill (mix mode) to avoid cloud 8192 cap; (4) fallback when the tool-selection model fails or returns empty.
+# Final response to user: when tool_selection_llm returns content only (no tool_calls)—whether on the first turn or after tools ran—the reply is sent to the user. By default (use_main_llm_for_direct_reply: true) Core then calls main_llm with the same messages (no tools) and uses that as the final response, so the user sees the main model's reply. Set use_main_llm_for_direct_reply: false to use tool_selection_llm's reply as-is.
+#tool_selection_llm: local_models/Qwen3-4B-Function-Calling-Pro
+#use_tool_selection_llm: false   # set false for stability (main_llm does all turns). Or set tool_selection_llm to main_llm_local (e.g. 8B) so one model handles tool turns.
+# use_main_llm_for_direct_reply: true   # default true: when tool_selection_llm returns content only (no tool call), Core calls main_llm with same messages (no tools) and uses that as the final response to the user (first turn or after tools). Set false to keep tool_selection_llm's reply as-is.
+#tool_selection_llm_host: 127.0.0.1   # host for tool_selection_llm; Core uses this when calling the tool-selection model (default 127.0.0.1)
+#tool_selection_llm_port: 5031         # port for tool_selection_llm; run the model server on this port (default 5031)
 # vision_llm: when main model has no vision (e.g. 27B text-only), use this model to describe images; description is injected into user message and main model replies. E.g. local_models/main_vl_model_2B. Omit or leave empty to save images and return a polite message instead.
 vision_llm: local_models/main_vl_model_2B
-# Mix mode routing: heuristic (Layer 1), semantic (Layer 2), SLM (Layer 3: classifier or perplexity). See comments in hybrid_router.
+# Mix mode routing: heuristic (Layer 1), semantic (Layer 2), SLM (Layer 3: classifier or perplexity). You can steer which model handles a request:
+# • default_route: use when no layer selects (e.g. local = document_read/folder_list and simple tasks often go local first).
+# • Heuristic: edit config/hybrid/heuristic_rules.yml — first matching rule wins; add local rules for read/list intents so read-document/list-folder tasks go to local.
+# • Semantic: add example phrases to config/hybrid/semantic_routes.yml local_utterances so similar queries route to local (or cloud_utterances for cloud).
+# • Long input: prefer_cloud_if_long_chars (e.g. 800) sends very long messages to cloud; set 0 to disable.
+# • tool_loop_route_overrides: during the tool loop, when the last executed tool is in this map, use that route for the *next* LLM call only (one turn; then back to the selected model). If the overridden model fails, Core falls back to the other (local<->cloud). Tools not listed are unchanged. Only applies in mix mode. Value per tool: "local" or "cloud".
+# All tools you can set (tool name -> use "local" or "cloud" for the turn after that tool runs):
+#   # File / document (I/O done by tool; model often just formats or continues)
+#   document_read: local    # read PDF/Office; next turn = summarize/format
+#   file_read: local
+#   file_write: local
+#   file_edit: local
+#   file_understand: local
+#   file_find: local        # search files; next turn = present results
+#   folder_list: local     # list directory; next turn = present results
+#   save_result_page: local
+#   get_file_view_link: local
+#   apply_patch: local
+#   markdown_to_pdf: local
+#   # Skills / output
+#   run_skill: local       # run skill (e.g. html-slides); next turn often long output
+#   # Cron / reminders / scheduling
+#   cron_schedule: local
+#   cron_list: local
+#   cron_remove: local
+#   cron_update: local
+#   cron_run: local
+#   cron_status: local
+#   remind_me: local
+#   record_date: local
+#   recorded_events_list: local
+#   # Memory
+#   memory_search: local
+#   memory_get: local
+#   append_agent_memory: local
+#   append_daily_memory: local
+#   agent_memory_search: local
+#   agent_memory_get: local
+#   memory_task_summary: local
+#   memory_skill_search: local
+#   memory_skill_get: local
+#   memory_task_list: local
+#   memory_write_public: local
+#   memory_skill_publish: local
+#   memory_skill_unpublish: local
+#   memory_viewer_url: local
+#   # Sessions / profile / channel
+#   sessions_transcript: local
+#   sessions_list: local
+#   sessions_send: local
+#   sessions_spawn: local
+#   session_status: local
+#   profile_get: local
+#   profile_update: local
+#   profile_list: local
+#   channel_send: local
+#   usage_report: local
+#   # Web / search / browser (often need cloud for complex reasoning)
+#   web_search: cloud
+#   web_search_browser: cloud
+#   tavily_extract: cloud
+#   tavily_crawl: cloud
+#   tavily_research: cloud
+#   fetch_url: local
+#   web_extract: local
+#   web_crawl: local
+#   browser_navigate: local
+#   browser_snapshot: local
+#   browser_click: local
+#   browser_type: local
+#   # Routing / system
+#   route_to_tam: local
+#   route_to_plugin: local
+#   # Other
+#   time: local
+#   image: local
+#   echo: local
+#   platform_info: local
+#   cwd: local
+#   env: local
+#   exec: local
+#   process_list: local
+#   process_poll: local
+#   process_kill: local
+#   http_request: local
+#   webhook_trigger: local
+#   models_list: local
+#   agents_list: local
+#   knowledge_base_search: local
+#   knowledge_base_add: local
+#   knowledge_base_remove: local
+#   knowledge_base_list: local
 hybrid_router:
   default_route: local
   show_route_in_response: true
   fallback_on_llm_error: true
   prefer_cloud_if_long_chars: 800
+  # Use local for the turn after these tools (read/list done by tool; model only formats or continues).
+  tool_loop_route_overrides:
+    document_read: local
+    folder_list: local
+#   # File / document (I/O done by tool; model often just formats or continues)
+#   document_read: local    # read PDF/Office; next turn = summarize/format
+    file_read: local
+    file_write: local
+    file_edit: local
+    file_understand: local
+    file_find: local        # search files; next turn = present results
+    folder_list: local     # list directory; next turn = present results
+    save_result_page: local
+    get_file_view_link: local
+#   apply_patch: local
+#   markdown_to_pdf: local
+#   # Skills / output
+#   run_skill: local       # run skill (e.g. html-slides); next turn often long output
+#   # Cron / reminders / scheduling
+#   cron_schedule: local
+#   cron_list: local
+#   cron_remove: local
+#   cron_update: local
+#   cron_run: local
+#   cron_status: local
+#   remind_me: local
+#   record_date: local
+#   recorded_events_list: local
+#   # Memory
+    memory_search: local
+    memory_get: local
+    append_agent_memory: local
+    append_daily_memory: local
+    agent_memory_search: local
+    agent_memory_get: local
+    memory_task_summary: local
+    memory_skill_search: local
+    memory_skill_get: local
+    memory_task_list: local
+    memory_write_public: local
+    memory_skill_publish: local
+    memory_skill_unpublish: local
+#    memory_viewer_url: local
+#   # Sessions / profile / channel
+#   sessions_transcript: local
+#   sessions_list: local
+#   sessions_send: local
+#   sessions_spawn: local
+#   session_status: local
+    profile_get: local
+    profile_update: local
+    profile_list: local
+    channel_send: local
+#   usage_report: local
+#   # Web / search / browser (often need cloud for complex reasoning)
+#   web_search: cloud
+#   web_search_browser: cloud
+#   tavily_extract: cloud
+#   tavily_crawl: cloud
+#   tavily_research: cloud
+#   fetch_url: local
+#   web_extract: local
+#   web_crawl: local
+#   browser_navigate: local
+#   browser_snapshot: local
+#   browser_click: local
+#   browser_type: local
+#   # Routing / system
+#   route_to_tam: local
+#   route_to_plugin: local
+#   # Other
+    time: local
+#   image: local
+#   echo: local
+#   platform_info: local
+    cwd: local
+    env: local
+    exec: local
+    process_list: local
+    process_poll: local
+    process_kill: local
+    http_request: local
+#   webhook_trigger: local
+#   models_list: local
+#   agents_list: local
+    knowledge_base_search: local
+    knowledge_base_add: local
+    knowledge_base_remove: local
+    knowledge_base_list: local
+
   heuristic:
     enabled: true
     rules_path: config/hybrid/heuristic_rules.yml
   semantic:
     enabled: true
-    threshold: 0.5   # min similarity (0..1) to accept the best route; higher = stricter, more fall-through
+    threshold: 0.6   # min similarity (0..1) to accept the best route; higher = stricter, more fall-through
     routes_path: config/hybrid/semantic_routes.yml
   slm:
     enabled: true
     model: local_models/classifier_0_6b
     mode: perplexity
     perplexity_max_tokens: 10
-    perplexity_threshold: -0.5   # logprob: avg >= this → local; higher (e.g. -0.3) = more to cloud
+    perplexity_threshold: -0.4   # logprob: avg >= this → local; higher (e.g -0.3) = more to cloud
 # main_llm_language: list of allowed/preferred response languages (e.g. [zh, en]). First = primary for prompt loading and default when user language unknown.
 main_llm_language: [en, zh]
 
@@ -310,10 +602,15 @@ embedding_port: 5066
 # embedding_health_check_timeout_sec: 120   # seconds to wait for local embedding server; default 120
 main_llm_host: 127.0.0.1
 main_llm_port: 5023
+# Cloud (LiteLLM) proxy: used for cloud-only and mix when route=cloud. Run LiteLLM on this host/port (e.g. litellm --port 14005).
+cloud_llm_host: 127.0.0.1
+cloud_llm_port: 14005
 
 # Vision sidecar: when vision_llm is set (e.g. local_models/small_vision_2B), Core uses this host/port to call it for image description.
-# Run the vision model server on this port so Core always knows where to reach it.
+# Run the vision model server on this port so Core always knows where to reach it (or use on-demand below).
 vision_llm_host: 127.0.0.1
 vision_llm_port: 5024
+vision_llm_start_on_demand: true   # default true: do not start vision at Core startup; start when first request needs vision, stop after use (or after idle). Saves memory when vision is rare. Set false to manage the vision server yourself.
+vision_llm_idle_stop_seconds: 300 # after last vision use, stop the server after this many seconds (0 = stop as soon as the request finishes). Only when vision_llm_start_on_demand is true.
 # Optional: resize images before sending to vision sidecar (max width or height). 0 = use completion.image_max_dimension only. E.g. 1024 for small vision models.
-# vision_image_max_dimension: 1024
+vision_image_max_dimension: 1024

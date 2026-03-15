@@ -1,0 +1,26 @@
+# .gitguardian.yml
+version: 2
+
+secret:
+  # Ignore specific file paths from scanning
+  ignored-paths:
+    - ".env.template"
+    - ".github/workflows/*.yml"
+    - "examples/**"
+    - "tests/**"
+    - "docker-compose.yml"
+    - "deployment/helm/docker-compose-helm.yml"
+
+  # Ignore specific detector types (test/CI credentials, not real secrets)
+  ignored-detectors:
+    - generic_password
+    - generic_high_entropy_secret
+
+  # Ignore specific known false-positive matches
+  ignored-matches:
+    - name: "CI test postgres credentials in e2e_tests.yml"
+      match: "cognee"
+    - name: "CI test postgres credentials in search_db_tests.yml"
+      match: "cognee"
+    - name: "Docker compose neo4j test password"
+      match: "pleaseletmein"

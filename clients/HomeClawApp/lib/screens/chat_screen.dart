@@ -573,20 +573,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             : null,
       );
       if (mounted) {
+        final cancelled = result['cancelled'] == true;
         final reply = (result['text'] as String?) ?? '';
+        _stopLoadingStatusTimer();
+        setState(() {
+          _loading = false;
+          _loadingMessage = null;
+        });
+        if (cancelled) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Request cancelled')),
+            );
+          }
+          return;
+        }
         final imageList = result['images'] as List<dynamic>?;
         final imageDataUrls = imageList != null
             ? imageList.whereType<String>().where((s) => s.startsWith('data:image/')).toList()
             : <String>[];
         _lastReply = reply;
-        _stopLoadingStatusTimer();
         setState(() {
           _messages.add(MapEntry(reply.isEmpty ? '(no reply)' : reply, false));
           _messageImages.add(imageDataUrls.isEmpty ? null : imageDataUrls);
           _messageAudios.add(null);
           _messageVideos.add(null);
-          _loading = false;
-          _loadingMessage = null;
         });
         _scrollToBottom();
         await _persistChatHistory();
@@ -1790,6 +1801,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       ),
                     ),
                   ),
+                  if (widget.coreService.ongoingInboundRequestId != null) ...[
+                    const SizedBox(width: 12),
+                    TextButton(
+                      onPressed: () async {
+                        await widget.coreService.cancelOngoingRequest();
+                      },
+                      child: const Text('Cancel'),
+                    ),
+                  ],
                 ],
               ),
             ),

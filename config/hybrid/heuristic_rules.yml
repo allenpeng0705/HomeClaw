@@ -1,9 +1,23 @@
 # Layer 1 heuristic rules. Enriched by: python scripts/generate_heuristics.py --merge
 # First match wins. Run: python scripts/validate_heuristic_rules.py
+# To route document_read / folder_list type tasks to local: ensure a local rule matches before cloud (e.g. "总结...pdf" is matched by the rule below so local handles read+summarize of a local file).
 
 long_input_chars: 4000
 long_input_route: cloud
 rules:
+# Local-first for local file tasks (document_read, folder_list, summarize a pdf in documents): match before generic "总结一下" cloud rule.
+- route: local
+  keywords:
+  - document_read
+  - .pdf
+  - documents/
+  - 读 pdf
+  - 读取 pdf
+  - folder_list
+  - 列出目录
+  - 目录里有什么
+  - 有什么文件
+  - 里有什么文件
 - route: local
   keywords:
   - 密码

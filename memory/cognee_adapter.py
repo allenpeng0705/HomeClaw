@@ -1,6 +1,6 @@
 """
 Cognee memory adapter: implements MemoryBase using Cognee (add -> cognify -> search).
-Use when memory_backend=cognee. Cognee is part of this repo (customized); install only its
+Use when memory_backend=cognee. Cognee is vendored in vendor/cognee; install only its
 dependencies (pip install -r requirements-cognee-deps.txt), not the cognee package.
 Config: Cognee .env and/or cognee section in core.yml (we convert to env vars before Cognee loads).
 Dataset scope: (user_id, agent_id) -> dataset name for add/search.
@@ -30,9 +30,11 @@ import traceback
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from uuid import UUID
 
 from loguru import logger
 
+from base.util import strip_reasoning_from_assistant_text
 from memory.base import MemoryBase
 
 # Composite id for summarization: "dataset_id:data_id" so delete_async can resolve both
@@ -280,7 +282,7 @@ class CogneeMemory(MemoryBase):
                     pass
         except ImportError as e:
             raise ImportError(
-                "Cognee memory backend requires the cognee package (part of this repo) and its dependencies (pip install -r requirements-cognee-deps.txt). Configure via .env or cognee section in config."
+                "Cognee memory backend requires the cognee package (vendored in vendor/cognee) and its dependencies (pip install -r requirements-cognee-deps.txt). Configure via .env or cognee section in config."
             ) from e
         # When using a custom embedding model (tokenizer set), Cognee/litellm may call tiktoken.encoding_for_model(embedding_model) which throws for unknown models. Fall back to cl100k_base so add/cognify does not fail.
         if self._huggingface_tokenizer:
@@ -301,7 +303,7 @@ class CogneeMemory(MemoryBase):
 
     async def add(
         self,
-        data: str,
+        data: Any,
         user_name: Optional[str] = None,
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
@@ -310,11 +312,43 @@ class CogneeMemory(MemoryBase):
         filters: Optional[Dict] = None,
         prompt: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        # data: str (user message) or list of {role, content, toolName?}. Store full turn (user + assistant + tool) so cognify can extract relationships from context (e.g. assistant question + user answer → correct entity mapping).
+        if isinstance(data, list):
+            _max_assistant = 4000
+            _max_tool = 2000
+            parts = []
+            for m in data:
+                if not isinstance(m, dict):
+                    continue
+                role = (str(m.get("role") or "user").strip() or "user").lower()
+                content = str(m.get("content") or "").strip()
+                if not content:
+                    continue
+                if role == "user":
+                    parts.append("User: " + content)
+                elif role == "assistant":
+                    content = strip_reasoning_from_assistant_text(content)
+                    if content:
+                        parts.append("Assistant: " + (content if len(content) <= _max_assistant else content[: _max_assistant] + "\n[Truncated for memory.]"))
+                elif role == "tool":
+                    name = (str(m.get("toolName") or m.get("tool_name") or "tool").strip() or "tool")
+                    parts.append("Tool (" + name + "): " + (content if len(content) <= _max_tool else content[: _max_tool] + "\n[Truncated.]"))
+            data = "\n\n".join(parts) if parts else (str(data[0].get("content", "")) if data and isinstance(data[0], dict) else "")
+        else:
+            data = str(data or "").strip()
+        if not (data or "").strip():
+            return [{"id": str(uuid.uuid4()), "event": "add", "data": ""}]
         memory_id = str(uuid.uuid4())
         dataset = _dataset_name(user_id=user_id, agent_id=agent_id)
         if self._huggingface_tokenizer:
             os.environ["HUGGINGFACE_TOKENIZER"] = self._huggingface_tokenizer
         logger.debug("Cognee memory add: step=start dataset={} data_len={}", dataset, len(data or ""))
+        # Re-apply Instructor patch so retry_sync is always our wrapper (e.g. if cognee was imported before patch in another process or import order differed).
+        try:
+            from memory.instructor_patch import apply_instructor_patch_for_local_llm
+            apply_instructor_patch_for_local_llm()
+        except Exception:
+            pass
         try:
             # Step 1: add raw data to Cognee dataset
             await self._cognee.add(data, dataset_name=dataset)
@@ -551,10 +585,11 @@ class CogneeMemory(MemoryBase):
             except Exception as e:
                 logger.debug("Cognee list_datasets for summarization: {}", e)
                 return out
-            get_data_fn = getattr(ds, "get_data", None) or getattr(ds, "get_dataset_data", None)
+            get_data_fn = getattr(ds, "get_data", None) or getattr(ds, "get_dataset_data", None) or getattr(ds, "list_data", None)
             if not get_data_fn or not callable(get_data_fn):
-                logger.debug("Cognee datasets has no get_data/get_dataset_data; summarization list unavailable")
+                logger.debug("Cognee datasets has no get_data/get_dataset_data/list_data; summarization list unavailable")
                 return out
+            use_list_data = getattr(get_data_fn, "__name__", "") == "list_data"
             for d in datasets_list or []:
                 name = getattr(d, "name", None) or (d.get("name") if isinstance(d, dict) else None)
                 if not name or not name.startswith("memory_"):
@@ -562,16 +597,20 @@ class CogneeMemory(MemoryBase):
                 did = getattr(d, "id", None) or (d.get("id") if isinstance(d, dict) else None)
                 if not did:
                     continue
-                did = str(did)
+                did_str = str(did)
                 u_id, a_id = _parse_memory_dataset_name(name)
                 try:
-                    result = get_data_fn(did)
+                    if use_list_data:
+                        _arg = UUID(did_str) if isinstance(did_str, str) else did
+                        result = get_data_fn(_arg, None)
+                    else:
+                        result = get_data_fn(did_str)
                     if asyncio.iscoroutine(result):
                         data_list = await asyncio.wait_for(result, timeout=15)
                     else:
                         data_list = result
                 except Exception as e:
-                    logger.debug("Cognee get_data({}) failed: {}", did[:8], e)
+                    logger.debug("Cognee get_data/list_data({}) failed: {}", did_str[:8], e)
                     continue
                 if not isinstance(data_list, list):
                     data_list = [data_list] if data_list else []
@@ -592,7 +631,7 @@ class CogneeMemory(MemoryBase):
                     meta = getattr(item, "metadata", None) if not isinstance(item, dict) else item.get("metadata")
                     is_sum = (meta.get("is_summary") if isinstance(meta, dict) else None) or (getattr(meta, "is_summary", None) if meta else None)
                     out.append({
-                        "id": f"{did}{COGNEE_ID_SEP}{data_id}",
+                        "id": f"{did_str}{COGNEE_ID_SEP}{data_id}",
                         "memory": text,
                         "created_at": created,
                         "user_id": u_id,
@@ -628,10 +667,12 @@ class CogneeMemory(MemoryBase):
             logger.debug("Cognee datasets has no delete_data/delete")
             return
         try:
+            d_uuid = UUID(dataset_id) if isinstance(dataset_id, str) else dataset_id
+            data_uuid = UUID(data_id) if isinstance(data_id, str) else data_id
             if getattr(delete_fn, "__code__", None) and delete_fn.__code__.co_argcount >= 3:
-                result = delete_fn(dataset_id, data_id)
+                result = delete_fn(d_uuid, data_uuid)
             else:
-                result = delete_fn(data_id, dataset_id=dataset_id)
+                result = delete_fn(data_uuid, dataset_id=d_uuid)
             if asyncio.iscoroutine(result):
                 await asyncio.wait_for(result, timeout=10)
         except Exception as e:
@@ -656,7 +697,11 @@ class CogneeMemory(MemoryBase):
             if not ds:
                 return False
             has_list = hasattr(ds, "list_datasets") and callable(getattr(ds, "list_datasets"))
-            has_get = (hasattr(ds, "get_data") and callable(getattr(ds, "get_data"))) or (hasattr(ds, "get_dataset_data") and callable(getattr(ds, "get_dataset_data")))
+            has_get = (
+                (hasattr(ds, "get_data") and callable(getattr(ds, "get_data")))
+                or (hasattr(ds, "get_dataset_data") and callable(getattr(ds, "get_dataset_data")))
+                or (hasattr(ds, "list_data") and callable(getattr(ds, "list_data")))
+            )
             has_del = (hasattr(ds, "delete_data") and callable(getattr(ds, "delete_data"))) or (hasattr(ds, "delete") and callable(getattr(ds, "delete")))
             return bool(has_list and has_get and has_del)
         except Exception:
@@ -665,7 +710,11 @@ class CogneeMemory(MemoryBase):
     def reset(self) -> None:
         try:
             import cognee
-            asyncio.get_event_loop().run_until_complete(cognee.delete(all=True))
+            # Current Cognee API: datasets.delete_all(user=None); cognee.delete(data_id, dataset_id) is deprecated and does not support all=True.
+            if hasattr(cognee, "datasets") and hasattr(cognee.datasets, "delete_all"):
+                asyncio.get_event_loop().run_until_complete(cognee.datasets.delete_all(user=None))
+            else:
+                asyncio.get_event_loop().run_until_complete(cognee.delete(all=True))
         except Exception as e:
             logger.debug("Cognee reset: {}", e)
 

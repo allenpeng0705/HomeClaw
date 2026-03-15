@@ -2,10 +2,14 @@
 Entry point: main() and Windows console Ctrl handler for Core.
 Extracted from core/core.py (Phase 8 refactor). main() uses lazy import of Core to avoid circular import.
 """
-
-import asyncio
 import os
 import sys
+
+# LiteLLM: use local model cost map only (avoids "Failed to fetch remote model cost map... timed out" when offline/slow).
+# Set before any litellm import (Core/main may import memory/cognee which use litellm).
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
+import asyncio
 import time
 from loguru import logger
 

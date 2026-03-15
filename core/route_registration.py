@@ -109,6 +109,12 @@ def register_all_routes(core: Any) -> None:
         dependencies=[Depends(auth.verify_inbound_auth)],
     )
     app.add_api_route(
+        "/inbound/cancel",
+        inbound_routes.cancel_inbound_request_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
         "/api/config/core",
         config_api.get_api_config_core_get_handler(core),
         methods=["GET"],
@@ -667,7 +673,9 @@ def register_all_routes(core: Any) -> None:
                     "status": "pending",
                     "created_at": time.time(),
                 }
-                asyncio.create_task(core._run_async_inbound(request_id, request))
+                task = asyncio.create_task(core._run_async_inbound(request_id, request))
+                if getattr(core, "_inbound_async_tasks", None) is not None:
+                    core._inbound_async_tasks[request_id] = task
                 return JSONResponse(
                     status_code=202,
                     content={

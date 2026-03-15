@@ -83,7 +83,8 @@ def _apply_litellm_messages_patch() -> bool:
                 return f(*args, **kwargs)
             return _inner
 
-        async def _async_wrapper(f: Any) -> Any:
+        def _async_wrapper(f: Any) -> Any:
+            """Sync factory: returns the inner async function so litellm.acompletion is callable (acompletion(**kwargs) then await)."""
             async def _inner(*args: Any, **kwargs: Any) -> Any:
                 try:
                     msgs = kwargs.get("messages")
@@ -272,7 +273,7 @@ def _apply_retry_sync_coroutine_handling() -> bool:
     """
     If Cognee/Instructor still use retry_sync with an async func (e.g. client created before our
     patch), func(*args, **kwargs) returns a coroutine and retry_sync crashes. Patch retry_sync
-    so that when the result is a coroutine, we run it on the running event loop and use the result.
+    so that when the result is a coroutine (or func is a coroutine), we run it and use the result.
     Idempotent.
     """
     global _RETRY_SYNC_PATCHED
@@ -283,7 +284,13 @@ def _apply_retry_sync_coroutine_handling() -> bool:
         import instructor.core.retry as retry_mod
     except ImportError:
         return False
-    _orig_retry_sync = retry_mod.retry_sync
+    _orig_retry_sync = getattr(retry_mod, "retry_sync", None)
+    if _orig_retry_sync is None:
+        return False
+    # Skip if we already patched (e.g. our wrapper is already there)
+    if getattr(_orig_retry_sync, "_homeclaw_retry_sync_wrapper", False):
+        _RETRY_SYNC_PATCHED = True
+        return True
 
     def _retry_sync_wrapper(
         func: Any,
@@ -296,16 +303,37 @@ def _apply_retry_sync_coroutine_handling() -> bool:
         mode: Any = None,
         hooks: Any = None,
     ) -> Any:
-        # Wrap func so that if it returns a coroutine, we run it (Cognee calls from async context;
-        # we cannot block the running loop with run_coroutine_threadsafe().result() — deadlock).
-        # Run the coroutine in a new thread with its own event loop.
+        # Wrap func so that if it IS a coroutine object or it RETURNS a coroutine, we run it.
+        # Cognee/Instructor can pass either an async function or an already-created coroutine into
+        # retry_sync. Calling a coroutine object raises "'coroutine' object is not callable", which
+        # is the bug we are shielding against here.
         def _sync_func(*a: Any, **kw: Any) -> Any:
-            out = func(*a, **kw)
+            import concurrent.futures
+
+            def _run_coro(coro: Any) -> Any:
+                try:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                        future = pool.submit(asyncio.run, coro)
+                        return future.result()
+                except Exception:
+                    raise
+
+            # Case 1: func itself is a coroutine object (not callable) – run it directly.
+            if asyncio.iscoroutine(func):
+                return _run_coro(func)
+
+            # Case 2: func is callable; it may return a coroutine.
+            try:
+                out = func(*a, **kw)
+            except TypeError as te:
+                msg = str(te).lower()
+                # "'coroutine' object is not callable": treat func as coroutine object and run it.
+                if "coroutine" in msg and "not callable" in msg and asyncio.iscoroutine(func):
+                    return _run_coro(func)
+                raise
+
             if asyncio.iscoroutine(out):
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    future = pool.submit(asyncio.run, out)
-                    return future.result()
+                return _run_coro(out)
             return out
 
         return _orig_retry_sync(
@@ -320,7 +348,21 @@ def _apply_retry_sync_coroutine_handling() -> bool:
             hooks=hooks,
         )
 
+    setattr(_retry_sync_wrapper, "_homeclaw_retry_sync_wrapper", True)
     retry_mod.retry_sync = _retry_sync_wrapper  # type: ignore[assignment]
+    # instructor.core.patch does "from .retry import retry_sync" at import time, so it holds
+    # a reference to the original. Cognee's path goes through patch.new_create_sync -> patch's
+    # retry_sync(...). Update the patch module's reference so the sync path uses our wrapper.
+    # If patch was already loaded (e.g. by Cognee before our init), update via sys.modules.
+    import sys as _sys
+    _patch_name = "instructor.core.patch"
+    if _patch_name in _sys.modules:
+        _sys.modules[_patch_name].retry_sync = retry_mod.retry_sync
+    try:
+        import instructor.core.patch as patch_mod  # noqa: PLC0415
+        patch_mod.retry_sync = retry_mod.retry_sync
+    except Exception:
+        pass
     _RETRY_SYNC_PATCHED = True
     logger.debug("Instructor patch: retry_sync runs returned coroutines on running loop")
     return True

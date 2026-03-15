@@ -5,6 +5,13 @@ Extracted from core/core.py (Phase 3 refactor). All functions take core as first
 
 from typing import Any, Dict
 
+# Apply Instructor patch before any memory/cognee import so cognify never sees unpatched retry_sync (avoids 'coroutine' object is not callable).
+try:
+    from memory.instructor_patch import apply_instructor_patch_for_local_llm
+    apply_instructor_patch_for_local_llm()
+except Exception:
+    pass
+
 from loguru import logger
 
 from base.util import Util
@@ -35,6 +42,33 @@ def _create_skills_vector_store(core: Any) -> None:
         backend=backend,
         config=config,
         collection_name=getattr(meta, "skills_vector_collection", "homeclaw_skills") or "homeclaw_skills",
+        chroma_client=chroma_client,
+    )
+
+
+def _create_tools_vector_store(core: Any) -> None:
+    """Create a dedicated vector store for tools (RAG by query). Used when tools.tools_use_vector_search (default false)."""
+    from memory.vector_store_factory import create_vector_store
+
+    meta = Util().get_core_metadata()
+    tools_cfg = getattr(meta, "tools_config", None) or {}
+    if not tools_cfg.get("tools_use_vector_search", False):
+        return
+    vdb = meta.vectorDB
+    backend = getattr(vdb, "backend", "chroma") or "chroma"
+    config = {
+        "backend": backend,
+        "Chroma": vars(vdb.Chroma),
+        "Qdrant": vars(vdb.Qdrant),
+        "Milvus": vars(vdb.Milvus),
+        "Pinecone": vars(vdb.Pinecone),
+        "Weaviate": vars(vdb.Weaviate),
+    }
+    chroma_client = getattr(core, "chromra_memory_client", None) if backend == "chroma" else None
+    core.tools_vector_store = create_vector_store(
+        backend=backend,
+        config=config,
+        collection_name=tools_cfg.get("tools_vector_collection", "homeclaw_tools") or "homeclaw_tools",
         chroma_client=chroma_client,
     )
 
@@ -228,11 +262,94 @@ def run_initialize(core: Any) -> None:
     except Exception:
         logger.info("CUDA (GPU) available: unknown — local llama.cpp will use platform default (CPU or GPU)")
     core.initialize_vector_store(collection_name="memory")
+
+    # Helpers for composite memory (build single backend instances)
+    def _create_cognee_memory_for_composite(meta: Any) -> Any:
+        try:
+            from memory.cognee_adapter import CogneeMemory
+            cognee_config = dict(getattr(meta, "cognee", None) or {})
+            llm_cfg = cognee_config.get("llm") or {}
+            if not isinstance(llm_cfg, dict):
+                llm_cfg = {}
+            if not (llm_cfg.get("endpoint") or llm_cfg.get("model")):
+                resolved = Util().main_llm()
+                if resolved:
+                    _path, _model_id, mtype, host, port = resolved
+                    model = _path if mtype == "litellm" else f"openai/{(_model_id or 'local').strip() or 'local'}"
+                    provider = (llm_cfg.get("provider") or "openai").strip() or "openai"
+                    cognee_config["llm"] = {
+                        **llm_cfg,
+                        "provider": provider,
+                        "endpoint": f"http://{host}:{port}/v1",
+                        "model": (llm_cfg.get("model") or model).strip() or model,
+                        "api_key": (getattr(meta, "main_llm_api_key", "") or "").strip() or "local",
+                    }
+                else:
+                    host = getattr(meta, "main_llm_host", "127.0.0.1") or "127.0.0.1"
+                    port = getattr(meta, "main_llm_port", 5088) or 5088
+                    main_llm_ref = (getattr(meta, "main_llm", "") or "").strip()
+                    model_id = main_llm_ref.split("/")[-1] if "/" in main_llm_ref else (main_llm_ref or "local") or "local"
+                    cognee_config["llm"] = {
+                        **llm_cfg,
+                        "provider": (llm_cfg.get("provider") or "openai").strip() or "openai",
+                        "endpoint": f"http://{host}:{port}/v1",
+                        "model": f"openai/{model_id}",
+                        "api_key": (getattr(meta, "main_llm_api_key", "") or "").strip() or "local",
+                    }
+            emb_cfg = cognee_config.get("embedding") or {}
+            if not isinstance(emb_cfg, dict):
+                emb_cfg = {}
+            if not (emb_cfg.get("endpoint") or emb_cfg.get("model")):
+                resolved = Util().embedding_llm()
+                if resolved:
+                    _path, _model_id, mtype, host, port = resolved
+                    model = _path if mtype == "litellm" else f"openai/{(_model_id or 'local').strip() or 'local'}"
+                    cognee_config.setdefault("embedding", {})
+                    cognee_config["embedding"].update({
+                        "provider": (emb_cfg.get("provider") or "openai").strip() or "openai",
+                        "endpoint": f"http://{host}:{port}/v1",
+                        "model": (emb_cfg.get("model") or model).strip(),
+                        "api_key": (getattr(meta, "main_llm_api_key", "") or "").strip() or "local",
+                    })
+                else:
+                    host = getattr(meta, "embedding_host", "127.0.0.1") or "127.0.0.1"
+                    port = getattr(meta, "embedding_port", 5066) or 5066
+                    emb_ref = (getattr(meta, "embedding_llm", "") or "").strip()
+                    model_id = emb_ref.split("/")[-1] if "/" in emb_ref else (emb_ref or "local") or "local"
+                    cognee_config.setdefault("embedding", {})
+                    cognee_config["embedding"].update({
+                        "provider": (emb_cfg.get("provider") or "openai").strip() or "openai",
+                        "endpoint": f"http://{host}:{port}/v1",
+                        "model": f"openai/{model_id}",
+                        "api_key": (getattr(meta, "main_llm_api_key", "") or "").strip() or "local",
+                    })
+            return CogneeMemory(config=cognee_config if cognee_config else None)
+        except Exception as e:
+            logger.debug("composite: could not create cognee backend: {}", e)
+            return None
+
+    def _create_memos_memory_for_composite(meta: Any) -> Any:
+        try:
+            from memory.memos_adapter import MemosMemoryAdapter
+            memos_config = dict(getattr(meta, "memos", None) or {})
+            if not (memos_config.get("url") or "").strip():
+                return None
+            try:
+                from memory.memos_server import ensure_memos_server_started
+                ensure_memos_server_started(memos_config)
+            except Exception as e:
+                logger.debug("memos auto-start: {}", e)
+            return MemosMemoryAdapter(config=memos_config)
+        except Exception as e:
+            logger.debug("composite: could not create memos backend: {}", e)
+            return None
+
     logger.debug("core init: vector_store done")
     core.embedder = LlamaCppEmbedding()
     logger.debug("core init: embedder done")
     meta = Util().get_core_metadata()
     _create_skills_vector_store(core)
+    _create_tools_vector_store(core)
     _create_plugins_vector_store(core)
     _create_agent_memory_vector_store(core)
     logger.debug("core init: skills/plugins/agent_memory vector stores done")
@@ -344,7 +461,61 @@ def run_initialize(core: Any) -> None:
             logger.warning("Cognee backend failed: {}. Using chroma.", e)
             memory_backend = "chroma"
 
-    if memory_backend != "cognee":
+    if memory_backend == "memos" and Util().has_memory():
+        try:
+            from memory.memos_adapter import MemosMemoryAdapter
+            memos_config = dict(getattr(meta, "memos", None) or {})
+            if not (memos_config.get("url") or "").strip():
+                logger.warning("memory_backend=memos but memos.url not set; using chroma.")
+                memory_backend = "chroma"
+            else:
+                try:
+                    from memory.memos_server import ensure_memos_server_started
+                    ensure_memos_server_started(memos_config)
+                except Exception as e:
+                    logger.debug("memos auto-start: {}", e)
+                core.mem_instance = MemosMemoryAdapter(config=memos_config)
+                logger.debug("core init: MemOS memory (standalone) done")
+        except Exception as e:
+            logger.warning("Memos backend failed: {}. Using chroma.", e)
+            memory_backend = "chroma"
+
+    if memory_backend == "composite" and Util().has_memory():
+        try:
+            from memory.composite_memory import CompositeMemory
+            composite_cfg = dict(getattr(meta, "composite", None) or {})
+            backend_names = composite_cfg.get("backends") or []
+            if not isinstance(backend_names, list):
+                backend_names = [backend_names] if backend_names else []
+            backends_list = []
+            for bname in backend_names:
+                bname = (bname or "").strip().lower()
+                if not bname:
+                    continue
+                if bname == "cognee":
+                    inst = _create_cognee_memory_for_composite(meta)
+                    if inst:
+                        backends_list.append(("cognee", inst))
+                elif bname == "memos":
+                    inst = _create_memos_memory_for_composite(meta)
+                    if inst:
+                        backends_list.append(("memos", inst))
+                else:
+                    logger.warning("composite backend unknown: {}", bname)
+            if backends_list:
+                core.mem_instance = CompositeMemory(
+                    backends_list,
+                    merge_by_score=composite_cfg.get("search_merge") != "primary_only",
+                )
+                logger.debug("core init: composite memory done (backends: {})", [n for n, _ in backends_list])
+            else:
+                logger.warning("memory_backend=composite but no backends created; using chroma.")
+                memory_backend = "chroma"
+        except Exception as e:
+            logger.warning("Composite backend failed: {}. Using chroma.", e)
+            memory_backend = "chroma"
+
+    if memory_backend not in ("cognee", "memos", "composite"):
         graph_store = None
         if Util().has_memory():
             try:

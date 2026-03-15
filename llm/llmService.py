@@ -47,6 +47,8 @@ class LLMServiceManager:
             #self.llm_to_app: Dict[str, asyncio.Task] = {}
             self.gather_task: asyncio.Task = None
             #self.litellm_server_task = None
+            self._vision_stop_timer = None
+            self._vision_stop_lock = threading.Lock()
         
         
     async def start_llama_cpp_process(self, cmd: str, name:str, host:str, port:str):
@@ -96,6 +98,101 @@ class LLMServiceManager:
             self.stop_llama_cpp_process(process_info['name'])
         self.llama_cpp_processes = []
 
+    VISION_LLM_PROCESS_NAME = "vision_llm"
+
+    def ensure_vision_llm_running(self):
+        """When vision_llm_start_on_demand is true, start the vision server if not already running (so we load vision only when needed). Call from request path; may block briefly. Safe to call from a thread (e.g. asyncio.to_thread)."""
+        try:
+            meta = Util().get_core_metadata()
+            vision_ref = (getattr(meta, "vision_llm", None) or "").strip()
+            if not vision_ref:
+                return
+            if not getattr(meta, "vision_llm_start_on_demand", True):
+                return
+            host = (getattr(meta, "vision_llm_host", None) or "127.0.0.1").strip() or "127.0.0.1"
+            port = max(1, min(65535, int(getattr(meta, "vision_llm_port", None) or 5024)))
+            # Already running?
+            for proc_info in list(self.llama_cpp_processes):
+                if proc_info.get("name") != self.VISION_LLM_PROCESS_NAME:
+                    continue
+                if proc_info.get("process") and proc_info["process"].poll() is None:
+                    for _ in range(60):
+                        try:
+                            with socket.create_connection((host, port), timeout=2.0):
+                                with self._vision_stop_lock:
+                                    if self._vision_stop_timer:
+                                        self._vision_stop_timer.cancel()
+                                        self._vision_stop_timer = None
+                                return
+                        except (socket.error, OSError):
+                            sleep(2)
+                    return
+                self.llama_cpp_processes.remove(proc_info)
+                break
+            try:
+                with socket.create_connection((host, port), timeout=1.0):
+                    return
+            except (socket.error, OSError):
+                pass
+            resolved = Util()._resolve_llm(vision_ref)
+            if not resolved or len(resolved) < 5:
+                return
+            _, raw_id, mtype, _host, _port = resolved[0], resolved[1], resolved[2], resolved[3], resolved[4]
+            if mtype != "local":
+                return
+            llm_path = resolved[0]
+            entry, _ = Util()._get_model_entry(vision_ref)
+            mmproj_path, lora_paths, lora_base_path = (None, [], None)
+            if entry and not Util()._is_ollama_entry(entry):
+                mmproj_path, lora_paths, lora_base_path = self._resolve_local_extra_paths(entry)
+            def _start():
+                opts_vision = self._llama_cpp_opts_for_role("vision")
+                self.start_llama_cpp_server(
+                    self.VISION_LLM_PROCESS_NAME, host, port, llm_path,
+                    mmproj_path=mmproj_path, lora_paths=lora_paths or None, lora_base_path=lora_base_path,
+                    opts_override=opts_vision,
+                )
+            t = threading.Thread(target=_start, daemon=True)
+            t.start()
+            for _ in range(60):
+                sleep(2)
+                try:
+                    with socket.create_connection((host, port), timeout=2.0):
+                        logger.info("Vision LLM server is up at {}:{}", host, port)
+                        return
+                except (socket.error, OSError):
+                    pass
+            logger.warning("Vision LLM server did not become ready within 120s")
+        except Exception as e:
+            logger.debug("ensure_vision_llm_running: {}", e)
+
+    def schedule_vision_llm_stop(self):
+        """After vision use: stop the vision server immediately or after idle timeout. Only when vision_llm_start_on_demand is true."""
+        try:
+            meta = Util().get_core_metadata()
+            if not getattr(meta, "vision_llm_start_on_demand", True):
+                return
+            sec = max(0, int(getattr(meta, "vision_llm_idle_stop_seconds", 300) or 300))
+            with self._vision_stop_lock:
+                if self._vision_stop_timer:
+                    self._vision_stop_timer.cancel()
+                    self._vision_stop_timer = None
+                if sec == 0:
+                    self.stop_vision_llm()
+                else:
+                    self._vision_stop_timer = threading.Timer(sec, self.stop_vision_llm)
+                    self._vision_stop_timer.daemon = True
+                    self._vision_stop_timer.start()
+        except Exception as e:
+            logger.debug("schedule_vision_llm_stop: {}", e)
+
+    def stop_vision_llm(self):
+        """Stop the vision LLM process if running (for on-demand unload)."""
+        self.stop_llama_cpp_process(self.VISION_LLM_PROCESS_NAME)
+        with self._vision_stop_lock:
+            if self._vision_stop_timer:
+                self._vision_stop_timer.cancel()
+                self._vision_stop_timer = None
 
     def get_llama_cpp_processes(self):
         """
@@ -165,29 +262,53 @@ class LLMServiceManager:
         #t.join() 
     
     def _llama_cpp_opts(self):
-        """Read llama.cpp server options from config/core.yml (llama_cpp section)."""
-        opts = getattr(Util().get_core_metadata(), "llama_cpp", None) or {}
-        return opts
+        """Read llama.cpp server options from config/core.yml (llama_cpp section). Returns a dict; never raises."""
+        try:
+            meta = Util().get_core_metadata()
+            opts = getattr(meta, "llama_cpp", None) if meta is not None else None
+            if not isinstance(opts, dict):
+                opts = {}
+            return opts
+        except Exception:
+            return {}
+
+    def _llama_cpp_opts_for_role(self, role: str) -> Dict:
+        """Return merged llama_cpp opts for role: 'main' (root), 'embedding' (embedding only), 'vision' (root + vision), 'tool_selection' (root + tool_selection)."""
+        root = self._llama_cpp_opts()
+        if role == "main":
+            return {k: v for k, v in root.items() if k not in ("embedding", "vision", "tool_selection")}
+        if role == "embedding":
+            emb = root.get("embedding") if isinstance(root.get("embedding"), dict) else {}
+            return dict(emb)
+        if role == "vision":
+            base = {k: v for k, v in root.items() if k not in ("embedding", "vision", "tool_selection")}
+            over = root.get("vision") if isinstance(root.get("vision"), dict) else {}
+            return {**base, **over}
+        if role == "tool_selection":
+            base = {k: v for k, v in root.items() if k not in ("embedding", "vision", "tool_selection")}
+            over = root.get("tool_selection") if isinstance(root.get("tool_selection"), dict) else {}
+            return {**base, **over}
+        return {k: v for k, v in root.items() if k not in ("embedding", "vision", "tool_selection")}
 
     def start_llama_cpp_server(self, name: str, host: str, port: int, model_path: str,
                               ctx_size: str = None, predict: str = None, temp: str = None,
                               threads: str = None, n_gpu_layers: str = None,
                               chat_format: str = None, verbose: str = None, function_calling: bool = True, pooling: bool = False,
                               mmproj_path: str = None, lora_paths: List[str] = None, lora_base_path: str = None,
-                              opts_override: Dict = None):
+                              opts_override: Dict = None, use_embedding_defaults: bool = False):
         """
         Start llama.cpp server. Parameters not passed are read from config/core.yml under llama_cpp.
-        When opts_override is set (embedding): only llama_cpp.embedding is used — main model settings are not applied.
+        When opts_override is set: use that dict (e.g. llama_cpp.embedding, or merged llama_cpp.vision for vision).
+        use_embedding_defaults: when True (embedding only), set ctx_size 0, threads 4, n_gpu_layers 20. For vision/tool_selection keep opts as-is.
         For vision models: pass mmproj_path (full path to projector .gguf).
         For LoRA: pass lora_paths (list of full paths; one or more adapters) and optionally lora_base_path.
         """
-        if opts_override is not None:
-            # Embedding server: use only the embedding subsection; main model opts (batch_size, cache_type_k, grp_attn_*, etc.) do not apply.
+        if opts_override is not None and isinstance(opts_override, dict):
             opts = dict(opts_override)
-            # Embedding-friendly defaults when keys are missing (do not use main-model values).
-            opts.setdefault("ctx_size", 0)
-            opts.setdefault("threads", 4)
-            opts.setdefault("n_gpu_layers", 20)
+            if use_embedding_defaults:
+                opts.setdefault("ctx_size", 0)
+                opts.setdefault("threads", 4)
+                opts.setdefault("n_gpu_layers", 20)
         else:
             opts = dict(self._llama_cpp_opts())
 
@@ -197,8 +318,8 @@ class LLMServiceManager:
         ctx_size = _str(ctx_size) or _str(opts.get("ctx_size")) or ("0" if pooling else "32768")
         predict = _str(predict) or _str(opts.get("predict")) or "8192"
         temp = _str(temp) or _str(opts.get("temp")) or "0.8"
-        threads = _str(threads) or _str(opts.get("threads")) or ("4" if opts_override is not None else "8")
-        n_gpu_layers = _str(n_gpu_layers) or _str(opts.get("n_gpu_layers")) or ("20" if opts_override is not None else "99")
+        threads = _str(threads) or _str(opts.get("threads")) or ("4" if use_embedding_defaults else "8")
+        n_gpu_layers = _str(n_gpu_layers) or _str(opts.get("n_gpu_layers")) or ("20" if use_embedding_defaults else "99")
         verbose = verbose if verbose is not None else opts.get("verbose", False)
         repeat_penalty = _str(opts.get("repeat_penalty")) or "1.5"
         if chat_format is None:
@@ -289,6 +410,14 @@ class LLMServiceManager:
             cmd_list.append("--verbose")
         if not pooling:
             cmd_list.extend(["--repeat-penalty", repeat_penalty])
+            min_p = opts.get("min_p")
+            if min_p is not None:
+                try:
+                    mp = float(min_p)
+                    if 0 <= mp <= 1:
+                        cmd_list.extend(["--min-p", str(mp)])
+                except (TypeError, ValueError):
+                    pass
         if function_calling:
             cmd_list.append("--jinja")
             logger.debug("Function calling is enabled.")
@@ -358,38 +487,47 @@ class LLMServiceManager:
             except (TypeError, ValueError):
                 pass
 
-        # Qwen: qwen_model "qwen3" or "qwen35" (or legacy qwen3_mode) -> reasoning_budget 0. Or set reasoning_budget/enable_reasoning explicitly.
+        # Qwen/thinking: use only reasoning_budget. Server accepts only 0 (disable <think>) or -1 (unrestricted). 0 = no <think>; omit or set !=0 = allow <think> (we pass -1; we strip <think> and remove </think> from stop).
         qwen_model = None
         try:
             qwen_model = Util._get_qwen_model()
         except Exception:
             pass
-        if qwen_model is None and opts:
-            ov = opts.get("qwen_model")
-            if ov is not None and str(ov).strip().lower() in ("qwen3", "qwen35"):
-                qwen_model = str(ov).strip().lower()
-        if qwen_model is None and opts and opts.get("qwen3_mode"):
-            qwen_model = "qwen3"
         reasoning_budget = opts.get("reasoning_budget")
         if reasoning_budget is not None:
             try:
                 rb = int(reasoning_budget)
+                # llama-server only accepts 0 or -1; map any other value to -1 (unrestricted)
                 if rb == 0:
                     cmd_list.append("--reasoning-budget")
                     cmd_list.append("0")
-                    logger.debug("Reasoning/thinking disabled (reasoning_budget=0) for tool routing.")
+                    logger.debug("Reasoning budget: 0 (thinking disabled).")
+                else:
+                    cmd_list.append("--reasoning-budget")
+                    cmd_list.append("-1")
+                    logger.debug("Reasoning budget: -1 (unrestricted thinking; config had %s).", rb)
             except (TypeError, ValueError):
                 pass
-        elif qwen_model in ("qwen3", "qwen35") or opts.get("enable_reasoning") is False or str(opts.get("enable_reasoning", "")).lower() in ("false", "0", "no"):
-            cmd_list.append("--reasoning-budget")
-            cmd_list.append("0")
-            logger.debug("Reasoning/thinking disabled (qwen_model=%s or enable_reasoning=false) for tool routing.", qwen_model or "n/a")
-        # Qwen 3.5 / Qwen3: disable thinking at server so tool calls are not lost (--chat-template-kwargs enable_thinking: false)
-        if qwen_model in ("qwen3", "qwen35"):
+        else:
+            # Not set: only pass 0 for non-Qwen when enable_reasoning is false. For Qwen, omit so model can use <think>.
+            if qwen_model not in ("qwen3", "qwen35") and (
+                opts.get("enable_reasoning") is False or str(opts.get("enable_reasoning", "")).lower() in ("false", "0", "no")
+            ):
+                cmd_list.append("--reasoning-budget")
+                cmd_list.append("0")
+                logger.debug("Reasoning disabled (enable_reasoning=false).")
+        # When reasoning_budget is explicitly 0, also disable enable_thinking for Qwen
+        _rb_val = None
+        if reasoning_budget is not None:
+            try:
+                _rb_val = int(reasoning_budget)
+            except (TypeError, ValueError):
+                pass
+        if qwen_model in ("qwen3", "qwen35") and _rb_val == 0:
             try:
                 cmd_list.append("--chat-template-kwargs")
                 cmd_list.append(json.dumps({"enable_thinking": False}))
-                logger.debug("Qwen: added --chat-template-kwargs enable_thinking=false for llama-server.")
+                logger.debug("Qwen: reasoning_budget=0 → enable_thinking=false for llama-server.")
             except Exception:
                 pass
 
@@ -438,7 +576,9 @@ class LLMServiceManager:
                 return
 
             if llm_type == 'local':
-                entry, _ = Util()._get_model_entry(Util().get_core_metadata().embedding_llm)
+                _meta = Util().get_core_metadata()
+                _emb_ref = getattr(_meta, "embedding_llm", None) if _meta else None
+                entry, _ = Util()._get_model_entry(_emb_ref) if _emb_ref else (None, None)
                 mmproj_path, lora_paths, lora_base_path = (None, [], None)
                 if entry:
                     mmproj_path, lora_paths, lora_base_path = self._resolve_local_extra_paths(entry)
@@ -457,7 +597,7 @@ class LLMServiceManager:
                     llm_name, host, port, embedding_model_path,
                     ctx_size=ctx_size, function_calling=False, pooling=True,
                     mmproj_path=mmproj_path, lora_paths=lora_paths or None, lora_base_path=lora_base_path,
-                    opts_override=embedding_opts,
+                    opts_override=embedding_opts, use_embedding_defaults=True,
                 )
             elif llm_type == 'litellm':
                 pass
@@ -573,13 +713,14 @@ class LLMServiceManager:
         logger.debug("Running classifier LLM {} on {}:{}", name, host, port)
 
     def run_mix_mode_cloud_llm(self):
-        """When main_llm_mode == 'mix', start the cloud LLM endpoint (e.g. LiteLLM on 4002 for Gemini) so it is reachable when requests are routed to cloud."""
+        """When main_llm_mode == 'mix', start the cloud LLM endpoint (LiteLLM proxy on cloud_llm_host:cloud_llm_port) so it is reachable when requests are routed to cloud."""
         meta = Util().get_core_metadata()
         mode = (getattr(meta, "main_llm_mode", None) or "").strip().lower()
         if mode != "mix":
             return
         cloud_ref = (getattr(meta, "main_llm_cloud", None) or "").strip()
         if not cloud_ref:
+            logger.debug("Mix mode: main_llm_cloud not set, skipping cloud LLM server")
             return
         try:
             _, raw_id, mtype, host, port = Util().main_llm_for_route("cloud")
@@ -588,12 +729,24 @@ class LLMServiceManager:
                 logger.debug("Mix mode cloud LLM %s already running", name)
                 return
             if mtype != "litellm":
-                logger.debug("Mix mode cloud ref %s is not litellm (type=%s), not starting a server", cloud_ref, mtype)
+                logger.warning(
+                    "Mix mode cloud LLM not started: ref %s resolved to type %s (expected litellm). "
+                    "Check config: main_llm_cloud must point to a cloud_models entry with type litellm.",
+                    cloud_ref, mtype,
+                )
                 return
+            # Ensure port is int for uvicorn
+            try:
+                port = int(port)
+            except (TypeError, ValueError):
+                port = 14005
             coroutine = self._serve_litellm_on_host_port(host, port, name)
             self.start_async_coroutine(coroutine)
             self.llms.append(name)
-            logger.debug("Running mix-mode cloud LLM %s on %s:%s", name, host, port)
+            logger.info(
+                "Cloud LLM (LiteLLM) started for mix mode: %s on %s:%s — ensure no other process uses this port",
+                name, host, port,
+            )
         except Exception as e:
             logger.warning("Failed to start mix-mode cloud LLM: %s", e)
 
@@ -656,31 +809,38 @@ class LLMServiceManager:
 
     async def _serve_litellm_on_host_port(self, host: str, port: int, name: str = "litellm"):
         """Run LiteLLM FastAPI app on the given host:port. Used by main-LLM and by mix-mode cloud."""
-        litellm_service = LiteLLMService()
-        if host in ("127.0.0.1", "localhost"):
-            host = "0.0.0.0"
-        config = uvicorn.Config(litellm_service.app, host=host, port=port, log_level="info")
-        server = Server(config)
-        logger.debug("Running LiteLLM on %s:%s (%s)", host, port, name)
         try:
+            litellm_service = LiteLLMService()
+            if host in ("127.0.0.1", "localhost"):
+                host = "0.0.0.0"
+            try:
+                port = int(port)
+            except (TypeError, ValueError):
+                port = 14005
+            config = uvicorn.Config(litellm_service.app, host=host, port=port, log_level="info")
+            server = Server(config)
+            logger.debug("Running LiteLLM on %s:%s (%s)", host, port, name)
             await server.serve()
         except asyncio.CancelledError:
             logger.debug("LiteLLM (%s) was cancelled.", name)
+        except Exception as e:
+            logger.error("LiteLLM (%s) failed to start or run on %s:%s: %s", name, host, port, e)
 
     def run_litellm_service(self):
+        """Start LiteLLM proxy for cloud-only mode (main_llm points to cloud_models/...). Uses cloud_llm_host and cloud_llm_port."""
         try:
-            _, model, type, host, port = Util().main_llm()
-            logger.debug(f"Try to run LLM Server {model} on {host}:{port}")
+            _, model, mtype, host, port = Util().main_llm()
+            logger.debug("Try to run LLM Server %s on %s:%s", model, host, port)
             if model in self.llms:
-                logger.debug(f"LLM {model} is already running")
+                logger.debug("LLM %s is already running", model)
                 return None
-            
+            try:
+                port = int(port)
+            except (TypeError, ValueError):
+                port = 14005
             coroutine = self._serve_litellm_on_host_port(host, port, model)
             self.start_async_coroutine(coroutine)
-            #self.litellm_server_task = asyncio.create_task(self.start_litellm_service())
-
-            #self.llm_to_app[name] = server_task
-            logger.debug(f"Running litellm Service {model} on {host}:{port}")
+            logger.info("Cloud LLM (LiteLLM) started: %s on %s:%s", model, host, port)
         except asyncio.CancelledError:
             logger.debug("LLM from litellm service was cancelled.")
 

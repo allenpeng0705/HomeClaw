@@ -18,7 +18,7 @@ import 'node_service.dart';
 /// HomeClaw Core API client.
 /// Sends messages via POST /inbound and returns the reply text.
 class CoreService {
-  /// Timeout for sending a message (POST /inbound). Tool use (e.g. document_read + summarize) can take several minutes; use 600 for large PDFs.
+  /// Timeout for sending a message (POST /inbound). Tool use and local→cloud fallback can take 5+ minutes; use 600 (10 min). Increase to 900 if you still see timeouts behind proxies.
   static const int sendMessageTimeoutSeconds = 600;
 
   static const String _keyBaseUrl = 'core_base_url';
@@ -83,6 +83,11 @@ class CoreService {
   final Map<String, Completer<Map<String, dynamic>>> _pendingInboundResult = {};
   /// request_id -> (userId, friendId) so when inbound_result arrives we can route to the correct chat.
   final Map<String, ({String userId, String friendId})> _pendingRequestMeta = {};
+  /// When using async /inbound: the current request_id and completer so the UI can cancel and we complete the future with cancelled result.
+  String? _currentInboundRequestId;
+  Completer<Map<String, dynamic>>? _currentInboundCompleter;
+  /// True when there is an ongoing async inbound request that can be cancelled via POST /inbound/cancel.
+  String? get ongoingInboundRequestId => _currentInboundRequestId;
   final StreamController<Map<String, dynamic>> _pushMessageController = StreamController<Map<String, dynamic>>.broadcast();
   /// Stream of proactive push messages from Core (cron, reminders, record_date). UI can listen and show in chat or as notification.
   Stream<Map<String, dynamic>> get pushMessageStream => _pushMessageController.stream;
@@ -1314,6 +1319,8 @@ class CoreService {
     if (requestId == null || requestId.isEmpty) return;
     final meta = _pendingRequestMeta.remove(requestId);
     final completer = _pendingInboundResult.remove(requestId);
+    final status = msg['status'] as String?;
+    final cancelled = status == 'cancelled';
     final ok = msg['ok'] as bool? ?? true;
     final text = (msg['text'] as String?) ?? '';
     final err = msg['error'] as String?;
@@ -1323,8 +1330,9 @@ class CoreService {
         ? (responseImages as List<dynamic>).whereType<String>().toList()
         : (responseImage is String ? <String>[responseImage as String] : null);
     final resultMap = {
-      'text': ok ? text : (err ?? text),
+      'text': cancelled ? (err ?? 'Request cancelled.') : (ok ? text : (err ?? text)),
       'images': imageList != null && imageList.isNotEmpty ? imageList : null,
+      if (cancelled) 'cancelled': true,
     };
     if (meta != null) {
       try {
@@ -1374,25 +1382,78 @@ class CoreService {
     final meta = (userId: userId ?? 'companion', friendId: friendId.isEmpty ? 'HomeClaw' : friendId);
     _pendingRequestMeta[requestId] = meta;
     if (_coreWsSessionId != null) {
-      final completer = Completer<Map<String, dynamic>>();
-      _pendingInboundResult[requestId] = completer;
+      // Race WebSocket push with polling so we get the result even if push is lost (e.g. proxy drops WS).
+      final pushCompleter = Completer<Map<String, dynamic>>();
+      _pendingInboundResult[requestId] = pushCompleter;
+      final resultCompleter = Completer<Map<String, dynamic>>();
+      _currentInboundRequestId = requestId;
+      _currentInboundCompleter = resultCompleter;
+      void complete(Map<String, dynamic> r) {
+        if (!resultCompleter.isCompleted) {
+          _currentInboundRequestId = null;
+          _currentInboundCompleter = null;
+          _pendingInboundResult.remove(requestId);
+          _pendingRequestMeta.remove(requestId);
+          resultCompleter.complete(r);
+        }
+      }
+      void completeError(Object e, StackTrace st) {
+        if (!resultCompleter.isCompleted) {
+          _currentInboundRequestId = null;
+          _currentInboundCompleter = null;
+          _pendingInboundResult.remove(requestId);
+          _pendingRequestMeta.remove(requestId);
+          resultCompleter.completeError(e, st);
+        }
+      }
+      pushCompleter.future
+          .timeout(
+            Duration(seconds: sendMessageTimeoutSeconds),
+            onTimeout: () => throw TimeoutException('Inbound push timed out', Duration(seconds: sendMessageTimeoutSeconds)),
+          )
+          .then(complete)
+          .catchError(completeError);
+      _pollInboundResult(requestId, meta, onProgress).then(complete).catchError(completeError);
       try {
-        final result = await completer.future.timeout(
-          Duration(seconds: sendMessageTimeoutSeconds),
-          onTimeout: () {
-            _pendingInboundResult.remove(requestId);
-            _pendingRequestMeta.remove(requestId);
-            throw TimeoutException('Inbound result push timed out', Duration(seconds: sendMessageTimeoutSeconds));
-          },
-        );
-        return result;
+        return await resultCompleter.future;
       } catch (_) {
+        _currentInboundRequestId = null;
+        _currentInboundCompleter = null;
         _pendingInboundResult.remove(requestId);
         _pendingRequestMeta.remove(requestId);
         rethrow;
       }
     }
-    return _pollInboundResult(requestId, meta, onProgress);
+    _currentInboundRequestId = requestId;
+    _currentInboundCompleter = null;
+    try {
+      return await _pollInboundResult(requestId, meta, onProgress);
+    } finally {
+      _currentInboundRequestId = null;
+      _currentInboundCompleter = null;
+    }
+  }
+
+  /// Cancel the ongoing async /inbound request (if any). Calls POST /inbound/cancel so Core stops the task; then completes the waiting future with a cancelled result so the UI can stop loading. No-op if no async request is in progress.
+  Future<void> cancelOngoingRequest() async {
+    final requestId = _currentInboundRequestId;
+    if (requestId == null || requestId.isEmpty) return;
+    try {
+      final cancelUrl = Uri.parse('$_baseUrl/inbound/cancel');
+      final headers = <String, String>{
+        'Content-Type': 'application/json',
+        ..._authHeaders(),
+      };
+      await http
+          .post(cancelUrl, headers: headers, body: jsonEncode({'request_id': requestId}))
+          .timeout(const Duration(seconds: 10));
+    } catch (_) {}
+    final completer = _currentInboundCompleter;
+    _currentInboundRequestId = null;
+    _currentInboundCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete({'text': 'Request cancelled.', 'cancelled': true});
+    }
   }
 
   /// Poll GET /inbound/result?request_id=... until status is "done" or error. Same auth as /inbound.
@@ -1418,8 +1479,9 @@ class CoreService {
         await Future<void>.delayed(Duration(seconds: 2));
         continue;
       }
-      if (response.statusCode == 200 && status == 'done') {
+      if (response.statusCode == 200 && (status == 'done' || status == 'cancelled')) {
         _pendingRequestMeta.remove(requestId);
+        final cancelled = status == 'cancelled';
         final ok = map?['ok'] as bool? ?? true;
         final text = (map?['text'] as String?) ?? '';
         final err = map?['error'] as String?;
@@ -1429,8 +1491,9 @@ class CoreService {
             ? (responseImages as List<dynamic>).whereType<String>().toList()
             : (responseImage is String ? <String>[responseImage as String] : null);
         final result = {
-          'text': ok ? text : (err ?? text),
+          'text': cancelled ? (err ?? 'Request cancelled.') : (ok ? text : (err ?? text)),
           'images': imageList != null && imageList.isNotEmpty ? imageList : null,
+          if (cancelled) 'cancelled': true,
         };
         try {
           _pushMessageController.add({

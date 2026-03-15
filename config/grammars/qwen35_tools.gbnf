@@ -1,30 +1,30 @@
 # Qwen 3.5 9B tool-call grammar for llama.cpp
-# Forces output to exactly: <tool_call>{"name":"...","arguments":{...}}</tool_call>
-# so the model cannot output conversational text or <think> blocks (illegal tokens).
-# Use with enable_thinking: false and presence_penalty 1.5 for Qwen 3.5.
+# Forces <tool_call>{"name":"...","arguments":{...}}</tool_call> or NO_TOOL_REQUIRED only.
+# No <think> block: use reasoning_budget in llm.yml to control thinking; with grammar we only constrain tool-decision output so the model cannot emit <think> then malformed <tool_call>.
+#
+# Truncation: We do NOT add "</tool_call>" to the stop list (see llm_loop: _stop_extra=None). Adding it caused the server to cut off and leave content empty. With grammar, the engine stops when the root rule is satisfied (complete tool_call or NO_TOOL_REQUIRED). Long tool_call arguments are only limited by max_tokens; keep completion.max_tokens high enough for your largest expected tool payload.
+#
+# Root: either NO_TOOL_REQUIRED or one or more tool_call blocks (aligns with prompt "one or more tool calls per turn when the task needs multiple steps").
 
-root ::= "<tool_call>" ws object ws "</tool_call>"
+root ::= "NO_TOOL_REQUIRED" | (tool_call_block (ws tool_call_block)*)
 
+tool_call_block ::= "<tool_call>" object "</tool_call>"
+
+# Core object structure
+object ::= "{" ws (kv ("," ws kv)*)? "}" ws
+kv     ::= string ":" ws value
+
+# Values
 value ::= object | array | string | number | ("true" | "false" | "null") ws
 
-object ::=
-  "{" ws (
-    string ":" ws value
-    ("," ws string ":" ws value)*
-  )? "}" ws
+# Arrays
+array ::= "[" ws (value ("," ws value)*)? "]" ws
 
-array ::=
-  "[" ws (
-    value
-    ("," ws value)*
-  )? "]" ws
+# String (handles escapes; \x00-\x1F excluded per JSON)
+string ::= "\"" ([^"\\\x00-\x1F] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4}))* "\"" ws
 
-string ::=
-  "\"" (
-    [^"\\\x7F\x00-\x1F] |
-    "\\" (["\\/bfnrt] | "u" [0-9a-fA-F]{4})
-  )* "\"" ws
+# Robust JSON number
+number ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? ([eE] [-+]? [0-9]+)? ws
 
-number ::= ("-"? ([0-9] | [1-9] [0-9]{0,15})) ("." [0-9]+)? ([eE] [-+]? [0-9] [1-9]{0,15})? ws
-
-ws ::= ([ \t\n])*
+# Whitespace
+ws     ::= [ \t\n]*

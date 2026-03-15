@@ -1,6 +1,6 @@
 @echo off
 REM HomeClaw installer launcher for Windows. Runs install.ps1 with ExecutionPolicy Bypass.
-REM Same steps as install.ps1: Python, Node, tsx, ClawHub, clone, VMPrint, pip, Cognee, document stack, llama.cpp, Portal.
+REM Same steps as install.ps1: Python, Node, tsx, ClawHub, clone, VMPrint, pip, Cognee deps (cognee in vendor/), document stack, MemOS (vendor/memos), llama.cpp, Portal.
 REM Use this if .\install.ps1 fails with "not digitally signed" (execution policy).
 echo.
 echo Running HomeClaw installer (same as install.ps1, with execution policy bypass)...

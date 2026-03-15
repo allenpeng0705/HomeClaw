@@ -36,6 +36,9 @@ def tool_result_looks_like_error(result: Any) -> bool:
             return True
         if r.startswith("error:") or "error: " in r[:200]:
             return True
+        # run_skill instruction-only: skill tells the model what to do next (e.g. html-slides). Not an error — same model should continue (second LLM round), not trigger mix retry.
+        if "instruction-only skill confirmed" in r:
+            return False
         if "do not reply with only this line" in r or "you must in this turn" in r:
             return True
     except Exception:
@@ -98,15 +101,17 @@ def tool_result_usable_as_final_response(
                         return False
         if tool_name in ("save_result_page", "get_file_view_link"):
             return ("/files/out" in result and "token=" in result) or ("http" in result and "/files/" in result)
+        # session_status excluded: its JSON is internal; use second LLM so model can answer identity queries (e.g. "你是谁？") in natural language.
+        # folder_list / file_find excluded (match primary): second LLM round so user gets natural language, not raw JSON.
         _self_raw = cfg.get("self_contained_tools")
         self_contained = tuple(_self_raw) if isinstance(_self_raw, (list, tuple)) else (
             "run_skill", "echo", "time", "profile_get", "profile_list", "models_list", "agents_list",
-            "platform_info", "cwd", "env", "session_status", "sessions_list", "sessions_send", "sessions_spawn",
+            "platform_info", "cwd", "env", "sessions_list", "sessions_send", "sessions_spawn",
             "cron_list", "cron_status", "cron_schedule", "cron_remove", "cron_update", "cron_run",
             "remind_me", "record_date", "recorded_events_list", "profile_update",
             "append_agent_memory", "append_daily_memory", "usage_report", "channel_send",
             "exec", "process_list", "process_poll", "process_kill",
-            "file_write", "file_edit", "apply_patch", "folder_list", "file_find",
+            "file_write", "file_edit", "apply_patch",
             "http_request", "webhook_trigger",
             "knowledge_base_add", "knowledge_base_remove", "knowledge_base_list",
             "browser_snapshot", "browser_click", "browser_type",
@@ -404,36 +409,152 @@ def infer_route_to_plugin_fallback(query: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def parse_raw_tool_calls_from_content(content: str):
-    """Parse <tool_call>...</tool_call> from LLM content. Returns list of tool_call dicts or None. Never raises."""
-    if not content or not isinstance(content, str):
-        return None
-    text = content.strip()
-    if "<tool_call>" not in text and "</tool_call>" not in text:
-        return None
-    pattern = re.compile(r"<tool_call>\s*(\{[\s\S]*?\})\s*</tool_call>", re.IGNORECASE)
-    matches = pattern.findall(text)
-    if not matches:
-        return None
-    tool_calls = []
-    for i, raw_json in enumerate(matches):
-        try:
-            obj = json.loads(raw_json)
-            name = obj.get("name") or (obj.get("function") or {}).get("name")
-            args = obj.get("arguments")
-            if isinstance(args, str):
-                try:
-                    args = json.loads(args)
-                except json.JSONDecodeError:
-                    args = {}
-            if not name:
+def _parse_xml_style_tool_call(inner: str) -> Optional[Dict[str, Any]]:
+    """
+    Parse alternate XML-style block inside <tool_call>...</tool_call> when JSON was not used.
+    e.g. <function=file_find>\n</parameter><pattern>*.png</pattern>
+    Handles truncated output (e.g. <pattern>*.{png,jpg,gif}*</p without closing).
+    Returns one OpenAI-style tool_call dict or None. Never raises.
+    """
+    try:
+        if not inner or not isinstance(inner, str):
+            return None
+        name_match = re.search(r"function\s*=\s*(\w+)", inner, re.IGNORECASE)
+        if not name_match:
+            name_match = re.search(r"<function\s*>([^<]+)</function>", inner, re.IGNORECASE)
+        if not name_match:
+            return None
+        name = (name_match.group(1) or "").strip()
+        if not name:
+            return None
+        args = {}
+        for tag_match in re.finditer(r"<(\w+)>([^<]*)", inner):
+            key = (tag_match.group(1) or "").strip().lower()
+            raw_val = (tag_match.group(2) or "").strip()
+            if "</" in raw_val:
+                raw_val = raw_val.split("</")[0].strip()
+            if not key or key in ("function", "tool_call"):
                 continue
-            if not isinstance(args, dict):
-                args = {}
-            tool_calls.append({
-                "id": f"raw_tool_{i}_{uuid.uuid4().hex[:8]}",
-                "function": {"name": name, "arguments": json.dumps(args)},
-            })
-        except (json.JSONDecodeError, TypeError):
-            continue
-    return tool_calls if tool_calls else None
+            args[key] = raw_val
+        return {
+            "id": f"raw_tool_0_{uuid.uuid4().hex[:8]}",
+            "type": "function",
+            "function": {"name": name, "arguments": json.dumps(args)},
+        }
+    except Exception:
+        return None
+
+
+def _extract_balanced_json_object(s: str):
+    """Return substring from first '{' to matching '}' (brace-balanced). Handles nested {} and "" strings. Never raises."""
+    try:
+        if not s or not isinstance(s, str) or not s.strip().startswith("{"):
+            return None
+        s = s.strip()
+        depth = 0
+        i = 0
+        in_string = False
+        escape = False
+        quote = None
+        while i < len(s):
+            c = s[i]
+            if escape:
+                escape = False
+                i += 1
+                continue
+            if c == "\\" and in_string:
+                escape = True
+                i += 1
+                continue
+            if in_string:
+                if c == quote:
+                    in_string = False
+                i += 1
+                continue
+            if c in ('"', "'"):
+                in_string = True
+                quote = c
+                i += 1
+                continue
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return s[: i + 1]
+            i += 1
+        return None
+    except Exception:
+        return None
+
+
+def parse_raw_tool_calls_from_content(content: str):
+    """Parse <tool_call>...</tool_call> from LLM content. Supports JSON and XML-style. Handles truncated (missing </tool_call>). Returns list of tool_call dicts or None. Never raises."""
+    try:
+        if not content or not isinstance(content, str):
+            return None
+        text = content.strip()
+        if "<tool_call>" not in text:
+            return None
+        block_re = re.compile(r"<tool_call>([\s\S]*?)</tool_call>", re.IGNORECASE)
+        blocks = block_re.findall(text)
+        tool_calls = []
+        for i, inner in enumerate(blocks):
+            inner = (inner or "").strip()
+            if not inner:
+                continue
+            parsed = None
+            if inner.startswith("{"):
+                try:
+                    obj = json.loads(inner)
+                    name = obj.get("name") or (obj.get("function") or {}).get("name")
+                    args = obj.get("arguments")
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError:
+                            args = {}
+                    if name and isinstance(args, dict):
+                        parsed = {
+                            "id": f"raw_tool_{i}_{uuid.uuid4().hex[:8]}",
+                            "type": "function",
+                            "function": {"name": name, "arguments": json.dumps(args)},
+                        }
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if not parsed:
+                parsed = _parse_xml_style_tool_call(inner)
+            if parsed:
+                parsed["id"] = f"raw_tool_{i}_{uuid.uuid4().hex[:8]}"
+                if "type" not in parsed:
+                    parsed["type"] = "function"
+            if parsed:
+                tool_calls.append(parsed)
+        # Truncated: <tool_call> present but no </tool_call> — extract JSON object after <tool_call>
+        if not tool_calls:
+            start = text.find("<tool_call>")
+            if start >= 0:
+                rest = text[start + len("<tool_call>"):].strip()
+                if rest.startswith("{"):
+                    inner = _extract_balanced_json_object(rest)
+                    if inner:
+                        try:
+                            obj = json.loads(inner)
+                            name = obj.get("name") or (obj.get("function") or {}).get("name")
+                            args = obj.get("arguments")
+                            if isinstance(args, str):
+                                try:
+                                    args = json.loads(args)
+                                except json.JSONDecodeError:
+                                    args = {}
+                            if name and isinstance(args, dict):
+                                tool_calls.append({
+                                    "id": f"raw_tool_0_{uuid.uuid4().hex[:8]}",
+                                    "type": "function",
+                                    "function": {"name": name, "arguments": json.dumps(args)},
+                                })
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+        return tool_calls if tool_calls else None
+    except Exception:
+        return None

@@ -50,11 +50,17 @@ import re
 from jinja2 import Template
 
 # Ensure the project root is in the PYTHONPATH
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_root = Path(__file__).resolve().parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+# Cognee is vendored in vendor/cognee
+_vendor_cognee = _root / "vendor" / "cognee"
+if _vendor_cognee.is_dir() and str(_vendor_cognee) not in sys.path:
+    sys.path.insert(0, str(_vendor_cognee))
 from core.orchestrator import Orchestrator
 from core.result_viewer import build_image_view_links, get_result_link_base_url
 from base.PluginManager import PluginManager
-from base.util import Util, redact_params_for_log
+from base.util import Util, redact_params_for_log, strip_reasoning_from_assistant_text
 from base.base import (
     LLM, EmbeddingRequest, Intent, IntentType, RegisterChannelRequest, PromptRequest, AsyncResponse, User, InboundRequest,
     ExternalPluginRegisterRequest, PluginLLMGenerateRequest, PluginResult,
@@ -229,6 +235,7 @@ class Core(CoreInterface):
             self._pending_plugin_calls: Dict[str, Dict[str, Any]] = {}  # session_key -> {plugin_id, capability_id, params, missing, ...}
             self._inbound_async_results: Dict[str, dict] = {}  # request_id -> {status, ok?, text?, images?, error?, created_at}; TTL 5 min
             self._inbound_async_results_ttl_sec = 300
+            self._inbound_async_tasks: Dict[str, asyncio.Task] = {}  # request_id -> Task for async /inbound; used by POST /inbound/cancel
             self._ws_sessions: Dict[str, WebSocket] = {}  # session_id -> WebSocket for push (Companion/channel holds /ws open; Core pushes async result and proactive messages)
             self._ws_user_by_session: Dict[str, str] = {}  # session_id -> user_id (so we can deliver_to_user for cron/reminder)
             #self.active_plugin = None
@@ -937,6 +944,26 @@ class Core(CoreInterface):
                     session_id = self.get_session_id(app_id=app_id, user_name=user_name, user_id=user_id, channel_name=channel_name, account_id=account_id, friend_id=_fid)
                     run_id = self.get_run_id(agent_id=app_id, user_name=user_name, user_id=user_id)
 
+                    # Full turn (user+assistant+tool) for MemOS; Cognee gets user only. When memory_turn_data present, pass list of messages.
+                    memory_turn_data = getattr(request, "memory_turn_data", None)
+                    if isinstance(memory_turn_data, dict) and memory_turn_data.get("user_message") is not None:
+                        messages_for_memory = [
+                            {"role": "user", "content": str(memory_turn_data.get("user_message") or "").strip()},
+                            {"role": "assistant", "content": str(memory_turn_data.get("assistant_message") or "").strip()},
+                        ]
+                        for tm in memory_turn_data.get("tool_messages") or []:
+                            if isinstance(tm, dict):
+                                raw_content = tm.get("content")
+                                content_str = str(raw_content or "").strip()
+                                if content_str:
+                                    messages_for_memory.append({
+                                        "role": "tool",
+                                        "content": content_str,
+                                        "toolName": str(tm.get("toolName") or tm.get("tool_name") or "tool"),
+                                    })
+                        add_data = messages_for_memory
+                    else:
+                        add_data = human_message
                     # When memory_check_before_add is True and model is small/local: run one LLM call to decide "should we store?"; else store every message (default).
                     meta = Util().get_core_metadata()
                     use_memory_check = getattr(meta, "memory_check_before_add", False)
@@ -962,11 +989,11 @@ class Core(CoreInterface):
                         if result is not None and len(result) > 0:
                             result = result.strip().lower()
                             if result.find("yes") != -1:
-                                await self.mem_instance.add(human_message, user_name=user_name, user_id=user_id, agent_id=_fid, run_id=run_id, metadata=None, filters=None)
-                                _component_log("memory", f"add (yes): user_id={user_id} friend_id={_fid} text={human_message[:60]}...")
+                                await self.mem_instance.add(add_data, user_name=user_name, user_id=user_id, agent_id=_fid, run_id=run_id, metadata=None, filters=None)
+                                _component_log("memory", f"add (yes): user_id={user_id} friend_id={_fid} text={(human_message or '')[:60]}...")
                                 logger.debug(f"User input added to memory: {human_message}")
                     else:
-                        await self.mem_instance.add(human_message, user_name=user_name, user_id=user_id, agent_id=_fid, run_id=run_id, metadata=None, filters=None)
+                        await self.mem_instance.add(add_data, user_name=user_name, user_id=user_id, agent_id=_fid, run_id=run_id, metadata=None, filters=None)
                         _component_log("memory", f"add: user_id={user_id} friend_id={_fid} text={(human_message or '')[:60]}...")
                         logger.debug(f"User input added to memory: {human_message}")
                 except Exception as e:
@@ -1187,7 +1214,10 @@ class Core(CoreInterface):
             if histories is not None and len(histories) > 0:
                 for item in histories:
                     messages.append({'role': 'user', 'content': item.human_message.content})
-                    messages.append({'role': 'assistant', 'content': item.ai_message.content})
+                    # Strip route label from stored assistant reply so the LLM never sees "[Local · ...]" and echoes it.
+                    ai_content = (item.ai_message.content or "").strip()
+                    ai_content = _strip_leading_route_label(ai_content) or ai_content
+                    messages.append({'role': 'assistant', 'content': ai_content})
             images_list = list(getattr(request, "images", None) or [])
             audios_list = list(getattr(request, "audios", None) or [])
             videos_list = list(getattr(request, "videos", None) or [])
@@ -1409,6 +1439,9 @@ class Core(CoreInterface):
                         pass
                 if vision_llm_ref and "image" in supported_vision:
                     try:
+                        # On-demand: start vision server when needed (saves memory when vision is used rarely).
+                        if getattr(Util().get_core_metadata(), "vision_llm_start_on_demand", True):
+                            await asyncio.to_thread(self.llmManager.ensure_vision_llm_running)
                         prompt_for_vision = "Describe the image(s) in detail. If the user asked a question about the image(s), answer it concisely. User message: " + ((text_only or "").strip() or "(no text)")
                         vision_content = [{"type": "text", "text": prompt_for_vision}]
                         vision_max_dim = 0
@@ -1442,6 +1475,13 @@ class Core(CoreInterface):
                         raise
                     except Exception as e:
                         logger.debug("Vision sidecar ({}): failed: {}", vision_llm_ref, e)
+                    finally:
+                        # On-demand: schedule vision server stop after use (or after idle timeout).
+                        if vision_llm_ref and getattr(Util().get_core_metadata(), "vision_llm_start_on_demand", True):
+                            try:
+                                self.llmManager.schedule_vision_llm_stop()
+                            except Exception:
+                                pass
                 if not vision_sidecar_ok:
                     # No vision sidecar or it failed: save images to user folder when possible and return a clear reply (no LLM call with omitted images).
                     saved = 0
@@ -1556,7 +1596,13 @@ class Core(CoreInterface):
             if use_memory and not memory_add_after_reply:
                 await self.memory_queue.put(request)
             start = time.time()
-            answer = await self.answer_from_memory(query=human_message, messages=messages, app_id=app_id, user_name=user_name, user_id=user_id, agent_id=app_id, session_id=session_id, run_id=run_id, request=request)
+            result = await self.answer_from_memory(query=human_message, messages=messages, app_id=app_id, user_name=user_name, user_id=user_id, agent_id=app_id, session_id=session_id, run_id=run_id, request=request)
+            if isinstance(result, tuple):
+                answer, memory_turn_data = result[0], (result[1] if len(result) > 1 else None)
+            else:
+                answer, memory_turn_data = result, None
+            if memory_turn_data is not None:
+                request.memory_turn_data = memory_turn_data
             end = time.time()
             elapsed = end - start
             logger.info("Core: response generated in {:.1f}s for user={}", elapsed, user_id)
@@ -1564,9 +1610,10 @@ class Core(CoreInterface):
             if use_memory and memory_add_after_reply:
                 await self.memory_queue.put(request)
             if elapsed > 90:
+                _suggest_sec = max(600, int(elapsed) + 60)
                 logger.warning(
-                    "Inbound request took {:.0f}s. If the client sees 'Connection closed while receiving data', use POST /inbound with stream: true (SSE) or set proxy/client read_timeout >= {:.0f}s (e.g. inbound_request_timeout_seconds in config).",
-                    elapsed, max(300, elapsed + 60),
+                    "Inbound request took %.0fs. To avoid client/proxy timeout: set inbound_request_timeout_seconds and proxy read_timeout >= %s s; or use POST /inbound with stream: true (SSE) or async: true for remote.",
+                    elapsed, _suggest_sec,
                 )
             if answer is None:
                 answer = "I'm sorry, I don't have the answer to that question. Please try asking a different question or restart your system."
@@ -1825,6 +1872,21 @@ class Core(CoreInterface):
                             _component_log("plugin", f"synced {n} plugin(s) to vector store")
                         except Exception as e:
                             logger.warning("Plugins vector sync failed: {}", e)
+
+            # Sync tools to vector store when tools.tools_use_vector_search and tools_refresh_on_startup (RAG for tools; off by default)
+            _tools_cfg = getattr(core_metadata, "tools_config", None) or {}
+            if _tools_cfg.get("tools_use_vector_search", False) and _tools_cfg.get("tools_refresh_on_startup", True):
+                if getattr(self, "tools_vector_store", None) and getattr(self, "embedder", None):
+                    from base.tools_rag import sync_tools_to_vector_store
+                    from base.tools import get_tool_registry
+                    registry = get_tool_registry()
+                    tool_list = registry.list_tools() if registry else []
+                    if tool_list:
+                        try:
+                            n = await sync_tools_to_vector_store(tool_list, self.tools_vector_store, self.embedder)
+                            _component_log("tools", f"synced {n} tool(s) to vector store (RAG)")
+                        except Exception as e:
+                            logger.warning("Tools vector sync failed: {}", e)
 
             # Sync agent memory (AGENT_MEMORY + daily markdown) to vector store when use_agent_memory_search. Index global + per (user_id, friend_id).
             if getattr(core_metadata, "use_agent_memory_search", True):
@@ -2183,7 +2245,7 @@ class Core(CoreInterface):
         try:
             message: ChatMessage = ChatMessage()
             message.add_user_message(user_message)
-            message.add_ai_message(ai_message)
+            message.add_ai_message(strip_reasoning_from_assistant_text(ai_message or ""))
             self.chatDB.add(app_id=app_id, user_name=user_name, user_id=user_id, session_id=session_id, friend_id=friend_id, chat_message=message)
         except Exception as e:
             logger.exception(e)
@@ -2378,6 +2440,7 @@ class Core(CoreInterface):
         return summary.strip() if summary else None
 
     def add_chat_history_by_role(self, sender_name, responder_name, sender_text, responder_text):
+        responder_text = strip_reasoning_from_assistant_text(responder_text or "") or responder_text or ""
         return self.chatDB.add_by_role(sender_name, responder_name, sender_text, responder_text)
 
 

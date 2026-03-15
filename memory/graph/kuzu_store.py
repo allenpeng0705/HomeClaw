@@ -33,8 +33,14 @@ class KuzuStore(GraphStoreBase):
             data_path = getattr(Util(), "data_path", lambda: "database")()
             if callable(data_path):
                 data_path = data_path()
-            p = str(Path(data_path) / "graph_kuzu")
-        Path(p).mkdir(parents=True, exist_ok=True)
+            p = str(Path(data_path) / "graph_kuzu" / "db.kuzu")
+        else:
+            # Kuzu 0.11+ expects a file path, not a directory; if path has no .kuzu, treat as dir and add db.kuzu.
+            p_obj = Path(p)
+            if not p.endswith(".kuzu"):
+                p = str(p_obj / "db.kuzu")
+        parent = Path(p).parent
+        parent.mkdir(parents=True, exist_ok=True)
         self._db = kuzu.Database(p)
         self._conn = kuzu.Connection(self._db)
         self.init_schema()

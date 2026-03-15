@@ -1,0 +1,73 @@
+# Cursor Bridge: open project in Cursor, chat with Cursor's agent, run commands and see results from HomeClaw.
+# Run the bridge on the machine where Cursor runs (see external_plugins/cursor_bridge/README.md).
+# Override base_url in config so Core can reach the bridge (e.g. Tailscale host).
+id: cursor-bridge
+name: Cursor Bridge
+description: |
+  Open a project/folder in Cursor IDE, run Cursor's agent with a task and return the result, or run shell commands
+  on the user's dev machine. Use when the user wants to: open a project in Cursor (then they can chat with the agent
+  in the IDE); have Cursor's agent do a coding task and see the output (run and see results); or run a command
+  (e.g. npm test, pip install) and get the output back (e.g. "open my project in Cursor", "in Cursor run the agent
+  to fix the bug and show me the result", "run npm test in Cursor").
+type: http
+config:
+  base_url: "http://127.0.0.1:3104"
+  path: /run
+  timeout_sec: 120
+capabilities:
+  - id: open_project
+    name: Open project in Cursor
+    description: Open a folder or project in Cursor IDE so the user can work and chat with the agent there. Use when the user says "open project X in Cursor", "open folder in Cursor", or "open my project / recent project in Cursor".
+    parameters:
+      - name: path
+        type: string
+        required: true
+        description: Folder path to open (absolute or relative to bridge CWD). Can be a project root or any folder.
+      - name: folder
+        type: string
+        required: false
+        description: Alias for path (folder to open).
+  - id: run_agent
+    name: Run Cursor agent and get result
+    description: Run Cursor CLI agent with a task in non-interactive mode and return the output so the user sees the result in the channel. Use when the user wants the agent to do something and "see the results" (e.g. "have Cursor agent fix the bug and show me", "run Cursor agent to add tests and show output").
+    parameters:
+      - name: task
+        type: string
+        required: true
+        description: The task or prompt for Cursor's agent (e.g. "fix the failing test in auth module", "add a README with installation steps").
+      - name: cwd
+        type: string
+        required: false
+        description: Project directory for the agent (optional; default is bridge CWD).
+      - name: timeout_sec
+        type: integer
+        required: false
+        description: Max seconds for the agent (default 120; long tasks may need Cloud Agent in Cursor IDE).
+  - id: run_command
+    name: Run command
+    description: Run a shell command on the dev machine and return output (e.g. npm test, pip install). Use when the user says "run X in Cursor" or "execute X in Cursor".
+    parameters:
+      - name: command
+        type: string
+        required: true
+        description: The shell command to run (e.g. "npm test", "pip install -r requirements.txt").
+      - name: cwd
+        type: string
+        required: false
+        description: Working directory (optional).
+  - id: open_file
+    name: Open file in Cursor
+    description: Open a single file in Cursor IDE. Use when the user says "open file X in Cursor".
+    parameters:
+      - name: path
+        type: string
+        required: true
+        description: File path to open (absolute or relative to project).
+  - id: ask_cursor
+    name: Ask Cursor (natural language)
+    description: Infer intent from user message (open project, run agent, or run command). Use when the request is ambiguous.
+    parameters:
+      - name: task
+        type: string
+        required: false
+        description: Short task description; if omitted, user_input is used.

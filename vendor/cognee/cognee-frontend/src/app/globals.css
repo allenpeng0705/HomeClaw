@@ -1,0 +1,31 @@
+:root {
+  --max-width: 1100px;
+  --border-radius: 2px;
+  --font-mono: ui-monospace, Menlo, Monaco, "Cascadia Mono", "Segoe UI Mono",
+    "Roboto Mono", "Oxygen Mono", "Ubuntu Monospace", "Source Code Pro",
+    "Fira Mono", "Droid Sans Mono", "Courier New", monospace;
+
+  --button-padding: 14px 20px !important;
+  --button-border-radius: 100px !important;
+  --global-color-primary: #6510F4 !important;
+  --global-color-primary-active: #500cc5 !important;
+  --global-color-primary-text: white !important;
+  --global-color-secondary: #0DFF00 !important;
+  --global-background-default: #F4F4F4;
+  --textarea-default-color: #0D051C !important;
+}
+
+html,
+body {
+  height: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+  background-color: var(--global-background-default);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+@import "tailwindcss";

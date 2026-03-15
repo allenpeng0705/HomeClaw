@@ -1,6 +1,6 @@
 # HomeClaw install script for Windows.
 # Run from project root (existing clone) or from a parent directory (script will clone).
-# Steps (same as install.sh): Python (3.9+) -> Node.js -> tsx -> ClawHub -> [clone if needed] -> VMPrint -> pip install -> Cognee -> document stack -> llama.cpp -> GGUF/Ollama -> open Portal.
+# Steps (same as install.sh): Python (3.9+) -> Node.js -> tsx -> ClawHub -> [clone if needed] -> VMPrint -> pip install -> Cognee deps (cognee in vendor/) -> document stack -> MemOS (vendor/memos) -> llama.cpp -> GGUF/Ollama -> open Portal.
 #
 # If you see "cannot be loaded... not digitally signed" (execution policy):
 #   Easiest: run install.bat instead (it uses Bypass automatically).
@@ -258,8 +258,8 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "OK: requirements installed"
 
 # ----- Step 5b: Cognee dependencies (for memory backend) -----
-# Cognee is the default memory backend. Cognee is part of this repo (customized); we only
-# install its dependencies here. Do not run "pip install cognee" — the package is in the source.
+# Cognee is the default memory backend. Cognee is vendored in vendor/cognee; we only
+# install its dependencies here. Do not run "pip install cognee".
 Write-Host ""
 Write-Host "=== Step 5b: Cognee dependencies (memory backend) ==="
 $cogneeDepsPath = Join-Path $Root "requirements-cognee-deps.txt"
@@ -286,6 +286,75 @@ if (Test-Path (Join-Path $Root "requirements-document.txt")) {
   if ($LASTEXITCODE -eq 0) { Write-Host "OK: document stack installed" } else { Write-Host "Document stack install failed or skipped. To install later: $PythonExe -m pip install -r requirements-document.txt -i https://pypi.org/simple" }
 } else {
   Write-Host "requirements-document.txt not found; skipping."
+}
+
+# ----- Step 5d: MemOS (memory backend, optional) -----
+Write-Host ""
+Write-Host "=== Step 5d: MemOS (memory backend) ==="
+$MemosDir = Join-Path $Root "vendor\memos"
+$MemosStandalone = Join-Path $MemosDir "server-standalone.ts"
+if (Test-Path $MemosStandalone) {
+  $MemosSrc = Join-Path $MemosDir "src"
+  $MemosPkg = Join-Path $MemosDir "package.json"
+  if (-not (Test-Path $MemosSrc) -or -not (Test-Path $MemosPkg)) {
+    Write-Host "MemOS app source missing in vendor\memos. Cloning MemOS and copying app..."
+    try {
+      $null = Get-Command git -ErrorAction SilentlyContinue
+      if ($?) {
+        $MemosTmp = Join-Path $Root ".tmp_memos_clone"
+        if (Test-Path $MemosTmp) { Remove-Item -Recurse -Force $MemosTmp }
+        & git clone --depth 1 https://github.com/MemTensor/MemOS.git $MemosTmp 2>$null
+        if ($LASTEXITCODE -eq 0 -and (Test-Path (Join-Path $MemosTmp "apps\memos-local-openclaw"))) {
+          $MemosApp = Join-Path $MemosTmp "apps\memos-local-openclaw"
+          Get-ChildItem -Path $MemosApp | ForEach-Object {
+            if ($_.Name -notin @("server-standalone.ts", "HOMECLAW-STANDALONE.md", "memos-standalone.json.example")) {
+              Copy-Item -Path $_.FullName -Destination $MemosDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+          Write-Host "MemOS app copied to vendor\memos"
+        }
+        if (Test-Path $MemosTmp) { Remove-Item -Recurse -Force $MemosTmp -ErrorAction SilentlyContinue }
+      } else {
+        Write-Host "git not found; skipping MemOS app copy. See vendor\memos\HOMECLAW-STANDALONE.md for manual setup."
+      }
+    } catch {
+      Write-Host "MemOS clone/copy failed. See vendor\memos\HOMECLAW-STANDALONE.md for manual setup."
+    }
+  }
+  if (Test-Path $MemosPkg) {
+    $pkgContent = Get-Content $MemosPkg -Raw -ErrorAction SilentlyContinue
+    if ($pkgContent -and $pkgContent -notmatch '"standalone"') {
+      if (Get-Command node -ErrorAction SilentlyContinue) {
+        $env:MEMOS_DIR = $MemosDir
+        & node -e "const fs=require('fs'),p=require('path'),d=process.env.MEMOS_DIR;if(d){const f=p.join(d,'package.json');try{const j=JSON.parse(fs.readFileSync(f,'utf8'));j.scripts=j.scripts||{};j.scripts.standalone='tsx server-standalone.ts';fs.writeFileSync(f,JSON.stringify(j,null,2));}catch(e){}}" 2>$null
+        if ($LASTEXITCODE -eq 0) { Write-Host "Added standalone script to MemOS package.json" }
+      }
+    }
+    if (Get-Command npm -ErrorAction SilentlyContinue) {
+      Write-Host "Installing MemOS dependencies (npm install in vendor\memos)..."
+      $memosPushed = $false
+      try {
+        Push-Location $MemosDir -ErrorAction Stop
+        $memosPushed = $true
+        npm install --silent 2>$null
+      } catch {
+        # path invalid or npm failed; continue
+      } finally {
+        if ($memosPushed) { Pop-Location -ErrorAction SilentlyContinue }
+      }
+      if (Test-Path (Join-Path $MemosDir "node_modules")) {
+        Write-Host "OK: MemOS installed at vendor\memos (run automatically with Core when memory_backend is memos or composite)"
+      } else {
+        Write-Host "MemOS npm install failed or skipped. To retry: cd vendor\memos; npm install"
+      }
+    } else {
+      Write-Host "npm not found; skipping MemOS dependencies. Install Node.js then: cd vendor\memos; npm install"
+    }
+  } else {
+    Write-Host "MemOS package.json missing; run install again after copying MemOS app (see vendor\memos\HOMECLAW-STANDALONE.md)"
+  }
+} else {
+  Write-Host "vendor\memos\server-standalone.ts not found; skipping MemOS (optional memory backend)"
 }
 
 # ----- Step 6a: llama.cpp -----
