@@ -2567,9 +2567,11 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
     if not scripts_dir.is_dir():
         if not script_arg:
             return (
-                f"Instruction-only skill confirmed: {skill_name}. Do NOT reply with only this line. "
-                "You MUST in this turn: (1) document_read(the file path the user asked about) to get the source text, (2) use that returned text to generate the full output (e.g. full HTML for slides), (3) call save_result_page(title=..., content=<the full HTML you just generated>, format='html') or file_write(path='output/...', content=<full HTML>). "
-                "The content parameter must be the actual generated HTML/text—never empty. Then return the view link to the user."
+                f"Instruction-only skill confirmed: {skill_name}. Do NOT reply with only this line. Do NOT call run_skill again—you already ran it. "
+                "Do NOT call web_search for this task—use only the document content already above. "
+                "If the conversation already has document content above (from a previous document_read), use that content: generate the full output (e.g. full HTML for slides) and call save_result_page(title=..., content=<the full HTML you generated>, format='html') or file_write(path='output/...', content=<full HTML>). "
+                "If you do not have document content yet: (1) document_read(the file path the user asked about) to get the source text, (2) use that text to generate the output, (3) call save_result_page(...) or file_write(...). "
+                "The content parameter must be the actual generated HTML/text—never empty. You MUST call save_result_page or file_write and return the view link to the user before replying; do not reply with only a summary or claim the file exists without calling the tool."
             )
         return f"Error: skill has no scripts/ folder: {skill_name}. Use the skill's instructions in your response instead of run_skill."
     if not script_arg:
@@ -3215,6 +3217,18 @@ async def _document_read_executor(arguments: Dict[str, Any], context: ToolContex
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
         if not full.is_file():
+            # Path not found: get the file name and search the sandbox for it; use if exactly one match.
+            basename = os.path.basename(path_arg.replace("\\", "/").strip())
+            if basename and (
+                path_arg.strip().startswith("./") or path_arg.strip() == basename or _is_bare_filename(path_arg)
+            ):
+                matches = _search_sandbox_for_filename(context, basename)
+                if len(matches) == 1:
+                    path_arg = matches[0]
+                    r = _resolve_file_path(path_arg, context, for_write=False)
+                    if r:
+                        full, base = r
+        if not full.is_file():
             return _file_not_found_msg(context)
         suffix = full.suffix.lower()
 
@@ -3472,14 +3486,12 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
             fmt = "markdown"
         content_str = str(content or "").strip()
         title_lower = title.lower()
-        # When user asked for HTML slides, insist on format=html and full content
+        # When user asked for HTML slides, insist on format=html and full content. If content looks like HTML but format was markdown, treat as html to avoid reject loop.
         if fmt == "markdown":
             if content_str and (content_str.lstrip().lower().startswith("<html") or content_str.lstrip().startswith("<!DOCTYPE")):
-                return (
-                    "Error: content is HTML but format is markdown. For HTML slides or HTML output use format='html'. "
-                    "Call save_result_page again with format='html' and content=<your full HTML>."
-                )
-            if ("slide" in title_lower or "slides" in title_lower()) and len(content_str) < 500:
+                fmt = "html"
+                logger.debug("save_result_page: content looks like HTML but format=markdown; using format=html")
+            if ("slide" in title_lower or "slides" in title_lower) and len(content_str) < 500:
                 return (
                     "Error: for HTML slides use format='html', not format='markdown'. "
                     "Generate the full HTML slide deck from the document_read result and call save_result_page(title=..., content=<full HTML>, format='html')."
@@ -3487,14 +3499,12 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
         if fmt == "html":
             if not content_str:
                 return (
-                    "Error: content is required for format=html. Use the **content from the previous document_read result** to generate the full HTML, then call save_result_page with that content. "
-                    "**Stop calling tools now.** Reply to the user: say you need to generate the slide from the document content first, then save it."
+                    "Error: content is required for format=html. Generate the full HTML from the **document_read result** above, then call save_result_page(title=..., content=<full HTML>, format='html') again. Do not reply to the user until you have saved the page and got the link."
                 )
             # Reject title-only or minimal HTML so the page has real body content (e.g. full slide deck, not just a heading)
             if len(content_str) < 250:
                 return (
-                    "Error: content for format=html is too short. Use the **previous document_read result** to build the full HTML (all slides with content), then call save_result_page with that HTML. "
-                    "**Stop calling tools now.** Reply to the user: explain that the slide needs full content from the document and ask them to try again or wait for you to generate it."
+                    "Error: content for format=html is too short (need full slide deck). Use the **document_read result** above to build the complete HTML (all slides with real content), then call save_result_page(title=..., content=<full HTML>, format='html') again. Do not reply to the user until you have saved the page and returned the link."
                 )
             # Reject truncated HTML (tool-call output was cut off by token limit): must contain closing </html>
             if len(content_str) > 500 and (
@@ -4066,6 +4076,13 @@ def _resolve_file_path(
         # Leading slash with no drive letter (e.g. "/1.pdf", "/documents/Allen_Peng_resume_en.docx") is often meant as sandbox-relative; treat as relative so we don't reject it.
         if base_str and path_arg.startswith("/") and (len(path_arg) <= 1 or path_arg[1] != ":"):
             path_arg = path_arg.lstrip("/")
+        # LLMs sometimes send /homeclaw/documents/... or homeclaw/documents/...; sandbox is already under homeclaw_root. Strip "homeclaw/" prefix so path becomes documents/norm-v4.pdf.
+        if base_str and path_arg:
+            _p = path_arg.replace("\\", "/").strip()
+            if _p.lower().startswith("homeclaw/"):
+                path_arg = _p[9:].lstrip("/") or "."
+            elif _p.lower() == "homeclaw":
+                path_arg = "."
 
         # When homeclaw_root is set, absolute paths are not allowed (sandbox only). Reject so caller can return a clear message.
         if base_str and path_arg and (path_arg.startswith("/") or (len(path_arg) > 1 and path_arg[1] == ":")):

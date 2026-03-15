@@ -815,9 +815,11 @@ class Core(CoreInterface):
                                 if image_links:
                                     resp_data["image_links"] = image_links
                                     try:
-                                        line = "\n".join(f"Image: {u}" for u in image_links[:10])
+                                        existing = str(resp_data.get("text") or "")
+                                        # Do not append "Image: URL" if the link is already in the response (e.g. get_file_view_link) to avoid duplicate link.
+                                        to_append = [u for u in image_links[:10] if u and u not in existing]
+                                        line = "\n".join(f"Image: {u}" for u in to_append)
                                         if line:
-                                            existing = str(resp_data.get("text") or "")
                                             resp_data["text"] = (existing + "\n\n" + line) if existing else line
                                     except Exception:
                                         pass

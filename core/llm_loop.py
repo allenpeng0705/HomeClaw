@@ -414,6 +414,7 @@ async def answer_from_memory(
         force_include_auto_invoke = []  # when model returns no tool_calls, run these (e.g. run_skill) so the skill runs anyway; each item: {"tool": str, "arguments": dict}
         force_include_plugin_ids = set()  # plugin ids to add to plugin list when skills_force_include_rules match (optional "plugins" in rule)
         _injected_skill_folders = []  # skill folder names in prompt; used to constrain run_skill skill_name to enum (Phase 1.1)
+        _document_read_forced_path = None  # when user message contains explicit path (e.g. documents/norm-v4.pdf), override first document_read(path) to this
 
         # Resolve current user once: used to decide workspace Identity vs who-based identity and for who injection.
         _sys_uid = getattr(request, "system_user_id", None) or user_id
@@ -1346,8 +1347,24 @@ async def answer_from_memory(
                     )
             except Exception:
                 pass
+            # When the user only said a short greeting, tell the model explicitly: reply with text only, no tools, no invented follow-up requests.
+            _greeting_only = False
+            if isinstance(query, str) and len(query.strip()) <= 30:
+                _q = query.strip().lower()
+                _q_raw = query.strip()
+                _greeting_phrases = ("你好", "hi", "hello", "嗨", "hey", "thanks", "谢谢", "thank you", "help", "哈喽")
+                if any((p in _q if p.isascii() else p in _q_raw) for p in _greeting_phrases) and not any(c in _q_raw for c in ("?", "？", "吗", "什么", "怎么", "how", "what", "why", "can you", "帮我")):
+                    _greeting_only = True
+            _greeting_instruction = ""
+            if _greeting_only:
+                _greeting_instruction = (
+                    "**This turn:** The user message is only a short greeting (e.g. 你好, hello). "
+                    "Reply with a brief friendly greeting in your message content only. Do NOT call any tool. "
+                    "Do NOT invent or act on hypothetical user requests (e.g. do not say \"I want to make a presentation\" and then call run_skill).\n\n"
+                )
             routing_block = (
-                "## Routing (choose one)\n"
+                _greeting_instruction
+                + "## Routing (choose one)\n"
                 + tool_format_line
                 + "Do NOT use route_to_tam for: opening URLs, listing nodes, canvas, camera/video on a node, or any non-scheduling request. Use route_to_plugin for those.\n"
                 "Recording a video or taking a photo on a node (e.g. \"record video on test-node-1\", \"take a photo on test-node-1\") -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_camera_clip or node_camera_snap, parameters={\"node_id\": \"<node_id>\"}; for clip add duration and includeAudio). Do NOT use browser_navigate for node ids; test-node-1 is a node id, not a URL.\n"
@@ -1416,6 +1433,23 @@ async def answer_from_memory(
                 _has_folder_list = _reg and any(t.name == "folder_list" for t in (_reg.list_tools() or []))
             except Exception:
                 _has_folder_list = False
+            # When the user message contains an explicit file path (e.g. documents/norm-v4.pdf), require document_read with that path so the model does not skip the tool or ask for confirmation.
+            _has_document_read = _reg is not None and any(t.name == "document_read" for t in (_reg.list_tools() or []))
+            if _has_document_read and isinstance(query, str) and query.strip():
+                _q = query.strip()
+                # Match path like documents/norm-v4.pdf or share/report.docx (relative path under sandbox).
+                _path_match = re.search(
+                    r"(documents|share|output|images|work|downloads|knowledge)/[^\s\]\[\)\,\"\'\n]+\.(?:pdf|docx|doc|pptx|ppt|txt|md|html)",
+                    _q,
+                    re.IGNORECASE,
+                )
+                if _path_match:
+                    _extracted = _path_match.group(0)
+                    if not _extracted.startswith("/"):
+                        _document_read_forced_path = _extracted
+                        force_include_instructions.append(
+                            f"The user specified the file path: {_extracted}. You MUST call document_read(path='{_extracted}') in this turn. Do not ask the user to confirm the path or filename; use this path directly. Do not use absolute paths (e.g. /homeclaw/); use only the relative path as given."
+                        )
             if _has_folder_list and any((p in (query or "").strip().lower() if p.isascii() else p in (query or "").strip()) for p in _list_dir_instruction_phrases):
                 _q_li = (query or "").strip().lower()
                 _q_ri = (query or "").strip()
@@ -1870,6 +1904,8 @@ async def answer_from_memory(
             last_tool_name = None  # so "no tool_calls" branch can skip remind_me clarifier when we already ran remind_me this turn
             last_file_link_result = None  # when save_result_page/get_file_view_link return a link; must be defined before loop so "no tool_calls" branch can read it
             last_tool_result_raw = None
+            _run_skills_executed_this_request = set()  # skill_name already executed this request; do not run the same skill twice
+            _consecutive_duplicate_run_skill_only = 0  # when only duplicate run_skill(s) in a batch; give one more turn then break if again
             # Qwen 3.5: when qwen_model == "qwen35" and tools present, pass GBNF grammar on tool-decision turns only (not after tool results). Set qwen35_use_grammar: false to disable.
             _qwen35_grammar = None
             try:
@@ -2006,7 +2042,11 @@ async def answer_from_memory(
                 if _last_role == "tool":
                     _use_grammar = None
                     _stop_extra = None
-                if _last_role != "tool":
+                elif _greeting_only:
+                    # Greeting-only turn: plain-text reply only. No grammar; and no tools so the server does not try to parse response as tool_call (avoids 500 on local servers).
+                    _use_grammar = None
+                    _stop_extra = None
+                if _last_role != "tool" and not _greeting_only:
                     if (
                         _tool_sel
                         and (llm_name_this_turn or "").strip() == _tool_sel
@@ -2019,9 +2059,31 @@ async def answer_from_memory(
                     else:
                         _use_grammar = _qwen35_grammar
                         _stop_extra = None  # Do not add "</tool_call>" for Qwen 3.5 — can truncate; we parse <tool_call>... from full response
+                _tools_req = None if _greeting_only else openai_tools
+                # After instruction-only run_skill (or "skill already run"), or after save_result_page returned "format is markdown" error, restrict tools so the model does not call run_skill again. Allow save_result_page, file_write, document_read, file_read only (no web_search) to avoid the model looping on web_search with garbage queries (e.g. PDF cid codes); run_skill stays blocked. Only applies when that run_skill/save_result_page result is the *last* tool result—if another tool ran after it, no restriction.
+                _restrict_to_save = False
+                if _tools_req and _last_role == "tool" and isinstance(last_tool_result_raw, str):
+                    if last_tool_name == "run_skill" and ("Instruction-only skill" in last_tool_result_raw or "This skill was already run" in last_tool_result_raw):
+                        _restrict_to_save = True
+                    elif last_tool_name == "save_result_page" and ("format is markdown" in last_tool_result_raw or "use format='html'" in last_tool_result_raw):
+                        _restrict_to_save = True
+                if _restrict_to_save:
+                    _allow_after_run = {"save_result_page", "file_write", "document_read", "file_read"}
+                    _tools_save_only = [t for t in _tools_req if isinstance(t, dict) and ((t.get("function") or {}).get("name") or "") in _allow_after_run]
+                    # Profile may not include these; fetch from registry so we can restrict to them.
+                    if not _tools_save_only and registry:
+                        try:
+                            _all_reg = registry.get_openai_tools(_max_desc if _max_desc else None)
+                            _tools_save_only = [t for t in (_all_reg or []) if isinstance(t, dict) and ((t.get("function") or {}).get("name") or "") in _allow_after_run]
+                        except Exception:
+                            pass
+                    if _tools_save_only:
+                        _tools_req = _tools_save_only
+                        _component_log("tools", "restricted to save_result_page, file_write, document_read, file_read this turn (last result was instruction-only or already run)")
+                _tool_choice_req = "none" if _greeting_only else "auto"
                 try:
                     msg = await Util().openai_chat_completion_message(
-                        _msgs_for_llm, tools=openai_tools, tool_choice="auto", grammar=_use_grammar, llm_name=llm_name_this_turn,
+                        _msgs_for_llm, tools=_tools_req, tool_choice=_tool_choice_req, grammar=_use_grammar, llm_name=llm_name_this_turn,
                         max_tokens_override=_max_tokens_override, stop_extra=_stop_extra,
                     )
                 except Exception as e:
@@ -2827,38 +2889,8 @@ async def answer_from_memory(
                 last_tool_args = None  # for run_skill: skills_results_need_llm per-skill override
                 meta = Util().get_core_metadata()
                 tool_timeout_sec = max(0, int(getattr(meta, "tool_timeout_seconds", 120) or 0))
-                # Safeguard: if the model keeps calling the same run_skill (e.g. html-slides) and the skill returns instruction-only, we'd loop until max_tool_rounds. Break early after 2+ prior runs of the same skill.
-                if len(tool_calls) == 1:
-                    _tc0 = tool_calls[0]
-                    _fn0 = (_tc0.get("function") or {}) if isinstance(_tc0, dict) else {}
-                    _name0 = (_fn0.get("name") or "").strip()
-                    if _name0 == "run_skill":
-                        try:
-                            _a0 = json.loads(_fn0.get("arguments") or "{}")
-                            _skill = (str(_a0.get("skill_name") or "").strip() if isinstance(_a0, dict) else "") or ""
-                            if _skill:
-                                _same_skill_count = 0
-                                for _m in (current_messages or []):
-                                    if not isinstance(_m, dict) or (_m.get("role") or "").strip() != "assistant":
-                                        continue
-                                    for _t in (_m.get("tool_calls") or []):
-                                        if not isinstance(_t, dict):
-                                            continue
-                                        _f = _t.get("function") or {}
-                                        if (_f.get("name") or "").strip() == "run_skill":
-                                            try:
-                                                _ar = json.loads(_f.get("arguments") or "{}")
-                                                if isinstance(_ar, dict) and (str(_ar.get("skill_name") or "").strip() == _skill):
-                                                    _same_skill_count += 1
-                                                    break
-                                            except (json.JSONDecodeError, TypeError):
-                                                pass
-                                if _same_skill_count >= 2:
-                                    response = "The task could not be completed in this turn (same step was repeated). Try again or use a cloud model for long outputs. (本次未能完成，请重试或使用云端模型。)"
-                                    logger.info("Stopping tool loop: run_skill(%s) already ran %s times in this turn", _skill, _same_skill_count)
-                                    break
-                        except (json.JSONDecodeError, TypeError, KeyError):
-                            pass
+                # Track whether we execute any tool this batch; if we only skip duplicate run_skill(s), return to user after appending results.
+                _executed_any_this_batch = False
                 for tc in tool_calls:
                     if not isinstance(tc, dict):
                         continue
@@ -2874,6 +2906,12 @@ async def answer_from_memory(
                         args = {}
                     args_redacted = redact_params_for_log(args) if isinstance(args, dict) else args
                     logger.info("Tool selected: name={} parameters={}", name, args_redacted)
+                    # Override document_read path when user specified an explicit path (e.g. documents/norm-v4.pdf) so we use it even if the model returned a wrong path (e.g. norm/v4/pdf).
+                    if name == "document_read" and _document_read_forced_path and isinstance(args, dict):
+                        args = dict(args)
+                        args["path"] = _document_read_forced_path
+                        _document_read_forced_path = None  # only override the first document_read for this request
+                        logger.info("document_read path overridden to user-specified path: %s", args.get("path"))
                     if name == "run_skill":
                         _component_log("tools", "executing run_skill (in_process from run_skill_py_in_process_skills if listed)")
                     # When response was truncated (finish_reason=length), tool_call arguments (e.g. save_result_page content) may be cut off; executor will reject bad HTML.
@@ -2952,20 +2990,30 @@ async def answer_from_memory(
                                 logger.info("Tool {} skipped by verification (Phase 3.3)", name)
                         except Exception:
                             pass  # on error allow execution
-                    try:
-                        if _tool_verified_skip:
-                            result = "Verification: tool selection did not match user intent; execution skipped."
-                        elif tool_timeout_sec > 0:
-                            result = await asyncio.wait_for(
-                                registry.execute_async(name, args, context),
-                                timeout=tool_timeout_sec,
-                            )
-                        else:
-                            result = await registry.execute_async(name, args, context)
-                    except asyncio.TimeoutError:
-                        result = f"Error: tool {name} timed out after {tool_timeout_sec}s. The system did not hang; you can retry or use a different approach."
-                    except Exception as e:
-                        result = f"Error: {e!s}"
+                    # Do not run the same run_skill(skill_name) twice in this request; skip and return a short result so other tools in this batch can still run.
+                    _skill_key = (str(args.get("skill_name") or "").strip()) if name == "run_skill" and isinstance(args, dict) else ""
+                    _skip_duplicate_run_skill = name == "run_skill" and _skill_key and _skill_key in _run_skills_executed_this_request
+                    if _skip_duplicate_run_skill:
+                        result = "This skill was already run in this conversation. Use the results above or call another tool (e.g. save_result_page)."
+                        logger.info("Skipping duplicate run_skill({}); already executed this request", _skill_key)
+                    else:
+                        try:
+                            if _tool_verified_skip:
+                                result = "Verification: tool selection did not match user intent; execution skipped."
+                            elif tool_timeout_sec > 0:
+                                result = await asyncio.wait_for(
+                                    registry.execute_async(name, args, context),
+                                    timeout=tool_timeout_sec,
+                                )
+                            else:
+                                result = await registry.execute_async(name, args, context)
+                        except asyncio.TimeoutError:
+                            result = f"Error: tool {name} timed out after {tool_timeout_sec}s. The system did not hang; you can retry or use a different approach."
+                        except Exception as e:
+                            result = f"Error: {e!s}"
+                        if name == "run_skill" and _skill_key:
+                            _run_skills_executed_this_request.add(_skill_key)
+                        _executed_any_this_batch = True
                     if name == "route_to_tam":
                         _component_log("TAM", "routed from model")
                     elif name == "route_to_plugin":
@@ -3002,6 +3050,16 @@ async def answer_from_memory(
                         if len(tool_content) > limit:
                             tool_content = tool_content[:limit] + "\n[Output truncated for context.]"
                     current_messages.append({"role": "tool", "tool_call_id": tcid, "content": tool_content})
+                # If the only tool call(s) this batch were duplicate run_skill (skipped), give the model one more turn to call save_result_page (or another tool); break only if we already did that once.
+                if not _executed_any_this_batch:
+                    _consecutive_duplicate_run_skill_only += 1
+                    if _consecutive_duplicate_run_skill_only >= 2:
+                        response = "The same skill was already run. Use the content above or try again with a different request. (同一技能已执行过，请使用上方内容或换一种方式重试。)"
+                        logger.info("Stopping tool loop: only duplicate run_skill(s) again; no other tools to run")
+                        break
+                    logger.info("Only duplicate run_skill(s) this batch; continuing one more turn so model can call save_result_page or another tool")
+                else:
+                    _consecutive_duplicate_run_skill_only = 0
                 if routing_sent:
                     out = routing_response_text if routing_response_text is not None else ROUTING_RESPONSE_ALREADY_SENT
                     if mix_route_this_request and mix_show_route_label and isinstance(out, str) and out is not ROUTING_RESPONSE_ALREADY_SENT:

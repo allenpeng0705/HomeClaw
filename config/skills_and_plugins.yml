@@ -50,15 +50,17 @@ intent_router:
     coding: "User wants to run code, edit files, use dev tools, or automate something."
   category_tools:
     search_web: { profile: minimal }
-    list_files: { tools: [folder_list, file_find, document_read] }
-    read_document: { tools: [document_read, file_read, file_understand, folder_list, file_find] }
+    # list_files: include get_file_view_link so "send me that file" / "发给我" can return a view link (path from folder_list/file_find).
+    list_files: { tools: [folder_list, file_find, document_read, get_file_view_link] }
+    read_document: { tools: [document_read, file_read, file_understand, folder_list, file_find, get_file_view_link] }
     create_slides: { profile: minimal, skills: [html-slides-1.0.0, ppt-generation-1.0.0] }
     schedule_remind: { tools: [remind_me, cron_schedule, cron_list, cron_remove, cron_update, record_date, recorded_events_list, route_to_tam, time] }
     open_url: { tools: [fetch_url, route_to_plugin, browser_navigate] }
     memory: { tools: [memory_search, memory_get, agent_memory_search, agent_memory_get, append_agent_memory, append_daily_memory] }
     knowledge_base: { tools: [knowledge_base_search, knowledge_base_add, knowledge_base_remove, knowledge_base_list] }
     image: { tools: [image], skills: [image-generation-1.0.0] }
-    general_chat: { profile: full }
+    # general_chat: greetings and open-ended chat; use minimal (time, web_search, folder_list, run_skill, remind_me, route_to_plugin) so "你好" etc. get ~6 tools, not 71.
+    general_chat: { profile: minimal }
     coding: { profile: coding }
   # Optional: include recent chat turns so router can resolve "that document", "it", "the same". Trade-off: helps follow-ups, can dilute current intent. 0 = only current message (default).
   include_recent_turns: 0

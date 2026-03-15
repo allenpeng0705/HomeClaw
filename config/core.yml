@@ -63,8 +63,8 @@ skills_and_plugins_config_file: skills_and_plugins.yml
 # orchestrator_timeout_seconds: 60
 # Recommended max time (seconds) for clients/proxies waiting for Core to respond (e.g. /inbound). 0 = unlimited. Long or fallback requests (e.g. local then cloud) can take 5+ minutes; "Connection closed" / timeout usually means proxy or client read_timeout was exceeded. Set to 600 (10 min) or 0 (unlimited) and ensure reverse proxy (nginx proxy_read_timeout, Cloudflare, etc.) and client timeouts are >= this when >0. For remote Core, Companion uses async (202) or stream to avoid long-held connections.
 inbound_request_timeout_seconds: 0   # 0 = unlimited; set 600 (10 min) or higher if your proxy/client has a fixed limit
-# Timeout (seconds) for each LLM chat completion HTTP call. Default 300. 0 = no timeout (unlimited). If large local models (e.g. 27B) often time out, set 600 or 900; set 0 for long-running tasks with no limit.
-# llm_completion_timeout_seconds: 300
+# Timeout (seconds) for each LLM chat completion HTTP call. Default 300. 0 = no timeout (unlimited). If large local models or long tasks time out, set 600 or 900 here; set 0 for no limit (use with care).
+llm_completion_timeout_seconds: 0
 # Prompt manager: load prompts from config/prompts with language/model overrides. See docs/PromptManagement.md.
 use_prompt_manager: true
 prompts_dir: config/prompts

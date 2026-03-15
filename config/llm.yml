@@ -29,7 +29,7 @@ llama_cpp:
   # 32768
   ctx_size: 262142 #128K
   predict: 131071   # server default max tokens (--predict); overridden per request by completion.max_tokens when Core sends it
-  temp: 0.5
+  temp: 0.2
   threads: 4
   n_gpu_layers: 99
   verbose: false

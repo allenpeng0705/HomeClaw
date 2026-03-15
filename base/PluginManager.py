@@ -375,17 +375,23 @@ class PluginManager:
 
 
     def _register_external(self, descriptor: Dict[str, Any]) -> None:
-        """Register an external plugin (http/subprocess/mcp) by manifest descriptor."""
+        """Register an external plugin (http/subprocess/mcp) by manifest descriptor. log_registration=False to suppress debug log when re-registering on hot reload."""
         pid = (descriptor.get("id") or "").strip().lower().replace(" ", "_")
         if not pid:
             return
         self.plugin_by_id[pid] = descriptor
         self.external_plugins.append(descriptor)
-        logger.debug(f"Registered external plugin: {pid} type={descriptor.get('type')}")
+        if descriptor.get("_log_registration", True):
+            logger.debug("Registered external plugin: {} type={}", pid, descriptor.get("type"))
 
     def load_plugins(self):
         if disable_plugins:
             return
+        # Remember folder-based plugin IDs before clear so we only log when newly discovered (avoids "Registered external plugin" every 60s on hot reload)
+        _folder_pids_before = {
+            pid for pid, p in self.plugin_by_id.items()
+            if isinstance(p, dict) and p.get("_source") != "api"
+        }
         # Remove only folder-based external plugins from plugin_by_id (keep API-registered)
         to_remove = [
             pid for pid, p in self.plugin_by_id.items()
@@ -408,6 +414,7 @@ class PluginManager:
                     continue  # API-registered takes precedence
                 manifest["_folder"] = plugin_folder
                 manifest["_source"] = "manifest"
+                manifest["_log_registration"] = pid not in _folder_pids_before
                 if not any(_normalize_plugin_id(d.get("id")) == pid for d in self.external_plugins):
                     self._register_external(manifest)
                 external_folders.add(folder_name)
@@ -436,6 +443,7 @@ class PluginManager:
                         continue
                     manifest["_folder"] = plugin_folder
                     manifest["_source"] = "manifest"
+                    manifest["_log_registration"] = pid not in _folder_pids_before
                     if not any(_normalize_plugin_id(d.get("id")) == pid for d in self.external_plugins):
                         self._register_external(manifest)
         except Exception as e:

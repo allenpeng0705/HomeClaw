@@ -87,9 +87,11 @@ async def run_async_inbound(core: Any, request_id: str, request: InboundRequest)
                     if image_links:
                         entry["image_links"] = image_links
                         try:
-                            line = "\n".join(f"Image: {u}" for u in image_links[:10])
+                            existing = str(entry.get("text") or "")
+                            # Do not append "Image: URL" if the link is already in the response (e.g. get_file_view_link) to avoid duplicate link.
+                            to_append = [u for u in image_links[:10] if u and u not in existing]
+                            line = "\n".join(f"Image: {u}" for u in to_append)
                             if line:
-                                existing = str(entry.get("text") or "")
                                 entry["text"] = (existing + "\n\n" + line) if existing else line
                         except Exception:
                             pass
