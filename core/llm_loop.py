@@ -2006,18 +2006,19 @@ async def answer_from_memory(
                 if _last_role == "tool":
                     _use_grammar = None
                     _stop_extra = None
-                elif (
-                    _tool_sel
-                    and (llm_name_this_turn or "").strip() == _tool_sel
-                    and _qwen3_xlam_grammar
-                    and isinstance(_qwen3_xlam_grammar, str)
-                    and len(_qwen3_xlam_grammar) > 0
-                ):
-                    _use_grammar = _qwen3_xlam_grammar
-                    _stop_extra = ["</tool_call>"]
-                else:
-                    _use_grammar = _qwen35_grammar
-                    _stop_extra = None  # Do not add "</tool_call>" for Qwen 3.5 — can truncate; we parse <tool_call>... from full response
+                if _last_role != "tool":
+                    if (
+                        _tool_sel
+                        and (llm_name_this_turn or "").strip() == _tool_sel
+                        and _qwen3_xlam_grammar
+                        and isinstance(_qwen3_xlam_grammar, str)
+                        and len(_qwen3_xlam_grammar) > 0
+                    ):
+                        _use_grammar = _qwen3_xlam_grammar
+                        _stop_extra = ["</tool_call>"]
+                    else:
+                        _use_grammar = _qwen35_grammar
+                        _stop_extra = None  # Do not add "</tool_call>" for Qwen 3.5 — can truncate; we parse <tool_call>... from full response
                 try:
                     msg = await Util().openai_chat_completion_message(
                         _msgs_for_llm, tools=openai_tools, tool_choice="auto", grammar=_use_grammar, llm_name=llm_name_this_turn,
