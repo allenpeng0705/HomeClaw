@@ -1463,16 +1463,41 @@ class CoreService {
     ({String userId, String friendId}) meta,
     void Function(String message) onProgress,
   ) async {
-    final resultUrl = Uri.parse('$_baseUrl/inbound/result').replace(queryParameters: {'request_id': requestId});
+    final resultUrl =
+        Uri.parse('$_baseUrl/inbound/result').replace(queryParameters: {'request_id': requestId});
     final headers = _authHeaders();
     final deadline = DateTime.now().add(Duration(seconds: sendMessageTimeoutSeconds));
     while (DateTime.now().isBefore(deadline)) {
-      final response = await http.get(resultUrl, headers: headers).timeout(Duration(seconds: 15));
+      final response =
+          await http.get(resultUrl, headers: headers).timeout(Duration(seconds: 15));
       if (response.statusCode == 404) {
         _pendingRequestMeta.remove(requestId);
         throw Exception('Request expired or not found (request_id=$requestId)');
       }
-      final map = jsonDecode(response.body) as Map<String, dynamic>?;
+      // For remote Core, proxies (Cloudflare, tunnels, etc.) can return 5xx HTML pages or other
+      // non-JSON bodies. Do not jsonDecode unless we got an expected status, otherwise the UI will
+      // see a FormatException instead of a clear HTTP error.
+      if (response.statusCode != 200 && response.statusCode != 202) {
+        final body = response.body.trim();
+        final shortBody =
+            body.length > 200 ? '${body.substring(0, 200)}…' : body;
+        throw Exception(shortBody.isEmpty
+            ? 'Core /inbound/result failed (${response.statusCode})'
+            : 'Core /inbound/result failed (${response.statusCode}): $shortBody');
+      }
+      Map<String, dynamic>? map;
+      try {
+        map = jsonDecode(response.body) as Map<String, dynamic>?;
+      } catch (_) {
+        // Unexpected non-JSON body (e.g. proxy HTML error). Surface as a clear error instead of
+        // bubbling a raw FormatException to the UI.
+        final body = response.body.trim();
+        final shortBody =
+            body.length > 200 ? '${body.substring(0, 200)}…' : body;
+        throw Exception(shortBody.isEmpty
+            ? 'Core /inbound/result returned invalid JSON (status ${response.statusCode})'
+            : 'Core /inbound/result returned invalid JSON (status ${response.statusCode}): $shortBody');
+      }
       final status = map?['status'] as String?;
       if (response.statusCode == 202 && status == 'pending') {
         onProgress('Still working…');

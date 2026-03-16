@@ -16,16 +16,21 @@ def get_inbound_result_handler(core):
     async def inbound_result(request_id: str = ""):
         """
         Poll result of an async POST /inbound (when async: true). Query: request_id=... from the 202 response.
-        Returns 202 + {status: "pending"} while processing; 200 + {status: "done"|"cancelled", text, format, images?, error?} when done/cancelled; 404 when request_id unknown or expired (TTL 5 min).
+        Returns 202 + {status: "pending"} while processing; 200 + {status: "done"|"cancelled", text, format, images?, error?} when done/cancelled; 404 when request_id unknown or expired. Pending entries use a longer TTL (default 30 min) so long-running requests stay pollable; done/cancelled entries expire after 5 min.
         """
         request_id = (request_id or "").strip()
         if not request_id:
             return JSONResponse(status_code=400, content={"error": "Missing request_id"})
         now = time.time()
         ttl = getattr(core, "_inbound_async_results_ttl_sec", 300)
+        pending_ttl = getattr(core, "_inbound_async_pending_ttl_sec", 1800)  # 30 min: don't expire "pending" too soon so long-running requests stay pollable
         # Core sets _inbound_async_results in __init__; default {} only to avoid AttributeError before init
         results = getattr(core, "_inbound_async_results", {})
-        expired = [rid for rid, v in results.items() if (now - v.get("created_at", 0)) > ttl]
+        # Expire only: (1) done/cancelled results older than ttl (so client had time to fetch), (2) pending older than pending_ttl (leak guard)
+        expired = [
+            rid for rid, v in results.items()
+            if (now - v.get("created_at", 0)) > (pending_ttl if v.get("status") == "pending" else ttl)
+        ]
         for rid in expired:
             results.pop(rid, None)
         entry = results.get(request_id)

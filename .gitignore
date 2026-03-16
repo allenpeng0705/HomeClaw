@@ -58,3 +58,4 @@ logs/core_debug.log
 /downloads/skills
 /system_plugins/homeclaw-browser/node_modules
 external_plugins/quote-java/target/classes/QuotePlugin.class
+/external_skills/imap-smtp-email/node_modules

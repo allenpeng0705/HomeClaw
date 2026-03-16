@@ -233,8 +233,9 @@ class Core(CoreInterface):
             self.memory_queue_task = None
             self._system_plugin_processes: List[asyncio.subprocess.Process] = []
             self._pending_plugin_calls: Dict[str, Dict[str, Any]] = {}  # session_key -> {plugin_id, capability_id, params, missing, ...}
-            self._inbound_async_results: Dict[str, dict] = {}  # request_id -> {status, ok?, text?, images?, error?, created_at}; TTL 5 min
-            self._inbound_async_results_ttl_sec = 300
+            self._inbound_async_results: Dict[str, dict] = {}  # request_id -> {status, ok?, text?, images?, error?, created_at}; TTL 5 min for done, 30 min for pending
+            self._inbound_async_results_ttl_sec = 300  # done/cancelled: remove after this many sec so client has time to fetch
+            self._inbound_async_pending_ttl_sec = 1800  # pending: don't expire before this (e.g. long LLM run); avoid 404 while task still running
             self._inbound_async_tasks: Dict[str, asyncio.Task] = {}  # request_id -> Task for async /inbound; used by POST /inbound/cancel
             self._ws_sessions: Dict[str, WebSocket] = {}  # session_id -> WebSocket for push (Companion/channel holds /ws open; Core pushes async result and proactive messages)
             self._ws_user_by_session: Dict[str, str] = {}  # session_id -> user_id (so we can deliver_to_user for cron/reminder)
