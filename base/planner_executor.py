@@ -86,11 +86,95 @@ def get_flow_for_categories(categories: List[str], config: Optional[Dict[str, An
     return None
 
 
+def is_send_email_confirmation(message: Optional[str]) -> Optional[str]:
+    """
+    If the user message is a confirmation to send or cancel the pending email draft, return "send" or "cancel".
+    Otherwise return None. Never raises.
+    """
+    if not message or not isinstance(message, str):
+        return None
+    q = message.strip().lower()
+    if not q:
+        return None
+    # "send", "发", "send it", "yes send", "cancel", "取消", etc.
+    if q in ("send", "发", "send it", "yes", "ok", "confirm", "发送", "确认发送"):
+        return "send"
+    if q in ("cancel", "cancel it", "no", "取消", "不发了", "discard"):
+        return "cancel"
+    if q in ("send the email", "send the mail", "yes send the email"):
+        return "send"
+    return None
+
+
+def parse_email_draft(text: Optional[str]) -> Optional[Dict[str, str]]:
+    """
+    Parse a draft string in the format produced by the send_email DAG (To:, Subject:, Body:).
+    Returns {"to": str, "subject": str, "body": str} or None if not enough structure. Never raises.
+    """
+    if not text or not isinstance(text, str) or not text.strip():
+        return None
+    # Strip the confirmation line and any trailing separator
+    t = text.strip()
+    for sep in ("\n---\n", "\n---", "---\n"):
+        if sep in t and "reply **send**" in t.lower():
+            t = t.split(sep)[0].strip()
+    to_val = ""
+    subject_val = ""
+    body_val = ""
+    state = None
+    for line in t.split("\n"):
+        line_stripped = line.strip()
+        low = line_stripped.lower()
+        if "to:" in low:
+            idx = low.index("to:")
+            to_val = line_stripped[idx + 3 :].strip()
+            state = "to"
+        elif "subject:" in low:
+            idx = low.index("subject:")
+            subject_val = line_stripped[idx + 8 :].strip()
+            state = "subject"
+        elif "body:" in low:
+            idx = low.index("body:")
+            state = "body"
+            rest = line_stripped[idx + 5 :].strip()
+            if rest:
+                body_val = rest + "\n"
+        elif state == "body":
+            body_val += line + "\n"
+    body_val = body_val.strip()
+    if not to_val or "@" not in to_val:
+        return None
+    return {"to": to_val, "subject": subject_val or "(no subject)", "body": body_val or ""}
+
+
+def get_last_assistant_content(messages: Optional[List[Dict[str, Any]]]) -> Optional[str]:
+    """
+    Return the content of the last message with role=='assistant' in the list (scan from end).
+    Used to find the email draft from the previous turn. Never raises.
+    """
+    if not messages or not isinstance(messages, list):
+        return None
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if not isinstance(m, dict):
+            continue
+        if (m.get("role") or "").strip().lower() == "assistant":
+            content = m.get("content")
+            if isinstance(content, str) and content.strip():
+                return content
+            return None
+    return None
+
+
+# File extensions for path extraction (documents + images) so "img1.png" / "1.pdf" are recognized.
+_PATH_EXTRACT_EXTENSIONS = r"pdf|docx|doc|pptx|ppt|txt|md|html|png|jpg|jpeg|gif|webp|bmp|svg"
+
+
 def _extract_path_from_user_message(message: Optional[str]) -> Optional[str]:
     """
     Extract a relative file path from the user message. Works for:
     - Paths under sandbox folders: documents/, share/, output/, images/, work/, downloads/, knowledge/
-    - Bare filenames with document extension: report.pdf, myfile.docx (no leading folder)
+    - Bare filenames with document or image extension: report.pdf, myfile.docx, img1.png (no leading folder)
     Returns None if no path found; then DAG uses the configured default (e.g. documents/). Never raises.
     """
     if not message or not isinstance(message, str) or not message.strip():
@@ -98,15 +182,15 @@ def _extract_path_from_user_message(message: Optional[str]) -> Optional[str]:
     q = message.strip()
     # 1) Path with known folder prefix (documents/, share/, output/, etc.)
     m = re.search(
-        r"(documents|share|output|images|work|downloads|knowledge)/[^\s\]\[\)\,\"\'\n]+\.(?:pdf|docx|doc|pptx|ppt|txt|md|html)",
+        rf"(documents|share|output|images|work|downloads|knowledge)/[^\s\]\[\)\,\"\'\n]+\.(?:{_PATH_EXTRACT_EXTENSIONS})",
         q,
         re.IGNORECASE,
     )
     if m and not m.group(0).startswith("/"):
         return m.group(0)
-    # 2) Bare filename with document extension (e.g. "report.pdf", "resume.docx")
+    # 2) Bare filename with document or image extension (e.g. "report.pdf", "resume.docx", "img1.png")
     m2 = re.search(
-        r"\b([a-zA-Z0-9_\-\u4e00-\u9fff][^\s\]\[\)\,\"\'\n]*\.(?:pdf|docx|doc|pptx|ppt|txt|md|html))\b",
+        rf"\b([a-zA-Z0-9_\-\u4e00-\u9fff][^\s\]\[\)\,\"\'\n]*\.(?:{_PATH_EXTRACT_EXTENSIONS}))\b",
         q,
         re.IGNORECASE,
     )
@@ -114,6 +198,48 @@ def _extract_path_from_user_message(message: Optional[str]) -> Optional[str]:
         cand = m2.group(1).strip()
         if "/" not in cand and "\\" not in cand and len(cand) < 200:
             return cand
+    return None
+
+
+def _resolve_path_from_context(
+    user_message: Optional[str],
+    path_resolution_context: Optional[str],
+    prefer_output_report: bool = False,
+) -> Optional[str]:
+    """
+    Resolve a file path using session context when the user message is underspecified.
+    - prefer_output_report: when True (e.g. generate_pdf), look for output/report_*.md in context (for "PDF version" / "convert that to PDF").
+    - Otherwise: if user message contains a bare filename (e.g. "1.pdf"), look in context for that file under documents/, output/, etc. (from a prior folder_list).
+    Returns None if nothing found. Never raises.
+    """
+    try:
+        if not path_resolution_context or not isinstance(path_resolution_context, str) or not path_resolution_context.strip():
+            return None
+        ctx = path_resolution_context.strip()[:8000]
+        q = (user_message or "").strip().lower() if isinstance(user_message, str) else ""
+
+        # User wants "the PDF version" / "convert to PDF" → use last saved report (output/report_*.md) from context
+        if prefer_output_report or any(
+            phrase in q for phrase in ("pdf version", "convert to pdf", "to pdf", "生成pdf", "要pdf", "export pdf")
+        ):
+            match = re.search(r"output/report_[a-zA-Z0-9]+\.md", ctx)
+            if match:
+                return match.group(0)
+            match = re.search(r"output/[^\s\]\[\)\"'\n]+\.md", ctx)
+            if match:
+                return match.group(0)
+
+        # Bare filename in user message (e.g. "summarize 1.pdf", "1.pdf") → resolve to folder/path from context (prior folder_list)
+        bare = _extract_path_from_user_message(user_message)
+        if not bare or "/" in bare or "\\" in bare or not isinstance(bare, str):
+            return None
+        # Context may contain "path": "documents/1.pdf" or — `documents/1.pdf` or documents/1.pdf
+        for prefix in ("documents/", "output/", "share/", "images/", "work/", "downloads/", "knowledge/"):
+            candidate = prefix + bare
+            if candidate in ctx or f'"{candidate}"' in ctx or f"`{candidate}`" in ctx or f"path\": \"{candidate}" in ctx:
+                return candidate
+    except Exception as e:
+        logger.debug("Path resolution from context failed (non-fatal): {}", e)
     return None
 
 
@@ -225,7 +351,7 @@ async def _dag_llm_summarize_for_reply(
             return response.strip()[:3000]
     except Exception as e:
         logger.debug("DAG summarize-for-reply LLM failed: {}", e)
-    return content[:2000] + ("…" if len(content) > 2000 else "")
+    return content[:4096] + ("…" if len(content) > 4096 else "")
 
 
 async def _dag_llm_compose_email_from_step(
@@ -264,10 +390,14 @@ async def _resolve_flow_step_args(
     completion_fn: Optional[Any],
     config: Optional[Dict[str, Any]],
     flow: Optional[Dict[str, Any]] = None,
+    path_resolution_context: Optional[str] = None,
+    flow_category: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Resolve args and args_from for a DAG step. step_index_1based is 1-based. Returns merged args dict. Never raises.
     args_from: key -> [source, default?]. source: user_message_path | result_of_step_N | llm_from_step_N.
+    path_resolution_context: optional session context (last assistant/tool output) to resolve paths when user message is underspecified.
+    flow_category: e.g. generate_pdf, used to prefer output/report_*.md when user asks for "PDF version".
     """
     out: Dict[str, Any] = {}
     fixed = step.get("args")
@@ -277,6 +407,7 @@ async def _resolve_flow_step_args(
     if not isinstance(args_from, dict):
         return out
     step_id_str = str(step_index_1based)
+    prefer_output_report = (flow_category or "").strip().lower() == "generate_pdf"
     for key, spec in args_from.items():
         if not isinstance(spec, list) or not spec:
             continue
@@ -284,6 +415,18 @@ async def _resolve_flow_step_args(
         default = spec[1] if len(spec) > 1 else ""
         if source == "user_message_path":
             val = _extract_path_from_user_message(user_message)
+            if path_resolution_context and isinstance(path_resolution_context, str):
+                try:
+                    from_ctx = _resolve_path_from_context(user_message, path_resolution_context, prefer_output_report=prefer_output_report)
+                    if from_ctx:
+                        val = from_ctx
+                    elif val and isinstance(val, str) and "/" not in val and "\\" not in val:
+                        # Bare filename (e.g. "1.pdf"): try to resolve to documents/1.pdf from context (prior folder_list)
+                        from_ctx = _resolve_path_from_context(user_message, path_resolution_context, prefer_output_report=False)
+                        if from_ctx:
+                            val = from_ctx
+                except Exception as e:
+                    logger.debug("Path resolution from context in step args failed (non-fatal): {}", e)
             out[key] = val if val is not None else (default if default is not None else "")
         elif source == "user_message_path_pdf":
             out[key] = _user_message_path_to_pdf_output(user_message, default or "output/report.pdf")
@@ -372,9 +515,11 @@ async def run_dag(
     completion_fn: Optional[Any] = None,
     config: Optional[Dict[str, Any]] = None,
     tool_names: Optional[List[str]] = None,
+    path_resolution_context: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """
     Execute a DAG flow: run steps in order, resolve args_from (user_message_path, result_of_step_N, llm_from_step_N).
+    path_resolution_context: optional session context (last assistant/tool output) to resolve paths when the user message is underspecified (e.g. "PDF version" → last output/report_*.md, or "1.pdf" → documents/1.pdf from prior folder_list).
     Returns (True, final_result_str) on success, (False, error_msg) on failure. Never raises.
     """
     if not flow or not isinstance(flow, dict):
@@ -389,6 +534,8 @@ async def run_dag(
     step_results: Dict[str, str] = {}
     last_result = ""
     when_skipped_summarize = bool(flow.get("when_step_skipped_return_summary_of_previous"))
+    _cat = flow.get("category")
+    flow_category = (_cat.strip() if isinstance(_cat, str) and _cat else None) or None
     try:
         for i, step in enumerate(steps):
             if not isinstance(step, dict):
@@ -443,6 +590,8 @@ async def run_dag(
                 completion_fn=completion_fn,
                 config=config,
                 flow=flow,
+                path_resolution_context=path_resolution_context,
+                flow_category=flow_category,
             )
             try:
                 result = await registry.execute_async(tool_name, args, context)
@@ -459,10 +608,16 @@ async def run_dag(
         # Success: prefer last result that looks like a link or is short
         if last_result and isinstance(last_result, str) and ("/files/out?" in last_result or "http" in last_result):
             return True, last_result.strip()
-        if last_result and isinstance(last_result, str) and len(last_result.strip()) < 2000:
+        if last_result and isinstance(last_result, str) and len(last_result.strip()) < 4096:
             return True, last_result.strip()
+        # Do not truncate folder_list/file_find JSON or markdown/slides so core and memory get full content
         if last_result and isinstance(last_result, str):
-            return True, last_result.strip()[:2000] + ("…" if len(last_result) > 2000 else "")
+            s = last_result.strip()
+            if s.startswith("[") and '"name"' in s[:500] and '"path"' in s[:500]:
+                return True, s
+            if s.startswith("#") or s.startswith("---") or (len(s) > 100 and "## " in s[:200]):
+                return True, s
+            return True, s[:4096] + ("…" if len(s) > 4096 else "")
         return True, "Task completed. (任务已完成。)"
     except Exception as e:
         logger.debug("DAG unexpected error: {}; returning failure", e)
@@ -975,10 +1130,13 @@ async def run_executor(
         # Fallback: prefer last result that looks like a link or is short
         if last_result and isinstance(last_result, str) and ("/files/out?" in last_result or "http" in last_result):
             return True, step_results, last_result.strip()
-        if last_result and isinstance(last_result, str) and len(last_result.strip()) < 2000:
+        if last_result and isinstance(last_result, str) and len(last_result.strip()) < 4096:
             return True, step_results, last_result.strip()
         if last_result and isinstance(last_result, str):
-            return True, step_results, last_result.strip()[:2000] + ("…" if len(last_result) > 2000 else "")
+            s = last_result.strip()
+            if s.startswith("#") or s.startswith("---") or (len(s) > 100 and "## " in s[:200]):
+                return True, step_results, s
+            return True, step_results, s[:4096] + ("…" if len(s) > 4096 else "")
         return True, step_results, "Task completed. (任务已完成。)"
     except Exception as e:
         logger.debug("Planner executor unexpected error: {}; returning failure", e)

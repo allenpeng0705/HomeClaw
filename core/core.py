@@ -1598,7 +1598,18 @@ class Core(CoreInterface):
             if use_memory and not memory_add_after_reply:
                 await self.memory_queue.put(request)
             start = time.time()
-            result = await self.answer_from_memory(query=human_message, messages=messages, app_id=app_id, user_name=user_name, user_id=user_id, agent_id=app_id, session_id=session_id, run_id=run_id, request=request)
+            inbound_timeout = max(0, int(getattr(Util().get_core_metadata(), "inbound_request_timeout_seconds", 0) or 0))
+            try:
+                if inbound_timeout > 0:
+                    result = await asyncio.wait_for(
+                        self.answer_from_memory(query=human_message, messages=messages, app_id=app_id, user_name=user_name, user_id=user_id, agent_id=app_id, session_id=session_id, run_id=run_id, request=request),
+                        timeout=float(inbound_timeout),
+                    )
+                else:
+                    result = await self.answer_from_memory(query=human_message, messages=messages, app_id=app_id, user_name=user_name, user_id=user_id, agent_id=app_id, session_id=session_id, run_id=run_id, request=request)
+            except asyncio.TimeoutError:
+                logger.warning("Inbound request timed out after {}s (inbound_request_timeout_seconds). The model may be busy or slow.", inbound_timeout)
+                return "The request took too long (timeout). Please try again. If the model server is busy, wait a moment. / 请求超时，请稍后重试。"
             if isinstance(result, tuple):
                 answer, memory_turn_data = result[0], (result[1] if len(result) > 1 else None)
             else:

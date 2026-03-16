@@ -28,7 +28,7 @@
 llama_cpp:
   # 32768
   ctx_size: 262142 #128K
-  predict: 131071   # server default max tokens (--predict); overridden per request by completion.max_tokens when Core sends it
+  predict: 262142   # server default max tokens (--predict); overridden per request by completion.max_tokens when Core sends it
   temp: 0.2
   threads: 4
   n_gpu_layers: 99
@@ -131,9 +131,9 @@ llama_cpp:
 # • Stop sequences: completion.stop (e.g. <|im_end|>) can cut replies if the model emits them early. For Qwen with reasoning_budget != 0, </think> is removed from stop automatically.
 # • Restart Core after changing llama_cpp.predict or ctx_size so the llama-server process is started with the new --predict and --ctx-size.
 completion:
-  max_tokens: 131071         # max tokens per response for all turns; 32768 helps avoid truncation on local. For cloud (DeepSeek, etc.) Core caps at cloud_max_tokens_cap (default 8192); set higher only if your provider allows (e.g. DeepSeek supports up to 32768).
+  max_tokens: 262142         # max tokens per response for all turns; 32768 helps avoid truncation on local. For cloud (DeepSeek, etc.) Core caps at cloud_max_tokens_cap (default 8192); set higher only if your provider allows (e.g. DeepSeek supports up to 32768).
   # cloud_max_tokens_cap: 8192   # optional; max_tokens sent to cloud = min(max_tokens, this). Default 8192. Set e.g. 32768 if your cloud provider allows and you want longer cloud replies (reduces truncation in mix mode).
-  temperature: 0.5          # sampling temperature 0..2 (fallback: llama_cpp.temp)
+  temperature: 0.2          # sampling temperature 0..2 (fallback: llama_cpp.temp)
   top_p: 1.0                # nucleus sampling 0..1
   presence_penalty: 0.4     # penalize tokens already in text (reduces repeated phrases; 0 = off)
   frequency_penalty: 0.3    # penalize by token frequency (reduces repetition; 0 = off)

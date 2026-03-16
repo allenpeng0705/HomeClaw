@@ -20,6 +20,7 @@ from base.tool_profiles import get_tool_names_for_profile
 DEFAULT_CATEGORIES = [
     "search_web",
     "list_files",
+    "get_file_link",
     "read_document",
     "create_slides",
     "create_html_slides",
@@ -39,6 +40,7 @@ DEFAULT_CATEGORIES = [
 DEFAULT_CATEGORY_DESCRIPTIONS: Dict[str, str] = {
     "search_web": "User wants to search the web or look up information online.",
     "list_files": "User wants to list, browse, or find files or folders.",
+    "get_file_link": "User wants to get a view/download link for a specific file (e.g. 'send me that file', '发给我 img1.png').",
     "read_document": "User wants to read, summarize, or understand a specific document or file.",
     "create_slides": "User wants to create slides, a presentation, or PPT from content (generic; may be HTML or PowerPoint).",
     "create_html_slides": "User wants to create HTML slides or a web-based slide deck from a document (not PowerPoint/PPT).",
@@ -162,6 +164,56 @@ async def route(
     if not categories:
         return "general_chat"
 
+    # When user explicitly asks for HTML slides, route to create_html_slides so the html-slides skill runs (not summarize_to_page → markdown).
+    try:
+        if "create_html_slides" in categories and query is not None and isinstance(query, str) and query.strip():
+            q = query.strip().lower()
+            if (
+                "html slides" in q
+                or "html_slides" in q
+                or "html-slides" in q
+                or ("生成" in query and "html" in q)
+                or "html幻灯片" in query
+                or "html 幻灯片" in q
+            ):
+                logger.debug("Intent router: query matches HTML slides -> category create_html_slides")
+                return "create_html_slides"
+    except Exception as e:
+        logger.debug("Intent router HTML slides pre-check failed (non-fatal): {}", e)
+
+    # When user asks to list files/folder contents (e.g. "images里有什么图片", "documents里有什么"), route to list_files so DAG runs folder_list and we don't block on slow LLM.
+    try:
+        if "list_files" in categories and query is not None and isinstance(query, str) and query.strip():
+            q = query.strip().lower()
+            # "X里有什么(图片/文件)" / "what's in X" / "list files in X"
+            if (
+                "里有什么" in query
+                or "里有哪些" in query
+                or "list" in q and ("file" in q or "folder" in q or "content" in q or "directory" in q)
+                or "what" in q and ("in " in q or "inside" in q) and ("folder" in q or "file" in q or "directory" in q or "images" in q or "documents" in q)
+                or "show" in q and ("file" in q or "folder" in q or "content" in q)
+                or "有哪些文件" in query
+                or "有什么文件" in query
+                or "有什么图片" in query
+            ):
+                logger.debug("Intent router: query matches list folder -> category list_files")
+                return "list_files"
+    except Exception as e:
+        logger.debug("Intent router list_files pre-check failed (non-fatal): {}", e)
+
+    # When user asks to get/send a file or image link (e.g. "把img1.png发给我", "send me that file"), route to get_file_link so DAG runs get_file_view_link with path from context.
+    try:
+        if "get_file_link" in categories and query is not None and isinstance(query, str) and query.strip():
+            q = query.strip().lower()
+            if (
+                "发给我" in query
+                or ("send" in q and "me" in q and ("file" in q or "image" in q or "that" in q or "link" in q or "图片" in query or "图" in query))
+            ):
+                logger.debug("Intent router: query matches get/send file -> category get_file_link")
+                return "get_file_link"
+    except Exception as e:
+        logger.debug("Intent router get_file_link pre-check failed (non-fatal): {}", e)
+
     try:
         include_turns = max(0, int(config.get("include_recent_turns", 0) or 0))
     except (TypeError, ValueError):
@@ -192,8 +244,12 @@ async def route(
             "Categories:\n" + categories_text + "\n\n"
             "User message: " + (query or "")[:2000]
         )
+    system_content = (
+        "You are a classifier. Reply with one category name, or two comma-separated category names if the request needs multiple types of actions. "
+        "If the user asks for HTML slides (e.g. 'html slides', '生成html slides', '生成幻灯片'), choose create_html_slides, not summarize_to_page."
+    )
     messages = [
-        {"role": "system", "content": "You are a classifier. Reply with one category name, or two comma-separated category names if the request needs multiple types of actions."},
+        {"role": "system", "content": system_content},
         {"role": "user", "content": prompt},
     ]
     try:

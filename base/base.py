@@ -999,6 +999,8 @@ class CoreMetadata:
     tools_config: Dict[str, Any] = field(default_factory=dict)  # merged tools dict from core.yml + optional skills_and_plugins file; used by tool layer (exec_allowlist, web.search, etc.)
     # Intent router (Phase 2): when enabled, one short LLM call classifies query -> category; tools/skills filtered by category. Config: enabled, categories, category_tools (profile or tools list).
     intent_router_config: Dict[str, Any] = field(default_factory=dict)
+    # Identity/capabilities shortcut: when user asks "what can you do?" / "你能为我做什么", reply from workspace IDENTITY.md + TOOLS.md without calling intent router or main LLM. Config: enabled, match_phrases (list of substrings).
+    identity_capabilities_shortcut_config: Dict[str, Any] = field(default_factory=dict)
     # Planner–Executor: when enabled, plan once then execute steps (see docs_design/PlannerExecutorAndDAG.md). Config: enabled, skip_planner_for_categories, planner_llm, max_steps_per_plan, max_replans, fallback_to_react_on_plan_failure.
     planner_executor_config: Dict[str, Any] = field(default_factory=dict)
     orchestrator_unified_with_tools: bool = True  # when True (default), main LLM with tools routes TAM/plugin/chat; when False, separate orchestrator_handler runs first (one LLM for intent+plugin)
@@ -1139,7 +1141,10 @@ class CoreMetadata:
                         _ext_data = yaml.safe_load(_f)
                     if isinstance(_ext_data, dict):
                         for _k, _v in _ext_data.items():
-                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k == 'tools' or _k == 'external_skills_dir' or _k == 'clawhub_download_dir' or _k == 'intent_router' or _k == 'planner_executor'):
+                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k == 'tools' or _k == 'external_skills_dir' or _k == 'clawhub_download_dir' or _k == 'intent_router' or _k == 'planner_executor' or _k == 'identity_capabilities_shortcut'):
+                                continue
+                            if _k == 'identity_capabilities_shortcut' and not isinstance(_v, dict):
+                                logging.warning("skills_and_plugins config %s: identity_capabilities_shortcut must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
                                 continue
                             if _k == 'intent_router' and not isinstance(_v, dict):
                                 logging.warning("skills_and_plugins config %s: intent_router must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
@@ -1470,6 +1475,7 @@ class CoreMetadata:
             tool_timeout_seconds=int((data.get('tools') or {}).get('tool_timeout_seconds', 120) or 0),
             tools_config=copy.deepcopy(data.get('tools')) if isinstance(data.get('tools'), dict) else {},
             intent_router_config=dict(data.get('intent_router')) if isinstance(data.get('intent_router'), dict) else {},
+            identity_capabilities_shortcut_config=dict(data.get('identity_capabilities_shortcut')) if isinstance(data.get('identity_capabilities_shortcut'), dict) else {},
             planner_executor_config=dict(data.get('planner_executor')) if isinstance(data.get('planner_executor'), dict) else {},
             orchestrator_unified_with_tools=data.get('orchestrator_unified_with_tools', True),
             inbound_request_timeout_seconds=max(0, int(data.get('inbound_request_timeout_seconds', 0) or 0)),

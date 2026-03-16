@@ -45,6 +45,9 @@ from base.intent_router import (
 )
 from base.planner_executor import (
     get_flow_for_categories,
+    get_last_assistant_content,
+    is_send_email_confirmation,
+    parse_email_draft,
     run_dag as dag_run_dag,
     run_planner as planner_run_planner,
     run_executor as planner_run_executor,
@@ -177,6 +180,73 @@ except Exception:
     )
 
 
+def _normalize_for_chat_match(text: str) -> str:
+    """Normalize user message for accurate chat/shortcut matching: strip, remove trailing punctuation, collapse spaces. Never raises."""
+    if not text or not isinstance(text, str):
+        return ""
+    s = text.strip()
+    s = re.sub(r"[。！？!?.,，、\s]+$", "", s)  # trailing punctuation and spaces
+    s = re.sub(r"^\s*[。！？!?.,，、]+", "", s)  # leading punctuation
+    s = re.sub(r"\s+", " ", s).strip()  # collapse internal spaces
+    return s
+
+
+def _try_chat_shortcut(query: str, shortcut_cfg: dict) -> Optional[str]:
+    """
+    If the query is a short greeting or capabilities question, return the shortcut reply (greeting_reply or identity+TOOLS). Otherwise return None.
+    Used when intent_router is disabled (early) or when intent_router returned general_chat (chatting intent).
+    """
+    if not query or not isinstance(shortcut_cfg, dict) or not shortcut_cfg.get("enabled"):
+        return None
+    _q_norm = _normalize_for_chat_match(query)
+    _greeting_max = max(0, int(shortcut_cfg.get("greeting_max_length", 20) or 20))
+    _cap_max = max(0, int(shortcut_cfg.get("capabilities_max_length", 60) or 60))
+    # Greeting
+    _greeting_phrases = shortcut_cfg.get("greeting_phrases") or []
+    if isinstance(_greeting_phrases, list) and _greeting_phrases and (_greeting_max == 0 or len(_q_norm) <= _greeting_max):
+        _q_norm_lower = _q_norm.lower()
+        for _gp in _greeting_phrases:
+            if not isinstance(_gp, str):
+                continue
+            _g = _normalize_for_chat_match(_gp.strip())
+            if not _g:
+                continue
+            if _q_norm == _g or _q_norm_lower == _g.lower():
+                _reply = (shortcut_cfg.get("greeting_reply") or "").strip()
+                if not _reply:
+                    _reply = "你好！我是 HomeClaw，有什么可以帮你？ / Hello! I'm HomeClaw, how can I help?"
+                logger.debug("Greeting shortcut: replying without main LLM (chat detected)")
+                return _reply
+    # Capabilities
+    _phrases = shortcut_cfg.get("match_phrases") or []
+    if isinstance(_phrases, list) and _phrases and (_cap_max == 0 or len(_q_norm) <= _cap_max):
+        _q_lower = _q_norm.lower()
+        for _p in _phrases:
+            if not isinstance(_p, str) or not _p.strip():
+                continue
+            _p_strip = _normalize_for_chat_match(_p.strip())
+            if not _p_strip:
+                continue
+            if _p_strip in _q_norm or _p_strip.lower() in _q_lower:
+                try:
+                    _ws_dir = get_workspace_dir(getattr(Util().core_metadata, "workspace_dir", None) or "config/workspace")
+                    _workspace = load_workspace(_ws_dir)
+                    _id_block = (_workspace.get("identity") or "").strip()
+                    _tools_block = (_workspace.get("tools") or "").strip()
+                    _parts = []
+                    if _id_block:
+                        _parts.append("## Identity\n" + _id_block)
+                    if _tools_block:
+                        _parts.append("## Tools / capabilities\n" + _tools_block)
+                    if _parts:
+                        logger.debug("Identity/capabilities shortcut: replying from workspace (chat detected)")
+                        return "\n\n".join(_parts)
+                except Exception as _e:
+                    logger.debug("Identity/capabilities shortcut failed: {}; continuing normal flow", _e)
+                break
+    return None
+
+
 async def answer_from_memory(
     core: Any,
     query: str,
@@ -253,6 +323,14 @@ async def answer_from_memory(
                         core.set_pending_plugin_call(app_id_val, user_id_val, session_id_val, pending)
                 elif not plugin:
                     core.clear_pending_plugin_call(app_id_val, user_id_val, session_id_val)
+
+        # When intent_router is disabled, apply greeting/capabilities shortcut early (no LLM). When enabled, shortcut runs after intent router and only when category is general_chat (see below).
+        _shortcut_cfg = getattr(Util().get_core_metadata(), "identity_capabilities_shortcut_config", None) or {}
+        _intent_router_enabled = isinstance(getattr(Util().get_core_metadata(), "intent_router_config", None), dict) and (getattr(Util().get_core_metadata(), "intent_router_config", None) or {}).get("enabled")
+        if not _intent_router_enabled and isinstance(_shortcut_cfg, dict) and _shortcut_cfg.get("enabled") and (query or "").strip():
+            _early_reply = _try_chat_shortcut((query or "").strip(), _shortcut_cfg)
+            if _early_reply is not None:
+                return (_early_reply, None)
 
         # Hybrid router (mix mode): run before injecting tools, skills, plugins. Router uses only user message (query).
         effective_llm_name = None
@@ -765,14 +843,22 @@ async def answer_from_memory(
             _intent_router_config = {}
         if _intent_router_config.get("enabled") and (query or "").strip():
             try:
-                _intent_router_category = await intent_router_route(
+                _ir_timeout = max(0, int(_intent_router_config.get("timeout_seconds", 25) or 25))
+                _route_coro = intent_router_route(
                     query=(query or "").strip(),
                     config=_intent_router_config,
                     completion_fn=core,
                     llm_name=None,
                     recent_messages=messages if isinstance(messages, list) else None,
                 )
+                if _ir_timeout > 0:
+                    _intent_router_category = await asyncio.wait_for(_route_coro, timeout=float(_ir_timeout))
+                else:
+                    _intent_router_category = await _route_coro
                 _component_log("intent_router", f"category={_intent_router_category}")
+            except asyncio.TimeoutError:
+                logger.warning("Intent router timed out ({}s); fallback general_chat", _intent_router_config.get("timeout_seconds", 25))
+                _intent_router_category = "general_chat"
             except Exception as _e:
                 logger.debug("Intent router failed (early): {}; fallback general_chat", _e)
                 _intent_router_category = "general_chat"
@@ -781,6 +867,15 @@ async def answer_from_memory(
             c.strip() for c in ((_intent_router_category or "").split(","))
             if (c or "").strip()
         ] if _intent_router_category else []
+
+        # When intent router says general_chat (chatting intent), apply shortcut so greeting/capabilities skip the main LLM.
+        _general_chat_norm = "general_chat"
+        if _intent_router_categories and any((c or "").strip().lower() == _general_chat_norm for c in _intent_router_categories):
+            _shortcut_cfg_ir = getattr(Util().get_core_metadata(), "identity_capabilities_shortcut_config", None) or {}
+            if isinstance(_shortcut_cfg_ir, dict) and _shortcut_cfg_ir.get("enabled") and (query or "").strip():
+                _chat_reply = _try_chat_shortcut((query or "").strip(), _shortcut_cfg_ir)
+                if _chat_reply is not None:
+                    return (_chat_reply, None)
 
         # Planner–Executor: when enabled and category not in skip list, use planner path (Phase 2+). Never crash on config.
         try:
@@ -1399,6 +1494,7 @@ async def answer_from_memory(
                 f"When the user asks to be reminded in N minutes (any phrasing: \"N分钟后\", \"N分钟提醒\", \"remind me in N minutes\", \"in N min\"), you MUST call remind_me with minutes=N (use the number from the user's message) and message= a short label only (e.g. \"喝水\", \"会议提醒\"; do NOT put date/time in message). Current time: {_req_time_24}. Use only this time; never invent times (e.g. never 2:49 PM, 明天下午7点).\n"
                 "For script-based workflows use run_skill(skill_name, script, ...). For instruction-only skills (no scripts/) use run_skill(skill_name) with no script—then you MUST continue in the same turn (document_read, generate content, file_write or save_result_page, return link); do not reply with only the confirmation. skill_name can be folder or short name (e.g. html-slides).\n"
                 "When the user asks to generate an HTML slide or report from a document/file: (1) call document_read(path) to get the file content, (2) use that returned text as the source and generate the full HTML yourself, (3) call save_result_page(title=..., content=<your generated full HTML>, format='html') so the user gets a view link. You MUST call save_result_page—do NOT return the raw HTML in your message. The user must receive the link (e.g. /files/out?token=...) so they can open the slides; returning HTML as text does not save it to the output folder. For HTML slides use format='html' not 'markdown'. Never pass empty or minimal content; content must be the full slide deck/report HTML.\n"
+                "**HTML slides must be a multi-slide deck:** When the user asks for HTML slides (or \"生成html slides\", \"总结...生成幻灯片\"), generate a **multi-slide presentation** (e.g. 8–20 distinct slides), not a single long page. Each slide should cover one main idea; use separate sections/slides (e.g. <section> or slide divs with clear titles). Follow the html-slides skill style: minimal, one point per slide, dark background, clear headings. Do not output one block of text as the whole deck—split the document summary into multiple slides.\n"
                 "CRITICAL for long HTML (especially on local models): Do NOT put very long HTML inside the save_result_page tool arguments; long JSON tool_call arguments can be truncated. Instead, put the full HTML in your **message content** inside a ```html ... ``` block, then call save_result_page(title=..., content=<short label like \"see html block above\">, format='html'). The system will detect the ```html``` block in your message and save that HTML to a file and return the link. Do not try to stuff hundreds of lines of HTML directly into the JSON content argument.\n"
                 "Using an external service (Slack, LinkedIn, Outlook, HubSpot, Notion, Gmail, Stripe, Google Calendar, Salesforce, Airtable, etc.) -> use run_skill(skill_name='maton-api-gateway-1.0.0', script='request.py') with app and path from the maton skill body (Supported Services table and references/). Do not claim the action was done without calling the skill. For LinkedIn post: GET linkedin/rest/me then POST linkedin/rest/posts with commentary.\n"
                 "When a tool returns a view/open link (URL containing /files/out?token=), you MUST output that URL exactly as given: character-for-character, no truncation, no added text, no character changes. Do not combine the URL with any other content. Copy only the URL line. One wrong or extra character makes the link invalid.\n"
@@ -1929,6 +2025,7 @@ async def answer_from_memory(
                                 "**When your reply would be a long document or a file** (report, HTML, markdown, slides, PDF summary, etc.): do NOT paste the full content in the message. Call save_result_page(title=..., content=<full content>, format='html' or 'markdown') or file_write(path='output/...', content=...); then return the view link to the user (the tool gives you the link when core_public_url is set). The user gets a link to open the file; long text stays in the file, not in chat. "
                                 "When the user asks about a **specific file by name** (e.g. \"能告诉我1.pdf都讲了什么吗\", \"what is in 1.pdf\"): (1) call folder_list() or file_find(pattern='*1.pdf*') to list/search user sandbox; (2) use the **exact path** from the result that matches the requested name in document_read — e.g. if the user asked for 1.pdf, use path \"1.pdf\" only. Do **not** use absolute paths or invent paths. "
                                 "When the user asks to **send or get a file** (e.g. \"发给我 ID1.jpg\", \"send me that file\", \"把XX发给我\"): call get_file_view_link(path=<exact path>) with the path from folder_list/file_find that matches the requested file, then output **only** the URL from the tool—do not ask for confirmation or give long explanations. "
+                                "**When the user sent an image and asks to receive the image or a link** (e.g. \"send me this image\", \"I want the image or link\", \"发给我这张图\", \"give me the link\"): use get_file_view_link(path=<path of the image they sent, e.g. from the message or /images/...>) and output the URL. Do NOT use the image tool for that—the image tool is only for **describing or analyzing** the image. Use the image tool only when they ask what is in the image, to describe it, or to answer questions about it. "
                                 "When the user asks for file search, list, or read without a specific name: omit path for user sandbox; if user says \"share\", use path \"share\" or \"share/...\". "
                                 "**When folder_list or file_find returns a list,** reply with a short user-friendly numbered list (e.g. \"1. Allen_Peng_resume_en.docx, 2. other.docx\") so the user can say \"file 1\" or \"item 1\"; do not output raw JSON. "
                                 "**Critical:** Each list entry has a **path** field (e.g. documents/1.pdf). Always use that path in document_read(path='...') and get_file_view_link(path='...')—never use only the name (e.g. 1.pdf) if the path is documents/1.pdf, or the file may not be found. "
@@ -1946,7 +2043,8 @@ async def answer_from_memory(
             if llm_input and llm_input[0].get("role") == "system":
                 tool_rule = (
                     "\n\n## Tool use — paths and URLs\n"
-                    "When a task requires a file path, filename, or URL: use only values returned by your tool calls or explicitly given by the user. Do not create, guess, or fabricate paths, filenames, or URLs."
+                    "When a task requires a file path, filename, or URL: use only values returned by your tool calls or explicitly given by the user. Do not create, guess, or fabricate paths, filenames, or URLs. "
+                    "For get_file_view_link: use the EXACT path from folder_list/file_find, or the EXACT filename the user wrote (e.g. img1.png). Do NOT change the extension (.png/.jpg) or invent names (e.g. imge_4, img2)."
                 )
                 llm_input[0]["content"] = (llm_input[0].get("content") or "") + tool_rule
             # Tool loop: call LLM with tools; if it returns tool_calls, execute and append results, repeat
@@ -1964,24 +2062,74 @@ async def answer_from_memory(
             # DAG first: if a flow is defined for this category, run it (no planner). On success use result and skip ReAct.
             _planner_executor_final_response = None
             if _dag_flow and openai_tools:
-                try:
-                    _dag_success, _dag_result = await dag_run_dag(
-                        _dag_flow,
-                        registry,
-                        context,
-                        user_message=query,
-                        completion_fn=core,
-                        config=_planner_executor_config,
-                        tool_names=_pe_tool_names if _pe_tool_names else None,
-                    )
-                    if _dag_success:
-                        _planner_executor_final_response = _dag_result
-                        _component_log("planner_executor", "DAG flow completed; using flow result")
-                    else:
-                        _component_log("planner_executor", f"DAG flow failed: {(_dag_result or '')[:80]}…; falling back")
-                except Exception as _dag_e:
-                    logger.debug("DAG failed: {}; falling back", _dag_e)
-                    _component_log("planner_executor", "DAG error; falling back")
+                _handled_send_email_confirm = False
+                if (_dag_flow.get("category") or "").strip().lower() == "send_email":
+                    action = is_send_email_confirmation(query)
+                    if action:
+                        last_content = get_last_assistant_content(llm_input)
+                        has_draft = (
+                            last_content
+                            and "To:" in last_content
+                            and ("reply **send**" in (last_content or "").lower() or "reply **cancel**" in (last_content or "").lower())
+                        )
+                        if has_draft:
+                            if action == "cancel":
+                                _planner_executor_final_response = "Email cancelled. （已取消发送。）"
+                                _handled_send_email_confirm = True
+                                _component_log("planner_executor", "send_email: user cancelled; skipping DAG")
+                            elif action == "send":
+                                draft = parse_email_draft(last_content)
+                                if draft and draft.get("to"):
+                                    try:
+                                        email_args = {
+                                            "skill_name": "imap-smtp-email",
+                                            "script": "smtp.js",
+                                            "args": ["send", "--to", draft["to"], "--subject", draft.get("subject") or "(no subject)", "--body", draft.get("body") or ""],
+                                        }
+                                        _email_result = await registry.execute_async("run_skill", email_args, context)
+                                        _planner_executor_final_response = _email_result if _email_result else "Email sent. （邮件已发送。）"
+                                        _handled_send_email_confirm = True
+                                        _component_log("planner_executor", "send_email: sent via run_skill; skipping DAG")
+                                    except Exception as _send_e:
+                                        logger.debug("send_email run_skill failed: {}; falling back to DAG", _send_e)
+                                        _planner_executor_final_response = f"Failed to send email: {_send_e!s}. You can try again or say cancel."
+                                        _handled_send_email_confirm = True
+                if not _handled_send_email_confirm:
+                    # Build path resolution context from last assistant + last tool output so DAG can resolve "PDF version" → output/report_*.md and "1.pdf" → documents/1.pdf from prior folder_list
+                    _path_ctx = ""
+                    try:
+                        if llm_input and isinstance(llm_input, list):
+                            _last_assistant = get_last_assistant_content(llm_input)
+                            if _last_assistant and isinstance(_last_assistant, str):
+                                _path_ctx = str(_last_assistant).strip()[:5000]
+                            for _i in range(len(llm_input) - 1, -1, -1):
+                                _m = llm_input[_i] if _i < len(llm_input) else None
+                                if isinstance(_m, dict) and (_m.get("role") or "").strip().lower() == "tool":
+                                    _tc = _m.get("content") or ""
+                                    if isinstance(_tc, str) and _tc.strip():
+                                        _path_ctx = (str(_path_ctx) + "\n\n" + _tc.strip()[:3000]).strip()[:6000]
+                                    break
+                    except Exception as _path_ctx_e:
+                        logger.debug("Build path_resolution_context failed (non-fatal): {}", _path_ctx_e)
+                    try:
+                        _dag_success, _dag_result = await dag_run_dag(
+                            _dag_flow,
+                            registry,
+                            context,
+                            user_message=query,
+                            completion_fn=core,
+                            config=_planner_executor_config,
+                            tool_names=_pe_tool_names if _pe_tool_names else None,
+                            path_resolution_context=_path_ctx if _path_ctx else None,
+                        )
+                        if _dag_success:
+                            _planner_executor_final_response = _dag_result
+                            _component_log("planner_executor", "DAG flow completed; using flow result")
+                        else:
+                            _component_log("planner_executor", f"DAG flow failed: {(_dag_result or '')[:80]}…; falling back")
+                    except Exception as _dag_e:
+                        logger.debug("DAG failed: {}; falling back", _dag_e)
+                        _component_log("planner_executor", "DAG error; falling back")
             # Planner–Executor Phase 3: if we have a valid plan (and no DAG result), run executor; on success use its result and skip ReAct.
             if _planner_executor_final_response is None and _planner_plan:
                 try:
@@ -2016,6 +2164,7 @@ async def answer_from_memory(
             last_tool_result_raw = None
             _run_skills_executed_this_request = set()  # skill_name already executed this request; do not run the same skill twice
             _consecutive_duplicate_run_skill_only = 0  # when only duplicate run_skill(s) in a batch; give one more turn then break if again
+            _image_tool_run_count_this_request = 0  # stop loop when model keeps calling image with empty content (use last description as response)
             # Qwen 3.5: when qwen_model == "qwen35" and tools present, pass GBNF grammar on tool-decision turns only (not after tool results). Set qwen35_use_grammar: false to disable.
             _qwen35_grammar = None
             try:
@@ -2110,9 +2259,9 @@ async def answer_from_memory(
                                 "\n\n## Handling tool results\n"
                                 "**When a tool result looks like an error** (e.g. starts with \"Error:\", or contains \"not found\", \"could not find\", \"file not found\", \"not readable\", \"path is required\"): Acknowledge to the user what went wrong in plain language. Suggest a concrete next step (e.g. list the directory with folder_list, try a different path, or ask the user for the correct path). Do not claim the operation succeeded; do not invent or fabricate successful content.\n"
                                 "**When a tool result is an instruction for you** (e.g. \"Instruction-only skill confirmed\", \"You MUST in this turn\", \"Do NOT reply with only this line\"): The tool is telling you what to do in this turn. Perform those steps now: call the tools it asks for (e.g. document_read, then generate content, then save_result_page) or generate the content it specifies. Do not reply with only a confirmation or \"I will do that\"—actually make the tool calls or produce the output in this same turn.\n"
-                                "**When the user asked for generated output** (e.g. HTML slides, report, summary to file) and a tool already returned the source content (e.g. document_read): you MUST call the next tool in this turn (e.g. run_skill(html-slides), save_result_page with the generated content)—do not reply with only a plan or \"I will generate...\"; actually invoke the tool. If you have already generated full HTML in your reply: you MUST call save_result_page(title=..., content=<that HTML>, format='html') so the user gets a view link; do not send the raw HTML as the final message—the user must receive the link to open the slides in the output folder.\n"
+                                "**When the user asked for generated output** (e.g. HTML slides, report, summary to file) and a tool already returned the source content (e.g. document_read): you MUST call the next tool in this turn (e.g. run_skill(html-slides), save_result_page with the generated content)—do not reply with only a plan or \"I will generate...\"; actually invoke the tool. If you have already generated full HTML in your reply: you MUST call save_result_page(title=..., content=<that HTML>, format='html') so the user gets a view link; do not send the raw HTML as the final message—the user must receive the link to open the slides in the output folder. For HTML slides, the content must be a **multi-slide deck** (multiple slides/sections, one idea per slide), not a single long page.\n"
                                 "**CRITICAL:** If a previous message in this conversation is a tool result that already contains document/content (e.g. from document_read), do NOT respond with a plan like \"我将现在生成\" or \"首先，我需要调用 document_read\" or \"I will call document_read then...\". You already have the content—either call the next tool (save_result_page, run_skill) with your generated output in this turn, or output the full generated content in your message. Never return only a plan or intention.\n"
-                                "**CRITICAL for HTML slides:** If the user asked for HTML slides (or \"生成html slides\", \"总结...生成幻灯片\") and the tool result above is document content: you MUST call run_skill(skill_name='html-slides') in this turn. Do not reply with only text, a plan, or \"Let first generate\"—make the tool call now.\n"
+                                "**CRITICAL for HTML slides:** If the user asked for HTML slides (or \"生成html slides\", \"总结...生成幻灯片\") and the tool result above is document content: you MUST call run_skill(skill_name='html-slides') in this turn. Then generate a **multi-slide deck** (8–20 slides, one idea per slide) and call save_result_page with that HTML. Do not output a single long page—split the summary into distinct slides.\n"
                                 "**In general:** Only use or cite content that tools actually returned. Do not invent file contents, error messages, or tool outputs."
                             )
                             current_messages[0]["content"] = _sys_content + _handling
@@ -2120,7 +2269,7 @@ async def answer_from_memory(
                             _use2 = (
                                 "\n\n## Your role this turn\n"
                                 "You are continuing after tools ran. Use the tool result(s) above to decide: respond to the user, retry with different parameters, or call more tools. Do not invent outcomes.\n"
-                                "If the user asked for generated output (e.g. HTML slides, report, summary to file) and a tool already returned the source content (e.g. document_read): you MUST call the next tool in this turn (e.g. run_skill(html-slides), save_result_page with generated content)—do not reply with only a plan or \"I will generate...\"; actually invoke the tool. If the conversation already has document content from a previous tool result, do NOT say \"首先我需要调用 document_read\" or \"I will call document_read\"—you have the content; produce the output or call save_result_page/run_skill now. CRITICAL: If the user asked for HTML slides and the tool result above is document content, call run_skill(skill_name='html-slides') now—do not respond with only text."
+                                "If the user asked for generated output (e.g. HTML slides, report, summary to file) and a tool already returned the source content (e.g. document_read): you MUST call the next tool in this turn (e.g. run_skill(html-slides), save_result_page with generated content)—do not reply with only a plan or \"I will generate...\"; actually invoke the tool. If the conversation already has document content from a previous tool result, do NOT say \"首先我需要调用 document_read\" or \"I will call document_read\"—you have the content; produce the output or call save_result_page/run_skill now. CRITICAL: If the user asked for HTML slides and the tool result above is document content, call run_skill(skill_name='html-slides') now, then generate a **multi-slide deck** (multiple slides, one idea per slide) and save_result_page—do not output a single long page."
                             )
                             current_messages[0]["content"] = (current_messages[0].get("content") or "") + _use2
                 except Exception as _e:
@@ -3145,6 +3294,8 @@ async def answer_from_memory(
                     last_tool_name = name
                     last_tool_result_raw = result if isinstance(result, str) else None
                     last_tool_args = args if isinstance(args, dict) else None
+                    if name == "image":
+                        _image_tool_run_count_this_request += 1
                     tool_content = result
                     # Collect for memory full-turn (MemOS user+assistant+tool)
                     try:
@@ -3170,6 +3321,11 @@ async def answer_from_memory(
                     logger.info("Only duplicate run_skill(s) this batch; continuing one more turn so model can call save_result_page or another tool")
                 else:
                     _consecutive_duplicate_run_skill_only = 0
+                # Stop image-tool loop: when the model keeps returning empty content and calling the image tool again, use the last description as the response
+                if _image_tool_run_count_this_request >= 2 and last_tool_name == "image" and last_tool_result_raw and (last_tool_result_raw or "").strip():
+                    response = last_tool_result_raw.strip()
+                    logger.info("Stopping tool loop: image tool already ran %s time(s); using last description as response", _image_tool_run_count_this_request)
+                    break
                 if routing_sent:
                     out = routing_response_text if routing_response_text is not None else ROUTING_RESPONSE_ALREADY_SENT
                     if mix_route_this_request and mix_show_route_label and isinstance(out, str) and out is not ROUTING_RESPONSE_ALREADY_SENT:
@@ -3268,36 +3424,22 @@ async def answer_from_memory(
         # If the model echoed raw "[]" (e.g. from empty folder_list/file_find), show a friendly message instead
         if isinstance(response, str) and response.strip() == "[]":
             response = "I couldn't find that file or path. Try asking me to list your files (e.g. 'list my files' or 'what files do I have'), then use the exact filename (e.g. 1.pdf) when you ask about a document."
-        # If the model echoed raw folder_list/file_find JSON, format as user-friendly list so the user does not see raw JSON
+        # If the model echoed raw folder_list/file_find JSON, format as user-friendly list so the user and memory never see raw JSON
         if isinstance(response, str) and response.strip():
             try:
-                body = response.strip()
-                label_prefix = ""
-                if body.startswith("[") and "]" in body and ("perplexity" in body.lower() or "local" in body.lower() or "cloud" in body.lower()):
-                    idx = body.find("]")
-                    if idx > 0 and idx < 30:
-                        label_prefix = body[: idx + 1].strip() + " "
-                        body = body[idx + 1 :].strip()
-                if body.startswith("[") and ("name" in body and "path" in body):
-                    parsed = json.loads(body)
-                    if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict) and ("name" in parsed[0] or "path" in parsed[0]):
-                        lines = []
-                        for e in parsed:
-                            if not isinstance(e, dict) or (e.get("path") or e.get("name")) == "(truncated)":
-                                continue
-                            try:
-                                name = str(e.get("name") or e.get("path") or "?").strip() or "?"
-                                p = str(e.get("path") or "").strip()
-                                typ = str(e.get("type") or "file")
-                            except (TypeError, AttributeError, ValueError):
-                                continue
-                            if p and p != name and "/" in p:
-                                lines.append(f"- **{name}** ({typ}) — `{p}`")
-                            else:
-                                lines.append(f"- **{name}** ({typ})" + (f" — `{p}`" if p else ""))
-                        if lines:
-                            response = label_prefix + "## Here are the items\n\n" + "\n".join(lines)
-            except (json.JSONDecodeError, TypeError):
+                full = response.strip()
+                content_only = _strip_leading_route_label(full)
+                if content_only != full:
+                    route_label = full[: full.find(content_only)].strip() + " " if content_only and content_only in full else ""
+                else:
+                    route_label = ""
+                    content_only = full
+                formatted = format_folder_list_file_find_result(content_only, is_file_find=False)
+                if not formatted and (content_only or "").strip().startswith("["):
+                    formatted = format_json_for_user(content_only)
+                if formatted:
+                    response = (route_label + formatted).strip() if route_label else formatted
+            except Exception:
                 pass
         # If the model echoed raw JSON from a scheduling tool (cron_schedule, record_date), show a short friendly line so the user never sees raw JSON. Never crash.
         if isinstance(response, str) and response.strip().startswith("{"):

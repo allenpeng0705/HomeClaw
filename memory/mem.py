@@ -561,17 +561,28 @@ class Memory(MemoryBase):
             embeddings = await self.embedding_model.embed(data)
         '''
         embeddings = await self.embedding_model.embed(data.lower())
+        # Defensive: embedding model may fail and return None or invalid vector; when that happens, skip vector insert
+        # so Chroma does not raise "Expected embeddings ... got [None]".
+        if embeddings is None:
+            logger.debug("Memory: embedding_model returned None; skipping vector_store.insert for this memory.")
+            embeddings_list = None
+        else:
+            embeddings_list = [embeddings]
         memory_id = str(uuid.uuid4())
         metadata = metadata or {}
         metadata["data"] = data
         metadata["hash"] = hashlib.md5(data.encode()).hexdigest()
         metadata["created_at"] = datetime.now(pytz.timezone("US/Pacific")).isoformat()
 
-        self.vector_store.insert(
-            vectors=[embeddings],
-            ids=[memory_id],
-            payloads=[metadata],
-        )
+        if embeddings_list is not None:
+            try:
+                self.vector_store.insert(
+                    vectors=embeddings_list,
+                    ids=[memory_id],
+                    payloads=[metadata],
+                )
+            except Exception as e:
+                logger.debug("Memory: vector_store.insert failed (non-fatal); memory still stored in DB: {}", e)
         self.db.add_history(
             memory_id, None, data, "ADD", created_at=metadata["created_at"]
         )

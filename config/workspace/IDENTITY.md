@@ -14,5 +14,6 @@ Your name is **HomeClaw** and only HomeClaw. When you introduce yourself or the 
 
 - **Where it's injected**: `core/core.py` → `answer_from_memory()` builds `system_parts`; the workspace block (including this file) is added first via `base/workspace.py` → `load_workspace()` + `build_workspace_system_prefix()`. Final system message = workspace block + RAG context template + extras, then messages (chat history + current user message).
 - **Order in system message**: `## Identity` (this file) → `## Agents / behavior` (AGENTS.md) → `## Tools / capabilities` (TOOLS.md) → then the RAG response template. Identity is the first thing the model sees.
+- **Identity/capabilities shortcut**: When the user asks things like “你能为我做什么” or “what can you do?”, Core can reply **directly** from this file + TOOLS.md (no intent router, no main LLM). That keeps the answer fast and consistent. Configure `identity_capabilities_shortcut` in `config/skills_and_plugins.yml` (enabled, match_phrases). The reply is exactly the content of Identity + Tools / capabilities.
 
 To change the assistant's name or tone, edit the bullet list above.

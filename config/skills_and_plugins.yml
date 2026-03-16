@@ -33,12 +33,15 @@ skills_use_vector_search: false
 # Phase 3.1: per category use "skills: [folder1, folder2]" to restrict which skills are in the prompt (skill_name enum then matches). Phase 3.3: verify_tool_selection + verify_tools to optionally verify exec/file_write before execution.
 intent_router:
   enabled: true
+  # Timeout (seconds) for the intent router LLM call. If the router does not respond in time (e.g. main LLM busy), we fall back to general_chat so the request does not hang. Default 25 when not set; set 0 to disable timeout.
+  # timeout_seconds: 25
   # Full coverage: see docs_design/IntentRouter_CategoriesCoverage.md. Every category has a mapping so router is enough for tools/skills.
-  categories: [search_web, list_files, read_document, create_slides, create_html_slides, generate_pdf, summarize_to_page, send_email, schedule_remind, open_url, memory, knowledge_base, image, general_chat, coding]
+  categories: [search_web, list_files, get_file_link, read_document, create_slides, create_html_slides, generate_pdf, summarize_to_page, send_email, schedule_remind, open_url, memory, knowledge_base, image, general_chat, coding]
   # Short description per category so the router LLM can classify more accurately. Reply must still be the exact category name.
   category_descriptions:
     search_web: "User wants to search the web or look up information online."
     list_files: "User wants to list, browse, or find files or folders."
+    get_file_link: "User wants to get a view/download link for a specific file (e.g. 'send me that file', '发给我 img1.png')."
     read_document: "User wants to read, summarize, or understand a specific document or file."
     summarize_to_page: "User wants a summary of a document as a viewable page (link), not necessarily as PDF."
     send_email: "User wants to send an email. The assistant will use a contacts list, compose a draft, and ask for confirmation before sending."
@@ -49,16 +52,19 @@ intent_router:
     open_url: "User wants to open a URL, visit a webpage, or navigate to a link."
     memory: "User wants to remember something, recall past context, or search memory."
     knowledge_base: "User wants to search or save something in their knowledge base."
-    image: "User wants to generate, analyze, or describe an image."
+    image: "User wants to generate, analyze, or describe an image, or to receive/send an image file (e.g. 发给我, send me that image)."
     general_chat: "General conversation, question, or intent that does not fit a specific category above."
     coding: "User wants to run code, edit files, use dev tools, or automate something."
   category_tools:
     search_web: { profile: minimal }
     # list_files: include get_file_view_link so "send me that file" / "发给我" can return a view link (path from folder_list/file_find).
     list_files: { tools: [folder_list, file_find, document_read, get_file_view_link] }
+    # get_file_link: "发给我 img1.png" / "send me that file" — DAG runs get_file_view_link with path from user_message_path (resolved from prior folder_list via path_resolution_context).
+    get_file_link: { tools: [get_file_view_link, folder_list, file_find] }
     read_document: { tools: [document_read, file_read, file_understand, folder_list, file_find, get_file_view_link] }
     create_slides: { profile: minimal, skills: [html-slides-1.0.0, ppt-generation-1.0.0] }
-    create_html_slides: { profile: minimal, skills: [html-slides-1.0.0] }
+    # create_html_slides uses a DAG flow (document_read -> run_skill(html-slides) -> save_result_page). Allow those tools so the DAG runs without fallback.
+    create_html_slides: { tools: [document_read, run_skill, save_result_page, file_read, file_understand], skills: [html-slides-1.0.0] }
     generate_pdf: { tools: [document_read, markdown_to_pdf] }
     summarize_to_page: { tools: [document_read, save_result_page] }
     send_email: { tools: [file_read, run_skill], skills: [imap-smtp-email] }
@@ -66,7 +72,8 @@ intent_router:
     open_url: { tools: [fetch_url, route_to_plugin, browser_navigate] }
     memory: { tools: [memory_search, memory_get, agent_memory_search, agent_memory_get, append_agent_memory, append_daily_memory] }
     knowledge_base: { tools: [knowledge_base_search, knowledge_base_add, knowledge_base_remove, knowledge_base_list] }
-    image: { tools: [image], skills: [image-generation-1.0.0] }
+    # Include get_file_view_link so "发给我 img1.png" returns a view link; folder_list/file_find to resolve path if needed.
+    image: { tools: [image, get_file_view_link, folder_list, file_find], skills: [image-generation-1.0.0] }
     # general_chat: greetings and open-ended chat; use minimal (time, web_search, folder_list, run_skill, remind_me, route_to_plugin) so "你好" etc. get ~6 tools, not 71.
     general_chat: { profile: minimal }
     coding: { profile: coding }
@@ -79,6 +86,38 @@ intent_router:
   # verify_tools: [exec, file_write]
   # Fallback: add these tools to every category so narrow intents (e.g. search_web) can still save or list. See docs_design/IntentRouter_CategoriesCoverage.md § Fallbacks.
   # tools_always_included: [save_result_page, file_write, folder_list]
+
+# --- Identity / capabilities shortcut (no LLM) ---
+# When the user asks "what can you do?" or "你能为我做什么?", reply directly from workspace IDENTITY.md + TOOLS.md. Chatting is detected accurately: when intent_router is enabled, shortcut runs only when the router returns general_chat (chatting intent); then greeting/capabilities phrase+length decide the reply. When intent_router is disabled, phrase+length are checked early (no LLM).
+identity_capabilities_shortcut:
+  enabled: true
+  # Max length (chars, after normalize) for greeting match. Only messages this short can trigger greeting_reply. 0 = no limit.
+  greeting_max_length: 20
+  # Max length (chars, after normalize) for capabilities match. Only messages this short can return identity+TOOLS.md. 0 = no limit.
+  capabilities_max_length: 60
+  # Greeting: exact match after normalize (strip + trim trailing punctuation). If the user message equals one of these, reply with greeting_reply and skip the LLM.
+  greeting_phrases:
+    - "你好"
+    - "您好"
+    - "hello"
+    - "hi"
+    - "hey"
+    - "嗨"
+  # Reply for greeting_phrases. If empty, a default bilingual greeting is used.
+  greeting_reply: ""
+  # Substring match (case-insensitive for ASCII). If the user message contains any phrase, return identity + capabilities from workspace.
+  match_phrases:
+    - "你能为我做什么"
+    - "你能做什么"
+    - "你能帮我做什么"
+    - "你有什么功能"
+    - "介绍你自己"
+    - "你是谁"
+    - "what can you do"
+    - "what can you do for me"
+    - "who are you"
+    - "what are your capabilities"
+    - "introduce yourself"
 
 # --- Planner–Executor (optional): plan once → execute steps; fallback to ReAct on failure. See docs_design/PlannerExecutorAndDAG.md. ---
 # When enabled: use planner for all intents except skip_planner_for_categories. Implemented step-by-step; set enabled: true when planner + executor are ready.
@@ -95,22 +134,6 @@ planner_executor:
   # --- DAG flows (fixed chains per category). Trigger: category from intent router. create_html_slides = HTML slides only (differs from ppt-generation). ---
   # Path resolution: user_message_path extracts path from the message (documents/, share/, output/, images/, work/, downloads/, knowledge/, or bare filename like report.pdf). Default "documents/" is used only when no path is found.
   flows:
-    create_html_slides:
-      trigger: category
-      category: create_html_slides
-      steps:
-        - tool: document_read
-          args_from:
-            path: [user_message_path, "documents/"]
-        - tool: run_skill
-          args:
-            skill_name: html-slides-1.0.0
-        - tool: save_result_page
-          args_from:
-            title: [llm_from_step_2, "Summary slides"]
-            content: [result_of_step_2]
-          args:
-            format: "html"
     # Generate PDF: read document → LLM produces Markdown → markdown_to_pdf. Path: from message (any sandbox folder or bare filename) or default documents/ when none found.
     generate_pdf:
       trigger: category
@@ -131,6 +154,14 @@ planner_executor:
         - tool: folder_list
           args_from:
             path: [user_message_folder, "."]
+    # Get file link: user asked to "send me that file" / "发给我 img1.png". Path from user message, resolved from prior folder_list via path_resolution_context (e.g. img1.png → images/img1.png).
+    get_file_link:
+      trigger: category
+      category: get_file_link
+      steps:
+        - tool: get_file_view_link
+          args_from:
+            path: [user_message_path, ""]
     # Web search: query from user message → web_search. If result short: summarize and reply directly; if long: save as markdown page and return link.
     search_web:
       trigger: category
@@ -336,7 +367,7 @@ skills_force_include_rules:
   - patterns:
     - "乔布斯|极简.*演示|HTML\\s*slides|html\\s*slides|幻灯片|生成.*HTML|做.*幻灯片"
     folders: [html-slides-1.0.0]
-    instruction: "User asked for 乔布斯-style or HTML slides. You have the html-slides skill: follow its steps, then file_write or save_result_page to output/ and return the link. Do not say you have no skill."
+    instruction: "User asked for 乔布斯-style or HTML slides. Generate a **multi-slide deck** (8–20 distinct slides, one idea per slide), not a single long page. Follow the html-slides skill steps (refine script → titles → structure → full HTML), then save_result_page(title=..., content=<full HTML>, format='html') or file_write to output/ and return the link. Do not say you have no skill."
   - patterns:
     - "发.*[Xx]|发推|发一条.*[Xx]|post.*tweet|tweet.*post|发.*twitter"
     folders: [x-api-1.0.0, social-media-agent-1.0.0]
@@ -455,6 +486,9 @@ tools:
   browser_enabled: true   # when browser_use_plugin false: built-in tools only if true
   browser_headless: false # when using built-in tools: false to show window (local testing)
   tool_timeout_seconds: 0   # per-tool timeout (seconds); 0 = no timeout. For long PDF/summarize use 300–600.
+  # get_file_view_link: when user asks for a file or system sends a file, we always return a view/download link. For images: if size <= max_image_size_for_inline we also attach the image so the client can show it directly; above that we send only the link.
+  get_file_view_link:
+    max_image_size_for_inline: 2097152   # bytes (2 MiB). Images at or below this size are sent inline; larger images get link only. Set 0 to never send images inline (link only).
   # max_tool_rounds: max LLM rounds in the tool loop (default 30). Complex tasks (e.g. document_read → run_skill → save_result_page) may need many rounds; set higher if needed.
   # Use tool result as final response and skip the second LLM call. These are the default lists (Core uses same if omitted).
   # Plugins (e.g. homeclaw-browser): invoked via route_to_plugin; result is always used as final response (no second LLM). PPT is now a skill (ppt-generation-1.0.0) invoked via run_skill.

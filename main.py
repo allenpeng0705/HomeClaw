@@ -601,9 +601,13 @@ def start(open_browser=True):
                     print(f"Launcher: {ui_url}\n")
                 except Exception:
                     pass
+        # Use join(timeout) in a loop so the main thread periodically returns to Python and can run
+        # the Ctrl+C handler. An infinite join() would block the main thread in a C-level wait, so
+        # the signal handler would never run (e.g. when Core is blocked on vision LLM).
         if core_thread is not None:
             try:
-                core_thread.join()
+                while core_thread.is_alive():
+                    core_thread.join(timeout=1.0)
             except Exception:
                 pass
             exc_holder = getattr(core_thread, "_exc_holder", None)

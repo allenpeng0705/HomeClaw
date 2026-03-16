@@ -1,11 +1,32 @@
-# Contacts (example for send_email flow)
+# Contacts for send_email
 
-Place a copy of this file at **share/contacts.md** (in your homeclaw sandbox) so the send_email DAG can resolve names to email addresses. The flow reads this file, then the LLM composes a draft using the list below.
+Copy this file to **share/contacts.md** in your HomeClaw sandbox so the send_email flow can resolve names (e.g. "send to John") to email addresses.
 
-Format: one contact per line or in a list. Include name and email; optional notes.
+**Format:** Each contact is one line: **Name** — `email@example.com` (optional note).  
+Use sections and blank lines as you like; the assistant matches the user’s wording to a name, then uses the email on that line.
 
-- **Alice** — alice@example.com
-- **Bob** — bob@example.com
-- **John Smith** — john.smith@company.com (work)
+---
 
-You can use Markdown lists or plain lines. The LLM will match the user's request (e.g. "send to John") to the right email.
+## Work
+
+- **Alice Chen** — alice.chen@company.com (team lead)
+- **Bob Zhang** — bob@company.com
+- **John Smith** — john.smith@company.com
+
+## Family & friends
+
+- **Emily** — emily@example.com
+- **Mom** — mom@gmail.com
+- **Dad** — dad@outlook.com
+
+## Other
+
+- **Support** — support@service.com (customer support)
+- **HR** — hr@company.com
+
+---
+
+**Tips:**
+- Use a clear display name so "send to Emily" or "email Mom" matches.
+- One email per line; multiple recipients can be chosen by the user in the request.
+- You can use plain lines without bullets, e.g. `John — john@example.com`, if you prefer.

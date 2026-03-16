@@ -115,7 +115,7 @@ content: |
   Call: run_skill(skill_name="imap-smtp-email", script="send_email.py", args=["--to", "john@example.com", "--body", "hello"])
 
   User: "Make HTML slides from my presentation.docx."
-  Thought: Instruction-only skill: confirm run_skill then document_read, generate HTML, save_result_page.
+  Thought: Instruction-only skill: confirm run_skill then document_read, generate a multi-slide deck (8–20 slides, one idea per slide), save_result_page(format='html').
   Call: run_skill(skill_name="html-slides")
 
   --- Memory and profile ---
@@ -142,11 +142,11 @@ content: |
   Call: web_search(query="X", count=10)
   Wrong: exec(...), tavily_crawl(...) for general search.
 
-  Rule: When the user asks for slides from a document (PDF, docx), use the slides skill (e.g. html-slides for HTML, ppt-generation for PPT). Do not reply with only text.
+  Rule: When the user asks for slides from a document (PDF, docx), use the slides skill (e.g. html-slides for HTML, ppt-generation for PPT). For HTML slides, output must be a multi-slide deck (multiple slides, one idea per slide), not a single long page. Do not reply with only text.
   User: "Make slides from my report.pdf." / "把这份文档做成PPT"
-  Thought: Slides from document -> run_skill with html-slides or ppt-generation, then document_read and save_result_page.
+  Thought: Slides from document -> run_skill with html-slides or ppt-generation, then document_read, generate multi-slide deck, save_result_page.
   Call: run_skill(skill_name="html-slides") or run_skill(skill_name="ppt-generation")
-  Wrong: Replying without calling run_skill and document_read/save_result_page.
+  Wrong: Replying without calling run_skill and document_read/save_result_page; or outputting one long HTML page instead of multiple slides.
 
   --- Web search and fetch ---
   User: "Search the web for latest news on AI."

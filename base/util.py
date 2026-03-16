@@ -46,6 +46,7 @@ _SENSITIVE_PARAM_KEYS = frozenset(k.lower() for k in (
 ))
 
 
+
 def _extract_arg_from_malformed_json(raw: str, key: str) -> Optional[str]:
     """Best-effort extract a string value for key from truncated/malformed JSON. Returns None if not found. Never raises."""
     if not raw or not isinstance(raw, str):
@@ -1691,7 +1692,7 @@ class Util:
                 _raw = 300 if _raw is None else int(_raw)
             except (TypeError, ValueError):
                 _raw = 300
-            timeout_sec = None if _raw == 0 else max(60, _raw)  # 0 = no timeout (use with care)
+            timeout_sec = None if _raw == 0 else max(60, _raw)  # 0 = no timeout (long tasks allowed; use shortcuts for simple replies)
             timeout = aiohttp.ClientTimeout(total=timeout_sec)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(chat_completion_api_url, headers=headers, data=data_json) as resp:
@@ -2021,7 +2022,7 @@ class Util:
                 _raw = 300 if _raw is None else int(_raw)
             except (TypeError, ValueError):
                 _raw = 300
-            timeout_sec = None if _raw == 0 else max(60, _raw)  # 0 = no timeout (use with care)
+            timeout_sec = None if _raw == 0 else max(60, _raw)  # 0 = no timeout (long tasks allowed; use shortcuts for simple replies)
             timeout = aiohttp.ClientTimeout(total=timeout_sec)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(chat_completion_api_url, headers=headers, data=data_json) as resp:

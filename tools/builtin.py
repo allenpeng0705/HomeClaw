@@ -2208,8 +2208,20 @@ async def _agents_list_executor(arguments: Dict[str, Any], context: ToolContext)
     })
 
 
+def _normalize_file_path_for_sandbox(path_arg: str) -> str:
+    """Strip /files/ prefix and leading slashes so paths like /files/images/img1.png become images/img1.png for sandbox resolution. Never raises."""
+    if not path_arg or not isinstance(path_arg, str):
+        return (path_arg or "").strip()
+    p = path_arg.strip().replace("\\", "/")
+    if p.startswith("/files/"):
+        p = p[7:].lstrip("/")
+    elif p.startswith("/"):
+        p = p.lstrip("/")
+    return p
+
+
 async def _image_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Analyze an image with the vision/multimodal model. Provide image as file path (relative to homeclaw_root) or URL, and an optional prompt."""
+    """Analyze an image with the vision/multimodal model. Provide image as file path (relative to homeclaw_root) or URL, and an optional prompt. If path is not found, infers by searching the sandbox for the filename (e.g. img1.png)."""
     import base64
     core = context.core
     path_arg = (arguments.get("path") or arguments.get("image") or "").strip()
@@ -2229,22 +2241,55 @@ async def _image_executor(arguments: Dict[str, Any], context: ToolContext) -> st
                 if ct and ct.startswith("image/"):
                     mime = ct
         else:
+            path_arg = _normalize_file_path_for_sandbox(path_arg)
             r = _resolve_file_path(path_arg, context, for_write=False)
+            if r is None and ("/" not in path_arg and "\\" not in path_arg):
+                for prefix in _fallback_prefixes_for_filename(path_arg):
+                    if not prefix:
+                        continue
+                    try_path = prefix + path_arg
+                    r = _resolve_file_path(try_path, context, for_write=False)
+                    if r:
+                        full, _ = r
+                        if isinstance(full, Path) and full.is_file():
+                            path_arg = try_path
+                            break
+                    r = None
+            if r is None:
+                matches = _search_sandbox_for_filename(context, path_arg.split("/")[-1].split("\\")[-1] if path_arg else path_arg)
+                if len(matches) == 1:
+                    path_arg = matches[0]
+                    r = _resolve_file_path(path_arg, context, for_write=False)
+                elif len(matches) > 1:
+                    return (
+                        f"Found {len(matches)} files matching that name. Please specify which one: "
+                        + ", ".join(matches[:15]) + (" ..." if len(matches) > 15 else "")
+                        + " — e.g. image(path='exact_path')."
+                    )
             if r is None:
                 return _file_resolve_error_msg(path_arg)
             full, base = r
             used_request_image = False
-            if not full.is_file():
-                req_images = list(getattr(getattr(context, "request", None), "images", None) or [])
-                for candidate in req_images:
-                    if isinstance(candidate, str) and candidate.strip() and os.path.isfile(candidate.strip()):
-                        full = Path(candidate.strip()).resolve()
-                        used_request_image = True
-                        break
-                else:
-                    if not _path_under(full, base):
-                        return _FILE_ACCESS_DENIED_MSG
-                    return _file_not_found_msg(context)
+            if not (isinstance(full, Path) and full.is_file()):
+                basename = path_arg.split("/")[-1].split("\\")[-1].strip() if path_arg else ""
+                if basename:
+                    matches = _search_sandbox_for_filename(context, basename)
+                    if len(matches) == 1:
+                        path_arg = matches[0]
+                        r = _resolve_file_path(path_arg, context, for_write=False)
+                        if r:
+                            full, base = r
+                if not (isinstance(full, Path) and full.is_file()):
+                    req_images = list(getattr(getattr(context, "request", None), "images", None) or [])
+                    for candidate in req_images:
+                        if isinstance(candidate, str) and candidate.strip() and os.path.isfile(candidate.strip()):
+                            full = Path(candidate.strip()).resolve()
+                            used_request_image = True
+                            break
+                    else:
+                        if not _path_under(full, base):
+                            return _FILE_ACCESS_DENIED_MSG
+                        return _file_not_found_msg(context)
             if not used_request_image and not _path_under(full, base):
                 return _FILE_ACCESS_DENIED_MSG
             image_bytes = full.read_bytes()
@@ -2380,16 +2425,19 @@ def _attach_run_skill_image_path(script_output: str, context: ToolContext) -> No
             if path:
                 paths.append(path)
                 break
-    if paths:
+    # Only attach images that are under the inline size limit (same as get_file_view_link)
+    paths_inline = [p for p in paths if _image_path_ok_for_inline(p)] if paths else []
+    if paths_inline:
         if meta is not None:
-            meta["response_image_paths"] = paths
+            meta["response_image_paths"] = paths_inline
         # Core-level fallback so /inbound can read even if request_metadata doesn't persist
         core = getattr(context, "core", None)
         req_id = getattr(req, "request_id", None)
         if core is not None and req_id:
             if not hasattr(core, "_response_image_paths_by_request_id"):
                 core._response_image_paths_by_request_id = {}
-            core._response_image_paths_by_request_id[req_id] = paths
+            core._response_image_paths_by_request_id[req_id] = paths_inline
+    # If paths were over limit, user still gets the tool output (which may contain a link or path)
 
 
 def _append_file_link_to_run_skill_output(script_output: str, context: Optional[ToolContext]) -> str:
@@ -3755,12 +3803,53 @@ def _markdown_to_pdf_convert_sync(
     )
 
 
-# Image extensions: when get_file_view_link serves these, we attach the image to the response so the client can show it inline.
+# Image extensions: when get_file_view_link (or run_skill image output) serves these, we may attach the image so the client can show it inline (if size <= max_image_size_for_inline).
 _FILE_VIEW_LINK_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico")
 
+# Default max image size (bytes) for sending inline; above this we send only the link. Overridden by tools.get_file_view_link.max_image_size_for_inline.
+_DEFAULT_MAX_IMAGE_SIZE_FOR_INLINE = 2 * 1024 * 1024  # 2 MiB
 
-# When user/model passes only a filename (no path), try these subdirs so we can still find the file (e.g. images/ID1.jpg).
-_GET_FILE_VIEW_LINK_FALLBACK_PREFIXES = ("images/", "documents/", "downloads/", "output/", "work/", "knowledge/")
+
+def _get_max_image_size_for_inline() -> int:
+    """Return max image size (bytes) for inline send from config; 0 = link only. Never raises."""
+    try:
+        config = _get_tools_config() or {}
+        gfv = config.get("get_file_view_link")
+        if isinstance(gfv, dict) and "max_image_size_for_inline" in gfv:
+            return max(0, int(gfv["max_image_size_for_inline"]))
+    except (TypeError, ValueError):
+        pass
+    return _DEFAULT_MAX_IMAGE_SIZE_FOR_INLINE
+
+
+def _image_path_ok_for_inline(abs_path: str) -> bool:
+    """True if this path is an image file and size <= max_image_size_for_inline. Never raises."""
+    if not abs_path:
+        return False
+    p = Path(abs_path)
+    if not p.suffix or p.suffix.lower() not in _FILE_VIEW_LINK_IMAGE_SUFFIXES:
+        return False
+    try:
+        return p.is_file() and p.stat().st_size <= _get_max_image_size_for_inline()
+    except OSError:
+        return False
+
+
+# When user/model passes only a filename (no path), try these subdirs so we can still find the file. Order depends on file type: images first for image extensions, documents first for others.
+_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico")
+_FALLBACK_PREFIXES_IMAGE_FIRST = ("images/", "documents/", "downloads/", "output/", "work/", "knowledge/")
+_FALLBACK_PREFIXES_DOCUMENT_FIRST = ("documents/", "images/", "downloads/", "output/", "work/", "knowledge/")
+
+
+def _fallback_prefixes_for_filename(filename: str) -> tuple:
+    """Return fallback folder prefixes to try when resolving a bare filename: images/ first for image extensions, documents/ first for other files. Never raises."""
+    if not filename or not isinstance(filename, str):
+        return _FALLBACK_PREFIXES_DOCUMENT_FIRST
+    lower = filename.lower().strip()
+    if any(lower.endswith(ext) for ext in _IMAGE_EXTENSIONS):
+        return _FALLBACK_PREFIXES_IMAGE_FIRST
+    return _FALLBACK_PREFIXES_DOCUMENT_FIRST
+
 
 # Max results when searching sandbox for a filename (avoid slow scans).
 _GET_FILE_VIEW_LINK_SEARCH_MAX = 25
@@ -3771,15 +3860,16 @@ async def _get_file_view_link_executor(arguments: Dict[str, Any], context: ToolC
     path_arg = (arguments.get("path") or "").strip()
     if not path_arg or ".." in path_arg:
         return "Path is required and must be a relative path (e.g. output/report.html, documents/1.pdf, images/photo.png)."
+    path_arg = _normalize_file_path_for_sandbox(path_arg)
     # Allow bare filename (e.g. "1.pdf"); we will search sandbox if resolve fails
     if path_arg.startswith("/") and _is_bare_filename(path_arg.lstrip("/")):
         path_arg = path_arg.lstrip("/")
     try:
         r = _resolve_file_path(path_arg, context, for_write=False)
         if not r:
-            # If only a filename was passed (no /), try common subdirs so "ID1.jpg" can resolve to images/ID1.jpg
+            # If only a filename was passed (no /), try common subdirs: images/ first for image files, documents/ first for others
             if "/" not in path_arg and "\\" not in path_arg:
-                for prefix in _GET_FILE_VIEW_LINK_FALLBACK_PREFIXES:
+                for prefix in _fallback_prefixes_for_filename(path_arg):
                     if not prefix:
                         continue
                     try_path = prefix + path_arg
@@ -3790,6 +3880,15 @@ async def _get_file_view_link_executor(arguments: Dict[str, Any], context: ToolC
                             path_arg = try_path
                             break
                         r = None
+            if not r and path_arg and ("/" in path_arg or "\\" in path_arg):
+                # LLM often invents wrong extension (e.g. img1.jpg when file is img1.png). Try search by basename stem.
+                basename = path_arg.replace("\\", "/").strip().split("/")[-1].strip()
+                stem = (basename.rsplit(".", 1)[0] if "." in basename else basename).strip()
+                if stem and len(stem) < 200:
+                    matches = _search_sandbox_for_filename(context, stem)
+                    if len(matches) == 1:
+                        path_arg = matches[0]
+                        r = _resolve_file_path(path_arg, context, for_write=False)
             if not r:
                 # Search sandbox by filename so "1.pdf" can be found
                 matches = _search_sandbox_for_filename(context, path_arg)
@@ -3843,13 +3942,13 @@ async def _get_file_view_link_executor(arguments: Dict[str, Any], context: ToolC
         link, link_err = build_file_view_link(scope, path_for_link)
         if not link:
             return f"View link is not available: {link_err or 'set core_public_url and auth_api_key in config/core.yml.'}"
-        # When the file is an image, attach it so the client can display it directly (Finder/any chat). Never crash; on failure we still return the link.
+        # When the file is an image and size <= limit, attach it so the client can display it directly; above limit we send only the link. Never crash; on failure we still return the link.
         try:
-            if full.suffix and full.suffix.lower() in _FILE_VIEW_LINK_IMAGE_SUFFIXES:
+            abs_path = str(full.resolve())
+            if _image_path_ok_for_inline(abs_path):
                 req = getattr(context, "request", None)
                 core = getattr(context, "core", None)
                 req_id = getattr(req, "request_id", None) if req else None
-                abs_path = str(full.resolve())
                 meta = getattr(req, "request_metadata", None)
                 if isinstance(meta, dict):
                     meta["response_image_paths"] = [abs_path]
@@ -3857,6 +3956,7 @@ async def _get_file_view_link_executor(arguments: Dict[str, Any], context: ToolC
                     if not hasattr(core, "_response_image_paths_by_request_id"):
                         core._response_image_paths_by_request_id = {}
                     core._response_image_paths_by_request_id[req_id] = [abs_path]
+            # else: image over limit or max_inline=0 → link only (no response_image_paths)
         except Exception as img_e:
             logger.debug("get_file_view_link: image attach failed (link still returned): %s", img_e)
         return f"View/download link. CRITICAL: Use ONLY the URL on the next line; copy it exactly—do not modify, truncate, or append anything.\n{link}"
@@ -5997,7 +6097,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="image",
-            description="Analyze an image with the vision/multimodal model. You MUST pass path (file in sandbox, from folder_list/file_find) or url (image URL). Extract from the user's message or attachment context. Do not call without an image source. Optional prompt for the vision question (default: Describe the image). Requires a vision-capable LLM.",
+            description="Analyze an image with the vision/multimodal model—use only for describing the image or answering questions about it. Pass path (sandbox-relative, e.g. images/img1.png; or bare filename—tool will search sandbox) or url. When the user wants to RECEIVE the image or a link (e.g. '发给我', 'send me this image'), use get_file_view_link(path=...) instead. Optional prompt (default: Describe the image). Requires a vision-capable LLM.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -6412,7 +6512,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path to the file. Use the **path** field from folder_list or file_find result (e.g. documents/1.pdf, images/photo.png), not the name field."},
+                    "path": {"type": "string", "description": "Relative path. Use ONLY the path from folder_list/file_find or the exact filename the user said (e.g. img1.png). Do NOT change extension (.png/.jpg) or invent names (e.g. imge_4)."},
                 },
                 "required": ["path"],
             },
