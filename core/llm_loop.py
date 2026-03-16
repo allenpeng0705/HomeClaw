@@ -43,6 +43,12 @@ from base.intent_router import (
     verify_tool_selection as intent_verify_tool_selection,
     DEFAULT_VERIFY_TOOLS as INTENT_VERIFY_TOOLS_DEFAULT,
 )
+from base.planner_executor import (
+    get_flow_for_categories,
+    run_dag as dag_run_dag,
+    run_planner as planner_run_planner,
+    run_executor as planner_run_executor,
+)
 from base.skills import (
     get_all_skills_dirs,
     get_skills_dir,
@@ -539,7 +545,8 @@ async def answer_from_memory(
             except Exception as e:
                 logger.debug("Companion identity (who) inject failed: {}", e)
 
-        # System context: current date/time (system timezone) + optional location. Never crash; see SystemContextDateTimeAndLocation.md
+        # System context: current date/time (system timezone) + optional location. Built here but appended at END of system_parts so the prefix (identity, tools, instructions) is static for KV cache reuse (cache_prompt: true). See SystemContextDateTimeAndLocation.md.
+        _system_context_block = None
         try:
             now = datetime.now()
             try:
@@ -585,12 +592,12 @@ async def answer_from_memory(
             except Exception as e:
                 logger.debug("System context location resolve: {}", e)
             ctx_line += "\nCritical for cron jobs and reminders: this current datetime is the single source of truth. The server uses it when scheduling; you must use it for all time calculations. Do not use any other time (e.g. from memory or prior turns—they may be outdated). Use this block only when the user explicitly asks (e.g. \"what day is it?\", \"what time is it?\", scheduling with remind_me, record_date, cron_schedule). Do not volunteer date/time in greetings. For any reminder or schedule request (in any wording), you MUST call the tool (remind_me, cron_schedule, or record_date)—replying with text only does not create a reminder. For reminders and cron: use ONLY the Current time above; do not invent or guess any time (e.g. never output 26号 15:49, 明天下午7点, 2026-1月 3号, or 2:49 PM). If the user says \"in N minutes\", reminder time = Current time + N minutes (e.g. Current time 17:58 + 30 min = 18:28). For remind_me(message=...): do NOT put any date or time inside the message; use a short label only (e.g. 会议提醒, Reminder: meeting)."
-            system_parts.append("## System context (date/time and location)\n" + ctx_line + "\n\n")
+            _system_context_block = "## System context (date/time and location)\n" + ctx_line + "\n\n"
         except Exception as e:
             logger.debug("System context block failed: {}", e)
             try:
                 fallback = f"Current date: {date.today().isoformat()}."
-                system_parts.append("## System context\n" + fallback + "\n\n")
+                _system_context_block = "## System context\n" + fallback + "\n\n"
                 # Still set a minimal datetime line so prepend and routing blocks can use it
                 core._request_current_datetime_line = getattr(core, "_request_current_datetime_line", None) or date.today().isoformat() + " 00:00"
             except Exception:
@@ -774,6 +781,22 @@ async def answer_from_memory(
             c.strip() for c in ((_intent_router_category or "").split(","))
             if (c or "").strip()
         ] if _intent_router_category else []
+
+        # Planner–Executor: when enabled and category not in skip list, use planner path (Phase 2+). Never crash on config.
+        try:
+            _planner_executor_config = getattr(Util().get_core_metadata(), "planner_executor_config", None) or {}
+            if not isinstance(_planner_executor_config, dict):
+                _planner_executor_config = {}
+        except Exception:
+            _planner_executor_config = {}
+        try:
+            _skip_list = _planner_executor_config.get("skip_planner_for_categories")
+            _skip_planner_cats = {str(x).strip().lower() for x in (_skip_list if isinstance(_skip_list, (list, tuple)) else []) if x is not None}
+        except Exception:
+            _skip_planner_cats = set()
+        _use_planner_executor = bool(_planner_executor_config.get("enabled")) and bool(_intent_router_categories) and not any(
+            (c or "").strip().lower() in _skip_planner_cats for c in _intent_router_categories
+        )
 
         # Skills (SKILL.md from skills_dir + skills_extra_dirs); skills_disabled excluded
         if getattr(Util().core_metadata, 'use_skills', True):
@@ -1513,6 +1536,9 @@ async def answer_from_memory(
             except Exception as e:
                 logger.debug("Friend preset system_prompt failed: {}", e)
 
+        # Append date/time block last so system prefix is static for KV cache (cache_prompt: true)
+        if _system_context_block:
+            system_parts.append(_system_context_block)
         if system_parts:
             llm_input = [{"role": "system", "content": "\n".join(system_parts)}]
 
@@ -1813,6 +1839,49 @@ async def answer_from_memory(
             "Tools for LLM: use_tools={} unified={} count={} has_route_to_plugin={}",
             use_tools, unified, len(openai_tools or []), "route_to_plugin" in (tool_names or []),
         )
+        # DAG: if a flow is defined for this category, we will run it after context is built (no planner call). See docs_design/PlannerExecutorAndDAG.md §3.
+        _dag_flow = None
+        if _intent_router_categories and _planner_executor_config and isinstance(_planner_executor_config, dict):
+            _dag_flow = get_flow_for_categories(_intent_router_categories, _planner_executor_config)
+        # Planner–Executor Phase 2: call planner only when no DAG flow (DAG first for category). Never crash; fall back to ReAct on any error.
+        _planner_plan = None
+        _pe_tool_names = []  # always defined so executor/DAG below never see NameError
+        if openai_tools:
+            _pe_tool_names = [((t or {}).get("function") or {}).get("name") for t in openai_tools if isinstance(t, dict)]
+            _pe_tool_names = [n for n in _pe_tool_names if n]
+        if _use_planner_executor and openai_tools and not _dag_flow:
+            try:
+                _pe_tools_desc = None
+                if openai_tools:
+                    _parts = []
+                    for t in openai_tools:
+                        if not isinstance(t, dict):
+                            continue
+                        fn = t.get("function") or {}
+                        name = fn.get("name")
+                        desc = (fn.get("description") or "")[:300]
+                        if name:
+                            _parts.append(f"- {name}: {desc}" if desc else f"- {name}")
+                    if _parts:
+                        _pe_tools_desc = "Available tools:\n" + "\n".join(_parts)
+                _planner_plan = await planner_run_planner(
+                    completion_fn=core,
+                    query=query,
+                    categories=_intent_router_categories,
+                    tool_names=_pe_tool_names,
+                    skill_names=_injected_skill_folders if _injected_skill_folders else None,
+                    tools_description=_pe_tools_desc,
+                    config=_planner_executor_config,
+                )
+                if _planner_plan:
+                    _goal = (_planner_plan.get("goal") or "").strip() or "(no goal)"
+                    _n_steps = len(_planner_plan.get("steps") or [])
+                    _component_log("planner_executor", f"plan received: goal={_goal[:80]}… steps={_n_steps}; Phase 2: executing via ReAct")
+                else:
+                    _component_log("planner_executor", "plan failed or invalid; using ReAct")
+            except Exception as _pe_e:
+                logger.debug("Planner call failed: {}; using ReAct", _pe_e)
+                _component_log("planner_executor", "error; using ReAct")
 
         if openai_tools:
             logger.info("Tools available for this turn: {}", tool_names)
@@ -1892,7 +1961,48 @@ async def answer_from_memory(
                 run_id=run_id,
                 request=request,
             )
-            current_messages = list(llm_input)
+            # DAG first: if a flow is defined for this category, run it (no planner). On success use result and skip ReAct.
+            _planner_executor_final_response = None
+            if _dag_flow and openai_tools:
+                try:
+                    _dag_success, _dag_result = await dag_run_dag(
+                        _dag_flow,
+                        registry,
+                        context,
+                        user_message=query,
+                        completion_fn=core,
+                        config=_planner_executor_config,
+                        tool_names=_pe_tool_names if _pe_tool_names else None,
+                    )
+                    if _dag_success:
+                        _planner_executor_final_response = _dag_result
+                        _component_log("planner_executor", "DAG flow completed; using flow result")
+                    else:
+                        _component_log("planner_executor", f"DAG flow failed: {(_dag_result or '')[:80]}…; falling back")
+                except Exception as _dag_e:
+                    logger.debug("DAG failed: {}; falling back", _dag_e)
+                    _component_log("planner_executor", "DAG error; falling back")
+            # Planner–Executor Phase 3: if we have a valid plan (and no DAG result), run executor; on success use its result and skip ReAct.
+            if _planner_executor_final_response is None and _planner_plan:
+                try:
+                    _exec_success, _exec_results, _exec_final = await planner_run_executor(
+                        _planner_plan,
+                        registry,
+                        context,
+                        completion_fn=core,
+                        config=_planner_executor_config,
+                        tool_names=_pe_tool_names if _pe_tool_names else None,
+                        user_message=query,
+                    )
+                    if _exec_success:
+                        _planner_executor_final_response = _exec_final
+                        _component_log("planner_executor", "executor completed; using plan result (Phase 3)")
+                except Exception as _ex:
+                    logger.debug("Planner executor failed: {}; falling back to ReAct", _ex)
+            if _planner_executor_final_response is not None:
+                response = _planner_executor_final_response
+            else:
+                current_messages = list(llm_input)
             try:
                 _tc = getattr(Util().get_core_metadata(), "tools_config", None) or {}
                 _n = _tc.get("max_tool_rounds")
@@ -1926,7 +2036,7 @@ async def answer_from_memory(
                     _qwen3_xlam_grammar = Util.get_qwen3_xlam_grammar()
             except Exception:
                 pass
-            for _ in range(max_tool_rounds):
+            for _ in (range(max_tool_rounds) if _planner_executor_final_response is None else []):
                 # Default: main model (effective_llm_name) for every turn — tool selection, parameter extraction, and final reply. Override only when tool_selection_llm is configured and use_tool_selection_llm is true.
                 llm_name_this_turn = effective_llm_name
                 # Sync mix_route_this_request with effective_llm_name each iteration so override applies only for one turn and fallback knows the current route. Defensive: never crash on metadata/config access.
@@ -3078,16 +3188,17 @@ async def answer_from_memory(
                     break
                 # Always run 2nd LLM round after tools; let the LLM decide whether the output is fine, how to refine it, or how to respond to errors (no if/else on tool result content).
             else:
-                # Loop exhausted (e.g. max_tool_rounds). Use last message content only if it is from the assistant; never use a tool result as the user-facing response.
-                if current_messages:
-                    _last = current_messages[-1]
-                    if isinstance(_last, dict) and (_last.get("role") or "").strip() == "assistant":
-                        _c = _last.get("content")
-                        response = (_c if isinstance(_c, str) else (str(_c) if _c is not None else "")).strip() or None
+                # Loop exhausted (e.g. max_tool_rounds). Use last message content only if it is from the assistant; never use a tool result as the user-facing response. Do not overwrite planner-executor response.
+                if _planner_executor_final_response is None:
+                    if current_messages:
+                        _last = current_messages[-1]
+                        if isinstance(_last, dict) and (_last.get("role") or "").strip() == "assistant":
+                            _c = _last.get("content")
+                            response = (_c if isinstance(_c, str) else (str(_c) if _c is not None else "")).strip() or None
+                        else:
+                            response = None
                     else:
                         response = None
-                else:
-                    response = None
             await close_browser_session(context)
         else:
             try:

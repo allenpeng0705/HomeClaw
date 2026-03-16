@@ -1668,6 +1668,12 @@ class Util:
                 if qwen_model == "qwen35":
                     data["presence_penalty"] = 1.5
                     # stop: from config only (completion.stop or llama_cpp.stop in llm.yml). See comments there for Qwen/Qwen35.
+            if mtype == "local":
+                _cp = llama_cpp.get("cache_prompt")
+                if _cp is None:
+                    _cp = True
+                if _cp:
+                    data["cache_prompt"] = True
             extra_body_params = self._filter_extra_body_for_model(extra_body_params, model_for_request)
             if extra_body_params:
                 data.setdefault("extra_body", {}).update(extra_body_params)
@@ -1997,6 +2003,12 @@ class Util:
                 if qwen_model == "qwen35":
                     data["presence_penalty"] = 1.5
                     # stop: from config only (completion.stop or llama_cpp.stop in llm.yml). See comments there for Qwen/Qwen35.
+            if mtype == "local":
+                _cp = llama_cpp.get("cache_prompt")
+                if _cp is None:
+                    _cp = True
+                if _cp:
+                    data["cache_prompt"] = True
             extra_body_params = self._filter_extra_body_for_model(extra_body_params, model_for_request)
             if extra_body_params:
                 data.setdefault("extra_body", {}).update(extra_body_params)

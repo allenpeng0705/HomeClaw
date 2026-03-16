@@ -44,6 +44,9 @@ llama_cpp:
   flash_attn: on
   # use_mmap: true = memory-map (default, lower RAM); false = --no-mmap (if you see mmap errors).
   use_mmap: false
+  # cache_prompt: true = send cache_prompt: true to llama-server so it reuses KV cache for unchanged prefix (system + tool defs); only new tokens at end are evaluated. Speeds up tool-loop turns. Set false if your server does not support it.
+  # Trade-offs: (1) Higher VRAM/RAM — cached prefix stays in memory; multi-session can OOM faster. (2) Prefix must be 100% identical — any change (e.g. "Current time") at the start invalidates cache and causes a full re-process. (3) Cached tokens count against ctx_size — less room for long conversations. (4) Prompt layout is fixed (static first, conversation last). Disable with cache_prompt: false if you hit OOM or need dynamic content at the top.
+  cache_prompt: true
   # batch_size: prompt batch size (default server ~512). Try 256–512 for 27B; higher = more VRAM, often better throughput.
   batch_size: 512
   cont_batching: true  #= --cont-batching (smaller batches, start generating sooner; helps avoid OOM on prefill).
@@ -99,6 +102,7 @@ llama_cpp:
     predict: 2048
     function_calling: true
     stop: ["<|im_end|>"]
+    cache_prompt: false   # disable only for vision_llm
 
   # ——— Tool-selection LLM (when you run it and Core starts it, or for reference when you start it yourself): overrides merged with root.
   # When main_llm is GPT but tool_selection_llm is Qwen: leave root qwen_mode unset and set qwen_mode here so only tool_selection requests get Qwen behavior (enable_thinking: false, tool_temperature, etc.). Also set completion_tool_selection.stop (e.g. ["<|im_end|>"]) and optionally temperature.
@@ -107,6 +111,7 @@ llama_cpp:
     predict: 8192
     function_calling: true
     stop: ["<|im_end|>"]
+    cache_prompt: false   # disable only for tool_selection_llm
     qwen_mode: qwen3    # set when tool_selection_llm is Qwen and main_llm is not (e.g. GPT main + Qwen tool_selection). Omit to use root qwen_mode.
     # ——— Qwen3-4B xLAM/Codex (e.g. Manojb/Qwen3-4B-toolcalling-gguf-codex): model uses <tool_call> XML and conflicts with native toolcall parser. Set qwen3_xlam_style: true so Core injects tools in prompt, sends grammar, and omits tools array; we add "</tool_call>" to stop.
     qwen3_xlam_style: true

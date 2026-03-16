@@ -215,3 +215,53 @@ If a needed tool or skill is **not** in the set chosen at the start of the turn 
 | **Mid-turn re-route** | Not implemented | Re-running the router after the first tool round to expand tools would allow a second chance; not implemented. |
 
 **Recommendation:** Use **router failure → general_chat** and **multi-category** first. If narrow categories still miss common tools (e.g. “search then save”), add **tools_always_included** (e.g. `save_result_page`, `file_write`, `folder_list`).
+
+---
+
+## Guaranteeing category has all needed tools/skills (for Planner–Executor)
+
+Before running the Planner–Executor, we need a clear policy so the **plan** can only reference tools/skills that the executor is allowed to run. Two approaches:
+
+1. **Planner sees the same set as today (category-filtered)**  
+   - Planner gets the **same** tools and skills as the ReAct loop: intent router categories → `category_tools` + `get_skills_filter_for_category` (union if multi-category), plus `tools_always_included`.  
+   - **Pro:** Plan is always executable; no tool/skill in the plan is “forbidden.”  
+   - **Con:** If the router under-selected (wrong category or single category for a multi-step task), the planner cannot produce a plan that uses the missing tool/skill. Mitigations: multi-category in router prompt, `tools_always_included`, and **fallback to ReAct** when planning fails or when the user request clearly needs something outside the set.
+
+2. **Planner sees full tool/skill list; executor validates**  
+   - Planner receives **all** registered tools and all loaded skills so it can propose any step. Executor, before running a step, checks that the step’s tool/skill is in the **category-allowed** set; if not, either re-plan (“you cannot use X for this category”) or **fall back to ReAct** for this turn.  
+   - **Pro:** Planner can always suggest the right sequence.  
+   - **Con:** Planner may suggest tools the executor will reject; we need a clear rule (re-plan once with restricted set, or fall back to ReAct).
+
+**Recommendation for HomeClaw:** Use **(1) category-filtered set for the planner** so the plan is directly executable, and rely on:
+- **Multi-category** so “search and save” gets both search and file tools.
+- **tools_always_included** so narrow categories still get save/list.
+- **Router prompt:** “If the request needs multiple types of actions, reply with two categories separated by a comma.”
+- **Fallback to ReAct** when the planner fails or returns an empty/invalid plan.
+
+That way we don’t have to guarantee “category has everything” in the abstract; we **improve coverage** (multi-category + tools_always_included) and **fall back** when the set is insufficient.
+
+---
+
+## New tools and new skills: how to handle them
+
+### New tools
+
+- Tools are **registered** in code (builtin + plugins). Which tools the LLM sees is controlled by **tool profiles** (`base/tool_profiles.py`: `TOOL_PROFILES`) and **category_tools** in `skills_and_plugins.yml`.
+- **If a category uses `profile: minimal` (or `coding`, etc.):** Only tools listed in that profile are sent. A **new tool** must be:
+  1. **Added to `TOOL_PROFILES`** with the right profile(s), e.g. `"new_tool": ["messaging"]`, and/or  
+  2. **Added to explicit `tools: [...]`** for any category that should see it, e.g. `read_document: { tools: [..., new_tool] }`.
+- **If a category uses `tools: [a, b, c]`:** The new tool does **not** appear until you add it to that category’s `tools` list.
+- **Convention:** When adding a new built-in or plugin tool, update `TOOL_PROFILES` (and optionally `category_tools`) so at least one category (e.g. `general_chat` via a broad profile, or an explicit list) includes it. Otherwise the tool is only available when the router returns a category with `profile: full` or when that tool is in that category’s list.
+
+### New skills
+
+- Skills are **discovered at runtime** from `skills_dir` and `external_skills_dir` (folder = skill). No code change needed for “a new skill exists.”
+- **Which skills get into the prompt** depends on:
+  - **Intent router:** Each category may have `skills: [folder1, folder2]`. If **absent**, that category gets **all** loaded skills (no filter). If **present**, only those folders are in the prompt.
+- So for a **new skill** (new folder in `skills/` or `external_skills/`):
+  - **Categories with no `skills` key** (e.g. `search_web`, `general_chat` with only `profile: minimal`): The new skill **automatically** appears in the prompt for that category (all skills are included).
+  - **Categories with explicit `skills: [...]`** (e.g. `create_slides`, `image`): The new skill will **not** appear until you add its folder name to the right category’s `skills` list in `skills_and_plugins.yml`.
+- **Recommendation:**  
+  - For **broad-use skills** (e.g. a new “summarize” skill): Add them to the categories that should offer them (e.g. `read_document: { ..., skills: [..., summarize-1.0.0] }`), or leave those categories without a `skills` list so they get all skills.  
+  - For **narrow-use skills** (e.g. a new slide template): Add only to the relevant category (e.g. `create_slides: { skills: [..., my-slides-1.0.0] }`).  
+  - Optional **convention:** One category (e.g. `general_chat`) can have no `skills` key so it always gets **all** skills; then new skills are automatically available for general_chat without config change. Other categories keep an explicit list for focused prompts.

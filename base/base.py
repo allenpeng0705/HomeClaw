@@ -999,6 +999,8 @@ class CoreMetadata:
     tools_config: Dict[str, Any] = field(default_factory=dict)  # merged tools dict from core.yml + optional skills_and_plugins file; used by tool layer (exec_allowlist, web.search, etc.)
     # Intent router (Phase 2): when enabled, one short LLM call classifies query -> category; tools/skills filtered by category. Config: enabled, categories, category_tools (profile or tools list).
     intent_router_config: Dict[str, Any] = field(default_factory=dict)
+    # Planner–Executor: when enabled, plan once then execute steps (see docs_design/PlannerExecutorAndDAG.md). Config: enabled, skip_planner_for_categories, planner_llm, max_steps_per_plan, max_replans, fallback_to_react_on_plan_failure.
+    planner_executor_config: Dict[str, Any] = field(default_factory=dict)
     orchestrator_unified_with_tools: bool = True  # when True (default), main LLM with tools routes TAM/plugin/chat; when False, separate orchestrator_handler runs first (one LLM for intent+plugin)
     inbound_request_timeout_seconds: int = 0  # recommended max seconds for clients/proxies waiting for Core; 0 = unlimited. Default when missing: 0. Not enforced by Core; set proxies read_timeout >= this when >0.
     llm_completion_timeout_seconds: int = 300  # HTTP timeout for each LLM chat completion call (local or cloud). Increase (e.g. 600, 900) if large local models often time out; 0 = no timeout (not recommended).
@@ -1137,10 +1139,13 @@ class CoreMetadata:
                         _ext_data = yaml.safe_load(_f)
                     if isinstance(_ext_data, dict):
                         for _k, _v in _ext_data.items():
-                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k == 'tools' or _k == 'external_skills_dir' or _k == 'clawhub_download_dir' or _k == 'intent_router'):
+                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k == 'tools' or _k == 'external_skills_dir' or _k == 'clawhub_download_dir' or _k == 'intent_router' or _k == 'planner_executor'):
                                 continue
                             if _k == 'intent_router' and not isinstance(_v, dict):
                                 logging.warning("skills_and_plugins config %s: intent_router must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
+                                continue
+                            if _k == 'planner_executor' and not isinstance(_v, dict):
+                                logging.warning("skills_and_plugins config %s: planner_executor must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
                                 continue
                             # Avoid injecting wrong types so later from_yaml never raises on this key
                             if _k in ('skills_force_include_rules', 'plugins_force_include_rules', 'system_plugins', 'skills_include_body_for', 'skills_extra_dirs', 'skills_disabled', 'plugins_extra_dirs', 'skills_filter') and not isinstance(_v, list):
@@ -1465,6 +1470,7 @@ class CoreMetadata:
             tool_timeout_seconds=int((data.get('tools') or {}).get('tool_timeout_seconds', 120) or 0),
             tools_config=copy.deepcopy(data.get('tools')) if isinstance(data.get('tools'), dict) else {},
             intent_router_config=dict(data.get('intent_router')) if isinstance(data.get('intent_router'), dict) else {},
+            planner_executor_config=dict(data.get('planner_executor')) if isinstance(data.get('planner_executor'), dict) else {},
             orchestrator_unified_with_tools=data.get('orchestrator_unified_with_tools', True),
             inbound_request_timeout_seconds=max(0, int(data.get('inbound_request_timeout_seconds', 0) or 0)),
             llm_completion_timeout_seconds=(lambda v: 0 if v == 0 else max(60, int(v or 300)))(data.get('llm_completion_timeout_seconds', 300)),

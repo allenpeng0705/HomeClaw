@@ -34,13 +34,17 @@ skills_use_vector_search: false
 intent_router:
   enabled: true
   # Full coverage: see docs_design/IntentRouter_CategoriesCoverage.md. Every category has a mapping so router is enough for tools/skills.
-  categories: [search_web, list_files, read_document, create_slides, schedule_remind, open_url, memory, knowledge_base, image, general_chat, coding]
+  categories: [search_web, list_files, read_document, create_slides, create_html_slides, generate_pdf, summarize_to_page, send_email, schedule_remind, open_url, memory, knowledge_base, image, general_chat, coding]
   # Short description per category so the router LLM can classify more accurately. Reply must still be the exact category name.
   category_descriptions:
     search_web: "User wants to search the web or look up information online."
     list_files: "User wants to list, browse, or find files or folders."
     read_document: "User wants to read, summarize, or understand a specific document or file."
-    create_slides: "User wants to create slides, a presentation, or PPT from content."
+    summarize_to_page: "User wants a summary of a document as a viewable page (link), not necessarily as PDF."
+    send_email: "User wants to send an email. The assistant will use a contacts list, compose a draft, and ask for confirmation before sending."
+    create_slides: "User wants to create slides, a presentation, or PPT from content (generic; may be HTML or PowerPoint)."
+    create_html_slides: "User wants to create HTML slides or a web-based slide deck from a document (not PowerPoint/PPT)."
+    generate_pdf: "User wants to generate or export a PDF from a document (e.g. summarize to PDF, report to PDF). Markdown is generated first, then converted to PDF."
     schedule_remind: "User wants to set a reminder, schedule, recurring task, or record a date."
     open_url: "User wants to open a URL, visit a webpage, or navigate to a link."
     memory: "User wants to remember something, recall past context, or search memory."
@@ -54,6 +58,10 @@ intent_router:
     list_files: { tools: [folder_list, file_find, document_read, get_file_view_link] }
     read_document: { tools: [document_read, file_read, file_understand, folder_list, file_find, get_file_view_link] }
     create_slides: { profile: minimal, skills: [html-slides-1.0.0, ppt-generation-1.0.0] }
+    create_html_slides: { profile: minimal, skills: [html-slides-1.0.0] }
+    generate_pdf: { tools: [document_read, markdown_to_pdf] }
+    summarize_to_page: { tools: [document_read, save_result_page] }
+    send_email: { tools: [file_read, run_skill], skills: [imap-smtp-email] }
     schedule_remind: { tools: [remind_me, cron_schedule, cron_list, cron_remove, cron_update, record_date, recorded_events_list, route_to_tam, time] }
     open_url: { tools: [fetch_url, route_to_plugin, browser_navigate] }
     memory: { tools: [memory_search, memory_get, agent_memory_search, agent_memory_get, append_agent_memory, append_daily_memory] }
@@ -71,6 +79,100 @@ intent_router:
   # verify_tools: [exec, file_write]
   # Fallback: add these tools to every category so narrow intents (e.g. search_web) can still save or list. See docs_design/IntentRouter_CategoriesCoverage.md § Fallbacks.
   # tools_always_included: [save_result_page, file_write, folder_list]
+
+# --- Planner–Executor (optional): plan once → execute steps; fallback to ReAct on failure. See docs_design/PlannerExecutorAndDAG.md. ---
+# When enabled: use planner for all intents except skip_planner_for_categories. Implemented step-by-step; set enabled: true when planner + executor are ready.
+# DAG flows: when a flow is defined for the intent category, run the fixed flow (no planner call); else use planner or ReAct. See §3 in PlannerExecutorAndDAG.md.
+planner_executor:
+  enabled: true
+  skip_planner_for_categories: [general_chat]
+  # planner_llm: null   # null = use main_llm; or set LLM ref for planning
+  # max_steps_per_plan: 12
+  # max_replans: 2
+  # re_plan_on_error: true
+  # requires_final_summary: true
+  # fallback_to_react_on_plan_failure: true
+  # --- DAG flows (fixed chains per category). Trigger: category from intent router. create_html_slides = HTML slides only (differs from ppt-generation). ---
+  # Path resolution: user_message_path extracts path from the message (documents/, share/, output/, images/, work/, downloads/, knowledge/, or bare filename like report.pdf). Default "documents/" is used only when no path is found.
+  flows:
+    create_html_slides:
+      trigger: category
+      category: create_html_slides
+      steps:
+        - tool: document_read
+          args_from:
+            path: [user_message_path, "documents/"]
+        - tool: run_skill
+          args:
+            skill_name: html-slides-1.0.0
+        - tool: save_result_page
+          args_from:
+            title: [llm_from_step_2, "Summary slides"]
+            content: [result_of_step_2]
+          args:
+            format: "html"
+    # Generate PDF: read document → LLM produces Markdown → markdown_to_pdf. Path: from message (any sandbox folder or bare filename) or default documents/ when none found.
+    generate_pdf:
+      trigger: category
+      category: generate_pdf
+      steps:
+        - tool: document_read
+          args_from:
+            path: [user_message_path, "documents/"]
+        - tool: markdown_to_pdf
+          args_from:
+            content: [llm_markdown_from_step_1]
+            path: [user_message_path_pdf, "output/report.pdf"]
+    # File listing: folder_list with path from message (documents, images, output, ...) or default ".".
+    list_files:
+      trigger: category
+      category: list_files
+      steps:
+        - tool: folder_list
+          args_from:
+            path: [user_message_folder, "."]
+    # Web search: query from user message → web_search. If result short: summarize and reply directly; if long: save as markdown page and return link.
+    search_web:
+      trigger: category
+      category: search_web
+      when_step_skipped_return_summary_of_previous: true
+      steps:
+        - tool: web_search
+          args_from:
+            query: [user_message_text, ""]
+        - tool: save_result_page
+          run_only_if_previous_step_longer_than: 2000
+          args_from:
+            title: [llm_from_step_1, "Search results"]
+            content: [result_of_step_1]
+          args:
+            format: "markdown"
+    # Summary as page: read document → LLM summary (Markdown) → save_result_page (viewable link, not PDF).
+    summarize_to_page:
+      trigger: category
+      category: summarize_to_page
+      steps:
+        - tool: document_read
+          args_from:
+            path: [user_message_path, "documents/"]
+        - tool: save_result_page
+          args_from:
+            title: [llm_from_step_1, "Summary"]
+            content: [llm_markdown_from_step_1]
+          args:
+            format: "markdown"
+    # Send email: read contacts from predefined Markdown file → LLM composes draft → show draft and ask user to reply "send" or "cancel". Actual send on next turn via skill external_skills/imap-smtp-email: run_skill(skill_name='imap-smtp-email', script='smtp.js', args=['send', '--to', '<email>', '--subject', '<subject>', '--body', '<body>']). Set contacts_path (path to contacts.md under sandbox, e.g. share/contacts.md).
+    send_email:
+      trigger: category
+      category: send_email
+      contacts_path: "share/contacts.md"
+      steps:
+        - tool: file_read
+          args_from:
+            path: [flow_config:contacts_path, "share/contacts.md"]
+        - output_only: [llm_compose_email_from_step_1]
+          append: "\n\n---\nReply **send** to send this email, or **cancel** to discard."
+
 skills_vector_collection: homeclaw_skills   # Chroma collection name (default: homeclaw_skills)
 skills_max_retrieved: 10                     # When using vector search: max skills from RAG before threshold + cap (default: 10)
 skills_max_in_prompt: 5                      # When skills_use_vector_search=true: cap skills in prompt (default: 5); ignored when false
