@@ -77,3 +77,4 @@ HomeClaw routes to the Cursor Bridge; the bridge opens the project in Cursor, ru
 
 - **Bridge code and options:** `external_plugins/cursor_bridge/README.md`
 - **Design (contract, security):** `docs_design/HomeClaw_Uses_Cursor_And_Traefik_Design.md` (Cursor section)
+- **Cursor and Claude Code together, and using Claude Code’s MCP server from HomeClaw:** `docs/cursor-claude-code-bridge.md`

@@ -895,6 +895,26 @@ def _normalize_main_llm_language(raw: Union[str, List[str], None]) -> List[str]:
     return [s]
 
 
+def _tools_config_with_auto_mcp(tools: Any) -> Dict[str, Any]:
+    """Build tools_config dict; when tools.mcp.auto_register_claude_code is true, enable MCP and add claude-code server if missing."""
+    if not isinstance(tools, dict):
+        return {}
+    out = copy.deepcopy(tools)
+    mcp = out.get("mcp")
+    if not isinstance(mcp, dict):
+        return out
+    if not mcp.get("auto_register_claude_code"):
+        return out
+    mcp["enabled"] = True
+    servers = mcp.get("servers")
+    if not isinstance(servers, dict):
+        mcp["servers"] = {}
+        servers = mcp["servers"]
+    if "claude-code" not in servers:
+        servers["claude-code"] = {"transport": "stdio", "command": "claude", "args": ["mcp", "serve"]}
+    return out
+
+
 @dataclass
 class CoreMetadata:
     name: str
@@ -1485,7 +1505,7 @@ class CoreMetadata:
             plugins_extra_dirs=[str(p).strip() for p in (data.get('plugins_extra_dirs') or []) if str(p).strip()],
             orchestrator_timeout_seconds=(lambda v: max(0, int(v)) if v is not None else 60)(data.get('orchestrator_timeout_seconds', 60)),
             tool_timeout_seconds=int((data.get('tools') or {}).get('tool_timeout_seconds', 120) or 0),
-            tools_config=copy.deepcopy(data.get('tools')) if isinstance(data.get('tools'), dict) else {},
+            tools_config=_tools_config_with_auto_mcp(data.get('tools')),
             intent_router_config=dict(data.get('intent_router')) if isinstance(data.get('intent_router'), dict) else {},
             identity_capabilities_shortcut_config=dict(data.get('identity_capabilities_shortcut')) if isinstance(data.get('identity_capabilities_shortcut'), dict) else {},
             planner_executor_config=dict(data.get('planner_executor')) if isinstance(data.get('planner_executor'), dict) else {},

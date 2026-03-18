@@ -97,13 +97,36 @@ If the MCP package is missing or a server is not configured, the tools return JS
 
 ---
 
-## 4. Intent router and tool filtering
+## 4. Using Claude Code as an MCP server
+
+You can run **Claude Code CLI** as an MCP server so HomeClaw can call its **built-in tools** (Read, Write, Edit, Bash, Task, WebFetch, etc.) via `mcp_list_tools` and `mcp_call`. This does **not** expose the MCP servers that Claude Code is configured with (e.g. GitHub, Notion); only Claude Code’s own tools are exposed.
+
+1. Install [Claude Code CLI](https://code.claude.com/) and ensure `claude` is on PATH (or use the full path in config).
+2. In `tools.mcp.servers`, add a stdio server:
+
+```yaml
+claude-code:
+  transport: stdio
+  command: claude
+  args: [mcp, serve]
+  # env: {}   # optional; e.g. ANTHROPIC_API_KEY
+```
+
+3. Set `tools.mcp.enabled: true`, or set **`tools.mcp.auto_register_claude_code: true`** so Core automatically enables MCP and adds the `claude-code` server at startup (no need to list it in `servers`).
+4. Use a **friend** that receives the coding or messaging tool set: the **coding** and **messaging** profiles include `mcp_list_tools` and `mcp_call`. The **Cursor** and **ClaudeCode** friends use presets that do not include MCP tools, so use the default friend (or another without a restrictive preset) and phrase your message so the intent router classifies it as “coding” or “messaging” (e.g. “edit this file”, “run a script”).
+5. The model can then call `mcp_list_tools(server_id="claude-code")` to discover tools, and `mcp_call(server_id="claude-code", tool_name="...", arguments={...})` to run them.
+
+See **docs/cursor-claude-code-bridge.md** for how this fits with the Cursor/Claude Code bridge and **docs_design/ClaudeCodeMCPInvestigation.md** for tool names and behavior.
+
+---
+
+## 5. Intent router and tool filtering
 
 If you use the **intent router** (`intent_router.enabled: true`), MCP tools are included only when the router allows them. To make MCP available for a category (e.g. `coding` or `general_chat`), ensure that category’s `category_tools` includes `mcp_list_tools` and `mcp_call` (or a profile that contains them). Otherwise, add an explicit category or use a profile that exposes these tools.
 
 ---
 
-## 5. Summary
+## 6. Summary
 
 | Step | Action |
 |------|--------|

@@ -450,9 +450,16 @@ tools:
   # When last result length exceeds this (chars), inject instruction to summarize and/or save_result_page. Default 6000; 0 = disabled.
   # large_result_summarize_threshold_chars: 6000
   # MCP (Model Context Protocol) client: call external MCP servers via mcp_call and mcp_list_tools. Optional: pip install mcp.
-  # mcp:
-  #   enabled: true
-  #   servers:
+  # See docs/mcp.md. Set auto_register_claude_code: true to have Core add the claude-code server at startup (no need to list it in servers).
+  mcp:
+    enabled: true
+    # auto_register_claude_code: true   # when true, Core enables MCP and adds server_id "claude-code" (claude mcp serve) at startup if not already in servers
+    servers:
+      claude-code:
+        transport: stdio
+        command: claude
+        args: [mcp, serve]
+        env: {}
   #     my-server:
   #       transport: stdio
   #       command: python
@@ -461,6 +468,13 @@ tools:
   #       transport: sse
   #       url: http://localhost:8000/sse
   #       timeout_seconds: 30
+  #     # Claude Code as MCP server: exposes Claude Code's built-in tools (Read, Write, Edit, Bash, Task, WebFetch, etc.).
+  #     # Requires Claude Code CLI installed; use server_id "claude-code" in mcp_list_tools / mcp_call. See docs/cursor-claude-code-bridge.md.
+  #     claude-code:
+  #       transport: stdio
+  #       command: claude
+  #       args: [mcp, serve]
+  #       # env: {}   # optional; e.g. ANTHROPIC_API_KEY if not in system env. On Windows use full path to claude.cmd if needed.
   # Phase 3.4: RAG for tools — when true, retrieve tools by query similarity (reuse skills RAG infra). Default false; off by default like skills RAG (low confidence in retrieval).
   tools_use_vector_search: false
   # tools_vector_collection: homeclaw_tools
@@ -471,6 +485,15 @@ tools:
   # Optional when using Qwen: tool_temperature, disable_thinking_when_tools, qwen3_tool_format_instruction.
   # exec: allowed command names. Empty = platform default (Unix: ls, cat, pwd; Windows: dir, type, cd).
   exec_allowlist: []
+  # --- Interactive sessions (PTY/ConPTY): shells and dev-bridge agent consoles. See docs/interactive-sessions.md. ---
+  # Max concurrent interactive sessions per user (default 3). Enforced by Core and bridge.
+  # interactive_max_sessions_per_user: 3
+  # Max characters kept in each session's output buffer; older output is trimmed (default 200000).
+  # interactive_max_buffer_bytes: 200000
+  # Idle TTL in seconds before a session can be garbage-collected (default 1800). Not yet enforced; reserved for future cleanup.
+  # interactive_idle_ttl_sec: 1800
+  # Allowed commands for interactive_start. Empty or omitted = use exec_allowlist. List of regex patterns (e.g. ["bash", "powershell", "sh", "cmd"]).
+  # interactive_allowed_commands: []
   # markdown_to_pdf: VMPrint (github.com/cosmiciron/vmprint). install.sh/install.ps1 clone to tools/vmprint; if you installed manually as tools/vm_print, set vmprint_dir to "tools/vm_print" (or use absolute path).
   markdown_to_pdf:
     vmprint_dir: "tools/vmprint"   # or "tools/vm_print"; must contain draft2final/ and have npm install run

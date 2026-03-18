@@ -316,6 +316,31 @@ def register_all_routes(core: Any) -> None:
         methods=["GET"],
         dependencies=[Depends(companion_auth.get_companion_token_user)],
     )
+    # Interactive sessions (Companion->Core).
+    app.add_api_route(
+        "/api/interactive/start",
+        misc_api.get_api_interactive_start_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/interactive/read",
+        misc_api.get_api_interactive_read_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/interactive/write",
+        misc_api.get_api_interactive_write_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/interactive/stop",
+        misc_api.get_api_interactive_stop_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
     app.add_api_route(
         "/api/skills/clawhub-login-status",
         misc_api.get_api_skills_clawhub_login_status_handler(core),

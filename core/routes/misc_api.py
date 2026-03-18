@@ -69,6 +69,332 @@ def get_api_cursor_bridge_status_handler(core):
     return api_cursor_bridge_status
 
 
+def _parse_bridge_session_id(session_id: str):
+    """If session_id is 'bridge:plugin_id:bridge_sess_id', return (plugin_id, bridge_sess_id). Else return (None, None)."""
+    if not session_id or not session_id.startswith("bridge:"):
+        return None, None
+    parts = session_id.split(":", 2)
+    if len(parts) < 3:
+        return None, None
+    return parts[1], parts[2]
+
+
+def get_api_interactive_start_handler(core):
+    """POST /api/interactive/start — start an interactive session for a user (Companion->Core).
+    Body: command + cwd (local PTY), or bridge_plugin (cursor-bridge | claude-code-bridge) to start agent interactively on the bridge.
+    """
+
+    async def api_interactive_start(request: Request, token_user=Depends(companion_auth.get_companion_token_user)):  # noqa: ARG001
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        bridge_plugin = (body.get("bridge_plugin") or "").strip()
+        if bridge_plugin:
+            # Start interactive agent on the bridge; Core calls bridge and returns composite session_id.
+            if bridge_plugin not in ("cursor-bridge", "claude-code-bridge"):
+                return JSONResponse(status_code=400, content={"detail": "bridge_plugin must be cursor-bridge or claude-code-bridge"})
+            pm = getattr(core, "plugin_manager", None)
+            if pm is None:
+                return JSONResponse(status_code=500, content={"detail": "Plugin manager not available"})
+            plug = pm.get_plugin_by_id(bridge_plugin)
+            if plug is None or not isinstance(plug, dict):
+                return JSONResponse(status_code=404, content={"detail": f"Plugin {bridge_plugin} not found"})
+            backend = "claude" if "claude" in bridge_plugin.lower() else "cursor"
+            req = PromptRequest(
+                request_id="interactive-start",
+                channel_name="companion",
+                request_metadata={
+                    "capability_id": "run_agent_interactive",
+                    "capability_parameters": {"backend": backend, "cwd": (body.get("cwd") or "").strip() or None},
+                },
+                channelType=ChannelType.IM,
+                user_name="companion",
+                app_id="homeclaw",
+                user_id="companion",
+                contentType=ContentType.TEXT,
+                text="",
+                action="respond",
+                host="api",
+                port=0,
+                images=[],
+                videos=[],
+                audios=[],
+                files=None,
+                timestamp=0.0,
+            )
+            try:
+                result = await pm.run_external_plugin(plug, req)
+            except Exception as e:
+                return JSONResponse(status_code=502, content={"detail": str(e)})
+            if not getattr(result, "success", False):
+                return JSONResponse(
+                    status_code=502,
+                    content={"detail": (getattr(result, "error", "") or "Bridge run_agent_interactive failed").strip()},
+                )
+            text = (getattr(result, "text", "") or "").strip()
+            try:
+                import json as _json
+                obj = _json.loads(text) if text else {}
+            except Exception:
+                return JSONResponse(status_code=502, content={"detail": "Bridge returned invalid JSON"})
+            bridge_sess = (obj.get("session_id") or "").strip()
+            initial = obj.get("initial_output") or ""
+            if not bridge_sess:
+                return JSONResponse(status_code=502, content={"detail": "Bridge did not return session_id"})
+            composite_id = f"bridge:{bridge_plugin}:{bridge_sess}"
+            return JSONResponse(
+                content={"session_id": composite_id, "status": "running", "initial_output": initial},
+            )
+        # Local PTY session
+        cmd = (body.get("command") or "").strip()
+        cwd = (body.get("cwd") or "").strip() or None
+        if not cmd:
+            return JSONResponse(status_code=400, content={"detail": "command is required"})
+        try:
+            from core.interactive_sessions import InteractiveSessionManager, get_interactive_config  # type: ignore
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"detail": f"Interactive sessions unavailable: {e!s}"})
+        mgr = getattr(core, "interactive_sessions", None)  # type: ignore[attr-defined]
+        if mgr is None:
+            cfg = get_interactive_config()
+            mgr = InteractiveSessionManager(
+                max_sessions_per_user=cfg["max_sessions_per_user"],
+                idle_ttl_sec=cfg["idle_ttl_sec"],
+                max_buffer_chars=cfg["max_buffer_chars"],
+            )
+            setattr(core, "interactive_sessions", mgr)
+        user_id = str(getattr(token_user, "id", None) or getattr(token_user, "name", "") or "companion")
+        try:
+            session_id, initial = await mgr.start_session(user_id, None, cmd, cwd=cwd)
+            return JSONResponse(content={"session_id": session_id, "status": "running", "initial_output": initial})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+
+    return api_interactive_start
+
+
+def get_api_interactive_read_handler(core):
+    """GET /api/interactive/read?session_id=...&from_seq=... — read output from interactive session. Supports bridge session_id (bridge:plugin_id:bridge_sess_id)."""
+
+    async def api_interactive_read(
+        request: Request,
+        token_user=Depends(companion_auth.get_companion_token_user),  # noqa: ARG001
+    ):
+        q = request.query_params
+        session_id = (q.get("session_id") or "").strip()
+        if not session_id:
+            return JSONResponse(status_code=400, content={"detail": "session_id is required"})
+        try:
+            from_seq = int(q.get("from_seq") or "1")
+        except ValueError:
+            from_seq = 1
+        plugin_id, bridge_sess_id = _parse_bridge_session_id(session_id)
+        if plugin_id and bridge_sess_id:
+            pm = getattr(core, "plugin_manager", None)
+            if pm is None:
+                return JSONResponse(status_code=500, content={"detail": "Plugin manager not available"})
+            plug = pm.get_plugin_by_id(plugin_id)
+            if plug is None or not isinstance(plug, dict):
+                return JSONResponse(status_code=404, content={"detail": f"Plugin {plugin_id} not found"})
+            req = PromptRequest(
+                request_id="interactive-read",
+                channel_name="companion",
+                request_metadata={
+                    "capability_id": "interactive_read",
+                    "capability_parameters": {"session_id": bridge_sess_id, "from_seq": from_seq},
+                },
+                channelType=ChannelType.IM,
+                user_name="companion",
+                app_id="homeclaw",
+                user_id="companion",
+                contentType=ContentType.TEXT,
+                text="",
+                action="respond",
+                host="api",
+                port=0,
+                images=[],
+                videos=[],
+                audios=[],
+                files=None,
+                timestamp=0.0,
+            )
+            try:
+                result = await pm.run_external_plugin(plug, req)
+            except Exception as e:
+                return JSONResponse(status_code=502, content={"detail": str(e)})
+            if not getattr(result, "success", False):
+                return JSONResponse(status_code=502, content={"detail": (getattr(result, "error", "") or "Bridge interactive_read failed").strip()})
+            try:
+                import json as _json
+                data = _json.loads((getattr(result, "text", "") or "").strip())
+            except Exception:
+                return JSONResponse(status_code=502, content={"detail": "Bridge returned invalid JSON"})
+            data["session_id"] = session_id
+            return JSONResponse(content=data)
+        try:
+            from core.interactive_sessions import InteractiveSessionManager  # type: ignore
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"detail": f"Interactive sessions unavailable: {e!s}"})
+        mgr = getattr(core, "interactive_sessions", None)  # type: ignore[attr-defined]
+        if mgr is None:
+            return JSONResponse(status_code=404, content={"detail": "No interactive sessions"})
+        try:
+            chunks, status, exit_code, command = await mgr.read(session_id, from_seq=from_seq)
+            return JSONResponse(
+                content={
+                    "session_id": session_id,
+                    "status": status,
+                    "exit_code": exit_code,
+                    "command": command,
+                    "chunks": [{"seq": c.seq, "text": c.text, "timestamp": c.timestamp} for c in chunks],
+                }
+            )
+        except KeyError:
+            return JSONResponse(status_code=404, content={"detail": "Unknown session_id"})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+
+    return api_interactive_read
+
+
+def get_api_interactive_write_handler(core):
+    """POST /api/interactive/write — write input to interactive session. Supports bridge session_id."""
+
+    async def api_interactive_write(request: Request, token_user=Depends(companion_auth.get_companion_token_user)):  # noqa: ARG001
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        session_id = (body.get("session_id") or "").strip()
+        data = (body.get("data") or "").replace("\r\n", "\n")
+        if not session_id:
+            return JSONResponse(status_code=400, content={"detail": "session_id is required"})
+        plugin_id, bridge_sess_id = _parse_bridge_session_id(session_id)
+        if plugin_id and bridge_sess_id:
+            pm = getattr(core, "plugin_manager", None)
+            if pm is None:
+                return JSONResponse(status_code=500, content={"detail": "Plugin manager not available"})
+            plug = pm.get_plugin_by_id(plugin_id)
+            if plug is None or not isinstance(plug, dict):
+                return JSONResponse(status_code=404, content={"detail": f"Plugin {plugin_id} not found"})
+            req = PromptRequest(
+                request_id="interactive-write",
+                channel_name="companion",
+                request_metadata={
+                    "capability_id": "interactive_write",
+                    "capability_parameters": {"session_id": bridge_sess_id, "data": data},
+                },
+                channelType=ChannelType.IM,
+                user_name="companion",
+                app_id="homeclaw",
+                user_id="companion",
+                contentType=ContentType.TEXT,
+                text="",
+                action="respond",
+                host="api",
+                port=0,
+                images=[],
+                videos=[],
+                audios=[],
+                files=None,
+                timestamp=0.0,
+            )
+            try:
+                result = await pm.run_external_plugin(plug, req)
+            except Exception as e:
+                return JSONResponse(status_code=502, content={"detail": str(e)})
+            if not getattr(result, "success", False):
+                return JSONResponse(status_code=502, content={"detail": (getattr(result, "error", "") or "Bridge interactive_write failed").strip()})
+            return JSONResponse(content={"ok": True})
+        try:
+            from core.interactive_sessions import InteractiveSessionManager  # type: ignore
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"detail": f"Interactive sessions unavailable: {e!s}"})
+        mgr = getattr(core, "interactive_sessions", None)  # type: ignore[attr-defined]
+        if mgr is None:
+            return JSONResponse(status_code=404, content={"detail": "No interactive sessions"})
+        try:
+            await mgr.write(session_id, data)
+            return JSONResponse(content={"ok": True})
+        except KeyError:
+            return JSONResponse(status_code=404, content={"detail": "Unknown session_id"})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+
+    return api_interactive_write
+
+
+def get_api_interactive_stop_handler(core):
+    """POST /api/interactive/stop — stop interactive session. Supports bridge session_id."""
+
+    async def api_interactive_stop(request: Request, token_user=Depends(companion_auth.get_companion_token_user)):  # noqa: ARG001
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        session_id = (body.get("session_id") or "").strip()
+        if not session_id:
+            return JSONResponse(status_code=400, content={"detail": "session_id is required"})
+        plugin_id, bridge_sess_id = _parse_bridge_session_id(session_id)
+        if plugin_id and bridge_sess_id:
+            pm = getattr(core, "plugin_manager", None)
+            if pm is None:
+                return JSONResponse(status_code=500, content={"detail": "Plugin manager not available"})
+            plug = pm.get_plugin_by_id(plugin_id)
+            if plug is None or not isinstance(plug, dict):
+                return JSONResponse(status_code=404, content={"detail": f"Plugin {plugin_id} not found"})
+            req = PromptRequest(
+                request_id="interactive-stop",
+                channel_name="companion",
+                request_metadata={
+                    "capability_id": "interactive_stop",
+                    "capability_parameters": {"session_id": bridge_sess_id},
+                },
+                channelType=ChannelType.IM,
+                user_name="companion",
+                app_id="homeclaw",
+                user_id="companion",
+                contentType=ContentType.TEXT,
+                text="",
+                action="respond",
+                host="api",
+                port=0,
+                images=[],
+                videos=[],
+                audios=[],
+                files=None,
+                timestamp=0.0,
+            )
+            try:
+                result = await pm.run_external_plugin(plug, req)
+            except Exception as e:
+                return JSONResponse(status_code=502, content={"detail": str(e)})
+            if not getattr(result, "success", False):
+                return JSONResponse(status_code=502, content={"detail": (getattr(result, "error", "") or "Bridge interactive_stop failed").strip()})
+            return JSONResponse(content={"ok": True})
+        try:
+            from core.interactive_sessions import InteractiveSessionManager  # type: ignore
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"detail": f"Interactive sessions unavailable: {e!s}"})
+        mgr = getattr(core, "interactive_sessions", None)  # type: ignore[attr-defined]
+        if mgr is None:
+            return JSONResponse(status_code=404, content={"detail": "No interactive sessions"})
+        try:
+            await mgr.stop(session_id)
+            return JSONResponse(content={"ok": True})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+
+    return api_interactive_stop
+
+
 def _install_failure_detail(out: dict) -> str:
     """Build a short, readable error message for skill install failure (no raw JSON/stderr dump). Never raises."""
     try:

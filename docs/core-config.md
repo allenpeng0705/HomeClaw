@@ -205,8 +205,9 @@ Under **`tools:`** you configure:
 | **`web.search`** | Web search provider (duckduckgo, google_cse, bing, tavily, brave, serpapi) and API keys (or env vars). |
 | **`browser_enabled`** | If false, Core does not register browser tools; use plugin (e.g. homeclaw-browser) for browser actions. |
 | **`tool_timeout_seconds`** | Per-tool execution timeout; 0 = no timeout. |
+| **`interactive_*`** | Interactive session limits: **interactive_max_sessions_per_user**, **interactive_max_buffer_bytes**, **interactive_idle_ttl_sec**, **interactive_allowed_commands**. See [Interactive sessions](interactive-sessions.md). |
 
-API keys for tools (e.g. Tavily, Google CSE) can be set in **core.yml** under the tool block or via **environment variables** where documented.
+API keys for tools (e.g. Tavily, Google CSE) can be set in **core.yml** under the tool block or via **environment variables** where documented. For multi-step tools (need input or confirmation), see [Workflow result envelope](workflow-result-envelope.md).
 
 ---
 

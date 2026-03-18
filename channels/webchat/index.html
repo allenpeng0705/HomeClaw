@@ -75,6 +75,8 @@
       }
 
       let ws = null;
+      let interactiveSessionId = null;
+      let interactiveLastSeq = 1;
       let config = { ws_url: '', user_id: 'webchat_user' };
       const STORAGE_CORE_URL = 'homeclaw_webchat_core_url';
       const STORAGE_API_KEY = 'homeclaw_webchat_api_key';
@@ -168,6 +170,12 @@
               }
               return;
             }
+            if (data.event === 'interactive_output' && data.session_id && data.chunks) {
+              data.chunks.forEach(function(c) {
+                if (c && typeof c.text === 'string') addLog('bot', '[interactive] ' + c.text);
+              });
+              return;
+            }
             if (data.error) addLog('error', 'Error: ' + data.error);
             else if (data.text) addLog('bot', data.text);
             if (data.images && Array.isArray(data.images)) {
@@ -228,6 +236,27 @@
           syncKbBtn.disabled = false;
         });
       }
+
+      // Minimal interactive helper (experimental): start shell via REST, then use WS interactive_read
+      window.startInteractiveShell = function() {
+        const coreUrl = (getStoredCoreUrl() || '').replace(/\/+$/,'') || window.location.origin;
+        const url = coreUrl + '/api/interactive/start';
+        fetch(url, {
+          method: 'POST',
+          headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+          body: JSON.stringify({ command: navigator.platform && navigator.platform.indexOf('Win') === 0 ? 'powershell' : 'bash' })
+        }).then(r => r.json()).then(function(res) {
+          if (res.session_id) {
+            interactiveSessionId = res.session_id;
+            interactiveLastSeq = 1;
+            if (res.initial_output) addLog('bot', '[interactive] ' + res.initial_output);
+          } else if (res.detail) {
+            addLog('error', 'Interactive error: ' + res.detail);
+          }
+        }).catch(function(e) {
+          addLog('error', 'Interactive start failed: ' + e);
+        });
+      };
 
       async function send() {
         const user_id = (userIdInput && userIdInput.value ? userIdInput.value : config.user_id || '').trim();

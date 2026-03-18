@@ -233,6 +233,7 @@ class Core(CoreInterface):
             self.memory_queue_task = None
             self._system_plugin_processes: List[subprocess.Popen] = []
             self._pending_plugin_calls: Dict[str, Dict[str, Any]] = {}  # session_key -> {plugin_id, capability_id, params, missing, ...}
+            self._pending_workflows: Dict[str, Dict[str, Any]] = {}  # session_key -> workflow envelope (need_input / need_confirmation)
             self._inbound_async_results: Dict[str, dict] = {}  # request_id -> {status, ok?, text?, images?, error?, created_at}; TTL 5 min for done, 30 min for pending
             self._inbound_async_results_ttl_sec = 300  # done/cancelled: remove after this many sec so client has time to fetch
             self._inbound_async_pending_ttl_sec = 1800  # pending: don't expire before this (e.g. long LLM run); avoid 404 while task still running
@@ -449,6 +450,18 @@ class Core(CoreInterface):
     def clear_pending_plugin_call(self, app_id: str, user_id: str, session_id: str) -> None:
         key = self._pending_plugin_call_key(app_id, user_id, session_id)
         self._pending_plugin_calls.pop(key, None)
+
+    def get_pending_workflow(self, app_id: str, user_id: str, session_id: str) -> Optional[Dict[str, Any]]:
+        key = self._pending_plugin_call_key(app_id, user_id, session_id)
+        return self._pending_workflows.get(key)
+
+    def set_pending_workflow(self, app_id: str, user_id: str, session_id: str, data: Dict[str, Any]) -> None:
+        key = self._pending_plugin_call_key(app_id, user_id, session_id)
+        self._pending_workflows[key] = data
+
+    def clear_pending_workflow(self, app_id: str, user_id: str, session_id: str) -> None:
+        key = self._pending_plugin_call_key(app_id, user_id, session_id)
+        self._pending_workflows.pop(key, None)
 
     def _discover_system_plugins(self) -> List[Dict]:
         """Discover plugins in system_plugins/ that have register.js and a server. Delegates to core.plugins_startup."""

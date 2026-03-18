@@ -47,7 +47,8 @@ def get_websocket_handler(core):
                 if not isinstance(data, dict):
                     await websocket.send_json({"error": "Expected JSON object", "text": ""})
                     continue
-                if data.get("event") == "register":
+                event = (str(data.get("event") or "").strip().lower() or "")
+                if event == "register":
                     uid = (str(data.get("user_id") or "").strip() or "companion")
                     core._ws_user_by_session[session_id] = uid
                     try:
@@ -55,12 +56,78 @@ def get_websocket_handler(core):
                     except Exception:
                         pass
                     continue
-                if data.get("event") == "ping":
+                if event == "ping":
                     try:
                         await websocket.send_json({"event": "pong"})
                     except Exception:
                         pass
                     continue
+                # Interactive sessions over WS: experimental
+                if event in ("interactive_start", "interactive_write", "interactive_read", "interactive_stop"):
+                    try:
+                        from core.interactive_sessions import InteractiveSessionManager, get_interactive_config  # type: ignore
+                    except Exception as e:
+                        await websocket.send_json({"event": event + "_error", "error": f"Interactive sessions unavailable: {e!s}"})
+                        continue
+                    mgr = getattr(core, "interactive_sessions", None)  # type: ignore[attr-defined]
+                    if mgr is None:
+                        cfg = get_interactive_config()
+                        mgr = InteractiveSessionManager(
+                            max_sessions_per_user=cfg["max_sessions_per_user"],
+                            idle_ttl_sec=cfg["idle_ttl_sec"],
+                            max_buffer_chars=cfg["max_buffer_chars"],
+                        )
+                        setattr(core, "interactive_sessions", mgr)
+                    try:
+                        if event == "interactive_start":
+                            cmd = (data.get("command") or "").strip()
+                            cwd = (data.get("cwd") or "").strip() or None
+                            if not cmd:
+                                await websocket.send_json({"event": "interactive_start_error", "error": "command is required"})
+                                continue
+                            uid = (str(data.get("user_id") or "").strip() or core._ws_user_by_session.get(session_id) or "companion")
+                            sid, initial = await mgr.start_session(uid, data.get("friend_id"), cmd, cwd=cwd)
+                            await websocket.send_json(
+                                {"event": "interactive_started", "session_id": sid, "status": "running", "initial_output": initial}
+                            )
+                        elif event == "interactive_read":
+                            sid = (data.get("session_id") or "").strip()
+                            if not sid:
+                                await websocket.send_json({"event": "interactive_read_error", "error": "session_id is required"})
+                                continue
+                            from_seq = int(data.get("from_seq") or 1)
+                            chunks, status, exit_code, command = await mgr.read(sid, from_seq=from_seq)
+                            await websocket.send_json(
+                                {
+                                    "event": "interactive_output",
+                                    "session_id": sid,
+                                    "status": status,
+                                    "exit_code": exit_code,
+                                    "command": command,
+                                    "chunks": [
+                                        {"seq": c.seq, "text": c.text, "timestamp": c.timestamp} for c in chunks
+                                    ],
+                                }
+                            )
+                        elif event == "interactive_write":
+                            sid = (data.get("session_id") or "").strip()
+                            if not sid:
+                                await websocket.send_json({"event": "interactive_write_error", "error": "session_id is required"})
+                                continue
+                            payload = (data.get("data") or "").replace("\r\n", "\n")
+                            await mgr.write(sid, payload)
+                            await websocket.send_json({"event": "interactive_write_ok", "session_id": sid})
+                        elif event == "interactive_stop":
+                            sid = (data.get("session_id") or "").strip()
+                            if not sid:
+                                await websocket.send_json({"event": "interactive_stop_error", "error": "session_id is required"})
+                                continue
+                            await mgr.stop(sid)
+                            await websocket.send_json({"event": "interactive_stopped", "session_id": sid})
+                    except Exception as e:
+                        await websocket.send_json({"event": event + "_error", "error": str(e)})
+                    continue
+
                 try:
                     _ni = len(data.get("images") or [])
                     _nf = len(data.get("files") or [])

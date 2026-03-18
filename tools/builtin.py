@@ -260,6 +260,129 @@ def get_sandbox_paths_for_user_key(user_key: str) -> Optional[Dict[str, str]]:
         return None
 
 
+# ==== Interactive sessions (PTY) ====
+
+
+async def interactive_start_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """
+    Start an interactive session (PTY/ConPTY) for long-lived commands that need stdin/stdout interaction.
+    Returns a small JSON: {"session_id": "...", "status": "..."}.
+    """
+    try:
+        from core.interactive_sessions import InteractiveSessionManager  # type: ignore
+    except Exception:
+        return "Interactive sessions are not available in this build."
+    cmd = (arguments.get("command") or "").strip()
+    if not cmd:
+        return "Error: command is required."
+    cwd = (arguments.get("cwd") or "").strip() or None
+    config = _get_tools_config()
+    # Allowlist: tools.interactive_allowed_commands if set, else tools.exec_allowlist.
+    allow = config.get("interactive_allowed_commands")
+    if not isinstance(allow, list) or not allow:
+        allow = config.get("exec_allowlist") or []
+    if isinstance(allow, list) and allow:
+        exe = cmd.split()[0]
+        ok = any(re.fullmatch(pat, exe) for pat in allow if isinstance(pat, str) and pat.strip())
+        if not ok:
+            return f"Command '{exe}' is not allowed (interactive_allowed_commands / exec_allowlist)."
+    user_id = getattr(context, "system_user_id", None) or getattr(context, "user_id", None) or "unknown"
+    friend_id = getattr(context, "friend_id", None) or None
+    mgr: InteractiveSessionManager = getattr(Util(), "_interactive_sessions", None)  # type: ignore[attr-defined]
+    if mgr is None:
+        try:
+            from core.interactive_sessions import get_interactive_config
+            cfg = get_interactive_config()
+            mgr = InteractiveSessionManager(
+                max_sessions_per_user=cfg["max_sessions_per_user"],
+                idle_ttl_sec=cfg["idle_ttl_sec"],
+                max_buffer_chars=cfg["max_buffer_chars"],
+            )
+        except Exception:
+            mgr = InteractiveSessionManager()
+        setattr(Util(), "_interactive_sessions", mgr)
+    try:
+        session_id, initial = await mgr.start_session(str(user_id), str(friend_id) if friend_id else None, cmd, cwd=cwd)
+        out = {"session_id": session_id, "status": "running", "initial_output": initial}
+        return json.dumps(out, ensure_ascii=False)
+    except Exception as e:
+        return f"Error starting interactive session: {e!s}"
+
+
+async def interactive_read_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Read output from an interactive session. Returns JSON with chunks and status."""
+    try:
+        from core.interactive_sessions import InteractiveSessionManager  # type: ignore
+    except Exception:
+        return "Interactive sessions are not available in this build."
+    session_id = (arguments.get("session_id") or "").strip()
+    if not session_id:
+        return "Error: session_id is required."
+    try:
+        from_seq = int(arguments.get("from_seq") or 1)
+    except (TypeError, ValueError):
+        from_seq = 1
+    from_seq = max(1, from_seq)
+    mgr: InteractiveSessionManager = getattr(Util(), "_interactive_sessions", None)  # type: ignore[attr-defined]
+    if mgr is None:
+        return "Error: interactive session manager not initialized."
+    try:
+        chunks, status, exit_code, command = await mgr.read(session_id, from_seq=from_seq)
+        out = {
+            "session_id": session_id,
+            "status": status,
+            "exit_code": exit_code,
+            "command": command,
+            "chunks": [{"seq": c.seq, "text": c.text, "timestamp": c.timestamp} for c in chunks],
+        }
+        return json.dumps(out, ensure_ascii=False)
+    except KeyError:
+        return "Error: unknown session_id."
+    except Exception as e:
+        return f"Error reading interactive session: {e!s}"
+
+
+async def interactive_write_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Write input to an interactive session."""
+    try:
+        from core.interactive_sessions import InteractiveSessionManager  # type: ignore
+    except Exception:
+        return "Interactive sessions are not available in this build."
+    session_id = (arguments.get("session_id") or "").strip()
+    data = (arguments.get("data") or "").replace("\r\n", "\n")
+    if not session_id:
+        return "Error: session_id is required."
+    mgr: InteractiveSessionManager = getattr(Util(), "_interactive_sessions", None)  # type: ignore[attr-defined]
+    if mgr is None:
+        return "Error: interactive session manager not initialized."
+    try:
+        await mgr.write(session_id, data)
+        return "ok"
+    except KeyError:
+        return "Error: unknown session_id."
+    except Exception as e:
+        return f"Error writing to interactive session: {e!s}"
+
+
+async def interactive_stop_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Stop an interactive session."""
+    try:
+        from core.interactive_sessions import InteractiveSessionManager  # type: ignore
+    except Exception:
+        return "Interactive sessions are not available in this build."
+    session_id = (arguments.get("session_id") or "").strip()
+    if not session_id:
+        return "Error: session_id is required."
+    mgr: InteractiveSessionManager = getattr(Util(), "_interactive_sessions", None)  # type: ignore[attr-defined]
+    if mgr is None:
+        return "Error: interactive session manager not initialized."
+    try:
+        await mgr.stop(session_id)
+        return "stopped"
+    except Exception as e:
+        return f"Error stopping interactive session: {e!s}"
+
+
 def build_and_save_sandbox_paths_json() -> Dict[str, Any]:
     """
     Build per-user sandbox_root and share (absolute paths), save to database/sandbox_paths.json, return the dict.
@@ -5818,6 +5941,66 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["text"],
             },
             execute_async=_channel_send_executor,
+        )
+    )
+    # Interactive sessions (experimental; opt-in)
+    registry.register(
+        ToolDefinition(
+            name="interactive_start",
+            description="Start an interactive shell/CLI session (PTY/ConPTY). Returns a session_id and initial output.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Command to start (e.g. 'bash', 'agent -p ...', 'claude')."},
+                    "cwd": {"type": "string", "description": "Working directory for the session.", "default": ""},
+                },
+                "required": ["command"],
+            },
+            execute_async=interactive_start_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="interactive_read",
+            description="Read output from an interactive session started by interactive_start.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Session id returned by interactive_start."},
+                    "from_seq": {"type": "integer", "description": "Sequence number to read from (incremental).", "default": 1},
+                },
+                "required": ["session_id"],
+            },
+            execute_async=interactive_read_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="interactive_write",
+            description="Write input to an interactive session started by interactive_start.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Session id returned by interactive_start."},
+                    "data": {"type": "string", "description": "Text to send (stdin)."},
+                },
+                "required": ["session_id", "data"],
+            },
+            execute_async=interactive_write_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="interactive_stop",
+            description="Stop an interactive session started by interactive_start.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Session id returned by interactive_start."},
+                },
+                "required": ["session_id"],
+            },
+            execute_async=interactive_stop_executor,
         )
     )
     registry.register(

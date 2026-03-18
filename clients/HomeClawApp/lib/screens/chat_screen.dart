@@ -102,6 +102,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _wasRouteCurrent = false;
   Uint8List? _chatPartnerAvatar;
   String _cursorActiveCwd = '';
+  String? _interactiveSessionId;
+  int _interactiveLastSeq = 1;
+  final TextEditingController _interactiveInputController = TextEditingController();
+  String _interactiveOutput = '';
 
   bool get _isDevBridgeFriend {
     final fid = (widget.friendId ?? '').trim().toLowerCase();
@@ -119,6 +123,84 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } catch (_) {
       // Keep previous value on failure.
     }
+  }
+
+  Future<void> _startInteractiveSessionIfNeeded() async {
+    if (!_isDevBridgeFriend || _interactiveSessionId != null) return;
+    try {
+      final cwd = _cursorActiveCwd.trim().isNotEmpty ? _cursorActiveCwd.trim() : null;
+      final fid = (widget.friendId ?? '').trim().toLowerCase();
+      final bridgePlugin = fid == 'claudecode' ? 'claude-code-bridge' : 'cursor-bridge';
+      final result = await widget.coreService.interactiveStart(
+        bridgePlugin: bridgePlugin,
+        cwd: cwd,
+      );
+      final sid = (result['session_id'] as String?)?.trim();
+      final initial = (result['initial_output'] as String?) ?? '';
+      if (!mounted || sid == null || sid.isEmpty) return;
+      setState(() {
+        _interactiveSessionId = sid;
+        _interactiveLastSeq = 1;
+        _interactiveOutput = initial;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _interactiveOutput = 'Failed to start interactive agent: ${e.toString().replaceFirst(RegExp(r'^Exception:?\s*'), '')}. '
+            'Ensure the bridge is running and Core can reach it.';
+      });
+    }
+  }
+
+  Future<void> _sendInteractiveInput() async {
+    final sid = _interactiveSessionId;
+    if (sid == null) return;
+    final text = _interactiveInputController.text;
+    if (text.trim().isEmpty) return;
+    _interactiveInputController.clear();
+    try {
+      await widget.coreService.interactiveWrite(sessionId: sid, data: '$text\n');
+      await _refreshInteractiveOutput();
+    } catch (_) {}
+  }
+
+  Future<void> _refreshInteractiveOutput() async {
+    final sid = _interactiveSessionId;
+    if (sid == null) return;
+    try {
+      final map = await widget.coreService.interactiveRead(sessionId: sid, fromSeq: _interactiveLastSeq);
+      final chunks = map['chunks'] as List<dynamic>? ?? const [];
+      if (chunks.isEmpty) return;
+      final buffer = StringBuffer(_interactiveOutput);
+      var maxSeq = _interactiveLastSeq;
+      for (final raw in chunks) {
+        if (raw is Map<String, dynamic>) {
+          final text = (raw['text'] as String?) ?? '';
+          final seq = (raw['seq'] as int?) ?? maxSeq;
+          buffer.write(text);
+          if (seq > maxSeq) maxSeq = seq;
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _interactiveOutput = buffer.toString();
+        _interactiveLastSeq = maxSeq + 1;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _stopInteractiveSession() async {
+    final sid = _interactiveSessionId;
+    if (sid == null) return;
+    try {
+      await widget.coreService.interactiveStop(sessionId: sid);
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _interactiveSessionId = null;
+      _interactiveLastSeq = 1;
+      _interactiveOutput = '';
+    });
   }
 
   Future<void> _loadChatPartnerAvatar() async {
@@ -1809,6 +1891,74 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               },
             ),
           ),
+          if (_isDevBridgeFriend && _interactiveSessionId != null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.6),
+                border: Border(
+                  top: BorderSide(color: Theme.of(context).dividerColor),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Interactive console',
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.refresh, size: 18),
+                        tooltip: 'Refresh output',
+                        onPressed: _refreshInteractiveOutput,
+                      ),
+                    ],
+                  ),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 160),
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: SingleChildScrollView(
+                      child: Text(
+                        _interactiveOutput.isEmpty ? '(no output yet)' : _interactiveOutput,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _interactiveInputController,
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            hintText: 'Type command or input…',
+                          ),
+                          onSubmitted: (_) => _sendInteractiveInput(),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.send, size: 18),
+                        onPressed: _sendInteractiveInput,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           if (_loading)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

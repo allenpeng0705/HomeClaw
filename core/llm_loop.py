@@ -489,6 +489,72 @@ async def answer_from_memory(
                 elif not plugin:
                     core.clear_pending_plugin_call(app_id_val, user_id_val, session_id_val)
 
+        # Unified workflow layer: if a tool previously returned need_input/need_confirmation, resume on user reply.
+        pending_wf = core.get_pending_workflow(app_id_val, user_id_val, session_id_val)
+        if isinstance(pending_wf, dict) and pending_wf and (query or "").strip():
+            try:
+                from core.workflow_result import (
+                    parse_workflow_result,
+                    is_confirm_reply,
+                    STATUS_NEED_INPUT,
+                    STATUS_NEED_CONFIRMATION,
+                )
+                status = (pending_wf.get("workflow_status") or "").strip().lower()
+                if status == STATUS_NEED_INPUT:
+                    missing = list(pending_wf.get("missing_fields") or [])
+                    if missing and (pending_wf.get("resume_tool") or "").strip():
+                        resume_tool = (pending_wf.get("resume_tool") or "").strip()
+                        resume_args = dict(pending_wf.get("resume_args") or {})
+                        name = missing[0]
+                        resume_args[name] = (query or "").strip()
+                        key = name.lower().replace(" ", "_")
+                        if key != name:
+                            resume_args[key] = (query or "").strip()
+                        core.clear_pending_workflow(app_id_val, user_id_val, session_id_val)
+                        _reg = get_tool_registry()
+                        _ctx = ToolContext(
+                            core=core,
+                            app_id=app_id_val or "homeclaw",
+                            user_name=user_name or "",
+                            user_id=user_id_val or "",
+                            system_user_id=getattr(request, "system_user_id", None) or user_id_val,
+                            friend_id=(str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw"),
+                            session_id=session_id_val or "",
+                            run_id=run_id,
+                            request=request,
+                        )
+                        _res = await _reg.execute_async(resume_tool, resume_args, _ctx)
+                        _res_str = str(_res) if _res is not None else ""
+                        _s2, _wf2 = parse_workflow_result(_res_str)
+                        if _s2 in (STATUS_NEED_INPUT, STATUS_NEED_CONFIRMATION) and _wf2:
+                            core.set_pending_workflow(app_id_val, user_id_val, session_id_val, {"workflow_status": _s2, **_wf2})
+                            return ((_wf2.get("message") or _res_str or "Done.").strip(), None)
+                        return (_res_str.strip() or "Done.", None)
+                elif status == STATUS_NEED_CONFIRMATION:
+                    if is_confirm_reply((query or "").strip()):
+                        confirm_tool = (pending_wf.get("confirm_tool") or "").strip()
+                        confirm_args = dict(pending_wf.get("confirm_args") or {})
+                        if confirm_tool:
+                            core.clear_pending_workflow(app_id_val, user_id_val, session_id_val)
+                            _reg = get_tool_registry()
+                            _ctx = ToolContext(
+                                core=core,
+                                app_id=app_id_val or "homeclaw",
+                                user_name=user_name or "",
+                                user_id=user_id_val or "",
+                                system_user_id=getattr(request, "system_user_id", None) or user_id_val,
+                                friend_id=(str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw"),
+                                session_id=session_id_val or "",
+                                run_id=run_id,
+                                request=request,
+                            )
+                            _res = await _reg.execute_async(confirm_tool, confirm_args, _ctx)
+                            return (str(_res).strip() if _res is not None else "Done.", None)
+                    core.clear_pending_workflow(app_id_val, user_id_val, session_id_val)
+            except Exception as _wf_e:
+                logger.debug("Workflow resume failed (non-fatal): {}", _wf_e)
+                core.clear_pending_workflow(app_id_val, user_id_val, session_id_val)
+
         # When intent_router is disabled, apply greeting/capabilities shortcut early (no LLM). When enabled, shortcut runs after intent router and only when category is general_chat (see below).
         _shortcut_cfg = getattr(Util().get_core_metadata(), "identity_capabilities_shortcut_config", None) or {}
         _intent_router_enabled = isinstance(getattr(Util().get_core_metadata(), "intent_router_config", None), dict) and (getattr(Util().get_core_metadata(), "intent_router_config", None) or {}).get("enabled")
@@ -3624,9 +3690,25 @@ async def answer_from_memory(
                     last_tool_name = name
                     last_tool_result_raw = result if isinstance(result, str) else None
                     last_tool_args = args if isinstance(args, dict) else None
+                    tool_content = result
+                    # Workflow envelope: if tool returned need_input/need_confirmation, store and use message as reply.
+                    if isinstance(result, str) and result.strip():
+                        try:
+                            from core.workflow_result import parse_workflow_result, STATUS_NEED_INPUT, STATUS_NEED_CONFIRMATION
+                            _wf_status, _wf_obj = parse_workflow_result(result)
+                            if _wf_status in (STATUS_NEED_INPUT, STATUS_NEED_CONFIRMATION) and _wf_obj:
+                                _aid = getattr(context, "app_id", None) or "homeclaw"
+                                _uid = getattr(context, "user_id", None) or ""
+                                _sid = getattr(context, "session_id", None) or ""
+                                core.set_pending_workflow(_aid, _uid, _sid, {"workflow_status": _wf_status, **_wf_obj})
+                                _msg = (_wf_obj.get("message") or result).strip()
+                                routing_sent = True
+                                routing_response_text = _msg
+                                tool_content = _msg
+                        except Exception as _wfe:
+                            logger.debug("Workflow parse after tool failed (non-fatal): {}", _wfe)
                     if name == "image":
                         _image_tool_run_count_this_request += 1
-                    tool_content = result
                     # Collect for memory full-turn (MemOS user+assistant+tool)
                     try:
                         _tr = str(result) if result is not None else ""

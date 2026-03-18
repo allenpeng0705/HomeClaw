@@ -1208,6 +1208,82 @@ class CoreService {
     return (map['active_cwd'] as String?)?.trim() ?? '';
   }
 
+  /// Interactive sessions: HTTP helpers (minimal; experimental).
+  /// For local shell: pass [command] (and optional [cwd]).
+  /// For Cursor/Claude agent on the bridge: pass [bridgePlugin] ('cursor-bridge' or 'claude-code-bridge') and optional [cwd].
+  Future<Map<String, dynamic>> interactiveStart({
+    String? command,
+    String? cwd,
+    String? bridgePlugin,
+  }) async {
+    final url = Uri.parse('$_baseUrl/api/interactive/start');
+    final body = <String, dynamic>{};
+    if ((bridgePlugin ?? '').trim().isNotEmpty) {
+      body['bridge_plugin'] = bridgePlugin!.trim();
+      if (cwd != null && cwd.trim().isNotEmpty) body['cwd'] = cwd.trim();
+    } else {
+      if ((command ?? '').trim().isEmpty) throw ArgumentError('command or bridgePlugin is required');
+      body['command'] = command!.trim();
+      if (cwd != null && cwd.trim().isNotEmpty) body['cwd'] = cwd.trim();
+    }
+    final response = await http
+        .post(url, headers: _authHeaders(forCompanionApi: true), body: jsonEncode(body))
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(response.body.isNotEmpty ? response.body : 'interactive start failed (${response.statusCode})');
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>? ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> interactiveRead({required String sessionId, int fromSeq = 1}) async {
+    final url = Uri.parse('$_baseUrl/api/interactive/read?session_id=$sessionId&from_seq=$fromSeq');
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(response.body.isNotEmpty ? response.body : 'interactive read failed (${response.statusCode})');
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>? ?? <String, dynamic>{};
+  }
+
+  Future<void> interactiveWrite({required String sessionId, required String data}) async {
+    final url = Uri.parse('$_baseUrl/api/interactive/write');
+    final body = <String, dynamic>{'session_id': sessionId, 'data': data};
+    final response = await http
+        .post(url, headers: _authHeaders(forCompanionApi: true), body: jsonEncode(body))
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(response.body.isNotEmpty ? response.body : 'interactive write failed (${response.statusCode})');
+    }
+  }
+
+  Future<void> interactiveStop({required String sessionId}) async {
+    final url = Uri.parse('$_baseUrl/api/interactive/stop');
+    final body = <String, dynamic>{'session_id': sessionId};
+    final response = await http
+        .post(url, headers: _authHeaders(forCompanionApi: true), body: jsonEncode(body))
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(response.body.isNotEmpty ? response.body : 'interactive stop failed (${response.statusCode})');
+    }
+  }
+
   /// Persist an inbound reply to the correct chat so it is not lost when the user has navigated away.
   void _persistInboundResultToStore(String userId, String? friendId, Map<String, dynamic> result) {
     try {

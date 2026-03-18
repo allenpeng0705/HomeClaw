@@ -50,8 +50,6 @@ qrcode[pil]==7.4.0
 #simplematrixbotlib==2.12.3
 
 
-
-
 # Memory: Cognee is default (memory_backend=cognee). Alternative: chroma + optional graph (kuzu/neo4j).
 # Cognee is vendored in vendor/cognee. Install only its deps: pip install -r requirements-cognee-deps.txt (install.sh/install.ps1 do this). Do not pip install cognee.
 # Used by Cognee (graph + robots). Stricter bounds to reduce pip backtracking.
@@ -80,7 +78,7 @@ duckduckgo-search>=4.0.0
 # simplematrixbotlib # Matrix channel (channels/matrix)
 # torch optional: CUDA detection uses nvidia-smi when torch not installed
 # MCP client (optional): for mcp_call and mcp_list_tools to use external MCP servers. See docs/mcp.md.
-# mcp
+mcp
 # Tests (optional: install only for development)
 pytest>=7.0.0
 pytest-asyncio>=0.21.0

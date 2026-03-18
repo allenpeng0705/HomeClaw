@@ -68,6 +68,61 @@ capabilities:
     name: Get Cursor Bridge status
     description: Return the Cursor Bridge current state, including active project cwd and default cwd. Useful for Companion UI and debugging.
     parameters: []
+  - id: run_agent_interactive
+    name: Start Cursor agent interactively (PTY)
+    description: Start the Cursor CLI agent in an interactive PTY on the bridge machine so the user can type and see output via Companion/WebChat. Returns session_id and initial_output; use interactive_read/interactive_write/interactive_stop for the same session.
+    parameters:
+      - name: backend
+        type: string
+        required: false
+        description: "cursor (default) or claude."
+      - name: cwd
+        type: string
+        required: false
+        description: Working directory (optional; defaults to active project cwd).
+  - id: run_command_interactive
+    name: Start command interactively (PTY)
+    description: Start a shell command in a PTY on the bridge for interactive use. Returns session_id and initial_output.
+    parameters:
+      - name: command
+        type: string
+        required: true
+        description: Shell command to run (e.g. bash, powershell).
+      - name: cwd
+        type: string
+        required: false
+      - name: backend
+        type: string
+        required: false
+        description: cursor or claude (for default cwd).
+  - id: interactive_read
+    name: Read from bridge interactive session
+    description: Read output chunks from a session started by run_agent_interactive or run_command_interactive.
+    parameters:
+      - name: session_id
+        type: string
+        required: true
+      - name: from_seq
+        type: integer
+        required: false
+        description: First chunk sequence number (default 1).
+  - id: interactive_write
+    name: Write to bridge interactive session
+    description: Send stdin to a bridge interactive session.
+    parameters:
+      - name: session_id
+        type: string
+        required: true
+      - name: data
+        type: string
+        required: true
+  - id: interactive_stop
+    name: Stop bridge interactive session
+    description: Stop a session started by run_agent_interactive or run_command_interactive.
+    parameters:
+      - name: session_id
+        type: string
+        required: true
   - id: ask_cursor
     name: Ask Cursor (natural language)
     description: Infer intent from user message (open project, run agent, or run command). Use when the request is ambiguous.

@@ -92,6 +92,9 @@ TOOL_PROFILES: Dict[str, List[str]] = {
     "env": ["messaging", "coding"],
     "http_request": ["coding"],
     "webhook_trigger": ["messaging"],
+    # MCP: when tools.mcp.enabled and servers configured, LLM can call external MCP servers (e.g. claude-code via claude mcp serve).
+    "mcp_list_tools": ["coding", "messaging"],
+    "mcp_call": ["coding", "messaging"],
 }
 
 VALID_PROFILES = frozenset({"full", "minimal", "messaging", "coding"})

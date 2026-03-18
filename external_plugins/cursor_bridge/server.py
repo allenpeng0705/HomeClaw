@@ -4,7 +4,9 @@ Cursor Bridge: HTTP server for HomeClaw to run commands, open projects, or chat 
 Main features:
 - open_project: open a folder/project in Cursor IDE (so you can then chat with the agent there).
 - run_agent: run Cursor CLI agent with a task in non-interactive mode and return the output (run and see results).
+- run_agent_interactive: start Cursor/Claude agent in a PTY so the user can interact via Companion/WebChat.
 - run_command: run a shell command (e.g. npm test) and return output.
+- run_command_interactive: start a shell command in a PTY for interactive use.
 
 Run: python -m external_plugins.cursor_bridge.server
      Optional: CURSOR_BRIDGE_PORT=3104 (default 3104), CURSOR_BRIDGE_CWD=/path/to/project
@@ -17,7 +19,10 @@ import platform
 import shutil
 import subprocess
 import threading
-from typing import Any, Dict, Optional
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI
 from fastapi import Request
@@ -138,6 +143,243 @@ def _resolve_path(p: str) -> str:
     if os.path.exists(abs_p):
         return abs_p
     return os.path.normpath(os.path.join(DEFAULT_CWD, s))
+
+
+# --- Bridge interactive sessions (PTY/ConPTY on bridge machine) ---
+
+
+@dataclass
+class _BridgeChunk:
+    seq: int
+    text: str
+    timestamp: float
+
+
+@dataclass
+class _BridgeSession:
+    session_id: str
+    command: str
+    cwd: Optional[str]
+    created_at: float
+    status: str = "running"
+    exit_code: Optional[int] = None
+    _buffer: List[_BridgeChunk] = field(default_factory=list)
+    _next_seq: int = 1
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def append_output(self, text: str) -> None:
+        now = time.time()
+        with self._lock:
+            if not text:
+                return
+            self._buffer.append(_BridgeChunk(seq=self._next_seq, text=text, timestamp=now))
+            self._next_seq += 1
+            # Cap buffer size
+            if len(self._buffer) > 500:
+                self._buffer = self._buffer[-300:]
+
+    def read_from(self, from_seq: int = 1) -> Tuple[List[_BridgeChunk], int]:
+        with self._lock:
+            chunks = [c for c in self._buffer if c.seq >= from_seq]
+            last_seq = self._next_seq - 1
+        return chunks, last_seq
+
+
+class _BridgeInteractiveManager:
+    """Manages PTY/ConPTY sessions on the bridge machine for run_agent_interactive / run_command_interactive."""
+
+    def __init__(self, max_sessions: int = 5):
+        self._sessions: Dict[str, _BridgeSession] = {}
+        self._unix_master_fds: Dict[str, int] = {}
+        self._win_procs: Dict[str, Any] = {}
+        self._max_sessions = max(1, max_sessions)
+        self._lock = threading.Lock()
+
+    def _make_session_id(self) -> str:
+        return f"bridge_{uuid.uuid4().hex[:12]}"
+
+    def start_session(self, command: str, cwd: Optional[str] = None, env: Optional[Dict[str, str]] = None) -> Tuple[str, str]:
+        """Start a PTY session; returns (session_id, initial_output). Blocks until first output or process start."""
+        with self._lock:
+            if len(self._sessions) >= self._max_sessions:
+                raise RuntimeError("Too many bridge interactive sessions")
+            session_id = self._make_session_id()
+            sess = _BridgeSession(
+                session_id=session_id,
+                command=command,
+                cwd=(cwd or "").strip() or None,
+                created_at=time.time(),
+            )
+            self._sessions[session_id] = sess
+        cwd = (cwd or "").strip() or DEFAULT_CWD
+        if not os.path.isdir(cwd):
+            cwd = DEFAULT_CWD
+        env = env or {}
+        env_merged = {**os.environ, **env}
+        if IS_WINDOWS:
+            self._start_win_conpty(sess, cwd, env_merged)
+        else:
+            self._start_unix_pty(sess, cwd, env_merged)
+        chunks, _ = sess.read_from(1)
+        initial = "".join(c.text for c in chunks)
+        return session_id, initial
+
+    def _start_unix_pty(self, sess: _BridgeSession, cwd: str, env: Dict[str, str]) -> None:
+        import pty as pty_mod
+
+        def _run():
+            try:
+                argv = ["/bin/sh", "-c", sess.command]
+                pid, master_fd = pty_mod.fork()
+                if pid == 0:
+                    try:
+                        os.chdir(cwd)
+                    except Exception:
+                        pass
+                    os.execvpe(argv[0], argv, env)
+                else:
+                    try:
+                        self._unix_master_fds[sess.session_id] = master_fd
+                    except Exception:
+                        pass
+                    try:
+                        while True:
+                            try:
+                                data = os.read(master_fd, 4096)
+                            except OSError:
+                                break
+                            if not data:
+                                break
+                            sess.append_output(data.decode("utf-8", errors="replace"))
+                    finally:
+                        try:
+                            os.close(master_fd)
+                        except OSError:
+                            pass
+                        try:
+                            self._unix_master_fds.pop(sess.session_id, None)
+                        except Exception:
+                            pass
+                        sess.status = "exited"
+            except Exception as e:
+                sess.append_output(f"Error starting PTY: {e!s}\n")
+                sess.status = "error"
+                sess.exit_code = 1
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _start_win_conpty(self, sess: _BridgeSession, cwd: str, env: Dict[str, str]) -> None:
+        try:
+            from pywinpty import PtyProcess  # type: ignore
+        except ImportError:
+            sess.append_output(
+                "Interactive sessions on Windows require the optional 'pywinpty' dependency. "
+                "Install with: pip install pywinpty\n"
+            )
+            sess.status = "error"
+            sess.exit_code = 1
+            return
+
+        def _run():
+            try:
+                proc = PtyProcess.spawn(sess.command, cwd=cwd, env=env)
+                self._win_procs[sess.session_id] = proc
+                try:
+                    while True:
+                        try:
+                            data = proc.read(4096)
+                        except Exception:
+                            break
+                        if not data:
+                            break
+                        text = data.decode("utf-8", errors="replace") if isinstance(data, (bytes, bytearray)) else str(data)
+                        sess.append_output(text)
+                finally:
+                    try:
+                        proc.close()
+                    except Exception:
+                        pass
+                    self._win_procs.pop(sess.session_id, None)
+                    sess.status = "exited"
+            except Exception as e:
+                sess.append_output(f"Failed to start ConPTY: {e!s}\n")
+                sess.status = "error"
+                sess.exit_code = 1
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def write(self, session_id: str, data: str) -> None:
+        if not data:
+            return
+        if IS_WINDOWS:
+            proc = self._win_procs.get(session_id)
+            if proc is not None:
+                try:
+                    proc.write(data)
+                except Exception:
+                    pass
+        else:
+            fd = self._unix_master_fds.get(session_id)
+            if fd is not None:
+                try:
+                    os.write(fd, data.encode("utf-8"))
+                except OSError:
+                    pass
+
+    def read(self, session_id: str, from_seq: int = 1) -> Tuple[List[_BridgeChunk], str, Optional[int], str]:
+        with self._lock:
+            sess = self._sessions.get(session_id)
+        if not sess:
+            raise KeyError("Unknown session_id")
+        chunks, _ = sess.read_from(from_seq)
+        return chunks, sess.status, sess.exit_code, sess.command
+
+    def stop(self, session_id: str) -> None:
+        with self._lock:
+            sess = self._sessions.get(session_id)
+            if sess:
+                sess.status = "killed"
+        if IS_WINDOWS:
+            proc = self._win_procs.pop(session_id, None)
+            if proc is not None:
+                try:
+                    proc.close()
+                except Exception:
+                    pass
+        else:
+            fd = self._unix_master_fds.pop(session_id, None)
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+
+
+_BRIDGE_INTERACTIVE = _BridgeInteractiveManager()
+
+
+def _agent_interactive_command(backend: str) -> Tuple[str, Optional[str]]:
+    """Return (command_string, cwd) to run the agent interactively (no -p, no task)."""
+    if (backend or "").strip().lower() == "claude":
+        exe = _claude_executable()
+        cwd = _get_active_cwd("claude") or DEFAULT_CWD
+        if IS_WINDOWS and exe.lower().endswith(".cmd"):
+            cmd = f'cmd /c "{exe}"'
+        elif IS_WINDOWS and exe.lower().endswith(".ps1"):
+            cmd = f'powershell -ExecutionPolicy Bypass -File "{exe}"'
+        else:
+            cmd = exe
+        return cmd, cwd
+    # Cursor agent
+    exe = _agent_executable()
+    cwd = _get_active_cwd("cursor") or DEFAULT_CWD
+    if IS_WINDOWS and exe.lower().endswith(".cmd"):
+        cmd = f'cmd /c "{exe}" --trust'
+    elif IS_WINDOWS and exe.lower().endswith(".ps1"):
+        cmd = f'powershell -ExecutionPolicy Bypass -File "{exe}" --trust'
+    else:
+        cmd = f"{exe} --trust"
+    return cmd, cwd
 
 
 def _status_payload() -> Dict[str, Any]:
@@ -592,6 +834,109 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
                 success, text = await _run_claude_task(task, cwd=cwd, timeout_sec=timeout)
             else:
                 success, text = await _run_agent_task(task, cwd=cwd, timeout_sec=timeout)
+
+    elif cap_id == "run_agent_interactive":
+        # Start Cursor or Claude agent in a PTY on the bridge; return session_id + initial_output for Core/Companion to use.
+        backend = (params.get("backend") or "").strip().lower()
+        if not backend:
+            pid_lower = (plugin_id or "").strip().lower()
+            backend = "claude" if "claude" in pid_lower else "cursor"
+        cwd_override = (params.get("cwd") or "").strip() or None
+        try:
+            cmd, cwd = _agent_interactive_command(backend)
+            if cwd_override and os.path.isdir(cwd_override):
+                cwd = cwd_override
+            session_id, initial = await asyncio.to_thread(_BRIDGE_INTERACTIVE.start_session, cmd, cwd)
+            text = json.dumps({"session_id": session_id, "initial_output": initial, "status": "running"}, ensure_ascii=False)
+        except Exception as e:
+            success = False
+            error = str(e)
+            text = ""
+
+    elif cap_id == "run_command_interactive":
+        # Start a shell command in a PTY on the bridge; return session_id + initial_output.
+        command = (params.get("command") or "").strip()
+        if not command:
+            success = False
+            error = "run_command_interactive requires 'command' in capability_parameters."
+        else:
+            cwd = (params.get("cwd") or "").strip() or None
+            if not cwd:
+                backend = (params.get("backend") or "").strip().lower()
+                if not backend:
+                    pid_lower = (plugin_id or "").strip().lower()
+                    backend = "claude" if "claude" in pid_lower else "cursor"
+                cwd = _get_active_cwd(backend) or DEFAULT_CWD
+            if not os.path.isdir(cwd):
+                cwd = DEFAULT_CWD
+            try:
+                session_id, initial = await asyncio.to_thread(_BRIDGE_INTERACTIVE.start_session, command, cwd)
+                text = json.dumps({"session_id": session_id, "initial_output": initial, "status": "running"}, ensure_ascii=False)
+            except Exception as e:
+                success = False
+                error = str(e)
+                text = ""
+
+    elif cap_id == "interactive_read":
+        session_id = (params.get("session_id") or "").strip()
+        if not session_id:
+            success = False
+            error = "interactive_read requires 'session_id' in capability_parameters."
+        else:
+            try:
+                from_seq = int(params.get("from_seq") or 1)
+            except (TypeError, ValueError):
+                from_seq = 1
+            try:
+                chunks, status, exit_code, command = _BRIDGE_INTERACTIVE.read(session_id, from_seq=from_seq)
+                text = json.dumps({
+                    "session_id": session_id,
+                    "status": status,
+                    "exit_code": exit_code,
+                    "command": command,
+                    "chunks": [{"seq": c.seq, "text": c.text, "timestamp": c.timestamp} for c in chunks],
+                }, ensure_ascii=False)
+            except KeyError:
+                success = False
+                error = "Unknown session_id."
+                text = ""
+            except Exception as e:
+                success = False
+                error = str(e)
+                text = ""
+
+    elif cap_id == "interactive_write":
+        session_id = (params.get("session_id") or "").strip()
+        data = (params.get("data") or "").replace("\r\n", "\n")
+        if not session_id:
+            success = False
+            error = "interactive_write requires 'session_id' in capability_parameters."
+        else:
+            try:
+                _BRIDGE_INTERACTIVE.write(session_id, data)
+                text = "ok"
+            except KeyError:
+                success = False
+                error = "Unknown session_id."
+                text = ""
+            except Exception as e:
+                success = False
+                error = str(e)
+                text = ""
+
+    elif cap_id == "interactive_stop":
+        session_id = (params.get("session_id") or "").strip()
+        if not session_id:
+            success = False
+            error = "interactive_stop requires 'session_id' in capability_parameters."
+        else:
+            try:
+                _BRIDGE_INTERACTIVE.stop(session_id)
+                text = "stopped"
+            except Exception as e:
+                success = False
+                error = str(e)
+                text = ""
 
     else:
         # ask_cursor or unknown: treat user_input or params.task as a natural-language task; run as a single command if it looks like one.
