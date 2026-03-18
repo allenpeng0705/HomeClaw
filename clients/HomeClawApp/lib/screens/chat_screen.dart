@@ -61,6 +61,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   bool _loading = false;
+
+  /// Pagination: number of messages fetched per page from Core.
+  static const int _pageSize = 50;
+  /// Current offset into Core chat history (for scroll-up pagination).
+  int _chatHistoryOffset = 0;
+  /// True while fetching an older page of messages.
+  bool _loadingMoreMessages = false;
+  /// False once Core returns fewer messages than _pageSize (no more older messages).
+  bool _hasMoreMessages = true;
   /// When streaming is on, latest progress message from Core (e.g. "Generating your presentation…"); shown under the loading bar.
   String? _loadingMessage;
   bool _voiceListening = false;
@@ -221,6 +230,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _loadVoiceInputLocale();
     _loadChatPartnerAvatar();
     _refreshCursorActiveProject();
+    _scrollController.addListener(_onScrollForPagination);
     if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
       _loadUserInbox();
       _userInboxPollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -229,16 +239,76 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } else {
       _loadChatHistory();
       _syncChatHistoryFromCore();
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await _checkPendingInboundAndRefresh();
+      });
     }
     _checkCoreConnection();
     _connectionCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkCoreConnection());
     _pushMessageSubscription = widget.coreService.pushMessageStream.listen(_onPushMessage);
-    // Register push token for this chat user (iOS: APNs, Android: FCM) so reminders for this user can be delivered when app is killed.
     widget.coreService.registerPushTokenWithCore(widget.userId);
     if (widget.initialMessage != null && widget.initialMessage!.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _inputController.text = widget.initialMessage!;
       });
+    }
+  }
+
+  void _onScrollForPagination() {
+    if (widget.isUserFriend) return;
+    if (_loadingMoreMessages || !_hasMoreMessages) return;
+    if (!_scrollController.hasClients) return;
+    if (_scrollController.position.pixels <= _scrollController.position.minScrollExtent + 50) {
+      _loadOlderMessages();
+    }
+  }
+
+  Future<void> _loadOlderMessages() async {
+    if (_loadingMoreMessages || !_hasMoreMessages || widget.isUserFriend) return;
+    setState(() => _loadingMoreMessages = true);
+    try {
+      final friendId = (widget.friendId != null && widget.friendId!.trim().isNotEmpty) ? widget.friendId!.trim() : 'HomeClaw';
+      final list = await widget.coreService.getChatHistory(
+        userId: widget.userId,
+        friendId: friendId,
+        limit: _pageSize,
+        offset: _chatHistoryOffset + _messages.length,
+      );
+      if (!mounted) return;
+      if (list.isEmpty || list.length < _pageSize) {
+        setState(() => _hasMoreMessages = false);
+      }
+      if (list.isEmpty) {
+        setState(() => _loadingMoreMessages = false);
+        return;
+      }
+      final older = <MapEntry<String, bool>>[];
+      final olderImages = <List<String>?>[];
+      final olderAudios = <List<String>?>[];
+      final olderVideos = <List<String>?>[];
+      for (final m in list) {
+        final role = ((m['role']?.toString()) ?? '').trim().toLowerCase();
+        final content = ((m['content']?.toString()) ?? '').trim();
+        older.add(MapEntry(content.isEmpty ? '(empty)' : content, role == 'user'));
+        olderImages.add(null);
+        olderAudios.add(null);
+        olderVideos.add(null);
+      }
+      final prevMax = _scrollController.position.maxScrollExtent;
+      setState(() {
+        _messages.insertAll(0, older);
+        _messageImages.insertAll(0, olderImages);
+        _messageAudios.insertAll(0, olderAudios);
+        _messageVideos.insertAll(0, olderVideos);
+        _loadingMoreMessages = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollController.hasClients) return;
+        final newMax = _scrollController.position.maxScrollExtent;
+        _scrollController.jumpTo(_scrollController.offset + (newMax - prevMax));
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingMoreMessages = false);
     }
   }
 
@@ -250,6 +320,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
       _loadUserInbox();
     } else {
+      _checkPendingInboundAndRefresh();
       _syncChatHistoryFromCore();
     }
   }
@@ -274,13 +345,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// If a pending async request (e.g. Cursor/ClaudeCode) completed while user was away or app was in background, fetch result, persist, and refresh chat so the reply is not missed.
+  Future<void> _checkPendingInboundAndRefresh() async {
+    if (widget.isUserFriend) return;
+    try {
+      final result = await widget.coreService.checkPendingInboundResult(widget.userId, widget.friendId);
+      if (result != null && mounted) {
+        _loadChatHistory();
+        setState(() {});
+      }
+    } catch (_) {}
+  }
+
   /// Load user-to-user messages from GET /api/user-inbox and show only thread with [widget.toUserId].
   /// Load Core↔user (AI) chat history from Core so replies that arrived while the app was offline appear in the list.
   Future<void> _syncChatHistoryFromCore() async {
     if (widget.isUserFriend) return;
     final friendId = (widget.friendId != null && widget.friendId!.trim().isNotEmpty) ? widget.friendId!.trim() : 'HomeClaw';
     try {
-      final list = await widget.coreService.getChatHistory(userId: widget.userId, friendId: friendId, limit: 100);
+      final list = await widget.coreService.getChatHistory(userId: widget.userId, friendId: friendId, limit: _pageSize, offset: 0);
       if (list.isEmpty || !mounted) return;
       final messages = <MapEntry<String, bool>>[];
       final images = <List<String>?>[];
@@ -305,6 +388,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _messageImages.addAll(images);
         _messageAudios.addAll(audios);
         _messageVideos.addAll(videos);
+        _chatHistoryOffset = 0;
+        _hasMoreMessages = list.length >= _pageSize;
       });
     } catch (_) {
       // Keep local history on failure (e.g. offline)
@@ -407,6 +492,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _messageAudios.clear();
       _messageVideos.clear();
       _lastReply = null;
+      _chatHistoryOffset = 0;
+      _hasMoreMessages = true;
     });
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1598,6 +1685,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _voice.dispose();
     _voiceRecorder.dispose();
     _inputController.dispose();
+    _scrollController.removeListener(_onScrollForPagination);
     _scrollController.dispose();
     super.dispose();
   }
@@ -1607,7 +1695,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final isCurrent = ModalRoute.of(context)?.isCurrent ?? false;
     if (isCurrent && !_wasRouteCurrent) {
       _wasRouteCurrent = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (mounted && !widget.isUserFriend) await _checkPendingInboundAndRefresh();
         if (mounted) {
           _loadChatHistory();
           setState(() {});
@@ -1776,115 +1865,107 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             child: ListView.builder(
               controller: _scrollController,
               padding: const EdgeInsets.all(8),
-              itemCount: _messages.length,
+              itemCount: _messages.length + (_loadingMoreMessages ? 1 : 0),
               itemBuilder: (context, i) {
-                final entry = _messages[i];
+                if (_loadingMoreMessages && i == 0) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+                  );
+                }
+                final msgIndex = _loadingMoreMessages ? i - 1 : i;
+                final entry = _messages[msgIndex];
                 final isUser = entry.value;
-                final imageUrls = i < _messageImages.length ? _messageImages[i] : null;
-                final audioUrls = i < _messageAudios.length ? _messageAudios[i] : null;
-                final videoUrls = i < _messageVideos.length ? _messageVideos[i] : null;
+                final imageUrls = msgIndex < _messageImages.length ? _messageImages[msgIndex] : null;
+                final audioUrls = msgIndex < _messageAudios.length ? _messageAudios[msgIndex] : null;
+                final videoUrls = msgIndex < _messageVideos.length ? _messageVideos[msgIndex] : null;
                 return Align(
                   alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (isUser) const SizedBox.shrink(),
-                        Flexible(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: isUser ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (imageUrls != null && imageUrls.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 8),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: imageUrls
-                                          .where((u) => u.startsWith('data:image/'))
-                                          .map((imageDataUrl) => Padding(
-                                                padding: const EdgeInsets.only(bottom: 6),
-                                                child: GestureDetector(
-                                                  onTap: () {
-                                                    Navigator.of(context).push(
-                                                      MaterialPageRoute<void>(
-                                                        builder: (ctx) => _FullScreenImagePage(imageDataUrl: imageDataUrl),
-                                                      ),
-                                                    );
-                                                  },
-                                                  child: ClipRRect(
-                                                    borderRadius: BorderRadius.circular(8),
-                                                    child: Image.memory(
-                                                      base64Decode(imageDataUrl.contains(',') ? imageDataUrl.split(',').last : ''),
-                                                      fit: BoxFit.contain,
-                                                      width: 280,
-                                                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  child: GestureDetector(
+                    onLongPress: () => _showDeleteMessageConfirmation(context, msgIndex),
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.85),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: isUser ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (imageUrls != null && imageUrls.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: imageUrls
+                                        .where((u) => u.startsWith('data:image/'))
+                                        .map((imageDataUrl) => Padding(
+                                              padding: const EdgeInsets.only(bottom: 6),
+                                              child: GestureDetector(
+                                                onTap: () {
+                                                  Navigator.of(context).push(
+                                                    MaterialPageRoute<void>(
+                                                      builder: (ctx) => _FullScreenImagePage(imageDataUrl: imageDataUrl),
                                                     ),
+                                                  );
+                                                },
+                                                child: ClipRRect(
+                                                  borderRadius: BorderRadius.circular(8),
+                                                  child: Image.memory(
+                                                    base64Decode(imageDataUrl.contains(',') ? imageDataUrl.split(',').last : ''),
+                                                    fit: BoxFit.contain,
+                                                    width: 280,
+                                                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                                                   ),
                                                 ),
-                                              ))
-                                          .toList(),
-                                    ),
+                                              ),
+                                            ))
+                                        .toList(),
                                   ),
-                                if (audioUrls != null && audioUrls.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 8),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: audioUrls
-                                          .map((audioDataUrl) => Padding(
-                                                padding: const EdgeInsets.only(bottom: 6),
-                                                child: _AudioPlayButton(dataUrl: audioDataUrl),
-                                              ))
-                                          .toList(),
-                                    ),
-                                  ),
-                                if (videoUrls != null && videoUrls.isNotEmpty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(bottom: 8),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: videoUrls
-                                          .map((videoDataUrl) => Padding(
-                                                padding: const EdgeInsets.only(bottom: 6),
-                                                child: _VideoPlayChip(dataUrl: videoDataUrl),
-                                              ))
-                                          .toList(),
-                                    ),
-                                  ),
-                                _ChatMessageText(
-                                  text: entry.key,
-                                  isUser: isUser,
-                                  plainText: _isDevBridgeFriend && widget.coreService.cursorChatPlainText,
-                                  // Apply copy-friendly plain text for Dev Bridge friends (Cursor/ClaudeCode) when enabled.
-                                  theme: Theme.of(context),
                                 ),
-                              ],
-                            ),
+                              if (audioUrls != null && audioUrls.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: audioUrls
+                                        .map((audioDataUrl) => Padding(
+                                              padding: const EdgeInsets.only(bottom: 6),
+                                              child: _AudioPlayButton(dataUrl: audioDataUrl),
+                                            ))
+                                        .toList(),
+                                  ),
+                                ),
+                              if (videoUrls != null && videoUrls.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: videoUrls
+                                        .map((videoDataUrl) => Padding(
+                                              padding: const EdgeInsets.only(bottom: 6),
+                                              child: _VideoPlayChip(dataUrl: videoDataUrl),
+                                            ))
+                                        .toList(),
+                                  ),
+                                ),
+                              _ChatMessageText(
+                                text: entry.key,
+                                isUser: isUser,
+                                plainText: _isDevBridgeFriend && widget.coreService.cursorChatPlainText,
+                                theme: Theme.of(context),
+                              ),
+                            ],
                           ),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline, size: 20),
-                          tooltip: 'Delete message',
-                          onPressed: () => _showDeleteMessageConfirmation(context, i),
-                          style: IconButton.styleFrom(
-                            minimumSize: const Size(36, 36),
-                            padding: EdgeInsets.zero,
-                            visualDensity: VisualDensity.compact,
-                          ),
-                        ),
-                        if (!isUser) const SizedBox.shrink(),
-                      ],
+                      ),
                     ),
                   ),
                 );

@@ -2438,6 +2438,7 @@ class Core(CoreInterface):
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
         limit: int = 100,
+        offset: int = 0,
         fetch_all: bool = False,
     ) -> list:
         """
@@ -2450,6 +2451,7 @@ class Core(CoreInterface):
             user_id=user_id,
             session_id=session_id,
             limit=limit,
+            offset=offset,
             fetch_all=fetch_all,
         )
 

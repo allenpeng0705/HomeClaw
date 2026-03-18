@@ -19,8 +19,8 @@ import 'node_service.dart';
 /// Sends messages via POST /inbound and returns the reply text.
 class CoreService {
   /// Timeout for sending a message (POST /inbound) and waiting for async results (/inbound/result).
-  /// Some tasks (e.g. Cursor agent / long tool runs) can take 10+ minutes; default to 1800 (30 min).
-  static const int sendMessageTimeoutSeconds = 1800;
+  /// Cursor/ClaudeCode and other long tool runs can take 30+ minutes; use 4 hours so we don't timeout first.
+  static const int sendMessageTimeoutSeconds = 14400;
 
   static const String _keyBaseUrl = 'core_base_url';
   static const String _keyApiKey = 'core_api_key';
@@ -35,6 +35,7 @@ class CoreService {
   static const String _keyCompanionSavedPassword = 'companion_saved_password';
   static const String _keyCompanionDeviceId = 'companion_device_id';
   static const String _keyPortalAdminToken = 'portal_admin_token';
+  static const String _keyPendingInboundPrefix = 'pending_inbound_';
   static const String _defaultBaseUrl = 'http://127.0.0.1:9000';
 
   String _baseUrl = _defaultBaseUrl;
@@ -619,10 +620,11 @@ class CoreService {
   }
 
   /// GET /api/chat-history — Core↔user (AI) conversation for (userId, friendId). Uses Bearer. Returns {messages: [{role, content, timestamp}]}. When app was offline, Core still stored the reply; this loads it so the "inbox" works for Core→user.
-  Future<List<Map<String, dynamic>>> getChatHistory({required String userId, required String friendId, int limit = 100}) async {
+  Future<List<Map<String, dynamic>>> getChatHistory({required String userId, required String friendId, int limit = 100, int offset = 0}) async {
     final url = Uri.parse('$_baseUrl/api/chat-history').replace(queryParameters: {
       'friend_id': friendId.trim(),
       'limit': limit.toString(),
+      'offset': offset.toString(),
     });
     final response = await http
         .get(url, headers: _authHeaders(forCompanionApi: true))
@@ -1284,7 +1286,7 @@ class CoreService {
     }
   }
 
-  /// Persist an inbound reply to the correct chat so it is not lost when the user has navigated away.
+  /// Persist an inbound reply to the correct chat so it is not lost when the user has navigated away or app is in background.
   void _persistInboundResultToStore(String userId, String? friendId, Map<String, dynamic> result) {
     try {
       final text = (result['text'] as String?) ?? '';
@@ -1296,6 +1298,74 @@ class CoreService {
       final effectiveFriendId = (friendId?.trim().isEmpty != false) ? 'HomeClaw' : friendId!.trim();
       ChatHistoryStore().appendMessage(userId, effectiveFriendId, text, false, imageList);
     } catch (_) {}
+  }
+
+  static String _pendingKey(String userId, String? friendId) {
+    final f = (friendId?.trim().isEmpty != false) ? 'HomeClaw' : friendId!.trim();
+    return '${_keyPendingInboundPrefix}${userId}_$f';
+  }
+
+  /// Save pending async request_id so we can resume or fetch result when user reopens the chat.
+  Future<void> _savePendingRequestId(String userId, String? friendId, String requestId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_pendingKey(userId, friendId), requestId);
+    } catch (_) {}
+  }
+
+  /// Clear pending request_id for this chat (after result received or cancel).
+  Future<void> _clearPendingRequestId(String userId, String? friendId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_pendingKey(userId, friendId));
+    } catch (_) {}
+  }
+
+  /// Get pending request_id for this chat, if any.
+  Future<String?> getPendingRequestId(String userId, String? friendId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_pendingKey(userId, friendId))?.trim();
+    } catch (_) {}
+    return null;
+  }
+
+  /// When user opens a chat (or app resumes): if there is a pending async request, fetch result once.
+  /// If status is done/cancelled, persist to store, clear pending, and return the result so UI can show it.
+  /// If still pending or 404, returns null. Call this from chat screen on init or when route becomes current.
+  Future<Map<String, dynamic>?> checkPendingInboundResult(String userId, String? friendId) async {
+    final requestId = await getPendingRequestId(userId, friendId);
+    if (requestId == null || requestId.isEmpty) return null;
+    try {
+      final resultUrl = Uri.parse('$_baseUrl/inbound/result').replace(queryParameters: {'request_id': requestId});
+      final response = await http.get(resultUrl, headers: _authHeaders()).timeout(const Duration(seconds: 30));
+      if (response.statusCode == 404) {
+        await _clearPendingRequestId(userId, friendId);
+        return null;
+      }
+      if (response.statusCode != 200 && response.statusCode != 202) return null;
+      final map = jsonDecode(response.body) as Map<String, dynamic>?;
+      final status = map?['status'] as String?;
+      if (status != 'done' && status != 'cancelled') return null;
+      await _clearPendingRequestId(userId, friendId);
+      final cancelled = status == 'cancelled';
+      final ok = map?['ok'] as bool? ?? true;
+      final text = (map?['text'] as String?) ?? '';
+      final err = map?['error'] as String?;
+      final responseImages = map?['images'];
+      final responseImage = map?['image'];
+      final imageList = responseImages is List
+          ? (responseImages as List<dynamic>).whereType<String>().toList()
+          : (responseImage is String ? <String>[responseImage as String] : null);
+      final result = {
+        'text': cancelled ? (err ?? 'Request cancelled.') : (ok ? text : (err ?? text)),
+        'images': imageList != null && imageList.isNotEmpty ? imageList : null,
+        if (cancelled) 'cancelled': true,
+      };
+      _persistInboundResultToStore(userId, friendId, result);
+      return result;
+    } catch (_) {}
+    return null;
   }
 
   /// Ensure WebSocket to Core /ws is connected (for push). When connected, Core sends {"event": "connected", "session_id": "..."}; we send {"event": "register", "user_id": userId} so Core can push proactive messages (cron, reminders) to this connection. [userId] from the message being sent (e.g. body['user_id']). Open WS for both local and remote Core so reminders/cron are delivered. Re-registers when userId changes so reminders for the current chat user are delivered.
@@ -1489,6 +1559,7 @@ class CoreService {
     final friendId = (body['friend_id'] as String?)?.trim() ?? '';
     final meta = (userId: userId ?? 'companion', friendId: friendId.isEmpty ? 'HomeClaw' : friendId);
     _pendingRequestMeta[requestId] = meta;
+    await _savePendingRequestId(meta.userId, meta.friendId, requestId);
     if (_coreWsSessionId != null) {
       // Race WebSocket push with polling so we get the result even if push is lost (e.g. proxy drops WS).
       final pushCompleter = Completer<Map<String, dynamic>>();
@@ -1502,6 +1573,8 @@ class CoreService {
           _currentInboundCompleter = null;
           _pendingInboundResult.remove(requestId);
           _pendingRequestMeta.remove(requestId);
+          _persistInboundResultToStore(meta.userId, meta.friendId, r);
+          _clearPendingRequestId(meta.userId, meta.friendId);
           resultCompleter.complete(r);
         }
       }
@@ -1511,6 +1584,7 @@ class CoreService {
           _currentInboundCompleter = null;
           _pendingInboundResult.remove(requestId);
           _pendingRequestMeta.remove(requestId);
+          _clearPendingRequestId(meta.userId, meta.friendId);
           resultCompleter.completeError(e, st);
         }
       }
@@ -1529,6 +1603,7 @@ class CoreService {
         _currentInboundCompleter = null;
         _pendingInboundResult.remove(requestId);
         _pendingRequestMeta.remove(requestId);
+        _clearPendingRequestId(meta.userId, meta.friendId);
         rethrow;
       }
     }
@@ -1546,6 +1621,8 @@ class CoreService {
   Future<void> cancelOngoingRequest() async {
     final requestId = _currentInboundRequestId;
     if (requestId == null || requestId.isEmpty) return;
+    final meta = _pendingRequestMeta[requestId];
+    final completer = _currentInboundCompleter;
     try {
       final cancelUrl = Uri.parse('$_baseUrl/inbound/cancel');
       final headers = <String, String>{
@@ -1556,16 +1633,17 @@ class CoreService {
           .post(cancelUrl, headers: headers, body: jsonEncode({'request_id': requestId}))
           .timeout(const Duration(seconds: 10));
     } catch (_) {}
-    final completer = _currentInboundCompleter;
     _currentInboundRequestId = null;
     _currentInboundCompleter = null;
+    _pendingInboundResult.remove(requestId);
+    _pendingRequestMeta.remove(requestId);
+    if (meta != null) _clearPendingRequestId(meta.userId, meta.friendId);
     if (completer != null && !completer.isCompleted) {
       completer.complete({'text': 'Request cancelled.', 'cancelled': true});
     }
   }
 
-  /// Poll GET /inbound/result?request_id=... until status is "done" or error. Same auth as /inbound.
-  /// [meta] is used to emit result to push stream so the global listener persists to the correct chat when user has navigated away.
+  /// Poll GET /inbound/result?request_id=... until status is "done" or error. Retries on socket/connection errors so long-running tasks (Cursor/ClaudeCode) are not lost. Persists result so it is not missed when user switched chat or app was in background.
   Future<Map<String, dynamic>> _pollInboundResult(
     String requestId,
     ({String userId, String friendId}) meta,
@@ -1575,17 +1653,35 @@ class CoreService {
         Uri.parse('$_baseUrl/inbound/result').replace(queryParameters: {'request_id': requestId});
     final headers = _authHeaders();
     final deadline = DateTime.now().add(Duration(seconds: sendMessageTimeoutSeconds));
+    const int retriesPerAttempt = 5;
+    const Duration retryDelay = Duration(seconds: 2);
+
     while (DateTime.now().isBefore(deadline)) {
-      // Per-request timeout: allow 30s so slow Core (e.g. planner + ReAct + LLM) still responds to poll
-      final response =
-          await http.get(resultUrl, headers: headers).timeout(Duration(seconds: 30));
-      if (response.statusCode == 404) {
+      http.Response? response;
+      for (var attempt = 0; attempt < retriesPerAttempt; attempt++) {
+        try {
+          response = await http.get(resultUrl, headers: headers).timeout(Duration(seconds: 30));
+          break;
+        } on SocketException catch (_) {
+          if (attempt == retriesPerAttempt - 1) rethrow;
+          await Future<void>.delayed(retryDelay);
+        } on TimeoutException catch (_) {
+          if (attempt == retriesPerAttempt - 1) rethrow;
+          await Future<void>.delayed(retryDelay);
+        } on ClientException catch (_) {
+          if (attempt == retriesPerAttempt - 1) rethrow;
+          await Future<void>.delayed(retryDelay);
+        } on OSError catch (_) {
+          if (attempt == retriesPerAttempt - 1) rethrow;
+          await Future<void>.delayed(retryDelay);
+        }
+      }
+
+      if (response!.statusCode == 404) {
         _pendingRequestMeta.remove(requestId);
+        _clearPendingRequestId(meta.userId, meta.friendId);
         throw Exception('Request expired or not found (request_id=$requestId)');
       }
-      // For remote Core, proxies (Cloudflare, tunnels, etc.) can return 5xx HTML pages or other
-      // non-JSON bodies. Do not jsonDecode unless we got an expected status, otherwise the UI will
-      // see a FormatException instead of a clear HTTP error.
       if (response.statusCode != 200 && response.statusCode != 202) {
         final body = response.body.trim();
         final shortBody =
@@ -1598,8 +1694,6 @@ class CoreService {
       try {
         map = jsonDecode(response.body) as Map<String, dynamic>?;
       } catch (_) {
-        // Unexpected non-JSON body (e.g. proxy HTML error). Surface as a clear error instead of
-        // bubbling a raw FormatException to the UI.
         final body = response.body.trim();
         final shortBody =
             body.length > 200 ? '${body.substring(0, 200)}…' : body;
@@ -1629,6 +1723,8 @@ class CoreService {
           'images': imageList != null && imageList.isNotEmpty ? imageList : null,
           if (cancelled) 'cancelled': true,
         };
+        _persistInboundResultToStore(meta.userId, meta.friendId, result);
+        _clearPendingRequestId(meta.userId, meta.friendId);
         try {
           _pushMessageController.add({
             'event': 'inbound_result',

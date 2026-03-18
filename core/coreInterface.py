@@ -86,6 +86,7 @@ class CoreInterface(ABC):
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
         limit: int = 100,
+        offset: int = 0,
         fetch_all: bool = False,
     ) -> list:
         """Return session transcript as list of {role, content, timestamp}. Optional on interface for tool layer."""

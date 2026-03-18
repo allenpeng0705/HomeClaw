@@ -19,6 +19,7 @@ def get_api_chat_history_handler(core):
     async def get_chat_history(
         friend_id: Optional[str] = None,
         limit: int = 100,
+        offset: int = 0,
         token_user: tuple = Depends(companion_auth.get_companion_token_user),
     ):
         try:
@@ -26,28 +27,30 @@ def get_api_chat_history_handler(core):
             user_id = (user_id or "").strip()
             friend_id = (friend_id or "HomeClaw").strip() or "HomeClaw"
             limit = max(1, min(500, int(limit) if limit is not None else 100))
+            offset = max(0, int(offset)) if offset is not None else 0
             sessions = core.get_sessions(user_id=user_id, friend_id=friend_id, num_rounds=1, fetch_all=True)
             if not sessions or not isinstance(sessions, list):
-                return JSONResponse(content={"messages": []})
+                return JSONResponse(content={"messages": [], "offset": offset, "limit": limit})
             row = sessions[0]
             if not isinstance(row, dict):
-                return JSONResponse(content={"messages": []})
+                return JSONResponse(content={"messages": [], "offset": offset, "limit": limit})
             app_id = (row.get("app_id") or "homeclaw").strip() or "homeclaw"
             user_name = (row.get("user_name") or user_id or "").strip() or user_id
             session_id = (row.get("session_id") or "").strip()
             if not session_id:
-                return JSONResponse(content={"messages": []})
+                return JSONResponse(content={"messages": [], "offset": offset, "limit": limit})
             transcript = core.get_session_transcript(
                 app_id=app_id,
                 user_name=user_name,
                 user_id=user_id,
                 session_id=session_id,
                 limit=limit,
+                offset=offset,
                 fetch_all=False,
             )
             if not isinstance(transcript, list):
                 transcript = []
-            return JSONResponse(content={"messages": transcript})
+            return JSONResponse(content={"messages": transcript, "offset": offset, "limit": limit})
         except Exception as e:
             logger.warning("GET /api/chat-history failed: {}", e)
             return JSONResponse(status_code=500, content={"error": "Internal server error"})
