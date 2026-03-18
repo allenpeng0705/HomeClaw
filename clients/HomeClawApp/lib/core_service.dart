@@ -1668,7 +1668,7 @@ class CoreService {
         } on TimeoutException catch (_) {
           if (attempt == retriesPerAttempt - 1) rethrow;
           await Future<void>.delayed(retryDelay);
-        } on ClientException catch (_) {
+        } on http.ClientException catch (_) {
           if (attempt == retriesPerAttempt - 1) rethrow;
           await Future<void>.delayed(retryDelay);
         } on OSError catch (_) {
