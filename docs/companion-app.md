@@ -29,7 +29,9 @@ friends:
     preset: cursor   # Cursor Bridge: open project, run agent, run command on dev machine (see docs/using-cursor-with-homeclaw.md)
 ```
 
-To remove a friend, delete that entry and restart Core. No code change is required. The list is returned by Core’s `/api/me/friends` and shown in the Companion app.
+To remove a friend, delete that entry. The list is returned by Core’s **GET /api/me/friends** (Companion calls it when you open the friend list or tap “Refresh friends”).
+
+**Why don’t my user.yml changes show in the app?** Core stores users (and their friends list) in **TinyDB** (`database/users.json`). The first time Core runs, it migrates from `config/user.yml` into TinyDB; after that, **TinyDB is the source of truth**. Editing `user.yml` by hand does not update TinyDB, so the Companion app still sees the old list. To apply your `user.yml` changes: **stop Core, delete `database/users.json`, then start Core again**. Core will re-migrate from `user.yml` and the new friends (e.g. Cursor, without Note) will appear. Then in the Companion app, tap “Refresh friends” or reopen the friend list. Alternatively, add or remove friends from the **Portal** (Manage → Users → edit user → friends) or via the Companion “Add friend” flow if available; those update TinyDB directly.
 
 ---
 

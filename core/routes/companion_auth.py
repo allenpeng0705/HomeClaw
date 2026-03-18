@@ -121,6 +121,8 @@ def _name_to_preset_key(name: str) -> Optional[str]:
         return "reminder"
     if "finder" in n or "file" in n:
         return "finder"
+    if n == "cursor" or "cursor" in n:
+        return "cursor"
     return None
 
 

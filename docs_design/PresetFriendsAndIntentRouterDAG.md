@@ -31,7 +31,7 @@ So preset friends already get the correct restricted context (tools, skills, plu
 
 - **Reminder** + “remind me in 5 min” → category `schedule_remind` → category tools include remind_me, cron_* → preset “reminder” allows the same → LLM and DAG see only reminder tools. Correct.
 - **Reminder** + “send an email” → category `send_email` → category would allow run_skill, etc., but **preset** restricts to reminder tools only → run_skill is not in the list → DAG for send_email would not have run_skill; we fall back to ReAct and the Reminder assistant (with only reminder tools) cannot send email. That is **intended**: preset friends are specialized.
-- **Cursor** friend → only `route_to_plugin`, folder_list, file_find, time → no DAG defined for “Cursor” category; ReAct with those tools is correct.
+- **Cursor** friend → pure bridge: no LLM; message is sent directly to Cursor Bridge (run_agent), which runs the Cursor CLI agent with the message as the task.
 
 So the **current implementation does not need a mandatory upgrade** for correctness: preset filtering is applied after category filtering, and Planner/DAG already use the preset-filtered tools.
 
@@ -64,10 +64,22 @@ No change to preset YAML schema is required for A; only the order of operations 
 
 ---
 
-## 4. Summary
+## 4. Cursor friend: pure bridge (no LLM)
+
+For the **Cursor** preset friend, the LLM is **not involved**. Core forwards the user message directly to the Cursor Bridge and returns the plugin result.
+
+- **When:** Friend preset is `cursor` and the request has a non-empty message.
+- **How:** Core picks capability and parameters by pattern (no LLM): **open_project** ("open X project", "open &lt;path&gt;", "open X in cursor"), **open_file** ("open file &lt;path&gt;"), **run_command** ("run npm/pip/...", "execute &lt;command&gt;"), **run_agent** (everything else). Then `route_to_plugin(plugin_id="cursor-bridge", capability_id=..., parameters=...)` and return the plugin result. No intent router, no skills/tools injection, no LLM call.
+- **Bridge behavior:** open_project/open_file open in Cursor IDE; run_command runs a shell command; run_agent runs Cursor CLI agent with the message as the task (`agent -p "&lt;message&gt;"`).
+- **Fallback:** If the bridge call raises, Core logs and continues (the request would then go through the normal flow; in practice the Cursor preset is only used with the bridge).
+
+---
+
+## 5. Summary
 
 | Question | Answer |
 |----------|--------|
 | Are preset tools and intent_router/DAG/Planner already aligned? | Yes. Tools = category ∩ preset; DAG and Plan-Executor use the same preset-filtered list. |
 | Is an upgrade **required**? | No. Current behavior is correct and consistent. |
+| Cursor: LLM involved? | No. Message is routed by pattern to open_project / open_file / run_command / run_agent, then bridged to Cursor Bridge. |
 | Suggested next step | Document the interaction (Option C). Optionally later: skip intent_router for preset friends (Option A) to save one LLM call and keep preset behavior independent of router. |

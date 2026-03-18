@@ -80,6 +80,8 @@ def _is_confirmation_phrase(text: str) -> bool:
         "send", "confirm", "ok", "okay", "yes", "y", "发", "发吧", "发送", "批准",
         "确认", "好", "行", "可以", "同意",
     )
+
+
 from tools.builtin import close_browser_session
 from core.log_helpers import (
     _component_log,
@@ -118,6 +120,8 @@ def _messages_sanitized_for_tool_role(messages: List[dict]) -> List[dict]:
         prev_role = (prev.get("role") or "").strip().lower()
         prev_tool_calls = prev.get("tool_calls") if isinstance(prev.get("tool_calls"), list) else []
         if prev_role == "assistant" and prev_tool_calls:
+            out.append(m)
+        elif prev_role == "tool":
             out.append(m)
         else:
             logger.debug(
@@ -188,7 +192,7 @@ try:
         remind_me_needs_clarification as _remind_me_needs_clarification,
         remind_me_clarification_question as _remind_me_clarification_question,
     )
-except Exception:
+except (ImportError, ModuleNotFoundError):
     from core.tool_helpers_fallback import (
         tool_result_usable_as_final_response as _tool_result_usable_as_final_response,
         parse_raw_tool_calls_from_content as _parse_raw_tool_calls_from_content,
@@ -209,6 +213,65 @@ def _normalize_for_chat_match(text: str) -> str:
     s = re.sub(r"^\s*[。！？!?.,，、]+", "", s)  # leading punctuation
     s = re.sub(r"\s+", " ", s).strip()  # collapse internal spaces
     return s
+
+
+def _cursor_bridge_capability_and_params(query: str) -> tuple:
+    """
+    For Cursor preset: route message to the right bridge capability (no LLM).
+    Supported phrasings:
+    - open_project: "open X project", "open <path>", "open X in cursor"
+    - open_file: "open file <path>"
+    - run_command: "run npm/pip/pnpm/yarn/python/node/npx/cargo/go ...", "execute <command>"
+    - run_agent: everything else (natural-language task, e.g. "fix the bug", "add unit tests")
+    Returns (capability_id, parameters).
+    """
+    q = (query or "").strip()
+    if not q:
+        return "run_agent", {"task": q}
+    q_lower = q.lower()
+    # ---- status ----
+    if q_lower in ("status", "cursor status", "current project", "current cwd", "which project", "what project", "active project"):
+        return "get_status", {}
+    # ---- open_project ----
+    # "open X project" → path is X
+    m = re.match(r"open\s+(.+?)\s+project\s*$", q, re.IGNORECASE)
+    if m:
+        path = m.group(1).strip()
+        if path:
+            return "open_project", {"path": path}
+    # "open <path>" where path contains / or \
+    m = re.match(r"open\s+([^\s]+(?:[/\\][^\s]*)+)\s*$", q, re.IGNORECASE)
+    if m:
+        return "open_project", {"path": m.group(1).strip()}
+    # "open X in cursor" / "open project X in cursor"
+    m = re.match(r"open\s+(?:project\s+)?(.+?)\s+in\s+cursor\s*$", q, re.IGNORECASE)
+    if m:
+        path = m.group(1).strip()
+        if path:
+            return "open_project", {"path": path}
+    # ---- open_file ----
+    m = re.match(r"open\s+file\s+(.+)\s*$", q, re.IGNORECASE)
+    if m:
+        path = m.group(1).strip()
+        if path:
+            return "open_file", {"path": path}
+    # ---- run_command (only when clearly a shell command: run/execute + npm|pip|... or short single token) ----
+    run_command_prefixes = ("npm ", "pnpm ", "yarn ", "pip ", "python ", "node ", "npx ", "cargo ", "go ")
+    if q_lower.startswith("run ") and len(q) > 4:
+        rest = q[4:].strip()
+        if any(rest.lower().startswith(p) for p in run_command_prefixes):
+            return "run_command", {"command": rest}
+        # "run ls", "run pwd", "run dotnet build" — single command, no "agent"/"cursor"
+        if re.match(r"^[a-zA-Z0-9_.-]+\s*$", rest) or (len(rest) < 50 and "agent" not in rest.lower() and "cursor" not in rest.lower() and " the " not in rest.lower()):
+            return "run_command", {"command": rest}
+    if q_lower.startswith("execute ") and len(q) > 8:
+        rest = q[8:].strip()
+        if any(rest.lower().startswith(p) for p in run_command_prefixes):
+            return "run_command", {"command": rest}
+        if len(rest) < 50 and "agent" not in rest.lower() and " the " not in rest.lower():
+            return "run_command", {"command": rest}
+    # ---- default: run_agent (natural-language task) ----
+    return "run_agent", {"task": q}
 
 
 def _try_chat_shortcut(query: str, shortcut_cfg: dict) -> Optional[str]:
@@ -270,7 +333,7 @@ def _try_chat_shortcut(query: str, shortcut_cfg: dict) -> Optional[str]:
 async def answer_from_memory(
     core: Any,
     query: str,
-    messages: List = [],
+    messages: Optional[List] = None,
     app_id: Optional[str] = None,
     user_name: Optional[str] = None,
     user_id: Optional[str] = None,
@@ -293,7 +356,9 @@ async def answer_from_memory(
     host: Optional[str] = None,
     port: Optional[int] = None,
     request: Optional[PromptRequest] = None,
-) -> Optional[str]:
+) -> Optional[tuple]:
+    if messages is None:
+        messages = []
     if not any([user_name, user_id, agent_id, run_id]):
         raise ValueError("One of user_name, user_id, agent_id, run_id must be provided")
     # Step 9: RAG/Cognee memory scope by (user_id, friend_id). Use friend_id from request for add/search.
@@ -333,7 +398,7 @@ async def answer_from_memory(
                                 )
                                 _tam_storage_module.mark_scheduled_action_scheduled(action_id_str)
                                 n_mins = max(0, int(round(delta_mins)))
-                                return f"Scheduled. The action will run in {n_mins} minutes. （已安排。）"
+                                return (f"Scheduled. The action will run in {n_mins} minutes. （已安排。）", None)
         except Exception as _confirm_e:
             logger.debug("Delayed action confirm failed (non-fatal): {}", _confirm_e)
     try:
@@ -366,12 +431,12 @@ async def answer_from_memory(
                     try:
                         result = await plugin_manager.run_external_plugin(plugin, req_copy)
                         if result is None:
-                            return "Done."
+                            return ("Done.", None)
                         if isinstance(result, PluginResult):
                             if not result.success:
-                                return result.error or result.text or "The action could not be completed."
-                            return result.text or "Done."
-                        return str(result) if result else "Done."
+                                return (result.error or result.text or "The action could not be completed.", None)
+                            return (result.text or "Done.", None)
+                        return (str(result) if result else "Done.", None)
                     except Exception as e:
                         logger.debug("Pending plugin retry failed: {}", e)
                         pending["params"] = params
@@ -594,7 +659,7 @@ async def answer_from_memory(
                     preset_cfg = get_friend_preset_config(preset_name)
                     if isinstance(preset_cfg, dict) and str(preset_cfg.get("model_routing") or "").strip().lower() == "local_only":
                         if main_llm_mode == "cloud":
-                            return "This friend is configured to use only a local model. Please switch to local or mix mode in Core settings to use it."
+                            return ("This friend is configured to use only a local model. Please switch to local or mix mode in Core settings to use it.", None)
                         if main_llm_mode == "mix" and effective_llm_name:
                             main_llm_cloud = (getattr(Util().core_metadata, "main_llm_cloud", None) or "").strip()
                             if main_llm_cloud and effective_llm_name == main_llm_cloud:
@@ -604,6 +669,43 @@ async def answer_from_memory(
                                     logger.debug("Friend preset local_only: forcing local model for this friend.")
             except Exception:
                 pass
+
+        # Cursor preset friend: pure bridge — no LLM. Detect "open X project" / "open <path>" → open_project; else run_agent with message as task.
+        if request and _current_friend and (query or "").strip():
+            try:
+                _preset = (getattr(_current_friend, "preset", None) or "").strip().lower()
+                if _preset == "cursor":
+                    _q = (query or "").strip()
+                    _cap, _params = _cursor_bridge_capability_and_params(_q)
+                    _reg = get_tool_registry()
+                    if _reg:
+                        _ctx = ToolContext(
+                            core=core,
+                            app_id=app_id or "homeclaw",
+                            user_name=user_name,
+                            user_id=user_id,
+                            system_user_id=getattr(request, "system_user_id", None) or user_id,
+                            friend_id=(str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw"),
+                            session_id=session_id,
+                            run_id=run_id,
+                            request=request,
+                        )
+                        _bridge_result = await _reg.execute_async(
+                            "route_to_plugin",
+                            {
+                                "plugin_id": "cursor-bridge",
+                                "capability_id": _cap,
+                                "parameters": _params,
+                            },
+                            _ctx,
+                        )
+                        if _bridge_result == ROUTING_RESPONSE_ALREADY_SENT:
+                            return (ROUTING_RESPONSE_ALREADY_SENT, None)
+                        if isinstance(_bridge_result, str) and _bridge_result.strip():
+                            return (_bridge_result.strip(), None)
+                        return ("Done.", None)
+            except Exception as _cursor_bridge_e:
+                logger.debug("Cursor bridge failed: {}", _cursor_bridge_e)
 
         # Workspace bootstrap (identity / agents / tools). When companion user has "who", skip workspace Identity so we inject only who-based identity below.
         if getattr(Util().core_metadata, 'use_workspace_bootstrap', True):
@@ -808,7 +910,7 @@ async def answer_from_memory(
                             else max(500, int(getattr(meta_mem, "agent_memory_bootstrap_max_chars", 20000) or 20000))
                         )
                         ws_dir = get_workspace_dir(getattr(meta_mem, "workspace_dir", None) or "config/workspace")
-                        _sys_uid = getattr(request, "system_user_id", None) if request else None
+                        _sys_uid_bootstrap = getattr(request, "system_user_id", None) or user_id if request else user_id
                         _fid = (str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw") if request else "HomeClaw"
                         parts_bootstrap = []
                         if use_agent_file:
@@ -816,7 +918,7 @@ async def answer_from_memory(
                                 workspace_dir=ws_dir,
                                 agent_memory_path=getattr(meta_mem, "agent_memory_path", None) or None,
                                 max_chars=0,
-                                system_user_id=_sys_uid,
+                                system_user_id=_sys_uid_bootstrap,
                                 friend_id=_fid,
                             )
                             if agent_raw and agent_raw.strip():
@@ -830,7 +932,7 @@ async def answer_from_memory(
                                 workspace_dir=ws_dir,
                                 daily_memory_dir=daily_dir,
                                 max_chars=0,
-                                system_user_id=_sys_uid,
+                                system_user_id=_sys_uid_bootstrap,
                                 friend_id=_fid,
                             )
                             if daily_raw and daily_raw.strip():
@@ -1636,17 +1738,17 @@ async def answer_from_memory(
                     "This message asks to list files or folder contents. You MUST call folder_list and you MUST include the path argument. Extract the folder name from the user's message: if they said a folder name (e.g. images, documents, output, work), use that as path; if they did not name a folder, use path '.' Do not reply with text only. Never call folder_list with empty or missing path."
                     + (f" For this message the user referred to a folder: use path='{_folder_hint}'." if _folder_hint and _folder_hint != "." else " For this message no folder was named: use path='.'.")
                 )
-                # When user asks to search the web (any language), require web_search — not tavily_crawl (crawl is for a specific URL only).
-                _search_web_phrases = (
-                    "上网搜", "搜一下", "搜索", "查一下", "有什么好看", "有什么好听的", "最新", "latest", "search the web", "search for ",
-                    "find information", "look up", "what is the", "current news", "recent news", "good movies", "popular movies",
-                    "just search", "give me results", "直接给结果", "搜一下结果", "search and ",
+            # When user asks to search the web (any language), require web_search — not tavily_crawl (crawl is for a specific URL only).
+            _search_web_phrases = (
+                "上网搜", "搜一下", "搜索", "查一下", "有什么好看", "有什么好听的", "最新", "latest", "search the web", "search for ",
+                "find information", "look up", "what is the", "current news", "recent news", "good movies", "popular movies",
+                "just search", "give me results", "直接给结果", "搜一下结果", "search and ",
+            )
+            _has_web_search = _reg is not None and any(t.name == "web_search" for t in (_reg.list_tools() or []))
+            if _has_web_search and any((p in (query or "").strip().lower() if p.isascii() else p in (query or "").strip()) for p in _search_web_phrases):
+                force_include_instructions.append(
+                    "This message asks to search something on the web. You MUST call web_search(query=<topic>) in this turn — do not reply with only text or 'I will use web_search'. Do NOT use exec or tavily_crawl; use web_search only."
                 )
-                _has_web_search = _reg is not None and any(t.name == "web_search" for t in (_reg.list_tools() or []))
-                if _has_web_search and any((p in (query or "").strip().lower() if p.isascii() else p in (query or "").strip()) for p in _search_web_phrases):
-                    force_include_instructions.append(
-                        "This message asks to search something on the web. You MUST call web_search(query=<topic>) in this turn — do not reply with only text or 'I will use web_search'. Do NOT use exec or tavily_crawl; use web_search only."
-                    )
 
         # Optional: surface recorded events (TAM) in context so model knows what's coming up (per-user)
         if getattr(core, "orchestratorInst", None) and getattr(core.orchestratorInst, "tam", None):
@@ -1762,8 +1864,9 @@ async def answer_from_memory(
                                 content_flush = (msg_flush.get("content") or "").strip()
                                 if not tool_calls_flush and content_flush:
                                     try:
-                                        if _parse_raw_tool_calls_from_content(content_flush):
-                                            tool_calls_flush = _parse_raw_tool_calls_from_content(content_flush)
+                                        _parsed_flush = _parse_raw_tool_calls_from_content(content_flush)
+                                        if _parsed_flush:
+                                            tool_calls_flush = _parsed_flush
                                     except Exception:
                                         pass
                                 if not tool_calls_flush:
@@ -1998,9 +2101,15 @@ async def answer_from_memory(
             use_tools, unified, len(openai_tools or []), "route_to_plugin" in (tool_names or []),
         )
         # DAG: if a flow is defined for this category, we will run it after context is built (no planner call). See docs_design/PlannerExecutorAndDAG.md §3.
+        # Skip DAG when friend preset is "cursor": Cursor friend must use route_to_plugin (open_project, run_agent, run_command), not category DAGs (e.g. list_files would run folder_list and return sandbox listing instead of opening the path in Cursor).
         _dag_flow = None
         if _intent_router_categories and _planner_executor_config and isinstance(_planner_executor_config, dict):
             _dag_flow = get_flow_for_categories(_intent_router_categories, _planner_executor_config)
+            if _dag_flow and _current_friend:
+                _preset = (getattr(_current_friend, "preset", None) or "").strip().lower()
+                if _preset == "cursor":
+                    _dag_flow = None
+                    _component_log("planner_executor", "skipped DAG for Cursor friend (use route_to_plugin)")
         # Planner–Executor Phase 2: call planner only when no DAG flow (DAG first for category). Never crash; fall back to ReAct on any error.
         _planner_plan = None
         _pe_tool_names = []  # always defined so executor/DAG below never see NameError
@@ -2507,7 +2616,7 @@ async def answer_from_memory(
                         try:
                             msg_main = await Util().openai_chat_completion_message(
                                 _msgs_for_llm, tools=None, tool_choice="auto", grammar=None, llm_name=effective_llm_name,
-                                max_tokens_override=_max_tokens_override, stop_extra=_stop_extra,
+                                max_tokens_override=_max_tokens_override, stop_extra=None,
                             )
                             if msg_main is not None and isinstance(msg_main, dict):
                                 msg = msg_main
@@ -2582,8 +2691,9 @@ async def answer_from_memory(
                 except Exception:
                     pass
                 # Some backends return tool_call as raw text in content instead of structured tool_calls (supports multiple <tool_call>...</tool_call> in one turn)
-                if not tool_calls and content_str and _parse_raw_tool_calls_from_content(content_str):
-                    tool_calls = _parse_raw_tool_calls_from_content(content_str)
+                _parsed_raw = _parse_raw_tool_calls_from_content(content_str) if (not tool_calls and content_str) else None
+                if _parsed_raw:
+                    tool_calls = _parsed_raw
                     # So the next LLM round sees a proper assistant message with tool_calls (ids must match tool result messages). Sanitize so each item has type="function" (required by OpenAI/llama.cpp/DeepSeek).
                     if tool_calls and current_messages and isinstance(current_messages[-1], dict) and (current_messages[-1].get("role") or "").strip() == "assistant":
                         current_messages[-1] = dict(current_messages[-1])
@@ -3012,7 +3122,7 @@ async def answer_from_memory(
                                             _component_log("tools", "executing run_skill (in_process from run_skill_py_in_process_skills if listed)")
                                         result = await registry.execute_async(tname, targs, context)
                                         if result == ROUTING_RESPONSE_ALREADY_SENT:
-                                            return ROUTING_RESPONSE_ALREADY_SENT
+                                            return (ROUTING_RESPONSE_ALREADY_SENT, None)
                                         if isinstance(result, str) and result.strip():
                                             # Format folder_list/file_find JSON as user-friendly text so the user does not see raw JSON
                                             if tname in ("folder_list", "file_find"):
@@ -3172,7 +3282,7 @@ async def answer_from_memory(
                                                 _component_log("tools", "fallback route_to_plugin (model did not call tool)")
                                                 result = await registry.execute_async("route_to_plugin", fallback_route, context)
                                                 if result == ROUTING_RESPONSE_ALREADY_SENT:
-                                                    return ROUTING_RESPONSE_ALREADY_SENT
+                                                    return (ROUTING_RESPONSE_ALREADY_SENT, None)
                                                 if isinstance(result, str) and result.strip():
                                                     response = result
                                                 else:
@@ -3231,7 +3341,7 @@ async def answer_from_memory(
                                                         )},
                                                     ]
                                                     response = await core.openai_chat_completion(summary_messages, llm_name=effective_llm_name)
-                                                    if not (response or (response and response.strip())):
+                                                    if not response or not response.strip():
                                                         response = "I read the document but could not generate a summary. You can ask for a specific section."
                                                 else:
                                                     response = content_str or "Could not read the document. It may be empty or in an unsupported format."

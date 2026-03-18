@@ -18,8 +18,9 @@ import 'node_service.dart';
 /// HomeClaw Core API client.
 /// Sends messages via POST /inbound and returns the reply text.
 class CoreService {
-  /// Timeout for sending a message (POST /inbound). Tool use and local→cloud fallback can take 5+ minutes; use 600 (10 min). Increase to 900 if you still see timeouts behind proxies.
-  static const int sendMessageTimeoutSeconds = 600;
+  /// Timeout for sending a message (POST /inbound) and waiting for async results (/inbound/result).
+  /// Some tasks (e.g. Cursor agent / long tool runs) can take 10+ minutes; default to 1800 (30 min).
+  static const int sendMessageTimeoutSeconds = 1800;
 
   static const String _keyBaseUrl = 'core_base_url';
   static const String _keyApiKey = 'core_api_key';
@@ -27,6 +28,7 @@ class CoreService {
   static const String _keyCanvasUrl = 'canvas_url';
   static const String _keyNodesUrl = 'nodes_url';
   static const String _keyShowProgress = 'show_progress_during_long_tasks';
+  static const String _keyCursorChatPlainText = 'cursor_chat_plain_text';
   static const String _keyCompanionToken = 'companion_session_token';
   static const String _keyCompanionUserId = 'companion_session_user_id';
   static const String _keyCompanionSavedUsername = 'companion_saved_username';
@@ -43,11 +45,13 @@ class CoreService {
   String? _canvasUrl;
   String? _nodesUrl;
   bool _showProgressDuringLongTasks = true;
+  bool _cursorChatPlainText = true;
   String? _portalAdminToken;
 
   String get baseUrl => _baseUrl;
   String? get portalAdminToken => _portalAdminToken;
   bool get showProgressDuringLongTasks => _showProgressDuringLongTasks;
+  bool get cursorChatPlainText => _cursorChatPlainText;
   String? get apiKey => _apiKey;
   String? get sessionToken => _sessionToken;
   String? get sessionUserId => _sessionUserId;
@@ -141,6 +145,7 @@ class CoreService {
     _nodesUrl = prefs.getString(_keyNodesUrl)?.trim();
     if (_nodesUrl != null && _nodesUrl!.isEmpty) _nodesUrl = null;
     _showProgressDuringLongTasks = prefs.getBool(_keyShowProgress) ?? true;
+    _cursorChatPlainText = prefs.getBool(_keyCursorChatPlainText) ?? true;
     _sessionToken = prefs.getString(_keyCompanionToken)?.trim();
     if (_sessionToken != null && _sessionToken!.isEmpty) _sessionToken = null;
     _sessionUserId = prefs.getString(_keyCompanionUserId)?.trim();
@@ -720,6 +725,12 @@ class CoreService {
     await prefs.setBool(_keyShowProgress, value);
   }
 
+  Future<void> saveCursorChatPlainText(bool value) async {
+    _cursorChatPlainText = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyCursorChatPlainText, value);
+  }
+
   Future<void> saveSettings({required String baseUrl, String? apiKey}) async {
     final trimmed = baseUrl.trim().replaceFirst(RegExp(r'/$'), '');
     _baseUrl = trimmed.isEmpty ? _defaultBaseUrl : trimmed;
@@ -1174,6 +1185,24 @@ class CoreService {
     };
     _persistInboundResultToStore(userId, friendId, result);
     return result;
+  }
+
+  /// GET /api/cursor-bridge/status (Companion auth). Returns active_cwd (or empty string).
+  Future<String> getCursorBridgeActiveCwd() async {
+    final url = Uri.parse('$_baseUrl/api/cursor-bridge/status');
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 10));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired');
+    }
+    if (response.statusCode != 200) {
+      final short = (response.body).toString();
+      throw Exception(short.isNotEmpty ? short : 'Status failed (${response.statusCode})');
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    return (map['active_cwd'] as String?)?.trim() ?? '';
   }
 
   /// Persist an inbound reply to the correct chat so it is not lost when the user has navigated away.

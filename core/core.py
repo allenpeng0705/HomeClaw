@@ -158,7 +158,7 @@ try:
         remind_me_needs_clarification as _remind_me_needs_clarification,
         remind_me_clarification_question as _remind_me_clarification_question,
     )
-except Exception:
+except (ImportError, ModuleNotFoundError):
     from core.tool_helpers_fallback import (
         tool_result_looks_like_error as _tool_result_looks_like_error,
         tool_result_usable_as_final_response as _tool_result_usable_as_final_response,
@@ -231,7 +231,7 @@ class Core(CoreInterface):
             self.request_queue_task = None
             self.response_queue_task = None
             self.memory_queue_task = None
-            self._system_plugin_processes: List[asyncio.subprocess.Process] = []
+            self._system_plugin_processes: List[subprocess.Popen] = []
             self._pending_plugin_calls: Dict[str, Dict[str, Any]] = {}  # session_key -> {plugin_id, capability_id, params, missing, ...}
             self._inbound_async_results: Dict[str, dict] = {}  # request_id -> {status, ok?, text?, images?, error?, created_at}; TTL 5 min for done, 30 min for pending
             self._inbound_async_results_ttl_sec = 300  # done/cancelled: remove after this many sec so client has time to fetch
@@ -416,6 +416,9 @@ class Core(CoreInterface):
         if 0 <= best_index < len(original_descriptions):
             best_match_description = original_descriptions[best_index]
             found_plugin = self.plugin_manager.plugin_descriptions.get(best_match_description, None)
+            if found_plugin is None:
+                logger.error(f"Plugin not found for description: {best_match_description}")
+                return None
             logger.debug(f"Found plugin: {found_plugin.get_description()}")
             return found_plugin
         else:
@@ -458,6 +461,45 @@ class Core(CoreInterface):
     async def _run_system_plugins_startup(self) -> None:
         """Start each discovered system plugin then run register. Delegates to core.plugins_startup."""
         await _run_system_plugins_startup_fn(self)
+
+    def _start_cursor_bridge(self) -> None:
+        """Start the Cursor Bridge subprocess. Resolves 'agent' from Core's PATH (or cursor_bridge_agent_path) and passes CURSOR_AGENT_PATH so the bridge finds it even if child env differs on Windows."""
+        import shutil
+        from core.log_helpers import _component_log
+        meta = Util().get_core_metadata()
+        port = max(1, min(65535, int(getattr(meta, "cursor_bridge_port", 3104) or 3104)))
+        root = Path(__file__).resolve().parent.parent
+        env = {**os.environ, "CURSOR_BRIDGE_PORT": str(port)}
+        agent_path = (getattr(meta, "cursor_bridge_agent_path", None) or "").strip()
+        if not agent_path:
+            agent_path = shutil.which("agent")
+        if agent_path:
+            env["CURSOR_AGENT_PATH"] = agent_path
+            _component_log("cursor_bridge", f"using CURSOR_AGENT_PATH={agent_path}")
+        cursor_cli_path = (getattr(meta, "cursor_bridge_cursor_cli_path", None) or "").strip()
+        if not cursor_cli_path:
+            cursor_cli_path = shutil.which("cursor")
+        if cursor_cli_path:
+            env["CURSOR_CLI_PATH"] = cursor_cli_path
+            _component_log("cursor_bridge", f"using CURSOR_CLI_PATH={cursor_cli_path}")
+        api_key = (getattr(meta, "cursor_bridge_cursor_api_key", None) or "").strip()
+        if api_key:
+            env["CURSOR_API_KEY"] = api_key
+            _component_log("cursor_bridge", "CURSOR_API_KEY set from config")
+        forward_logs = getattr(meta, "cursor_bridge_forward_logs", False)
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "external_plugins.cursor_bridge.server"],
+                cwd=str(root),
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=None if forward_logs else subprocess.DEVNULL,
+            )
+            self._cursor_bridge_process = proc
+            _component_log("cursor_bridge", f"started (pid={proc.pid}, port={port})")
+        except Exception as e:
+            logger.warning("Failed to start Cursor Bridge: {}", e)
+            self._cursor_bridge_process = None
 
     # try to reduce the misunderstanding. All the input tests in EmbeddingBase should be
     # in a list[str]. If you just want to embedding one string, ok, put into one list first.
@@ -913,7 +955,7 @@ class Core(CoreInterface):
             #     time.sleep(30)
             #     continue
             # else:
-            time.sleep(2)
+            await asyncio.sleep(2)
 
             request: PromptRequest = await self.memory_queue.get()
             if use_memory:
@@ -934,18 +976,6 @@ class Core(CoreInterface):
 
                     if channel_type == ChannelType.Email:
                         content_json = json.loads(content)
-                        msg_id = content_json["MessageID"]
-                        email_addr = content_json["From"]
-                        subject = content_json["Subject"]
-                        body = content_json["Body"]
-                        human_message = body
-                        logger.debug(f"email_addr: {email_addr}, subject: {subject}, body: {body}")
-                    else:
-                        human_message = content
-
-                    if channel_type == ChannelType.Email:
-                        content_json = json.loads(content)
-                        msg_id = content_json["MessageID"]
                         email_addr = content_json["From"]
                         subject = content_json["Subject"]
                         body = content_json["Body"]
@@ -1000,7 +1030,7 @@ class Core(CoreInterface):
                         llm_input = []
                         llm_input = [{"role": "system", "content": "You are a helpful assistant, please follow the instructions from user."}, {"role": "user", "content": prompt}]
                         logger.debug("Start to check if the user input should be added to memory")
-                        result =await self.openai_chat_completion(messages=llm_input)
+                        result = await self.openai_chat_completion(messages=llm_input)
                         if result is not None and len(result) > 0:
                             result = result.strip().lower()
                             if result.find("yes") != -1:
@@ -1638,7 +1668,7 @@ class Core(CoreInterface):
             if elapsed > 90:
                 _suggest_sec = max(600, int(elapsed) + 60)
                 logger.warning(
-                    "Inbound request took %.0fs. To avoid client/proxy timeout: set inbound_request_timeout_seconds and proxy read_timeout >= %s s; or use POST /inbound with stream: true (SSE) or async: true for remote.",
+                    "Inbound request took {:.0f}s. To avoid client/proxy timeout: set inbound_request_timeout_seconds and proxy read_timeout >= {} s; or use POST /inbound with stream: true (SSE) or async: true for remote.",
                     elapsed, _suggest_sec,
                 )
             if answer is None:
@@ -1993,6 +2023,9 @@ class Core(CoreInterface):
             # Optionally start and register system_plugins (e.g. homeclaw-browser) so one command runs Core + plugins.
             if getattr(core_metadata, "system_plugins_auto_start", False):
                 asyncio.create_task(self._run_system_plugins_startup())
+            # Optionally start Cursor Bridge so one command runs Core + bridge (same env as Core, so PATH includes 'agent' if Core was started from a terminal where it works).
+            if getattr(core_metadata, "cursor_bridge_auto_start", False):
+                self._start_cursor_bridge()
             # Pinggy: only when pinggy.token is set — start tunnel and optionally open browser to /pinggy (public URL + QR). If neither core_public_url nor token is set, we just run Core and do not pop up QR.
             try:
                 core_yml_path = os.path.join(Util().config_path(), "core.yml")
@@ -2036,6 +2069,13 @@ class Core(CoreInterface):
             except Exception:
                 pass
         self._system_plugin_processes = []
+        _bridge_proc = getattr(self, "_cursor_bridge_process", None)
+        if _bridge_proc is not None and getattr(_bridge_proc, "returncode", None) is None:
+            try:
+                _bridge_proc.terminate()
+            except Exception:
+                pass
+        self._cursor_bridge_process = None
         self.stop_chroma_client()
 
         def shutdown():
@@ -2050,16 +2090,16 @@ class Core(CoreInterface):
         #logger.debug("Uvicorn server is stopped!")
 
     def register_channel(self, name: str, host: str, port: str, endpoints: list):
-        channel = {
+        new_channel = {
             "name": name,
             "host": host,
             "port": port,
             "endpoints": endpoints
         }
-        for  channel in self.channels:
-            if channel["host"] == host and channel["port"] == port:
+        for ch in self.channels:
+            if ch["host"] == host and ch["port"] == port:
                 return
-        self.channels.append(channel)
+        self.channels.append(new_channel)
 
 
     def deregister_channel(self, name: str, host: str, port: str, endpoints: list):
@@ -2082,11 +2122,10 @@ class Core(CoreInterface):
 
 
     def shutdown_all_channels(self):
-        for channel in self.channels:
+        for channel in list(self.channels):
             try:
                 self.shutdown_channel(channel["name"], channel["host"], channel["port"])
-                #logger.debug(f"Channel {channel['name']} is shutdown from {channel['host']}:{channel['port']}")
-            except Exception as e:
+            except Exception:
                 continue
         #logger.debug("All channels are shutdown!")
 
@@ -2104,7 +2143,6 @@ class Core(CoreInterface):
 
 
     def stop_chroma_client(self):
-        #self.chromra_memory_client.()
         logger.debug("ChromaDB client disconnected")
 
     '''
@@ -2218,7 +2256,7 @@ class Core(CoreInterface):
                 async with session.post(completion_api_url, headers=headers, data=data_json) as resp:
                     ret = (await resp.json())
                     logger.debug(f"Resp: {ret}")
-                    resp = ret['content']
+                    resp = ret['choices'][0]['text']
                     logger.debug(f"Resp: {resp}")
                     ret = self.extract_json_str(resp)
                     return ret
@@ -2230,7 +2268,7 @@ class Core(CoreInterface):
 
     async def answer_from_memory(self,
                                  query: str,
-                                 messages: List = [],
+                                 messages: Optional[List] = None,
                                  app_id: Optional[str] = None,
                                  user_name: Optional[str] = None,
                                  user_id: Optional[str] = None,
@@ -2565,8 +2603,7 @@ class Core(CoreInterface):
             base_str = str(kb_dir.resolve())
             for p, rel, source_id in files_on_disk:
                 try:
-                    if source_id not in folder_source_ids and not resync:
-                        # already in KB and we're not resyncing
+                    if source_id in folder_source_ids and not resync:
                         continue
                     if resync and source_id in folder_source_ids:
                         await kb.remove_by_source_id(user_id, source_id)

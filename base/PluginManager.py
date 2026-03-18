@@ -202,7 +202,7 @@ class PluginManager:
             return False
         try:
             import httpx
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=5.0, trust_env=False) as client:
                 resp = await client.get(url)
                 return 200 <= resp.status_code < 300
         except Exception as e:
@@ -282,26 +282,33 @@ class PluginManager:
             url = f"{base_url}/{path}" if path else base_url
             if not base_url:
                 return PluginResult(success=False, error=f"Error: plugin {plugin_id} type http has no base_url in config.")
+            logger.info("Plugin HTTP request: plugin_id={} url={}", plugin_id, url)
             try:
                 import httpx
-                async with httpx.AsyncClient(timeout=timeout) as client:
+                # trust_env=False so we connect directly to the plugin (no HTTP_PROXY); avoids 502 when system proxy is set (same as channels → Core).
+                async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
                     resp = await client.post(url, json=req.model_dump())
                     if resp.status_code != 200:
                         body_preview = (resp.text or "").strip()[:300]
                         msg = f"Error: plugin returned {resp.status_code}: {body_preview}" if body_preview else f"Error: plugin returned {resp.status_code}"
                         if resp.status_code == 503:
                             msg += ". Service Unavailable — often a reverse proxy read timeout: the request (e.g. video recording) took longer than the proxy allows (e.g. 60–120s). Fix: call the plugin directly (base_url http://127.0.0.1:3020) or increase the proxy's read timeout to at least 420s. See plugin README."
+                        elif resp.status_code == 502:
+                            msg += ". Bad Gateway — the plugin server may not be running or is unreachable. For cursor-bridge: start it on the machine where Cursor runs with: python -m external_plugins.cursor_bridge.server (default port 3104). If Core runs elsewhere, set plugin config.base_url so Core can reach the bridge."
                         return PluginResult(success=False, error=msg)
                     data = resp.json()
                     result = PluginResult(**data) if isinstance(data, dict) else PluginResult(success=False, error=str(data))
             except Exception as e:
-                logger.debug("Plugin HTTP call failed: {} {}: {}", plugin_id, url, e)
+                logger.warning("Plugin HTTP call failed: plugin_id={} url={} error={}", plugin_id, url, e)
                 err_detail = f"{type(e).__name__}: {e!s}" if (e and str(e).strip()) else (type(e).__name__ or "Exception")
                 hint = ""
                 if "connect" in err_detail.lower() or "refused" in err_detail.lower() or "connection" in err_detail.lower():
-                    hint = f" Is the plugin running? For {plugin_id} start it (e.g. cd system_plugins/{plugin_id} && npm start) and ensure base_url {config.get('base_url', '')} is reachable."
+                    hint = f" Is the plugin running? For {plugin_id} start it and ensure base_url {config.get('base_url', '')} is reachable. Same machine: check Core log for 'Plugin HTTP request: plugin_id=... url=...'; test that URL from PowerShell (Invoke-WebRequest). Windows: allow Python in firewall or try disabling antivirus for localhost."
                 elif "timeout" in err_detail.lower() or "timed out" in err_detail.lower():
-                    hint = f" Long-running media (e.g. video) may need a higher timeout_sec (current {int(timeout)}s). Ensure the node (e.g. Nodes page tab) is connected and recording completes."
+                    if plugin_id in ("cursor_bridge", "cursor-bridge"):
+                        hint = f" Cursor agent tasks can run long. Increase timeout in plugins/CursorBridge/plugin.yaml config.timeout_sec (current {int(timeout)}s), or in config override for this plugin."
+                    else:
+                        hint = f" Long-running media (e.g. video) may need a higher timeout_sec (current {int(timeout)}s). Ensure the node (e.g. Nodes page tab) is connected and recording completes."
                 return PluginResult(success=False, error=f"Error calling plugin {plugin_id}: {err_detail}.{hint}")
             if not result.success:
                 return PluginResult(success=result.success, text=result.text or "", error=result.error, metadata=result.metadata or {})
@@ -376,7 +383,7 @@ class PluginManager:
 
     def _register_external(self, descriptor: Dict[str, Any]) -> None:
         """Register an external plugin (http/subprocess/mcp) by manifest descriptor. log_registration=False to suppress debug log when re-registering on hot reload."""
-        pid = (descriptor.get("id") or "").strip().lower().replace(" ", "_")
+        pid = _normalize_plugin_id(descriptor.get("id") or "")
         if not pid:
             return
         self.plugin_by_id[pid] = descriptor

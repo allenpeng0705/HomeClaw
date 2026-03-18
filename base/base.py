@@ -4,13 +4,12 @@ from enum import Enum
 import json
 import logging
 import os
-from typing import List, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 import uuid
 from pydantic import BaseModel, Field
 import uvicorn
 import yaml
 from dataclasses import dataclass, field
-from typing import Dict, List, Any
 
 try:
     from base.auth_api_key_crypto import decrypt_auth_api_key, encrypt_auth_api_key
@@ -129,6 +128,7 @@ class Intent:
     def to_json(self) -> str:
         return json.dumps(self.__dict__)
 
+    @classmethod
     def from_json(cls, data: str) -> 'Intent':
         return cls.from_dict(json.loads(data))
     
@@ -458,7 +458,7 @@ class User:
                 ftype = (f.get('type') or "").strip().lower() or None
                 if ftype not in ("user", "ai", "remote_ai", "remote_user"):
                     ftype = "ai"  # explicit default for AI friends
-                uid_friend = (f.get('user_id') or "").strip() if ftype == "user" else None
+                uid_friend = (f.get('user_id') or "").strip() if ftype in ("user", "remote_user") else None
                 result.append(Friend(name=fname, relation=relation, who=fwho, identity=identity, preset=preset, type=ftype, user_id=uid_friend))
             except Exception:
                 continue
@@ -609,7 +609,7 @@ class ChatRequest(BaseModel):
     model: str
     # OpenAI-style messages: list of {role, content}; content can be str or list of parts (text, image_url, input_audio, etc.)
     messages: List[Any] = []
-    extra_body: Dict[str, Union[str, int, float, dict, list]] = None
+    extra_body: Optional[Dict[str, Union[str, int, float, dict, list]]] = None
     timeout: Union[float, int, None] = None
     temperature: Union[float, None] = None
     top_p: Union[float, None] = None
@@ -640,7 +640,7 @@ class ChatRequest(BaseModel):
     
 class EmbeddingRequest(BaseModel):
     model: str
-    input: list[str]
+    input: List[str]
     '''
     Cohere v3 Models have a required parameter: input_type, it can be one of the following four values:
 
@@ -649,13 +649,13 @@ class EmbeddingRequest(BaseModel):
     input_type="classification": Use this if you use the embeddings as an input for a classification system
     input_type="clustering": Use this if you use the embeddings for text clustering
     '''
-    dimensions: int | None = None
+    dimensions: Optional[int] = None
     timeout: int = 600
     input_type: Optional[str] = None
-    api_base: Optional[str] = None,
-    api_version: Optional[str] = None,
+    api_base: Optional[str] = None
+    api_version: Optional[str] = None
     api_key: Optional[str] = None
-    api_type: str | None = None
+    api_type: Optional[str] = None
     
     
 class ImageGenerationRequest(BaseModel):
@@ -667,8 +667,8 @@ class ImageGenerationRequest(BaseModel):
     size: Optional[str] = None  # 256x256, 512x512, 1024x1024 (dall-e-2); 1024x1024, 1792x1024, 1024x1792 (dall-e-3)
     style: Optional[str] = None
     timeout: Optional[int] = 600  # max seconds to wait
-    api_key: Optional[str] = None, #The API key to authenticate and authorize requests. If not provided, the default API key is used.
-    api_base: Optional[str] = None, #The api endpoint you want to call the model with
+    api_key: Optional[str] = None  #The API key to authenticate and authorize requests. If not provided, the default API key is used.
+    api_base: Optional[str] = None  #The api endpoint you want to call the model with
     api_version: Optional[str] = None #(Azure-specific) the api version for the call; required for dall-e-3 on Azure
     
 
@@ -724,10 +724,6 @@ class VectorDB(BaseModel):
     is_persistent: bool
     anonymized_telemetry: bool
 '''
-
-import yaml
-from dataclasses import dataclass, field
-from typing import List, Dict, Any
 
 
 @dataclass
@@ -1029,6 +1025,13 @@ class CoreMetadata:
     system_plugins: List[str] = field(default_factory=list)  # optional allowlist; empty = start all discovered system plugins
     system_plugins_env: Dict[str, Dict[str, str]] = field(default_factory=dict)  # per-plugin env: plugin_id -> { VAR: "value" }; e.g. homeclaw-browser: { BROWSER_HEADLESS: "false" }
     system_plugins_start_delay: float = 2.0  # seconds to wait after starting plugin processes before running register; increase on slow Windows if register fails
+    # When true, Core starts the Cursor Bridge (external_plugins.cursor_bridge.server) so one command runs Core + bridge. Bridge runs with same env as Core (PATH for 'agent' CLI). Set cursor_bridge_port if not 3104.
+    cursor_bridge_auto_start: bool = False
+    cursor_bridge_port: int = 3104  # port for Cursor Bridge when cursor_bridge_auto_start is true; must match plugins/CursorBridge/plugin.yaml config.base_url
+    cursor_bridge_agent_path: str = ""  # optional full path to Cursor CLI 'agent' executable; when set, passed as CURSOR_AGENT_PATH so the bridge finds agent even when started by Core without agent in PATH
+    cursor_bridge_cursor_cli_path: str = ""  # optional full path to Cursor CLI 'cursor' (open project/file in IDE); when set, passed as CURSOR_CLI_PATH so the bridge opens Cursor IDE instead of File Explorer on Windows
+    cursor_bridge_cursor_api_key: str = ""  # optional Cursor API key for agent auth; when set, passed as CURSOR_API_KEY to the bridge (so agent works when started by Core). Prefer env CURSOR_API_KEY for secrets.
+    cursor_bridge_forward_logs: bool = False  # when True and cursor_bridge_auto_start, bridge stderr is not discarded so you see agent/bridge logs in Core's terminal (for debugging exit code 1 etc.)
     # When true, on permission denied (unknown user) notify owner via last-used channel so they can add to user.yml. See docs_design/OutboundMarkdownAndUnknownRequest.md.
     notify_unknown_request: bool = False
     # Outbound text format: Core converts assistant reply (Markdown) before sending to channels. "whatsapp" (default) = *bold* _italic_ ~strikethrough~ (works for most IMs); "plain" = strip Markdown; "none" = no conversion.
@@ -1141,7 +1144,7 @@ class CoreMetadata:
                         _ext_data = yaml.safe_load(_f)
                     if isinstance(_ext_data, dict):
                         for _k, _v in _ext_data.items():
-                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k == 'tools' or _k == 'external_skills_dir' or _k == 'clawhub_download_dir' or _k == 'intent_router' or _k == 'planner_executor' or _k == 'identity_capabilities_shortcut'):
+                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k in ('tools', 'external_skills_dir', 'clawhub_download_dir', 'intent_router', 'planner_executor', 'identity_capabilities_shortcut', 'cursor_bridge_auto_start', 'cursor_bridge_port', 'cursor_bridge_agent_path', 'cursor_bridge_cursor_cli_path', 'cursor_bridge_cursor_api_key', 'cursor_bridge_forward_logs')):
                                 continue
                             if _k == 'identity_capabilities_shortcut' and not isinstance(_v, dict):
                                 logging.warning("skills_and_plugins config %s: identity_capabilities_shortcut must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
@@ -1183,6 +1186,12 @@ class CoreMetadata:
                                     _ = float(_v) if _v is not None else 2.0
                                 except (TypeError, ValueError):
                                     logging.warning("skills_and_plugins config %s: %s must be a number, got %s; skipping", _ext_path, _k, type(_v).__name__)
+                                    continue
+                            if _k == 'cursor_bridge_port':
+                                try:
+                                    _ = max(1, min(65535, int(_v) if _v is not None else 3104))
+                                except (TypeError, ValueError):
+                                    logging.warning("skills_and_plugins config %s: cursor_bridge_port must be an integer, got %s; skipping", _ext_path, type(_v).__name__)
                                     continue
                             data[_k] = _v
                 except Exception as _e:
@@ -1504,6 +1513,12 @@ class CoreMetadata:
             system_plugins=list(data.get('system_plugins') or []) if isinstance(data.get('system_plugins'), list) else [],
             system_plugins_env=CoreMetadata._normalize_system_plugins_env(data.get('system_plugins_env')),
             system_plugins_start_delay=max(0.5, float(data.get('system_plugins_start_delay', 2) or 2)),
+            cursor_bridge_auto_start=bool(data.get('cursor_bridge_auto_start', False)),
+            cursor_bridge_port=max(1, min(65535, int(data.get('cursor_bridge_port') or 3104))),
+            cursor_bridge_agent_path=(str(data.get('cursor_bridge_agent_path') or '').strip()),
+            cursor_bridge_cursor_cli_path=(str(data.get('cursor_bridge_cursor_cli_path') or '').strip()),
+            cursor_bridge_cursor_api_key=(str(data.get('cursor_bridge_cursor_api_key') or '').strip()),
+            cursor_bridge_forward_logs=bool(data.get('cursor_bridge_forward_logs', False)),
             notify_unknown_request=bool(data.get('notify_unknown_request', False)),
             outbound_markdown_format=(data.get('outbound_markdown_format') or 'whatsapp').strip().lower() or 'whatsapp',
             main_llm_mode=main_llm_mode_val,

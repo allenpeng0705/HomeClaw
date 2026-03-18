@@ -3,11 +3,64 @@ Misc API routes: skills clear-vector-store, skills list/search/install (Companio
 """
 from pathlib import Path
 
+from fastapi import Depends
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 from loguru import logger
 
 from base.util import Util
+from base.base import PromptRequest, ChannelType, ContentType
+from core.routes import companion_auth
+
+
+def get_api_cursor_bridge_status_handler(core):
+    """GET /api/cursor-bridge/status — returns Cursor Bridge active project cwd (if any). Companion->Core direct."""
+    async def api_cursor_bridge_status(
+        request: Request,  # noqa: ARG001
+        token_user=Depends(companion_auth.get_companion_token_user),  # noqa: ARG001
+    ):
+        try:
+            pm = getattr(core, "plugin_manager", None)
+            if pm is None:
+                return JSONResponse(status_code=500, content={"detail": "Plugin manager not available"})
+            plug = pm.get_plugin_by_id("cursor-bridge")
+            if plug is None or not isinstance(plug, dict):
+                return JSONResponse(status_code=404, content={"detail": "cursor-bridge plugin not found"})
+            # Build a minimal PromptRequest to run external plugin capability get_status.
+            req = PromptRequest(
+                request_id="cursor-bridge-status",
+                channel_name="companion",
+                request_metadata={"capability_id": "get_status", "capability_parameters": {}},
+                channelType=ChannelType.IM,
+                user_name="companion",
+                app_id="homeclaw",
+                user_id="companion",
+                contentType=ContentType.TEXT,
+                text="",
+                action="respond",
+                host="api",
+                port=0,
+                images=[],
+                videos=[],
+                audios=[],
+                files=None,
+                timestamp=0.0,
+            )
+            result = await pm.run_external_plugin(plug, req)
+            if not getattr(result, "success", False):
+                return JSONResponse(status_code=502, content={"detail": getattr(result, "error", "") or "cursor-bridge status failed"})
+            text = (getattr(result, "text", "") or "").strip()
+            try:
+                import json as _json
+                obj = _json.loads(text) if text else {}
+            except Exception:
+                obj = {}
+            active = (obj.get("active_cwd") or "").strip() if isinstance(obj, dict) else ""
+            return JSONResponse(content={"active_cwd": active})
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+    return api_cursor_bridge_status
 
 
 def _install_failure_detail(out: dict) -> str:

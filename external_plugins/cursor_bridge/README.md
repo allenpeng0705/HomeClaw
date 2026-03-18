@@ -22,12 +22,24 @@ So the bridge must run on the **same machine (or a machine that can run commands
 ## Requirements on the dev machine
 
 - **Open project / open file:** Cursor IDE with the **shell command** installed (in Cursor: Command Palette → “Install cursor” or “Shell Command: Install 'cursor' command”). Then `cursor <path>` opens that folder or file in Cursor.
-- **Run agent:** **Cursor CLI** so the `agent` command is available. Install: `curl https://cursor.com/install -fsS | bash` (macOS/Linux) or PowerShell (see [Cursor CLI](https://cursor.com/docs/cli)). Then `agent -p "task"` runs the agent and returns output.
+- **Run agent:** **Cursor CLI** so the `agent` command is available. Install: **macOS/Linux:** `curl https://cursor.com/install -fsS | bash` — **Windows (PowerShell):** `irm 'https://cursor.com/install?win32=true' | iex` (then restart the terminal). See [Cursor CLI](https://cursor.com/docs/cli). Then run **`agent login`** once (or set **`CURSOR_API_KEY`** in the environment). If Core auto-starts the bridge and you get "Authentication required", set `cursor_bridge_cursor_api_key` in config or `CURSOR_API_KEY` before starting Core.
 - **Run command:** No extra requirement; the bridge runs shell commands in a subprocess.
 
 ## Run the bridge
 
-From the project root (or any directory):
+**Option A — Auto-start with Core (recommended on same machine):** Set in `config/skills_and_plugins.yml` (or `config/core.yml`):
+
+```yaml
+cursor_bridge_auto_start: true
+# cursor_bridge_port: 3104   # optional; default 3104
+# If the bridge reports "agent not found", set the full path (Core may not have agent on PATH when it starts the bridge):
+# cursor_bridge_agent_path: "C:\\Users\\You\\AppData\\Local\\Programs\\cursor\\agent.exe"   # PowerShell: (Get-Command agent).Source
+# cursor_bridge_cursor_api_key: "your-cursor-api-key"   # if agent says "Authentication required"; prefer CURSOR_API_KEY in env for secrets
+```
+
+Then start Core as usual (`python -m main start`). If you see "agent not found", add `cursor_bridge_agent_path` with the output of `(Get-Command agent).Source` in PowerShell. No separate terminal needed.
+
+**Option B — Manual:** From the project root (or any directory). Start the bridge from a terminal where `agent` is on PATH (e.g. where `agent --version` works).
 
 ```bash
 # Default port 3104
@@ -38,6 +50,8 @@ Optional environment variables:
 
 - **`CURSOR_BRIDGE_PORT`** — Port (default `3104`). Must match `plugins/CursorBridge/plugin.yaml` `config.base_url` if Core runs elsewhere.
 - **`CURSOR_BRIDGE_CWD`** — Default working directory for `run_command` when `cwd` is not provided (e.g. your project root).
+- **`CURSOR_CLI_PATH`** — Full path to the `cursor` CLI (to open project/folder in Cursor IDE). If "open project" opens File Explorer instead of Cursor, set this (or `cursor_bridge_cursor_cli_path` in config when using auto-start). PowerShell: `(Get-Command cursor).Source`.
+- **`CURSOR_API_KEY`** — Cursor API key for `agent` auth. If you get "Authentication required", run `agent login` once or set this (or `cursor_bridge_cursor_api_key` in config when using auto-start).
 
 Example with custom port and project dir:
 
@@ -55,6 +69,10 @@ The server listens on `0.0.0.0:3104` so it can be reached from another machine (
 - **Core on another machine:** Set `base_url` to the bridge machine’s URL, e.g. `http://192.168.1.100:3104` or `http://my-pc:3104` (Tailscale/LAN). You can override in `config/skills_and_plugins.yml` under the plugin config if your deployment merges that.
 
 Restart or reload Core after changing the plugin config so it picks up the new URL.
+
+### No logs on the bridge when using Companion
+
+If Core runs on a **different machine** (e.g. a server) and the plugin config there has `base_url: "http://127.0.0.1:3104"`, Core calls **127.0.0.1 on the server**, not your PC. Your bridge terminal shows no requests. **Fix:** On the machine where **Core** runs, set `plugins/CursorBridge/plugin.yaml` to `base_url: "http://<YOUR_PC_IP>:3104"` (your PC's IP or hostname). Allow inbound TCP 3104 on your PC firewall, then restart Core.
 
 ## Capabilities
 

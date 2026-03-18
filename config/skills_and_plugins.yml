@@ -418,6 +418,15 @@ system_plugins_env:
   homeclaw-browser:
     BROWSER_HEADLESS: false
 
+# --- Cursor Bridge (external_plugins/cursor_bridge) ---
+# When true, Core starts the Cursor Bridge on startup. If the bridge reports "agent not found", set cursor_bridge_agent_path to the full path (PowerShell: (Get-Command agent).Source).
+cursor_bridge_auto_start: true
+# cursor_bridge_port: 3104   # optional; default 3104; must match plugins/CursorBridge/plugin.yaml config.base_url
+# cursor_bridge_agent_path: "C:\\Users\\You\\AppData\\Local\\Programs\\cursor\\agent.exe"   # optional; use when Core starts the bridge and agent is not in Core's PATH
+# cursor_bridge_cursor_cli_path: "C:\\Users\\You\\AppData\\Local\\Programs\\cursor\\cursor.cmd"   # optional; use when "open project" opens File Explorer instead of Cursor (PowerShell: (Get-Command cursor).Source)
+# cursor_bridge_cursor_api_key: "your-cursor-api-key"   # optional; use when agent says "Authentication required" (or set CURSOR_API_KEY in env before starting Core). Prefer env for secrets.
+# cursor_bridge_forward_logs: true   # set true to see bridge/agent logs in Core's terminal (debug "Agent exited with code 1")
+
 # --- Tool layer (used when use_tools: true) ---
 # Built-in tools: time, cron_*, sessions_*, memory_*, file_*, folder_list, fetch_url, web_search, browser_*,
 # exec, process_*, run_skill, run_plugin, image, channel_send, etc. Only keys below are read by the tool layer.
@@ -490,7 +499,7 @@ tools:
         api_key: ""
         engine: google   # google | bing | baidu
       tavily:
-        api_key: "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"   # or TAVILY_API_KEY
+        api_key: ""   # set your Tavily API key here or use TAVILY_API_KEY env var
         search_depth: basic   # basic | fast | advanced | ultra-fast
         topic: general        # general | news | finance
         time_range: ""        # day | week | month | year (empty = no filter). When user asks for "recent/latest" (e.g. 最近), code auto-uses month if empty; set week for current week.

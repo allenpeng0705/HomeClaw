@@ -311,6 +311,12 @@ def register_all_routes(core: Any) -> None:
         dependencies=[Depends(companion_auth.get_companion_token_user)],
     )
     app.add_api_route(
+        "/api/cursor-bridge/status",
+        misc_api.get_api_cursor_bridge_status_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
         "/api/skills/clawhub-login-status",
         misc_api.get_api_skills_clawhub_login_status_handler(core),
         methods=["GET"],

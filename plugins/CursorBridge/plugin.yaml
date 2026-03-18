@@ -13,7 +13,7 @@ type: http
 config:
   base_url: "http://127.0.0.1:3104"
   path: /run
-  timeout_sec: 120
+  timeout_sec: 1800   # 30 min; agent tasks can run long (run_agent). Override in config if needed.
 capabilities:
   - id: open_project
     name: Open project in Cursor
@@ -42,7 +42,7 @@ capabilities:
       - name: timeout_sec
         type: integer
         required: false
-        description: Max seconds for the agent (default 120; long tasks may need Cloud Agent in Cursor IDE).
+        description: Max seconds for the agent (default 600; allowed 30–1800). Plugin config.timeout_sec (HTTP) is 1800 so long tasks can complete.
   - id: run_command
     name: Run command
     description: Run a shell command on the dev machine and return output (e.g. npm test, pip install). Use when the user says "run X in Cursor" or "execute X in Cursor".
@@ -63,6 +63,10 @@ capabilities:
         type: string
         required: true
         description: File path to open (absolute or relative to project).
+  - id: get_status
+    name: Get Cursor Bridge status
+    description: Return the Cursor Bridge current state, including active project cwd and default cwd. Useful for Companion UI and debugging.
+    parameters: []
   - id: ask_cursor
     name: Ask Cursor (natural language)
     description: Infer intent from user message (open project, run agent, or run command). Use when the request is ambiguous.

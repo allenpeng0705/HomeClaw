@@ -101,6 +101,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? _loadingStatusTimer;
   bool _wasRouteCurrent = false;
   Uint8List? _chatPartnerAvatar;
+  String _cursorActiveCwd = '';
+
+  bool get _isCursorFriend {
+    final fid = (widget.friendId ?? '').trim().toLowerCase();
+    return fid == 'cursor';
+  }
+
+  Future<void> _refreshCursorActiveProject() async {
+    if (!_isCursorFriend) return;
+    try {
+      final cwd = await widget.coreService.getCursorBridgeActiveCwd();
+      if (!mounted) return;
+      setState(() => _cursorActiveCwd = cwd);
+    } catch (_) {
+      // Keep previous value on failure.
+    }
+  }
 
   Future<void> _loadChatPartnerAvatar() async {
     final url = widget.isUserFriend && (widget.toUserId ?? '').trim().isNotEmpty
@@ -119,6 +136,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _loadTtsAutoSpeak();
     _loadVoiceInputLocale();
     _loadChatPartnerAvatar();
+    _refreshCursorActiveProject();
     if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
       _loadUserInbox();
       _userInboxPollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
@@ -144,6 +162,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state != AppLifecycleState.resumed || !mounted) return;
+    _refreshCursorActiveProject();
     if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
       _loadUserInbox();
     } else {
@@ -1528,7 +1547,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
             if (!hideHomeClawLabel) ...[
               const SizedBox(width: 10),
-              Flexible(child: Text(widget.userName, overflow: TextOverflow.ellipsis)),
+              Flexible(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(widget.userName, overflow: TextOverflow.ellipsis),
+                    if (_isCursorFriend && _cursorActiveCwd.trim().isNotEmpty)
+                      Text(
+                        'Project: ${path.basename(_cursorActiveCwd.trim())}',
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                  ],
+                ),
+              ),
             ],
           ],
         ),
@@ -1748,6 +1781,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 _ChatMessageText(
                                   text: entry.key,
                                   isUser: isUser,
+                                  plainText: _isCursorFriend && widget.coreService.cursorChatPlainText,
                                   theme: Theme.of(context),
                                 ),
                               ],
@@ -2159,11 +2193,13 @@ class _AttachmentChip extends StatelessWidget {
 class _ChatMessageText extends StatelessWidget {
   final String text;
   final bool isUser;
+  final bool plainText;
   final ThemeData theme;
 
   const _ChatMessageText({
     required this.text,
     required this.isUser,
+    required this.plainText,
     required this.theme,
   });
 
@@ -2219,6 +2255,12 @@ class _ChatMessageText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final effectiveText = text.isEmpty ? '\u200B' : text;
+    if (plainText) {
+      return SelectableText(
+        effectiveText,
+        style: theme.textTheme.bodyLarge,
+      );
+    }
     final styleSheet = MarkdownStyleSheet.fromTheme(theme).copyWith(
       p: theme.textTheme.bodyLarge,
       listBullet: theme.textTheme.bodyLarge,
