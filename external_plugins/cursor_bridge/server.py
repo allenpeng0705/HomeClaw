@@ -522,6 +522,66 @@ def _claude_executable() -> str:
     return shutil.which("claude") or "claude"
 
 
+def _claude_env_from_config() -> Dict[str, str]:
+    """Read Claude config from ~/.claude/settings.json and return env vars to inject. Injects the full \"env\" object (all keys, values stringified) so ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, API_TIMEOUT_MS, ANTHROPIC_MODEL, etc. are passed to the CLI. Also supports top-level anthropic_api_key/api_url for backward compat."""
+    out: Dict[str, str] = {}
+    base = os.path.expanduser("~")
+    if not base:
+        return out
+
+    def _str_value(v: Any) -> str:
+        if v is None:
+            return ""
+        if isinstance(v, str):
+            return v
+        return str(v)
+
+    def _merge_from(data: Optional[Dict[str, Any]]) -> None:
+        if not isinstance(data, dict):
+            return
+        # Top-level keys for backward compat (only if not already set from env block)
+        for key in ("anthropic_api_key", "api_key", "ANTHROPIC_API_KEY"):
+            v = data.get(key)
+            if isinstance(v, str) and v.strip() and "ANTHROPIC_API_KEY" not in out:
+                out["ANTHROPIC_API_KEY"] = v.strip()
+                break
+        for key in ("anthropic_api_url", "api_url", "ANTHROPIC_API_URL"):
+            v = data.get(key)
+            if isinstance(v, str) and v.strip() and "ANTHROPIC_API_URL" not in out:
+                out["ANTHROPIC_API_URL"] = v.strip()
+                break
+        # Full env block: inject every key so ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, API_TIMEOUT_MS, ANTHROPIC_MODEL, etc. are all passed
+        env_block = data.get("env")
+        if isinstance(env_block, dict):
+            for ek, ev in env_block.items():
+                if not isinstance(ek, str) or not ek.strip():
+                    continue
+                out[ek.strip()] = _str_value(ev)
+
+    try:
+        settings_path = os.path.join(base, ".claude", "settings.json")
+        if os.path.isfile(settings_path):
+            with open(settings_path, "r", encoding="utf-8") as f:
+                _merge_from(json.load(f))
+        legacy_path = os.path.join(base, ".claude.json")
+        if os.path.isfile(legacy_path):
+            with open(legacy_path, "r", encoding="utf-8") as f:
+                _merge_from(json.load(f))
+    except Exception as e:
+        logger.debug("Could not load Claude settings from ~/.claude/settings.json: %s", e)
+    return out
+
+
+def _claude_subprocess_env() -> Dict[str, str]:
+    """Environment for Claude CLI subprocess: inherit current env, then fill from ~/.claude/settings.json if ANTHROPIC_API_KEY etc. are not set."""
+    env = dict(os.environ)
+    from_file = _claude_env_from_config()
+    for key, value in from_file.items():
+        if value and (not env.get(key) or not str(env.get(key)).strip()):
+            env[key] = value
+    return env
+
+
 async def _run_claude_task(task: str, cwd: Optional[str] = None, timeout_sec: int = 120) -> tuple:
     """Run Claude Code CLI headlessly. Always uses --dangerously-skip-permissions for non-interactive runs."""
     if not (task or str(task).strip()):
@@ -545,12 +605,15 @@ async def _run_claude_task(task: str, cwd: Optional[str] = None, timeout_sec: in
         _log_argv[-1] = task_str[:80] + "..."
     logger.info("claude run: argv=%s cwd=%s", _log_argv, work_dir)
 
+    claude_env = _claude_subprocess_env()
+
     async def _run_exec(argv: list[str]) -> tuple[int, str, str]:
         p = await asyncio.create_subprocess_exec(
             *argv,
             cwd=work_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=claude_env,
         )
         try:
             stdout_b, stderr_b = await asyncio.wait_for(
@@ -584,7 +647,7 @@ async def _run_claude_task(task: str, cwd: Optional[str] = None, timeout_sec: in
                 parts.append(f"stdout: {out}")
             msg = "\n".join(parts) if (err or out) else parts[0]
             if "anthropic_api_key" in msg.lower() or "api key" in msg.lower() or "login" in msg.lower():
-                msg += " To fix: set ANTHROPIC_API_KEY in the environment where the bridge runs, or run 'claude' once interactively to log in."
+                msg += " To fix: set ANTHROPIC_API_KEY in the environment where the bridge runs, or add anthropic_api_key to ~/.claude/settings.json (or C:\\Users\\<you>\\.claude\\settings.json on Windows), or run 'claude' once interactively to log in."
             return False, msg
         if out:
             try:
@@ -846,7 +909,8 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             cmd, cwd = _agent_interactive_command(backend)
             if cwd_override and os.path.isdir(cwd_override):
                 cwd = cwd_override
-            session_id, initial = await asyncio.to_thread(_BRIDGE_INTERACTIVE.start_session, cmd, cwd)
+            session_env = _claude_subprocess_env() if backend == "claude" else None
+            session_id, initial = await asyncio.to_thread(_BRIDGE_INTERACTIVE.start_session, cmd, cwd, session_env)
             text = json.dumps({"session_id": session_id, "initial_output": initial, "status": "running"}, ensure_ascii=False)
         except Exception as e:
             success = False
