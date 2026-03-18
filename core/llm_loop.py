@@ -274,6 +274,51 @@ def _cursor_bridge_capability_and_params(query: str) -> tuple:
     return "run_agent", {"task": q}
 
 
+def _claude_bridge_capability_and_params(query: str) -> tuple:
+    """
+    For ClaudeCode preset: route message to the Claude bridge plugin (no LLM).
+    - set_cwd: "open X project" / "open <path>" / "cd <path>"
+    - get_status: "status", "current project"
+    - run_command: "run <cmd>" / "execute <cmd>"
+    - run_agent: everything else
+    """
+    q = (query or "").strip()
+    if not q:
+        return "run_agent", {"task": q}
+    q_lower = q.lower()
+    if q_lower in ("status", "claude status", "current project", "current cwd", "which project", "what project", "active project"):
+        return "get_status", {}
+    # set_cwd via "open X project"
+    m = re.match(r"open\s+(.+?)\s+project\s*$", q, re.IGNORECASE)
+    if m:
+        path = m.group(1).strip()
+        if path:
+            return "set_cwd", {"path": path}
+    # set_cwd via "open <path>" where path contains / or \
+    m = re.match(r"open\s+([^\s]+(?:[/\\][^\s]*)+)\s*$", q, re.IGNORECASE)
+    if m:
+        return "set_cwd", {"path": m.group(1).strip()}
+    # set_cwd via "cd <path>"
+    m = re.match(r"cd\s+(.+)\s*$", q, re.IGNORECASE)
+    if m:
+        path = m.group(1).strip()
+        if path:
+            return "set_cwd", {"path": path}
+    # run_command (same heuristic as cursor)
+    run_command_prefixes = ("npm ", "pnpm ", "yarn ", "pip ", "python ", "node ", "npx ", "cargo ", "go ")
+    if q_lower.startswith("run ") and len(q) > 4:
+        rest = q[4:].strip()
+        if any(rest.lower().startswith(p) for p in run_command_prefixes):
+            return "run_command", {"command": rest}
+        if re.match(r"^[a-zA-Z0-9_.-]+\s*$", rest) or (len(rest) < 50 and " the " not in rest.lower()):
+            return "run_command", {"command": rest}
+    if q_lower.startswith("execute ") and len(q) > 8:
+        rest = q[8:].strip()
+        if any(rest.lower().startswith(p) for p in run_command_prefixes) or (len(rest) < 50 and " the " not in rest.lower()):
+            return "run_command", {"command": rest}
+    return "run_agent", {"task": q}
+
+
 def _try_chat_shortcut(query: str, shortcut_cfg: dict) -> Optional[str]:
     """
     If the query is a short greeting or capabilities question, return the shortcut reply (greeting_reply or identity+TOOLS). Otherwise return None.
@@ -670,13 +715,17 @@ async def answer_from_memory(
             except Exception:
                 pass
 
-        # Cursor preset friend: pure bridge — no LLM. Detect "open X project" / "open <path>" → open_project; else run_agent with message as task.
+        # Cursor/ClaudeCode preset friends: pure bridge — no LLM. Route by pattern then call the bridge plugin.
         if request and _current_friend and (query or "").strip():
             try:
                 _preset = (getattr(_current_friend, "preset", None) or "").strip().lower()
-                if _preset == "cursor":
+                if _preset in ("cursor", "claudecode"):
+                    _plugin_id = "cursor-bridge" if _preset == "cursor" else "claude-code-bridge"
                     _q = (query or "").strip()
-                    _cap, _params = _cursor_bridge_capability_and_params(_q)
+                    if _preset == "cursor":
+                        _cap, _params = _cursor_bridge_capability_and_params(_q)
+                    else:
+                        _cap, _params = _claude_bridge_capability_and_params(_q)
                     _reg = get_tool_registry()
                     if _reg:
                         _ctx = ToolContext(
@@ -693,7 +742,7 @@ async def answer_from_memory(
                         _bridge_result = await _reg.execute_async(
                             "route_to_plugin",
                             {
-                                "plugin_id": "cursor-bridge",
+                                "plugin_id": _plugin_id,
                                 "capability_id": _cap,
                                 "parameters": _params,
                             },

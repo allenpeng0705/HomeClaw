@@ -174,6 +174,53 @@ if (-not $ClawhubOk) {
   }
 }
 
+# ----- Step 2d: Dev CLIs (optional): Cursor CLI + Claude Code CLI -----
+# Off by default. Enable with:
+#   $env:HOMECLAW_INSTALL_CURSOR_CLI="1"; .\install.ps1
+#   $env:HOMECLAW_INSTALL_CLAUDE_CODE="1"; .\install.ps1
+Write-Host ""
+Write-Host "=== Step 2d: Dev CLIs (optional) ==="
+$InstallCursorCli = ($env:HOMECLAW_INSTALL_CURSOR_CLI -eq "1")
+$InstallClaudeCode = ($env:HOMECLAW_INSTALL_CLAUDE_CODE -eq "1")
+
+if ($InstallCursorCli) {
+  $hasAgent = $false
+  $hasCursor = $false
+  try { $null = Get-Command agent -ErrorAction SilentlyContinue; if ($?) { $hasAgent = $true } } catch {}
+  try { $null = Get-Command cursor -ErrorAction SilentlyContinue; if ($?) { $hasCursor = $true } } catch {}
+  if ($hasAgent -and $hasCursor) {
+    Write-Host "OK: Cursor CLI already installed (agent + cursor found on PATH)"
+  } else {
+    Write-Host "Installing Cursor CLI (agent/cursor)..."
+    try {
+      irm "https://cursor.com/install?win32=true" | iex
+      Write-Host "OK: Cursor CLI installer finished"
+    } catch {
+      Write-Host "Warning: Cursor CLI install failed. See https://cursor.com/docs/cli"
+    }
+  }
+} else {
+  Write-Host "Skipping Cursor CLI install (set HOMECLAW_INSTALL_CURSOR_CLI=1 to enable)"
+}
+
+if ($InstallClaudeCode) {
+  $hasClaude = $false
+  try { $null = Get-Command claude -ErrorAction SilentlyContinue; if ($?) { $hasClaude = $true } } catch {}
+  if ($hasClaude) {
+    Write-Host "OK: Claude Code CLI already installed (claude found on PATH)"
+  } else {
+    Write-Host "Installing Claude Code CLI (claude)..."
+    try {
+      irm "https://claude.ai/install.ps1" | iex
+      Write-Host "OK: Claude Code CLI installer finished"
+    } catch {
+      Write-Host "Warning: Claude Code CLI install failed. See https://docs.claude.com/en/docs/claude-code/setup"
+    }
+  }
+} else {
+  Write-Host "Skipping Claude Code CLI install (set HOMECLAW_INSTALL_CLAUDE_CODE=1 to enable)"
+}
+
 # ----- Step 4b: VMPrint (Markdown to PDF tool) -----
 Write-Host ""
 Write-Host "=== Step 4b: VMPrint (Markdown to PDF) ==="
@@ -411,5 +458,11 @@ Write-Host "  1. In Portal ($PortalUrl): create admin account, choose model, add
 Write-Host "  2. Check setup: cd $Root; $PythonExe -m main doctor"
 Write-Host "  3. Start Core: cd $Root; $PythonExe -m main start"
 Write-Host "  4. Run Portal again: cd $Root; $PythonExe -m main portal"
+Write-Host ""
+Write-Host "--- Optional (Dev Bridge) ---"
+Write-Host "If you want to use the Cursor / ClaudeCode friends (run tools on your dev machine), you may want these CLIs:"
+Write-Host "  - Cursor CLI (agent/cursor): `$env:HOMECLAW_INSTALL_CURSOR_CLI=`"1`"; .\\install.ps1"
+Write-Host "  - Claude Code CLI (claude):  `$env:HOMECLAW_INSTALL_CLAUDE_CODE=`"1`"; .\\install.ps1"
+Write-Host "  - Or using install.bat flags: install.bat cursor   |  install.bat claude   |  install.bat cursor claude"
 Write-Host ""
 Write-Host "Docs: https://github.com/allenpeng0705/HomeClaw"

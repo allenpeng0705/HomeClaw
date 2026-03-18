@@ -283,11 +283,19 @@ class PluginManager:
             if not base_url:
                 return PluginResult(success=False, error=f"Error: plugin {plugin_id} type http has no base_url in config.")
             logger.info("Plugin HTTP request: plugin_id={} url={}", plugin_id, url)
+            headers = {}
+            try:
+                # Optional shared-secret header for bridge-style plugins.
+                bridge_key = (config.get("bridge_api_key") or "").strip()
+                if bridge_key:
+                    headers["X-HomeClaw-Bridge-Key"] = bridge_key
+            except Exception:
+                headers = {}
             try:
                 import httpx
                 # trust_env=False so we connect directly to the plugin (no HTTP_PROXY); avoids 502 when system proxy is set (same as channels → Core).
                 async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-                    resp = await client.post(url, json=req.model_dump())
+                    resp = await client.post(url, json=req.model_dump(), headers=headers or None)
                     if resp.status_code != 200:
                         body_preview = (resp.text or "").strip()[:300]
                         msg = f"Error: plugin returned {resp.status_code}: {body_preview}" if body_preview else f"Error: plugin returned {resp.status_code}"

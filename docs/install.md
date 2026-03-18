@@ -28,6 +28,17 @@ Run the install script from the project root. It checks Python (3.9+), installs 
 
 If `./install.sh` fails with "Permission denied", use `chmod +x install.sh` or `bash install.sh`. You can also run from a parent directory (e.g. `cd ~/projects && bash install.sh`); the script will clone the repo into `./HomeClaw` if needed.
 
+#### Optional: install Dev CLIs (Cursor CLI / Claude Code CLI)
+
+- Cursor CLI (for Cursor Bridge): set `HOMECLAW_INSTALL_CURSOR_CLI=1`
+- Claude Code CLI (for ClaudeCode friend): set `HOMECLAW_INSTALL_CLAUDE_CODE=1`
+
+Example:
+
+```bash
+HOMECLAW_INSTALL_CURSOR_CLI=1 HOMECLAW_INSTALL_CLAUDE_CODE=1 bash install.sh
+```
+
 ### Windows
 
 1. **Use PowerShell** (not Command Prompt). Open **PowerShell**: Win + X → "Windows PowerShell" or "Terminal", or search for "PowerShell".
@@ -40,6 +51,21 @@ If `./install.sh` fails with "Permission denied", use `chmod +x install.sh` or `
    ```powershell
    .\install.ps1
    ```
+
+#### Optional: install Dev CLIs (Cursor CLI / Claude Code CLI)
+
+- PowerShell:
+
+```powershell
+$env:HOMECLAW_INSTALL_CURSOR_CLI="1"
+$env:HOMECLAW_INSTALL_CLAUDE_CODE="1"
+.\install.ps1
+```
+
+- Or using `install.bat` flags:
+  - `install.bat cursor`
+  - `install.bat claude`
+  - `install.bat cursor claude`
 
 **If PowerShell says the script "cannot be loaded" or "is not digitally signed" (execution policy):**
 

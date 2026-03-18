@@ -169,6 +169,51 @@ else
   fi
 fi
 
+# ----- Step 2d: Dev CLIs (optional): Cursor CLI + Claude Code CLI -----
+# Off by default. Enable with:
+#   HOMECLAW_INSTALL_CURSOR_CLI=1 bash install.sh
+#   HOMECLAW_INSTALL_CLAUDE_CODE=1 bash install.sh
+echo ""
+echo "=== Step 2d: Dev CLIs (optional) ==="
+INSTALL_CURSOR_CLI="${HOMECLAW_INSTALL_CURSOR_CLI:-0}"
+INSTALL_CLAUDE_CODE="${HOMECLAW_INSTALL_CLAUDE_CODE:-0}"
+if [ "$INSTALL_CURSOR_CLI" = "1" ]; then
+  if command -v agent >/dev/null 2>&1 && command -v cursor >/dev/null 2>&1; then
+    echo "OK: Cursor CLI already installed (agent + cursor found on PATH)"
+  else
+    echo "Installing Cursor CLI (agent/cursor)..."
+    if command -v curl >/dev/null 2>&1; then
+      if curl https://cursor.com/install -fsS | bash; then
+        echo "OK: Cursor CLI installer finished"
+      else
+        echo "Warning: Cursor CLI install failed. See https://cursor.com/docs/cli"
+      fi
+    else
+      echo "Warning: curl not found; cannot auto-install Cursor CLI. Install curl then re-run, or follow https://cursor.com/docs/cli"
+    fi
+  fi
+else
+  echo "Skipping Cursor CLI install (set HOMECLAW_INSTALL_CURSOR_CLI=1 to enable)"
+fi
+if [ "$INSTALL_CLAUDE_CODE" = "1" ]; then
+  if command -v claude >/dev/null 2>&1; then
+    echo "OK: Claude Code CLI already installed (claude found on PATH)"
+  else
+    echo "Installing Claude Code CLI (claude)..."
+    if command -v curl >/dev/null 2>&1; then
+      if curl -fsSL https://claude.ai/install.sh | bash; then
+        echo "OK: Claude Code CLI installer finished"
+      else
+        echo "Warning: Claude Code CLI install failed. See https://docs.claude.com/en/docs/claude-code/setup"
+      fi
+    else
+      echo "Warning: curl not found; cannot auto-install Claude Code CLI. Install curl then re-run, or see https://docs.claude.com/en/docs/claude-code/setup"
+    fi
+  fi
+else
+  echo "Skipping Claude Code CLI install (set HOMECLAW_INSTALL_CLAUDE_CODE=1 to enable)"
+fi
+
 # ----- Step 3: already done if IN_REPO -----
 # (clone was done above if needed)
 
@@ -405,5 +450,11 @@ echo "  1. In Portal ($PORTAL_URL): create admin account, choose model, add user
 echo "  2. Check setup: cd $ROOT && $PYTHON -m main doctor"
 echo "  3. Start Core: cd $ROOT && $PYTHON -m main start"
 echo "  4. Run Portal again: cd $ROOT && $PYTHON -m main portal"
+echo ""
+echo "--- Optional (Dev Bridge) ---"
+echo "If you want to use the Cursor / ClaudeCode friends (run tools on your dev machine), you may want these CLIs:"
+echo "  - Cursor CLI (agent/cursor): HOMECLAW_INSTALL_CURSOR_CLI=1 bash install.sh"
+echo "  - Claude Code CLI (claude):  HOMECLAW_INSTALL_CLAUDE_CODE=1 bash install.sh"
+echo "  - Both: HOMECLAW_INSTALL_CURSOR_CLI=1 HOMECLAW_INSTALL_CLAUDE_CODE=1 bash install.sh"
 echo ""
 echo "Docs: https://github.com/allenpeng0705/HomeClaw"

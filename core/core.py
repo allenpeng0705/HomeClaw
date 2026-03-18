@@ -486,6 +486,24 @@ class Core(CoreInterface):
         if api_key:
             env["CURSOR_API_KEY"] = api_key
             _component_log("cursor_bridge", "CURSOR_API_KEY set from config")
+        bridge_key = (getattr(meta, "cursor_bridge_bridge_api_key", None) or "").strip()
+        if bridge_key:
+            env["CURSOR_BRIDGE_API_KEY"] = bridge_key
+            _component_log("cursor_bridge", "CURSOR_BRIDGE_API_KEY set from config")
+        claude_path = (getattr(meta, "claude_code_path", None) or "").strip()
+        if not claude_path:
+            try:
+                import shutil
+                claude_path = shutil.which("claude") or ""
+            except Exception:
+                claude_path = ""
+        if claude_path:
+            env["CLAUDE_PATH"] = claude_path
+            _component_log("cursor_bridge", f"using CLAUDE_PATH={claude_path}")
+        anthropic_key = (getattr(meta, "claude_code_api_key", None) or "").strip()
+        if anthropic_key:
+            env["ANTHROPIC_API_KEY"] = anthropic_key
+            _component_log("cursor_bridge", "ANTHROPIC_API_KEY set from config")
         forward_logs = getattr(meta, "cursor_bridge_forward_logs", False)
         try:
             proc = subprocess.Popen(

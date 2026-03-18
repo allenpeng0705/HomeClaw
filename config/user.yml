@@ -54,6 +54,8 @@ users:
         preset: finder
       - name: Cursor
         preset: cursor
+      - name: ClaudeCode
+        preset: claudecode
 
   - id: PengXiaoFeng
     name: PengXiaoFeng

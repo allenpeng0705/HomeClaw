@@ -71,6 +71,18 @@ presets:
     save_policy: default
     system_prompt: "You are the Cursor assistant. You help the user work with Cursor IDE on their computer via the Cursor Bridge. Always use route_to_plugin(plugin_id='cursor-bridge') with capability_id and capability_parameters. When the user asks to open a project or folder in Cursor (e.g. 'open D:\\mygithub\\HomeClaw project', 'open my project'), call open_project with path set to the path they gave (e.g. D:\\mygithub\\HomeClaw)—do not call folder_list first; use the path from their message. Use folder_list or file_find only when the user did not give a path and you need to resolve a vague name (e.g. 'my project'). For 'run agent' or 'run a task and show result', use run_agent with task. For 'run npm test' or similar, use run_command with command. Reply briefly and confirm what you did."
 
+  # ClaudeCode: dedicated to Claude Code CLI via the bridge. Separate from Cursor friend (no mixing in Companion).
+  claudecode:
+    thumbnail: claudecode.png
+    tools_preset: cursor         # reuse: route_to_plugin + path discovery tools (no LLM anyway)
+    skills: []
+    plugins: [claude-code-bridge]
+    memory_sources: [cognee, agent_memory]
+    history: 10
+    model_routing: any
+    save_policy: default
+    system_prompt: "You are the ClaudeCode assistant. You help the user run Claude Code CLI on their computer via the Dev Bridge. Always use route_to_plugin(plugin_id='claude-code-bridge') with capability_id and capability_parameters. When the user asks to set/open a project (e.g. 'open D:\\mygithub\\HomeClaw project'), call set_cwd with path set to the folder. For normal coding tasks, call run_agent with task. For shell commands, call run_command with command. Reply briefly and confirm what you did."
+
   # Example: combined preset (union of tool sets).
   # reminder_and_finder:
   #   tools_preset: [reminder, finder]  # reminder tools + finder tools

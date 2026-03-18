@@ -1,0 +1,53 @@
+# Claude Code Bridge: run Claude Code CLI (claude) headlessly on the dev machine.
+# Uses the same bridge server as Cursor Bridge (external_plugins/cursor_bridge/server.py) but a separate plugin id
+# so Companion can have a dedicated ClaudeCode friend without mixing with Cursor.
+id: claude-code-bridge
+name: Claude Code Bridge
+description: |
+  Run Claude Code CLI ('claude') in headless mode on the user's dev machine and return output.
+  Use when the user wants: "run claude code to review/fix/build and show me the result".
+type: http
+config:
+  base_url: "http://127.0.0.1:3104"
+  path: /run
+  timeout_sec: 1800   # 30 min
+  # bridge_api_key: "set-a-random-secret"   # optional; must match CURSOR_BRIDGE_API_KEY on the bridge server
+capabilities:
+  - id: set_cwd
+    name: Set active project cwd
+    description: Set the active project directory on the bridge so subsequent Claude runs default to it.
+    parameters:
+      - name: path
+        type: string
+        required: true
+        description: Project folder path (absolute or relative to bridge default cwd).
+  - id: run_agent
+    name: Run Claude Code and get result
+    description: Run Claude Code CLI headlessly in the active project and return the output. By default uses --dangerously-skip-permissions.
+    parameters:
+      - name: task
+        type: string
+        required: true
+        description: Task/prompt for Claude Code CLI.
+      - name: cwd
+        type: string
+        required: false
+        description: Working directory (optional; defaults to active project cwd).
+      - name: timeout_sec
+        type: integer
+        required: false
+        description: Max seconds (default 600; allowed 30–1800).
+  - id: run_command
+    name: Run command
+    description: Run a shell command in the active project and return output.
+    parameters:
+      - name: command
+        type: string
+        required: true
+      - name: cwd
+        type: string
+        required: false
+  - id: get_status
+    name: Get Bridge status
+    description: Return bridge state (active cwd, default cwd, auth enabled).
+    parameters: []

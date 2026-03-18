@@ -103,15 +103,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Uint8List? _chatPartnerAvatar;
   String _cursorActiveCwd = '';
 
-  bool get _isCursorFriend {
+  bool get _isDevBridgeFriend {
     final fid = (widget.friendId ?? '').trim().toLowerCase();
-    return fid == 'cursor';
+    return fid == 'cursor' || fid == 'claudecode';
   }
 
   Future<void> _refreshCursorActiveProject() async {
-    if (!_isCursorFriend) return;
+    if (!_isDevBridgeFriend) return;
     try {
-      final cwd = await widget.coreService.getCursorBridgeActiveCwd();
+      final fid = (widget.friendId ?? '').trim().toLowerCase();
+      final backend = fid == 'claudecode' ? 'claude' : 'cursor';
+      final cwd = await widget.coreService.getCursorBridgeActiveCwd(backend: backend);
       if (!mounted) return;
       setState(() => _cursorActiveCwd = cwd);
     } catch (_) {
@@ -1553,7 +1555,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(widget.userName, overflow: TextOverflow.ellipsis),
-                    if (_isCursorFriend && _cursorActiveCwd.trim().isNotEmpty)
+                    if (_isDevBridgeFriend && _cursorActiveCwd.trim().isNotEmpty)
                       Text(
                         'Project: ${path.basename(_cursorActiveCwd.trim())}',
                         overflow: TextOverflow.ellipsis,
@@ -1781,7 +1783,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 _ChatMessageText(
                                   text: entry.key,
                                   isUser: isUser,
-                                  plainText: _isCursorFriend && widget.coreService.cursorChatPlainText,
+                                  plainText: _isDevBridgeFriend && widget.coreService.cursorChatPlainText,
+                                  // Apply copy-friendly plain text for Dev Bridge friends (Cursor/ClaudeCode) when enabled.
                                   theme: Theme.of(context),
                                 ),
                               ],

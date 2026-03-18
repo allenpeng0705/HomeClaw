@@ -1188,8 +1188,11 @@ class CoreService {
   }
 
   /// GET /api/cursor-bridge/status (Companion auth). Returns active_cwd (or empty string).
-  Future<String> getCursorBridgeActiveCwd() async {
-    final url = Uri.parse('$_baseUrl/api/cursor-bridge/status');
+  /// backend: "cursor" | "claude" (default "cursor").
+  Future<String> getCursorBridgeActiveCwd({String backend = 'cursor'}) async {
+    final b = backend.trim().toLowerCase();
+    final eff = (b == 'claude') ? 'claude' : 'cursor';
+    final url = Uri.parse('$_baseUrl/api/cursor-bridge/status?backend=$eff');
     final response = await http
         .get(url, headers: _authHeaders(forCompanionApi: true))
         .timeout(const Duration(seconds: 10));

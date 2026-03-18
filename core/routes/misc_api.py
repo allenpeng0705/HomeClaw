@@ -14,23 +14,29 @@ from core.routes import companion_auth
 
 
 def get_api_cursor_bridge_status_handler(core):
-    """GET /api/cursor-bridge/status — returns Cursor Bridge active project cwd (if any). Companion->Core direct."""
+    """GET /api/cursor-bridge/status — returns Dev Bridge active project cwd (if any).
+    Query param: backend=cursor|claude (default cursor). Companion->Core direct.
+    """
     async def api_cursor_bridge_status(
-        request: Request,  # noqa: ARG001
+        request: Request,
         token_user=Depends(companion_auth.get_companion_token_user),  # noqa: ARG001
     ):
         try:
             pm = getattr(core, "plugin_manager", None)
             if pm is None:
                 return JSONResponse(status_code=500, content={"detail": "Plugin manager not available"})
-            plug = pm.get_plugin_by_id("cursor-bridge")
+            backend = (request.query_params.get("backend") or "").strip().lower()
+            if backend not in ("cursor", "claude"):
+                backend = "cursor"
+            plugin_id = "cursor-bridge" if backend == "cursor" else "claude-code-bridge"
+            plug = pm.get_plugin_by_id(plugin_id)
             if plug is None or not isinstance(plug, dict):
-                return JSONResponse(status_code=404, content={"detail": "cursor-bridge plugin not found"})
+                return JSONResponse(status_code=404, content={"detail": f"{plugin_id} plugin not found"})
             # Build a minimal PromptRequest to run external plugin capability get_status.
             req = PromptRequest(
                 request_id="cursor-bridge-status",
                 channel_name="companion",
-                request_metadata={"capability_id": "get_status", "capability_parameters": {}},
+                request_metadata={"capability_id": "get_status", "capability_parameters": {"backend": backend}},
                 channelType=ChannelType.IM,
                 user_name="companion",
                 app_id="homeclaw",
