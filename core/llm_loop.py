@@ -288,7 +288,13 @@ def _claude_bridge_capability_and_params(query: str) -> tuple:
     q_lower = q.lower()
     if q_lower in ("status", "claude status", "current project", "current cwd", "which project", "what project", "active project"):
         return "get_status", {}
-    # set_cwd via "open X project"
+    # set_cwd via "open project <path>" (e.g. "Open project D:\mygithub\summBox")
+    m = re.match(r"open\s+project\s+(.+)\s*$", q, re.IGNORECASE)
+    if m:
+        path = m.group(1).strip()
+        if path:
+            return "set_cwd", {"path": path}
+    # set_cwd via "open X project" at end (e.g. "open my project")
     m = re.match(r"open\s+(.+?)\s+project\s*$", q, re.IGNORECASE)
     if m:
         path = m.group(1).strip()
