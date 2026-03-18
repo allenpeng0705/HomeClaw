@@ -14,8 +14,9 @@ HomeClaw provides **tools** the LLM can call by name (file, exec, browser, cron,
 | **Scheduling** | `cron_schedule`, `cron_list`, `remind_me`, `record_date` |
 | **Sessions**   | `sessions_list`, `sessions_transcript`, `sessions_send`, `sessions_spawn` |
 | **Routing**    | `route_to_plugin`, `route_to_tam`, `run_skill` |
+| **MCP**        | `mcp_list_tools`, `mcp_call` (optional; see [MCP](mcp.md)) |
 
-Config (allowlists, timeouts, API keys) is under **`tools:`** in `config/core.yml`. See [ToolsDesign.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/ToolsDesign.md) and [ToolsAndSkillsTesting.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/ToolsAndSkillsTesting.md) in the repo.
+Config (allowlists, timeouts, API keys) is under **`tools:`** in `config/core.yml`. MCP server config is under **`tools.mcp`** in `config/skills_and_plugins.yml` — see [Using MCP](mcp.md). See [ToolsDesign.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/ToolsDesign.md) and [ToolsAndSkillsTesting.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/ToolsAndSkillsTesting.md) in the repo.
 
 ---
 

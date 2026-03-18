@@ -1306,16 +1306,81 @@ class TAM:
         msg_preview = (message or "")[:50] + ("..." if len(message or "") > 50 else "")
         logger.info("TAM: One-shot reminder triggered: delivering to user_id={} from_friend={} message={!r}", user_id or "companion", from_friend, msg_preview)
         try:
-            if hasattr(self.coreInst, "deliver_to_user"):
-                await self.coreInst.deliver_to_user(
-                    user_id or "companion",
-                    message or "Reminder",
-                    channel_key=channel_key,
-                    source="reminder",
-                    from_friend=from_friend,
-                )
+            if (message or "").strip().startswith(tam_storage.PENDING_ACTION_PREFIX):
+                action_id_raw = (message or "").strip()[len(tam_storage.PENDING_ACTION_PREFIX) :].split(tam_storage.PENDING_ACTION_SUFFIX)[0].strip()
+                action_id = str(action_id_raw) if action_id_raw else ""
+                if action_id:
+                    action = tam_storage.get_scheduled_action(action_id)
+                    if action and action.get("status") == "scheduled":
+                        payload = action.get("action_payload")
+                        if not isinstance(payload, dict):
+                            payload = {}
+                        if hasattr(self.coreInst, "execute_scheduled_action"):
+                            try:
+                                result = await self.coreInst.execute_scheduled_action(
+                                    action_type=action.get("action_type") or "run_skill",
+                                    action_payload=payload,
+                                    user_id=action.get("user_id") or user_id or "companion",
+                                    friend_id=action.get("friend_id") or friend_id,
+                                    channel_key=action.get("channel_key") or channel_key,
+                                )
+                                to_deliver = result if isinstance(result, str) and result.strip() else "Done. （已完成。）"
+                            except Exception as exec_e:
+                                logger.exception("TAM: execute_scheduled_action raised: {}", exec_e)
+                                to_deliver = f"Error: scheduled action failed. （定时任务执行失败。）"
+                            try:
+                                tam_storage.mark_scheduled_action_executed(action_id)
+                                tam_storage.delete_scheduled_action(action_id)
+                            except Exception as db_e:
+                                logger.debug("TAM: mark/delete scheduled action failed: {}", db_e)
+                            if hasattr(self.coreInst, "deliver_to_user"):
+                                await self.coreInst.deliver_to_user(
+                                    action.get("user_id") or user_id or "companion",
+                                    to_deliver,
+                                    channel_key=action.get("channel_key") or channel_key,
+                                    source="reminder",
+                                    from_friend=from_friend,
+                                )
+                            else:
+                                await self.send_reminder_to_channel(to_deliver, {"channel_key": channel_key, "friend_id": from_friend} if channel_key else {"friend_id": from_friend})
+                        else:
+                            if hasattr(self.coreInst, "deliver_to_user"):
+                                await self.coreInst.deliver_to_user(
+                                    user_id or "companion",
+                                    "Scheduled action could not run (Core has no execute_scheduled_action). （定时任务无法执行。）",
+                                    channel_key=channel_key,
+                                    source="reminder",
+                                    from_friend=from_friend,
+                                )
+                    else:
+                        if hasattr(self.coreInst, "deliver_to_user"):
+                            await self.coreInst.deliver_to_user(
+                                user_id or "companion",
+                                message or "Reminder",
+                                channel_key=channel_key,
+                                source="reminder",
+                                from_friend=from_friend,
+                            )
+                else:
+                    if hasattr(self.coreInst, "deliver_to_user"):
+                        await self.coreInst.deliver_to_user(
+                            user_id or "companion",
+                            message or "Reminder",
+                            channel_key=channel_key,
+                            source="reminder",
+                            from_friend=from_friend,
+                        )
             else:
-                await self.send_reminder_to_channel(message or "Reminder", {"channel_key": channel_key, "friend_id": from_friend} if channel_key else {"friend_id": from_friend})
+                if hasattr(self.coreInst, "deliver_to_user"):
+                    await self.coreInst.deliver_to_user(
+                        user_id or "companion",
+                        message or "Reminder",
+                        channel_key=channel_key,
+                        source="reminder",
+                        from_friend=from_friend,
+                    )
+                else:
+                    await self.send_reminder_to_channel(message or "Reminder", {"channel_key": channel_key, "friend_id": from_friend} if channel_key else {"friend_id": from_friend})
         except Exception as e:
             logger.exception("TAM: _run_one_shot_and_remove deliver failed: {}", e)
         try:

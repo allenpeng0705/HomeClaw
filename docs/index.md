@@ -57,6 +57,7 @@
 ## More
 
 - [Introducing HomeClaw](introducing-homeclaw.md) — What it is: companion app, memory, plugins (any language), OpenClaw skillset, multi-agent, cloud & multimodal  
+- [Using MCP](mcp.md) — Connect to MCP servers and use **mcp_list_tools** / **mcp_call**  
 - [Story](story.md) — Why and how HomeClaw was built  
 
 ---

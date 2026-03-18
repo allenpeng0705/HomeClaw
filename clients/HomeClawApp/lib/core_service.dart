@@ -1468,8 +1468,9 @@ class CoreService {
     final headers = _authHeaders();
     final deadline = DateTime.now().add(Duration(seconds: sendMessageTimeoutSeconds));
     while (DateTime.now().isBefore(deadline)) {
+      // Per-request timeout: allow 30s so slow Core (e.g. planner + ReAct + LLM) still responds to poll
       final response =
-          await http.get(resultUrl, headers: headers).timeout(Duration(seconds: 15));
+          await http.get(resultUrl, headers: headers).timeout(Duration(seconds: 30));
       if (response.statusCode == 404) {
         _pendingRequestMeta.remove(requestId);
         throw Exception('Request expired or not found (request_id=$requestId)');

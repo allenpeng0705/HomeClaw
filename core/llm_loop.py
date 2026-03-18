@@ -48,6 +48,7 @@ from base.planner_executor import (
     get_last_assistant_content,
     is_send_email_confirmation,
     parse_email_draft,
+    parse_delayed_minutes,
     run_dag as dag_run_dag,
     run_planner as planner_run_planner,
     run_executor as planner_run_executor,
@@ -61,6 +62,24 @@ from base.skills import (
 )
 from memory.prompts import RESPONSE_TEMPLATE
 from memory.chat.message import ChatMessage
+
+try:
+    from memory import tam_storage as _tam_storage_module
+except ImportError:
+    _tam_storage_module = None
+
+
+def _is_confirmation_phrase(text: str) -> bool:
+    """True if the user message is a short confirmation (send, confirm, 确认, etc.) for delayed actions."""
+    if not text or not isinstance(text, str):
+        return False
+    t = text.strip().lower()
+    if not t:
+        return False
+    return t in (
+        "send", "confirm", "ok", "okay", "yes", "y", "发", "发吧", "发送", "批准",
+        "确认", "好", "行", "可以", "同意",
+    )
 from tools.builtin import close_browser_session
 from core.log_helpers import (
     _component_log,
@@ -68,6 +87,7 @@ from core.log_helpers import (
     _strip_leading_route_label,
     format_folder_list_file_find_result,
     format_json_for_user,
+    format_web_search_result,
 )
 
 
@@ -281,6 +301,41 @@ async def answer_from_memory(
         _mem_scope = (str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw") if request else (str(agent_id or "").strip() or "HomeClaw")
     except (TypeError, AttributeError):
         _mem_scope = "HomeClaw"
+    uid = (user_id or getattr(request, "user_id", None) or "").strip() or "companion"
+    # Delayed action confirm: if user says "confirm"/"发送"/"确认" and there is a pending scheduled action, schedule the one-shot and return.
+    if _tam_storage_module and (query or "").strip() and _is_confirmation_phrase((query or "").strip()):
+        try:
+            action = _tam_storage_module.get_pending_confirmation_for_user(uid)
+            if action:
+                action_id = action.get("id")
+                run_at = action.get("run_at")
+                if action_id is not None and run_at is not None:
+                    action_id_str = str(action_id).strip()
+                    if action_id_str:
+                        if hasattr(run_at, "strftime"):
+                            run_at_str = run_at.strftime("%Y-%m-%d %H:%M:%S")
+                            delta_mins = (run_at - datetime.now()).total_seconds() / 60
+                        else:
+                            s = str(run_at).strip()
+                            run_at_str = s.replace("T", " ")[:19] if s else ""
+                            delta_mins = 0
+                        if run_at_str:
+                            orchestrator = getattr(core, "orchestratorInst", None)
+                            tam = getattr(orchestrator, "tam", None) if orchestrator else None
+                            if tam and hasattr(tam, "schedule_one_shot"):
+                                msg = _tam_storage_module.PENDING_ACTION_PREFIX + action_id_str + _tam_storage_module.PENDING_ACTION_SUFFIX
+                                tam.schedule_one_shot(
+                                    msg,
+                                    run_at_str,
+                                    user_id=action.get("user_id") or uid,
+                                    channel_key=action.get("channel_key"),
+                                    friend_id=action.get("friend_id"),
+                                )
+                                _tam_storage_module.mark_scheduled_action_scheduled(action_id_str)
+                                n_mins = max(0, int(round(delta_mins)))
+                                return f"Scheduled. The action will run in {n_mins} minutes. （已安排。）"
+        except Exception as _confirm_e:
+            logger.debug("Delayed action confirm failed (non-fatal): {}", _confirm_e)
     try:
         # If user is replying to a "missing parameters" question, fill and retry the pending plugin call
         app_id_val = app_id or "homeclaw"
@@ -2077,23 +2132,46 @@ async def answer_from_memory(
                                 _planner_executor_final_response = "Email cancelled. （已取消发送。）"
                                 _handled_send_email_confirm = True
                                 _component_log("planner_executor", "send_email: user cancelled; skipping DAG")
-                            elif action == "send":
+                            elif action == "send" or parse_delayed_minutes(query) is not None:
                                 draft = parse_email_draft(last_content)
                                 if draft and draft.get("to"):
-                                    try:
-                                        email_args = {
-                                            "skill_name": "imap-smtp-email",
-                                            "script": "smtp.js",
-                                            "args": ["send", "--to", draft["to"], "--subject", draft.get("subject") or "(no subject)", "--body", draft.get("body") or ""],
-                                        }
-                                        _email_result = await registry.execute_async("run_skill", email_args, context)
-                                        _planner_executor_final_response = _email_result if _email_result else "Email sent. （邮件已发送。）"
-                                        _handled_send_email_confirm = True
-                                        _component_log("planner_executor", "send_email: sent via run_skill; skipping DAG")
-                                    except Exception as _send_e:
-                                        logger.debug("send_email run_skill failed: {}; falling back to DAG", _send_e)
-                                        _planner_executor_final_response = f"Failed to send email: {_send_e!s}. You can try again or say cancel."
-                                        _handled_send_email_confirm = True
+                                    delayed_minutes = parse_delayed_minutes(query)
+                                    if delayed_minutes:
+                                        try:
+                                            _delayed_result = await registry.execute_async(
+                                                "schedule_delayed_action",
+                                                {
+                                                    "minutes": delayed_minutes,
+                                                    "action_type": "send_email",
+                                                    "action_payload": {
+                                                        "to": draft["to"],
+                                                        "subject": draft.get("subject") or "(no subject)",
+                                                        "body": draft.get("body") or "",
+                                                    },
+                                                    "confirmation_prompt": f"I'll send this email in {delayed_minutes} minutes. Reply **confirm** (or 确认) to schedule, or **cancel** to discard.",
+                                                },
+                                                context,
+                                            )
+                                            _planner_executor_final_response = _delayed_result if _delayed_result else f"Scheduled to send in {delayed_minutes} minutes. Reply confirm to schedule. （{delayed_minutes}分钟后发送，回复确认以安排。）"
+                                            _handled_send_email_confirm = True
+                                            _component_log("planner_executor", "send_email: scheduled delayed send; skipping DAG")
+                                        except Exception as _del_e:
+                                            logger.debug("schedule_delayed_action failed: {}; falling back to send now", _del_e)
+                                    if not _handled_send_email_confirm:
+                                        try:
+                                            email_args = {
+                                                "skill_name": "imap-smtp-email",
+                                                "script": "smtp.js",
+                                                "args": ["send", "--to", draft["to"], "--subject", draft.get("subject") or "(no subject)", "--body", draft.get("body") or ""],
+                                            }
+                                            _email_result = await registry.execute_async("run_skill", email_args, context)
+                                            _planner_executor_final_response = _email_result if _email_result else "Email sent. （邮件已发送。）"
+                                            _handled_send_email_confirm = True
+                                            _component_log("planner_executor", "send_email: sent via run_skill; skipping DAG")
+                                        except Exception as _send_e:
+                                            logger.debug("send_email run_skill failed: {}; falling back to DAG", _send_e)
+                                            _planner_executor_final_response = f"Failed to send email: {_send_e!s}. You can try again or say cancel."
+                                            _handled_send_email_confirm = True
                 if not _handled_send_email_confirm:
                     # Build path resolution context from last assistant + last tool output so DAG can resolve "PDF version" → output/report_*.md and "1.pdf" → documents/1.pdf from prior folder_list
                     _path_ctx = ""
@@ -2111,6 +2189,16 @@ async def answer_from_memory(
                                     break
                     except Exception as _path_ctx_e:
                         logger.debug("Build path_resolution_context failed (non-fatal): {}", _path_ctx_e)
+                    # Include tools required by the DAG steps so the flow can run (e.g. search_web needs save_result_page even if category profile is minimal).
+                    _dag_tool_names = list(_pe_tool_names) if _pe_tool_names else []
+                    try:
+                        for _s in (_dag_flow.get("steps") or []):
+                            if isinstance(_s, dict):
+                                _t = (_s.get("tool") or "").strip()
+                                if _t and _t not in _dag_tool_names:
+                                    _dag_tool_names.append(_t)
+                    except Exception:
+                        pass
                     try:
                         _dag_success, _dag_result = await dag_run_dag(
                             _dag_flow,
@@ -2119,12 +2207,38 @@ async def answer_from_memory(
                             user_message=query,
                             completion_fn=core,
                             config=_planner_executor_config,
-                            tool_names=_pe_tool_names if _pe_tool_names else None,
+                            tool_names=_dag_tool_names if _dag_tool_names else None,
                             path_resolution_context=_path_ctx if _path_ctx else None,
                         )
                         if _dag_success:
-                            _planner_executor_final_response = _dag_result
-                            _component_log("planner_executor", "DAG flow completed; using flow result")
+                            # If user asked to send in N minutes in the same message (e.g. "3分钟后帮我发封邮件"), schedule delayed send instead of showing "Reply send"
+                            _delayed_mins = parse_delayed_minutes(query) if (_dag_flow.get("category") or "").strip().lower() == "send_email" else None
+                            _draft_from_dag = parse_email_draft(_dag_result) if isinstance(_dag_result, str) and _dag_result and "To:" in _dag_result and "reply **send**" in (_dag_result or "").lower() else None
+                            if _delayed_mins and _draft_from_dag and _draft_from_dag.get("to"):
+                                try:
+                                    _delayed_result = await registry.execute_async(
+                                        "schedule_delayed_action",
+                                        {
+                                            "minutes": _delayed_mins,
+                                            "action_type": "send_email",
+                                            "action_payload": {
+                                                "to": _draft_from_dag["to"],
+                                                "subject": _draft_from_dag.get("subject") or "(no subject)",
+                                                "body": _draft_from_dag.get("body") or "",
+                                            },
+                                            "confirmation_prompt": f"I'll send this email in {_delayed_mins} minutes. Reply **confirm** (or 确认) to schedule, or **cancel** to discard.",
+                                        },
+                                        context,
+                                    )
+                                    _planner_executor_final_response = _delayed_result if _delayed_result else f"Scheduled to send in {_delayed_mins} minutes. Reply confirm to schedule. （{_delayed_mins}分钟后发送，回复确认以安排。）"
+                                    _component_log("planner_executor", "send_email: scheduled delayed send from initial request; using flow result")
+                                except Exception as _del_e:
+                                    logger.debug("schedule_delayed_action from DAG result failed: {}; using draft as-is", _del_e)
+                                    _planner_executor_final_response = _dag_result
+                                    _component_log("planner_executor", "DAG flow completed; using flow result")
+                            else:
+                                _planner_executor_final_response = _dag_result
+                                _component_log("planner_executor", "DAG flow completed; using flow result")
                         else:
                             _component_log("planner_executor", f"DAG flow failed: {(_dag_result or '')[:80]}…; falling back")
                     except Exception as _dag_e:
@@ -2258,12 +2372,24 @@ async def answer_from_memory(
                             _handling = (
                                 "\n\n## Handling tool results\n"
                                 "**When a tool result looks like an error** (e.g. starts with \"Error:\", or contains \"not found\", \"could not find\", \"file not found\", \"not readable\", \"path is required\"): Acknowledge to the user what went wrong in plain language. Suggest a concrete next step (e.g. list the directory with folder_list, try a different path, or ask the user for the correct path). Do not claim the operation succeeded; do not invent or fabricate successful content.\n"
+                                "**When a tool result indicates missing or required information** (e.g. \"Ask the user for\", \"required\", \"provide ... then call again\", \"provide either ... or\", \"when would you like\"): You MUST ask the user for that information in a friendly, natural way. Rephrase as one short question or a clear list of what you need (e.g. \"What time would you like to be reminded?\" or \"To set this up I need: address and phone number. Could you provide those?\"). Do not just echo the raw tool message—the user should receive a clear question they can answer so you can complete the action on the next turn.\n"
                                 "**When a tool result is an instruction for you** (e.g. \"Instruction-only skill confirmed\", \"You MUST in this turn\", \"Do NOT reply with only this line\"): The tool is telling you what to do in this turn. Perform those steps now: call the tools it asks for (e.g. document_read, then generate content, then save_result_page) or generate the content it specifies. Do not reply with only a confirmation or \"I will do that\"—actually make the tool calls or produce the output in this same turn.\n"
                                 "**When the user asked for generated output** (e.g. HTML slides, report, summary to file) and a tool already returned the source content (e.g. document_read): you MUST call the next tool in this turn (e.g. run_skill(html-slides), save_result_page with the generated content)—do not reply with only a plan or \"I will generate...\"; actually invoke the tool. If you have already generated full HTML in your reply: you MUST call save_result_page(title=..., content=<that HTML>, format='html') so the user gets a view link; do not send the raw HTML as the final message—the user must receive the link to open the slides in the output folder. For HTML slides, the content must be a **multi-slide deck** (multiple slides/sections, one idea per slide), not a single long page.\n"
                                 "**CRITICAL:** If a previous message in this conversation is a tool result that already contains document/content (e.g. from document_read), do NOT respond with a plan like \"我将现在生成\" or \"首先，我需要调用 document_read\" or \"I will call document_read then...\". You already have the content—either call the next tool (save_result_page, run_skill) with your generated output in this turn, or output the full generated content in your message. Never return only a plan or intention.\n"
                                 "**CRITICAL for HTML slides:** If the user asked for HTML slides (or \"生成html slides\", \"总结...生成幻灯片\") and the tool result above is document content: you MUST call run_skill(skill_name='html-slides') in this turn. Then generate a **multi-slide deck** (8–20 slides, one idea per slide) and call save_result_page with that HTML. Do not output a single long page—split the summary into distinct slides.\n"
                                 "**In general:** Only use or cite content that tools actually returned. Do not invent file contents, error messages, or tool outputs."
                             )
+                            # When the last tool result is very long, instruct the model to summarize and/or save to file (context management; see docs_design/DeepAgentsComparisonAndLearnings.md).
+                            try:
+                                _tc = getattr(Util().get_core_metadata(), "tools_config", None)
+                                _tc = _tc if isinstance(_tc, dict) else {}
+                                _thresh = int(_tc.get("large_result_summarize_threshold_chars", 6000))
+                                if _thresh > 0 and isinstance(last_tool_result_raw, str) and len(last_tool_result_raw) > _thresh:
+                                    _handling += (
+                                        "\n**The previous tool result is very long.** Summarize it concisely for the user (a few sentences or a short list). If it is document-like or would be useful as a page, call save_result_page(title=..., content=<full or summarized content>, format='markdown') and return the view link to the user; do not paste the full content in your message."
+                                    )
+                            except (TypeError, ValueError, AttributeError):
+                                pass
                             current_messages[0]["content"] = _sys_content + _handling
                         if mix_route_this_request and "continuing after tools ran" not in (current_messages[0].get("content") or ""):
                             _use2 = (
@@ -2834,7 +2960,8 @@ async def answer_from_memory(
                                 except Exception as e_sw:
                                     logger.debug("Fallback web_search failed: {}", e_sw)
                         # Log when user clearly asked for scheduling but model didn't call any tool (informational only; no auto-invoke when strict_fallback).
-                        if isinstance(query, str) and _query_looks_like_scheduling(query) and registry:
+                        # Do not log if we already ran remind_me/cron_schedule/route_to_tam this request (e.g. model replied with text after a successful reminder).
+                        if isinstance(query, str) and _query_looks_like_scheduling(query) and registry and last_tool_name not in ("remind_me", "cron_schedule", "route_to_tam"):
                             try:
                                 _tool_names = [getattr(t, "name", None) for t in (registry.list_tools() or []) if getattr(t, "name", None)]
                                 if any(n in _tool_names for n in ("cron_schedule", "remind_me", "route_to_tam")):
@@ -3171,6 +3298,36 @@ async def answer_from_memory(
                         args["path"] = _document_read_forced_path
                         _document_read_forced_path = None  # only override the first document_read for this request
                         logger.info("document_read path overridden to user-specified path: %s", args.get("path"))
+                    # remind_me: if model omitted minutes/at_time but user said e.g. "5分钟后", infer from query so execution succeeds (avoids repeated failed tool calls).
+                    if name == "remind_me" and isinstance(args, dict) and (query or "").strip():
+                        has_minutes = args.get("minutes") is not None
+                        has_at_time = bool((args.get("at_time") or "").strip())
+                        if not has_minutes and not has_at_time:
+                            try:
+                                _inferred = _infer_remind_me_fallback((query or "").strip())
+                                if isinstance(_inferred, dict) and isinstance(_inferred.get("arguments"), dict):
+                                    _ia = _inferred["arguments"]
+                                    if _ia.get("minutes") is not None or (_ia.get("at_time") or "").strip():
+                                        args = dict(args)
+                                        if not has_minutes and _ia.get("minutes") is not None:
+                                            args["minutes"] = _ia["minutes"]
+                                        if not has_at_time and (_ia.get("at_time") or "").strip():
+                                            args["at_time"] = (_ia.get("at_time") or "").strip()
+                                        if not (args.get("message") or "").strip() and (_ia.get("message") or "").strip():
+                                            args["message"] = (_ia.get("message") or "Reminder").strip()
+                                        _component_log("tools", "remind_me: completed missing minutes/at_time from user query (model sent message only)")
+                            except Exception as _e:
+                                logger.debug("remind_me infer from query failed: {}", _e)
+                    # Avoid infinite loop: if remind_me still lacks minutes/at_time and last result was the "provide either minutes" error, skip re-execution and return clarification.
+                    _remind_me_skip_repeat = (
+                        name == "remind_me"
+                        and isinstance(args, dict)
+                        and args.get("minutes") is None
+                        and not (args.get("at_time") or "").strip()
+                        and last_tool_name == "remind_me"
+                        and isinstance(last_tool_result_raw, str)
+                        and "provide either minutes" in last_tool_result_raw
+                    )
                     if name == "run_skill":
                         _component_log("tools", "executing run_skill (in_process from run_skill_py_in_process_skills if listed)")
                     # When response was truncated (finish_reason=length), tool_call arguments (e.g. save_result_page content) may be cut off; executor will reject bad HTML.
@@ -3255,6 +3412,13 @@ async def answer_from_memory(
                     if _skip_duplicate_run_skill:
                         result = "This skill was already run in this conversation. Use the results above or call another tool (e.g. save_result_page)."
                         logger.info("Skipping duplicate run_skill({}); already executed this request", _skill_key)
+                    elif _remind_me_skip_repeat:
+                        try:
+                            _ask = _remind_me_clarification_question((query or "").strip()) if (query or "").strip() else None
+                            result = (str(_ask).strip() if _ask else "您希望什么时候提醒？例如：「15分钟后」或「下午3点」。 When would you like to be reminded? E.g. in 15 minutes or at 3:00 PM.")
+                        except Exception:
+                            result = "您希望什么时候提醒？例如：「15分钟后」或「下午3点」。 When would you like to be reminded? E.g. in 15 minutes or at 3:00 PM."
+                        logger.info("Skipping repeated remind_me without minutes/at_time (avoid loop); returning clarification")
                     else:
                         try:
                             if _tool_verified_skip:
@@ -3395,7 +3559,21 @@ async def answer_from_memory(
                     "Instruction-only skill confirmed" in _raw or "Instruction-only skill" in _raw
                 ) and ("You MUST in this turn" in _raw or "Do NOT reply with only this line" in _raw)
                 if not _is_instruction_only:
-                    response = format_json_for_user(last_tool_result_raw) or _raw
+                    # When the tool asked for missing/required info, show a friendly question so the user can reply (instead of raw error).
+                    _ask_user_phrases = ("Ask the user", "provide either", "required", "then call ", "parameters=")
+                    if any(p in _raw for p in _ask_user_phrases) or (_raw.startswith("Error:") and ("required" in _raw or "provide" in _raw)):
+                        if last_tool_name == "remind_me" and ("minutes" in _raw or "at_time" in _raw):
+                            try:
+                                response = (_remind_me_clarification_question((query or "").strip()) if (query or "").strip() else None) or "When would you like to be reminded? (e.g. in 15 minutes or at 3:00 PM). 您希望什么时候提醒？例如：15分钟后 或 下午3点。"
+                            except Exception:
+                                response = "When would you like to be reminded? (e.g. in 15 minutes or at 3:00 PM). 您希望什么时候提醒？例如：15分钟后 或 下午3点。"
+                        else:
+                            response = "I need a bit more information to do that. Please tell me the missing details (e.g. time, address, or whatever the previous step asked for), and I’ll try again. (请补充一下需要的信息，例如时间、地址等，我再帮您处理。)"
+                    else:
+                        if last_tool_name == "web_search":
+                            response = format_web_search_result(last_tool_result_raw) or format_json_for_user(last_tool_result_raw) or _raw
+                        else:
+                            response = format_json_for_user(last_tool_result_raw) or _raw
             # Only show generic "Done..." when we have no usable response (no err_hint, and either no tool ran or tool output was empty/error-like).
             if response is None or (isinstance(response, str) and len(response.strip()) == 0):
                 if last_tool_name and not err_hint:
@@ -3435,18 +3613,36 @@ async def answer_from_memory(
                     route_label = ""
                     content_only = full
                 formatted = format_folder_list_file_find_result(content_only, is_file_find=False)
+                if not formatted:
+                    # Preserve short header (e.g. DAG summary "# 最火爆的电影推荐~") before JSON when formatting web_search results
+                    content_for_search = content_only
+                    search_header = ""
+                    if "\n\n{" in content_only and '"results"' in content_only:
+                        idx = content_only.index("\n\n{")
+                        if idx > 0 and idx < 300:
+                            search_header = (content_only[:idx].strip() + "\n\n") or ""
+                            content_for_search = content_only[idx:].strip()
+                    formatted = format_web_search_result(content_for_search)
+                    if formatted and search_header:
+                        formatted = search_header + formatted
                 if not formatted and (content_only or "").strip().startswith("["):
                     formatted = format_json_for_user(content_only)
                 if formatted:
                     response = (route_label + formatted).strip() if route_label else formatted
             except Exception:
                 pass
-        # If the model echoed raw JSON from a scheduling tool (cron_schedule, record_date), show a short friendly line so the user never sees raw JSON. Never crash.
+        # If the model echoed raw JSON from a scheduling tool (cron_schedule, record_date), email send result, or session_status, show a short friendly line. Never crash.
         if isinstance(response, str) and response.strip().startswith("{"):
             try:
-                obj = json.loads(response.strip())
+                _to_parse = response.strip()
+                if "stderr:" in _to_parse:
+                    _to_parse = _to_parse.split("stderr:")[0].strip()
+                obj = json.loads(_to_parse)
                 if isinstance(obj, dict):
-                    if obj.get("scheduled") and ("job_id" in obj or "cron_expr" in obj):
+                    if obj.get("success") is True and obj.get("to") and ("messageId" in obj or "message_id" in obj):
+                        to_addr = str(obj.get("to") or "").strip()
+                        response = f"Email sent to {to_addr}. （邮件已发送。）"
+                    elif obj.get("scheduled") and ("job_id" in obj or "cron_expr" in obj):
                         msg = str(obj.get("message", "Scheduled reminder") or "Scheduled reminder")
                         response = f"**Recurring reminder scheduled.** I'll remind you: {msg}."
                     elif obj.get("recorded") and ("event_name" in obj or "when" in obj):
@@ -3469,6 +3665,15 @@ async def answer_from_memory(
         # If the model echoed the internal file_write/save_result_page empty-content message, show a short user-facing message instead
         if isinstance(response, str) and ("Do NOT share this link" in response or ("empty or too small" in response and '"written"' in response)):
             response = "The slide wasn’t generated yet because the content was empty. Please try again; I’ll generate the HTML from the document and then save it. （幻灯片尚未生成，请再试一次。）"
+        # When we just ran remind_me, ensure the user sees the correct trigger time (model sometimes hallucinates wrong time).
+        if last_tool_name == "remind_me" and isinstance(last_tool_result_raw, str) and last_tool_result_raw.strip() and isinstance(response, str) and response.strip():
+            _tr = last_tool_result_raw.strip()
+            _time_match = re.search(r"Reminder set for (\d{1,2}:\d{2}(?::\d{2})?)", _tr) or re.search(r"run_at=['\"]?[\d-]+\s+(\d{1,2}:\d{2}(?::\d{2})?)", _tr)
+            if _time_match:
+                _correct_time = _time_match.group(1)
+                _hm = _correct_time[:5] if len(_correct_time) >= 5 else _correct_time
+                if _hm not in response and _correct_time not in response:
+                    response = (response.strip() + "\n\n（提醒时间：{}）").format(_hm)
         if mix_route_this_request and mix_show_route_label:
             layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
             label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "

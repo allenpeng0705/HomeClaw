@@ -104,3 +104,18 @@ class TamOneShotReminderModel(Base):
     channel_key = Column(String, nullable=True)  # for channel delivery (per-session cron)
     friend_id = Column(String, nullable=True)  # Step 10: from_friend when reminder fires (e.g. "Sabrina" or "HomeClaw")
     created_at = Column(TIMESTAMP, default=func.current_timestamp(), index=True)
+
+
+class ScheduledActionModel(Base):
+    """Confirm-now-execute-later: store a pending action (e.g. send_email, run_skill) to run at run_at after user confirms. When a one-shot reminder fires with message __ACTION:id__, TAM runs this action and delivers the result."""
+    __tablename__ = "homeclaw_scheduled_actions"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, nullable=False, index=True)
+    friend_id = Column(String, nullable=True, index=True)
+    channel_key = Column(String, nullable=True)
+    run_at = Column(DateTime, nullable=False, index=True)
+    action_type = Column(String, nullable=False, index=True)  # send_email, run_skill, etc.
+    action_payload = Column(Text, nullable=False)  # JSON
+    status = Column(String, nullable=False, index=True, default="awaiting_confirmation")  # awaiting_confirmation, scheduled, executed, cancelled
+    created_at = Column(TIMESTAMP, default=func.current_timestamp(), index=True)

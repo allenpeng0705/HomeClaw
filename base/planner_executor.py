@@ -30,7 +30,7 @@ PLANNER_SYSTEM = """You are a task planner. Given the user's request and the int
 - "steps": array of steps. Each step has: "id" (string, e.g. "1", "2"), "tool" (exact tool name from the list), "arguments" (object with parameters for that tool), "optional" (boolean, default false). Use only tools from the available list.
 - "requires_final_summary": boolean (true if the user should get a short natural-language reply after steps run).
 
-Output only valid JSON. No markdown, no code fence, no explanation. For run_skill, set "arguments": {"skill_name": "<exact skill folder name>"}. You may use placeholders in arguments like "<from_step_1>" to mean "use the text result of step 1"; the executor will replace them."""
+Output only valid JSON: every key must be in double quotes (e.g. "optional": false not optional: false). No markdown, no code fence, no explanation. No trailing commas. For run_skill, set "arguments": {"skill_name": "<exact skill folder name>"}. You may use placeholders in arguments like "<from_step_1>" only when the value comes from a previous step; otherwise use the literal value from the user (e.g. "minutes_to_wait": 5 for "in 5 minutes")."""
 
 # Re-plan: same JSON schema; planner sees goal, what ran so far, and the failure.
 REPLAN_SYSTEM = """You are a task planner. A previous plan failed at one step. Given the original goal, the execution log (steps that already ran and their results), and the error, output a NEW single JSON object with:
@@ -103,6 +103,31 @@ def is_send_email_confirmation(message: Optional[str]) -> Optional[str]:
         return "cancel"
     if q in ("send the email", "send the mail", "yes send the email"):
         return "send"
+    return None
+
+
+def parse_delayed_minutes(message: Optional[str]) -> Optional[int]:
+    """
+    If the user message asks to do something in N minutes (e.g. "3分钟后发", "send in 5 minutes"), return N.
+    Otherwise return None. Used for delayed send email or any delayed action. Never raises.
+    """
+    if not message or not isinstance(message, str):
+        return None
+    q = message.strip()
+    if not q:
+        return None
+    # "3分钟后发", "5分钟后发送", "3分钟后帮我发封邮件", "send in 3 minutes", "in 5 min send"
+    m = re.search(
+        r"(?:(\d+)\s*分钟\s*后\s*[发送]|(\d+)\s*分钟\s*后\s*(?:帮我?)?\s*发|(\d+)\s*分钟\s*后.*?发(?:封)?(?:邮件)?|(?:in\s+)?(\d+)\s*min(?:ute)?s?(?:\s*(?:to\s+)?(?:send|later))?|(\d+)\s*min\s*(?:to\s+)?send)",
+        q,
+        re.I,
+    )
+    if m:
+        for g in m.groups():
+            if g is not None and g.isdigit():
+                n = int(g)
+                if 0 < n <= 1440:  # 1 min to 24h
+                    return n
     return None
 
 
@@ -453,6 +478,9 @@ async def _resolve_flow_step_args(
                 out[key] = val if val else (default or "")
             else:
                 out[key] = default or ""
+            # Fallback: when content is for markdown_to_pdf and LLM step returned empty, use step result (e.g. raw .md from document_read)
+            if key == "content" and (not (out.get("content") or "").strip()) and prior and (prior or "").strip():
+                out[key] = prior.strip()
         elif isinstance(source, str) and source.startswith("llm_compose_email_from_step_"):
             n = source.replace("llm_compose_email_from_step_", "").strip()
             prior = (step_results.get(n) or step_results.get(str(n)) or "") if n else ""
@@ -598,6 +626,9 @@ async def run_dag(
                 result = result if result is not None else ""
                 if isinstance(result, str) and result.strip().startswith(TOOL_ERROR_PREFIX):
                     return False, result
+                # Treat tool-level validation errors as DAG failure so caller can fall back (e.g. markdown_to_pdf "Content is required")
+                if tool_name == "markdown_to_pdf" and isinstance(result, str) and "Content is required" in result:
+                    return False, result
                 step_id = str(step_index_1based)
                 step_results[step_id] = result
                 last_result = result
@@ -632,7 +663,10 @@ def build_final_summary_messages(
 ) -> List[Dict[str, Any]]:
     """Build messages for the final-summary LLM: goal, what ran, last result, optional user message. Never raises."""
     step_results = step_results if isinstance(step_results, dict) else {}
+    total = len(steps_done) if isinstance(steps_done, list) else 0
     summary_parts = [f"Goal: {goal or 'Complete the task'}"]
+    if total > 0:
+        summary_parts.append(f"Plan progress: {total}/{total} steps completed.")
     for entry in steps_done or []:
         if not isinstance(entry, dict):
             continue
@@ -836,14 +870,47 @@ def _extract_json_from_response(response: str) -> Optional[str]:
     return None
 
 
+def _sanitize_plan_json(raw: str) -> str:
+    """
+    Fix common LLM JSON mistakes so strict json.loads can parse the plan.
+    - Unquoted keys: optional, goal, steps, requires_final_summary, requireFinalSummary.
+    - Key without value: "requires_final_summary" } or , -> "requires_final_summary": true
+    - Wrong key names: "" or "steps" variants -> "steps"; minutes_to_wait -> minutes; requireFinalSummary -> requires_final_summary.
+    """
+    if not raw or not isinstance(raw, str):
+        return raw or ""
+    text = raw
+    # Fix unquoted keys common in planner steps: optional, id, tool, arguments
+    text = re.sub(r"\boptional\s*:\s*(true|false)", r'"optional": \1', text, flags=re.IGNORECASE)
+    text = re.sub(r"\bid\s*:\s*['\"]?([^,\]}]+)['\"]?", r'"id": "\1"', text)
+    text = re.sub(r"\btool\s*:\s*['\"]?([^,\]}]+)['\"]?", r'"tool": "\1"', text)
+    text = re.sub(r"\barguments\s*:\s*", r'"arguments": ', text, flags=re.IGNORECASE)
+    # Fix requireFinalSummary (camelCase) -> "requires_final_summary": true
+    text = re.sub(r"\brequireFinalSummary\s*:\s*true", r'"requires_final_summary": true', text, flags=re.IGNORECASE)
+    text = re.sub(r'"requireFinalSummary"\s*:\s*true', r'"requires_final_summary": true', text, flags=re.IGNORECASE)
+    # Fix "requires_final_summary" with no value (invalid JSON)
+    text = re.sub(r'"requires_final_summary"\s*([,}])', r'"requires_final_summary": true\1', text)
+    # Fix empty or wrong key for steps: "" : [ or '"": [' -> "steps": [
+    text = re.sub(r'"\s*"\s*:\s*\[', r'"steps": [', text)
+    # Fix minutes_to_wait"5" (missing colon) -> "minutes": 5
+    text = re.sub(r'minutes_to_wait"\s*(\d+)\s*"', r'"minutes": \1', text, flags=re.IGNORECASE)
+    text = re.sub(r'"minutes_to_wait"\s*:\s*"(\d+)"', r'"minutes": \1', text, flags=re.IGNORECASE)
+    # Normalize "steps" key when it was written as empty string key (already handled above)
+    # Remove trailing commas before ] or } (invalid in strict JSON)
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    return text
+
+
 def parse_plan(response: str) -> Optional[Dict[str, Any]]:
     """
     Parse planner LLM response into a plan dict. Returns None on parse failure.
     Expects JSON with keys: goal (str), steps (list), requires_final_summary (bool, optional).
+    Applies lenient fixup for common LLM JSON mistakes (unquoted keys, trailing commas).
     """
     raw = _extract_json_from_response(response)
     if not raw:
         return None
+    raw = _sanitize_plan_json(raw)
     try:
         plan = json.loads(raw)
         if not isinstance(plan, dict):

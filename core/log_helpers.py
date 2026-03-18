@@ -82,6 +82,81 @@ def format_folder_list_file_find_result(raw: str, is_file_find: bool = False) ->
     return header + "\n".join(lines)
 
 
+def format_web_search_result(raw: str) -> Optional[str]:
+    """
+    Parse web_search tool result (JSON with "results" array of {title, url, description}) and return readable list.
+    Handles raw JSON or text containing a JSON object (e.g. "- **results:** {...}"). Returns None if not web_search format. Never raises.
+    """
+    if not raw or not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    if s.startswith("Error") or "error" in s[:100].lower():
+        return None
+    data = None
+    try:
+        # Try direct parse
+        try:
+            data = json.loads(s)
+        except (json.JSONDecodeError, TypeError):
+            pass
+        # If wrapped (e.g. header + JSON, or "Tool (web_search): {...}"), find JSON object. Prefer one containing "results".
+        if data is None and "{" in s and '"results"' in s:
+            start = s.index("{")
+            # Try from first { to last }; if that fails (truncated), try shortening from the end until valid JSON
+            for end in range(len(s), start, -1):
+                if end <= start + 10:
+                    break
+                if s[end - 1] != "}":
+                    continue
+                try:
+                    data = json.loads(s[start:end])
+                    if isinstance(data, dict) and isinstance(data.get("results"), list):
+                        break
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            else:
+                data = None
+        if data is None and "{" in s:
+            start = s.index("{")
+            end = s.rfind("}") + 1
+            if end > start:
+                try:
+                    data = json.loads(s[start:end])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        if data is None:
+            return None
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    try:
+        if not isinstance(data, dict):
+            return None
+        results = data.get("results")
+        if not isinstance(results, list) or not results:
+            return None
+        lines = []
+        for i, e in enumerate(results[:15]):  # cap at 15
+            if not isinstance(e, dict):
+                continue
+            try:
+                title = str(e.get("title") or e.get("name") or "").strip() or "(no title)"
+                url = str(e.get("url") or "").strip()
+                desc = str(e.get("description") or "").strip()
+                if url:
+                    lines.append(f"- **{title}**\n  {url}" + (f"\n  {desc[:200]}…" if len(desc) > 200 else (f"\n  {desc}" if desc else "")))
+                else:
+                    lines.append(f"- **{title}**" + (f"\n  {desc[:200]}…" if len(desc) > 200 else (f"\n  {desc}" if desc else "")))
+            except (TypeError, AttributeError, ValueError):
+                continue
+        if not lines:
+            return None
+        return "## 搜索结果 / Search results\n\n" + "\n\n".join(lines)
+    except Exception:
+        return None
+
+
 def format_json_for_user(raw: str) -> Optional[str]:
     """
     Convert JSON to user-friendly text so we never show raw JSON to the end user.

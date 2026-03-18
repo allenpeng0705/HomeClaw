@@ -148,6 +148,15 @@ This document lists all **built-in tools** with their **name** and **description
 
 ---
 
+## MCP (Model Context Protocol)
+
+| Tool | Description |
+|------|-------------|
+| **mcp_list_tools** | List tools exposed by an MCP server. Pass server_id (a key from tools.mcp.servers in config). Use this to discover what tools a configured MCP server provides before calling mcp_call. |
+| **mcp_call** | Call a tool on an MCP server. Pass server_id (from config tools.mcp.servers), tool_name (from mcp_list_tools), and arguments (object). Use when the user wants to use an external MCP service (e.g. GitHub, filesystem, browser). |
+
+---
+
 ## HTTP & webhook
 
 | Tool | Description |

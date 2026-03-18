@@ -9,9 +9,10 @@ from typing import Any, Dict, List, Optional, Union
 import yaml
 
 # Tool names per preset. Must match names registered in the tool registry (e.g. tools/builtin.py).
-# Reminder: cron/reminder/scheduling only.
+# Reminder: cron/reminder/scheduling only. Include time so the LLM can use current date when scheduling (e.g. "tomorrow at 9am").
 TOOL_PRESETS: Dict[str, List[str]] = {
     "reminder": [
+        "time",
         "remind_me",
         "record_date",
         "recorded_events_list",

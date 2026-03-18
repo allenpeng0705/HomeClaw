@@ -214,6 +214,30 @@ async def route(
     except Exception as e:
         logger.debug("Intent router get_file_link pre-check failed (non-fatal): {}", e)
 
+    # When user explicitly asks to convert Markdown to PDF (e.g. "convert X.md to PDF", "把X.md转成PDF"),
+    # route directly to generate_pdf so the fixed DAG (document_read -> markdown_to_pdf) runs and uses
+    # VMPrint/pandoc/weasyprint instead of generic file_write. This makes Markdown→PDF behavior consistent
+    # and avoids hallucinated PDFs.
+    try:
+        if "generate_pdf" in categories and query is not None and isinstance(query, str) and query.strip():
+            q = query.strip().lower()
+            has_pdf = "pdf" in q
+            has_md = ".md" in q or "markdown" in q or "mark down" in q or "md文" in query or "markdown文" in query
+            mentions_convert = (
+                "convert" in q
+                or "to pdf" in q
+                or "export" in q and "pdf" in q
+                or "转成pdf" in query
+                or "转为pdf" in query
+                or "生成pdf" in query
+                or "导出为pdf" in query
+            )
+            if has_pdf and has_md and mentions_convert:
+                logger.debug("Intent router: query matches markdown->PDF convert -> category generate_pdf")
+                return "generate_pdf"
+    except Exception as e:
+        logger.debug("Intent router generate_pdf pre-check failed (non-fatal): {}", e)
+
     try:
         include_turns = max(0, int(config.get("include_recent_turns", 0) or 0))
     except (TypeError, ValueError):

@@ -876,6 +876,18 @@ class Core(CoreInterface):
         """Push to user (WebSocket, push, channel). Delegates to core.outbound.deliver_to_user. audios: voice; videos: short video. from_user_id: for user_message so Companion can match chat thread."""
         await _deliver_to_user_fn(self, user_id, text, images=images, audios=audios, videos=videos, channel_key=channel_key, source=source, from_friend=from_friend, from_user_id=from_user_id)
 
+    async def execute_scheduled_action(
+        self,
+        action_type: str,
+        action_payload: dict,
+        user_id: str,
+        friend_id: Optional[str] = None,
+        channel_key: Optional[str] = None,
+    ) -> str:
+        """Run a stored action (send_email, run_skill, etc.). Used by TAM when a one-shot reminder fires with __ACTION:id__. Returns result string. Never raises."""
+        from core.scheduled_action import execute_scheduled_action as _run_action
+        return await _run_action(self, action_type, action_payload or {}, user_id, friend_id=friend_id, channel_key=channel_key)
+
     async def send_response_to_request_channel(
         self,
         response: str,
@@ -3110,7 +3122,8 @@ class Core(CoreInterface):
     async def run_spawn(self, task: str, llm_name: Optional[str] = None) -> str:
         """
         Sub-agent run: one-off completion for a task (one agent, optional different LLM).
-        For sessions_spawn tool. No RAG, no tools, no session; same identity via system prompt is optional.
+        For sessions_spawn tool. Uses isolated context: no RAG, no tools, no prior conversation—
+        only system prompt + the task message, so the sub-agent gets a clean context window.
         Returns the model response text or an error string.
         """
         if not (task and str(task).strip()):

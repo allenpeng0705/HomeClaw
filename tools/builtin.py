@@ -37,6 +37,11 @@ from loguru import logger
 import time as _time
 
 try:
+    from memory import tam_storage as _tam_storage
+except ImportError:
+    _tam_storage = None
+
+try:
     import yaml
 except ImportError:
     yaml = None
@@ -863,6 +868,64 @@ async def _remind_me_executor(arguments: Dict[str, Any], context: ToolContext) -
         return f"Reminder set for {time_part}. I'll remind you: {message}. (Current date: {today.strftime('%Y-%m-%d')}, {day_num}号. Use this when referring to today.)"
     except Exception as e:
         return f"Error: {e!s}"
+
+
+async def _schedule_delayed_action_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Store an action to run at a future time; user must confirm (e.g. reply 'confirm' or '发送') to schedule. Use for: 'send this email in 3 minutes', '3分钟后发邮件', or any task that should run after a delay. Returns the confirmation_prompt so the LLM can show it to the user. Never raises."""
+    try:
+        if _tam_storage is None:
+            return "Error: scheduled action storage not available."
+        if not isinstance(arguments, dict):
+            return "Error: invalid arguments."
+        core = getattr(context, "core", None)
+        if core is None:
+            return "Error: context has no core."
+        orchestrator = getattr(core, "orchestratorInst", None)
+        if orchestrator is None:
+            return "Error: Orchestrator/TAM not available for delayed execution."
+        tam = getattr(orchestrator, "tam", None)
+        if tam is None or not hasattr(tam, "schedule_one_shot"):
+            return "Error: TAM not available for delayed execution."
+        minutes = arguments.get("minutes")
+        if minutes is None:
+            try:
+                minutes = int((arguments.get("minutes_to_wait") or 0))
+            except (TypeError, ValueError):
+                pass
+        if minutes is None or not isinstance(minutes, int) or minutes <= 0:
+            return "Error: minutes must be a positive integer (e.g. 3 for 'in 3 minutes')."
+        if minutes > 1440:
+            return "Error: minutes must be at most 1440 (24 hours)."
+        action_type = (arguments.get("action_type") or "").strip() or "run_skill"
+        action_payload = arguments.get("action_payload")
+        if action_payload is not None and not isinstance(action_payload, dict):
+            return "Error: action_payload must be a dict (e.g. {\"to\": \"...\", \"subject\": \"...\", \"body\": \"...\"} for send_email)."
+        action_payload = action_payload if isinstance(action_payload, dict) else {}
+        confirmation_prompt = (arguments.get("confirmation_prompt") or "").strip()
+        user_id = (getattr(context, "system_user_id", None) or getattr(context, "user_id", None) or "").strip() or "companion"
+        channel_key = None
+        if getattr(context, "app_id", None) and getattr(context, "user_id", None) and getattr(context, "session_id", None):
+            channel_key = f"{context.app_id}:{context.user_id}:{context.session_id}"
+        elif user_id.lower() in ("companion", "system"):
+            channel_key = "companion"
+        friend_id = getattr(context, "friend_id", None) or getattr(context, "app_id", None)
+        run_at = datetime.now() + timedelta(minutes=minutes)
+        action_id = _tam_storage.add_scheduled_action(
+            user_id=user_id,
+            run_at=run_at,
+            action_type=action_type,
+            action_payload=action_payload,
+            friend_id=friend_id,
+            channel_key=channel_key,
+        )
+        if not action_id:
+            return "Error: could not store the delayed action."
+        if not confirmation_prompt:
+            confirmation_prompt = f"I'll run this in {minutes} minutes. Reply **confirm** (or 确认) to schedule, or **cancel** to discard."
+        return confirmation_prompt
+    except Exception as e:
+        logger.debug("schedule_delayed_action executor failed: {}", e)
+        return f"Error: delayed action could not be scheduled: {e!s}"
 
 
 async def _record_date_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
@@ -1745,6 +1808,24 @@ async def _web_search_serpapi(query: str, count: int, api_key: str, engine: str)
     return json.dumps({"results": results, "provider": "serpapi", "engine": eng})
 
 
+def _web_search_recent_intent(query: str) -> tuple:
+    """Detect if query asks for 'recent' / 'latest' content. Returns (use_time_range: bool, append_year_to_query: bool).
+    When append_year_to_query is True, caller should append current year to query so results favor current-year lists (e.g. movie recommendations)."""
+    if not query or not isinstance(query, str):
+        return (False, False)
+    q = query.strip().lower()
+    recent_phrases = (
+        "最近", "最新", "近期", "今年", "当下",
+        "latest", "recent", "newest", "current", "this year", "now playing", "in theaters",
+    )
+    is_recent = any(p in q for p in recent_phrases)
+    movie_phrases = ("电影", "影片", "电视剧", "电影推荐", "movie", "film", "movies", "上映")
+    is_movie = any(p in q for p in movie_phrases)
+    use_time_range = is_recent
+    append_year = is_recent and is_movie
+    return (use_time_range, append_year)
+
+
 async def _web_search_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Search the web. Free (no key): duckduckgo. Free tier: tavily, google_cse (100/day), bing (1000/mo). Paid: brave, serpapi. Fallback: DuckDuckGo when no key."""
     config = _get_tools_config()
@@ -1758,7 +1839,15 @@ async def _web_search_executor(arguments: Dict[str, Any], context: ToolContext) 
     query = (arguments.get("query") or "").strip()
     if not query:
         return "Error: query is required"
-    count = int(arguments.get("count", 5))
+    use_time_range, append_year = _web_search_recent_intent(query)
+    if append_year:
+        year = datetime.now(timezone.utc).year
+        if str(year) not in query:
+            query = f"{query} {year}"
+    try:
+        count = int(arguments.get("count", 5))
+    except (TypeError, ValueError):
+        count = 5
     count = min(max(1, count), 20)
 
     async def _try_fallback() -> str:
@@ -1850,7 +1939,11 @@ async def _web_search_executor(arguments: Dict[str, Any], context: ToolContext) 
                 ),
                 "results": [],
             })
-        result = await _web_search_tavily(query, count, api_key, search_config.get("tavily") or {})
+        _tavily_raw = search_config.get("tavily")
+        tavily_opts = dict(_tavily_raw) if isinstance(_tavily_raw, dict) else {}
+        if use_time_range and not (tavily_opts.get("time_range") or "").strip():
+            tavily_opts["time_range"] = "month"
+        result = await _web_search_tavily(query, count, api_key, tavily_opts)
         try:
             data = json.loads(result)
             if data.get("error") and not data.get("results") and use_fallback:
@@ -2204,7 +2297,7 @@ async def _agents_list_executor(arguments: Dict[str, Any], context: ToolContext)
     """List agent ids. HomeClaw runs a single Core; returns a note that only one agent is available."""
     return json.dumps({
         "agents": ["default"],
-        "message": "HomeClaw runs a single agent (Core). Use sessions_spawn for a sub-agent one-off run (optional llm_name for a different model). Use models_list to see available llm_name values.",
+        "message": "HomeClaw runs a single agent (Core). Use sessions_spawn for a sub-agent one-off run with isolated context (no prior conversation)—ideal for a focused subtask. Optional llm_name for a different model. Use models_list to see available llm_name values.",
     })
 
 
@@ -3681,9 +3774,13 @@ async def _markdown_to_pdf_executor(arguments: Dict[str, Any], context: ToolCont
         if not isinstance(md2pdf_cfg, dict):
             md2pdf_cfg = {}
         vmprint_dir = (md2pdf_cfg.get("vmprint_dir") or "").strip() or None
+        _project_root = Path(__file__).resolve().parent.parent
         if vmprint_dir and not os.path.isabs(vmprint_dir):
-            _project_root = Path(__file__).resolve().parent.parent
             vmprint_dir = str((_project_root / vmprint_dir).resolve())
+        elif not vmprint_dir:
+            # Fallback: try default tools/vmprint so VMPrint works even if tools_config wasn't merged (e.g. from skills_and_plugins)
+            _default_vmp = (_project_root / "tools" / "vmprint").resolve()
+            vmprint_dir = str(_default_vmp)
         loop = asyncio.get_event_loop()
         pdf_bytes, err = await loop.run_in_executor(
             None, lambda: _markdown_to_pdf_convert_sync(content_str, vmprint_dir=vmprint_dir)
@@ -3716,45 +3813,66 @@ def _markdown_to_pdf_convert_sync(
     if not md_content:
         return (None, "Content is empty.")
 
+    # Resolve VMPrint dir: support alternate name "vm_print" (underscore) if "vmprint" path does not exist
+    def _vmprint_base() -> Optional[Path]:
+        if not vmprint_dir:
+            return None
+        base = Path(vmprint_dir).resolve()
+        if base.is_dir() and (base / "draft2final").is_dir():
+            return base
+        # If configured as tools/vmprint but user installed as tools/vm_print, try that
+        alt = None
+        if vmprint_dir.rstrip("/\\").endswith("vmprint"):
+            alt = base.parent / "vm_print"
+        elif vmprint_dir.rstrip("/\\").endswith("vm_print"):
+            alt = base.parent / "vmprint"
+        if alt and alt.is_dir() and (alt / "draft2final").is_dir():
+            return alt
+        return None
+
+    vmp = _vmprint_base() if vmprint_dir else None
+    if vmprint_dir and vmp is None:
+        expected = str(Path(vmprint_dir).resolve())
+        return (
+            None,
+            f"Markdown to PDF: VMPrint is configured but directory missing or invalid (expected: {expected} with a 'draft2final' subfolder). "
+            "Set tools.markdown_to_pdf.vmprint_dir in config to your VMPrint clone path (e.g. tools/vm_print or an absolute path), or run ./install.sh / install.ps1, or install pandoc, or: pip install markdown weasyprint.",
+        )
+
     # 1. VMPrint (draft2final): when tools.markdown_to_pdf.vmprint_dir is set to a clone of https://github.com/cosmiciron/vmprint
-    if vmprint_dir:
-        vmp = Path(vmprint_dir).resolve()
-        if vmp.is_dir() and (vmp / "draft2final").is_dir():
+    # Invoke draft2final via node dist/cli.js so argv is exactly [input, --as, academic, --output, out]; npm run dev adds extra args and causes "Unexpected positional argument".
+    cli_js = (vmp / "draft2final" / "dist" / "cli.js") if vmp is not None else None
+    if cli_js is not None and cli_js.is_file():
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w", encoding="utf-8") as f:
+                f.write(md_content)
+                md_path = f.name
+            out_path = md_path + ".pdf"
             try:
-                with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w", encoding="utf-8") as f:
-                    f.write(md_content)
-                    md_path = f.name
-                out_path = md_path + ".pdf"
-                try:
-                    result = subprocess.run(
-                        ["npm", "run", "dev", "--prefix", "draft2final", "--", "build", md_path, "-o", out_path, "--format", "academic"],
-                        cwd=str(vmp),
-                        capture_output=True,
-                        timeout=120,
-                        check=False,
-                    )
-                    if result.returncode != 0 and b"academic" in (result.stderr or b""):
-                        result = subprocess.run(
-                            ["npm", "run", "dev", "--prefix", "draft2final", "--", "build", md_path, "-o", out_path],
-                            cwd=str(vmp),
-                            capture_output=True,
-                            timeout=120,
-                            check=False,
-                        )
-                    if result.returncode == 0 and Path(out_path).is_file():
-                        pdf_bytes = Path(out_path).read_bytes()
-                        Path(out_path).unlink(missing_ok=True)
-                        Path(md_path).unlink(missing_ok=True)
-                        return (pdf_bytes, None)
-                    err = (result.stderr or result.stdout or b"").decode("utf-8", errors="replace").strip() or "unknown"
-                    logger.debug("markdown_to_pdf vmprint: %s", err)
-                finally:
+                result = subprocess.run(
+                    ["node", str(cli_js), md_path, "--as", "academic", "--output", out_path],
+                    cwd=str(vmp),
+                    capture_output=True,
+                    timeout=120,
+                    check=False,
+                )
+                if result.returncode == 0 and Path(out_path).is_file():
+                    pdf_bytes = Path(out_path).read_bytes()
+                    Path(out_path).unlink(missing_ok=True)
                     Path(md_path).unlink(missing_ok=True)
-                    Path(md_path + ".pdf").unlink(missing_ok=True)
-            except FileNotFoundError:
-                pass
-            except Exception as e:
-                logger.debug("markdown_to_pdf vmprint: %s", e)
+                    return (pdf_bytes, None)
+                err = (result.stderr or result.stdout or b"").decode("utf-8", errors="replace").strip() or "unknown"
+                logger.debug("markdown_to_pdf vmprint: %s", err)
+                # Surface VMPrint failure so user doesn't see generic "run install.sh"; suggest npm install or Node
+                return (None, f"Markdown to PDF: VMPrint build failed. {err[:500]}. Ensure Node is on PATH and run: cd {vmp} && npm install")
+            finally:
+                Path(md_path).unlink(missing_ok=True)
+                Path(md_path + ".pdf").unlink(missing_ok=True)
+        except FileNotFoundError:
+            # npm/Node not in PATH (e.g. Core started from GUI). Fall through to try pandoc then weasyprint.
+            pass
+        except Exception as e:
+            logger.debug("markdown_to_pdf vmprint: %s", e)
 
     # 2. Pandoc
     try:
@@ -3792,14 +3910,14 @@ def _markdown_to_pdf_convert_sync(
     except ImportError:
         return (
             None,
-            "Markdown to PDF: set tools.markdown_to_pdf.vmprint_dir to a VMPrint clone (github.com/cosmiciron/vmprint), or install pandoc, or pip install markdown weasyprint."
+            "Markdown to PDF: run ./install.sh (Linux/macOS) or install.ps1 (Windows) to install VMPrint, or install pandoc, or: pip install markdown weasyprint.",
         )
     except Exception as e:
         logger.debug("markdown_to_pdf weasyprint: %s", e)
         return (None, f"PDF conversion failed: {e!s}")
     return (
         None,
-        "No PDF converter available. Use VMPrint (config: tools.markdown_to_pdf.vmprint_dir), or install pandoc, or: pip install markdown weasyprint.",
+        "No PDF converter available. If VMPrint is installed: add Node.js to the system PATH for the account that runs Core, or run Core from a terminal where 'npm' works. Otherwise: run ./install.sh or install.ps1 for VMPrint, install pandoc, or: pip install markdown weasyprint.",
     )
 
 
@@ -5482,6 +5600,136 @@ def _register_browser_tools_if_available(registry: ToolRegistry) -> None:
     )
 
 
+# ---- MCP (Model Context Protocol) client tools ----
+# Optional dependency: pip install mcp. When mcp is not installed or server not configured, tools return a clear error.
+
+
+def _mcp_get_server_config(server_id: str) -> Optional[Dict[str, Any]]:
+    """Return config for server_id from tools.mcp.servers, or None. Never raises."""
+    try:
+        config = _get_tools_config()
+        mcp_cfg = config.get("mcp") if isinstance(config, dict) else None
+        if not isinstance(mcp_cfg, dict):
+            return None
+        servers = mcp_cfg.get("servers")
+        if not isinstance(servers, dict):
+            return None
+        s = servers.get(server_id) if server_id else None
+        return s if isinstance(s, dict) else None
+    except Exception:
+        return None
+
+
+async def _mcp_run_with_session(server_id: str, fn):
+    """
+    Connect to the MCP server identified by server_id (from config), run async fn(session), return result.
+    fn must accept one argument (ClientSession). Raises on connection/session errors; returns fn return value.
+    """
+    try:
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+    except ImportError:
+        return json.dumps({
+            "error": "MCP client not installed. Install with: pip install mcp",
+            "results": [],
+            "tools": [],
+        })
+    server_cfg = _mcp_get_server_config(server_id)
+    if not server_cfg:
+        return json.dumps({
+            "error": f"MCP server '{server_id}' not configured. Add it under tools.mcp.servers in config (e.g. skills_and_plugins.yml).",
+            "results": [],
+            "tools": [],
+        })
+    transport = (server_cfg.get("transport") or "stdio").strip().lower()
+    timeout = max(5.0, min(120.0, float(server_cfg.get("timeout_seconds") or 30)))
+    try:
+        if transport == "sse":
+            from mcp.client.sse import sse_client
+            url = (server_cfg.get("url") or "").strip()
+            if not url:
+                return json.dumps({"error": f"MCP server '{server_id}' has transport=sse but no url.", "results": [], "tools": []})
+            async with sse_client(url=url, timeout=timeout, sse_read_timeout=timeout) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    return await fn(session)
+        else:
+            command = (server_cfg.get("command") or "").strip()
+            args = server_cfg.get("args")
+            if not command:
+                return json.dumps({"error": f"MCP server '{server_id}' has transport=stdio but no command.", "results": [], "tools": []})
+            if not isinstance(args, list):
+                args = []
+            env = server_cfg.get("env")
+            if not isinstance(env, dict):
+                env = None
+            params = StdioServerParameters(command=command, args=args, env=env or os.environ.copy())
+            async with stdio_client(params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    return await fn(session)
+    except Exception as e:
+        return json.dumps({
+            "error": f"MCP server '{server_id}': {e!s}",
+            "results": [],
+            "tools": [],
+        })
+
+
+async def _mcp_list_tools_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """List tools exposed by an MCP server. Use server_id from config (tools.mcp.servers)."""
+    server_id = (arguments.get("server_id") or arguments.get("server") or "").strip()
+    if not server_id:
+        return json.dumps({
+            "error": "server_id is required. Use a key from tools.mcp.servers (e.g. the server name you configured).",
+            "tools": [],
+        })
+
+    async def _list(session):
+        result = await session.list_tools()
+        tools = []
+        for t in getattr(result, "tools", []) or []:
+            tools.append({
+                "name": getattr(t, "name", ""),
+                "description": (getattr(t, "description", None) or "")[:500],
+                "inputSchema": getattr(t, "inputSchema", None),
+            })
+        return json.dumps({"tools": tools, "server_id": server_id})
+
+    out = await _mcp_run_with_session(server_id, _list)
+    if isinstance(out, str) and out.strip().startswith("{"):
+        return out
+    return json.dumps({"tools": [], "error": str(out)})
+
+
+async def _mcp_call_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Call a tool on an MCP server. server_id and tool_name are required; arguments is a JSON object for the tool."""
+    server_id = (arguments.get("server_id") or arguments.get("server") or "").strip()
+    tool_name = (arguments.get("tool_name") or arguments.get("tool") or "").strip()
+    if not server_id:
+        return json.dumps({"error": "server_id is required.", "results": []})
+    if not tool_name:
+        return json.dumps({"error": "tool_name is required.", "results": []})
+    args = arguments.get("arguments") or arguments.get("params") or {}
+    if not isinstance(args, dict):
+        args = {}
+
+    async def _call(session):
+        result = await session.call_tool(tool_name, args)
+        parts = []
+        for c in getattr(result, "content", []) or []:
+            text = getattr(c, "text", None)
+            if text:
+                parts.append(text)
+        out_text = "\n".join(parts) if parts else str(result)
+        return json.dumps({"content": out_text, "server_id": server_id, "tool": tool_name})
+
+    out = await _mcp_run_with_session(server_id, _call)
+    if isinstance(out, str):
+        return out
+    return json.dumps({"content": "", "error": str(out)})
+
+
 def register_builtin_tools(registry: ToolRegistry) -> None:
     """Register all built-in tools. Call once at startup (e.g. from Core)."""
     # Session tools
@@ -5541,7 +5789,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="sessions_spawn",
-            description="Sub-agent run: run a one-off task and get the model reply. Select model by llm_name (ref from models_list) or capability (e.g. 'Chat' — selects a model that has that capability in config). Omit both to use main_llm.",
+            description="Sub-agent run: run a one-off task with isolated context (no prior conversation); ideal for a focused subtask. Returns the model reply. Select model by llm_name (ref from models_list) or capability (e.g. 'Chat'). Omit both to use main_llm.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -5721,6 +5969,29 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             },
             execute_async=_remind_me_executor,
             short_description="Use when: user says 'remind me in N minutes', 'N分钟后提醒', 'at 9am', one-shot reminder. Pass minutes OR at_time; message = short label. Not for recurring → use cron_schedule.",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="schedule_delayed_action",
+            description=(
+                "Schedule any action to run after a delay (e.g. 'send email in 3 minutes', '3分钟后发'). "
+                "User must confirm (reply 'confirm' or '确认' or 'send') to actually schedule. "
+                "Supply: minutes (int), action_type (e.g. 'send_email' or 'run_skill'), action_payload (dict with task args), and optional confirmation_prompt. "
+                "Use for: delayed send email, delayed run_skill, or any confirm-now-execute-later task."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "minutes": {"type": "integer", "description": "Run the action in this many minutes (e.g. 3 for 'in 3 minutes')."},
+                    "action_type": {"type": "string", "description": "Type: 'send_email' or 'run_skill'. For send_email, action_payload must have to, subject, body.", "default": "run_skill"},
+                    "action_payload": {"type": "object", "description": "Task parameters (e.g. for send_email: {to, subject, body}; for run_skill: skill args)."},
+                    "confirmation_prompt": {"type": "string", "description": "Optional. Message to show user (e.g. 'I will send this email in 3 minutes. Reply confirm to schedule.').", "default": ""},
+                },
+                "required": ["minutes", "action_type", "action_payload"],
+            },
+            execute_async=_schedule_delayed_action_executor,
+            short_description="Use when: user wants to run something after a delay (e.g. '3分钟后发邮件'). Pass minutes, action_type, action_payload; user confirms to schedule.",
         )
     )
     registry.register(
@@ -6092,6 +6363,40 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             description="List agent ids. In HomeClaw returns single-agent note.",
             parameters={"type": "object", "properties": {}, "required": []},
             execute_async=_agents_list_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="mcp_list_tools",
+            description="List tools exposed by an MCP (Model Context Protocol) server. Pass server_id (a key from tools.mcp.servers in config). Use this to discover what tools a configured MCP server provides before calling mcp_call.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "server_id": {"type": "string", "description": "Id of the MCP server (must match a key in tools.mcp.servers)."},
+                    "server": {"type": "string", "description": "Alias for server_id."},
+                },
+                "required": ["server_id"],
+            },
+            execute_async=_mcp_list_tools_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="mcp_call",
+            description="Call a tool on an MCP server. Pass server_id (from config tools.mcp.servers), tool_name (from mcp_list_tools), and arguments (object). Use when the user wants to use an external MCP service (e.g. GitHub, filesystem, browser).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "server_id": {"type": "string", "description": "Id of the MCP server (must match a key in tools.mcp.servers)."},
+                    "server": {"type": "string", "description": "Alias for server_id."},
+                    "tool_name": {"type": "string", "description": "Name of the tool to call (from mcp_list_tools)."},
+                    "tool": {"type": "string", "description": "Alias for tool_name."},
+                    "arguments": {"type": "object", "description": "Arguments for the tool (key-value object)."},
+                    "params": {"type": "object", "description": "Alias for arguments."},
+                },
+                "required": ["server_id", "tool_name"],
+            },
+            execute_async=_mcp_call_executor,
         )
     )
     registry.register(

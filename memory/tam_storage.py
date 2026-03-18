@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from memory.database.database import DatabaseManager
-from memory.database.models import TamCronJobModel, TamOneShotReminderModel
+from memory.database.models import TamCronJobModel, TamOneShotReminderModel, ScheduledActionModel
 
 
 def _get_session():
@@ -269,6 +269,171 @@ def delete_one_shot_reminder(reminder_id: str) -> bool:
         return n > 0
     except Exception as e:
         logger.warning("TAM storage: delete_one_shot_reminder failed: {}", e)
+        session.rollback()
+        return False
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+# --- Scheduled actions (confirm now, execute at run_at). Used for "3分钟后发邮件" etc. ---
+PENDING_ACTION_PREFIX = "__ACTION:"
+PENDING_ACTION_SUFFIX = "__"
+
+
+def add_scheduled_action(
+    user_id: str,
+    run_at: datetime,
+    action_type: str,
+    action_payload: Dict[str, Any],
+    friend_id: Optional[str] = None,
+    channel_key: Optional[str] = None,
+) -> Optional[str]:
+    """Store a pending action (status=awaiting_confirmation). Returns action_id or None. Never raises."""
+    session = _get_session()
+    try:
+        payload_str = json.dumps(action_payload) if isinstance(action_payload, dict) else "{}"
+        row = ScheduledActionModel(
+            user_id=(user_id or "").strip() or "companion",
+            friend_id=(str(friend_id).strip() or None) if friend_id is not None else None,
+            channel_key=(str(channel_key).strip() or None) if channel_key is not None else None,
+            run_at=run_at,
+            action_type=(action_type or "").strip() or "run_skill",
+            action_payload=payload_str,
+            status="awaiting_confirmation",
+        )
+        session.add(row)
+        session.flush()
+        aid = row.id
+        session.commit()
+        return aid
+    except Exception as e:
+        logger.warning("TAM storage: add_scheduled_action failed: {}", e)
+        session.rollback()
+        return None
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+def get_scheduled_action(action_id: str) -> Optional[Dict[str, Any]]:
+    """Load action by id. Returns {id, user_id, friend_id, channel_key, run_at, action_type, action_payload, status} or None. Never raises."""
+    try:
+        aid = (str(action_id).strip() if action_id is not None else "") or ""
+    except (TypeError, AttributeError):
+        return None
+    if not aid:
+        return None
+    session = _get_session()
+    try:
+        row = session.query(ScheduledActionModel).filter(ScheduledActionModel.id == aid).first()
+        if not row:
+            return None
+        try:
+            payload = json.loads(row.action_payload) if row.action_payload else {}
+        except Exception:
+            payload = {}
+        return {
+            "id": row.id,
+            "user_id": getattr(row, "user_id", None) or "companion",
+            "friend_id": getattr(row, "friend_id", None),
+            "channel_key": getattr(row, "channel_key", None),
+            "run_at": row.run_at,
+            "action_type": (row.action_type or "").strip() or "run_skill",
+            "action_payload": payload,
+            "status": (row.status or "").strip() or "awaiting_confirmation",
+        }
+    except Exception as e:
+        logger.warning("TAM storage: get_scheduled_action failed: {}", e)
+        return None
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+def get_pending_confirmation_for_user(user_id: str) -> Optional[Dict[str, Any]]:
+    """Get the most recent action for this user with status=awaiting_confirmation. For confirm flow. Never raises."""
+    if not user_id or not isinstance(user_id, str):
+        return None
+    session = _get_session()
+    try:
+        row = (
+            session.query(ScheduledActionModel)
+            .filter(
+                ScheduledActionModel.user_id == user_id.strip(),
+                ScheduledActionModel.status == "awaiting_confirmation",
+            )
+            .order_by(ScheduledActionModel.created_at.desc())
+            .first()
+        )
+        if not row:
+            return None
+        return get_scheduled_action(row.id)
+    except Exception as e:
+        logger.warning("TAM storage: get_pending_confirmation_for_user failed: {}", e)
+        return None
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+def mark_scheduled_action_scheduled(action_id: str) -> bool:
+    """Set status=scheduled after we created the one-shot reminder. Returns True on success. Never raises."""
+    session = _get_session()
+    try:
+        n = (
+            session.query(ScheduledActionModel)
+            .filter(ScheduledActionModel.id == action_id, ScheduledActionModel.status == "awaiting_confirmation")
+            .update({"status": "scheduled"}, synchronize_session=False)
+        )
+        session.commit()
+        return n > 0
+    except Exception as e:
+        logger.warning("TAM storage: mark_scheduled_action_scheduled failed: {}", e)
+        session.rollback()
+        return False
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+def mark_scheduled_action_executed(action_id: str) -> bool:
+    """Set status=executed after action ran. Returns True on success. Never raises."""
+    session = _get_session()
+    try:
+        n = session.query(ScheduledActionModel).filter(ScheduledActionModel.id == action_id).update({"status": "executed"}, synchronize_session=False)
+        session.commit()
+        return n > 0
+    except Exception as e:
+        logger.warning("TAM storage: mark_scheduled_action_executed failed: {}", e)
+        session.rollback()
+        return False
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+def delete_scheduled_action(action_id: str) -> bool:
+    """Remove action (e.g. after executed or cancelled). Returns True if deleted. Never raises."""
+    session = _get_session()
+    try:
+        n = session.query(ScheduledActionModel).filter(ScheduledActionModel.id == action_id).delete()
+        session.commit()
+        return n > 0
+    except Exception as e:
+        logger.warning("TAM storage: delete_scheduled_action failed: {}", e)
         session.rollback()
         return False
     finally:

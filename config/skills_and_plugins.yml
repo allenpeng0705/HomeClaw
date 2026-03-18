@@ -422,6 +422,7 @@ system_plugins_env:
 # Built-in tools: time, cron_*, sessions_*, memory_*, file_*, folder_list, fetch_url, web_search, browser_*,
 # exec, process_*, run_skill, run_plugin, image, channel_send, etc. Only keys below are read by the tool layer.
 # tool_timeout_seconds: per-tool execution timeout (seconds); 0 = no timeout. Core reads it into CoreMetadata.tool_timeout_seconds.
+# large_result_summarize_threshold_chars: when last tool result length exceeds this, LLM is instructed to summarize and/or save_result_page (default 6000; 0 = disabled). See docs_design/DeepAgentsComparisonAndLearnings.md.
 tools:
   # OpenClaw-style tool profiles: only tools in the selected profile(s) are sent to the LLM. Reduces wrong tool selection. Omit or "full" = all tools.
   # profile: "full"   # full | minimal | messaging | coding. Or use profiles: [messaging, coding] for union.
@@ -432,6 +433,20 @@ tools:
   # tool_selection_examples: true
   # When true (default): never auto-invoke tools when the model returned no tool_calls. Rely on the model to decide; no our own if-else to run tools. When false: allow legacy fallbacks (force_include, remind_me, route_to_plugin, folder_list, etc.) when model didn't call a tool.
   strict_fallback: true
+  # When last result length exceeds this (chars), inject instruction to summarize and/or save_result_page. Default 6000; 0 = disabled.
+  # large_result_summarize_threshold_chars: 6000
+  # MCP (Model Context Protocol) client: call external MCP servers via mcp_call and mcp_list_tools. Optional: pip install mcp.
+  # mcp:
+  #   enabled: true
+  #   servers:
+  #     my-server:
+  #       transport: stdio
+  #       command: python
+  #       args: [path/to/mcp_server.py, --transport, stdio]
+  #     remote-server:
+  #       transport: sse
+  #       url: http://localhost:8000/sse
+  #       timeout_seconds: 30
   # Phase 3.4: RAG for tools — when true, retrieve tools by query similarity (reuse skills RAG infra). Default false; off by default like skills RAG (low confidence in retrieval).
   tools_use_vector_search: false
   # tools_vector_collection: homeclaw_tools
@@ -442,9 +457,9 @@ tools:
   # Optional when using Qwen: tool_temperature, disable_thinking_when_tools, qwen3_tool_format_instruction.
   # exec: allowed command names. Empty = platform default (Unix: ls, cat, pwd; Windows: dir, type, cd).
   exec_allowlist: []
-  # markdown_to_pdf: VMPrint (github.com/cosmiciron/vmprint). install.sh/install.ps1 clone it to tools/vmprint and run npm install. Use tools/vmprint (relative to repo root) or an absolute path.
+  # markdown_to_pdf: VMPrint (github.com/cosmiciron/vmprint). install.sh/install.ps1 clone to tools/vmprint; if you installed manually as tools/vm_print, set vmprint_dir to "tools/vm_print" (or use absolute path).
   markdown_to_pdf:
-    vmprint_dir: "tools/vmprint"   # default after install; empty = use pandoc or weasyprint
+    vmprint_dir: "tools/vmprint"   # or "tools/vm_print"; must contain draft2final/ and have npm install run
   exec_timeout: 120   # seconds
   # Max characters returned by file_read when the tool does not pass max_chars. Increase for long PDFs/documents.
   file_read_max_chars: 5000000
@@ -478,7 +493,7 @@ tools:
         api_key: "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"   # or TAVILY_API_KEY
         search_depth: basic   # basic | fast | advanced | ultra-fast
         topic: general        # general | news | finance
-        time_range: ""        # day | week | month | year (empty = no filter)
+        time_range: ""        # day | week | month | year (empty = no filter). When user asks for "recent/latest" (e.g. 最近), code auto-uses month if empty; set week for current week.
       fallback_no_key: true   # use DuckDuckGo when primary provider has no key or fails
       fallback_max_results: 5
   # true = use system plugin homeclaw-browser (route_to_plugin); false = register built-in browser_* tools (Playwright).
