@@ -79,7 +79,8 @@ duckduckgo-search>=4.0.0
 # llama-cpp-python   # in-process LLM via LlamaCppPython (default is llama.cpp server subprocess or litellm)
 # simplematrixbotlib # Matrix channel (channels/matrix)
 # torch optional: CUDA detection uses nvidia-smi when torch not installed
-# MCP client (optional): for mcp_call and mcp_list_tools to use external MCP servers. pip install mcp
+# MCP client (optional): for mcp_call and mcp_list_tools to use external MCP servers. See docs/mcp.md.
+# mcp
 # Tests (optional: install only for development)
 pytest>=7.0.0
 pytest-asyncio>=0.21.0

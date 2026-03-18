@@ -7,6 +7,7 @@
 #   reminder — remind_me, record_date, recorded_events_list, cron_schedule, cron_list, cron_remove, cron_update, cron_run, cron_status, route_to_tam
 #   note     — document_read, file_read, file_write, folder_list, file_find, save_result_page, get_file_view_link (Cognee only; no append_agent_memory/append_daily_memory)
 #   finder   — search/list (file_find, folder_list); read (document_read, file_read); view (get_file_view_link); edit (file_write); save_result_page (e.g. HTML slides from doc)
+#   cursor   — time, route_to_plugin, folder_list, file_find (Cursor Bridge only; open project, run agent, run command on dev machine)
 # Use tools_preset so the friend only sees the tools it needs (saves tokens, clearer behavior). E.g. Note uses "note" to get save/query/file tools only, no reminder or routing tools.
 #
 # --- Field reference (each key) ---
@@ -57,6 +58,18 @@ presets:
     save_policy: default
     # Same logic as any chat with the same tools: file/sandbox rules and skills are injected in core/llm_loop when file tools are present. Finder's benefit: short context so it stays focused.
     system_prompt: "You are the Finder assistant. Help the user find files, read or summarize documents, get view links, generate HTML slides or PPT from documents, and search the web when needed. Use only the provided tools and skills."
+
+  # Cursor: dedicated to Cursor Bridge. Use from Companion (or any channel) to open projects in Cursor, run the Cursor agent, or run commands on the dev machine — works like being on the computer.
+  cursor:
+    thumbnail: cursor.png   # under config/preset_thumbnails/; app falls back to default icon if missing
+    tools_preset: cursor    # time, route_to_plugin, folder_list, file_find (see base/friend_presets.py)
+    skills: []              # no skills
+    plugins: [cursor-bridge] # only Cursor Bridge plugin
+    memory_sources: [cognee, agent_memory] # light context so it stays focused on Cursor tasks
+    history: 10             # short context
+    model_routing: any
+    save_policy: default
+    system_prompt: "You are the Cursor assistant. You help the user work with Cursor IDE on their computer via the Cursor Bridge. Use route_to_plugin(plugin_id='cursor-bridge') with capability_id and capability_parameters. When the user wants to open a project or folder in Cursor, use capability_id open_project and path (or folder). When they want to run a coding task and see the result, use run_agent with task. When they want to run a shell command (e.g. npm test, pip install), use run_command with command. Use folder_list or file_find only to resolve paths (e.g. 'my project') if needed. Reply briefly and confirm what you did."
 
   # Example: combined preset (union of tool sets).
   # reminder_and_finder:

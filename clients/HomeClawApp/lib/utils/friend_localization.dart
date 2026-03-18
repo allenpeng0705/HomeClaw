@@ -37,6 +37,16 @@ const Map<String, Map<String, String>> _presetDisplayNames = {
     'ja': 'プライベートメモ',
     'ko': '비공개 메모',
   },
+  'cursor': {
+    'en': 'Cursor',
+    'zh': 'Cursor',
+    'es': 'Cursor',
+    'fr': 'Cursor',
+    'de': 'Cursor',
+    'it': 'Cursor',
+    'ja': 'Cursor',
+    'ko': 'Cursor',
+  },
   'HomeClaw': {
     'en': 'HomeClaw',
     'zh': 'HomeClaw',
@@ -54,6 +64,7 @@ const Map<String, Map<String, String>> _nameDisplayNames = {
   'Finder': {'en': 'Files', 'zh': '文件', 'es': 'Archivos', 'fr': 'Fichiers', 'de': 'Dateien', 'it': 'File', 'ja': 'ファイル', 'ko': '파일'},
   'Reminder': {'en': 'Reminder', 'zh': '提醒', 'es': 'Recordatorio', 'fr': 'Rappel', 'de': 'Erinnerung', 'it': 'Promemoria', 'ja': 'リマインダー', 'ko': '리마인더'},
   'Note': {'en': 'Private Notes', 'zh': '私密笔记', 'es': 'Notas privadas', 'fr': 'Notes privées', 'de': 'Private Notizen', 'it': 'Note private', 'ja': 'プライベートメモ', 'ko': '비공개 메모'},
+  'Cursor': {'en': 'Cursor', 'zh': 'Cursor', 'es': 'Cursor', 'fr': 'Cursor', 'de': 'Cursor', 'it': 'Cursor', 'ja': 'Cursor', 'ko': 'Cursor'},
 };
 
 /// Returns a localized display name for a friend from the API (name, preset).
@@ -86,7 +97,7 @@ String localizedFriendDisplayName({
   return name;
 }
 
-/// Order for system friends at the top of the list: HomeClaw, Reminder, Files (finder), Note, then others.
+/// Order for system friends at the top of the list: HomeClaw, Reminder, Files (finder), Note, Cursor, then others.
 /// Returns a sort key (lower = first). Use with [sortFriendsWithSystemFirst].
 int friendListSortOrder(Map<String, dynamic> friend) {
   final name = (friend['name'] as String?)?.trim() ?? '';
@@ -95,7 +106,8 @@ int friendListSortOrder(Map<String, dynamic> friend) {
   if (preset == 'reminder') return 1;
   if (preset == 'finder') return 2;
   if (preset == 'note') return 3;
-  return 4;
+  if (preset == 'cursor') return 4;
+  return 5;
 }
 
 /// Sorts the friends list so system friends appear first: HomeClaw, Reminder, Files, Note, then others.

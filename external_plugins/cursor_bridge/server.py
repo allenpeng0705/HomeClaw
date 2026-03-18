@@ -122,11 +122,8 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/run")
-async def run(body: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Accept PluginRequest (JSON) from HomeClaw. Dispatch by capability_id; return PluginResult (JSON).
-    """
+def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Dispatch by capability_id; return PluginResult. Never raises."""
     request_id = body.get("request_id", "")
     plugin_id = body.get("plugin_id", "cursor-bridge")
     user_input = (body.get("user_input") or "").strip()
@@ -219,6 +216,28 @@ async def run(body: Dict[str, Any]) -> Dict[str, Any]:
         "error": error,
         "metadata": {},
     }
+
+
+@app.post("/run")
+async def run(body: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Accept PluginRequest (JSON) from HomeClaw. Dispatch by capability_id; return PluginResult (JSON).
+    Never raises: any unexpected error returns success=False with error message.
+    """
+    try:
+        if not isinstance(body, dict):
+            body = {}
+        return _run_impl(body)
+    except Exception as e:
+        _b = body if isinstance(body, dict) else {}
+        return {
+            "request_id": _b.get("request_id", ""),
+            "plugin_id": _b.get("plugin_id", "cursor-bridge"),
+            "success": False,
+            "text": "",
+            "error": f"Cursor Bridge error: {e!s}",
+            "metadata": {},
+        }
 
 
 if __name__ == "__main__":

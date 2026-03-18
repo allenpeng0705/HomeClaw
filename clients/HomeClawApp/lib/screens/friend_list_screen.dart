@@ -13,7 +13,7 @@ import 'login_screen.dart';
 import 'settings_screen.dart';
 
 /// Bundled preset thumbnail assets (used when Core does not serve one). No download; shipped with app.
-const Set<String> _bundledPresetKeys = {'reminder', 'note', 'finder'};
+const Set<String> _bundledPresetKeys = {'reminder', 'note', 'finder', 'cursor'};
 String? _bundledPresetAssetPath(String? preset) {
   final p = (preset is String ? preset : '').trim().toLowerCase();
   if (p.isEmpty || !_bundledPresetKeys.contains(p)) return null;
@@ -22,7 +22,7 @@ String? _bundledPresetAssetPath(String? preset) {
 
 /// Known localized names -> preset key (so avatar works when API returns localized friend name).
 const Map<String, String> _localizedNameToPreset = {
-  'reminder': 'reminder', 'finder': 'finder', 'note': 'note', 'files': 'finder',
+  'reminder': 'reminder', 'finder': 'finder', 'note': 'note', 'cursor': 'cursor', 'files': 'finder',
   '提醒': 'reminder', '文件': 'finder', '私密笔记': 'note',
   'recordatorio': 'reminder', 'archivos': 'finder', 'notas privadas': 'note',
   'rappel': 'reminder', 'fichiers': 'finder', 'notes privées': 'note',
@@ -45,6 +45,7 @@ String? _presetKeyFromFriendName(String name) {
   if (nLower == 'reminder' || nLower.contains('reminder')) return 'reminder';
   if (nLower == 'finder' || nLower == 'files' || nLower.contains('finder') || nLower.contains('file')) return 'finder';
   if (nLower == 'note' || nLower == 'notes' || nLower.contains('note')) return 'note';
+  if (nLower == 'cursor' || nLower.contains('cursor')) return 'cursor';
   return null;
 }
 

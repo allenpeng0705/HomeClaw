@@ -1949,9 +1949,16 @@ async def answer_from_memory(
                         allowed_names = get_tool_names_for_preset(preset_name)
                     if allowed_names is not None:
                         allowed_set = set(allowed_names)
-                        all_tools = [t for t in all_tools if ((t.get("function") or {}).get("name")) in allowed_set]
-                        _filtered_by_preset = True
-                        _component_log("friend_preset", f"filtered tools to preset '{preset_name}' ({len(all_tools)} tools)")
+                        _filtered = [t for t in all_tools if ((t.get("function") or {}).get("name")) in allowed_set]
+                        if _filtered:
+                            all_tools = _filtered
+                            _filtered_by_preset = True
+                            _component_log("friend_preset", f"filtered tools to preset '{preset_name}' ({len(all_tools)} tools)")
+                        else:
+                            logger.warning(
+                                "Friend preset '{}' produced 0 tools (preset names may not match registry); keeping category tools",
+                                preset_name,
+                            )
             except Exception as e:
                 logger.debug("Friend preset tool filter failed: {}", e)
         if all_tools and not unified and not _filtered_by_preset:
