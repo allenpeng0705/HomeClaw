@@ -426,7 +426,8 @@ cursor_bridge_auto_start: true
 # cursor_bridge_cursor_cli_path: "C:\\Users\\You\\AppData\\Local\\Programs\\cursor\\cursor.cmd"   # optional; use when "open project" opens File Explorer instead of Cursor (PowerShell: (Get-Command cursor).Source)
 # cursor_bridge_cursor_api_key: "your-cursor-api-key"   # optional; use when agent says "Authentication required" (or set CURSOR_API_KEY in env before starting Core). Prefer env for secrets.
 # cursor_bridge_bridge_api_key: "set-a-random-secret"   # optional; protects the bridge HTTP API. When set, Core starts bridge with CURSOR_BRIDGE_API_KEY and sends X-HomeClaw-Bridge-Key on calls.
-# cursor_bridge_forward_logs: true   # set true to see bridge/agent logs in Core's terminal (debug "Agent exited with code 1")
+cursor_bridge_forward_logs: true   # set true to see bridge/agent logs in Core's terminal (debug "Agent exited with code 1")
+cursor_bridge_claude_settings_path: "C:\\Users\\PS\\.claude\\settings.json"   # optional; full path to Claude Code settings.json so the bridge loads auth/env from that file (fixes 401 when bridge runs under a different user)
 
 # --- Claude Code (CLI) via the same bridge ---
 # claude_code_path: "C:\\Users\\You\\AppData\\Local\\Programs\\claude\\claude.cmd"   # optional; PowerShell: (Get-Command claude).Source
@@ -453,7 +454,7 @@ tools:
   # See docs/mcp.md. Set auto_register_claude_code: true to have Core add the claude-code server at startup (no need to list it in servers).
   mcp:
     enabled: true
-    # auto_register_claude_code: true   # when true, Core enables MCP and adds server_id "claude-code" (claude mcp serve) at startup if not already in servers
+    auto_register_claude_code: true   # when true, Core enables MCP and adds server_id "claude-code" (claude mcp serve) at startup if not already in servers
     servers:
       claude-code:
         transport: stdio

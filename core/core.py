@@ -517,6 +517,10 @@ class Core(CoreInterface):
         if anthropic_key:
             env["ANTHROPIC_API_KEY"] = anthropic_key
             _component_log("cursor_bridge", "ANTHROPIC_API_KEY set from config")
+        claude_settings_path = (getattr(meta, "cursor_bridge_claude_settings_path", None) or "").strip()
+        if claude_settings_path:
+            env["CLAUDE_SETTINGS_PATH"] = claude_settings_path
+            _component_log("cursor_bridge", f"CLAUDE_SETTINGS_PATH={claude_settings_path}")
         forward_logs = getattr(meta, "cursor_bridge_forward_logs", False)
         try:
             proc = subprocess.Popen(

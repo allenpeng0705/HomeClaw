@@ -49,6 +49,23 @@ When you send a task via `run_agent`, the **Claude Code CLI** runs on the bridge
 
 ---
 
+### 3.1 Supporting both Anthropic and Minimax (or other gateways)
+
+The bridge supports **both** the official Anthropic API and third-party Anthropic-compatible gateways (e.g. **Minimax**):
+
+- **Official Anthropic:** Use `ANTHROPIC_API_KEY` (and optionally `ANTHROPIC_AUTH_TOKEN`) in your `~/.claude/settings.json` `env` block. The CLI can send X-Api-Key and/or Bearer; the bridge does not change them.
+- **Minimax:** Minimax's `/anthropic` endpoint requires **Authorization: Bearer** only; sending `X-Api-Key` as well can cause 401. When your base URL contains `minimax` (e.g. `https://api.minimax.io/anthropic`), the bridge **unsets** `ANTHROPIC_API_KEY` so the CLI sends only Bearer auth from `ANTHROPIC_AUTH_TOKEN`. Put your Minimax API key in `ANTHROPIC_AUTH_TOKEN` in `settings.json`; do not add a `Bearer ` prefix (the CLI adds it).
+
+**Using both on the same machine (switch by config):**
+
+- **Option A – One settings file:** Edit `~/.claude/settings.json` when you switch: for Anthropic, set `ANTHROPIC_API_KEY` and default or Anthropic base URL; for Minimax, set `ANTHROPIC_BASE_URL` to `https://api.minimax.io/anthropic` and `ANTHROPIC_AUTH_TOKEN` to your Minimax key (the bridge will clear `ANTHROPIC_API_KEY` for you when it sees Minimax).
+- **Option B – Two settings files:** Keep e.g. `~/.claude/settings.json` for Anthropic and `~/.claude/settings.minimax.json` for Minimax. To use Minimax, set in `config/skills_and_plugins.yml`:
+  `cursor_bridge_claude_settings_path: "C:\\Users\\<you>\\.claude\\settings.minimax.json"`
+  then restart Core. To use Anthropic again, clear that key or point it back to `settings.json` and restart.
+
+---
+
+
 ## 4. Using Claude Code’s MCP Server from HomeClaw
 
 Claude Code can also run as an **MCP server** (`claude mcp serve`). That exposes **Claude Code’s built-in tools** (Read, Write, Edit, Bash, Task, etc.) over stdio so that **HomeClaw’s MCP client** can call them via `mcp_list_tools` and `mcp_call`.

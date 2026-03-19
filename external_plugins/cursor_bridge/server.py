@@ -557,28 +557,210 @@ def _claude_env_from_config() -> Dict[str, str]:
                 if not isinstance(ek, str) or not ek.strip():
                     continue
                 out[ek.strip()] = _str_value(ev)
+        # Claude Code and gateways have historically used either ANTHROPIC_API_URL or ANTHROPIC_BASE_URL.
+        # Mirror BASE_URL -> API_URL when only one is provided to make configuration more forgiving.
+        try:
+            base_url = (out.get("ANTHROPIC_BASE_URL") or "").strip()
+            api_url = (out.get("ANTHROPIC_API_URL") or "").strip()
+            if base_url and not api_url:
+                out["ANTHROPIC_API_URL"] = base_url
+        except Exception:
+            pass
 
     try:
-        settings_path = os.path.join(base, ".claude", "settings.json")
+        settings_path = (
+            (os.environ.get("CLAUDE_SETTINGS_PATH") or "").strip()
+            or os.path.join(base, ".claude", "settings.json")
+        )
         if os.path.isfile(settings_path):
             with open(settings_path, "r", encoding="utf-8") as f:
                 _merge_from(json.load(f))
-        legacy_path = os.path.join(base, ".claude.json")
+        legacy_path = (
+            (os.environ.get("CLAUDE_LEGACY_SETTINGS_PATH") or "").strip()
+            or os.path.join(base, ".claude.json")
+        )
         if os.path.isfile(legacy_path):
             with open(legacy_path, "r", encoding="utf-8") as f:
                 _merge_from(json.load(f))
     except Exception as e:
         logger.debug("Could not load Claude settings from ~/.claude/settings.json: %s", e)
+    try:
+        # Debug path presence only; do not log env values or secrets.
+        if "settings_path" in locals():
+            logger.info(
+                "Claude settings paths: settings_path=%s exists=%s legacy_path=%s exists=%s",
+                settings_path,
+                os.path.isfile(settings_path),
+                legacy_path if "legacy_path" in locals() else None,
+                os.path.isfile(legacy_path) if "legacy_path" in locals() else False,
+            )
+    except Exception:
+        pass
+    # Compatibility fallback: some setups use a single secret and the CLI may accept it via
+    # either ANTHROPIC_API_KEY (X-Api-Key) or ANTHROPIC_AUTH_TOKEN (Bearer).
+    # Do NOT auto-map Bearer tokens to API keys for Minimax, where sending X-Api-Key can cause 401.
+    try:
+        base_url = (out.get("ANTHROPIC_BASE_URL") or out.get("ANTHROPIC_API_URL") or "").strip().lower()
+        is_minimax = "minimax" in base_url
+        if (not is_minimax) and "ANTHROPIC_API_KEY" not in out and out.get("ANTHROPIC_AUTH_TOKEN"):
+            token = str(out["ANTHROPIC_AUTH_TOKEN"]).strip()
+            if token.lower().startswith("bearer "):
+                token = token[7:].strip()
+            if token:
+                out["ANTHROPIC_API_KEY"] = token
+    except Exception:
+        pass
     return out
 
 
+def _claude_settings_diagnostic() -> Tuple[str, bool, List[str]]:
+    """Return (settings_path_used, file_exists, sorted_keys_loaded) for 401 diagnostics. No secret values."""
+    path = (os.environ.get("CLAUDE_SETTINGS_PATH") or "").strip()
+    if not path:
+        base = os.path.expanduser("~")
+        path = os.path.join(base, ".claude", "settings.json") if base else ""
+    exists = os.path.isfile(path) if path else False
+    keys = sorted(_claude_env_from_config().keys())
+    return path, exists, keys
+
+
+def _redact_secret(value: str) -> str:
+    """Return a short redacted form for logging (e.g. sk-api-...xyz9). Never log the full secret."""
+    if not value or not isinstance(value, str):
+        return "(empty)"
+    s = value.strip()
+    if len(s) <= 12:
+        return "***"
+    return s[:8] + "..." + s[-4:]
+
+
+def _inject_minimax_settings_file(env: Dict[str, str]) -> None:
+    """For Minimax: create a fake HOME that contains only .claude/settings.json (Bearer auth, no ANTHROPIC_API_KEY) and set HOME/USERPROFILE so the CLI loads that file. The CLI does not document CLAUDE_SETTINGS_PATH; it resolves ~ from HOME (Mac/Linux) or USERPROFILE (Windows)."""
+    try:
+        allow_keys = (
+            "ANTHROPIC_BASE_URL", "ANTHROPIC_API_URL", "ANTHROPIC_AUTH_TOKEN",
+            "API_TIMEOUT_MS", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+            "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        )
+        env_block = {k: str(v) for k, v in env.items() if k in allow_keys and v is not None and str(v).strip()}
+        if not env_block.get("ANTHROPIC_AUTH_TOKEN"):
+            return
+        base = os.path.dirname(STATE_FILE)
+        if not base:
+            base = os.path.join(os.path.expanduser("~") or os.environ.get("USERPROFILE", ""), ".homeclaw")
+        if not base:
+            return
+        # Fake home: e.g. ~/.homeclaw/claude_minimax_home (Windows: %USERPROFILE%\.homeclaw\claude_minimax_home).
+        fake_home = os.path.normpath(os.path.join(base, "claude_minimax_home"))
+        claude_dir = os.path.join(fake_home, ".claude")
+        settings_path = os.path.join(claude_dir, "settings.json")
+        try:
+            os.makedirs(claude_dir, exist_ok=True)
+        except OSError:
+            return
+        with open(settings_path, "w", encoding="utf-8") as f:
+            json.dump({"env": env_block}, f, indent=2)
+        # CLI resolves ~ from HOME (Unix) or USERPROFILE (Windows). Override so it loads our file.
+        env["HOME"] = fake_home
+        env["USERPROFILE"] = fake_home
+        if IS_WINDOWS:
+            # Some Windows tools resolve ~ from HOMEDRIVE+HOMEPATH; set both so they point to fake_home.
+            drive, tail = os.path.splitdrive(fake_home)
+            if drive:
+                env["HOMEDRIVE"] = drive  # e.g. "C:"
+                env["HOMEPATH"] = tail if tail else "\\"  # e.g. "\\Users\\PS\\.homeclaw\\claude_minimax_home"
+    except Exception as e:
+        logger.debug("Could not write Minimax fake-home settings: %s", e)
+
+
+def _log_claude_auth_env(env: Dict[str, str]) -> None:
+    """Log the API URL and redacted key/token we pass to Claude CLI so you can verify they match settings.json."""
+    url_keys = ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_URL")
+    auth_keys = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+    url_used = None
+    for k in url_keys:
+        v = (env.get(k) or "").strip()
+        if v:
+            url_used = v
+            break
+    key_redacted = _redact_secret(env.get("ANTHROPIC_API_KEY") or env.get("ANTHROPIC_AUTH_TOKEN") or "")
+    logger.info(
+        "Claude API env: base_url=%s api_key=%s (compare with your settings.json)",
+        url_used or "(default/none)",
+        key_redacted,
+    )
+
+
 def _claude_subprocess_env() -> Dict[str, str]:
-    """Environment for Claude CLI subprocess: inherit current env, then fill from ~/.claude/settings.json if ANTHROPIC_API_KEY etc. are not set."""
+    """Environment for Claude CLI subprocess.
+
+    We treat Claude settings.json as the source of truth and override any existing env inherited
+    by the bridge process for keys present in that settings file.
+    """
     env = dict(os.environ)
     from_file = _claude_env_from_config()
+    if from_file:
+        # Avoid leaking secrets: only log which keys we loaded and a short fingerprint (hash).
+        try:
+            loaded_keys = sorted(from_file.keys())
+            # Only log key names; values (and fingerprints) are intentionally omitted.
+            logger.info("Claude env loaded from config keys=%s", loaded_keys)
+        except Exception:
+            pass
     for key, value in from_file.items():
-        if value and (not env.get(key) or not str(env.get(key)).strip()):
-            env[key] = value
+        if isinstance(key, str) and key.strip() and value is not None:
+            env[key] = str(value)
+    # Support both official Anthropic and third-party gateways (e.g. Minimax).
+    # Note: Different Claude Code CLI versions / gateways disagree on whether Bearer (ANTHROPIC_AUTH_TOKEN)
+    # is honored. We default to Bearer-only for Minimax here, but _run_claude_task will auto-retry once
+    # with X-Api-Key mode if we still get a 401.
+    try:
+        base_url = (env.get("ANTHROPIC_BASE_URL") or env.get("ANTHROPIC_API_URL") or "").strip().lower()
+        if "minimax" in base_url and env.get("ANTHROPIC_AUTH_TOKEN"):
+            env["ANTHROPIC_API_KEY"] = ""
+            # Write a Minimax-only settings file so the CLI never sees ANTHROPIC_API_KEY (CLI can prefer file over env).
+            _inject_minimax_settings_file(env)
+            logger.info("Claude env: using Bearer-only auth for Minimax (fake HOME with .claude/settings.json, ANTHROPIC_API_KEY empty)")
+    except Exception:
+        pass
+    try:
+        _log_claude_auth_env(env)
+    except Exception:
+        pass
+    return env
+
+
+def _claude_subprocess_env_minimax_x_api_key() -> Dict[str, str]:
+    """Alternate Minimax auth mode: force X-Api-Key by setting ANTHROPIC_API_KEY from ANTHROPIC_AUTH_TOKEN.
+
+    Some Claude Code CLI builds appear to ignore ANTHROPIC_AUTH_TOKEN; this mode is a pragmatic fallback.
+    """
+    env = dict(os.environ)
+    from_file = _claude_env_from_config()
+    for key, value in (from_file or {}).items():
+        if isinstance(key, str) and key.strip() and value is not None:
+            env[key] = str(value)
+    try:
+        base_url = (env.get("ANTHROPIC_BASE_URL") or env.get("ANTHROPIC_API_URL") or "").strip().lower()
+        if "minimax" in base_url:
+            token = (env.get("ANTHROPIC_AUTH_TOKEN") or "").strip()
+            if token.lower().startswith("bearer "):
+                token = token[7:].strip()
+            if token:
+                # Force X-Api-Key path. Also mirror base_url to api_url for compatibility.
+                env["ANTHROPIC_API_KEY"] = token
+                if env.get("ANTHROPIC_BASE_URL") and not env.get("ANTHROPIC_API_URL"):
+                    env["ANTHROPIC_API_URL"] = env["ANTHROPIC_BASE_URL"]
+                # Avoid any Bearer usage ambiguity.
+                env["ANTHROPIC_AUTH_TOKEN"] = ""
+                logger.info("Claude env: Minimax fallback auth mode = X-Api-Key (ANTHROPIC_API_KEY set from ANTHROPIC_AUTH_TOKEN)")
+    except Exception:
+        pass
+    try:
+        _log_claude_auth_env(env)
+    except Exception:
+        pass
     return env
 
 
@@ -639,6 +821,28 @@ async def _run_claude_task(task: str, cwd: Optional[str] = None, timeout_sec: in
             fallback_argv = [a for a in run_argv if a not in ("--output-format", "json")]
             logger.info("claude retry without --output-format (flag unsupported)")
             rc, out, err = await _run_exec(fallback_argv)
+        # Minimax auth fallback: if Bearer-only fails with 401, retry once with X-Api-Key mode.
+        try:
+            base_url = (claude_env.get("ANTHROPIC_BASE_URL") or claude_env.get("ANTHROPIC_API_URL") or "").strip().lower()
+            looks_like_auth_401 = (rc != 0) and (
+                ("api error: 401" in (out or "").lower())
+                or ("api error: 401" in (err or "").lower())
+                or ("invalid api key" in (out or "").lower())
+                or ("invalid api key" in (err or "").lower())
+            )
+            if ("minimax" in base_url) and looks_like_auth_401:
+                logger.info("Claude Minimax: 401 with Bearer-only; retrying once with X-Api-Key mode")
+                claude_env = _claude_subprocess_env_minimax_x_api_key()
+                # Re-run the same argv (and the no-output-format fallback if needed)
+                rc, out, err = await _run_exec(run_argv)
+                if rc != 0 and err and (
+                    "output-format" in err.lower() or "unknown option" in err.lower() or "unrecognized" in err.lower()
+                ):
+                    fallback_argv = [a for a in run_argv if a not in ("--output-format", "json")]
+                    logger.info("claude retry without --output-format (flag unsupported) [after minimax auth fallback]")
+                    rc, out, err = await _run_exec(fallback_argv)
+        except Exception:
+            pass
         if rc != 0:
             parts = [f"Claude exited with code {rc}."]
             if err:
@@ -647,7 +851,19 @@ async def _run_claude_task(task: str, cwd: Optional[str] = None, timeout_sec: in
                 parts.append(f"stdout: {out}")
             msg = "\n".join(parts) if (err or out) else parts[0]
             if "anthropic_api_key" in msg.lower() or "api key" in msg.lower() or "login" in msg.lower():
-                msg += " To fix: set ANTHROPIC_API_KEY in the environment where the bridge runs, or add anthropic_api_key to ~/.claude/settings.json (or C:\\Users\\<you>\\.claude\\settings.json on Windows), or run 'claude' once interactively to log in."
+                msg += (
+                    " To fix: ensure Claude Code is configured with the right auth for your endpoint."
+                    " For official Anthropic: set ANTHROPIC_API_KEY (typically starts with 'sk-ant-')."
+                    " For Minimax gateway: set ANTHROPIC_BASE_URL to the Minimax /anthropic endpoint and set ANTHROPIC_AUTH_TOKEN; do not rely on ANTHROPIC_API_KEY."
+                    " You can also run 'claude' once interactively to log in."
+                )
+                try:
+                    diag_path, diag_exists, diag_keys = _claude_settings_diagnostic()
+                    msg += f" Diagnostic: settings_path={diag_path!r}, exists={diag_exists}, keys_loaded={diag_keys}."
+                    if not diag_exists or not any(k for k in diag_keys if "ANTHROPIC" in k or "API" in k.upper()):
+                        msg += " Set cursor_bridge_claude_settings_path in config/skills_and_plugins.yml to the full path of your settings.json and restart Core."
+                except Exception:
+                    pass
             return False, msg
         if out:
             try:

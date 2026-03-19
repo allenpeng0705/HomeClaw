@@ -125,6 +125,25 @@ class ChatHistoryStore {
       final b = _boxSafe;
       if (b == null) return;
       final existing = load(userId, friendId);
+      // De-dupe: the same reply can arrive via multiple paths (HTTP + WS push, or async poll + push).
+      // Avoid persisting consecutive identical messages, which show up as duplicates after leaving/re-entering a chat.
+      try {
+        if (existing.isNotEmpty) {
+          final last = existing.last;
+          final lastText = last.key.key;
+          final lastIsUser = last.key.value;
+          final lastImages = last.value;
+          final t = text;
+          final i = images;
+          final sameText = (lastText == t);
+          final sameRole = (lastIsUser == isUser);
+          final norm = (List<String>? xs) => (xs == null || xs.isEmpty) ? "" : xs.join("\n");
+          final sameImages = norm(lastImages) == norm(i);
+          if (sameText && sameRole && sameImages) {
+            return;
+          }
+        }
+      } catch (_) {}
       existing.add(MapEntry(MapEntry(text, isUser), images));
       await save(userId, existing, friendId);
     } catch (_) {}
