@@ -376,7 +376,7 @@ def _agent_interactive_command(backend: str) -> Tuple[str, Optional[str]]:
             cmd = exe
         return cmd, cwd
     if (backend or "").strip().lower() == "trae":
-        exe = _trae_executable()
+        exe = _trae_agent_executable()
         cwd = _get_active_cwd("trae") or DEFAULT_CWD
         if IS_WINDOWS and exe.lower().endswith(".cmd"):
             cmd = f'cmd /c "{exe}"'
@@ -517,55 +517,35 @@ def _open_in_cursor(path: str) -> tuple:
         return False, f"Could not open in Cursor: {e!s}. Install Cursor shell command (Command Palette: 'Install cursor') and ensure 'cursor' is in PATH or set CURSOR_CLI_PATH."
 
 
-def _trae_executable() -> str:
-    """Return path to Trae IDE CLI. Use TRAE_CLI_PATH if set, else try trae-cn then trae (from PATH). Trae CN: https://www.trae.cn — CLI is typically named trae-cn."""
-    path = (os.environ.get("TRAE_CLI_PATH") or "").strip()
+def _trae_agent_executable() -> str:
+    """Return path to Trae Agent CLI (trae-cli). Use TRAE_AGENT_PATH if set, else trae-cli from PATH. See github.com/bytedance/trae-agent."""
+    path = (os.environ.get("TRAE_AGENT_PATH") or "").strip()
     if path and os.path.isfile(path):
         return path
     if path:
         return path
-    return shutil.which("trae-cn") or shutil.which("trae") or "trae-cn"
+    return shutil.which("trae-cli") or "trae-cli"
+
+
+def _trae_agent_config_file() -> Optional[str]:
+    """Return path to trae_config.yaml for trae-cli --config-file, or None."""
+    path = (os.environ.get("TRAE_AGENT_CONFIG") or "").strip()
+    if path and os.path.isfile(path):
+        return path
+    return None
 
 
 def _open_in_trae(path: str) -> Tuple[bool, str]:
-    """Open a path (folder or file) in Trae IDE. Returns (success, message). Uses TRAE_CLI_PATH or trae-cn/trae CLI."""
+    """Trae Agent has no IDE to open; set active project cwd so run_agent uses this folder. Returns (success, message)."""
     if not (path or str(path).strip()):
         return False, "Error: path is empty."
     p = _resolve_path(path)
     if not os.path.exists(p):
         return False, f"Path does not exist: {path}"
-    try:
-        trae_cmd = _trae_executable()
-        cwd = os.path.dirname(p) if os.path.isfile(p) else p
-        if IS_WINDOWS and trae_cmd.lower().endswith(".cmd"):
-            subprocess.Popen(
-                ["cmd", "/c", trae_cmd, p],
-                cwd=cwd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        elif IS_WINDOWS and trae_cmd.lower().endswith(".ps1"):
-            subprocess.Popen(
-                ["powershell", "-ExecutionPolicy", "Bypass", "-File", trae_cmd, p],
-                cwd=cwd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        else:
-            subprocess.Popen(
-                [trae_cmd, p],
-                cwd=cwd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        return True, f"Opened in Trae: {p}"
-    except FileNotFoundError:
-        return False, (
-            "Trae CLI (trae-cn) not found. Install Trae IDE from https://www.trae.cn and run 'Install trae command' in the IDE, "
-            "or set TRAE_CLI_PATH to the full path of the trae-cn executable."
-        )
-    except Exception as e:
-        return False, f"Could not open in Trae: {e!s}"
+    if not os.path.isdir(p):
+        p = os.path.dirname(p)
+    _set_active_cwd(p, backend="trae")
+    return True, f"Project folder set to: {p}. Use run_agent to run tasks in this directory (Trae Agent has no IDE to open)."
 
 
 def _agent_executable() -> str:
@@ -1078,21 +1058,26 @@ def _infer_backend_from_plugin_id(plugin_id: str) -> str:
 
 
 async def _run_trae_task(task: str, cwd: Optional[str] = None, timeout_sec: int = 600) -> Tuple[bool, str]:
-    """Run Trae with a task. Trae IDE (www.trae.cn) may not support headless 'run'; we try 'trae run <task>' (trae-agent style). If not available, return guidance."""
+    """Run Trae Agent (trae-cli) with a task. Captures stdout/stderr and returns the result. See github.com/bytedance/trae-agent."""
     if not (task or str(task).strip()):
         return False, "Error: task is empty."
     work_dir = (cwd or "").strip() or _get_active_cwd("trae") or DEFAULT_CWD
     if not os.path.isdir(work_dir):
         work_dir = DEFAULT_CWD
     task_str = task.strip()
-    # TRAE_RUN_CMD overrides the default; otherwise use same executable as _trae_executable (trae-cn typical for CN) with "run"
-    run_cmd = (os.environ.get("TRAE_RUN_CMD") or "").strip()
-    if run_cmd:
-        argv = run_cmd.split() + [task_str]
+    timeout = max(30, min(int(timeout_sec or 600), 1800))
+    exe = _trae_agent_executable()
+    config_file = _trae_agent_config_file()
+    # On Windows, .cmd/.ps1 launchers must be run via cmd or powershell (same as Cursor/Claude).
+    if IS_WINDOWS and exe.lower().endswith(".cmd"):
+        argv = ["cmd", "/c", exe, "run", task_str, "--working-dir", work_dir, "--console-type", "simple"]
+    elif IS_WINDOWS and exe.lower().endswith(".ps1"):
+        argv = ["powershell", "-ExecutionPolicy", "Bypass", "-File", exe, "run", task_str, "--working-dir", work_dir, "--console-type", "simple"]
     else:
-        exe = _trae_executable()
-        argv = [exe, "run", task_str]
-    logger.info("trae run: argv=%s cwd=%s", argv, work_dir)
+        argv = [exe, "run", task_str, "--working-dir", work_dir, "--console-type", "simple"]
+    if config_file:
+        argv.extend(["--config-file", config_file])
+    logger.info("trae-cli run: argv=%s cwd=%s", argv, work_dir)
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
@@ -1102,7 +1087,7 @@ async def _run_trae_task(task: str, cwd: Optional[str] = None, timeout_sec: int 
         )
         stdout_b, stderr_b = await asyncio.wait_for(
             proc.communicate(),
-            timeout=max(30, min(int(timeout_sec or 600), 1800)),
+            timeout=timeout,
         )
         out = (stdout_b.decode("utf-8", errors="replace") if stdout_b else "").strip()
         err = (stderr_b.decode("utf-8", errors="replace") if stderr_b else "").strip()
@@ -1110,18 +1095,18 @@ async def _run_trae_task(task: str, cwd: Optional[str] = None, timeout_sec: int 
         if rc != 0:
             if "not found" in err.lower() or "not found" in out.lower() or "command" in err.lower():
                 return False, (
-                    "Trae CLI did not run. Trae IDE (https://www.trae.cn) is for interactive use: use open_project to open a folder in Trae, then work in the IDE. "
-                    "To run tasks from the bridge you need the Trae CLI (e.g. trae-cn run); set TRAE_RUN_CMD or install Trae and add trae-cn to PATH."
+                    "Trae Agent (trae-cli) not found or failed. Install from github.com/bytedance/trae-agent: clone repo, run 'uv sync', then use 'uv run trae-cli' or set TRAE_AGENT_PATH. "
+                    "Create trae_config.yaml with your API key (see repo README) and set TRAE_AGENT_CONFIG to its path."
                 )
-            return False, err or out or f"Trae exited with code {rc}."
-        return True, out or err or "(no output)"
+            return False, err or out or f"Trae Agent exited with code {rc}."
+        return True, out or err or "(Trae Agent completed with no output)"
     except FileNotFoundError:
         return False, (
-            "Trae CLI (trae-cn) not found. Install Trae IDE from https://www.trae.cn and use 'Install trae command' in the IDE, or set TRAE_CLI_PATH to the trae-cn executable. "
-            "For headless task runs set TRAE_RUN_CMD (e.g. trae-cn run) if the command differs."
+            "Trae Agent (trae-cli) not found. Install: git clone https://github.com/bytedance/trae-agent && cd trae-agent && uv sync; "
+            "then set TRAE_AGENT_PATH to the repo path or add 'uv run trae-cli' to PATH, and TRAE_AGENT_CONFIG to your trae_config.yaml path."
         )
     except asyncio.TimeoutError:
-        return False, f"Trae timed out after {timeout_sec}s."
+        return False, f"Trae Agent timed out after {timeout_sec}s."
     except Exception as e:
         return False, f"Error: {e!s}"
 
@@ -1207,7 +1192,7 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
                 text = f"Could not open {path}: {e!s}."
 
     elif cap_id == "open_project":
-        # Open a folder or project in Cursor IDE or Trae IDE so the user can chat with the agent there.
+        # Open a folder in Cursor IDE, or set active project cwd for Trae Agent (no IDE).
         path = (params.get("path") or params.get("folder") or "").strip()
         if not path:
             success = False

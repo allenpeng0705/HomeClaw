@@ -51,24 +51,25 @@ When you send a task via `run_agent`, the **Claude Code CLI** runs on the bridge
 
 ## 4. Trae Bridge (plugin: `trae-bridge`)
 
-**Trae IDE** (https://www.trae.cn) is ByteDance’s AI-native IDE. HomeClaw can open projects in Trae and, if the Trae CLI supports it, run tasks headlessly.
+**Trae Agent** ([github.com/bytedance/trae-agent](https://github.com/bytedance/trae-agent)) is an open-source CLI agent for software engineering. HomeClaw runs `trae-cli run "task"` in a project folder and returns the agent’s output to the user.
 
 | Capability | Purpose |
 |------------|--------|
-| `open_project` | Open a folder in Trae IDE (path). |
-| `open_file` | Open a single file in Trae. |
+| `open_project` | Set the **trae** active project folder (Trae Agent has no IDE; this sets cwd for run_agent). |
+| `open_file` | Set active cwd to the file’s directory. |
 | `set_cwd` | Set the **trae** active project path on the bridge. |
-| `run_agent` | Run Trae with a task (e.g. `trae run "task"` if available); returns output or guidance. |
+| `run_agent` | Run **trae-cli run** with the task in the active folder; returns stdout/stderr. |
 | `run_command` | Run a shell command in the active project. |
 | `get_status` | Return bridge status (including trae active cwd). |
-| `run_agent_interactive` | Start Trae in a PTY for interactive use. |
+| `run_agent_interactive` | Start **trae-cli interactive** in a PTY. |
 | `run_command_interactive` | Start a shell in a PTY. |
 | `interactive_read` / `interactive_write` / `interactive_stop` | Same as Cursor/Claude. |
 
-- **Setup:** Install [Trae IDE](https://www.trae.cn) and in the IDE run **“Install trae command”** so the CLI is on your PATH (CN build is typically **trae-cn**). The bridge uses it to open projects (e.g. `trae-cn <path>`). Optional: set **TRAE_CLI_PATH** (full path to trae-cn) or **TRAE_RUN_CMD** (e.g. `trae-cn run`) on the bridge machine if the CLI is not in PATH or you use a different command for headless runs.
-- **Active CWD:** Stored as `trae_active_cwd` in the same state file (`~/.homeclaw/cursor_bridge_state.json`).
-- **Routing:** For the Trae friend, `_trae_bridge_capability_and_params()` maps messages (e.g. “open X in Trae”, “open project D:\myrepo”) to the capabilities above.
-- **Adding Trae in Companion:** In `config/user.yml`, add a friend with `preset: trae` and `name: Trae` (or any name). The Trae chat will use the same bridge server as Cursor and Claude Code.
+- **Setup:** Clone the repo, run `uv sync`, and create `trae_config.yaml` with your API key (see [Trae Agent README](https://github.com/bytedance/trae-agent)). Set **cursor_bridge_trae_agent_path** to the full path of `trae-cli` (e.g. `trae-agent\.venv\Scripts\trae-cli.exe` on Windows) and **cursor_bridge_trae_agent_config** to your `trae_config.yaml` path. The bridge reads **TRAE_AGENT_PATH** and **TRAE_AGENT_CONFIG** when Core starts it.
+- **Windows:** Use the full path to `trae-cli.exe` in `Scripts` (e.g. `D:\repos\trae-agent\.venv\Scripts\trae-cli.exe`) so the bridge finds it when started by Core (PATH may be minimal). If your venv only has `trae-cli.cmd`, the bridge runs it via `cmd /c`. Trae Agent’s built-in **bash** tool may require Git Bash or WSL on Windows; see the trae-agent repo for tool configuration.
+- **Active CWD:** Stored as `trae_active_cwd` in `~/.homeclaw/cursor_bridge_state.json`.
+- **Routing:** For the Trae friend, `_trae_bridge_capability_and_params()` maps messages (e.g. “open project D:\myrepo”, “run task: add tests”) to the capabilities above.
+- **Adding Trae in Companion:** In `config/user.yml`, add a friend with `preset: trae` and `name: Trae`. See **docs/trae-agent-integration-investigation.md** for full install and config steps.
 
 ---
 

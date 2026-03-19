@@ -174,14 +174,16 @@ if (-not $ClawhubOk) {
   }
 }
 
-# ----- Step 2d: Dev CLIs (optional): Cursor CLI + Claude Code CLI -----
+# ----- Step 2d: Dev CLIs (optional): Cursor CLI + Claude Code CLI + Trae Agent -----
 # Off by default. Enable with:
 #   $env:HOMECLAW_INSTALL_CURSOR_CLI="1"; .\install.ps1
 #   $env:HOMECLAW_INSTALL_CLAUDE_CODE="1"; .\install.ps1
+#   $env:HOMECLAW_INSTALL_TRAE_AGENT="1"; .\install.ps1
 Write-Host ""
 Write-Host "=== Step 2d: Dev CLIs (optional) ==="
 $InstallCursorCli = ($env:HOMECLAW_INSTALL_CURSOR_CLI -eq "1")
 $InstallClaudeCode = ($env:HOMECLAW_INSTALL_CLAUDE_CODE -eq "1")
+$InstallTraeAgent = ($env:HOMECLAW_INSTALL_TRAE_AGENT -eq "1")
 
 if ($InstallCursorCli) {
   $hasAgent = $false
@@ -219,6 +221,69 @@ if ($InstallClaudeCode) {
   }
 } else {
   Write-Host "Skipping Claude Code CLI install (set HOMECLAW_INSTALL_CLAUDE_CODE=1 to enable)"
+}
+
+if ($InstallTraeAgent) {
+  $TraeAgentDir = Join-Path $Root "tools\trae-agent"
+  $TraeAgentVenv = Join-Path $TraeAgentDir ".venv"
+  $TraeAgentPyproject = Join-Path $TraeAgentDir "pyproject.toml"
+  if ((Test-Path $TraeAgentVenv) -and (Test-Path $TraeAgentPyproject)) {
+    try {
+      Push-Location $TraeAgentDir
+      $null = Get-Command uv -ErrorAction SilentlyContinue
+      if ($?) {
+        $uvRun = & uv run trae-cli --help 2>$null
+        if ($LASTEXITCODE -eq 0) { Write-Host "OK: Trae Agent already installed at $TraeAgentDir (trae-cli in venv)" }
+        else { & uv sync --all-extras 2>$null; Write-Host "OK: Trae Agent updated at $TraeAgentDir" }
+      } else { Write-Host "uv not found. Install with: pip install uv. Then run: cd $TraeAgentDir; uv sync --all-extras" }
+    } finally { Pop-Location -ErrorAction SilentlyContinue }
+  } else {
+    Write-Host "Installing Trae Agent (clone + uv sync)..."
+    $hasGit = $false; $hasUv = $false
+    try { $null = Get-Command git -ErrorAction SilentlyContinue; if ($?) { $hasGit = $true } } catch {}
+    try { $null = Get-Command uv -ErrorAction SilentlyContinue; if ($?) { $hasUv = $true } } catch {}
+    if (-not $hasUv) {
+      Write-Host "Installing uv (required for Trae Agent)..."
+      & $PythonExe -m pip install -q uv 2>$null
+      $null = Get-Command uv -ErrorAction SilentlyContinue; if ($?) { $hasUv = $true }
+    }
+    if ($hasGit -and $hasUv) {
+      New-Item -ItemType Directory -Path (Join-Path $Root "tools") -Force | Out-Null
+      if (Test-Path (Join-Path $TraeAgentDir ".git")) {
+        Set-Location $TraeAgentDir
+        git pull --quiet 2>$null
+        & uv sync --all-extras 2>$null
+        if (-not (Test-Path (Join-Path $TraeAgentDir "trae_config.yaml")) -and (Test-Path (Join-Path $TraeAgentDir "trae_config.yaml.example"))) {
+          Copy-Item -Path (Join-Path $TraeAgentDir "trae_config.yaml.example") -Destination (Join-Path $TraeAgentDir "trae_config.yaml")
+          Write-Host "  Created trae_config.yaml from example. Edit it and add your API key."
+        }
+        Write-Host "OK: Trae Agent at $TraeAgentDir (set cursor_bridge_trae_agent_path to .venv\Scripts\trae-cli.exe and cursor_bridge_trae_agent_config to trae_config.yaml in config)"
+        Set-Location $Root
+      } else {
+        & git clone --progress --depth 1 https://github.com/bytedance/trae-agent.git $TraeAgentDir 2>&1
+        if ($LASTEXITCODE -ne 0) { Write-Host "Warning: Trae Agent clone failed." } else {
+          Set-Location $TraeAgentDir
+          & uv sync --all-extras 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "OK: Trae Agent installed at $TraeAgentDir"
+            $exampleConfig = Join-Path $TraeAgentDir "trae_config.yaml.example"
+            $configPath = Join-Path $TraeAgentDir "trae_config.yaml"
+            if (-not (Test-Path $configPath) -and (Test-Path $exampleConfig)) {
+              Copy-Item -Path $exampleConfig -Destination $configPath
+              Write-Host "  Created $TraeAgentDir\trae_config.yaml from example. Edit it and add your API key (see repo README)."
+            }
+            $venvCli = Join-Path $TraeAgentDir ".venv\Scripts\trae-cli.exe"
+            if (Test-Path $venvCli) { Write-Host "  Set in config: cursor_bridge_trae_agent_path = $venvCli , cursor_bridge_trae_agent_config = $configPath" }
+          } else { Write-Host "Warning: uv sync failed in $TraeAgentDir" }
+          Set-Location $Root
+        }
+      }
+    } else {
+      Write-Host "Skipping Trae Agent (need git and uv). Install uv: pip install uv. Then: `$env:HOMECLAW_INSTALL_TRAE_AGENT=`"1`"; .\install.ps1"
+    }
+  }
+} else {
+  Write-Host "Skipping Trae Agent install (set HOMECLAW_INSTALL_TRAE_AGENT=1 to enable)"
 }
 
 # ----- Step 4b: VMPrint (Markdown to PDF tool) -----
@@ -460,9 +525,12 @@ Write-Host "  3. Start Core: cd $Root; $PythonExe -m main start"
 Write-Host "  4. Run Portal again: cd $Root; $PythonExe -m main portal"
 Write-Host ""
 Write-Host "--- Optional (Dev Bridge) ---"
-Write-Host "If you want to use the Cursor / ClaudeCode friends (run tools on your dev machine), you may want these CLIs:"
+Write-Host "If you want to use the Cursor / ClaudeCode / Trae friends (run tools on your dev machine), you may want:"
 Write-Host "  - Cursor CLI (agent/cursor): `$env:HOMECLAW_INSTALL_CURSOR_CLI=`"1`"; .\\install.ps1"
 Write-Host "  - Claude Code CLI (claude):  `$env:HOMECLAW_INSTALL_CLAUDE_CODE=`"1`"; .\\install.ps1"
-Write-Host "  - Or using install.bat flags: install.bat cursor   |  install.bat claude   |  install.bat cursor claude"
+Write-Host "  - Trae Agent (trae-cli):     `$env:HOMECLAW_INSTALL_TRAE_AGENT=`"1`"; .\\install.ps1"
+Write-Host "  - Or using install.bat flags: install.bat cursor   |  install.bat claude   |  install.bat trae   |  install.bat cursor claude trae"
+Write-Host ""
+Write-Host "Trae Agent: install clones to tools\trae-agent and creates trae_config.yaml from example. Edit trae_config.yaml with your API key (see https://github.com/bytedance/trae-agent). Then set cursor_bridge_trae_agent_path (path to trae-cli, e.g. tools\trae-agent\.venv\Scripts\trae-cli.exe) and cursor_bridge_trae_agent_config (path to trae_config.yaml) in config\skills_and_plugins.yml."
 Write-Host ""
 Write-Host "Docs: https://github.com/allenpeng0705/HomeClaw"

@@ -1,13 +1,11 @@
-# Trae Bridge: open project in Trae IDE, run Trae/trae-agent from HomeClaw.
-# Uses the same bridge server as Cursor/Claude Code (external_plugins/cursor_bridge/server.py).
-# Trae IDE: https://www.trae.cn — install the 'trae' command in the IDE, then open projects or run tasks from HomeClaw.
-# Optional: set TRAE_CLI_PATH (full path to trae-cn) or TRAE_RUN_CMD (e.g. trae-cn run) on the bridge machine if the CLI is not in PATH. The CN build is typically named trae-cn.
+# Trae Bridge: run Trae Agent (trae-cli) from HomeClaw. Uses the same bridge server as Cursor/Claude Code.
+# Trae Agent: https://github.com/bytedance/trae-agent — clone, uv sync, create trae_config.yaml with API key.
+# Set cursor_bridge_trae_agent_path (path to trae-cli) and cursor_bridge_trae_agent_config (path to trae_config.yaml) in config.
 id: trae-bridge
 name: Trae Bridge
 description: |
-  Open a project/folder in Trae IDE (https://www.trae.cn), run Trae with a task and get output, or run shell commands
-  on the dev machine. Use when the user wants to: open a project in Trae; have Trae do a coding task (if trae run is available);
-  or run a command (e.g. npm test) and get the result back.
+  Run Trae Agent (trae-cli) for software engineering tasks: set project folder, run a natural-language task and get the result,
+  or run shell commands. Use when the user wants to: set/open a project folder for Trae Agent; run a coding task (e.g. "add tests", "fix the bug") and see the output; or run a command (e.g. npm test).
 type: http
 config:
   base_url: "http://127.0.0.1:3104"
@@ -16,33 +14,33 @@ config:
   # bridge_api_key: "set-a-random-secret"   # optional; must match CURSOR_BRIDGE_API_KEY on the bridge server
 capabilities:
   - id: open_project
-    name: Open project in Trae
-    description: Open a folder or project in Trae IDE so the user can work there. Use when the user says "open project X in Trae", "open folder in Trae".
+    name: Set project folder for Trae Agent
+    description: Set the active project directory so run_agent runs in this folder (Trae Agent has no IDE to open). Use when the user says "open project X in Trae", "use folder X for Trae".
     parameters:
       - name: path
         type: string
         required: true
-        description: Folder path to open (absolute or relative to bridge CWD).
+        description: Folder path (absolute or relative to bridge CWD).
       - name: folder
         type: string
         required: false
         description: Alias for path.
   - id: set_cwd
     name: Set active project cwd
-    description: Set the active project directory on the bridge so subsequent Trae runs default to it.
+    description: Set the active project directory on the bridge so subsequent Trae Agent runs default to it.
     parameters:
       - name: path
         type: string
         required: true
         description: Project folder path (absolute or relative to bridge default cwd).
   - id: run_agent
-    name: Run Trae and get result
-    description: Run Trae with a task and return output (requires 'trae run' or TRAE_RUN_CMD on the bridge). If not available, use open_project to work in Trae IDE.
+    name: Run Trae Agent and get result
+    description: Run trae-cli with a task in the active project; returns the agent output. Requires Trae Agent installed and trae_config.yaml with API key.
     parameters:
       - name: task
         type: string
         required: true
-        description: Task or prompt for Trae (e.g. "add error handling to auth module").
+        description: Natural-language task (e.g. "add error handling to auth module", "create a hello world script").
       - name: cwd
         type: string
         required: false
@@ -67,8 +65,8 @@ capabilities:
     description: Return bridge state (active cwd, default cwd, auth enabled).
     parameters: []
   - id: run_agent_interactive
-    name: Start Trae interactively (PTY)
-    description: Start Trae IDE in an interactive PTY on the bridge. Returns session_id and initial_output; use interactive_read/interactive_write/interactive_stop for the same session.
+    name: Start Trae Agent interactive (PTY)
+    description: Start trae-cli interactive on the bridge. Returns session_id and initial_output; use interactive_read/write/stop.
     parameters:
       - name: backend
         type: string

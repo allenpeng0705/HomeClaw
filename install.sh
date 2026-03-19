@@ -173,10 +173,12 @@ fi
 # Off by default. Enable with:
 #   HOMECLAW_INSTALL_CURSOR_CLI=1 bash install.sh
 #   HOMECLAW_INSTALL_CLAUDE_CODE=1 bash install.sh
+#   HOMECLAW_INSTALL_TRAE_AGENT=1 bash install.sh
 echo ""
 echo "=== Step 2d: Dev CLIs (optional) ==="
 INSTALL_CURSOR_CLI="${HOMECLAW_INSTALL_CURSOR_CLI:-0}"
 INSTALL_CLAUDE_CODE="${HOMECLAW_INSTALL_CLAUDE_CODE:-0}"
+INSTALL_TRAE_AGENT="${HOMECLAW_INSTALL_TRAE_AGENT:-0}"
 if [ "$INSTALL_CURSOR_CLI" = "1" ]; then
   if command -v agent >/dev/null 2>&1 && command -v cursor >/dev/null 2>&1; then
     echo "OK: Cursor CLI already installed (agent + cursor found on PATH)"
@@ -212,6 +214,52 @@ if [ "$INSTALL_CLAUDE_CODE" = "1" ]; then
   fi
 else
   echo "Skipping Claude Code CLI install (set HOMECLAW_INSTALL_CLAUDE_CODE=1 to enable)"
+fi
+if [ "$INSTALL_TRAE_AGENT" = "1" ]; then
+  TRAE_AGENT_DIR="$ROOT/tools/trae-agent"
+  if [ -d "$TRAE_AGENT_DIR/.venv" ] && [ -f "$TRAE_AGENT_DIR/pyproject.toml" ]; then
+    if (cd "$TRAE_AGENT_DIR" && command -v uv >/dev/null 2>&1 && uv run trae-cli --help >/dev/null 2>&1); then
+      echo "OK: Trae Agent already installed at $TRAE_AGENT_DIR (trae-cli in venv)"
+    else
+      echo "Trae Agent repo present; running uv sync..."
+      if command -v uv >/dev/null 2>&1; then
+        (cd "$TRAE_AGENT_DIR" && uv sync --all-extras 2>/dev/null) && echo "OK: Trae Agent updated at $TRAE_AGENT_DIR" || echo "Warning: uv sync failed in $TRAE_AGENT_DIR"
+      else
+        echo "uv not found. Install with: pip install uv  or see https://docs.astral.sh/uv/. Then run: cd $TRAE_AGENT_DIR && uv sync --all-extras"
+      fi
+    fi
+  else
+    echo "Installing Trae Agent (clone + uv sync)..."
+    if ! command -v git >/dev/null 2>&1; then
+      echo "Warning: git not found; cannot clone Trae Agent. Install git then set HOMECLAW_INSTALL_TRAE_AGENT=1 and re-run."
+    elif ! command -v uv >/dev/null 2>&1; then
+      echo "Installing uv (required for Trae Agent)..."
+      "$PYTHON" -m pip install --quiet uv 2>/dev/null || true
+    fi
+    if command -v uv >/dev/null 2>&1 && command -v git >/dev/null 2>&1; then
+      mkdir -p "$ROOT/tools"
+      if [ -d "$TRAE_AGENT_DIR/.git" ]; then
+        (cd "$TRAE_AGENT_DIR" && git pull --quiet 2>/dev/null || true)
+        (cd "$TRAE_AGENT_DIR" && uv sync --all-extras 2>/dev/null) && echo "OK: Trae Agent updated at $TRAE_AGENT_DIR" || echo "Warning: uv sync failed in $TRAE_AGENT_DIR"
+      else
+        git clone --progress --depth 1 https://github.com/bytedance/trae-agent.git "$TRAE_AGENT_DIR" 2>&1 || { echo "Warning: Trae Agent clone failed."; fi_skip=1; }
+      fi
+      if [ -z "${fi_skip:-}" ] && [ -d "$TRAE_AGENT_DIR" ] && [ -f "$TRAE_AGENT_DIR/pyproject.toml" ]; then
+        if [ ! -d "$TRAE_AGENT_DIR/.venv" ]; then
+          (cd "$TRAE_AGENT_DIR" && uv sync --all-extras 2>/dev/null) && echo "OK: Trae Agent installed at $TRAE_AGENT_DIR" || echo "Warning: uv sync failed in $TRAE_AGENT_DIR"
+        fi
+        if [ ! -f "$TRAE_AGENT_DIR/trae_config.yaml" ] && [ -f "$TRAE_AGENT_DIR/trae_config.yaml.example" ]; then
+          cp "$TRAE_AGENT_DIR/trae_config.yaml.example" "$TRAE_AGENT_DIR/trae_config.yaml"
+          echo "  Created $TRAE_AGENT_DIR/trae_config.yaml from example. Edit it and add your API key (see repo README)."
+        fi
+        echo "  Set in config: cursor_bridge_trae_agent_path = $TRAE_AGENT_DIR/.venv/bin/trae-cli  (or full path), cursor_bridge_trae_agent_config = path to trae_config.yaml"
+      fi
+    else
+      echo "Skipping Trae Agent (need git and uv). Install uv: pip install uv. Then: HOMECLAW_INSTALL_TRAE_AGENT=1 bash install.sh"
+    fi
+  fi
+else
+  echo "Skipping Trae Agent install (set HOMECLAW_INSTALL_TRAE_AGENT=1 to enable)"
 fi
 
 # ----- Step 3: already done if IN_REPO -----
@@ -452,9 +500,12 @@ echo "  3. Start Core: cd $ROOT && $PYTHON -m main start"
 echo "  4. Run Portal again: cd $ROOT && $PYTHON -m main portal"
 echo ""
 echo "--- Optional (Dev Bridge) ---"
-echo "If you want to use the Cursor / ClaudeCode friends (run tools on your dev machine), you may want these CLIs:"
+echo "If you want to use the Cursor / ClaudeCode / Trae friends (run tools on your dev machine), you may want:"
 echo "  - Cursor CLI (agent/cursor): HOMECLAW_INSTALL_CURSOR_CLI=1 bash install.sh"
 echo "  - Claude Code CLI (claude):  HOMECLAW_INSTALL_CLAUDE_CODE=1 bash install.sh"
-echo "  - Both: HOMECLAW_INSTALL_CURSOR_CLI=1 HOMECLAW_INSTALL_CLAUDE_CODE=1 bash install.sh"
+echo "  - Trae Agent (trae-cli):     HOMECLAW_INSTALL_TRAE_AGENT=1 bash install.sh"
+echo "  - All three: HOMECLAW_INSTALL_CURSOR_CLI=1 HOMECLAW_INSTALL_CLAUDE_CODE=1 HOMECLAW_INSTALL_TRAE_AGENT=1 bash install.sh"
+echo ""
+echo "Trae Agent: install clones to tools/trae-agent and creates trae_config.yaml from example. Edit trae_config.yaml with your API key (see https://github.com/bytedance/trae-agent). Then set cursor_bridge_trae_agent_path (path to trae-cli, e.g. tools/trae-agent/.venv/bin/trae-cli) and cursor_bridge_trae_agent_config (path to trae_config.yaml) in config/skills_and_plugins.yml."
 echo ""
 echo "Docs: https://github.com/allenpeng0705/HomeClaw"
