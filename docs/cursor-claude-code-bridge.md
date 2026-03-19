@@ -70,6 +70,7 @@ When you send a task via `run_agent`, the **Claude Code CLI** runs on the bridge
 - **Active CWD:** Stored as `trae_active_cwd` in `~/.homeclaw/cursor_bridge_state.json`.
 - **Routing:** For the Trae friend, `_trae_bridge_capability_and_params()` maps messages (e.g. “open project D:\myrepo”, “run task: add tests”) to the capabilities above.
 - **Adding Trae in Companion:** In `config/user.yml`, add a friend with `preset: trae` and `name: Trae`. See **docs/trae-agent-integration-investigation.md** for full install and config steps.
+- **502 on long tasks:** Trae (and Cursor/Claude) tasks can run many minutes. If you see "Core /inbound/result failed (502)", it is usually a **reverse proxy** (e.g. in front of Core) closing the connection. The Companion app uses **async mode** for Trae/Cursor/ClaudeCode friends (POST returns 202, then polls GET /inbound/result), so the connection is not held; if you still get 502, ensure any proxy has a long read timeout (e.g. ≥ 1800s) for `/inbound` and `/inbound/result`, or connect to Core directly (no proxy).
 
 ---
 

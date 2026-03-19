@@ -91,3 +91,4 @@ external_plugins/quote-java/target/classes/QuotePlugin.class
 /skills/x-api-1.0.0/scripts/__pycache__
 /ui/__pycache__
 /skills/ppt-generation-1.0.0/scripts/__pycache__
+/tools/trae-agent

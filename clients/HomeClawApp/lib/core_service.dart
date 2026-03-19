@@ -1132,7 +1132,11 @@ class CoreService {
   }) async {
     final url = Uri.parse('$_baseUrl/inbound');
     final useAsyncForRemote = _isRemoteCore;
-    final useStreamPath = !useAsyncForRemote &&
+    // Use async (202 + poll) for dev-bridge friends so long-running trae-cli/Cursor/Claude tasks don't hold the connection and trigger proxy 502.
+    final fid = (friendId ?? '').trim().toLowerCase();
+    final useAsyncForBridge = fid == 'trae' || fid == 'cursor' || fid == 'claudecode';
+    final useAsync = useAsyncForRemote || useAsyncForBridge;
+    final useStreamPath = !useAsync &&
         ((useStream ?? _showProgressDuringLongTasks) && onProgress != null);
 
     final body = <String, dynamic>{
@@ -1148,7 +1152,7 @@ class CoreService {
     if (videos != null && videos.isNotEmpty) body['videos'] = videos;
     if (audios != null && audios.isNotEmpty) body['audios'] = audios;
     if (files != null && files.isNotEmpty) body['files'] = files;
-    if (useAsyncForRemote) body['async'] = true;
+    if (useAsync) body['async'] = true;
     if (useStreamPath) body['stream'] = true;
 
     // Establish WebSocket for push (reminders, cron) for both local and remote Core.
@@ -1156,7 +1160,7 @@ class CoreService {
     // Register FCM token with Core so reminders can be sent when app is killed/background (iOS/Android only).
     registerPushTokenWithCore(userId);
 
-    if (useAsyncForRemote) {
+    if (useAsync) {
       return _sendMessageAsync(url, body, onProgress ?? (_) {});
     }
     if (useStreamPath) {
