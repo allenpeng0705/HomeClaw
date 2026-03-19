@@ -56,8 +56,6 @@ users:
         preset: cursor
       - name: ClaudeCode
         preset: claudecode
-      - name: Trae
-        preset: trae
 
   - id: PengXiaoFeng
     name: PengXiaoFeng

@@ -46,8 +46,8 @@ This doc summarizes all code/config changes for replacing Trae IDE (trae-cn) wit
 
 | File | Change |
 |------|--------|
-| **install.sh** | Optional step when `HOMECLAW_INSTALL_TRAE_AGENT=1`: clone trae-agent to `tools/trae-agent`, install uv if missing (`pip install uv`), run `uv sync --all-extras`, copy `trae_config.yaml.example` → `trae_config.yaml` if missing. End message: how to install Trae Agent and set `cursor_bridge_trae_agent_path` / `cursor_bridge_trae_agent_config` in config. |
-| **install.ps1** | Same optional step; Windows paths; same end message. |
+| **install.sh** | Optional step when `HOMECLAW_INSTALL_TRAE_AGENT=1`: clone trae-agent to `tools/trae-agent`, install uv if missing (`pip install uv`), run `uv sync --all-extras`, copy `trae_config.yaml.example` → `trae_config.yaml` if missing. After install/update, applies **patches/trae-agent-anthropic-client-minimax.patch** so Minimax (and other Anthropic-compatible backends) get standard tool format. End message: how to install Trae Agent and set `cursor_bridge_trae_agent_path` / `cursor_bridge_trae_agent_config` in config. |
+| **install.ps1** | Same optional step; Windows paths; applies the same patch after install/update; same end message. |
 | **install.bat** | New flag `trae`: sets `HOMECLAW_INSTALL_TRAE_AGENT=1`; echo and comments updated for Trae Agent and “install.bat trae”. |
 
 ---

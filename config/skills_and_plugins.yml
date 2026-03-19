@@ -178,7 +178,7 @@ planner_executor:
             content: [result_of_step_1]
           args:
             format: "markdown"
-    # Summary as page: read document → LLM summary (Markdown) → save_result_page (viewable link, not PDF).
+    # summarize_to_page DAG flow (simple): read document -> LLM summary -> save_result_page
     summarize_to_page:
       trigger: category
       category: summarize_to_page
@@ -394,6 +394,12 @@ skills_force_include_rules:
         skill_name: imap-smtp-email
         script: smtp.js
         args: ["send-from-message", "{{query}}"]
+  # Deep / cited web research (external_skills/deep-research-workflow/SKILL.md — uses tavily_research, web_search, fetch_url)
+  - patterns:
+    - "deep\\s+research|in-?depth\\s+research|research\\s+report|comprehensive\\s+research|literature\\s+review|cited\\s+sources"
+    - "深度调研|调研报告|详细调研|全面调研|文献综述|引用来源"
+    folders: [deep-research-workflow]
+    instruction: "User wants thorough web research with sources. Follow skill deep-research-workflow: prefer tavily_research(input=<question>) if configured; else web_search + fetch_url; respect budgets in SKILL.md; answer with [1][2] citations and ### Sources. Do not use run_skill as the only action—call research tools, then write the report."
 
 # --- Plugins: vector search (RAG) ---
 # When false (default): include ALL plugins in the routing block. When true: vector store + RAG to pick top-N.
@@ -418,6 +424,10 @@ system_plugins_env:
   homeclaw-browser:
     BROWSER_HEADLESS: false
 
+# --- Trae Agent (experimental) ---
+# When false (default): Trae Bridge plugin is not registered, TRAE_AGENT_* is not passed to the bridge, and preset "trae" replies with a hint. Set true only if you use Trae Agent (trae-cli); see docs/cursor-claude-code-bridge.md §4.
+trae_agent_enabled: false
+
 # --- Cursor Bridge (external_plugins/cursor_bridge) ---
 # When true, Core starts the Cursor Bridge on startup. If the bridge reports "agent not found", set cursor_bridge_agent_path to the full path (PowerShell: (Get-Command agent).Source).
 cursor_bridge_auto_start: true
@@ -428,8 +438,8 @@ cursor_bridge_auto_start: true
 # cursor_bridge_bridge_api_key: "set-a-random-secret"   # optional; protects the bridge HTTP API. When set, Core starts bridge with CURSOR_BRIDGE_API_KEY and sends X-HomeClaw-Bridge-Key on calls.
 cursor_bridge_forward_logs: true   # set true to see bridge/agent logs in Core's terminal (debug "Agent exited with code 1")
 cursor_bridge_claude_settings_path: "C:\\Users\\PS\\.claude\\settings.json"   # optional; full path to Claude Code settings.json so the bridge loads auth/env from that file (fixes 401 when bridge runs under a different user)
-cursor_bridge_trae_agent_path: "D:\\mygithub\\HomeClaw\\tools\\trae-agent\\.venv\\Scripts\\trae-cli.exe"   # optional; full path to trae-cli (from clone: uv sync then .venv\Scripts\trae-cli.exe, or after pip install -e .)
-cursor_bridge_trae_agent_config: "D:\\mygithub\\HomeClaw\\tools\\trae-agent\\trae_config.yaml"   # optional; full path to trae_config.yaml (API key + model). See github.com/bytedance/trae-agent
+#cursor_bridge_trae_agent_path: "D:\\mygithub\\HomeClaw\\tools\\trae-agent\\.venv\\Scripts\\trae-cli.exe"   # optional; full path to trae-cli (from clone: uv sync then .venv\Scripts\trae-cli.exe, or after pip install -e .)
+#cursor_bridge_trae_agent_config: "D:\\mygithub\\HomeClaw\\tools\\trae-agent\\trae_config.yaml"   # optional; full path to trae_config.yaml (API key + model). See github.com/bytedance/trae-agent
 
 # --- Claude Code (CLI) via the same bridge ---
 # claude_code_path: "C:\\Users\\You\\AppData\\Local\\Programs\\claude\\claude.cmd"   # optional; PowerShell: (Get-Command claude).Source

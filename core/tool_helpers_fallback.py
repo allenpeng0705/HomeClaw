@@ -535,7 +535,8 @@ def parse_raw_tool_calls_from_content(content: str):
             start = text.find("<tool_call>")
             if start >= 0:
                 rest = text[start + len("<tool_call>"):].strip()
-                if rest.startswith("{"):
+                # 1) Try JSON object (common truncated variant).
+                if rest.lstrip().startswith("{"):
                     inner = _extract_balanced_json_object(rest)
                     if inner:
                         try:
@@ -555,6 +556,17 @@ def parse_raw_tool_calls_from_content(content: str):
                                 })
                         except (json.JSONDecodeError, TypeError):
                             pass
+
+                # 2) Try XML-style tool calls even when `</tool_call>` is missing.
+                # Example truncated output:
+                #   <tool_call><function=file_find>...</function><pattern>*.png*</p
+                if not tool_calls and rest:
+                    parsed = _parse_xml_style_tool_call(rest)
+                    if parsed:
+                        parsed["id"] = f"raw_tool_0_{uuid.uuid4().hex[:8]}"
+                        if "type" not in parsed:
+                            parsed["type"] = "function"
+                        tool_calls.append(parsed)
         return tool_calls if tool_calls else None
     except Exception:
         return None

@@ -1078,12 +1078,19 @@ async def _run_trae_task(task: str, cwd: Optional[str] = None, timeout_sec: int 
     if config_file:
         argv.extend(["--config-file", config_file])
     logger.info("trae-cli run: argv=%s cwd=%s", argv, work_dir)
+    # Force UTF-8 for trae-cli subprocess so Rich/console output (e.g. ✅ emoji) does not hit
+    # UnicodeEncodeError on Windows with GBK/default code page.
+    trae_env = dict(os.environ)
+    trae_env["PYTHONIOENCODING"] = "utf-8"
+    if IS_WINDOWS:
+        trae_env["PYTHONUTF8"] = "1"
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
             cwd=work_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=trae_env,
         )
         stdout_b, stderr_b = await asyncio.wait_for(
             proc.communicate(),
@@ -1093,12 +1100,20 @@ async def _run_trae_task(task: str, cwd: Optional[str] = None, timeout_sec: int 
         err = (stderr_b.decode("utf-8", errors="replace") if stderr_b else "").strip()
         rc = proc.returncode if proc.returncode is not None else 1
         if rc != 0:
-            if "not found" in err.lower() or "not found" in out.lower() or "command" in err.lower():
+            # Only use generic "not found" message when output clearly indicates the executable wasn't found (e.g. "trae-cli: command not found"). Otherwise return the actual error so the user sees config/API/model issues.
+            combined = (err + "\n" + out).strip()
+            looks_like_exe_not_found = (
+                ("command not found" in (err + " " + out).lower())
+                or ("not found" in err.lower() and ("trae-cli" in err.lower() or "trae_cli" in err.lower()))
+            )
+            if looks_like_exe_not_found and not combined:
                 return False, (
-                    "Trae Agent (trae-cli) not found or failed. Install from github.com/bytedance/trae-agent: clone repo, run 'uv sync', then use 'uv run trae-cli' or set TRAE_AGENT_PATH. "
-                    "Create trae_config.yaml with your API key (see repo README) and set TRAE_AGENT_CONFIG to its path."
+                    "Trae Agent (trae-cli) not found. Install from github.com/bytedance/trae-agent: clone repo, run 'uv sync', then set TRAE_AGENT_PATH to .venv/Scripts/trae-cli.exe (Windows) or .venv/bin/trae-cli. "
+                    "Create trae_config.yaml with your API key and set TRAE_AGENT_CONFIG to its path."
                 )
-            return False, err or out or f"Trae Agent exited with code {rc}."
+            if looks_like_exe_not_found:
+                return False, combined or "Trae Agent (trae-cli) not found. Set TRAE_AGENT_PATH and TRAE_AGENT_CONFIG in config (cursor_bridge_trae_agent_path, cursor_bridge_trae_agent_config)."
+            return False, combined or f"Trae Agent exited with code {rc}."
         return True, out or err or "(Trae Agent completed with no output)"
     except FileNotFoundError:
         return False, (

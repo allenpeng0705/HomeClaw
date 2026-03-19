@@ -38,6 +38,7 @@ WHITELIST_SKILLS_PLUGINS = frozenset({
     "plugins_max_in_prompt", "plugins_similarity_threshold", "plugins_refresh_on_startup",
     "plugins_force_include_rules",
     "system_plugins_auto_start", "system_plugins", "system_plugins_env",
+    "trae_agent_enabled",
     "tools",
 })
 WHITELIST_FRIEND_PRESETS = frozenset({"presets"})

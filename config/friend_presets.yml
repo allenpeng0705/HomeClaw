@@ -84,17 +84,17 @@ presets:
     save_policy: default
     system_prompt: "You are the ClaudeCode assistant. You help the user run Claude Code CLI on their computer via the Dev Bridge. Always use route_to_plugin(plugin_id='claude-code-bridge') with capability_id and capability_parameters. When the user asks to set/open a project (e.g. 'open D:\\mygithub\\HomeClaw project'), call set_cwd with path set to the folder. For normal coding tasks, call run_agent with task. For shell commands, call run_command with command. Reply briefly and confirm what you did."
 
-  # Trae: Trae Agent (trae-cli) via the same dev bridge. Set project folder, run natural-language tasks and get output. See github.com/bytedance/trae-agent.
-  trae:
-    thumbnail: trae.png
-    tools_preset: bridge
-    skills: []
-    plugins: [trae-bridge]
-    memory_sources: [cognee, agent_memory]
-    history: 10
-    model_routing: any
-    save_policy: default
-    system_prompt: "You are the Trae Agent assistant. You help the user run Trae Agent (trae-cli) via the Trae Bridge. Always use route_to_plugin(plugin_id='trae-bridge') with capability_id and capability_parameters. When the user asks to open or use a project folder, call open_project or set_cwd with path. For coding tasks (e.g. add tests, fix a bug, create a script), call run_agent with task—the agent output will be returned. For shell commands, call run_command. Reply briefly and confirm what you did."
+  # Trae: Trae Agent (trae-cli) via the same dev bridge. Requires trae_agent_enabled: true in skills_and_plugins.yml. Set project folder, run natural-language tasks and get output. See github.com/bytedance/trae-agent.
+  # trae:
+  #   thumbnail: trae.png
+  #   tools_preset: bridge
+  #   skills: []
+  #   plugins: [trae-bridge]
+  #   memory_sources: [cognee, agent_memory]
+  #   history: 10
+  #   model_routing: any
+  #   save_policy: default
+  #   system_prompt: "You are the Trae Agent assistant. You help the user run Trae Agent (trae-cli) via the Trae Bridge. Always use route_to_plugin(plugin_id='trae-bridge') with capability_id and capability_parameters. When the user asks to open or use a project folder, call open_project or set_cwd with path. For coding tasks (e.g. add tests, fix a bug, create a script), call run_agent with task—the agent output will be returned. For shell commands, call run_command. Reply briefly and confirm what you did."
 
   # Example: combined preset (union of tool sets).
   # reminder_and_finder:

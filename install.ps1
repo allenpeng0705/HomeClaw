@@ -282,6 +282,29 @@ if ($InstallTraeAgent) {
       Write-Host "Skipping Trae Agent (need git and uv). Install uv: pip install uv. Then: `$env:HOMECLAW_INSTALL_TRAE_AGENT=`"1`"; .\install.ps1"
     }
   }
+  # Apply HomeClaw patch for Minimax / Anthropic-compatible backends (standard tool format)
+  $TraePatch = Join-Path $Root "patches\trae-agent-anthropic-client-minimax.patch"
+  $AnthropicClient = Join-Path $TraeAgentDir "trae_agent\utils\llm_clients\anthropic_client.py"
+  if ((Test-Path $TraePatch) -and (Test-Path (Join-Path $TraeAgentDir "trae_agent"))) {
+    $alreadyPatched = Get-Content $AnthropicClient -Raw -ErrorAction SilentlyContinue | Select-String -Pattern "use_standard_tools_only" -Quiet
+    if (-not $alreadyPatched) {
+      Push-Location $TraeAgentDir
+      git apply $TraePatch 2>$null
+      if ($LASTEXITCODE -eq 0) { Write-Host "  Applied Minimax/compat patch to trae-agent" } else { Write-Host "  Note: could not apply trae-agent patch (already applied or upstream changed)." }
+      Pop-Location
+    }
+  }
+  $TraeLakeviewPatch = Join-Path $Root "patches\trae-agent-lakeview-index-fix.patch"
+  $LakeviewPy = Join-Path $TraeAgentDir "trae_agent\utils\lake_view.py"
+  if ((Test-Path $TraeLakeviewPatch) -and (Test-Path $LakeviewPy)) {
+    $lakeviewPatched = Get-Content $LakeviewPy -Raw -ErrorAction SilentlyContinue | Select-String -Pattern "if not matched_tags:" -Quiet
+    if (-not $lakeviewPatched) {
+      Push-Location $TraeAgentDir
+      git apply $TraeLakeviewPatch 2>$null
+      if ($LASTEXITCODE -eq 0) { Write-Host "  Applied lakeview index-fix patch to trae-agent" } else { Write-Host "  Note: could not apply trae-agent lakeview patch." }
+      Pop-Location
+    }
+  }
 } else {
   Write-Host "Skipping Trae Agent install (set HOMECLAW_INSTALL_TRAE_AGENT=1 to enable)"
 }

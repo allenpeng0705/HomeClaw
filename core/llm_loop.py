@@ -837,6 +837,11 @@ async def answer_from_memory(
             try:
                 _preset = (getattr(_current_friend, "preset", None) or "").strip().lower()
                 if _preset in ("cursor", "claudecode", "trae"):
+                    if _preset == "trae" and not getattr(Util().core_metadata, "trae_agent_enabled", False):
+                        return (
+                            "Trae Agent is disabled. Set trae_agent_enabled: true in config/skills_and_plugins.yml (and restart Core) to register the Trae Bridge and use preset: trae.",
+                            None,
+                        )
                     if _preset == "cursor":
                         _plugin_id = "cursor-bridge"
                         _cap, _params = _cursor_bridge_capability_and_params((query or "").strip())

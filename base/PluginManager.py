@@ -417,6 +417,10 @@ class PluginManager:
         self.external_plugins = [d for d in self.external_plugins if d.get("_source") == "api"]
         current_plugins = set()
         external_folders = set()
+        try:
+            _trae_enabled = bool(getattr(Util().get_core_metadata(), "trae_agent_enabled", False))
+        except Exception:
+            _trae_enabled = False
         # First pass: discover plugin.yaml (standard); register folder-based external (http/subprocess/mcp)
         for folder_name in os.listdir(self.plugins_dir):
             plugin_folder = os.path.join(self.plugins_dir, folder_name)
@@ -425,6 +429,8 @@ class PluginManager:
             manifest = _load_plugin_manifest(plugin_folder)
             if manifest and (manifest.get("type") or "inline").lower() in EXTERNAL_TYPES:
                 pid = _normalize_plugin_id(manifest.get("id") or folder_name)
+                if pid == "trae_bridge" and not _trae_enabled:
+                    continue
                 if pid in self.plugin_by_id and self.plugin_by_id[pid].get("_source") == "api":
                     continue  # API-registered takes precedence
                 manifest["_folder"] = plugin_folder
@@ -454,6 +460,8 @@ class PluginManager:
                     if not manifest or (manifest.get("type") or "inline").lower() not in EXTERNAL_TYPES:
                         continue
                     pid = _normalize_plugin_id(manifest.get("id") or folder_name)
+                    if pid == "trae_bridge" and not _trae_enabled:
+                        continue
                     if pid in self.plugin_by_id and isinstance(self.plugin_by_id.get(pid), dict) and self.plugin_by_id[pid].get("_source") == "api":
                         continue
                     manifest["_folder"] = plugin_folder

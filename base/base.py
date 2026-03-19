@@ -1054,6 +1054,9 @@ class CoreMetadata:
     cursor_bridge_bridge_api_key: str = ""  # optional shared-secret to protect Cursor Bridge HTTP API. When set, Core passes CURSOR_BRIDGE_API_KEY to the bridge and also sends X-HomeClaw-Bridge-Key on HTTP calls.
     cursor_bridge_forward_logs: bool = False  # when True and cursor_bridge_auto_start, bridge stderr is not discarded so you see agent/bridge logs in Core's terminal (for debugging exit code 1 etc.)
     cursor_bridge_claude_settings_path: str = ""  # optional full path to Claude Code settings.json; when set, passed as CLAUDE_SETTINGS_PATH to the bridge (so it loads auth from that file). Set in config/skills_and_plugins.yml or core.yml.
+
+    # When false (default): do not register plugins/TraeBridge, do not pass TRAE_AGENT_* to the bridge, and Trae preset replies with a config hint. Set true to enable Trae Agent (experimental).
+    trae_agent_enabled: bool = False
     cursor_bridge_trae_agent_path: str = ""  # optional full path to Trae Agent CLI (trae-cli); when set, passed as TRAE_AGENT_PATH so the bridge finds trae-cli. Install: clone github.com/bytedance/trae-agent, uv sync, then uv run trae-cli or pip install -e .
     cursor_bridge_trae_agent_config: str = ""  # optional full path to trae_config.yaml; when set, passed as TRAE_AGENT_CONFIG so trae-cli run uses --config-file
     claude_code_path: str = ""  # optional full path to Claude Code CLI 'claude'; when set, passed as CLAUDE_PATH to the bridge
@@ -1170,7 +1173,7 @@ class CoreMetadata:
                         _ext_data = yaml.safe_load(_f)
                     if isinstance(_ext_data, dict):
                         for _k, _v in _ext_data.items():
-                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k in ('tools', 'external_skills_dir', 'clawhub_download_dir', 'intent_router', 'planner_executor', 'identity_capabilities_shortcut', 'cursor_bridge_auto_start', 'cursor_bridge_port', 'cursor_bridge_agent_path', 'cursor_bridge_cursor_cli_path', 'cursor_bridge_cursor_api_key', 'cursor_bridge_bridge_api_key', 'cursor_bridge_forward_logs', 'cursor_bridge_claude_settings_path', 'cursor_bridge_trae_agent_path', 'cursor_bridge_trae_agent_config', 'claude_code_path', 'claude_code_api_key')):
+                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k in ('tools', 'external_skills_dir', 'clawhub_download_dir', 'intent_router', 'planner_executor', 'identity_capabilities_shortcut', 'cursor_bridge_auto_start', 'cursor_bridge_port', 'cursor_bridge_agent_path', 'cursor_bridge_cursor_cli_path', 'cursor_bridge_cursor_api_key', 'cursor_bridge_bridge_api_key', 'cursor_bridge_forward_logs', 'cursor_bridge_claude_settings_path', 'trae_agent_enabled', 'cursor_bridge_trae_agent_path', 'cursor_bridge_trae_agent_config', 'claude_code_path', 'claude_code_api_key')):
                                 continue
                             if _k == 'identity_capabilities_shortcut' and not isinstance(_v, dict):
                                 logging.warning("skills_and_plugins config %s: identity_capabilities_shortcut must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
@@ -1547,6 +1550,7 @@ class CoreMetadata:
             cursor_bridge_bridge_api_key=(str(data.get('cursor_bridge_bridge_api_key') or '').strip()),
             cursor_bridge_forward_logs=bool(data.get('cursor_bridge_forward_logs', False)),
             cursor_bridge_claude_settings_path=(str(data.get('cursor_bridge_claude_settings_path') or '').strip()),
+            trae_agent_enabled=bool(data.get('trae_agent_enabled', False)),
             cursor_bridge_trae_agent_path=(str(data.get('cursor_bridge_trae_agent_path') or '').strip()),
             cursor_bridge_trae_agent_config=(str(data.get('cursor_bridge_trae_agent_config') or '').strip()),
             claude_code_path=(str(data.get('claude_code_path') or '').strip()),

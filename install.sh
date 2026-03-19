@@ -258,6 +258,25 @@ if [ "$INSTALL_TRAE_AGENT" = "1" ]; then
       echo "Skipping Trae Agent (need git and uv). Install uv: pip install uv. Then: HOMECLAW_INSTALL_TRAE_AGENT=1 bash install.sh"
     fi
   fi
+  # Apply HomeClaw patch for Minimax / Anthropic-compatible backends (standard tool format)
+  TRAE_PATCH="$ROOT/patches/trae-agent-anthropic-client-minimax.patch"
+  ANTHROPIC_CLIENT="$TRAE_AGENT_DIR/trae_agent/utils/llm_clients/anthropic_client.py"
+  if [ -f "$TRAE_PATCH" ] && [ -d "$TRAE_AGENT_DIR/trae_agent" ]; then
+    if grep -q "use_standard_tools_only" "$ANTHROPIC_CLIENT" 2>/dev/null; then
+      : # already patched
+    else
+      (cd "$TRAE_AGENT_DIR" && git apply "$TRAE_PATCH" 2>/dev/null) && echo "  Applied Minimax/compat patch to trae-agent" || echo "  Note: could not apply trae-agent patch (already applied or upstream changed)."
+    fi
+  fi
+  TRAE_LAKEVIEW_PATCH="$ROOT/patches/trae-agent-lakeview-index-fix.patch"
+  LAKEVIEW_PY="$TRAE_AGENT_DIR/trae_agent/utils/lake_view.py"
+  if [ -f "$TRAE_LAKEVIEW_PATCH" ] && [ -f "$LAKEVIEW_PY" ]; then
+    if grep -q "if not matched_tags:" "$LAKEVIEW_PY" 2>/dev/null; then
+      : # already patched
+    else
+      (cd "$TRAE_AGENT_DIR" && git apply "$TRAE_LAKEVIEW_PATCH" 2>/dev/null) && echo "  Applied lakeview index-fix patch to trae-agent" || echo "  Note: could not apply trae-agent lakeview patch."
+    fi
+  fi
 else
   echo "Skipping Trae Agent install (set HOMECLAW_INSTALL_TRAE_AGENT=1 to enable)"
 fi

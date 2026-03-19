@@ -77,7 +77,7 @@ The **README** lists: **OpenAI, Anthropic, Doubao, Azure, OpenRouter, Ollama, Go
 | **Minimax** | No | Use `provider: openai` + `base_url: https://api.minimaxi.com/v1` + your Minimax API key; model e.g. `MiniMax-M2.7`. |
 | Other OpenAI-compatible gateways | No | Same pattern: `provider: openai`, `base_url`, `api_key`, and the model id the endpoint expects. |
 
-For **Doubao**, use `base_url: https://ark.cn-beijing.volces.com/api/v3` (see [issue #308](https://github.com/bytedance/trae-agent/issues/308) if you see connection errors). For **Minimax**, the official OpenAI-compatible endpoint is `https://api.minimaxi.com/v1`.
+For **Doubao**, use `base_url: https://ark.cn-beijing.volces.com/api/v3` (see [issue #308](https://github.com/bytedance/trae-agent/issues/308) if you see connection errors). For **Minimax**, the official OpenAI-compatible endpoint is `https://api.minimaxi.com/v1`. **Note:** trae-agent’s OpenAI client uses the **Responses API** (`client.responses.create`), not the **Chat Completions API** (`/v1/chat/completions`). Minimax (and many other gateways) only support Chat Completions, so with provider `openai` and `base_url` pointing at Minimax you get **404 page not found**. Use **Anthropic** or **OpenAI** directly in trae_config.yaml, or another provider that supports the Responses API, until trae-agent adds a Chat Completions path for openai-compatible endpoints.
 
 ### 3.3 Minimal config (from README / example)
 

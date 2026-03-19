@@ -1,0 +1,25 @@
+--- a/trae_agent/utils/llm_clients/anthropic_client.py
++++ b/trae_agent/utils/llm_clients/anthropic_client.py
+@@ -72,10 +72,23 @@ class AnthropicClient(BaseLLMClient):
+         if tools:
+             tool_schemas = []
++            # Minimax and other Anthropic-compatible backends expect standard tool format
++            # (name, description, input_schema). They reject Anthropic beta types
++            # (bash_20250124, text_editor_20250429) with "function name or parameters is empty (2013)".
++            use_standard_tools_only = bool(
++                self.base_url and "api.anthropic.com" not in (self.base_url or "")
++            )
+             for tool in tools:
+-                if tool.name == "str_replace_based_edit_tool":
++                if use_standard_tools_only:
++                    tool_schemas.append(
++                        anthropic.types.ToolParam(
++                            name=tool.name,
++                            description=tool.description,
++                            input_schema=tool.get_input_schema(),
++                        )
++                    )
++                elif tool.name == "str_replace_based_edit_tool":
+                     tool_schemas.append(
+                         TextEditor20250429(
+                             name="str_replace_based_edit_tool",

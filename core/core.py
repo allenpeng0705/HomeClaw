@@ -521,19 +521,20 @@ class Core(CoreInterface):
         if claude_settings_path:
             env["CLAUDE_SETTINGS_PATH"] = claude_settings_path
             _component_log("cursor_bridge", f"CLAUDE_SETTINGS_PATH={claude_settings_path}")
-        trae_agent_path = (getattr(meta, "cursor_bridge_trae_agent_path", None) or "").strip()
-        if not trae_agent_path:
-            try:
-                trae_agent_path = (shutil.which("trae-cli") or "").strip()
-            except Exception:
-                trae_agent_path = ""
-        if trae_agent_path:
-            env["TRAE_AGENT_PATH"] = trae_agent_path
-            _component_log("cursor_bridge", f"using TRAE_AGENT_PATH={trae_agent_path}")
-        trae_agent_config = (getattr(meta, "cursor_bridge_trae_agent_config", None) or "").strip()
-        if trae_agent_config:
-            env["TRAE_AGENT_CONFIG"] = trae_agent_config
-            _component_log("cursor_bridge", f"using TRAE_AGENT_CONFIG={trae_agent_config}")
+        if getattr(meta, "trae_agent_enabled", False):
+            trae_agent_path = (getattr(meta, "cursor_bridge_trae_agent_path", None) or "").strip()
+            if not trae_agent_path:
+                try:
+                    trae_agent_path = (shutil.which("trae-cli") or "").strip()
+                except Exception:
+                    trae_agent_path = ""
+            if trae_agent_path:
+                env["TRAE_AGENT_PATH"] = trae_agent_path
+                _component_log("cursor_bridge", f"using TRAE_AGENT_PATH={trae_agent_path}")
+            trae_agent_config = (getattr(meta, "cursor_bridge_trae_agent_config", None) or "").strip()
+            if trae_agent_config:
+                env["TRAE_AGENT_CONFIG"] = trae_agent_config
+                _component_log("cursor_bridge", f"using TRAE_AGENT_CONFIG={trae_agent_config}")
         forward_logs = getattr(meta, "cursor_bridge_forward_logs", False)
         try:
             proc = subprocess.Popen(

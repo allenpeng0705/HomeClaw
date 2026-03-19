@@ -51,6 +51,8 @@ When you send a task via `run_agent`, the **Claude Code CLI** runs on the bridge
 
 ## 4. Trae Bridge (plugin: `trae-bridge`)
 
+**Opt-in:** Trae integration is **off by default**. In `config/skills_and_plugins.yml` set **`trae_agent_enabled: true`**, then restart Core. That registers the `trae-bridge` plugin and passes `TRAE_AGENT_PATH` / `TRAE_AGENT_CONFIG` to the bridge when configured. With `false` (default), the Trae preset replies with a short hint instead of calling the bridge.
+
 **Trae Agent** ([github.com/bytedance/trae-agent](https://github.com/bytedance/trae-agent)) is an open-source CLI agent for software engineering. HomeClaw runs `trae-cli run "task"` in a project folder and returns the agent’s output to the user.
 
 | Capability | Purpose |
@@ -65,7 +67,7 @@ When you send a task via `run_agent`, the **Claude Code CLI** runs on the bridge
 | `run_command_interactive` | Start a shell in a PTY. |
 | `interactive_read` / `interactive_write` / `interactive_stop` | Same as Cursor/Claude. |
 
-- **Setup:** Clone the repo, run `uv sync`, and create `trae_config.yaml` with your API key (see [Trae Agent README](https://github.com/bytedance/trae-agent)). Set **cursor_bridge_trae_agent_path** to the full path of `trae-cli` (e.g. `trae-agent\.venv\Scripts\trae-cli.exe` on Windows) and **cursor_bridge_trae_agent_config** to your `trae_config.yaml` path. The bridge reads **TRAE_AGENT_PATH** and **TRAE_AGENT_CONFIG** when Core starts it.
+- **Setup:** Clone the repo, run `uv sync`, and create `trae_config.yaml` with your API key (see [Trae Agent README](https://github.com/bytedance/trae-agent)). Set **cursor_bridge_trae_agent_path** to the full path of `trae-cli` (e.g. `trae-agent\.venv\Scripts\trae-cli.exe` on Windows) and **cursor_bridge_trae_agent_config** to your `trae_config.yaml` path. The bridge reads **TRAE_AGENT_PATH** and **TRAE_AGENT_CONFIG** when Core starts it. When you install Trae Agent via HomeClaw’s install script (`HOMECLAW_INSTALL_TRAE_AGENT=1` or `install.bat trae`), a **patch** is applied from `patches/trae-agent-anthropic-client-minimax.patch` so that Minimax and other Anthropic-compatible backends receive standard tool definitions (avoiding “function name or parameters is empty” errors). New clones and updates get the patch applied automatically.
 - **Windows:** Use the full path to `trae-cli.exe` in `Scripts` (e.g. `D:\repos\trae-agent\.venv\Scripts\trae-cli.exe`) so the bridge finds it when started by Core (PATH may be minimal). If your venv only has `trae-cli.cmd`, the bridge runs it via `cmd /c`. Trae Agent’s built-in **bash** tool may require Git Bash or WSL on Windows; see the trae-agent repo for tool configuration.
 - **Active CWD:** Stored as `trae_active_cwd` in `~/.homeclaw/cursor_bridge_state.json`.
 - **Routing:** For the Trae friend, `_trae_bridge_capability_and_params()` maps messages (e.g. “open project D:\myrepo”, “run task: add tests”) to the capabilities above.

@@ -28,6 +28,11 @@ def get_api_cursor_bridge_status_handler(core):
             backend = (request.query_params.get("backend") or "").strip().lower()
             if backend not in ("cursor", "claude", "trae"):
                 backend = "cursor"
+            if backend == "trae" and not bool(getattr(Util().get_core_metadata(), "trae_agent_enabled", False)):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Trae Agent is disabled. Set trae_agent_enabled: true in config/skills_and_plugins.yml and restart Core."},
+                )
             plugin_id = "trae-bridge" if backend == "trae" else ("claude-code-bridge" if backend == "claude" else "cursor-bridge")
             plug = pm.get_plugin_by_id(plugin_id)
             if plug is None or not isinstance(plug, dict):
@@ -96,6 +101,11 @@ def get_api_interactive_start_handler(core):
             # Start interactive agent on the bridge; Core calls bridge and returns composite session_id.
             if bridge_plugin not in ("cursor-bridge", "claude-code-bridge", "trae-bridge"):
                 return JSONResponse(status_code=400, content={"detail": "bridge_plugin must be cursor-bridge, claude-code-bridge, or trae-bridge"})
+            if "trae" in bridge_plugin.lower() and not bool(getattr(Util().get_core_metadata(), "trae_agent_enabled", False)):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Trae Agent is disabled. Set trae_agent_enabled: true in config/skills_and_plugins.yml and restart Core."},
+                )
             pm = getattr(core, "plugin_manager", None)
             if pm is None:
                 return JSONResponse(status_code=500, content={"detail": "Plugin manager not available"})
