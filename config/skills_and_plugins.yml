@@ -433,6 +433,9 @@ cursor_bridge_claude_settings_path: "C:\\Users\\PS\\.claude\\settings.json"   # 
 # claude_code_path: "C:\\Users\\You\\AppData\\Local\\Programs\\claude\\claude.cmd"   # optional; PowerShell: (Get-Command claude).Source
 # claude_code_api_key: "your-anthropic-api-key"   # optional; prefer env ANTHROPIC_API_KEY for secrets
 
+# --- Trae IDE (https://www.trae.cn) via the same bridge ---
+# Trae Bridge uses the same server (port 3104). Install Trae IDE and run "Install trae command" in the IDE; the CLI is typically named trae-cn. Optional: TRAE_CLI_PATH (full path to trae-cn) or TRAE_RUN_CMD (e.g. trae-cn run) on the bridge machine.
+
 # --- Tool layer (used when use_tools: true) ---
 # Built-in tools: time, cron_*, sessions_*, memory_*, file_*, folder_list, fetch_url, web_search, browser_*,
 # exec, process_*, run_skill, run_plugin, image, channel_send, etc. Only keys below are read by the tool layer.

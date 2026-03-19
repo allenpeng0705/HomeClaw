@@ -7,7 +7,8 @@
 #   reminder — remind_me, record_date, recorded_events_list, cron_schedule, cron_list, cron_remove, cron_update, cron_run, cron_status, route_to_tam
 #   note     — document_read, file_read, file_write, folder_list, file_find, save_result_page, get_file_view_link (Cognee only; no append_agent_memory/append_daily_memory)
 #   finder   — search/list (file_find, folder_list); read (document_read, file_read); view (get_file_view_link); edit (file_write); save_result_page (e.g. HTML slides from doc)
-#   cursor   — pure bridge: no LLM; message is forwarded to Cursor Bridge (run_agent) on the dev machine
+#   bridge   — shared by Cursor, ClaudeCode, Trae: time, route_to_plugin, folder_list, file_find (message is pattern-routed to the right bridge; no general LLM tool loop)
+#   cursor   — same as bridge; kept for backward compat
 # Use tools_preset so the friend only sees the tools it needs (saves tokens, clearer behavior). E.g. Note uses "note" to get save/query/file tools only, no reminder or routing tools.
 #
 # --- Field reference (each key) ---
@@ -62,7 +63,7 @@ presets:
   # Cursor: dedicated to Cursor Bridge. Use from Companion (or any channel) to open projects in Cursor, run the Cursor agent, or run commands on the dev machine — works like being on the computer.
   cursor:
     thumbnail: cursor.png   # under config/preset_thumbnails/; app falls back to default icon if missing
-    tools_preset: cursor    # time, route_to_plugin, folder_list, file_find (see base/friend_presets.py)
+    tools_preset: bridge    # shared: time, route_to_plugin, folder_list, file_find (same as cursor; see base/friend_presets.py)
     skills: []              # no skills
     plugins: [cursor-bridge] # only Cursor Bridge plugin
     memory_sources: [cognee, agent_memory] # light context so it stays focused on Cursor tasks
@@ -74,7 +75,7 @@ presets:
   # ClaudeCode: dedicated to Claude Code CLI via the bridge. Separate from Cursor friend (no mixing in Companion).
   claudecode:
     thumbnail: claudecode.png
-    tools_preset: cursor         # reuse: route_to_plugin + path discovery tools (no LLM anyway)
+    tools_preset: bridge         # shared with Cursor/Trae: route_to_plugin + path discovery
     skills: []
     plugins: [claude-code-bridge]
     memory_sources: [cognee, agent_memory]
@@ -82,6 +83,18 @@ presets:
     model_routing: any
     save_policy: default
     system_prompt: "You are the ClaudeCode assistant. You help the user run Claude Code CLI on their computer via the Dev Bridge. Always use route_to_plugin(plugin_id='claude-code-bridge') with capability_id and capability_parameters. When the user asks to set/open a project (e.g. 'open D:\\mygithub\\HomeClaw project'), call set_cwd with path set to the folder. For normal coding tasks, call run_agent with task. For shell commands, call run_command with command. Reply briefly and confirm what you did."
+
+  # Trae: dedicated to Trae IDE (https://www.trae.cn) via the same dev bridge. Open projects in Trae, run tasks if 'trae run' is available, or run shell commands.
+  trae:
+    thumbnail: trae.png
+    tools_preset: bridge         # shared with Cursor/ClaudeCode: route_to_plugin + path discovery
+    skills: []
+    plugins: [trae-bridge]
+    memory_sources: [cognee, agent_memory]
+    history: 10
+    model_routing: any
+    save_policy: default
+    system_prompt: "You are the Trae assistant. You help the user work with Trae IDE (https://www.trae.cn) via the Trae Bridge. Always use route_to_plugin(plugin_id='trae-bridge') with capability_id and capability_parameters. When the user asks to open a project or folder in Trae, call open_project with path. To set the active project, call set_cwd with path. For coding tasks, call run_agent with task if available; otherwise suggest opening the project in Trae. For shell commands, call run_command. Reply briefly and confirm what you did."
 
   # Example: combined preset (union of tool sets).
   # reminder_and_finder:

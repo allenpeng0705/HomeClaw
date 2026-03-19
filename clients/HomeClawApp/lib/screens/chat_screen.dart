@@ -118,14 +118,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   bool get _isDevBridgeFriend {
     final fid = (widget.friendId ?? '').trim().toLowerCase();
-    return fid == 'cursor' || fid == 'claudecode';
+    return fid == 'cursor' || fid == 'claudecode' || fid == 'trae';
   }
 
   Future<void> _refreshCursorActiveProject() async {
     if (!_isDevBridgeFriend) return;
     try {
       final fid = (widget.friendId ?? '').trim().toLowerCase();
-      final backend = fid == 'claudecode' ? 'claude' : 'cursor';
+      final backend = fid == 'trae' ? 'trae' : (fid == 'claudecode' ? 'claude' : 'cursor');
       final cwd = await widget.coreService.getCursorBridgeActiveCwd(backend: backend);
       if (!mounted) return;
       setState(() => _cursorActiveCwd = cwd);
@@ -139,7 +139,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       final cwd = _cursorActiveCwd.trim().isNotEmpty ? _cursorActiveCwd.trim() : null;
       final fid = (widget.friendId ?? '').trim().toLowerCase();
-      final bridgePlugin = fid == 'claudecode' ? 'claude-code-bridge' : 'cursor-bridge';
+      final bridgePlugin = fid == 'trae' ? 'trae-bridge' : (fid == 'claudecode' ? 'claude-code-bridge' : 'cursor-bridge');
       final result = await widget.coreService.interactiveStart(
         bridgePlugin: bridgePlugin,
         cwd: cwd,

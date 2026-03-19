@@ -1,13 +1,13 @@
-# Cursor and Claude Code Bridge — How It Works
+# Cursor, Claude Code, and Trae Bridge — How It Works
 
-This doc reviews how HomeClaw integrates with **Cursor** and **Claude Code** on the user’s dev machine, and how to use **Claude Code’s MCP server** so HomeClaw can call Claude Code’s tools.
+This doc reviews how HomeClaw integrates with **Cursor**, **Claude Code**, and **Trae IDE** on the user’s dev machine, and how to use **Claude Code’s MCP server** so HomeClaw can call Claude Code’s tools.
 
 ---
 
 ## 1. Overview
 
-- **Cursor Bridge** and **Claude Code Bridge** are two **plugins** that talk to the **same bridge server** (`external_plugins/cursor_bridge/server.py`) running on the dev machine (e.g. `http://127.0.0.1:3104`).
-- **Cursor friend** uses plugin `cursor-bridge`; **ClaudeCode friend** uses plugin `claude-code-bridge`. Each has its own preset and plugin id so Companion can show separate chats.
+- **Cursor Bridge**, **Claude Code Bridge**, and **Trae Bridge** are three **plugins** that talk to the **same bridge server** (`external_plugins/cursor_bridge/server.py`) running on the dev machine (e.g. `http://127.0.0.1:3104`).
+- **Cursor friend** uses plugin `cursor-bridge`; **ClaudeCode friend** uses plugin `claude-code-bridge`; **Trae friend** uses plugin `trae-bridge`. Each has its own preset and plugin id so Companion can show separate chats.
 - The bridge does **not** use HomeClaw’s LLM for these friends: messages are **pattern-routed** in `llm_loop.py` to the right capability and sent to the bridge via `route_to_plugin`.
 
 ---
@@ -49,6 +49,29 @@ When you send a task via `run_agent`, the **Claude Code CLI** runs on the bridge
 
 ---
 
+## 4. Trae Bridge (plugin: `trae-bridge`)
+
+**Trae IDE** (https://www.trae.cn) is ByteDance’s AI-native IDE. HomeClaw can open projects in Trae and, if the Trae CLI supports it, run tasks headlessly.
+
+| Capability | Purpose |
+|------------|--------|
+| `open_project` | Open a folder in Trae IDE (path). |
+| `open_file` | Open a single file in Trae. |
+| `set_cwd` | Set the **trae** active project path on the bridge. |
+| `run_agent` | Run Trae with a task (e.g. `trae run "task"` if available); returns output or guidance. |
+| `run_command` | Run a shell command in the active project. |
+| `get_status` | Return bridge status (including trae active cwd). |
+| `run_agent_interactive` | Start Trae in a PTY for interactive use. |
+| `run_command_interactive` | Start a shell in a PTY. |
+| `interactive_read` / `interactive_write` / `interactive_stop` | Same as Cursor/Claude. |
+
+- **Setup:** Install [Trae IDE](https://www.trae.cn) and in the IDE run **“Install trae command”** so the CLI is on your PATH (CN build is typically **trae-cn**). The bridge uses it to open projects (e.g. `trae-cn <path>`). Optional: set **TRAE_CLI_PATH** (full path to trae-cn) or **TRAE_RUN_CMD** (e.g. `trae-cn run`) on the bridge machine if the CLI is not in PATH or you use a different command for headless runs.
+- **Active CWD:** Stored as `trae_active_cwd` in the same state file (`~/.homeclaw/cursor_bridge_state.json`).
+- **Routing:** For the Trae friend, `_trae_bridge_capability_and_params()` maps messages (e.g. “open X in Trae”, “open project D:\myrepo”) to the capabilities above.
+- **Adding Trae in Companion:** In `config/user.yml`, add a friend with `preset: trae` and `name: Trae` (or any name). The Trae chat will use the same bridge server as Cursor and Claude Code.
+
+---
+
 ### 3.1 Supporting both Anthropic and Minimax (or other gateways)
 
 The bridge supports **both** the official Anthropic API and third-party Anthropic-compatible gateways (e.g. **Minimax**):
@@ -66,14 +89,14 @@ The bridge supports **both** the official Anthropic API and third-party Anthropi
 ---
 
 
-## 4. Using Claude Code’s MCP Server from HomeClaw
+## 5. Using Claude Code’s MCP Server from HomeClaw
 
 Claude Code can also run as an **MCP server** (`claude mcp serve`). That exposes **Claude Code’s built-in tools** (Read, Write, Edit, Bash, Task, etc.) over stdio so that **HomeClaw’s MCP client** can call them via `mcp_list_tools` and `mcp_call`.
 
 - **What you get:** HomeClaw’s LLM (with MCP tools enabled) can discover and call tools like Read, Write, Edit, Bash, Task, WebFetch, etc., implemented by Claude Code, without running the full CLI for each request.
 - **What you don’t get:** The MCP server does **not** re-expose the MCP servers that Claude Code is configured with (e.g. GitHub, Notion). Those are only used when the Claude Code **CLI** runs (e.g. via the bridge’s `run_agent`).
 
-### 4.1 Configure Claude Code as an MCP server
+### 5.1 Configure Claude Code as an MCP server
 
 1. Install the MCP client: `pip install mcp`.
 2. **Automatic (recommended):** In `config/skills_and_plugins.yml` under `tools:`, add `mcp:` and set **`auto_register_claude_code: true`**. When Core starts, it enables MCP and registers the `claude-code` server (stdio, `claude mcp serve`) so you don’t have to list it in `servers`.
@@ -99,7 +122,7 @@ tools:
 
 See **docs/mcp.md** for full MCP config (transports, timeouts) and **docs_design/ClaudeCodeMCPInvestigation.md** for tool names and behavior.
 
-### 4.2 Two ways to “use Claude Code” from HomeClaw
+### 5.2 Two ways to “use Claude Code” from HomeClaw
 
 | Method | When to use |
 |--------|----------------|
@@ -110,10 +133,10 @@ You can use both: e.g. ClaudeCode friend for interactive CLI and PTY, and MCP fo
 
 ---
 
-## 5. References
+## 6. References
 
-- Plugin manifests: `plugins/CursorBridge/plugin.yaml`, `plugins/ClaudeCodeBridge/plugin.yaml`
+- Plugin manifests: `plugins/CursorBridge/plugin.yaml`, `plugins/ClaudeCodeBridge/plugin.yaml`, `plugins/TraeBridge/plugin.yaml`
 - Bridge server: `external_plugins/cursor_bridge/server.py`
-- Routing: `core/llm_loop.py` (`_cursor_bridge_capability_and_params`, `_claude_bridge_capability_and_params`)
+- Routing: `core/llm_loop.py` (`_cursor_bridge_capability_and_params`, `_claude_bridge_capability_and_params`, `_trae_bridge_capability_and_params`)
 - MCP client: `docs/mcp.md`; tool registration and profiles: `tools/builtin.py`, `base/tool_profiles.py`
 - Claude Code MCP: `docs_design/ClaudeCodeMCPInvestigation.md`

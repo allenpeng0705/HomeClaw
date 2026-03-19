@@ -1190,10 +1190,10 @@ class CoreService {
   }
 
   /// GET /api/cursor-bridge/status (Companion auth). Returns active_cwd (or empty string).
-  /// backend: "cursor" | "claude" (default "cursor").
+  /// backend: "cursor" | "claude" | "trae" (default "cursor").
   Future<String> getCursorBridgeActiveCwd({String backend = 'cursor'}) async {
     final b = backend.trim().toLowerCase();
-    final eff = (b == 'claude') ? 'claude' : 'cursor';
+    final eff = (b == 'trae') ? 'trae' : ((b == 'claude') ? 'claude' : 'cursor');
     final url = Uri.parse('$_baseUrl/api/cursor-bridge/status?backend=$eff');
     final response = await http
         .get(url, headers: _authHeaders(forCompanionApi: true))
@@ -1212,7 +1212,7 @@ class CoreService {
 
   /// Interactive sessions: HTTP helpers (minimal; experimental).
   /// For local shell: pass [command] (and optional [cwd]).
-  /// For Cursor/Claude agent on the bridge: pass [bridgePlugin] ('cursor-bridge' or 'claude-code-bridge') and optional [cwd].
+  /// For Cursor/Claude/Trae agent on the bridge: pass [bridgePlugin] ('cursor-bridge', 'claude-code-bridge', or 'trae-bridge') and optional [cwd].
   Future<Map<String, dynamic>> interactiveStart({
     String? command,
     String? cwd,

@@ -26,9 +26,9 @@ def get_api_cursor_bridge_status_handler(core):
             if pm is None:
                 return JSONResponse(status_code=500, content={"detail": "Plugin manager not available"})
             backend = (request.query_params.get("backend") or "").strip().lower()
-            if backend not in ("cursor", "claude"):
+            if backend not in ("cursor", "claude", "trae"):
                 backend = "cursor"
-            plugin_id = "cursor-bridge" if backend == "cursor" else "claude-code-bridge"
+            plugin_id = "trae-bridge" if backend == "trae" else ("claude-code-bridge" if backend == "claude" else "cursor-bridge")
             plug = pm.get_plugin_by_id(plugin_id)
             if plug is None or not isinstance(plug, dict):
                 return JSONResponse(status_code=404, content={"detail": f"{plugin_id} plugin not found"})
@@ -81,7 +81,7 @@ def _parse_bridge_session_id(session_id: str):
 
 def get_api_interactive_start_handler(core):
     """POST /api/interactive/start — start an interactive session for a user (Companion->Core).
-    Body: command + cwd (local PTY), or bridge_plugin (cursor-bridge | claude-code-bridge) to start agent interactively on the bridge.
+    Body: command + cwd (local PTY), or bridge_plugin (cursor-bridge | claude-code-bridge | trae-bridge) to start agent interactively on the bridge.
     """
 
     async def api_interactive_start(request: Request, token_user=Depends(companion_auth.get_companion_token_user)):  # noqa: ARG001
@@ -94,15 +94,15 @@ def get_api_interactive_start_handler(core):
         bridge_plugin = (body.get("bridge_plugin") or "").strip()
         if bridge_plugin:
             # Start interactive agent on the bridge; Core calls bridge and returns composite session_id.
-            if bridge_plugin not in ("cursor-bridge", "claude-code-bridge"):
-                return JSONResponse(status_code=400, content={"detail": "bridge_plugin must be cursor-bridge or claude-code-bridge"})
+            if bridge_plugin not in ("cursor-bridge", "claude-code-bridge", "trae-bridge"):
+                return JSONResponse(status_code=400, content={"detail": "bridge_plugin must be cursor-bridge, claude-code-bridge, or trae-bridge"})
             pm = getattr(core, "plugin_manager", None)
             if pm is None:
                 return JSONResponse(status_code=500, content={"detail": "Plugin manager not available"})
             plug = pm.get_plugin_by_id(bridge_plugin)
             if plug is None or not isinstance(plug, dict):
                 return JSONResponse(status_code=404, content={"detail": f"Plugin {bridge_plugin} not found"})
-            backend = "claude" if "claude" in bridge_plugin.lower() else "cursor"
+            backend = "trae" if "trae" in bridge_plugin.lower() else ("claude" if "claude" in bridge_plugin.lower() else "cursor")
             req = PromptRequest(
                 request_id="interactive-start",
                 channel_name="companion",

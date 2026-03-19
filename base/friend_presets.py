@@ -46,8 +46,15 @@ TOOL_PRESETS: Dict[str, List[str]] = {
         "run_skill",
         "web_search",
     ],
-    # Cursor: dedicated to Cursor Bridge — open project, run agent, run command on the dev machine. Only route_to_plugin (cursor-bridge) + path discovery.
+    # Cursor: same as "bridge"; kept for backward compat. Prefer "bridge" for new bridge-style friends.
     "cursor": [
+        "time",
+        "route_to_plugin",
+        "folder_list",
+        "file_find",
+    ],
+    # Bridge: shared preset for all dev-bridge friends (Cursor, ClaudeCode, Trae). Only route_to_plugin + path discovery; no LLM tool loop for normal messages (pattern-routed in llm_loop).
+    "bridge": [
         "time",
         "route_to_plugin",
         "folder_list",

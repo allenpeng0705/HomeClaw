@@ -1,0 +1,116 @@
+# Trae Bridge: open project in Trae IDE, run Trae/trae-agent from HomeClaw.
+# Uses the same bridge server as Cursor/Claude Code (external_plugins/cursor_bridge/server.py).
+# Trae IDE: https://www.trae.cn — install the 'trae' command in the IDE, then open projects or run tasks from HomeClaw.
+# Optional: set TRAE_CLI_PATH (full path to trae-cn) or TRAE_RUN_CMD (e.g. trae-cn run) on the bridge machine if the CLI is not in PATH. The CN build is typically named trae-cn.
+id: trae-bridge
+name: Trae Bridge
+description: |
+  Open a project/folder in Trae IDE (https://www.trae.cn), run Trae with a task and get output, or run shell commands
+  on the dev machine. Use when the user wants to: open a project in Trae; have Trae do a coding task (if trae run is available);
+  or run a command (e.g. npm test) and get the result back.
+type: http
+config:
+  base_url: "http://127.0.0.1:3104"
+  path: /run
+  timeout_sec: 1800   # 30 min
+  # bridge_api_key: "set-a-random-secret"   # optional; must match CURSOR_BRIDGE_API_KEY on the bridge server
+capabilities:
+  - id: open_project
+    name: Open project in Trae
+    description: Open a folder or project in Trae IDE so the user can work there. Use when the user says "open project X in Trae", "open folder in Trae".
+    parameters:
+      - name: path
+        type: string
+        required: true
+        description: Folder path to open (absolute or relative to bridge CWD).
+      - name: folder
+        type: string
+        required: false
+        description: Alias for path.
+  - id: set_cwd
+    name: Set active project cwd
+    description: Set the active project directory on the bridge so subsequent Trae runs default to it.
+    parameters:
+      - name: path
+        type: string
+        required: true
+        description: Project folder path (absolute or relative to bridge default cwd).
+  - id: run_agent
+    name: Run Trae and get result
+    description: Run Trae with a task and return output (requires 'trae run' or TRAE_RUN_CMD on the bridge). If not available, use open_project to work in Trae IDE.
+    parameters:
+      - name: task
+        type: string
+        required: true
+        description: Task or prompt for Trae (e.g. "add error handling to auth module").
+      - name: cwd
+        type: string
+        required: false
+        description: Working directory (optional; defaults to active project cwd).
+      - name: timeout_sec
+        type: integer
+        required: false
+        description: Max seconds (default 600; allowed 30–1800).
+  - id: run_command
+    name: Run command
+    description: Run a shell command on the dev machine and return output (e.g. npm test, pip install).
+    parameters:
+      - name: command
+        type: string
+        required: true
+        description: Shell command to run.
+      - name: cwd
+        type: string
+        required: false
+  - id: get_status
+    name: Get Trae Bridge status
+    description: Return bridge state (active cwd, default cwd, auth enabled).
+    parameters: []
+  - id: run_agent_interactive
+    name: Start Trae interactively (PTY)
+    description: Start Trae IDE in an interactive PTY on the bridge. Returns session_id and initial_output; use interactive_read/interactive_write/interactive_stop for the same session.
+    parameters:
+      - name: backend
+        type: string
+        required: false
+        description: trae (default for this plugin).
+      - name: cwd
+        type: string
+        required: false
+  - id: run_command_interactive
+    name: Start command interactively (PTY)
+    description: Start a shell command in a PTY on the bridge for interactive use.
+    parameters:
+      - name: command
+        type: string
+        required: true
+      - name: cwd
+        type: string
+        required: false
+      - name: backend
+        type: string
+        required: false
+  - id: interactive_read
+    name: Read from bridge interactive session
+    parameters:
+      - name: session_id
+        type: string
+        required: true
+      - name: from_seq
+        type: integer
+        required: false
+  - id: interactive_write
+    name: Write to bridge interactive session
+    parameters:
+      - name: session_id
+        type: string
+        required: true
+      - name: data
+        type: string
+        required: true
+  - id: interactive_stop
+    name: Stop bridge interactive session
+    parameters:
+      - name: session_id
+        type: string
+        required: true

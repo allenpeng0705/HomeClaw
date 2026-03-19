@@ -274,6 +274,51 @@ def _cursor_bridge_capability_and_params(query: str) -> tuple:
     return "run_agent", {"task": q}
 
 
+def _trae_bridge_capability_and_params(query: str) -> tuple:
+    """
+    For Trae preset: route message to the Trae bridge capability (no LLM).
+    Same patterns as Cursor but with "in trae": open_project, open_file, run_command, run_agent, get_status.
+    """
+    q = (query or "").strip()
+    if not q:
+        return "run_agent", {"task": q}
+    q_lower = q.lower()
+    if q_lower in ("status", "trae status", "current project", "current cwd", "which project", "what project", "active project"):
+        return "get_status", {}
+    m = re.match(r"open\s+(.+?)\s+project\s*$", q, re.IGNORECASE)
+    if m:
+        path = m.group(1).strip()
+        if path:
+            return "open_project", {"path": path}
+    m = re.match(r"open\s+([^\s]+(?:[/\\][^\s]*)+)\s*$", q, re.IGNORECASE)
+    if m:
+        return "open_project", {"path": m.group(1).strip()}
+    m = re.match(r"open\s+(?:project\s+)?(.+?)\s+in\s+trae\s*$", q, re.IGNORECASE)
+    if m:
+        path = m.group(1).strip()
+        if path:
+            return "open_project", {"path": path}
+    m = re.match(r"open\s+file\s+(.+)\s*$", q, re.IGNORECASE)
+    if m:
+        path = m.group(1).strip()
+        if path:
+            return "open_file", {"path": path}
+    run_command_prefixes = ("npm ", "pnpm ", "yarn ", "pip ", "python ", "node ", "npx ", "cargo ", "go ")
+    if q_lower.startswith("run ") and len(q) > 4:
+        rest = q[4:].strip()
+        if any(rest.lower().startswith(p) for p in run_command_prefixes):
+            return "run_command", {"command": rest}
+        if re.match(r"^[a-zA-Z0-9_.-]+\s*$", rest) or (len(rest) < 50 and "agent" not in rest.lower() and "trae" not in rest.lower() and " the " not in rest.lower()):
+            return "run_command", {"command": rest}
+    if q_lower.startswith("execute ") and len(q) > 8:
+        rest = q[8:].strip()
+        if any(rest.lower().startswith(p) for p in run_command_prefixes):
+            return "run_command", {"command": rest}
+        if len(rest) < 50 and "agent" not in rest.lower() and " the " not in rest.lower():
+            return "run_command", {"command": rest}
+    return "run_agent", {"task": q}
+
+
 def _claude_bridge_capability_and_params(query: str) -> tuple:
     """
     For ClaudeCode preset: route message to the Claude bridge plugin (no LLM).
@@ -791,13 +836,17 @@ async def answer_from_memory(
         if request and _current_friend and (query or "").strip():
             try:
                 _preset = (getattr(_current_friend, "preset", None) or "").strip().lower()
-                if _preset in ("cursor", "claudecode"):
-                    _plugin_id = "cursor-bridge" if _preset == "cursor" else "claude-code-bridge"
-                    _q = (query or "").strip()
+                if _preset in ("cursor", "claudecode", "trae"):
                     if _preset == "cursor":
-                        _cap, _params = _cursor_bridge_capability_and_params(_q)
+                        _plugin_id = "cursor-bridge"
+                        _cap, _params = _cursor_bridge_capability_and_params((query or "").strip())
+                    elif _preset == "claudecode":
+                        _plugin_id = "claude-code-bridge"
+                        _cap, _params = _claude_bridge_capability_and_params((query or "").strip())
                     else:
-                        _cap, _params = _claude_bridge_capability_and_params(_q)
+                        _plugin_id = "trae-bridge"
+                        _cap, _params = _trae_bridge_capability_and_params((query or "").strip())
+                    _q = (query or "").strip()
                     _reg = get_tool_registry()
                     if _reg:
                         _ctx = ToolContext(

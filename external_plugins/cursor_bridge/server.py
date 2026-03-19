@@ -49,8 +49,8 @@ if not STATE_FILE:
 
 _ACTIVE_CWD_LOCK = threading.Lock()
 # Track active project per backend so Cursor and ClaudeCode don't step on each other.
-# Keys: "cursor" | "claude"
-_ACTIVE_CWD_BY_BACKEND: Dict[str, Optional[str]] = {"cursor": None, "claude": None}
+# Keys: "cursor" | "claude" | "trae"
+_ACTIVE_CWD_BY_BACKEND: Dict[str, Optional[str]] = {"cursor": None, "claude": None, "trae": None}
 
 def _load_state() -> None:
     """Load persisted active cwd (best-effort)."""
@@ -65,16 +65,20 @@ def _load_state() -> None:
         legacy = (obj.get("active_cwd") or "").strip()
         cursor_cwd = (obj.get("cursor_active_cwd") or legacy or "").strip()
         claude_cwd = (obj.get("claude_active_cwd") or "").strip()
+        trae_cwd = (obj.get("trae_active_cwd") or "").strip()
         with _ACTIVE_CWD_LOCK:
             if cursor_cwd and os.path.isdir(cursor_cwd):
                 _ACTIVE_CWD_BY_BACKEND["cursor"] = cursor_cwd
             if claude_cwd and os.path.isdir(claude_cwd):
                 _ACTIVE_CWD_BY_BACKEND["claude"] = claude_cwd
-        if _ACTIVE_CWD_BY_BACKEND.get("cursor") or _ACTIVE_CWD_BY_BACKEND.get("claude"):
+            if trae_cwd and os.path.isdir(trae_cwd):
+                _ACTIVE_CWD_BY_BACKEND["trae"] = trae_cwd
+        if _ACTIVE_CWD_BY_BACKEND.get("cursor") or _ACTIVE_CWD_BY_BACKEND.get("claude") or _ACTIVE_CWD_BY_BACKEND.get("trae"):
             logger.info(
-                "Loaded cursor bridge state: cursor_active_cwd=%s claude_active_cwd=%s",
+                "Loaded cursor bridge state: cursor_active_cwd=%s claude_active_cwd=%s trae_active_cwd=%s",
                 _ACTIVE_CWD_BY_BACKEND.get("cursor"),
                 _ACTIVE_CWD_BY_BACKEND.get("claude"),
+                _ACTIVE_CWD_BY_BACKEND.get("trae"),
             )
     except Exception as e:
         logger.warning("Failed to load cursor bridge state: %s", e)
@@ -90,10 +94,11 @@ def _save_state() -> None:
             os.makedirs(base, exist_ok=True)
         cursor_cwd = _get_active_cwd("cursor") or ""
         claude_cwd = _get_active_cwd("claude") or ""
+        trae_cwd = _get_active_cwd("trae") or ""
         tmp = STATE_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(
-                {"cursor_active_cwd": cursor_cwd, "claude_active_cwd": claude_cwd},
+                {"cursor_active_cwd": cursor_cwd, "claude_active_cwd": claude_cwd, "trae_active_cwd": trae_cwd},
                 f,
                 ensure_ascii=False,
             )
@@ -112,7 +117,7 @@ def _set_active_cwd(path: str, backend: str = "cursor") -> None:
     if not p:
         return
     b = (backend or "cursor").strip().lower()
-    if b not in ("cursor", "claude"):
+    if b not in ("cursor", "claude", "trae"):
         b = "cursor"
     try:
         if os.path.isdir(p):
@@ -126,7 +131,7 @@ def _set_active_cwd(path: str, backend: str = "cursor") -> None:
 def _get_active_cwd(backend: str = "cursor") -> Optional[str]:
     try:
         b = (backend or "cursor").strip().lower()
-        if b not in ("cursor", "claude"):
+        if b not in ("cursor", "claude", "trae"):
             b = "cursor"
         with _ACTIVE_CWD_LOCK:
             return _ACTIVE_CWD_BY_BACKEND.get(b)
@@ -370,6 +375,16 @@ def _agent_interactive_command(backend: str) -> Tuple[str, Optional[str]]:
         else:
             cmd = exe
         return cmd, cwd
+    if (backend or "").strip().lower() == "trae":
+        exe = _trae_executable()
+        cwd = _get_active_cwd("trae") or DEFAULT_CWD
+        if IS_WINDOWS and exe.lower().endswith(".cmd"):
+            cmd = f'cmd /c "{exe}"'
+        elif IS_WINDOWS and exe.lower().endswith(".ps1"):
+            cmd = f'powershell -ExecutionPolicy Bypass -File "{exe}"'
+        else:
+            cmd = exe
+        return cmd, cwd
     # Cursor agent
     exe = _agent_executable()
     cwd = _get_active_cwd("cursor") or DEFAULT_CWD
@@ -388,6 +403,7 @@ def _status_payload() -> Dict[str, Any]:
         "default_cwd": DEFAULT_CWD,
         "cursor_active_cwd": _get_active_cwd("cursor"),
         "claude_active_cwd": _get_active_cwd("claude"),
+        "trae_active_cwd": _get_active_cwd("trae"),
         "state_file": STATE_FILE,
         "auth_enabled": bool(BRIDGE_API_KEY),
     }
@@ -499,6 +515,57 @@ def _open_in_cursor(path: str) -> tuple:
         )
     except Exception as e:
         return False, f"Could not open in Cursor: {e!s}. Install Cursor shell command (Command Palette: 'Install cursor') and ensure 'cursor' is in PATH or set CURSOR_CLI_PATH."
+
+
+def _trae_executable() -> str:
+    """Return path to Trae IDE CLI. Use TRAE_CLI_PATH if set, else try trae-cn then trae (from PATH). Trae CN: https://www.trae.cn — CLI is typically named trae-cn."""
+    path = (os.environ.get("TRAE_CLI_PATH") or "").strip()
+    if path and os.path.isfile(path):
+        return path
+    if path:
+        return path
+    return shutil.which("trae-cn") or shutil.which("trae") or "trae-cn"
+
+
+def _open_in_trae(path: str) -> Tuple[bool, str]:
+    """Open a path (folder or file) in Trae IDE. Returns (success, message). Uses TRAE_CLI_PATH or trae-cn/trae CLI."""
+    if not (path or str(path).strip()):
+        return False, "Error: path is empty."
+    p = _resolve_path(path)
+    if not os.path.exists(p):
+        return False, f"Path does not exist: {path}"
+    try:
+        trae_cmd = _trae_executable()
+        cwd = os.path.dirname(p) if os.path.isfile(p) else p
+        if IS_WINDOWS and trae_cmd.lower().endswith(".cmd"):
+            subprocess.Popen(
+                ["cmd", "/c", trae_cmd, p],
+                cwd=cwd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        elif IS_WINDOWS and trae_cmd.lower().endswith(".ps1"):
+            subprocess.Popen(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-File", trae_cmd, p],
+                cwd=cwd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            subprocess.Popen(
+                [trae_cmd, p],
+                cwd=cwd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        return True, f"Opened in Trae: {p}"
+    except FileNotFoundError:
+        return False, (
+            "Trae CLI (trae-cn) not found. Install Trae IDE from https://www.trae.cn and run 'Install trae command' in the IDE, "
+            "or set TRAE_CLI_PATH to the full path of the trae-cn executable."
+        )
+    except Exception as e:
+        return False, f"Could not open in Trae: {e!s}"
 
 
 def _agent_executable() -> str:
@@ -1000,6 +1067,65 @@ async def _run_agent_task(task: str, cwd: Optional[str] = None, timeout_sec: int
         return False, f"Error: {e!s}"
 
 
+def _infer_backend_from_plugin_id(plugin_id: str) -> str:
+    """Infer backend (cursor, claude, trae) from plugin_id for routing."""
+    pid_lower = (plugin_id or "").strip().lower()
+    if "trae" in pid_lower:
+        return "trae"
+    if "claude" in pid_lower:
+        return "claude"
+    return "cursor"
+
+
+async def _run_trae_task(task: str, cwd: Optional[str] = None, timeout_sec: int = 600) -> Tuple[bool, str]:
+    """Run Trae with a task. Trae IDE (www.trae.cn) may not support headless 'run'; we try 'trae run <task>' (trae-agent style). If not available, return guidance."""
+    if not (task or str(task).strip()):
+        return False, "Error: task is empty."
+    work_dir = (cwd or "").strip() or _get_active_cwd("trae") or DEFAULT_CWD
+    if not os.path.isdir(work_dir):
+        work_dir = DEFAULT_CWD
+    task_str = task.strip()
+    # TRAE_RUN_CMD overrides the default; otherwise use same executable as _trae_executable (trae-cn typical for CN) with "run"
+    run_cmd = (os.environ.get("TRAE_RUN_CMD") or "").strip()
+    if run_cmd:
+        argv = run_cmd.split() + [task_str]
+    else:
+        exe = _trae_executable()
+        argv = [exe, "run", task_str]
+    logger.info("trae run: argv=%s cwd=%s", argv, work_dir)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            cwd=work_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_b, stderr_b = await asyncio.wait_for(
+            proc.communicate(),
+            timeout=max(30, min(int(timeout_sec or 600), 1800)),
+        )
+        out = (stdout_b.decode("utf-8", errors="replace") if stdout_b else "").strip()
+        err = (stderr_b.decode("utf-8", errors="replace") if stderr_b else "").strip()
+        rc = proc.returncode if proc.returncode is not None else 1
+        if rc != 0:
+            if "not found" in err.lower() or "not found" in out.lower() or "command" in err.lower():
+                return False, (
+                    "Trae CLI did not run. Trae IDE (https://www.trae.cn) is for interactive use: use open_project to open a folder in Trae, then work in the IDE. "
+                    "To run tasks from the bridge you need the Trae CLI (e.g. trae-cn run); set TRAE_RUN_CMD or install Trae and add trae-cn to PATH."
+                )
+            return False, err or out or f"Trae exited with code {rc}."
+        return True, out or err or "(no output)"
+    except FileNotFoundError:
+        return False, (
+            "Trae CLI (trae-cn) not found. Install Trae IDE from https://www.trae.cn and use 'Install trae command' in the IDE, or set TRAE_CLI_PATH to the trae-cn executable. "
+            "For headless task runs set TRAE_RUN_CMD (e.g. trae-cn run) if the command differs."
+        )
+    except asyncio.TimeoutError:
+        return False, f"Trae timed out after {timeout_sec}s."
+    except Exception as e:
+        return False, f"Error: {e!s}"
+
+
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
@@ -1022,12 +1148,11 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
     if cap_id in ("get_status", "status"):
         # Return bridge status (active project cwd, default cwd, etc.)
         success = True
-        backend = (params.get("backend") or "").strip().lower()
+        backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
         payload = _status_payload()
-        if backend in ("cursor", "claude"):
+        if backend in ("cursor", "claude", "trae"):
             payload["active_cwd"] = payload.get(f"{backend}_active_cwd")
         else:
-            # Backward compat: active_cwd means cursor active cwd.
             payload["active_cwd"] = payload.get("cursor_active_cwd")
         text = json.dumps(payload, ensure_ascii=False)
 
@@ -1042,7 +1167,8 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
                 success = False
                 error = f"Path is not a directory: {resolved}"
             else:
-                _set_active_cwd(resolved, backend="claude")
+                backend = _infer_backend_from_plugin_id(plugin_id)
+                _set_active_cwd(resolved, backend=backend)
                 text = f"Active project set: {resolved}"
 
     elif cap_id == "run_command":
@@ -1052,10 +1178,9 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             success = False
             error = "run_command requires 'command' in capability_parameters."
         else:
-            backend = (params.get("backend") or "").strip().lower()
-            if backend not in ("cursor", "claude"):
-                pid_lower = (plugin_id or "").strip().lower()
-                backend = "claude" if "claude" in pid_lower else "cursor"
+            backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
+            if backend not in ("cursor", "claude", "trae"):
+                backend = "cursor"
             if not cwd:
                 cwd = _get_active_cwd(backend) or None
             success, text = await _run_command(command, cwd=cwd)
@@ -1066,36 +1191,44 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             success = False
             error = "open_file requires 'path' in capability_parameters."
         else:
+            backend = _infer_backend_from_plugin_id(plugin_id)
             try:
                 abs_path = _resolve_path(path)
-                success, text = _open_in_cursor(abs_path)
-                if success:
-                    _set_active_cwd(os.path.dirname(abs_path), backend="cursor")
+                if backend == "trae":
+                    success, text = _open_in_trae(abs_path)
+                    if success:
+                        _set_active_cwd(os.path.dirname(abs_path), backend="trae")
+                else:
+                    success, text = _open_in_cursor(abs_path)
+                    if success:
+                        _set_active_cwd(os.path.dirname(abs_path), backend="cursor")
             except Exception as e:
                 success = False
-                text = f"Could not open {path}: {e!s}. You can run 'cursor {path}' in terminal if Cursor CLI is installed."
+                text = f"Could not open {path}: {e!s}."
 
     elif cap_id == "open_project":
-        # Open a folder or project in Cursor IDE so the user can chat with the agent there.
+        # Open a folder or project in Cursor IDE or Trae IDE so the user can chat with the agent there.
         path = (params.get("path") or params.get("folder") or "").strip()
         if not path:
             success = False
             error = "open_project requires 'path' or 'folder' in capability_parameters."
         else:
             resolved = _resolve_path(path)
-            success, text = _open_in_cursor(resolved)
-            if success and os.path.isdir(resolved):
-                _set_active_cwd(resolved, backend="cursor")
+            backend = _infer_backend_from_plugin_id(plugin_id)
+            if backend == "trae":
+                success, text = _open_in_trae(resolved)
+                if success and os.path.isdir(resolved):
+                    _set_active_cwd(resolved, backend="trae")
+            else:
+                success, text = _open_in_cursor(resolved)
+                if success and os.path.isdir(resolved):
+                    _set_active_cwd(resolved, backend="cursor")
 
     elif cap_id == "run_agent":
-        # Run Cursor CLI agent (cursor-bridge) or Claude Code CLI (claude-code-bridge) with a task; return output.
+        # Run Cursor / Claude Code / Trae with a task; return output.
         task = (params.get("task") or params.get("prompt") or user_input or "").strip()
         cwd = (params.get("cwd") or "").strip() or None
-        backend = (params.get("backend") or "").strip().lower()
-        if not backend:
-            # Infer from plugin_id when caller uses separate plugin ids.
-            pid_lower = (plugin_id or "").strip().lower()
-            backend = "claude" if "claude" in pid_lower else "cursor"
+        backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
         timeout = 600  # default 10 min; allow up to 1800 (30 min) to match plugin HTTP timeout
         try:
             t = int(params.get("timeout_sec", timeout))
@@ -1111,15 +1244,14 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
                 cwd = _get_active_cwd(backend) or None
             if backend == "claude":
                 success, text = await _run_claude_task(task, cwd=cwd, timeout_sec=timeout)
+            elif backend == "trae":
+                success, text = await _run_trae_task(task, cwd=cwd, timeout_sec=timeout)
             else:
                 success, text = await _run_agent_task(task, cwd=cwd, timeout_sec=timeout)
 
     elif cap_id == "run_agent_interactive":
-        # Start Cursor or Claude agent in a PTY on the bridge; return session_id + initial_output for Core/Companion to use.
-        backend = (params.get("backend") or "").strip().lower()
-        if not backend:
-            pid_lower = (plugin_id or "").strip().lower()
-            backend = "claude" if "claude" in pid_lower else "cursor"
+        # Start Cursor, Claude, or Trae in a PTY on the bridge; return session_id + initial_output for Core/Companion to use.
+        backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
         cwd_override = (params.get("cwd") or "").strip() or None
         try:
             cmd, cwd = _agent_interactive_command(backend)
@@ -1142,10 +1274,7 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
         else:
             cwd = (params.get("cwd") or "").strip() or None
             if not cwd:
-                backend = (params.get("backend") or "").strip().lower()
-                if not backend:
-                    pid_lower = (plugin_id or "").strip().lower()
-                    backend = "claude" if "claude" in pid_lower else "cursor"
+                backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
                 cwd = _get_active_cwd(backend) or DEFAULT_CWD
             if not os.path.isdir(cwd):
                 cwd = DEFAULT_CWD
