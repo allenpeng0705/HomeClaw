@@ -6,7 +6,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional, Union
 import uuid
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 import uvicorn
 import yaml
 from dataclasses import dataclass, field
@@ -104,6 +104,26 @@ class InboundRequest(BaseModel):
     reply_accepts: Optional[List[str]] = None
     # Cursor preset only: when set, merged into bridge run_agent as yolo (true = CLI --yolo for this message; false = never --yolo this message). Omitted = follow CURSOR_AGENT_YOLO / cursor_bridge_agent_yolo only.
     cursor_agent_yolo: Optional[bool] = None
+    # Claude Code preset only: when set, merged into bridge run_agent as skip_permissions (true = --dangerously-skip-permissions; false = omit). Omitted = HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT on bridge (see cursor_bridge_claude_skip_permissions_default).
+    claude_skip_permissions: Optional[bool] = None
+
+    @field_validator("cursor_agent_yolo", "claude_skip_permissions", mode="before")
+    @classmethod
+    def _coerce_optional_bridge_flags(cls, v: Any) -> Any:
+        """Accept true/false from JSON bool, 0/1, or common string forms (WebChat / loose clients)."""
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return v != 0
+        if isinstance(v, str):
+            s = v.strip().lower()
+            if s in ("1", "true", "yes", "on"):
+                return True
+            if s in ("0", "false", "no", "off", ""):
+                return False
+        return v
 
 class IntentType(Enum):
     TIME = "TIME"
@@ -1057,6 +1077,8 @@ class CoreMetadata:
     cursor_bridge_forward_logs: bool = False  # when True and cursor_bridge_auto_start, bridge stderr is not discarded so you see agent/bridge logs in Core's terminal (for debugging exit code 1 etc.)
     # When True, bridge passes --yolo to Cursor CLI agent (run_agent): auto-approve shell unless permissions.deny in ~/.cursor/cli-config.json. Trusted machines only; use a strong deny list.
     cursor_bridge_agent_yolo: bool = False
+    # When True and Core auto-starts the bridge, sets HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT=1 so headless claude -p uses --dangerously-skip-permissions when a request does not set skip_permissions. Default False = safer; set True to restore old "always skip" behavior without Companion toggle.
+    cursor_bridge_claude_skip_permissions_default: bool = False
     cursor_bridge_claude_settings_path: str = ""  # optional full path to Claude Code settings.json; when set, passed as CLAUDE_SETTINGS_PATH to the bridge (so it loads auth from that file). Set in config/skills_and_plugins.yml or core.yml.
 
     # When false (default): do not register plugins/TraeBridge, do not pass TRAE_AGENT_* to the bridge, and Trae preset replies with a config hint. Set true to enable Trae Agent (experimental).
@@ -1177,7 +1199,7 @@ class CoreMetadata:
                         _ext_data = yaml.safe_load(_f)
                     if isinstance(_ext_data, dict):
                         for _k, _v in _ext_data.items():
-                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k in ('tools', 'external_skills_dir', 'clawhub_download_dir', 'intent_router', 'planner_executor', 'identity_capabilities_shortcut', 'cursor_bridge_auto_start', 'cursor_bridge_port', 'cursor_bridge_agent_path', 'cursor_bridge_cursor_cli_path', 'cursor_bridge_cursor_api_key', 'cursor_bridge_bridge_api_key', 'cursor_bridge_forward_logs', 'cursor_bridge_agent_yolo', 'cursor_bridge_claude_settings_path', 'trae_agent_enabled', 'cursor_bridge_trae_agent_path', 'cursor_bridge_trae_agent_config', 'claude_code_path', 'claude_code_api_key')):
+                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k in ('tools', 'external_skills_dir', 'clawhub_download_dir', 'intent_router', 'planner_executor', 'identity_capabilities_shortcut', 'cursor_bridge_auto_start', 'cursor_bridge_port', 'cursor_bridge_agent_path', 'cursor_bridge_cursor_cli_path', 'cursor_bridge_cursor_api_key', 'cursor_bridge_bridge_api_key', 'cursor_bridge_forward_logs', 'cursor_bridge_agent_yolo', 'cursor_bridge_claude_skip_permissions_default', 'cursor_bridge_claude_settings_path', 'trae_agent_enabled', 'cursor_bridge_trae_agent_path', 'cursor_bridge_trae_agent_config', 'claude_code_path', 'claude_code_api_key')):
                                 continue
                             if _k == 'identity_capabilities_shortcut' and not isinstance(_v, dict):
                                 logging.warning("skills_and_plugins config %s: identity_capabilities_shortcut must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
@@ -1554,6 +1576,7 @@ class CoreMetadata:
             cursor_bridge_bridge_api_key=(str(data.get('cursor_bridge_bridge_api_key') or '').strip()),
             cursor_bridge_forward_logs=bool(data.get('cursor_bridge_forward_logs', False)),
             cursor_bridge_agent_yolo=bool(data.get('cursor_bridge_agent_yolo', False)),
+            cursor_bridge_claude_skip_permissions_default=bool(data.get('cursor_bridge_claude_skip_permissions_default', False)),
             cursor_bridge_claude_settings_path=(str(data.get('cursor_bridge_claude_settings_path') or '').strip()),
             trae_agent_enabled=bool(data.get('trae_agent_enabled', False)),
             cursor_bridge_trae_agent_path=(str(data.get('cursor_bridge_trae_agent_path') or '').strip()),

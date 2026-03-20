@@ -1117,6 +1117,7 @@ class CoreService {
   /// [useStream]: when true and [onProgress] is set, sends stream: true and parses SSE; progress events are reported via [onProgress], final result returned as usual. When false or [onProgress] null, uses single-JSON response (no streaming).
   /// For remote Core: uses async: true so the initial POST returns 202 immediately (no long-held connection for proxies like Cloudflare); then polls GET /inbound/result until done. Use [onProgress] to show "Processing…" while polling.
   /// [cursorAgentYolo]: Cursor friend only — when true/false, sends `cursor_agent_yolo` on POST /inbound so Core passes `yolo` to the bridge for that `run_agent` only (CLI `--yolo` / auto-run unless `permissions.deny`). Omit (null) to use server default (env / config).
+  /// [claudeSkipPermissions]: Claude Code friend only — when true/false, sends `claude_skip_permissions` so the bridge adds or omits `--dangerously-skip-permissions` for that `run_agent`.
   /// Throws on network or API error.
   Future<Map<String, dynamic>> sendMessage(
     String text, {
@@ -1131,6 +1132,7 @@ class CoreService {
     bool? useStream,
     void Function(String message)? onProgress,
     bool? cursorAgentYolo,
+    bool? claudeSkipPermissions,
   }) async {
     final url = Uri.parse('$_baseUrl/inbound');
     final useAsyncForRemote = _isRemoteCore;
@@ -1155,6 +1157,7 @@ class CoreService {
     if (audios != null && audios.isNotEmpty) body['audios'] = audios;
     if (files != null && files.isNotEmpty) body['files'] = files;
     if (cursorAgentYolo != null) body['cursor_agent_yolo'] = cursorAgentYolo;
+    if (claudeSkipPermissions != null) body['claude_skip_permissions'] = claudeSkipPermissions;
     if (useAsync) body['async'] = true;
     if (useStreamPath) body['stream'] = true;
 

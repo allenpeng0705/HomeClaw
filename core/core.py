@@ -539,6 +539,12 @@ class Core(CoreInterface):
         if getattr(meta, "cursor_bridge_agent_yolo", False):
             env["CURSOR_AGENT_YOLO"] = "1"
             _component_log("cursor_bridge", "CURSOR_AGENT_YOLO=1 (agent --yolo for headless; use strong cli-config deny list)")
+        if getattr(meta, "cursor_bridge_claude_skip_permissions_default", False):
+            env["HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT"] = "1"
+            _component_log(
+                "cursor_bridge",
+                "HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT=1 (claude -p uses --dangerously-skip-permissions when request omits skip_permissions)",
+            )
         try:
             proc = subprocess.Popen(
                 [sys.executable, "-m", "external_plugins.cursor_bridge.server"],

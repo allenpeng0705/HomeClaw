@@ -41,9 +41,9 @@ def _env_truthy(name: str) -> bool:
     return v in ("1", "true", "yes", "on")
 
 
-def _parse_yolo_override(params: Dict[str, Any]) -> Optional[bool]:
-    """Per-request override for Cursor agent --yolo. None = use CURSOR_AGENT_YOLO env only."""
-    for key in ("yolo", "agent_yolo", "force"):
+def _parse_optional_bool_param(params: Dict[str, Any], keys: Tuple[str, ...]) -> Optional[bool]:
+    """First matching key in params → bool; absent keys → None."""
+    for key in keys:
         if key not in params:
             continue
         v = params.get(key)
@@ -60,6 +60,25 @@ def _parse_yolo_override(params: Dict[str, Any]) -> Optional[bool]:
             return False
         return bool(v)
     return None
+
+
+def _parse_yolo_override(params: Dict[str, Any]) -> Optional[bool]:
+    """Per-request override for Cursor agent --yolo. None = use CURSOR_AGENT_YOLO env only."""
+    return _parse_optional_bool_param(params, ("yolo", "agent_yolo", "force"))
+
+
+def _parse_claude_skip_permissions_override(params: Dict[str, Any]) -> Optional[bool]:
+    """Per-request: add --dangerously-skip-permissions when True. None = HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT env."""
+    return _parse_optional_bool_param(
+        params, ("skip_permissions", "dangerously_skip_permissions", "claude_skip_permissions")
+    )
+
+
+def _effective_claude_skip_permissions(explicit: Optional[bool]) -> bool:
+    """Whether to pass --dangerously-skip-permissions to claude -p."""
+    if explicit is not None:
+        return bool(explicit)
+    return _env_truthy("HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT")
 
 
 def _cursor_agent_yolo_argv(use_yolo: Optional[bool] = None) -> List[str]:
@@ -856,8 +875,13 @@ def _claude_subprocess_env_minimax_x_api_key() -> Dict[str, str]:
     return env
 
 
-async def _run_claude_task(task: str, cwd: Optional[str] = None, timeout_sec: int = 120) -> tuple:
-    """Run Claude Code CLI headlessly. Always uses --dangerously-skip-permissions for non-interactive runs."""
+async def _run_claude_task(
+    task: str,
+    cwd: Optional[str] = None,
+    timeout_sec: int = 120,
+    skip_permissions: Optional[bool] = None,
+) -> tuple:
+    """Run Claude Code CLI headlessly (-p). Optionally passes --dangerously-skip-permissions when skip_permissions resolves true (see _effective_claude_skip_permissions)."""
     if not (task or str(task).strip()):
         return False, "Error: task is empty."
     work_dir = (cwd or "").strip()
@@ -867,13 +891,15 @@ async def _run_claude_task(task: str, cwd: Optional[str] = None, timeout_sec: in
         work_dir = DEFAULT_CWD
     claude_cmd = _claude_executable()
     task_str = task.strip()
-    # Headless + skip permissions + JSON output (fallback if unsupported).
+    do_skip = _effective_claude_skip_permissions(skip_permissions)
+    skip_arg = ["--dangerously-skip-permissions"] if do_skip else []
+    # Headless + optional skip permissions + JSON output (fallback if unsupported).
     if IS_WINDOWS and claude_cmd.lower().endswith(".cmd"):
-        run_argv = ["cmd", "/c", claude_cmd, "--dangerously-skip-permissions", "-p", "--output-format", "json", task_str]
+        run_argv = ["cmd", "/c", claude_cmd, *skip_arg, "-p", "--output-format", "json", task_str]
     elif IS_WINDOWS and claude_cmd.lower().endswith(".ps1"):
-        run_argv = ["powershell", "-ExecutionPolicy", "Bypass", "-File", claude_cmd, "--dangerously-skip-permissions", "-p", "--output-format", "json", task_str]
+        run_argv = ["powershell", "-ExecutionPolicy", "Bypass", "-File", claude_cmd, *skip_arg, "-p", "--output-format", "json", task_str]
     else:
-        run_argv = [claude_cmd, "--dangerously-skip-permissions", "-p", "--output-format", "json", task_str]
+        run_argv = [claude_cmd, *skip_arg, "-p", "--output-format", "json", task_str]
     _log_argv = run_argv.copy()
     if len(_log_argv) > 2 and len(task_str) > 80:
         _log_argv[-1] = task_str[:80] + "..."
@@ -956,6 +982,13 @@ async def _run_claude_task(task: str, cwd: Optional[str] = None, timeout_sec: in
                         msg += " Set cursor_bridge_claude_settings_path in config/skills_and_plugins.yml to the full path of your settings.json and restart Core."
                 except Exception:
                     pass
+            if not do_skip:
+                msg += (
+                    " Headless run did not use --dangerously-skip-permissions. If Claude failed waiting for approval, "
+                    "turn ON the Companion flash for Claude chat, pass skip_permissions:true on the bridge call, "
+                    "set HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT=1 on the bridge, or set "
+                    "cursor_bridge_claude_skip_permissions_default: true in skills_and_plugins.yml."
+                )
             return False, msg
         if out:
             try:
@@ -1298,7 +1331,10 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             if not cwd:
                 cwd = _get_active_cwd(backend) or None
             if backend == "claude":
-                success, text = await _run_claude_task(task, cwd=cwd, timeout_sec=timeout)
+                _sk = _parse_claude_skip_permissions_override(params)
+                success, text = await _run_claude_task(
+                    task, cwd=cwd, timeout_sec=timeout, skip_permissions=_sk
+                )
             elif backend == "trae":
                 success, text = await _run_trae_task(task, cwd=cwd, timeout_sec=timeout)
             else:

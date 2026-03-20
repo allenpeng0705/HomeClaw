@@ -56,6 +56,16 @@ Optional environment variables:
 
 **Companion app:** POST `/inbound` may include **`cursor_agent_yolo`: `true` | `false`** (Cursor friend only). Core forwards it as **`yolo`** on **`run_agent`** for that message. The Flutter app exposes a flash (⚡) toggle in the Cursor chat app bar; preference is saved locally.
 
+### Claude Code (`claude-code-bridge` / preset `claudecode`)
+
+Headless **`run_agent`** uses **`claude -p`**. The bridge adds **`--dangerously-skip-permissions`** only when **`skip_permissions`** is resolved **true** for that call:
+
+- **Per request:** capability parameters **`skip_permissions`**, **`claude_skip_permissions`**, or **`dangerously_skip_permissions`** (`true` / `false`).
+- **Companion:** POST `/inbound` field **`claude_skip_permissions`**: `true` | `false` — Core merges **`skip_permissions`** for that message. The Flutter app uses the same **flash** toggle in the **Claude Code** chat app bar (off = safer default).
+- **When omitted:** bridge uses env **`HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT`** (`1` / `true` / `yes` / `on` = skip). Core sets this when **`cursor_bridge_claude_skip_permissions_default: true`** in `skills_and_plugins.yml`. **Default is off** (safer); set that YAML key to `true` if you want the previous “always skip permissions” behavior without using the Companion toggle.
+
+Example without Core: `set HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT=1` before starting the bridge.
+
 Example with custom port and project dir:
 
 ```bash

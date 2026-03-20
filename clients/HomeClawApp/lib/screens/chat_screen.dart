@@ -120,6 +120,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   static const String _keyCursorAgentYolo = 'chat_cursor_agent_yolo';
   bool _cursorAgentYolo = false;
 
+  /// Claude Code friend only: when true, POST /inbound includes `claude_skip_permissions` → bridge adds --dangerously-skip-permissions for that run_agent.
+  static const String _keyClaudeSkipPermissions = 'chat_claude_skip_permissions';
+  bool _claudeSkipPermissions = false;
+
   bool get _isDevBridgeFriend {
     final fid = (widget.friendId ?? '').trim().toLowerCase();
     return fid == 'cursor' || fid == 'claudecode' || fid == 'trae';
@@ -140,6 +144,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       final p = await SharedPreferences.getInstance();
       await p.setBool(_keyCursorAgentYolo, value);
+    } catch (_) {}
+  }
+
+  Future<void> _loadClaudeSkipPermissionsPref() async {
+    if ((widget.friendId ?? '').trim().toLowerCase() != 'claudecode') return;
+    try {
+      final p = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() => _claudeSkipPermissions = p.getBool(_keyClaudeSkipPermissions) ?? false);
+    } catch (_) {}
+  }
+
+  Future<void> _setClaudeSkipPermissions(bool value) async {
+    if (!mounted) return;
+    setState(() => _claudeSkipPermissions = value);
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setBool(_keyClaudeSkipPermissions, value);
     } catch (_) {}
   }
 
@@ -253,6 +275,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _loadChatPartnerAvatar();
     _refreshCursorActiveProject();
     _loadCursorAgentYoloPref();
+    _loadClaudeSkipPermissionsPref();
     _scrollController.addListener(_onScrollForPagination);
     if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
       _loadUserInbox();
@@ -780,6 +803,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         videos: videoPaths.isEmpty ? null : videoPaths,
         files: filePaths.isEmpty ? null : filePaths,
         cursorAgentYolo: (widget.friendId ?? '').trim().toLowerCase() == 'cursor' ? _cursorAgentYolo : null,
+        claudeSkipPermissions:
+            (widget.friendId ?? '').trim().toLowerCase() == 'claudecode' ? _claudeSkipPermissions : null,
         onProgress: widget.coreService.showProgressDuringLongTasks
             ? (String message) {
                 if (mounted) setState(() => _loadingMessage = message);
@@ -1775,6 +1800,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   : 'Auto-run OFF (stricter CLI permissions for this chat)',
               color: _cursorAgentYolo ? Theme.of(context).colorScheme.primary : null,
               onPressed: () => _setCursorAgentYolo(!_cursorAgentYolo),
+            ),
+          if ((widget.friendId ?? '').trim().toLowerCase() == 'claudecode')
+            IconButton(
+              icon: Icon(_claudeSkipPermissions ? Icons.flash_on : Icons.flash_off_outlined),
+              tooltip: _claudeSkipPermissions
+                  ? 'Claude Code: --dangerously-skip-permissions ON (full auto-run for this chat)'
+                  : 'Claude Code: stricter headless (no skip-permissions for this chat)',
+              color: _claudeSkipPermissions ? Theme.of(context).colorScheme.primary : null,
+              onPressed: () => _setClaudeSkipPermissions(!_claudeSkipPermissions),
             ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),

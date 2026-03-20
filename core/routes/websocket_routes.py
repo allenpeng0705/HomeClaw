@@ -149,6 +149,7 @@ def get_websocket_handler(core):
                         files=data.get("files"),
                         location=(data.get("location") or "").strip() or None,
                         cursor_agent_yolo=data.get("cursor_agent_yolo"),
+                        claude_skip_permissions=data.get("claude_skip_permissions"),
                     )
                 except Exception as e:
                     await websocket.send_json({"error": str(e), "text": ""})

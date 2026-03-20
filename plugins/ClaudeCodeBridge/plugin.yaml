@@ -23,7 +23,7 @@ capabilities:
         description: Project folder path (absolute or relative to bridge default cwd).
   - id: run_agent
     name: Run Claude Code and get result
-    description: Run Claude Code CLI headlessly in the active project and return the output. By default uses --dangerously-skip-permissions.
+    description: Run Claude Code CLI headlessly in the active project and return the output. Pass skip_permissions true only when the user explicitly wants full auto-run (--dangerously-skip-permissions); false or omitted uses safer defaults (Companion flash off / server env).
     parameters:
       - name: task
         type: string
@@ -37,6 +37,10 @@ capabilities:
         type: integer
         required: false
         description: Max seconds (default 600; allowed 30–1800).
+      - name: skip_permissions
+        type: boolean
+        required: false
+        description: If true, adds --dangerously-skip-permissions (full tool/shell auto-run for this task). If false, omits it (stricter). If omitted, bridge uses HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT (Core cursor_bridge_claude_skip_permissions_default).
   - id: run_command
     name: Run command
     description: Run a shell command in the active project and return output.

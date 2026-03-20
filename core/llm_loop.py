@@ -851,6 +851,9 @@ async def answer_from_memory(
                     elif _preset == "claudecode":
                         _plugin_id = "claude-code-bridge"
                         _cap, _params = _claude_bridge_capability_and_params((query or "").strip())
+                        _csp = getattr(request, "claude_skip_permissions", None)
+                        if _csp is not None and _cap == "run_agent":
+                            _params = {**dict(_params), "skip_permissions": bool(_csp)}
                     else:
                         _plugin_id = "trae-bridge"
                         _cap, _params = _trae_bridge_capability_and_params((query or "").strip())
