@@ -1522,12 +1522,26 @@ class CoreService {
       'images': imageList != null && imageList.isNotEmpty ? imageList : null,
       if (cancelled) 'cancelled': true,
     };
-    if (meta != null) {
+    // Persist immediately so reply is not lost when no chat screen is listening (user left chat).
+    final metaFromMessage = (() {
+      final uid = (msg?['user_id'] as String?)?.trim();
+      final fid = (msg?['friend_id'] as String?)?.trim();
+      if (uid != null && uid.isNotEmpty) {
+        return (userId: uid, friendId: (fid == null || fid.isEmpty) ? 'HomeClaw' : fid);
+      }
+      return null;
+    })();
+    final effectiveMeta = meta ?? metaFromMessage;
+    if (effectiveMeta != null) {
+      _persistInboundResultToStore(effectiveMeta.userId, effectiveMeta.friendId, resultMap);
+      _clearPendingRequestId(effectiveMeta.userId, effectiveMeta.friendId);
+    }
+    if (effectiveMeta != null) {
       try {
         _pushMessageController.add({
           'event': 'inbound_result',
-          'user_id': meta.userId,
-          'friend_id': meta.friendId,
+          'user_id': effectiveMeta.userId,
+          'friend_id': effectiveMeta.friendId,
           'text': resultMap['text'],
           'images': resultMap['images'],
         });

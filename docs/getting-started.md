@@ -1,34 +1,53 @@
 # Getting started
 
-Quick path from install to chatting with HomeClaw via the **Companion app** and/or **channels** (WebChat, Telegram, etc.). They all talk to the same **Core**—run Core once, then use the app and any channel together.
+Full path from zero to chatting with HomeClaw. The **[Companion App](companion-app.md)** is the recommended way to use HomeClaw — it works on Mac, Windows, iPhone, and Android.
 
 ---
 
-1. **Install (first step)**
+## 1. Install
 
-   **Recommended:** Run the install script. Clone the repo (`git clone https://github.com/allenpeng0705/HomeClaw.git`, `cd HomeClaw`), then:
+Clone the repo and run the install script:
 
-   - **Mac/Linux:** Run `chmod +x install.sh` (one-time) then `./install.sh`, or run `bash install.sh` (no chmod needed). If `./install.sh` gives "Permission denied", use one of these.
-   - **Windows:** Use **PowerShell** (not Command Prompt). Run `.\install.ps1` or **`install.bat`**. If you get an execution policy error, run `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser` once, or use `powershell -ExecutionPolicy Bypass -File .\install.ps1`, or use `install.bat`. See [Install](install.md) for details.
+- **Mac/Linux:** `git clone https://github.com/allenpeng0705/HomeClaw.git && cd HomeClaw && bash install.sh`
+- **Windows (PowerShell):** `git clone https://github.com/allenpeng0705/HomeClaw.git; cd HomeClaw; .\install.ps1`
 
-   The script checks Python, installs dependencies, and **opens the Portal** at **http://127.0.0.1:18472** when done.
+The script checks Python, installs dependencies, and opens the **Portal** at http://127.0.0.1:18472.
 
-   **Manual alternative:** `pip install -r requirements.txt` after cloning (see [Install](install.md)).
+Manual alternative: `pip install -r requirements.txt` after cloning. See [Install](install.md) for details.
 
-2. **Configure** — Edit `config/core.yml` (LLM, memory) and `config/user.yml` (who can talk to the assistant). Or use the **Portal**: run `python -m main portal` and open **http://127.0.0.1:18472** in your browser to manage settings and users.
+## 2. Configure
 
-   - **Local models:** Copy llama.cpp's **binary distribution** into `llama.cpp-master/<platform>/` for your device (see `llama.cpp-master/README.md` in the repo).
-   - **Cloud models:** Set API keys in the environment (e.g. `export GEMINI_API_KEY=...`).
+Edit `config/core.yml` (LLM, memory) and `config/user.yml` (allowed users). Or use the **Portal** (`python -m main portal`) to manage settings in a web UI.
 
-3. **Run Core** — `python -m main start` (starts Core and built-in CLI; web UI opens). Core is the single backend for the Companion app and all channels.
+- **Cloud models (fastest start):** Set an API key in the environment (e.g. `export GEMINI_API_KEY=...`) and point `main_llm` to a cloud model in `core.yml`.
+- **Local models:** Copy llama.cpp binaries into `llama.cpp-master/<platform>/` and configure `local_models` in `core.yml`. See [Models](models.md).
 
-   **Verify:** `curl -s http://127.0.0.1:9000/ready` should return 200. Or run `python -m main doctor` to check config and LLM.
+## 3. Start Core
 
-4. **Use the Companion app and/or channels**
+```bash
+python -m main start
+```
 
-   - **Companion app** — Install from `clients/HomeClawApp/`. In Settings set **Core URL** to `http://127.0.0.1:9000` (same machine) or your remote URL (Tailscale, Cloudflare Tunnel, etc.). Add your user in `config/user.yml` or via Portal. Open **Chat** to talk to HomeClaw; use **Settings** for **Skills** (install/remove via ClawHub) and **Manage Core** (edit config).
-   - **Channels** — With Core running, run e.g. `python -m channels.run webchat` and open http://localhost:8014. Set `CORE_URL` in `channels/.env`. Same Core, same memory as the Companion app.
+Core listens on **port 9000** by default. Verify: `curl -s http://127.0.0.1:9000/ready` should return 200.
 
-   **Companion and channels together:** Run Core once. The app and every channel connect to that same Core; you can use both at the same time.
+## 4. Use the Companion App
 
-For full steps, see [QuickStart.md](https://github.com/allenpeng0705/HomeClaw/blob/main/QuickStart.md), the main [README](https://github.com/allenpeng0705/HomeClaw/blob/main/README.md), and [HOW_TO_USE.md](https://github.com/allenpeng0705/HomeClaw/blob/main/HOW_TO_USE.md) in the repo.
+1. Build from `clients/HomeClawApp/` (see [Companion App](companion-app.md#build-from-source-recommended)) or install from TestFlight/App Store.
+2. In the app's **Settings**, set **Core URL** to `http://127.0.0.1:9000` (same machine) or your remote URL.
+3. Open **Chat** and send a message.
+
+That's it — you're talking to HomeClaw.
+
+## 5. Optional: add a channel
+
+With Core running, you can also connect via WebChat, Telegram, Discord, and more:
+
+```bash
+python -m channels.run webchat   # open http://localhost:8014
+```
+
+The Companion App and channels share the same Core, memory, and user identity. See [Channels](channels.md).
+
+---
+
+For troubleshooting, run `python -m main doctor`. See [Help](help.md) for common issues.

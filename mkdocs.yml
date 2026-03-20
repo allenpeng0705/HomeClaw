@@ -29,6 +29,8 @@ theme:
   features:
     - navigation.instant
     - navigation.tabs
+    - navigation.sections
+    - navigation.expand
     - search.suggest
     - search.highlight
   icon:
@@ -40,26 +42,31 @@ plugins:
 
 nav:
   - Home: index.md
-  - Introducing HomeClaw: introducing-homeclaw.md
-  - Story: story.md
-  - Install: install.md
-  - Run: run.md
-  - Getting started: getting-started.md
-  - Deploy to cloud: deploy-cloud.md
-  - Companion app: companion-app.md
-  - Companion app (macOS permissions): companion-app-macos-permissions.md
-  - Channels: channels.md
-  - Companion vs Channels: companion-vs-channels.md
-  - Per-user sandbox and file links: per-user-sandbox-and-file-links.md
-  - Friends plugin: friends-plugin.md
-  - Tools: tools.md
-  - Plugins: plugins.md
-  - Writing plugins and skills: writing-plugins-and-skills.md
-  - Models: models.md
-  - Core config (core.yml): core-config.md
-  - Mix mode and reports: mix-mode-and-reports.md
-  - Hybrid router scripts: hybrid-router-scripts.md
-  - Platform: platform.md
-  - Remote access: remote-access.md
-  - Companion on iPhone (Cloudflare Tunnel): companion-iphone-cloudflare-tunnel.md
+  - Companion App: companion-app.md
+  - Get Started:
+    - Install: install.md
+    - Run: run.md
+    - Getting started: getting-started.md
+    - Models: models.md
+  - Connect:
+    - Channels: channels.md
+    - Remote access: remote-access.md
+    - Deploy to cloud: deploy-cloud.md
+  - Extend:
+    - Tools: tools.md
+    - Plugins: plugins.md
+    - Writing plugins and skills: writing-plugins-and-skills.md
+    - Friends: friends-plugin.md
+  - Configure:
+    - Core config (core.yml): core-config.md
+    - Platform: platform.md
+    - Per-user sandbox and file links: per-user-sandbox-and-file-links.md
+    - Mix mode and reports: mix-mode-and-reports.md
+    - Hybrid router scripts: hybrid-router-scripts.md
+  - Reference:
+    - Companion vs Channels: companion-vs-channels.md
+    - Companion app (macOS permissions): companion-app-macos-permissions.md
+    - Companion on iPhone (Cloudflare Tunnel): companion-iphone-cloudflare-tunnel.md
+    - Introducing HomeClaw: introducing-homeclaw.md
+    - Story: story.md
   - Help: help.md

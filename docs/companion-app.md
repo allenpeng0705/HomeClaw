@@ -1,126 +1,167 @@
-# Companion app (Flutter)
+# Companion App
 
-The **HomeClaw Companion** app is a **Flutter-based** client for **Mac, Windows, iPhone, and Android**. It makes HomeClaw much easier to use from any device.
-
----
-
-## What it does
-
-- **Chat** — Send messages, attach images and files; voice input and TTS (speak replies).
-- **Manage Core** — Edit **core.yml** and **user.yml** from the app: server, LLM, memory, session, completion, profile, skills, tools, auth, and users. No need to SSH or edit config files by hand.
-- **One app, all platforms** — Same codebase for desktop and mobile; install from the store or build from source.
+The **HomeClaw Companion** is a Flutter app for **Mac, Windows, iPhone, and Android**. It is the primary way to use HomeClaw — chat with your AI, manage your server, and install skills, all from one app.
 
 ---
 
-## Friends and presets
+## Why the Companion App
 
-Each user has a **friends** list in `config/user.yml`. The Companion app shows these friends so you can chat with different “assistants” (e.g. HomeClaw, or custom friends with their own identity). You can also add **system friends** that use a **preset**: a limited set of tools and context for a specific task (e.g. Reminder for scheduling, Note for notes, Finder for file search, Cursor for the Cursor Bridge). Presets are defined in `config/friend_presets.yml`.
+- **One app, all platforms** — Same Flutter codebase for desktop and mobile.
+- **Direct connection** — The app talks to your HomeClaw Core over HTTP. No bot tokens, no third-party platform needed.
+- **Full control** — Chat, manage config, install skills, switch models — without editing files or using SSH.
 
-**Adding or removing friends (including system friends):** Edit `config/user.yml` for the user. Under that user’s `friends:` list, add or remove an entry. To use a preset, set `preset: <name>` (e.g. `preset: reminder`). Example:
+---
 
-```yaml
-friends:
-  - name: HomeClaw
-  - name: Reminder
-    preset: reminder
-  - name: Note
-    preset: note
-  - name: Cursor
-    preset: cursor   # Cursor Bridge: open project, run agent, run command on dev machine (see docs/using-cursor-with-homeclaw.md)
+## What you can do
+
+### Chat
+
+Send text messages, attach images and files. The assistant replies using your configured LLM (cloud or local). Voice input and text-to-speech are supported.
+
+### Friends
+
+Each user has a **friends list** — different assistants with different personalities or capabilities. The default friend is "HomeClaw" (your main assistant). You can add **preset friends** for specific tasks:
+
+| Friend | Preset | What it does |
+|--------|--------|-------------|
+| HomeClaw | *(default)* | General assistant with full tools |
+| Reminder | `reminder` | Scheduling and reminders |
+| Note | `note` | Note-taking |
+| Cursor | `cursor` | Cursor Bridge — open projects, run agents on your dev machine |
+
+Friends are configured in `config/user.yml` under each user's `friends:` list. The Companion App shows them so you can switch between assistants.
+
+### Manage Core
+
+Edit **core.yml** and **user.yml** from the app — LLM settings, memory, tools, auth, users. No need to SSH or edit config files by hand.
+
+### Skills (ClawHub)
+
+Browse and install skills from **ClawHub** directly in the app. Skills are workflows the LLM can execute (e.g. summarize, research, translate).
+
+### Canvas
+
+An agent-driven UI viewer. The LLM can push live content (titles, text blocks, buttons) to a "second screen" in the app. Useful for status displays, choices, and simple forms. Requires the **homeclaw-browser** plugin.
+
+---
+
+## Get the Companion App
+
+### Build from source (recommended)
+
+The source is in `clients/HomeClawApp/` in the repo.
+
+**Prerequisites:** [Flutter SDK](https://flutter.dev/docs/get-started/install) installed.
+
+```bash
+cd clients/HomeClawApp
+flutter pub get
+flutter run          # run on connected device or desktop
 ```
 
-To remove a friend, delete that entry. The list is returned by Core’s **GET /api/me/friends** (Companion calls it when you open the friend list or tap “Refresh friends”).
+**Platform-specific:**
 
-**Why don’t my user.yml changes show in the app?** Core stores users (and their friends list) in **TinyDB** (`database/users.json`). The first time Core runs, it migrates from `config/user.yml` into TinyDB; after that, **TinyDB is the source of truth**. Editing `user.yml` by hand does not update TinyDB, so the Companion app still sees the old list. To apply your `user.yml` changes: **stop Core, delete `database/users.json`, then start Core again**. Core will re-migrate from `user.yml` and the new friends (e.g. Cursor, without Note) will appear. Then in the Companion app, tap “Refresh friends” or reopen the friend list. Alternatively, add or remove friends from the **Portal** (Manage → Users → edit user → friends) or via the Companion “Add friend” flow if available; those update TinyDB directly.
+| Platform | Command | Notes |
+|----------|---------|-------|
+| **macOS** | `flutter run -d macos` | See [macOS permissions](#macos-permissions) below |
+| **Windows** | `flutter run -d windows` | |
+| **iPhone** | `flutter run -d ios` | Requires Xcode and a signing profile |
+| **Android** | `flutter run -d android` | Requires Android Studio / SDK |
 
----
+See `clients/HomeClawApp/README.md` for full build and release instructions.
 
-## Where to get it
+### Install from TestFlight / App Store
 
-- **Source:** `clients/HomeClawApp/` in the repo.
-- **Build:** Use Flutter; see `clients/HomeClawApp/README.md` for build instructions.
-- **Connect:** Set the Core URL and optional API key in the app (e.g. in Settings or on first launch). The app talks to your Core over HTTP (e.g. `http://127.0.0.1:9000` or your server URL). To use the app on your **iPhone** when Core is at home, expose Core with [Tailscale](remote-access.md#1-tailscale-recommended-for-home--mobile) or [Cloudflare Tunnel](remote-access.md#2-cloudflare-tunnel-public-url); see [Companion on iPhone via Cloudflare Tunnel](companion-iphone-cloudflare-tunnel.md) for detailed steps.
-
-You can use the companion app **instead of** or **together with** WebChat, CLI, Telegram, and other channels—all talk to the same Core and memory.
-
-**macOS users:** For permissions (network, and future voice/notifications/screen), see [Companion app (macOS permissions)](companion-app-macos-permissions.md).
-
----
-
-## Canvas (agent-driven UI)
-
-**Target and feature:** The **Canvas** in the Companion app is an **agent-driven UI** viewer. It loads a URL you configure (usually the **homeclaw-browser** plugin’s canvas page). The plugin serves a page at **/canvas** where the **LLM can push live UI** (title, text blocks, buttons) via the `canvas_update` capability. So Canvas lets you see and interact with UI that the agent sends in real time (e.g. forms, choices, status), without leaving the app.
-
-### What you can use the Canvas for
-
-- **Status / info** — The agent can push a title and text blocks to the Canvas so you see a live status or summary (e.g. “Current task”, “Search results”, “Reminder”).
-- **Choices / actions** — The agent can add **buttons** (e.g. “OK”, “Cancel”, “Retry”). When you tap a button, the canvas page can send that back (today the Companion only displays the UI; button actions depend on the canvas page implementation).
-- **Simple forms** — The agent can show a small “form” as title + text + buttons (e.g. “Confirm?”, “Yes” / “No”).
-
-So in practice: you **chat with the agent**, and when you ask it to **“show something on the canvas”** or **“update the canvas”**, it calls the plugin to push that content; the **Canvas screen in the app** shows it in real time.
-
-### How to use it (step by step)
-
-1. **Prerequisites**
-   - **homeclaw-browser** plugin is running (e.g. Core auto-starts it, or you run `node server.js` in `system_plugins/homeclaw-browser`).
-   - Plugin is registered with Core (`node register.js` or Core auto-registers it).
-   - In the Companion app, **Canvas URL** is set (e.g. `http://<host>:3020/canvas`). You can set it in **Settings** or on the Login screen if you use the same host as Core.
-
-2. **Open the Canvas in the app**  
-   From the app (e.g. from the main menu or the place you open “Canvas”), open the Canvas screen. It will load the Canvas URL and connect to the plugin’s canvas session.
-
-3. **Ask the agent to update the canvas**  
-   In **Chat**, say something that clearly asks to show content on the canvas. The agent will then call `canvas_update` and the Canvas screen will update. Example phrases:
-   - *“Update the canvas.”*
-   - *“Show on the canvas: Hello world.”*
-   - *“Put a title and a button on the canvas.”*
-   - *“更新画布”* / *“画布显示 …”* (Chinese triggers are also configured.)
-
-4. **See the result**  
-   The Canvas screen in the app should show the title and blocks (text, buttons) the agent pushed. If nothing appears, check that the session name on the canvas page matches what the agent uses (usually your user/session; see plugin README for `session_id`).
-
-**How the canvas is shown (WebView) and desktop:** The Companion shows the canvas in an **embedded WebView** ([webview_flutter](https://pub.dev/packages/webview_flutter)). On **desktop** (macOS, Windows, Linux) the native platform view often has a **fixed frame** and may not resize with the window; use the **Open in browser** toolbar button on the Canvas screen to open the URL in your system browser for a resizable view.
-
-So: **Canvas = “second screen”** where the agent can push live UI (title, text, buttons) while you chat; you use it by opening Canvas in the app and then asking the agent in chat to “update the canvas” or “show … on the canvas”.
+If a TestFlight or store build is available, install it directly on your device.
 
 ---
 
-- **Core** = your HomeClaw Core (e.g. `http://host:9000`). Chat, config, and APIs talk to Core.
-- **Canvas URL** = the page that shows that agent-pushed UI. It is served by the **homeclaw-browser** plugin on a **different port** (default **3020**), e.g. `http://host:3020/canvas`.
+## Connect to Core
 
-So you have **two endpoints**: Core (e.g. 9000) and the plugin (e.g. 3020). Both must be reachable from the Companion app.
+The Companion App needs two things: your **Core URL** and (optionally) an **API key**.
 
-### Connecting when Core and Canvas use different ports
+### Same machine (localhost)
 
-If Core and the plugin run on the same machine but different ports, you have two main options.
+If the app and Core run on the same computer:
 
-**Option A — Same network (e.g. home Wi‑Fi or Tailscale)**  
-- Set **Core URL** to `http://<host>:9000` (or your Core URL).  
-- Set **Canvas URL** to `http://<host>:3020/canvas` (or your plugin URL + `/canvas`).  
-- No tunnel needed if the phone and the host are on the same network (or both on Tailscale). Use the host’s LAN or Tailscale IP for `<host>`.
+1. Start Core: `python -m main start`
+2. In the app, go to **Settings** → set **Core URL** to `http://127.0.0.1:9000`
+3. Start chatting.
 
-**Option B — Remote access (two tunnels)**  
-Expose both services with **two tunnels** (e.g. two Cloudflare quick tunnels or two Tailscale Serve entries):
+### Same network (home Wi-Fi or Tailscale)
 
-1. **Tunnel 1 → Core**  
-   - Example: `cloudflared tunnel --url http://127.0.0.1:9000`  
-   - Use the resulting URL as **Core URL** in the app.
+If Core runs on a different machine on your local network:
 
-2. **Tunnel 2 → Plugin (Canvas)**  
-   - Example: `cloudflared tunnel --url http://127.0.0.1:3020`  
-   - Use the resulting URL + `/canvas` as **Canvas URL**, e.g. `https://other-words.trycloudflare.com/canvas`.
+1. Find Core's IP (e.g. `192.168.1.100` or a Tailscale IP like `100.x.x.x`).
+2. In the app, set **Core URL** to `http://192.168.1.100:9000`.
 
-You then set **Core URL** and **Canvas URL** in the app to these two public URLs. No change to Core or the plugin is required.
+### Remote access (phone on cellular, laptop away from home)
 
-**Option C — Single host with a reverse proxy (one tunnel)**  
-Run a **reverse proxy** on the machine (e.g. nginx or Caddy) that listens on one port and routes:
+Expose Core with a tunnel so the app can reach it from anywhere:
 
-- `/` (and `/api`, `/inbound`, `/ws`, etc.) → Core (e.g. `http://127.0.0.1:9000`)
-- `/canvas`, `/nodes`, `/ws` for the plugin → plugin (e.g. `http://127.0.0.1:3020`)
+- **Scan to connect:** Core can show a QR code at `/pinggy` — scan it from the app's Settings to auto-fill the URL and API key.
+- **Cloudflare Tunnel:** Run `cloudflared tunnel --url http://127.0.0.1:9000`, then use the public URL in the app. [Step-by-step guide →](companion-iphone-cloudflare-tunnel.md)
+- **Tailscale:** Install Tailscale on both machines. Use the Tailscale IP as Core URL. [Details →](remote-access.md)
+- **Pinggy (built-in):** Set `pinggy.token` in `core.yml` and Core starts a tunnel automatically.
 
-Then expose **that** proxy with **one** tunnel. In the app:
+**Important:** When Core is reachable from the internet, enable auth in `config/core.yml`:
 
-- **Core URL** = proxy base URL (e.g. `https://my-tunnel.trycloudflare.com`).
-- **Canvas URL** = same base + path to the canvas page (e.g. `https://my-tunnel.trycloudflare.com/canvas`).
+```yaml
+auth_enabled: true
+auth_api_key: "your-long-random-key"
+```
 
-This way you only run one tunnel and one public URL; the proxy splits traffic by path to Core vs plugin.
+Enter the same API key in the app's Settings.
+
+---
+
+## Companion App vs Channels
+
+The Companion App and channels (Telegram, Discord, WebChat, email) are two ways to reach the same Core. You can use both at the same time — they share memory, config, and user identity.
+
+| | Companion App | Channels |
+|---|---|---|
+| **What it is** | A client app on your device | Server-side bridge processes |
+| **How it reaches Core** | Directly via HTTP/WebSocket | Channel process forwards messages |
+| **Extra features** | Manage Core, install skills, Canvas | Platform-specific (e.g. Telegram groups) |
+| **Setup** | Just set Core URL | Run a channel process + set bot tokens |
+
+**When to use the Companion App:** Personal use, managing config, when you want one app for everything.
+
+**When to use channels:** When you want to reach HomeClaw from Telegram, Discord, email, or a browser (WebChat). See [Channels](channels.md).
+
+---
+
+## Canvas setup
+
+Canvas lets the LLM push live UI to a "second screen" in the app.
+
+1. Ensure the **homeclaw-browser** plugin is running (Core can auto-start it).
+2. In the app's **Settings**, set **Canvas URL** to `http://<host>:3020/canvas` (the plugin's port, not Core's).
+3. Open Canvas from the app menu.
+4. In Chat, ask the agent to "update the canvas" or "show something on the canvas."
+
+If Core and the Canvas plugin run on different ports, both must be reachable from the app. For remote access, you may need two tunnels (one for Core, one for the plugin) or a reverse proxy. See [Remote access](remote-access.md) for details.
+
+---
+
+## macOS permissions
+
+For chat-only use, the app typically needs no special permissions — just outgoing network access (enabled by default in Flutter macOS builds).
+
+If you add features like voice input, notifications, or screen capture later, macOS will prompt for each capability. Tips:
+
+- Use a real Apple Development certificate (ad-hoc signing resets permissions each build).
+- Keep a consistent bundle ID (e.g. `ai.homeclaw.companion`).
+- Run the app from a fixed location.
+- If permission prompts stop appearing, reset with: `sudo tccutil reset Accessibility ai.homeclaw.companion`
+
+For Flutter sandbox builds, ensure `com.apple.security.network.client` is `true` in `macos/Runner/Release.entitlements`. See [full macOS permissions reference](companion-app-macos-permissions.md).
+
+---
+
+## Tips
+
+- **User must exist in Core:** Your user ID must be in `config/user.yml` (or added via Portal). The default companion user ID is `companion`.
+- **Friends not updating?** Core stores users in TinyDB (`database/users.json`) after first migration from `user.yml`. To apply `user.yml` changes: stop Core, delete `database/users.json`, restart Core. Or manage friends from the Portal.
+- **WebView on desktop:** Canvas uses an embedded WebView which may have a fixed frame on desktop. Use the "Open in browser" button for a resizable view.

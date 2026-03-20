@@ -136,6 +136,9 @@ async def run_async_inbound(core: Any, request_id: str, request: InboundRequest)
                         "text": entry.get("text", ""),
                         "format": entry.get("format", "plain"),
                         "ok": entry.get("ok", True),
+                        # Include routing metadata so clients can persist even when local pending map was lost.
+                        "user_id": (getattr(request, "user_id", None) or "").strip() or "companion",
+                        "friend_id": (getattr(request, "friend_id", None) or "").strip() or "HomeClaw",
                     }
                     if entry.get("error"):
                         push_payload["error"] = entry["error"]
