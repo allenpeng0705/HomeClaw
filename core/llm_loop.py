@@ -845,6 +845,9 @@ async def answer_from_memory(
                     if _preset == "cursor":
                         _plugin_id = "cursor-bridge"
                         _cap, _params = _cursor_bridge_capability_and_params((query or "").strip())
+                        _yo = getattr(request, "cursor_agent_yolo", None)
+                        if _yo is not None and _cap == "run_agent":
+                            _params = {**dict(_params), "yolo": bool(_yo)}
                     elif _preset == "claudecode":
                         _plugin_id = "claude-code-bridge"
                         _cap, _params = _claude_bridge_capability_and_params((query or "").strip())

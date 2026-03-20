@@ -148,6 +148,7 @@ def get_websocket_handler(core):
                         audios=data.get("audios"),
                         files=data.get("files"),
                         location=(data.get("location") or "").strip() or None,
+                        cursor_agent_yolo=data.get("cursor_agent_yolo"),
                     )
                 except Exception as e:
                     await websocket.send_json({"error": str(e), "text": ""})

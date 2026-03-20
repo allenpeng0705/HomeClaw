@@ -437,6 +437,8 @@ cursor_bridge_auto_start: true
 # cursor_bridge_cursor_api_key: "your-cursor-api-key"   # optional; use when agent says "Authentication required" (or set CURSOR_API_KEY in env before starting Core). Prefer env for secrets.
 # cursor_bridge_bridge_api_key: "set-a-random-secret"   # optional; protects the bridge HTTP API. When set, Core starts bridge with CURSOR_BRIDGE_API_KEY and sends X-HomeClaw-Bridge-Key on calls.
 cursor_bridge_forward_logs: true   # set true to see bridge/agent logs in Core's terminal (debug "Agent exited with code 1")
+# Optional global default: when true, Core sets CURSOR_AGENT_YOLO=1 for the bridge so run_agent adds --yolo unless a call passes yolo:false. When false/omitted (default), --yolo is off unless the tool call sets yolo:true (or force:true). Trusted machine only; use permissions.deny in %USERPROFILE%\.cursor\cli-config.json.
+# cursor_bridge_agent_yolo: true
 cursor_bridge_claude_settings_path: "C:\\Users\\PS\\.claude\\settings.json"   # optional; full path to Claude Code settings.json so the bridge loads auth/env from that file (fixes 401 when bridge runs under a different user)
 #cursor_bridge_trae_agent_path: "D:\\mygithub\\HomeClaw\\tools\\trae-agent\\.venv\\Scripts\\trae-cli.exe"   # optional; full path to trae-cli (from clone: uv sync then .venv\Scripts\trae-cli.exe, or after pip install -e .)
 #cursor_bridge_trae_agent_config: "D:\\mygithub\\HomeClaw\\tools\\trae-agent\\trae_config.yaml"   # optional; full path to trae_config.yaml (API key + model). See github.com/bytedance/trae-agent
@@ -500,7 +502,8 @@ tools:
   # Qwen / Qwen 3.5: configure in llm.yml under llama_cpp only (qwen_mode, qwen35_grammar_path, qwen35_use_grammar). Do not set qwen_model or qwen35_* here.
   # Optional when using Qwen: tool_temperature, disable_thinking_when_tools, qwen3_tool_format_instruction.
   # exec: allowed command names. Empty = platform default (Unix: ls, cat, pwd; Windows: dir, type, cd).
-  exec_allowlist: []
+  # For Flutter workflows, allow the binary and the common run invocation form.
+  exec_allowlist: [flutter, "flutter run -d"]
   # --- Interactive sessions (PTY/ConPTY): shells and dev-bridge agent consoles. See docs/interactive-sessions.md. ---
   # Max concurrent interactive sessions per user (default 3). Enforced by Core and bridge.
   # interactive_max_sessions_per_user: 3

@@ -44,6 +44,17 @@ capabilities:
         type: integer
         required: false
         description: Max seconds for the agent (default 600; allowed 30–1800). Plugin config.timeout_sec (HTTP) is 1800 so long tasks can complete.
+      - name: yolo
+        type: boolean
+        required: false
+        description: |
+          If true, pass Cursor CLI --yolo for this run only (auto-run shell unless blocked by permissions.deny in ~/.cursor/cli-config.json).
+          If false, never pass --yolo for this run (stricter; default when CURSOR_AGENT_YOLO is unset).
+          If omitted, use global bridge env CURSOR_AGENT_YOLO (e.g. cursor_bridge_agent_yolo in HomeClaw config). Prefer false unless the user asked for a trusted auto-run.
+      - name: force
+        type: boolean
+        required: false
+        description: Alias for yolo (same as Cursor CLI --force).
   - id: run_command
     name: Run command
     description: Run a shell command on the dev machine and return output (e.g. npm test, pip install). Use when the user says "run X in Cursor" or "execute X in Cursor".

@@ -52,6 +52,9 @@ Optional environment variables:
 - **`CURSOR_BRIDGE_CWD`** — Default working directory for `run_command` when `cwd` is not provided (e.g. your project root).
 - **`CURSOR_CLI_PATH`** — Full path to the `cursor` CLI (to open project/folder in Cursor IDE). If "open project" opens File Explorer instead of Cursor, set this (or `cursor_bridge_cursor_cli_path` in config when using auto-start). PowerShell: `(Get-Command cursor).Source`.
 - **`CURSOR_API_KEY`** — Cursor API key for `agent` auth. If you get "Authentication required", run `agent login` once or set this (or `cursor_bridge_cursor_api_key` in config when using auto-start).
+- **`CURSOR_AGENT_YOLO`** — If `1` / `true` / `yes`, the bridge **defaults** to adding **`--yolo`** on each **`run_agent`** call **unless** that call passes **`yolo: false`** (or **`force: false`**) in capability parameters. If this env is unset, **`--yolo` is off by default**; pass **`yolo: true`** (or **`force: true`**) on a specific `run_agent` to enable auto-run for that task only. `--yolo` is the same as **`--force`**: shell runs automatically **unless** blocked by **`permissions.deny`** in `%USERPROFILE%\.cursor\cli-config.json`. Use only on a **trusted** machine; keep a **strong deny** list. When Core auto-starts the bridge, **`cursor_bridge_agent_yolo: true`** in `config/skills_and_plugins.yml` sets this env (global default on); omit it to keep global default off and opt in per request.
+
+**Companion app:** POST `/inbound` may include **`cursor_agent_yolo`: `true` | `false`** (Cursor friend only). Core forwards it as **`yolo`** on **`run_agent`** for that message. The Flutter app exposes a flash (⚡) toggle in the Cursor chat app bar; preference is saved locally.
 
 Example with custom port and project dir:
 

@@ -102,6 +102,8 @@ class InboundRequest(BaseModel):
     push_ws_session_id: Optional[str] = None
     # Reply-accepts: list of content types the client can receive (e.g. ["text", "image", "file"]). Omitted or ["text"] = text-only; Core then sends only text (or text + image_links if core_public_url is set). See docs_design/ReplyAcceptsPattern.md.
     reply_accepts: Optional[List[str]] = None
+    # Cursor preset only: when set, merged into bridge run_agent as yolo (true = CLI --yolo for this message; false = never --yolo this message). Omitted = follow CURSOR_AGENT_YOLO / cursor_bridge_agent_yolo only.
+    cursor_agent_yolo: Optional[bool] = None
 
 class IntentType(Enum):
     TIME = "TIME"
@@ -1053,6 +1055,8 @@ class CoreMetadata:
     cursor_bridge_cursor_api_key: str = ""  # optional Cursor API key for agent auth; when set, passed as CURSOR_API_KEY to the bridge (so agent works when started by Core). Prefer env CURSOR_API_KEY for secrets.
     cursor_bridge_bridge_api_key: str = ""  # optional shared-secret to protect Cursor Bridge HTTP API. When set, Core passes CURSOR_BRIDGE_API_KEY to the bridge and also sends X-HomeClaw-Bridge-Key on HTTP calls.
     cursor_bridge_forward_logs: bool = False  # when True and cursor_bridge_auto_start, bridge stderr is not discarded so you see agent/bridge logs in Core's terminal (for debugging exit code 1 etc.)
+    # When True, bridge passes --yolo to Cursor CLI agent (run_agent): auto-approve shell unless permissions.deny in ~/.cursor/cli-config.json. Trusted machines only; use a strong deny list.
+    cursor_bridge_agent_yolo: bool = False
     cursor_bridge_claude_settings_path: str = ""  # optional full path to Claude Code settings.json; when set, passed as CLAUDE_SETTINGS_PATH to the bridge (so it loads auth from that file). Set in config/skills_and_plugins.yml or core.yml.
 
     # When false (default): do not register plugins/TraeBridge, do not pass TRAE_AGENT_* to the bridge, and Trae preset replies with a config hint. Set true to enable Trae Agent (experimental).
@@ -1173,7 +1177,7 @@ class CoreMetadata:
                         _ext_data = yaml.safe_load(_f)
                     if isinstance(_ext_data, dict):
                         for _k, _v in _ext_data.items():
-                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k in ('tools', 'external_skills_dir', 'clawhub_download_dir', 'intent_router', 'planner_executor', 'identity_capabilities_shortcut', 'cursor_bridge_auto_start', 'cursor_bridge_port', 'cursor_bridge_agent_path', 'cursor_bridge_cursor_cli_path', 'cursor_bridge_cursor_api_key', 'cursor_bridge_bridge_api_key', 'cursor_bridge_forward_logs', 'cursor_bridge_claude_settings_path', 'trae_agent_enabled', 'cursor_bridge_trae_agent_path', 'cursor_bridge_trae_agent_config', 'claude_code_path', 'claude_code_api_key')):
+                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k in ('tools', 'external_skills_dir', 'clawhub_download_dir', 'intent_router', 'planner_executor', 'identity_capabilities_shortcut', 'cursor_bridge_auto_start', 'cursor_bridge_port', 'cursor_bridge_agent_path', 'cursor_bridge_cursor_cli_path', 'cursor_bridge_cursor_api_key', 'cursor_bridge_bridge_api_key', 'cursor_bridge_forward_logs', 'cursor_bridge_agent_yolo', 'cursor_bridge_claude_settings_path', 'trae_agent_enabled', 'cursor_bridge_trae_agent_path', 'cursor_bridge_trae_agent_config', 'claude_code_path', 'claude_code_api_key')):
                                 continue
                             if _k == 'identity_capabilities_shortcut' and not isinstance(_v, dict):
                                 logging.warning("skills_and_plugins config %s: identity_capabilities_shortcut must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
@@ -1549,6 +1553,7 @@ class CoreMetadata:
             cursor_bridge_cursor_api_key=(str(data.get('cursor_bridge_cursor_api_key') or '').strip()),
             cursor_bridge_bridge_api_key=(str(data.get('cursor_bridge_bridge_api_key') or '').strip()),
             cursor_bridge_forward_logs=bool(data.get('cursor_bridge_forward_logs', False)),
+            cursor_bridge_agent_yolo=bool(data.get('cursor_bridge_agent_yolo', False)),
             cursor_bridge_claude_settings_path=(str(data.get('cursor_bridge_claude_settings_path') or '').strip()),
             trae_agent_enabled=bool(data.get('trae_agent_enabled', False)),
             cursor_bridge_trae_agent_path=(str(data.get('cursor_bridge_trae_agent_path') or '').strip()),

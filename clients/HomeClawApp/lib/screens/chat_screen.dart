@@ -116,9 +116,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final TextEditingController _interactiveInputController = TextEditingController();
   String _interactiveOutput = '';
 
+  /// Cursor friend only: when true, POST /inbound includes `cursor_agent_yolo` so Core passes `yolo` to the bridge for that `run_agent` (CLI --yolo).
+  static const String _keyCursorAgentYolo = 'chat_cursor_agent_yolo';
+  bool _cursorAgentYolo = false;
+
   bool get _isDevBridgeFriend {
     final fid = (widget.friendId ?? '').trim().toLowerCase();
     return fid == 'cursor' || fid == 'claudecode' || fid == 'trae';
+  }
+
+  Future<void> _loadCursorAgentYoloPref() async {
+    if ((widget.friendId ?? '').trim().toLowerCase() != 'cursor') return;
+    try {
+      final p = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() => _cursorAgentYolo = p.getBool(_keyCursorAgentYolo) ?? false);
+    } catch (_) {}
+  }
+
+  Future<void> _setCursorAgentYolo(bool value) async {
+    if (!mounted) return;
+    setState(() => _cursorAgentYolo = value);
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setBool(_keyCursorAgentYolo, value);
+    } catch (_) {}
   }
 
   Future<void> _refreshCursorActiveProject() async {
@@ -230,6 +252,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _loadVoiceInputLocale();
     _loadChatPartnerAvatar();
     _refreshCursorActiveProject();
+    _loadCursorAgentYoloPref();
     _scrollController.addListener(_onScrollForPagination);
     if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
       _loadUserInbox();
@@ -756,6 +779,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         images: imagePaths.isEmpty ? null : imagePaths,
         videos: videoPaths.isEmpty ? null : videoPaths,
         files: filePaths.isEmpty ? null : filePaths,
+        cursorAgentYolo: (widget.friendId ?? '').trim().toLowerCase() == 'cursor' ? _cursorAgentYolo : null,
         onProgress: widget.coreService.showProgressDuringLongTasks
             ? (String message) {
                 if (mounted) setState(() => _loadingMessage = message);
@@ -1743,6 +1767,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
+          if ((widget.friendId ?? '').trim().toLowerCase() == 'cursor')
+            IconButton(
+              icon: Icon(_cursorAgentYolo ? Icons.flash_on : Icons.flash_off_outlined),
+              tooltip: _cursorAgentYolo
+                  ? 'Auto-run Cursor agent (--yolo) ON for this chat'
+                  : 'Auto-run OFF (stricter CLI permissions for this chat)',
+              color: _cursorAgentYolo ? Theme.of(context).colorScheme.primary : null,
+              onPressed: () => _setCursorAgentYolo(!_cursorAgentYolo),
+            ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
             child: Center(

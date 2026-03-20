@@ -35,6 +35,51 @@ app = FastAPI(title="Cursor Bridge", description="HomeClaw → open project, run
 IS_WINDOWS = platform.system() == "Windows"
 IS_DARWIN = platform.system() == "Darwin"
 
+
+def _env_truthy(name: str) -> bool:
+    v = (os.environ.get(name) or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
+def _parse_yolo_override(params: Dict[str, Any]) -> Optional[bool]:
+    """Per-request override for Cursor agent --yolo. None = use CURSOR_AGENT_YOLO env only."""
+    for key in ("yolo", "agent_yolo", "force"):
+        if key not in params:
+            continue
+        v = params.get(key)
+        if v is None:
+            continue
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return v != 0
+        s = str(v).strip().lower()
+        if s in ("1", "true", "yes", "on"):
+            return True
+        if s in ("0", "false", "no", "off", ""):
+            return False
+        return bool(v)
+    return None
+
+
+def _cursor_agent_yolo_argv(use_yolo: Optional[bool] = None) -> List[str]:
+    """Build argv fragment for Cursor CLI --yolo (alias --force).
+
+    - use_yolo False: never pass --yolo (strict; respect allowlist / prompts in CLI).
+    - use_yolo True: always pass --yolo for this run (auto-run shell unless permissions.deny).
+    - use_yolo None: pass --yolo only if CURSOR_AGENT_YOLO env is set (global opt-in from Core or shell).
+
+    Use only on trusted machines; pair with a strong deny list in ~/.cursor/cli-config.json.
+    """
+    if use_yolo is False:
+        return []
+    if use_yolo is True:
+        return ["--yolo"]
+    if _env_truthy("CURSOR_AGENT_YOLO"):
+        return ["--yolo"]
+    return []
+
+
 # Optional shared-secret for remote/LAN exposure. If set, requests must include X-HomeClaw-Bridge-Key.
 BRIDGE_API_KEY = (os.environ.get("CURSOR_BRIDGE_API_KEY") or "").strip()
 
@@ -936,8 +981,16 @@ async def _run_claude_task(task: str, cwd: Optional[str] = None, timeout_sec: in
     except Exception as e:
         return False, f"Error: {e!s}"
 
-async def _run_agent_task(task: str, cwd: Optional[str] = None, timeout_sec: int = 120) -> tuple:
-    """Run Cursor CLI agent in non-interactive mode: agent -p \"task\". Returns (success, output_or_error). On Windows, .cmd/.ps1 are run via cmd or powershell."""
+async def _run_agent_task(
+    task: str,
+    cwd: Optional[str] = None,
+    timeout_sec: int = 120,
+    use_yolo: Optional[bool] = None,
+) -> tuple:
+    """Run Cursor CLI agent in non-interactive mode: agent -p \"task\". Returns (success, output_or_error). On Windows, .cmd/.ps1 are run via cmd or powershell.
+
+    use_yolo: None = follow CURSOR_AGENT_YOLO env; True/False = override for this invocation only.
+    """
     if not (task or str(task).strip()):
         return False, "Error: task is empty."
     work_dir = (cwd or "").strip()
@@ -947,14 +1000,16 @@ async def _run_agent_task(task: str, cwd: Optional[str] = None, timeout_sec: int
         work_dir = DEFAULT_CWD
     agent_cmd = _agent_executable()
     task_str = task.strip()
+    yolo_argv = _cursor_agent_yolo_argv(use_yolo)
     # --trust so agent runs non-interactively (avoids "Workspace Trust Required" prompt and exit 1)
+    # Optional --yolo when CURSOR_AGENT_YOLO=1: allow commands unless denied in cli-config (headless Companion).
     # --output-format json so the bridge can reliably extract the result text.
     if IS_WINDOWS and agent_cmd.lower().endswith(".cmd"):
-        run_argv = ["cmd", "/c", agent_cmd, "--trust", "-p", "--output-format", "json", task_str]
+        run_argv = ["cmd", "/c", agent_cmd, "--trust", *yolo_argv, "-p", "--output-format", "json", task_str]
     elif IS_WINDOWS and agent_cmd.lower().endswith(".ps1"):
-        run_argv = ["powershell", "-ExecutionPolicy", "Bypass", "-File", agent_cmd, "--trust", "-p", "--output-format", "json", task_str]
+        run_argv = ["powershell", "-ExecutionPolicy", "Bypass", "-File", agent_cmd, "--trust", *yolo_argv, "-p", "--output-format", "json", task_str]
     else:
-        run_argv = [agent_cmd, "--trust", "-p", "--output-format", "json", task_str]
+        run_argv = [agent_cmd, "--trust", *yolo_argv, "-p", "--output-format", "json", task_str]
     _log_argv = run_argv.copy()
     if len(_log_argv) > 2 and len(task_str) > 80:
         _log_argv[-1] = task_str[:80] + "..."
@@ -1247,7 +1302,10 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             elif backend == "trae":
                 success, text = await _run_trae_task(task, cwd=cwd, timeout_sec=timeout)
             else:
-                success, text = await _run_agent_task(task, cwd=cwd, timeout_sec=timeout)
+                yolo_override = _parse_yolo_override(params)
+                success, text = await _run_agent_task(
+                    task, cwd=cwd, timeout_sec=timeout, use_yolo=yolo_override
+                )
 
     elif cap_id == "run_agent_interactive":
         # Start Cursor, Claude, or Trae in a PTY on the bridge; return session_id + initial_output for Core/Companion to use.

@@ -536,6 +536,9 @@ class Core(CoreInterface):
                 env["TRAE_AGENT_CONFIG"] = trae_agent_config
                 _component_log("cursor_bridge", f"using TRAE_AGENT_CONFIG={trae_agent_config}")
         forward_logs = getattr(meta, "cursor_bridge_forward_logs", False)
+        if getattr(meta, "cursor_bridge_agent_yolo", False):
+            env["CURSOR_AGENT_YOLO"] = "1"
+            _component_log("cursor_bridge", "CURSOR_AGENT_YOLO=1 (agent --yolo for headless; use strong cli-config deny list)")
         try:
             proc = subprocess.Popen(
                 [sys.executable, "-m", "external_plugins.cursor_bridge.server"],
