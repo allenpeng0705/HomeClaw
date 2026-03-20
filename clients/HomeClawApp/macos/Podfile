@@ -1,4 +1,5 @@
 platform :osx, '12.3'
+inhibit_all_warnings!
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -44,9 +45,9 @@ post_install do |installer|
       if paths.is_a?(Array)
         config.build_settings['LIBRARY_SEARCH_PATHS'] = paths.reject { |p| p.to_s.include?('Metal.xctoolchain') || p.to_s.include?('cryptexd') }
       end
-      # Bump deployment target for pods that set it below supported minimum (10.13)
-      if config.build_settings['MACOSX_DEPLOYMENT_TARGET'].to_f < 10.13
-        config.build_settings['MACOSX_DEPLOYMENT_TARGET'] = '10.13'
+      # Keep pods aligned with the app target to avoid linker warnings about older deployment targets.
+      if config.build_settings['MACOSX_DEPLOYMENT_TARGET'].to_f < 12.3
+        config.build_settings['MACOSX_DEPLOYMENT_TARGET'] = '12.3'
       end
       # Silence deprecation warnings from geolocator_apple (CLLocationManager authorizationStatus etc.)
       if target.name.include?('geolocator_apple')
