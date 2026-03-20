@@ -385,7 +385,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _messageAudios.add(null);
         _messageVideos.add(null);
       }
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {});
+        _scrollToBottom();
+      }
     } catch (_) {
       // Store load failed; keep empty chat.
     }
@@ -437,6 +440,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _chatHistoryOffset = 0;
         _hasMoreMessages = list.length >= _pageSize;
       });
+      _scrollToBottom();
     } catch (_) {
       // Keep local history on failure (e.g. offline)
     }
@@ -495,7 +499,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (at != null && at > latestTs) latestTs = at;
       }
       widget.coreService.setUserInboxLastRead(widget.userId, widget.toUserId!, latestTs);
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {});
+        _scrollToBottom();
+      }
     } catch (_) {
       if (mounted) setState(() {});
     }
