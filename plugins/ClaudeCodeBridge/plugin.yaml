@@ -40,7 +40,7 @@ capabilities:
       - name: skip_permissions
         type: boolean
         required: false
-        description: If true, adds --dangerously-skip-permissions (full tool/shell auto-run for this task). If false, omits it (stricter). If omitted, bridge uses HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT (Core cursor_bridge_claude_skip_permissions_default).
+        description: If true, adds --dangerously-skip-permissions (full tool/shell auto-run for this task). If false or omitted, omit the flag (stricter headless).
   - id: run_command
     name: Run command
     description: Run a shell command in the active project and return output.

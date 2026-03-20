@@ -49,8 +49,7 @@ capabilities:
         required: false
         description: |
           If true, pass Cursor CLI --yolo for this run only (auto-run shell unless blocked by permissions.deny in ~/.cursor/cli-config.json).
-          If false, never pass --yolo for this run (stricter; default when CURSOR_AGENT_YOLO is unset).
-          If omitted, use global bridge env CURSOR_AGENT_YOLO (e.g. cursor_bridge_agent_yolo in HomeClaw config). Prefer false unless the user asked for a trusted auto-run.
+          If false or omitted, do not pass --yolo. Use true only when the user explicitly wants trusted auto-run for this task.
       - name: force
         type: boolean
         required: false

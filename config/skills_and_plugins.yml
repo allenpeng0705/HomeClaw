@@ -437,10 +437,6 @@ cursor_bridge_auto_start: true
 # cursor_bridge_cursor_api_key: "your-cursor-api-key"   # optional; use when agent says "Authentication required" (or set CURSOR_API_KEY in env before starting Core). Prefer env for secrets.
 # cursor_bridge_bridge_api_key: "set-a-random-secret"   # optional; protects the bridge HTTP API. When set, Core starts bridge with CURSOR_BRIDGE_API_KEY and sends X-HomeClaw-Bridge-Key on calls.
 cursor_bridge_forward_logs: true   # set true to see bridge/agent logs in Core's terminal (debug "Agent exited with code 1")
-# Optional global default: when true, Core sets CURSOR_AGENT_YOLO=1 for the bridge so run_agent adds --yolo unless a call passes yolo:false. When false/omitted (default), --yolo is off unless the tool call sets yolo:true (or force:true). Trusted machine only; use permissions.deny in %USERPROFILE%\.cursor\cli-config.json.
-# cursor_bridge_agent_yolo: true
-# When true, Core sets HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT=1 so headless Claude Code adds --dangerously-skip-permissions when a request omits skip_permissions. Default false (safer); use Companion flash for Claude chat, or set true here to restore old always-skip behavior.
-# cursor_bridge_claude_skip_permissions_default: true
 cursor_bridge_claude_settings_path: "C:\\Users\\PS\\.claude\\settings.json"   # optional; full path to Claude Code settings.json so the bridge loads auth/env from that file (fixes 401 when bridge runs under a different user)
 #cursor_bridge_trae_agent_path: "D:\\mygithub\\HomeClaw\\tools\\trae-agent\\.venv\\Scripts\\trae-cli.exe"   # optional; full path to trae-cli (from clone: uv sync then .venv\Scripts\trae-cli.exe, or after pip install -e .)
 #cursor_bridge_trae_agent_config: "D:\\mygithub\\HomeClaw\\tools\\trae-agent\\trae_config.yaml"   # optional; full path to trae_config.yaml (API key + model). See github.com/bytedance/trae-agent

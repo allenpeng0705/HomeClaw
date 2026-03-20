@@ -36,11 +36,6 @@ IS_WINDOWS = platform.system() == "Windows"
 IS_DARWIN = platform.system() == "Darwin"
 
 
-def _env_truthy(name: str) -> bool:
-    v = (os.environ.get(name) or "").strip().lower()
-    return v in ("1", "true", "yes", "on")
-
-
 def _parse_optional_bool_param(params: Dict[str, Any], keys: Tuple[str, ...]) -> Optional[bool]:
     """First matching key in params → bool; absent keys → None."""
     for key in keys:
@@ -63,38 +58,25 @@ def _parse_optional_bool_param(params: Dict[str, Any], keys: Tuple[str, ...]) ->
 
 
 def _parse_yolo_override(params: Dict[str, Any]) -> Optional[bool]:
-    """Per-request override for Cursor agent --yolo. None = use CURSOR_AGENT_YOLO env only."""
+    """Per-request Cursor --yolo. None = do not pass --yolo."""
     return _parse_optional_bool_param(params, ("yolo", "agent_yolo", "force"))
 
 
 def _parse_claude_skip_permissions_override(params: Dict[str, Any]) -> Optional[bool]:
-    """Per-request: add --dangerously-skip-permissions when True. None = HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT env."""
+    """Per-request --dangerously-skip-permissions. None = omit flag (strict headless)."""
     return _parse_optional_bool_param(
         params, ("skip_permissions", "dangerously_skip_permissions", "claude_skip_permissions")
     )
 
 
 def _effective_claude_skip_permissions(explicit: Optional[bool]) -> bool:
-    """Whether to pass --dangerously-skip-permissions to claude -p."""
-    if explicit is not None:
-        return bool(explicit)
-    return _env_truthy("HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT")
+    """Whether to pass --dangerously-skip-permissions to claude -p (only when explicit True)."""
+    return bool(explicit) if explicit is not None else False
 
 
 def _cursor_agent_yolo_argv(use_yolo: Optional[bool] = None) -> List[str]:
-    """Build argv fragment for Cursor CLI --yolo (alias --force).
-
-    - use_yolo False: never pass --yolo (strict; respect allowlist / prompts in CLI).
-    - use_yolo True: always pass --yolo for this run (auto-run shell unless permissions.deny).
-    - use_yolo None: pass --yolo only if CURSOR_AGENT_YOLO env is set (global opt-in from Core or shell).
-
-    Use only on trusted machines; pair with a strong deny list in ~/.cursor/cli-config.json.
-    """
-    if use_yolo is False:
-        return []
+    """Build argv fragment for Cursor CLI --yolo (alias --force). Only True adds the flag."""
     if use_yolo is True:
-        return ["--yolo"]
-    if _env_truthy("CURSOR_AGENT_YOLO"):
         return ["--yolo"]
     return []
 
@@ -125,9 +107,7 @@ def _load_state() -> None:
             obj = json.load(f)
         if not isinstance(obj, dict):
             return
-        # Backward compat: old state used {"active_cwd": "..."} (Cursor only).
-        legacy = (obj.get("active_cwd") or "").strip()
-        cursor_cwd = (obj.get("cursor_active_cwd") or legacy or "").strip()
+        cursor_cwd = (obj.get("cursor_active_cwd") or "").strip()
         claude_cwd = (obj.get("claude_active_cwd") or "").strip()
         trae_cwd = (obj.get("trae_active_cwd") or "").strip()
         with _ACTIVE_CWD_LOCK:
@@ -985,9 +965,7 @@ async def _run_claude_task(
             if not do_skip:
                 msg += (
                     " Headless run did not use --dangerously-skip-permissions. If Claude failed waiting for approval, "
-                    "turn ON the Companion flash for Claude chat, pass skip_permissions:true on the bridge call, "
-                    "set HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT=1 on the bridge, or set "
-                    "cursor_bridge_claude_skip_permissions_default: true in skills_and_plugins.yml."
+                    "turn ON the Companion flash for Claude chat or pass skip_permissions:true on the bridge run_agent call."
                 )
             return False, msg
         if out:
@@ -1022,7 +1000,7 @@ async def _run_agent_task(
 ) -> tuple:
     """Run Cursor CLI agent in non-interactive mode: agent -p \"task\". Returns (success, output_or_error). On Windows, .cmd/.ps1 are run via cmd or powershell.
 
-    use_yolo: None = follow CURSOR_AGENT_YOLO env; True/False = override for this invocation only.
+    use_yolo: True adds --yolo; None/False does not.
     """
     if not (task or str(task).strip()):
         return False, "Error: task is empty."
@@ -1035,7 +1013,7 @@ async def _run_agent_task(
     task_str = task.strip()
     yolo_argv = _cursor_agent_yolo_argv(use_yolo)
     # --trust so agent runs non-interactively (avoids "Workspace Trust Required" prompt and exit 1)
-    # Optional --yolo when CURSOR_AGENT_YOLO=1: allow commands unless denied in cli-config (headless Companion).
+    # Optional --yolo when use_yolo True: allow commands unless denied in cli-config.
     # --output-format json so the bridge can reliably extract the result text.
     if IS_WINDOWS and agent_cmd.lower().endswith(".cmd"):
         run_argv = ["cmd", "/c", agent_cmd, "--trust", *yolo_argv, "-p", "--output-format", "json", task_str]

@@ -1116,8 +1116,8 @@ class CoreService {
   /// [location]: optional "lat,lng" or address string; Core stores it as latest location (per user) and uses it in system context.
   /// [useStream]: when true and [onProgress] is set, sends stream: true and parses SSE; progress events are reported via [onProgress], final result returned as usual. When false or [onProgress] null, uses single-JSON response (no streaming).
   /// For remote Core: uses async: true so the initial POST returns 202 immediately (no long-held connection for proxies like Cloudflare); then polls GET /inbound/result until done. Use [onProgress] to show "Processing…" while polling.
-  /// [cursorAgentYolo]: Cursor friend only — when true/false, sends `cursor_agent_yolo` on POST /inbound so Core passes `yolo` to the bridge for that `run_agent` only (CLI `--yolo` / auto-run unless `permissions.deny`). Omit (null) to use server default (env / config).
-  /// [claudeSkipPermissions]: Claude Code friend only — when true/false, sends `claude_skip_permissions` so the bridge adds or omits `--dangerously-skip-permissions` for that `run_agent`.
+  /// [cursorAgentYolo]: Cursor friend only — sends `cursor_agent_yolo` on POST /inbound so Core passes `yolo` to the bridge for that `run_agent` (true = CLI `--yolo`).
+  /// [claudeSkipPermissions]: Claude Code friend only — sends `claude_skip_permissions` so the bridge adds `--dangerously-skip-permissions` when true for that `run_agent`.
   /// Throws on network or API error.
   Future<Map<String, dynamic>> sendMessage(
     String text, {

@@ -52,19 +52,15 @@ Optional environment variables:
 - **`CURSOR_BRIDGE_CWD`** — Default working directory for `run_command` when `cwd` is not provided (e.g. your project root).
 - **`CURSOR_CLI_PATH`** — Full path to the `cursor` CLI (to open project/folder in Cursor IDE). If "open project" opens File Explorer instead of Cursor, set this (or `cursor_bridge_cursor_cli_path` in config when using auto-start). PowerShell: `(Get-Command cursor).Source`.
 - **`CURSOR_API_KEY`** — Cursor API key for `agent` auth. If you get "Authentication required", run `agent login` once or set this (or `cursor_bridge_cursor_api_key` in config when using auto-start).
-- **`CURSOR_AGENT_YOLO`** — If `1` / `true` / `yes`, the bridge **defaults** to adding **`--yolo`** on each **`run_agent`** call **unless** that call passes **`yolo: false`** (or **`force: false`**) in capability parameters. If this env is unset, **`--yolo` is off by default**; pass **`yolo: true`** (or **`force: true`**) on a specific `run_agent` to enable auto-run for that task only. `--yolo` is the same as **`--force`**: shell runs automatically **unless** blocked by **`permissions.deny`** in `%USERPROFILE%\.cursor\cli-config.json`. Use only on a **trusted** machine; keep a **strong deny** list. When Core auto-starts the bridge, **`cursor_bridge_agent_yolo: true`** in `config/skills_and_plugins.yml` sets this env (global default on); omit it to keep global default off and opt in per request.
+**Cursor `run_agent` and `--yolo`:** The bridge adds **`--yolo`** (same as **`--force`**) only when the **`run_agent`** request includes **`yolo: true`** or **`force: true`** (e.g. from Companion: POST `/inbound` field **`cursor_agent_yolo`**, or from **`route_to_plugin`** parameters). Otherwise **`--yolo` is not passed**. Shell auto-runs **unless** blocked by **`permissions.deny`** in `%USERPROFILE%\.cursor\cli-config.json`. Use only on a **trusted** machine.
 
-**Companion app:** POST `/inbound` may include **`cursor_agent_yolo`: `true` | `false`** (Cursor friend only). Core forwards it as **`yolo`** on **`run_agent`** for that message. The Flutter app exposes a flash (⚡) toggle in the Cursor chat app bar; preference is saved locally.
+**Companion app:** POST `/inbound` may include **`cursor_agent_yolo`: `true` | `false`** (Cursor friend only). Core forwards it as **`yolo`** on **`run_agent`** for that message. The Flutter app exposes a flash toggle in the Cursor chat app bar; preference is saved locally.
 
 ### Claude Code (`claude-code-bridge` / preset `claudecode`)
 
-Headless **`run_agent`** uses **`claude -p`**. The bridge adds **`--dangerously-skip-permissions`** only when **`skip_permissions`** is resolved **true** for that call:
+Headless **`run_agent`** uses **`claude -p`**. The bridge adds **`--dangerously-skip-permissions`** only when the request explicitly sets **`skip_permissions`**: **`true`** (aliases in params: **`claude_skip_permissions`**, **`dangerously_skip_permissions`**). If **`false`** or omitted, the flag is **not** passed (stricter).
 
-- **Per request:** capability parameters **`skip_permissions`**, **`claude_skip_permissions`**, or **`dangerously_skip_permissions`** (`true` / `false`).
-- **Companion:** POST `/inbound` field **`claude_skip_permissions`**: `true` | `false` — Core merges **`skip_permissions`** for that message. The Flutter app uses the same **flash** toggle in the **Claude Code** chat app bar (off = safer default).
-- **When omitted:** bridge uses env **`HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT`** (`1` / `true` / `yes` / `on` = skip). Core sets this when **`cursor_bridge_claude_skip_permissions_default: true`** in `skills_and_plugins.yml`. **Default is off** (safer); set that YAML key to `true` if you want the previous “always skip permissions” behavior without using the Companion toggle.
-
-Example without Core: `set HOMECLAW_CLAUDE_SKIP_PERMISSIONS_DEFAULT=1` before starting the bridge.
+- **Companion:** POST `/inbound` **`claude_skip_permissions`**: `true` | `false` — Core merges **`skip_permissions`** for that message. The Flutter app uses a **flash** toggle in the **Claude Code** chat app bar.
 
 Example with custom port and project dir:
 
