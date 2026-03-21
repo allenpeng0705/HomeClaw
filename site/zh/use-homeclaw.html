@@ -87,6 +87,70 @@
         <h2>配置模型</h2>
         <p>HomeClaw 支持<strong>本地模型</strong>（在您的机器上运行）和<strong>云端模型</strong>（通过 API）。您可以通过 <code>config/llm.yml</code> 文件或使用 Portal 来配置它们。</p>
 
+        <h3>推荐模型</h3>
+        <p>以下是 HomeClaw 推荐的 GGUF 模型（可在 <code>config/llm.yml</code> 中自定义）。<strong>只需主聊天模型即可</strong> — 其他为可选增强功能：</p>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(255,152,0,.15); border-left:4px solid #ff9800; border-radius:4px;">
+          <strong>必需：</strong>主聊天模型 — 这是您开始使用所需的唯一模型。
+        </div>
+
+        <div class="quickstart-requirements" style="margin-bottom:1.5rem;">
+          <div class="requirement-item">
+            <div class="requirement-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </div>
+            <div class="requirement-content">
+              <h4>主聊天模型</h4>
+              <p><code>Qwen3VL-4B-Instruct-Q4_K_M.gguf</code> + <code>mmproj-Qwen3VL-4B-Instruct-F16.gguf</code></p>
+              <p><small>备选：Qwen3VL-2B-Instruct（更轻量）、Qwen3-VL-8B-Instruct（更强大）、gpt-oss-20b-Q4_K_M（纯文本）</small></p>
+            </div>
+          </div>
+          <div class="requirement-item">
+            <div class="requirement-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+              </svg>
+            </div>
+            <div class="requirement-content">
+              <h4>嵌入模型</h4>
+              <p><code>Qwen3-Embedding-0.6B-Q8_0.gguf</code></p>
+              <p><small>用于记忆、RAG 和语义搜索</small></p>
+            </div>
+          </div>
+          <div class="requirement-item">
+            <div class="requirement-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+              </svg>
+            </div>
+            <div class="requirement-content">
+              <h4>视觉模型</h4>
+              <p><code>Qwen3VL-2B-Instruct-Q4_K_M.gguf</code> + <code>mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf</code></p>
+              <p><small>用于图像理解（当主模型为纯文本时）</small></p>
+            </div>
+          </div>
+          <div class="requirement-item">
+            <div class="requirement-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                <polyline points="2 17 12 22 22 17"></polyline>
+                <polyline points="2 12 12 17 22 12"></polyline>
+              </svg>
+            </div>
+            <div class="requirement-content">
+              <h4>工具选择模型（可选）</h4>
+              <p><code>Qwen3-4B-Function-Calling-Pro.gguf</code></p>
+              <p><small>专用于函数调用，提高工具准确性</small></p>
+            </div>
+          </div>
+        </div>
+
         <h3>本地模型</h3>
         <p>本地模型完全在您的机器上运行，保持数据私密。HomeClaw 使用 <strong>llama.cpp</strong> 进行本地模型推理。</p>
 

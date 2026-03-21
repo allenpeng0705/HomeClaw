@@ -111,10 +111,14 @@
       <div class="doc-section-img-wrap" aria-hidden="true"></div>
       <div class="doc-section-body">
         <h2>Suggested Models</h2>
-        <p>HomeClaw works with local GGUF models. Here are the recommended models (you can customize in <code>config/llm.yml</code>):</p>
+        <p>HomeClaw works with local GGUF models. <strong>Only the main chat model is required to run HomeClaw.</strong> Other models are optional and enhance specific features.</p>
 
-        <h3>Main Chat Model (Local)</h3>
-        <p>The main model handles conversations and tool calls. Recommended:</p>
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(255,152,0,.15); border-left:4px solid #ff9800; border-radius:4px;">
+          <strong>Required:</strong> Main Chat Model — This is the only model you need to get started. All other models below are optional enhancements.
+        </div>
+
+        <h3>Main Chat Model (Required)</h3>
+        <p>The main model handles conversations and tool calls. Choose one:</p>
         <div class="doc-keys">
           <p class="doc-keys-title">Main Model (with vision support)</p>
           <pre class="quickstart-code"><code>Qwen3VL-4B-Instruct-Q4_K_M.gguf
@@ -127,15 +131,15 @@ mmproj-Qwen3VL-4B-Instruct-F16.gguf</code></pre>
           <li><code>gpt-oss-20b-Q4_K_M.gguf</code> — Text-only, larger model</li>
         </ul>
 
-        <h3>Embedding Model</h3>
-        <p>Used for memory, RAG, and semantic search:</p>
+        <h3>Embedding Model (Optional)</h3>
+        <p>Used for memory, RAG, and semantic search. Without this, memory features will be limited:</p>
         <div class="doc-keys">
           <p class="doc-keys-title">Embedding Model</p>
           <pre class="quickstart-code"><code>Qwen3-Embedding-0.6B-Q8_0.gguf</code></pre>
         </div>
 
-        <h3>Vision Model</h3>
-        <p>For image understanding (when main model is text-only). The Qwen3VL models above have built-in vision support:</p>
+        <h3>Vision Model (Optional)</h3>
+        <p>For image understanding. The Qwen3VL models above have built-in vision support, so you only need a separate vision model if using a text-only main model:</p>
         <div class="doc-keys">
           <p class="doc-keys-title">Vision Model (standalone)</p>
           <pre class="quickstart-code"><code>Qwen3VL-2B-Instruct-Q4_K_M.gguf

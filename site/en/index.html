@@ -8,6 +8,11 @@
   <title>HomeClaw — AI assistant that runs on your machine</title>
   <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
   <link rel="stylesheet" href="../assets/style.css">
+  <script>
+    if ('scrollRestoration' in history) {
+      history.scrollRestoration = 'manual';
+    }
+  </script>
 </head>
 <body>
   <header class="site-nav-wrap">
@@ -40,11 +45,11 @@
   <main>
     <section class="hero container">
       <div class="hero-content">
-        <div class="hero-logo-wrap">
-          <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="hero-logo" width="80" height="80">
-        </div>
         <div class="hero-text">
-          <h1 class="hero-title">HomeClaw</h1>
+          <div class="hero-title-row">
+            <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="hero-logo" width="64" height="64">
+            <h1 class="hero-title">HomeClaw</h1>
+          </div>
           <p class="hero-tagline">AI assistant that runs on your machine. Your data, your control.</p>
           <div class="hero-cta">
             <a href="https://github.com/allenpeng0705/HomeClaw" class="btn btn-primary" target="_blank" rel="noopener">
@@ -402,59 +407,6 @@
           });
         }
       });
-    });
-    
-    // Scroll animations
-    function handleScrollAnimations() {
-      const elements = document.querySelectorAll('.animate-on-scroll');
-      
-      elements.forEach(element => {
-        const elementTop = element.getBoundingClientRect().top;
-        const windowHeight = window.innerHeight;
-        
-        if (elementTop < windowHeight * 0.85) {
-          element.classList.add('visible');
-        }
-      });
-    }
-    
-    // Initial check
-    handleScrollAnimations();
-    
-    // Add scroll event listener
-    window.addEventListener('scroll', handleScrollAnimations);
-    
-    // Add animation classes to elements
-    document.addEventListener('DOMContentLoaded', function() {
-      // Hero section elements
-      const heroElements = document.querySelectorAll('.hero-text, .hero-image');
-      heroElements.forEach((el, index) => {
-        el.classList.add('animate-on-scroll', `delay-${index * 100}`);
-      });
-      
-      // Feature sections
-      const featureSections = document.querySelectorAll('.feature-section');
-      featureSections.forEach((section, index) => {
-        section.classList.add('animate-on-scroll', `delay-${index * 100}`);
-      });
-      
-      // Feature cards
-      const featureCards = document.querySelectorAll('.feature-card');
-      featureCards.forEach((card, index) => {
-        card.classList.add('animate-on-scroll', `delay-${index * 100}`);
-      });
-      
-      // Quickstart section
-      const quickstartSection = document.querySelector('.quickstart-section');
-      if (quickstartSection) {
-        quickstartSection.classList.add('animate-on-scroll');
-      }
-      
-      // Contact section
-      const contactSection = document.querySelector('#contact');
-      if (contactSection) {
-        contactSection.classList.add('animate-on-scroll');
-      }
     });
   </script>
 </body>

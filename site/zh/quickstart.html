@@ -110,10 +110,14 @@
       <div class="doc-section-img-wrap" aria-hidden="true"></div>
       <div class="doc-section-body">
         <h2>推荐模型</h2>
-        <p>HomeClaw 使用本地 GGUF 模型。以下是推荐的模型（可在 <code>config/llm.yml</code> 中自定义）：</p>
+        <p>HomeClaw 使用本地 GGUF 模型。<strong>只需主聊天模型即可运行 HomeClaw。</strong>其他模型为可选，用于增强特定功能。</p>
 
-        <h3>主聊天模型（本地）</h3>
-        <p>主模型负责对话和工具调用。推荐：</p>
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(255,152,0,.15); border-left:4px solid #ff9800; border-radius:4px;">
+          <strong>必需：</strong>主聊天模型 — 这是您开始使用所需的唯一模型。以下其他模型均为可选增强功能。
+        </div>
+
+        <h3>主聊天模型（必需）</h3>
+        <p>主模型负责对话和工具调用。选择其中一个：</p>
         <div class="doc-keys">
           <p class="doc-keys-title">主模型（支持视觉）</p>
           <pre class="quickstart-code"><code>Qwen3VL-4B-Instruct-Q4_K_M.gguf
@@ -126,15 +130,15 @@ mmproj-Qwen3VL-4B-Instruct-F16.gguf</code></pre>
           <li><code>gpt-oss-20b-Q4_K_M.gguf</code> — 纯文本模型，较大</li>
         </ul>
 
-        <h3>嵌入模型</h3>
-        <p>用于记忆、RAG 和语义搜索：</p>
+        <h3>嵌入模型（可选）</h3>
+        <p>用于记忆、RAG 和语义搜索。没有此模型，记忆功能将受限：</p>
         <div class="doc-keys">
           <p class="doc-keys-title">嵌入模型</p>
           <pre class="quickstart-code"><code>Qwen3-Embedding-0.6B-Q8_0.gguf</code></pre>
         </div>
 
-        <h3>视觉模型</h3>
-        <p>用于图像理解（当主模型为纯文本时）。上面的 Qwen3VL 模型已内置视觉支持：</p>
+        <h3>视觉模型（可选）</h3>
+        <p>用于图像理解。上面的 Qwen3VL 模型已内置视觉支持，只有在使用纯文本主模型时才需要单独的视觉模型：</p>
         <div class="doc-keys">
           <p class="doc-keys-title">视觉模型（独立）</p>
           <pre class="quickstart-code"><code>Qwen3VL-2B-Instruct-Q4_K_M.gguf
