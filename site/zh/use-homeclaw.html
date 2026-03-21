@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="学习如何使用 HomeClaw AI 助手。运行 Core，通过伴侣应用或渠道聊天。">
+  <title>如何使用 HomeClaw — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="主导航">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">首页</a>
+        <a href="install.html">安装</a>
+        <a href="use-homeclaw.html" class="active">如何使用</a>
+        <a href="companion-app.html">伴侣应用</a>
+        <a href="portal.html">门户</a>
+        <a href="docs.html">文档</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch"><a href="../en/use-homeclaw.html">EN</a> | 中文</span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>如何使用 HomeClaw</h1>
+      <p class="lead">通过三个简单步骤开始使用 HomeClaw：运行 Core，通过伴侣应用或渠道连接，然后开始聊天。</p>
+      <p>HomeClaw 由处理所有 AI 请求的 <strong>Core</strong> 和多种交互方式组成。所有连接使用相同的 Core、内存和配置 — 运行 Core 一次，随处使用。</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="本页内容">
+      <p class="doc-toc-title">本页内容</p>
+      <ul>
+        <li><a href="#overview">概述</a></li>
+        <li><a href="#step1">步骤 1：运行 Core</a></li>
+        <li><a href="#models">配置模型</a></li>
+        <li><a href="#step2">步骤 2：通过伴侣应用连接</a></li>
+        <li><a href="#step3">步骤 3：通过渠道连接</a></li>
+        <li><a href="#features">主要功能</a></li>
+        <li><a href="#tips">最佳体验提示</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="overview">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>概述</h2>
+        <p>HomeClaw 有三个主要组件：</p>
+        <ul>
+          <li><strong>Core</strong> — 处理请求、管理内存和执行技能的 AI 引擎</li>
+          <li><strong>伴侣应用</strong> — 与 HomeClaw 聊天的专用桌面/移动应用</li>
+          <li><strong>渠道</strong> — 与 HomeClaw 交互的各种平台（WebChat、Telegram 等）</li>
+        </ul>
+        <p>所有这些组件共享相同的 Core，意味着您的对话、记忆和设置在所有界面之间同步。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="step1">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>步骤 1：运行 Core</h2>
+        <p>启动 HomeClaw Core 以开始处理请求：</p>
+
+        <div class="doc-keys">
+          <p class="doc-keys-title">启动 Core</p>
+          <pre class="quickstart-code"><code>python -m main start</code></pre>
+        </div>
+
+        <p>Core 将启动并监听连接。您应该看到输出指示服务器正在运行。</p>
+        <p><em>注意：在使用 HomeClaw 时保持此终端窗口打开。Core 需要运行才能处理请求。</em></p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="models">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>配置模型</h2>
+        <p>HomeClaw 支持<strong>本地模型</strong>（在您的机器上运行）和<strong>云端模型</strong>（通过 API）。您可以通过 <code>config/llm.yml</code> 文件或使用 Portal 来配置它们。</p>
+
+        <h3>本地模型</h3>
+        <p>本地模型完全在您的机器上运行，保持数据私密。HomeClaw 使用 <strong>llama.cpp</strong> 进行本地模型推理。</p>
+
+        <h4>本地模型存放位置</h4>
+        <p>将 GGUF 模型文件放在 <code>models/</code> 目录中。示例结构：</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">模型目录结构</p>
+          <pre class="quickstart-code"><code>models/
+├── Qwen3VL-4B-Instruct-Q4_K_M.gguf
+├── mmproj-Qwen3VL-4B-Instruct-F16.gguf
+├── gpt-oss-20b-Q4_K_M.gguf
+└── ...</code></pre>
+        </div>
+
+        <h4>在 llm.yml 中配置本地模型</h4>
+        <p>编辑 <code>config/llm.yml</code> 以添加您的本地模型。以下是实际配置示例：</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">本地模型配置示例</p>
+          <pre class="quickstart-code"><code>local_models:
+  - id: main_vl_model_4B
+    alias: main_vl_model_4B
+    path: Qwen3VL-4B-Instruct-Q4_K_M.gguf
+    mmproj: mmproj-Qwen3VL-4B-Instruct-F16.gguf
+    host: 127.0.0.1
+    port: 5026
+    capabilities: [Chat]
+    supported_media: [image]
+
+  - id: gpt-oss-20b-Q4_K_M
+    alias: gpt-oss-20b-Q4_K_M
+    path: gpt-oss-20b-Q4_K_M.gguf
+    host: 127.0.0.1
+    port: 5050
+    capabilities: [Chat]</code></pre>
+        </div>
+
+        <h4>下载模型</h4>
+        <p>您可以从以下位置下载 GGUF 格式的模型：</p>
+        <ul>
+          <li><a href="https://huggingface.co/models?sort=trending&search=gguf" target="_blank" rel="noopener">Hugging Face</a> — 搜索 "gguf" 模型</li>
+          <li><a href="https://ollama.com/library" target="_blank" rel="noopener">Ollama 库</a> — 将 Ollama 模型转换为 GGUF</li>
+        </ul>
+
+        <h3>云端模型</h3>
+        <p>云端模型为复杂任务提供更高的性能。HomeClaw 支持 OpenAI、DeepSeek、Anthropic、Google Gemini 和其他提供商。</p>
+
+        <h4>在 llm.yml 中配置云端模型</h4>
+        <p>以下是实际配置示例：</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">云端模型配置示例</p>
+          <pre class="quickstart-code"><code>cloud_models:
+  - id: DeepSeek-Chat
+    alias: DeepSeek Chat
+    path: deepseek/deepseek-chat
+    host: 127.0.0.1
+    port: 14005
+    api_key_name: DEEPSEEK_API_KEY
+    api_key: sk-your-api-key-here
+    capabilities: [Chat]
+
+  # OpenAI 示例（取消注释以使用）
+  # - id: OpenAI-GPT4o
+  #   alias: OpenAI GPT-4o
+  #   path: openai/gpt-4o
+  #   host: 127.0.0.1
+  #   port: 4001
+  #   api_key_name: OPENAI_API_KEY
+  #   supported_media: [image]
+  #   capabilities: [Functioncall, Chat]</code></pre>
+        </div>
+
+        <h4>设置 API 密钥</h4>
+        <p>将您的 API 密钥设置为环境变量（或直接放在 <code>api_key</code> 字段中）：</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">设置 API 密钥为环境变量</p>
+          <pre class="quickstart-code"><code># Mac/Linux
+export DEEPSEEK_API_KEY="your-key-here"
+export OPENAI_API_KEY="your-key-here"
+
+# Windows PowerShell
+$env:DEEPSEEK_API_KEY="your-key-here"
+$env:OPENAI_API_KEY="your-key-here"</code></pre>
+        </div>
+
+        <h3>通过 Portal 配置</h3>
+        <p>您还可以通过 Portal Web 界面配置模型：</p>
+        <ol>
+          <li>启动 Portal：<code>python -m main portal</code></li>
+          <li>在浏览器中打开 <code>http://127.0.0.1:18472</code></li>
+          <li>导航到 <strong>设置 → 模型</strong></li>
+          <li>添加或编辑本地和云端模型配置</li>
+          <li>点击 <strong>保存</strong> 应用更改</li>
+        </ol>
+
+        <h3>混合模式：两全其美</h3>
+        <p>启用混合模式以根据任务复杂度自动在本地和云端模型之间路由请求：</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">llm.yml 中的混合模式配置</p>
+          <pre class="quickstart-code"><code>main_llm_mode: mix
+main_llm_local: local_models/main_vl_model_4B
+main_llm_cloud: cloud_models/DeepSeek-Chat</code></pre>
+        </div>
+        <p>启用混合模式后：</p>
+        <ul>
+          <li><strong>简单查询</strong>使用本地模型（免费、私密）</li>
+          <li><strong>复杂查询</strong>使用云端模型（强大、准确）</li>
+          <li><strong>文件操作</strong>（读取、列表）自动路由到本地</li>
+          <li><strong>长输出</strong>（在 document_read、run_skill 之后）优先使用本地以避免云端令牌限制</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="step2">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>步骤 2：通过伴侣应用连接</h2>
+        <p>伴侣应用提供了与 HomeClaw 交互的最佳体验：</p>
+
+        <h3>下载伴侣应用</h3>
+        <ul>
+          <li><strong>Mac：</strong> 可在 <code>clients/HomeClawApp/</code> 目录中找到</li>
+          <li><strong>Windows：</strong> 可在 <code>clients/HomeClawApp/</code> 目录中找到</li>
+          <li><strong>iPhone：</strong> 从 App Store 下载（搜索 "HomeClaw"）</li>
+          <li><strong>Android：</strong> 从 Google Play 下载（搜索 "HomeClaw"）</li>
+        </ul>
+
+        <h3>连接到 Core</h3>
+        <ol>
+          <li>打开伴侣应用</li>
+          <li>输入您的 Core 地址（默认：<code>localhost:8000</code>）</li>
+          <li>点击"连接"</li>
+          <li>开始聊天！</li>
+        </ol>
+
+        <p>有关详细设置说明，请参阅 <a href="companion-app.html">伴侣应用指南</a>。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="step3">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>步骤 3：通过渠道连接</h2>
+        <p>HomeClaw 支持多种渠道以提供灵活性：</p>
+
+        <h3>WebChat</h3>
+        <p>直接从浏览器访问 HomeClaw：</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">访问 WebChat</p>
+          <pre class="quickstart-code"><code>http://localhost:8000/chat</code></pre>
+        </div>
+
+        <h3>Telegram</h3>
+        <p>将 HomeClaw 连接到 Telegram 以实现随时随地访问：</p>
+        <ol>
+          <li>通过 <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> 创建 Telegram 机器人</li>
+          <li>获取您的机器人令牌</li>
+          <li>在 <code>config/core.yml</code> 中配置 Telegram 渠道</li>
+          <li>启动您的机器人并开始聊天</li>
+        </ol>
+
+        <h3>其他渠道</h3>
+        <p>HomeClaw 还支持其他渠道，如 Slack、Discord 等。查看 <a href="docs.html">文档</a> 了解配置详情。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="features">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>主要功能</h2>
+        <p>连接后，您可以利用 HomeClaw 的强大功能：</p>
+
+        <h3>混合模式</h3>
+        <p>同时使用云端和本地 AI 模型以获得最佳性能和成本效益。</p>
+
+        <h3>插件和技能</h3>
+        <p>使用任何语言编写的插件和技能扩展 HomeClaw 的功能。</p>
+
+        <h3>记忆</h3>
+        <p>HomeClaw 在会话之间记住您的对话和上下文。</p>
+
+        <h3>知识库</h3>
+        <p>上传文档，让 HomeClaw 从您的个人知识库中学习。</p>
+
+        <h3>多智能体</h3>
+        <p>创建多个专门在复杂任务上协同工作的智能体。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="tips">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>最佳体验提示</h2>
+        <ul>
+          <li><strong>保持 Core 运行：</strong> Core 必须运行才能处理请求</li>
+          <li><strong>使用伴侣应用：</strong> 伴侣应用提供最佳用户体验</li>
+          <li><strong>配置模型：</strong> 在 <code>config/core.yml</code> 中设置您偏好的 AI 模型</li>
+          <li><strong>启用混合模式：</strong> 同时使用云端和本地模型以获得最佳性能</li>
+          <li><strong>探索插件：</strong> 安装插件以扩展功能</li>
+          <li><strong>检查日志：</strong> 监控 Core 日志以进行故障排除</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="next-steps">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>下一步</h2>
+        <p>准备深入了解？</p>
+        <ul>
+          <li><a href="companion-app.html">设置伴侣应用</a></li>
+          <li><a href="portal.html">访问门户</a></li>
+          <li><a href="docs.html">阅读完整文档</a></li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">在 GitHub 上贡献</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2026 HomeClaw. 您的数据，您做主。</p>
+      <p>有问题？联系 <a href="mailto:shileipeng@gmail.com">shileipeng@gmail.com</a> 或 <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

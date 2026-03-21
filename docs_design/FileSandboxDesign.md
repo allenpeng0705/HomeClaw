@@ -14,7 +14,7 @@ This document defines how HomeClaw restricts file and folder access per user and
 
 - **homeclaw_root** (in `config/core.yml`, top-level) is **required** for file and folder access from channel/companion. When it is not set, file tools return a clear message: set homeclaw_root so that each user has a subfolder (e.g. `homeclaw_root/{user_id}/` for private files, `homeclaw_root/share` for shared). Core does **not** fall back to workspace_dir for user files — workspace is internal only.
 - Under **homeclaw_root** we have:
-  - **Per-user sandbox** – `homeclaw_root/{user_id}/` (or `homeclaw_root/companion/` when not tied to a user). Path `"."` or `"subdir"` resolves here. Subfolders: **output/** (generated files; use path `output/<filename>` and return a link), **knowledge/** (for KB folder sync; same name as friends’ knowledge folder).
+  - **Per-user sandbox** – `homeclaw_root/{user_id}/` (or `homeclaw_root/companion/` when not tied to a user). Path `"."` or `"subdir"` resolves here. Common subfolders (see `base/user_sandbox_folders.py`): **documents**, **downloads**, **images**, **output** (generated files; path `output/<filename>`), **work**, **knowledge** (KB folder sync), **videos**, **audios**. Listing a missing standard folder via `folder_list` may create it empty on first access.
   - **Share** – `homeclaw_root/share/`. Path `share` or `share/...` resolves here. Visible and writable by all users and companion.
 - When the user asks for file search, list, or read **without specifying a folder**: search/list in the user's sandbox first (path `"."`); if not found or the user says "share", use path `"share"` or `"share/..."`. Results (e.g. generated reports, PPT) go into **output/** and Core generates a link and sends it back.
 

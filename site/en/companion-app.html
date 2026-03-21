@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw Companion app guide. Available for Mac, Windows, iPhone, and Android.">
+  <title>Companion App — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="Main navigation">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="use-homeclaw.html">How to use</a>
+        <a href="companion-app.html" class="active">Companion app</a>
+        <a href="portal.html">Portal</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch">EN | <a href="../zh/companion-app.html">中文</a></span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>HomeClaw Companion App</h1>
+      <p class="lead">The best way to interact with HomeClaw. Available for Mac, Windows, iPhone, and Android.</p>
+      <p>The Companion app provides a beautiful, intuitive interface for chatting with HomeClaw. It connects to your Core and gives you full access to all features, including memory, plugins, and skills.</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="On this page">
+      <p class="doc-toc-title">On this page</p>
+      <ul>
+        <li><a href="#download">Download</a></li>
+        <li><a href="#setup">Setup</a></li>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#remote">Remote Access</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="download">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Download the Companion App</h2>
+        <p>The Companion app is available for all major platforms:</p>
+
+        <h3>Desktop Applications (Mac &amp; Windows)</h3>
+        <ul>
+          <li><strong>GitHub Releases:</strong> Download from <a href="https://github.com/allenpeng0705/HomeClaw/releases" target="_blank" rel="noopener">https://github.com/allenpeng0705/HomeClaw/releases</a></li>
+          <li><strong>Build from source:</strong> Compile from <code>clients/HomeClawApp/</code> in the repository</li>
+        </ul>
+
+        <h3>Mobile Applications</h3>
+        <ul>
+          <li><strong>Android:</strong> Download from <a href="https://github.com/allenpeng0705/HomeClaw/releases" target="_blank" rel="noopener">GitHub Releases</a></li>
+          <li><strong>iPhone:</strong> Coming soon to App Store</li>
+        </ul>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(255,152,0,.15); border-left:4px solid #ff9800; border-radius:4px;">
+          <strong>Build from source:</strong> For all platforms, you can build from <code>clients/HomeClawApp/</code> in the repo. See <a href="https://github.com/allenpeng0705/HomeClaw/tree/main/clients/HomeClawApp" target="_blank" rel="noopener">HomeClawApp on GitHub</a> and <code>clients/HomeClawApp/README.md</code> for build instructions.
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="setup">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Setup the Companion App</h2>
+        <p>Follow these steps to connect the Companion app to your HomeClaw Core:</p>
+
+        <h3>Step 1: Install the App</h3>
+        <ul>
+          <li>Download and install the Companion app for your platform</li>
+          <li>Launch the application</li>
+        </ul>
+
+        <h3>Step 2: Configure Core URL</h3>
+        <p>Choose your connection method:</p>
+
+        <h4>Option A: Local LAN Connection</h4>
+        <p>If your device is on the same local network as HomeClaw Core:</p>
+        <ol>
+          <li>Find your Core's local IP address (e.g., <code>192.168.1.100</code>)</li>
+          <li>In Companion app Settings, enter: <code>http://&lt;local-ip&gt;:9000</code></li>
+          <li>Example: <code>http://192.168.1.100:9000</code></li>
+        </ol>
+
+        <h4>Option B: Remote Connection via Tunnel</h4>
+        <p>For iPhone, Android, or remote access, use a tunnel service:</p>
+        <ul>
+          <li><strong>Cloudflare Tunnel:</strong> Set up a tunnel to get a domain like <code>https://your-subdomain.trycloudflare.com</code></li>
+          <li><strong>Pinggy:</strong> Use Pinggy to create a tunnel with a custom domain</li>
+          <li><strong>Ngrok:</strong> Use Ngrok to get a public URL like <code>https://abc123.ngrok.io</code></li>
+        </ul>
+        <p>Enter the tunnel URL in the Companion app as your Core URL.</p>
+
+        <h3>Step 3: Enable API Key Authentication (Recommended)</h3>
+        <p>Secure your Core connection with API key authentication:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Enable authentication in config/core.yml</p>
+          <pre class="quickstart-code"><code>auth_enable: true
+auth_api_key: your-secure-api-key-here</code></pre>
+        </div>
+        <p>After enabling authentication:</p>
+        <ol>
+          <li>Open Settings in the Companion app</li>
+          <li>Enter the same API key you configured in <code>core.yml</code></li>
+          <li>Save the settings</li>
+        </ol>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(244,67,54,.15); border-left:4px solid #f44336; border-radius:4px;">
+          <strong>Important:</strong> Always enable API key authentication when using remote access (tunneling). Without authentication, anyone with your tunnel URL can access your Core.
+        </div>
+
+        <h3>Step 4: Add Your User</h3>
+        <p>Add your user in one of two ways:</p>
+        <ul>
+          <li><strong>Method 1:</strong> Edit <code>config/user.yml</code> and add your user under <code>im:</code></li>
+          <li><strong>Method 2:</strong> Use "Manage Core" feature in the app (if available)</li>
+        </ul>
+
+        <h3>Step 5: Connect and Chat</h3>
+        <ol>
+          <li>Click "Connect" in the app</li>
+          <li>Wait for connection to establish</li>
+          <li>Start chatting with HomeClaw!</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="features">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Companion App Features</h2>
+        <p>The Companion app offers a rich set of features:</p>
+
+        <h3>Beautiful Interface</h3>
+        <p>Clean, modern design with smooth animations and intuitive navigation.</p>
+
+        <h3>Full Core Access</h3>
+        <p>Access all Core features including plugins, skills, and knowledge base.</p>
+
+        <h3>Memory Management</h3>
+        <p>View and manage your conversation history and memory.</p>
+
+        <h3>Multi-Device Sync</h3>
+        <p>Your conversations sync across all your devices connected to the same Core.</p>
+
+        <h3>Rich Media Support</h3>
+        <p>Send and receive images, files, and other media types.</p>
+
+        <h3>Notifications</h3>
+        <p>Get notified when HomeClaw responds to your messages.</p>
+
+        <h3>Offline Mode</h3>
+        <p>View past conversations even when offline (messages sync when reconnected).</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="remote">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Remote Access</h2>
+        <p>Access HomeClaw from anywhere using the Companion app:</p>
+
+        <h3>QR Code Scan (Recommended)</h3>
+        <p>Use the built-in Pinggy tunnel for easy remote access:</p>
+        <ol>
+          <li>Set <code>pinggy.token</code> in <code>config/core.yml</code></li>
+          <li>Start Core: <code>python -m main start</code></li>
+          <li>Core starts Pinggy tunnel and opens <code>http://127.0.0.1:&lt;port&gt;/pinggy</code></li>
+          <li>In Companion app: <strong>Settings → Scan QR to connect</strong></li>
+          <li>Scan the QR code from the /pinggy page</li>
+          <li>App automatically saves Core URL and API key</li>
+        </ol>
+
+        <h3>Manual Configuration</h3>
+        <p>Configure remote access manually using:</p>
+        <ul>
+          <li><strong>Tailscale:</strong> Use Tailscale IP as Core URL</li>
+          <li><strong>Cloudflare Tunnel:</strong> Use tunnel URL as Core URL</li>
+          <li><strong>SSH Tunnel:</strong> Forward port to Core over SSH</li>
+        </ul>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(33,150,243,.15); border-left:4px solid #2196f3; border-radius:4px;">
+          <strong>Security Tip:</strong> Always enable <code>auth_enabled</code> and <code>auth_api_key</code> in <code>config/core.yml</code> when using remote access to protect your Core.
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="troubleshooting">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Troubleshooting</h2>
+        <p>Common issues and solutions:</p>
+
+        <h3>Cannot Connect to Core</h3>
+        <ul>
+          <li>Make sure Core is running: <code>python -m main start</code></li>
+          <li>Check Core URL is correct (local: <code>http://127.0.0.1:9000</code> or LAN IP)</li>
+          <li>For remote access, verify your tunnel is running</li>
+          <li>Verify firewall settings allow the connection</li>
+          <li>Check if authentication is enabled and API key is correct</li>
+        </ul>
+
+        <h3>Connection Drops Frequently</h3>
+        <ul>
+          <li>Check network stability</li>
+          <li>Try using a different remote access method</li>
+          <li>Ensure Core is running on a stable connection</li>
+        </ul>
+
+        <h3>Messages Not Syncing</h3>
+        <ul>
+          <li>Check if both devices are connected to the same Core</li>
+          <li>Verify user configuration in <code>config/user.yml</code></li>
+          <li>Check Core logs for errors</li>
+        </ul>
+
+        <h3>Need More Help?</h3>
+        <p>Check the <a href="https://github.com/allenpeng0705/HomeClaw/issues" target="_blank" rel="noopener">GitHub issues</a> or <a href="docs.html">full documentation</a> for more detailed troubleshooting guides.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="next-steps">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Next Steps</h2>
+        <p>Ready to explore more?</p>
+        <ul>
+          <li><a href="use-homeclaw.html">Learn how to use HomeClaw</a></li>
+          <li><a href="portal.html">Access the Portal</a></li>
+          <li><a href="docs.html">Read the full documentation</a></li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">Contribute on GitHub</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2026 HomeClaw. Your data, your control.</p>
+      <p>Questions? Contact <a href="mailto:shileipeng@gmail.com">shileipeng@gmail.com</a> or <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

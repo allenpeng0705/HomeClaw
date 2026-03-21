@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw Skills from ClawHub - Search, download, convert and install OpenClaw skills from ClawHub registry.">
+  <title>Skills from ClawHub — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="Main navigation">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="use-homeclaw.html">How to use</a>
+        <a href="companion-app.html">Companion app</a>
+        <a href="portal.html">Portal</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch">EN | <a href="../zh/skills-clawhub.html">中文</a></span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>Skills from ClawHub</h1>
+      <p class="lead">Reuse OpenClaw skills from the ClawHub registry.</p>
+      <p>ClawHub is a registry of OpenClaw skills that you can search, download, convert, and install into HomeClaw. Extend your HomeClaw with community-contributed skills for various tasks.</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="On this page">
+      <p class="doc-toc-title">On this page</p>
+      <ul>
+        <li><a href="#what-is-clawhub">What is ClawHub</a></li>
+        <li><a href="#setup-token">Set Up ClawHub Token</a></li>
+        <li><a href="#search-skills">Search Skills</a></li>
+        <li><a href="#install-skills">Install Skills</a></li>
+        <li><a href="#skill-folders">Skill Folders</a></li>
+        <li><a href="#maton-gateway">Maton API Gateway</a></li>
+        <li><a href="#manage-skills">Manage Skills</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="what-is-clawhub">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>What is ClawHub</h2>
+        <p><a href="https://clawhub.ai" target="_blank" rel="noopener">ClawHub</a> is a registry of OpenClaw skills contributed by the community. These skills can be used with HomeClaw after automatic conversion.</p>
+
+        <h3>Skill Types</h3>
+        <ul>
+          <li><strong>Instruction-only skills:</strong> Provide instructions to the LLM (e.g., API documentation, workflows)</li>
+          <li><strong>Script-based skills:</strong> Include Python/JavaScript scripts for specific tasks</li>
+          <li><strong>Integration skills:</strong> Connect to external services (Slack, Notion, Outlook, etc.)</li>
+        </ul>
+
+        <h3>How It Works</h3>
+        <ol>
+          <li><strong>Search:</strong> Find skills in the ClawHub registry</li>
+          <li><strong>Download:</strong> Download the OpenClaw skill to your machine</li>
+          <li><strong>Convert:</strong> Automatically convert to HomeClaw format</li>
+          <li><strong>Install:</strong> Place in <code>external_skills/</code> folder</li>
+          <li><strong>Use:</strong> Skills are loaded and available in your next chat</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="setup-token">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Set Up ClawHub Token</h2>
+        <p>Before you can search and install skills, you need to authenticate with ClawHub.</p>
+
+        <h3>Option 1: Token in Config (Recommended)</h3>
+        <p>Add your ClawHub token directly to <code>config/core.yml</code>:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Configure ClawHub token in core.yml</p>
+          <pre class="quickstart-code"><code>clawhub_token: "YOUR_TOKEN_FROM_CLAWHUB_AI"</code></pre>
+        </div>
+        <p>Get your token from <a href="https://clawhub.ai" target="_blank" rel="noopener">clawhub.ai</a> after signing in with GitHub.</p>
+
+        <h3>Option 2: CLI Login</h3>
+        <p>Use the ClawHub CLI to authenticate:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Login via CLI</p>
+          <pre class="quickstart-code"><code>clawhub login</code></pre>
+        </div>
+        <p>This opens a browser for GitHub OAuth. Complete the authorization on the same machine running Core.</p>
+
+        <h3>Option 3: Token Login (Workaround)</h3>
+        <p>If browser login fails, use token-based login:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Login with token</p>
+          <pre class="quickstart-code"><code>clawhub login --no-browser --token YOUR_TOKEN</code></pre>
+        </div>
+
+        <h3>Verify Login</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Check login status</p>
+          <pre class="quickstart-code"><code>clawhub whoami</code></pre>
+        </div>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(33,150,243,.15); border-left:4px solid #2196f3; border-radius:4px;">
+          <strong>Note:</strong> When using the Companion app or Portal, the token in <code>core.yml</code> is used automatically. You don't need to login separately.
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="search-skills">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Search Skills</h2>
+        <p>Search for skills in the ClawHub registry using Companion app, Portal, or CLI.</p>
+
+        <h3>Option 1: Companion App</h3>
+        <ol>
+          <li>Open Companion app</li>
+          <li>Go to <strong>Settings → Skills</strong></li>
+          <li>Use the search bar to find skills</li>
+          <li>Browse results and view skill details</li>
+        </ol>
+
+        <h3>Option 2: Portal</h3>
+        <ol>
+          <li>Start Portal: <code>python -m main portal</code></li>
+          <li>Open browser to <code>http://127.0.0.1:18472</code></li>
+          <li>Navigate to <strong>Skills</strong> section</li>
+          <li>Search and browse available skills</li>
+        </ol>
+
+        <h3>Option 3: CLI</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Search skills via CLI</p>
+          <pre class="quickstart-code"><code>python -m main skills search "slack"
+python -m main skills search "email"
+python -m main skills search "slides"</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="install-skills">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Install Skills</h2>
+        <p>Install skills from ClawHub. The skill is downloaded, converted, and placed in your <code>external_skills/</code> folder.</p>
+
+        <h3>Option 1: Companion App</h3>
+        <ol>
+          <li>Search for a skill</li>
+          <li>Click <strong>Install</strong> on the skill card</li>
+          <li>Wait for download and conversion</li>
+          <li>Skill is ready to use in your next chat</li>
+        </ol>
+
+        <h3>Option 2: Portal</h3>
+        <ol>
+          <li>Search for a skill in Portal</li>
+          <li>Click <strong>Install</strong></li>
+          <li>The skill is converted and added to <code>external_skills/</code></li>
+        </ol>
+
+        <h3>Option 3: CLI</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Install skill via CLI</p>
+          <pre class="quickstart-code"><code>python -m main skills install skill-name@1.0.0</code></pre>
+        </div>
+
+        <h3>What Happens During Install</h3>
+        <ol>
+          <li><strong>Download:</strong> OpenClaw skill is downloaded to <code>downloads/</code> folder</li>
+          <li><strong>Locate:</strong> HomeClaw finds the installed skill folder</li>
+          <li><strong>Convert:</strong> OpenClaw format is converted to HomeClaw format (SKILL.md, scripts/, references/)</li>
+          <li><strong>Install:</strong> Converted skill is placed in <code>external_skills/</code></li>
+          <li><strong>Load:</strong> Skill is loaded on next Core request</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="skill-folders">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Skill Folders</h2>
+        <p>HomeClaw uses multiple skill folders for organization.</p>
+
+        <h3>Built-in Skills</h3>
+        <p>Location: <code>skills/</code> folder in your HomeClaw directory</p>
+        <ul>
+          <li>Pre-installed skills that come with HomeClaw</li>
+          <li>Protected - cannot be removed via Companion or Portal</li>
+          <li>Examples: html-slides, ppt-generation, image-generation</li>
+        </ul>
+
+        <h3>External Skills</h3>
+        <p>Location: <code>external_skills/</code> folder (default)</p>
+        <ul>
+          <li>Skills installed from ClawHub</li>
+          <li>Can be removed via Companion, Portal, or CLI</li>
+          <li>Configured via <code>external_skills_dir</code> in <code>core.yml</code></li>
+        </ul>
+
+        <h3>Custom Skill Folders</h3>
+        <p>Add additional skill folders in <code>config/core.yml</code>:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Configure extra skill directories</p>
+          <pre class="quickstart-code"><code>skills_dir: skills
+external_skills_dir: external_skills
+skills_extra_dirs:
+  - /path/to/custom/skills
+  - /another/skills/folder</code></pre>
+        </div>
+
+        <h3>Loading Order</h3>
+        <p>Skills are loaded in this order (first match wins):</p>
+        <ol>
+          <li><code>skills_dir</code> (built-in)</li>
+          <li><code>external_skills_dir</code> (ClawHub installed)</li>
+          <li><code>skills_extra_dirs</code> (custom folders)</li>
+        </ol>
+
+        <h3>Configure via Portal</h3>
+        <p>You can configure skill folders through Portal:</p>
+        <ol>
+          <li>Open Portal at <code>http://127.0.0.1:18472</code></li>
+          <li>Go to <strong>Settings → Skills</strong></li>
+          <li>Add or modify skill folder paths</li>
+          <li>Restart Core for changes to take effect</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="maton-gateway">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Maton API Gateway</h2>
+        <p>One important skill from ClawHub is <strong>maton-api-gateway-1.0.0</strong>, which enables access to many web services.</p>
+
+        <h3>What is Maton?</h3>
+        <p><a href="https://maton.ai" target="_blank" rel="noopener">Maton</a> provides an API gateway with managed OAuth for 100+ services:</p>
+        <ul>
+          <li><strong>Communication:</strong> Slack, Discord, Microsoft Teams</li>
+          <li><strong>Email:</strong> Gmail, Outlook</li>
+          <li><strong>Productivity:</strong> Notion, Airtable, Trello</li>
+          <li><strong>CRM:</strong> HubSpot, Salesforce</li>
+          <li><strong>Finance:</strong> Stripe</li>
+          <li><strong>And more:</strong> Google Workspace, GitHub, Calendly, etc.</li>
+        </ul>
+
+        <h3>How It Works</h3>
+        <ul>
+          <li>Single API key (<code>MATON_API_KEY</code>) for all services</li>
+          <li>Maton handles OAuth tokens for each connected service</li>
+          <li>Call native APIs through the gateway</li>
+        </ul>
+
+        <h3>Setup</h3>
+        <ol>
+          <li>Sign up at <a href="https://maton.ai" target="_blank" rel="noopener">maton.ai</a></li>
+          <li>Get your API key from settings</li>
+          <li>Install the skill: <code>python -m main skills install maton-api-gateway@1.0.0</code></li>
+          <li>Set the API key in environment or skill config</li>
+        </ol>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Set Maton API key</p>
+          <pre class="quickstart-code"><code>export MATON_API_KEY="your-maton-api-key"</code></pre>
+        </div>
+
+        <h3>Connect Services</h3>
+        <ol>
+          <li>Create a connection for the service you want to use (e.g., Slack)</li>
+          <li>Open the OAuth URL in a browser</li>
+          <li>Authorize the connection</li>
+          <li>Now you can call that service's API through the gateway</li>
+        </ol>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(76,175,80,.15); border-left:4px solid #4caf50; border-radius:4px;">
+          <strong>Tip:</strong> The Maton API Gateway skill is especially useful for integrating with services that require OAuth, as it handles all the token management for you.
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="manage-skills">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Manage Skills</h2>
+
+        <h3>List Installed Skills</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">List skills via CLI</p>
+          <pre class="quickstart-code"><code>python -m main skills list</code></pre>
+        </div>
+
+        <h3>Remove Skills</h3>
+        <p>Remove skills from <code>external_skills/</code> (built-in skills in <code>skills/</code> are protected):</p>
+
+        <h4>Option 1: Companion App</h4>
+        <ol>
+          <li>Go to <strong>Settings → Skills</strong></li>
+          <li>Find the skill you want to remove</li>
+          <li>Click <strong>Remove</strong></li>
+        </ol>
+
+        <h4>Option 2: Portal</h4>
+        <ol>
+          <li>Open Portal</li>
+          <li>Navigate to <strong>Skills</strong></li>
+          <li>Click <strong>Remove</strong> on the skill</li>
+        </ol>
+
+        <h4>Option 3: CLI</h4>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Remove skill via CLI</p>
+          <pre class="quickstart-code"><code>python -m main skills remove skill-name</code></pre>
+        </div>
+
+        <h3>Disable Skills Temporarily</h3>
+        <p>Add skill names to <code>skills_disabled</code> in <code>config/core.yml</code>:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Disable specific skills</p>
+          <pre class="quickstart-code"><code>skills_disabled:
+  - skill-name-1
+  - skill-name-2</code></pre>
+        </div>
+
+        <h3>Skill Vector Search (RAG)</h3>
+        <p>When you have many skills, enable vector search to find relevant skills automatically:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Enable skill RAG in skills_and_plugins.yml</p>
+          <pre class="quickstart-code"><code>skills_use_vector_search: true</code></pre>
+        </div>
+        <p>When enabled, Core creates a vector store of skills and retrieves relevant ones based on your query similarity.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2024 HomeClaw. <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> | <a href="mailto:shileipeng@gmail.com">Contact</a></p>
+    </div>
+  </footer>
+</body>
+</html>

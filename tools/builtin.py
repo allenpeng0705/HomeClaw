@@ -30,6 +30,7 @@ from urllib.parse import quote
 from base.tools import ToolContext, ToolDefinition, ToolRegistry, ROUTING_RESPONSE_ALREADY_SENT
 from base.skills import get_all_skills_dirs, resolve_skill_to_path
 from base.workspace import get_workspace_dir, get_agent_memory_file_path, append_daily_memory
+from base.user_sandbox_folders import FOLDER_NAMES_FOR_USER_MESSAGE, STANDARD_USER_SANDBOX_SUBDIRS
 from base.util import Util, redact_params_for_log
 from base.base import PluginResult, User
 from base.media_io import save_data_url_to_media_folder
@@ -59,6 +60,9 @@ KEYED_SKILLS = {
     "hootsuite-1.0.0": ("hootsuite_access_token", "HOOTSUITE_ACCESS_TOKEN"),
     "weibo-api-1.0.0": ("weibo_access_token", "WEIBO_ACCESS_TOKEN"),
 }
+
+# Shown in folder_list / file_find tool descriptions (keep in sync with base.user_sandbox_folders).
+_USER_SANDBOX_FOLDER_NAMES_FOR_TOOLS = ", ".join(FOLDER_NAMES_FOR_USER_MESSAGE)
 
 
 def _get_keyed_skill_env_overrides(
@@ -4209,6 +4213,103 @@ async def _get_file_view_link_executor(arguments: Dict[str, Any], context: ToolC
 # Reserved path prefix for user/companion generated files (reports, images, exports). Use path "output/<filename>" so files land in base/{user_id}/output/ or base/companion/output/. See docs_design/FileSandboxDesign.md.
 FILE_OUTPUT_SUBDIR = "output"
 
+def _resolved_base_is_share_root(base: Optional[Any]) -> bool:
+    """True if resolved base path is the global share directory (homeclaw_root/share), not a user's sandbox."""
+    if base is None:
+        return False
+    try:
+        cfg = _get_tools_config()
+        sd = (cfg.get("file_read_shared_dir") or "share").strip().lower()
+        name = Path(base).name.lower()
+        return bool(sd) and name == sd
+    except Exception:
+        return False
+
+
+def _try_create_standard_sandbox_subdir(full: Path, base: Path) -> bool:
+    """
+    If `full` is under the user sandbox (not share) and the path starts with a standard subfolder name,
+    create the directory tree (mkdir -p). Returns True if `full` is a directory after the call.
+    Never raises.
+    """
+    try:
+        if _resolved_base_is_share_root(base):
+            return False
+        if not _path_under(full, base):
+            return False
+        rel = full.relative_to(base.resolve())
+        parts = rel.parts
+        if not parts:
+            return full.is_dir()
+        first = parts[0].lower()
+        if first not in STANDARD_USER_SANDBOX_SUBDIRS:
+            return False
+        if full.exists() and full.is_file():
+            return False
+        full.mkdir(parents=True, exist_ok=True)
+        return full.is_dir()
+    except (ValueError, OSError) as e:
+        logger.debug("_try_create_standard_sandbox_subdir: %s", e)
+        return False
+
+
+async def _folder_list_fallback_explore(context: ToolContext, path_arg: str) -> str:
+    """
+    When the requested path is not a folder: show sandbox root + shared folder listings so the user (and LLM) can pick a valid path.
+    Returns markdown text (not JSON). Never raises.
+    """
+    lines: List[str] = [
+        f"**Path `{path_arg}`** is not a folder in your sandbox, or it could not be opened. "
+        "Below are **your sandbox root** and the **shared folder** (`share`):\n\n",
+    ]
+    try:
+        max_show = 80
+        for label, pth in (
+            ("Your sandbox root (use path `.` or empty)", "."),
+            ("Shared folder (use path `share`)", "share"),
+        ):
+            r = _resolve_file_path(pth, context, for_write=False)
+            if r is None:
+                lines.append(f"### {label}\n_Not available (check **homeclaw_root** in config)._ \n\n")
+                continue
+            fdir, b = r
+            if not fdir.is_dir():
+                lines.append(f"### {label}\n_Not a directory or missing._\n\n")
+                continue
+            try:
+                children = list(fdir.iterdir())
+            except OSError as e:
+                lines.append(f"### {label}\n_Could not read: {e!s}_\n\n")
+                continue
+            children.sort(key=lambda x: (not x.is_dir(), (x.name or "").lower()))
+            lines.append(f"### {label}\n")
+            if not children:
+                lines.append("_Empty._\n\n")
+                continue
+            for i, p in enumerate(children):
+                if i >= max_show:
+                    lines.append(f"- … _({len(children) - max_show} more)_\n")
+                    break
+                typ = "dir" if p.is_dir() else "file"
+                try:
+                    rp = str(p.relative_to(b)).replace("\\", "/")
+                except ValueError:
+                    rp = getattr(p, "name", "") or "?"
+                nm = getattr(p, "name", "") or rp
+                lines.append(f"- **{nm}** ({typ}) — `{rp}`\n")
+            lines.append("\n")
+    except Exception as e:
+        logger.debug("_folder_list_fallback_explore failed: %s", e)
+        return _file_not_found_msg(context)
+    _names = ", ".join(f"**{n}**" for n in FOLDER_NAMES_FOR_USER_MESSAGE if n != "share")
+    lines.append(
+        f"---\n**Tip:** Standard folders under your sandbox are {_names}. "
+        "Listing one of these paths creates the folder if it did not exist yet. "
+        "Use **`share`** for the **global** shared folder (all users). "
+        "Use **`folder_list(path='…')`** with the exact path from the lists above.\n"
+    )
+    return "".join(lines)
+
 # Polite messages for file tools (never crash; user-friendly responses)
 _FILE_ACCESS_DENIED_MSG = (
     "That path is outside the sandbox. You can only access (1) the user sandbox root and its subfolders (omit path or use subdir name), "
@@ -4651,7 +4752,14 @@ async def _folder_list_executor(arguments: Dict[str, Any], context: ToolContext)
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
         if not full.is_dir():
-            return _file_not_found_msg(context)
+            if full.exists() and full.is_file():
+                return (
+                    f"`{path_arg}` is a **file**, not a folder. Use **document_read** or **file_read** to read it, "
+                    f"or **folder_list** on a parent path (e.g. `documents` if this file is under documents)."
+                )
+            _try_create_standard_sandbox_subdir(full, base)
+        if not full.is_dir():
+            return await _folder_list_fallback_explore(context, path_arg)
         max_entries = _safe_int(arguments.get("max_entries"), 500, 1, 2000)
         entries = []
         path_arg_normalized = (path_arg or ".").strip() in (".", "")
@@ -4705,7 +4813,11 @@ async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -
         if not _path_under(full_dir, base):
             return _FILE_ACCESS_DENIED_MSG
         if not full_dir.is_dir():
-            return _file_not_found_msg(context)
+            if full_dir.exists() and full_dir.is_file():
+                return f"`{path_arg}` is a file, not a folder. Use **file_find** with a directory path (e.g. `.` or `documents`)."
+            _try_create_standard_sandbox_subdir(full_dir, base)
+        if not full_dir.is_dir():
+            return await _folder_list_fallback_explore(context, path_arg)
         max_results = _safe_int(arguments.get("max_results"), 200, 1, 2000)
         results = []
         base_for_rel = base if base is not None else full_dir
@@ -6809,11 +6921,14 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="folder_list",
-            description="List one level of a directory (subfolders and files). You MUST call this tool when the user asks to list files or what is in a folder (any wording or language). You MUST pass the path argument: extract the folder name from the user's message (e.g. 'images里有哪些文件' → path='images'; 'documents folder' → path='documents'; '看下output里有什么' → path='output'). If the user did not name a folder, use path='.'. User sandbox folders: documents, downloads, output, images, work, knowledge, share. Never call folder_list without the path argument.",
+            description=(
+                "List one level of a directory (subfolders and files). You MUST call this tool when the user asks to list files or what is in a folder (any wording or language). You MUST pass the path argument: extract the folder name from the user's message (e.g. 'images里有哪些文件' → path='images'; 'documents folder' → path='documents'; '看下output里有什么' → path='output'). If the user did not name a folder, use path='.'. "
+                f"Known folder names (user sandbox or global share): {_USER_SANDBOX_FOLDER_NAMES_FOR_TOOLS}. Never call folder_list without the path argument."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Required. The folder to list. Extract from the user's message: the exact folder name they said (e.g. images, documents, output, work, downloads, knowledge, share), or '.' if they did not name a folder (e.g. 'list my files', '我都有哪些文件'). Examples: 'images里有哪些文件' → 'images'; 'documents里有哪些文件' → 'documents'; 'what's in the work folder' → 'work'. Do not omit."},
+                    "path": {"type": "string", "description": f"Required. The folder to list. Extract from the user's message: the exact folder name they said (e.g. {_USER_SANDBOX_FOLDER_NAMES_FOR_TOOLS}), or '.' if they did not name a folder (e.g. 'list my files', '我都有哪些文件'). Examples: 'images里有哪些文件' → 'images'; 'documents里有哪些文件' → 'documents'; 'what's in the work folder' → 'work'. Do not omit."},
                     "max_entries": {"type": "integer", "description": "Max entries to return (default 500).", "default": 500},
                 },
                 "required": ["path"],

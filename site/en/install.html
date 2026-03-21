@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw installation guide for Mac, Windows, and Linux. Step-by-step setup instructions.">
+  <title>How to Install — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="Main navigation">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">Home</a>
+        <a href="install.html" class="active">Install</a>
+        <a href="use-homeclaw.html">How to use</a>
+        <a href="companion-app.html">Companion app</a>
+        <a href="portal.html">Portal</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch">EN | <a href="../zh/install.html">中文</a></span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>How to Install HomeClaw</h1>
+      <p class="lead">Get HomeClaw up and running on your machine in minutes. Works on Mac, Windows, and Linux.</p>
+      <p>HomeClaw is an AI assistant that runs locally on your machine. Your data stays with you, giving you complete control and privacy. Installation is simple and straightforward.</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="On this page">
+      <p class="doc-toc-title">On this page</p>
+      <ul>
+        <li><a href="#prerequisites">Prerequisites</a></li>
+        <li><a href="#simple-install">Simple Installation (Recommended)</a></li>
+        <li><a href="#manual-install">Manual Installation</a></li>
+        <li><a href="#verify">Verify Installation</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="prerequisites">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Prerequisites</h2>
+        <p>Before installing HomeClaw, make sure you have the following:</p>
+        <ul>
+          <li><strong>Python 3.11 or higher</strong> — Check with <code>python --version</code> or <code>python3 --version</code></li>
+          <li><strong>Git</strong> — For cloning the repository</li>
+          <li><strong>pip</strong> — Python package manager (usually comes with Python)</li>
+        </ul>
+        <p><em>Note: On Windows, if you encounter C++ build errors, install <a href="https://visualstudio.microsoft.com/visual-cpp-build-tools/" target="_blank" rel="noopener">Visual C++ Build Tools</a>.</em></p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="simple-install">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Simple Installation (Recommended)</h2>
+        <p>The easiest way to install HomeClaw is using the provided installation scripts. These scripts handle all the setup automatically.</p>
+
+        <h3>Mac &amp; Linux</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Run the installation script</p>
+          <pre class="quickstart-code"><code>./install.sh</code></pre>
+        </div>
+        <p>The script will automatically:</p>
+        <ul>
+          <li>Clone the repository (if not already cloned)</li>
+          <li>Install Python dependencies</li>
+          <li>Copy llama.cpp binary distributions</li>
+          <li>Download required models</li>
+          <li>Set up configuration files</li>
+        </ul>
+
+        <h3>Windows</h3>
+        <p>For Windows, you can use either PowerShell or Command Prompt:</p>
+
+        <div class="doc-keys">
+          <p class="doc-keys-title">Option 1: PowerShell</p>
+          <pre class="quickstart-code"><code>.\install.ps1</code></pre>
+        </div>
+
+        <div class="doc-keys">
+          <p class="doc-keys-title">Option 2: Command Prompt</p>
+          <pre class="quickstart-code"><code>install.bat</code></pre>
+        </div>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(76,175,80,.15); border-left:4px solid #4caf50; border-radius:4px;">
+          <strong>What the scripts do:</strong> The installation scripts automate the entire setup process, including cloning the code, installing dependencies, setting up llama.cpp binaries, and downloading models. This is the recommended method for most users.
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="manual-install">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Manual Installation</h2>
+        <p>If you prefer to install HomeClaw manually without using the installation scripts, follow these steps:</p>
+
+        <h3>Step 1: Clone the Repository</h3>
+        <div class="doc-keys">
+          <pre class="quickstart-code"><code>git clone https://github.com/allenpeng0705/HomeClaw.git
+cd HomeClaw</code></pre>
+        </div>
+
+        <h3>Step 2: Install Python Dependencies</h3>
+        <div class="doc-keys">
+          <pre class="quickstart-code"><code>pip install -r requirements.txt</code></pre>
+        </div>
+
+        <h3>Step 3: Copy llama.cpp Binary Distributions</h3>
+        <p>Download and copy the appropriate llama.cpp binaries for your platform:</p>
+        <ul>
+          <li><strong>Mac:</strong> Copy binaries to the appropriate directory</li>
+          <li><strong>Linux:</strong> Copy binaries to the appropriate directory</li>
+          <li><strong>Windows:</strong> Copy binaries to the appropriate directory</li>
+        </ul>
+
+        <h3>Step 4: Download Models</h3>
+        <p>Download the required AI models. The specific models depend on your configuration in <code>config/llm.yml</code>.</p>
+
+        <h3>Step 5: Configure and Run</h3>
+        <p>Edit the configuration files as needed, then run HomeClaw:</p>
+        <div class="doc-keys">
+          <pre class="quickstart-code"><code>python -m main start</code></pre>
+        </div>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(255,152,0,.15); border-left:4px solid #ff9800; border-radius:4px;">
+          <strong>Note:</strong> Manual installation requires more technical knowledge. We recommend using the installation scripts unless you have specific requirements for custom setup.
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="verify">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Verify Installation</h2>
+        <p>After installation, verify that everything is working correctly:</p>
+
+        <div class="doc-keys">
+          <p class="doc-keys-title">Start HomeClaw</p>
+          <pre class="quickstart-code"><code>python -m main start</code></pre>
+        </div>
+
+        <p>If HomeClaw starts without errors and you can access the web interface, congratulations! HomeClaw is installed successfully.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="troubleshooting">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Troubleshooting</h2>
+        <p>Common issues and solutions:</p>
+
+        <h3>Python not found</h3>
+        <p>Make sure Python is installed and added to your system PATH. On Mac, you may need to use <code>python3</code> instead of <code>python</code>.</p>
+
+        <h3>Pip not found</h3>
+        <p>Ensure pip is installed. You can install it using: <code>python -m ensurepip --upgrade</code></p>
+
+        <h3>Permission denied</h3>
+        <p>On Mac/Linux, make sure the install script has execute permissions: <code>chmod +x install.sh</code></p>
+
+        <h3>Build errors on Windows</h3>
+        <p>Install Visual C++ Build Tools from Microsoft's website.</p>
+
+        <h3>Need more help?</h3>
+        <p>Check the <a href="https://github.com/allenpeng0705/HomeClaw/issues" target="_blank" rel="noopener">GitHub issues</a> or <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">full documentation</a> for more detailed troubleshooting guides.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="next-steps">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Next Steps</h2>
+        <p>Now that HomeClaw is installed, you can:</p>
+        <ul>
+          <li><a href="use-homeclaw.html">Learn how to use HomeClaw</a></li>
+          <li><a href="companion-app.html">Set up the Companion app</a></li>
+          <li><a href="portal.html">Access the Portal</a></li>
+          <li><a href="docs.html">Read the full documentation</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2026 HomeClaw. Your data, your control.</p>
+      <p>Questions? Contact <a href="mailto:shileipeng@gmail.com">shileipeng@gmail.com</a> or <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from loguru import logger
 
+from base.user_sandbox_folders import FOLDER_NAMES_FOR_USER_MESSAGE, folder_names_pattern_for_regex
+
 # Prefix for tool execution errors returned by the registry
 TOOL_ERROR_PREFIX = "Error running tool"
 
@@ -285,7 +287,15 @@ def _extract_folder_from_user_message(message: Optional[str]) -> str:
     if not message or not isinstance(message, str) or not message.strip():
         return "."
     q = message.strip().lower()
-    for folder in ("documents", "images", "output", "work", "downloads", "knowledge", "share"):
+    # Prefer explicit path segments: "allenpeng/documents", "in documents folder", "list videos"
+    try:
+        _pat = folder_names_pattern_for_regex()
+        m = re.search(rf"(?:^|[\s/])({_pat})(?:[\s/]|folder|dir|$)", q, re.I)
+        if m:
+            return m.group(1).lower()
+    except Exception:
+        pass
+    for folder in FOLDER_NAMES_FOR_USER_MESSAGE:
         if folder in q:
             return folder
     return "."

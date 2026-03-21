@@ -26,6 +26,7 @@ from base.workspace import (
     trim_content_bootstrap,
     load_friend_identity_file,
 )
+from base.user_sandbox_folders import FOLDER_NAMES_FOR_USER_MESSAGE, STANDARD_USER_SANDBOX_SUBDIRS
 from base.friend_presets import (
     get_tool_names_for_preset,
     get_tool_names_for_preset_value,
@@ -83,6 +84,11 @@ def _is_confirmation_phrase(text: str) -> bool:
 
 
 from tools.builtin import close_browser_session
+
+# System prompt: per-user standard dirs + global share.
+_PRIVATE_STANDARD_FOLDERS_PROMPT = ", ".join(sorted(STANDARD_USER_SANDBOX_SUBDIRS))
+_STANDARD_SANDBOX_FOLDER_NAMES_FOR_PROMPT = _PRIVATE_STANDARD_FOLDERS_PROMPT + ", share (global)"
+
 from core.log_helpers import (
     _component_log,
     _truncate_for_log,
@@ -1433,9 +1439,8 @@ async def answer_from_memory(
                 _q_lo = (query or "").strip().lower()
                 _q_raw = (query or "").strip()
                 if any((p in _q_lo if p.isascii() else p in _q_raw) for p in _list_folder_phrases):
-                    _sandbox_subdirs = ("documents", "downloads", "output", "images", "work", "knowledge", "share")
                     _inferred_path = "."
-                    for _key in _sandbox_subdirs:
+                    for _key in FOLDER_NAMES_FOR_USER_MESSAGE:
                         if _key in _q_lo or _key in _q_raw:
                             _inferred_path = _key
                             break
@@ -1912,7 +1917,7 @@ async def answer_from_memory(
                 _q = query.strip()
                 # Match path like documents/norm-v4.pdf or share/report.docx (relative path under sandbox).
                 _path_match = re.search(
-                    r"(documents|share|output|images|work|downloads|knowledge)/[^\s\]\[\)\,\"\'\n]+\.(?:pdf|docx|doc|pptx|ppt|txt|md|html)",
+                    r"(documents|share|output|images|work|downloads|knowledge|videos|audios)/[^\s\]\[\)\,\"\'\n]+\.(?:pdf|docx|doc|pptx|ppt|txt|md|html|png|jpg|jpeg|gif|webp|mp4|webm|mov|mkv|mp3|wav|m4a|ogg)",
                     _q,
                     re.IGNORECASE,
                 )
@@ -1927,7 +1932,7 @@ async def answer_from_memory(
                 _q_li = (query or "").strip().lower()
                 _q_ri = (query or "").strip()
                 _folder_hint = "."
-                for _k in ("documents", "downloads", "output", "images", "work", "knowledge", "share"):
+                for _k in FOLDER_NAMES_FOR_USER_MESSAGE:
                     if _k in _q_li or _k in _q_ri:
                         _folder_hint = _k
                         break
@@ -2384,9 +2389,9 @@ async def answer_from_memory(
                                 "\n\n## File tools — sandbox (only two bases)\n"
                                 "Only these two bases are the search path and working area; their subfolders can be accessed. Any other folder cannot be accessed (sandbox). "
                                 "(1) User sandbox root — omit path or use subdir name; (2) share — path \"share\" or \"share/...\". "
-                                "**User sandbox has these standard folders:** output (generated files, reports, slides), documents, downloads, images, work, knowledge. Use path '' or '.' for root; folder_list(path='documents'), folder_list(path='output'), etc.; use the exact path from the result in document_read or get_file_view_link. "
-                                "**Whenever the user asks to list files or what is in a folder** (any wording or language): you MUST call folder_list(path='<folder>'). Use the folder name they said (documents, images, output, work, downloads, knowledge, share), or path '' or '.' for sandbox root if they did not name a folder. Do NOT reply with text only—the user expects the actual list. "
-                                "**If they name a folder** (e.g. documents, images, output, work): call folder_list(path='that_name'). If they do not name a folder: call folder_list(path='') or folder_list(path='.'). "
+                                f"**Standard folders:** under your private sandbox: {_PRIVATE_STANDARD_FOLDERS_PROMPT}; **share** = global shared folder (all users). Typical roles: **output** = generated reports/slides; **documents** = user docs; **images** / **videos** / **audios** = media; **downloads**, **work**, **knowledge** = as named. Use path '' or '.' for sandbox root; folder_list(path='<folder>'); use the exact path from the result in document_read or get_file_view_link. "
+                                f"**Whenever the user asks to list files or what is in a folder** (any wording or language): you MUST call folder_list(path='<folder>'). Use the folder name they said ({_STANDARD_SANDBOX_FOLDER_NAMES_FOR_PROMPT}), or path '' or '.' for sandbox root if they did not name a folder. Do NOT reply with text only—the user expects the actual list. "
+                                "**If they name a folder**: call folder_list(path='that_name'). If they do not name a folder: call folder_list(path='') or folder_list(path='.'). "
                                 "**Do not invent or fabricate file names, file paths, or URLs** to complete tasks. Use only: (a) values returned by your tool calls (e.g. path from folder_list, file_find), (b) the exact filename or path the user mentioned (e.g. 1.pdf), (c) links returned by save_result_page or get_file_view_link. If you need a path or URL, call the appropriate tool first and use its result. "
                                 "**Never use absolute paths** (e.g. /mnt/, C:\\, /Users/). Use only relative paths under the sandbox: the filename (e.g. 1.pdf) or the path from folder_list/file_find. "
                                 "Do not use workspace, config, or paths outside these two trees. Put generated files in output/ (path \"output/filename\") and return the link. "
@@ -3237,7 +3242,7 @@ async def answer_from_memory(
                             _q_raw = (query or "").strip()
                             if any((p in _q_lo if p.isascii() else p in _q_raw) for p in _list_dir_phrases):
                                 _fallback_path = "."
-                                for _key in ("documents", "downloads", "output", "images", "work", "knowledge", "share"):
+                                for _key in FOLDER_NAMES_FOR_USER_MESSAGE:
                                     if _key in _q_lo or _key in _q_raw:
                                         _fallback_path = _key
                                         break
@@ -3353,7 +3358,7 @@ async def answer_from_memory(
                                 )
                                 if _list_dir_match:
                                     _fallback_path = "."
-                                    for _key in ("documents", "downloads", "output", "images", "work", "knowledge", "share"):
+                                    for _key in FOLDER_NAMES_FOR_USER_MESSAGE:
                                         if _key in _ql_first or _key in _qr_first:
                                             _fallback_path = _key
                                             break
@@ -3562,8 +3567,7 @@ async def answer_from_memory(
                                         ):
                                             # Infer subfolder from query so "documents folder" / "files in documents" list documents/, not root
                                             _fallback_path = "."
-                                            _sandbox_subdirs = ("documents", "downloads", "output", "images", "work", "knowledge", "share")
-                                            for _key in _sandbox_subdirs:
+                                            for _key in FOLDER_NAMES_FOR_USER_MESSAGE:
                                                 if _key in _query_lower or _key in _query_raw:
                                                     _fallback_path = _key
                                                     break

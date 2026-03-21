@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw QuickStart - Get up and running in minutes with simple installation steps.">
+  <title>QuickStart — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="Main navigation">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">Home</a>
+        <a href="quickstart.html" class="active">QuickStart</a>
+        <a href="install.html">Install</a>
+        <a href="use-homeclaw.html">How to use</a>
+        <a href="companion-app.html">Companion app</a>
+        <a href="portal.html">Portal</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch">EN | <a href="../zh/quickstart.html">中文</a></span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>QuickStart</h1>
+      <p class="lead">Get HomeClaw up and running in minutes.</p>
+      <p>Follow these simple steps to install, configure, and start using HomeClaw with the Companion app, Portal, and remote access.</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="On this page">
+      <p class="doc-toc-title">On this page</p>
+      <ul>
+        <li><a href="#prerequisites">Prerequisites</a></li>
+        <li><a href="#suggested-models">Suggested Models</a></li>
+        <li><a href="#step-1-install">Step 1: Install HomeClaw</a></li>
+        <li><a href="#step-2-run-core">Step 2: Run Core</a></li>
+        <li><a href="#step-3-companion">Step 3: Companion App</a></li>
+        <li><a href="#step-4-portal">Step 4: Portal (Optional)</a></li>
+        <li><a href="#step-5-remote">Step 5: Remote Access</a></li>
+        <li><a href="#step-6-cursor-claude">Step 6: Cursor & Claude Code</a></li>
+        <li><a href="#next-steps">Next Steps</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="prerequisites">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Prerequisites</h2>
+        <p>Before installing HomeClaw, make sure you have:</p>
+
+        <div class="quickstart-requirements">
+          <div class="requirement-item">
+            <div class="requirement-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+                <path d="M2 17l10 5 10-5"></path>
+                <path d="M2 12l10 5 10-5"></path>
+              </svg>
+            </div>
+            <div class="requirement-content">
+              <h4>Python 3.11+</h4>
+              <p>Required for running HomeClaw Core</p>
+            </div>
+          </div>
+          <div class="requirement-item">
+            <div class="requirement-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+            </div>
+            <div class="requirement-content">
+              <h4>Git</h4>
+              <p>For cloning the repository</p>
+            </div>
+          </div>
+          <div class="requirement-item">
+            <div class="requirement-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+            </div>
+            <div class="requirement-content">
+              <h4>API Keys (Optional)</h4>
+              <p>For cloud LLM models (OpenAI, Anthropic, etc.)</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(33,150,243,.15); border-left:4px solid #2196f3; border-radius:4px;">
+          <strong>Tip:</strong> HomeClaw can run with local models only. Cloud API keys are optional for Mix Mode.
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="suggested-models">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Suggested Models</h2>
+        <p>HomeClaw works with local GGUF models. Here are the recommended models (you can customize in <code>config/llm.yml</code>):</p>
+
+        <h3>Main Chat Model (Local)</h3>
+        <p>The main model handles conversations and tool calls. Recommended:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Main Model (with vision support)</p>
+          <pre class="quickstart-code"><code>Qwen3VL-4B-Instruct-Q4_K_M.gguf
+mmproj-Qwen3VL-4B-Instruct-F16.gguf</code></pre>
+        </div>
+        <p><strong>Alternative options:</strong></p>
+        <ul>
+          <li><code>Qwen3VL-2B-Instruct-Q4_K_M.gguf</code> — Lighter, faster, less VRAM</li>
+          <li><code>Qwen3-VL-8B-Instruct-Q4_K_M.gguf</code> — More capable, requires more VRAM</li>
+          <li><code>gpt-oss-20b-Q4_K_M.gguf</code> — Text-only, larger model</li>
+        </ul>
+
+        <h3>Embedding Model</h3>
+        <p>Used for memory, RAG, and semantic search:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Embedding Model</p>
+          <pre class="quickstart-code"><code>Qwen3-Embedding-0.6B-Q8_0.gguf</code></pre>
+        </div>
+
+        <h3>Vision Model</h3>
+        <p>For image understanding (when main model is text-only). The Qwen3VL models above have built-in vision support:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Vision Model (standalone)</p>
+          <pre class="quickstart-code"><code>Qwen3VL-2B-Instruct-Q4_K_M.gguf
+mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf</code></pre>
+        </div>
+
+        <h3>Tool Selection Model (Optional)</h3>
+        <p>Fine-tuned for function calling, improves tool accuracy:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Tool Selection Model</p>
+          <pre class="quickstart-code"><code>Qwen3-4B-Function-Calling-Pro.gguf</code></pre>
+        </div>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(76,175,80,.15); border-left:4px solid #4caf50; border-radius:4px;">
+          <strong>Download models from:</strong> <a href="https://huggingface.co/models?sort=trending&search=gguf" target="_blank" rel="noopener">Hugging Face</a> — Search for the GGUF versions. Place them in the <code>models/</code> folder.
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="step-1-install">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Step 1: Install HomeClaw</h2>
+        <p>Clone the repository and run the installation script for your platform.</p>
+
+        <h3>Clone Repository</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Clone HomeClaw</p>
+          <pre class="quickstart-code"><code>git clone https://github.com/allenpeng0705/HomeClaw.git
+cd HomeClaw</code></pre>
+        </div>
+
+        <h3>Run Install Script</h3>
+        <p>Choose the script for your operating system:</p>
+
+        <div class="install-tabs">
+          <div class="install-tab-group">
+            <div class="install-tab active" data-tab="mac-linux">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"></path>
+              </svg>
+              Mac / Linux
+            </div>
+            <div class="install-tab" data-tab="windows">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+              Windows
+            </div>
+          </div>
+
+          <div class="install-tab-content active" id="mac-linux">
+            <div class="doc-keys">
+              <p class="doc-keys-title">Install on Mac/Linux</p>
+              <pre class="quickstart-code"><code>chmod +x install.sh
+./install.sh</code></pre>
+            </div>
+            <p style="margin-top:1rem;">The script will:</p>
+            <ul>
+              <li>Install Python dependencies</li>
+              <li>Download llama.cpp binaries</li>
+              <li>Download default models (optional)</li>
+              <li>Create default configuration files</li>
+            </ul>
+          </div>
+
+          <div class="install-tab-content" id="windows">
+            <div class="doc-keys">
+              <p class="doc-keys-title">Install on Windows (PowerShell)</p>
+              <pre class="quickstart-code"><code>.\install.ps1</code></pre>
+            </div>
+            <div class="doc-keys" style="margin-top:1rem;">
+              <p class="doc-keys-title">Or use Command Prompt</p>
+              <pre class="quickstart-code"><code>install.bat</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <p style="margin-top:1.5rem;"><a href="install.html">→ Detailed installation guide</a></p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="step-2-run-core">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Step 2: Run Core</h2>
+        <p>Start the HomeClaw Core server to begin using your AI assistant.</p>
+
+        <h3>Start Core</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Start HomeClaw Core</p>
+          <pre class="quickstart-code"><code>python -m main start</code></pre>
+        </div>
+
+        <h3>What Happens</h3>
+        <ul>
+          <li>Core starts on default port <strong>9000</strong></li>
+          <li>WebChat becomes available at <code>http://127.0.0.1:9000</code></li>
+          <li>API endpoints are ready for Companion app</li>
+          <li>Default model configuration is loaded from <code>config/llm.yml</code></li>
+        </ul>
+
+        <h3>Verify Core is Running</h3>
+        <p>Open your browser and visit:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">WebChat URL</p>
+          <pre class="quickstart-code"><code>http://127.0.0.1:9000</code></pre>
+        </div>
+
+        <h3>Configure Models (Optional)</h3>
+        <p>Edit <code>config/llm.yml</code> to configure your models:</p>
+        <ul>
+          <li><strong>Local models:</strong> Place GGUF files in <code>models/</code> folder</li>
+          <li><strong>Cloud models:</strong> Add API keys for OpenAI, Anthropic, etc.</li>
+          <li><strong>Mix Mode:</strong> Enable automatic routing between local and cloud</li>
+        </ul>
+        <p><a href="use-homeclaw.html">→ How to configure models</a></p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="step-3-companion">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Step 3: Companion App</h2>
+        <p>Download and configure the Companion app for the best HomeClaw experience.</p>
+
+        <h3>Download Companion App</h3>
+        <p>Get the app for your platform:</p>
+
+        <div class="download-grid">
+          <a href="https://github.com/allenpeng0705/HomeClaw/releases" target="_blank" rel="noopener" class="download-card">
+            <div class="download-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                <line x1="12" y1="18" x2="12.01" y2="18"></line>
+              </svg>
+            </div>
+            <div class="download-info">
+              <h4>iPhone</h4>
+              <p>App Store (coming soon) or build from source</p>
+            </div>
+          </a>
+          <a href="https://github.com/allenpeng0705/HomeClaw/releases" target="_blank" rel="noopener" class="download-card">
+            <div class="download-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                <line x1="12" y1="18" x2="12.01" y2="18"></line>
+              </svg>
+            </div>
+            <div class="download-info">
+              <h4>Android</h4>
+              <p>Download APK from GitHub Releases</p>
+            </div>
+          </a>
+          <a href="https://github.com/allenpeng0705/HomeClaw/releases" target="_blank" rel="noopener" class="download-card">
+            <div class="download-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+            </div>
+            <div class="download-info">
+              <h4>Mac</h4>
+              <p>Download .dmg from GitHub Releases</p>
+            </div>
+          </a>
+          <a href="https://github.com/allenpeng0705/HomeClaw/releases" target="_blank" rel="noopener" class="download-card">
+            <div class="download-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+            </div>
+            <div class="download-info">
+              <h4>Windows</h4>
+              <p>Download .exe from GitHub Releases</p>
+            </div>
+          </a>
+        </div>
+
+        <h3>Connect to Core</h3>
+        <ol>
+          <li>Open Companion app</li>
+          <li>Go to <strong>Settings</strong></li>
+          <li>Enter Core URL: <code>http://127.0.0.1:9000</code> (for local)</li>
+          <li>If authentication is enabled, enter your API key</li>
+          <li>Tap <strong>Connect</strong></li>
+        </ol>
+
+        <h3>Features</h3>
+        <ul>
+          <li><strong>Chat:</strong> Talk to your AI assistant</li>
+          <li><strong>Friends:</strong> AI friends and family members</li>
+          <li><strong>Manage Core:</strong> Edit configuration files</li>
+          <li><strong>Skills:</strong> Install skills from ClawHub</li>
+        </ul>
+
+        <p><a href="companion-app.html">→ Companion app guide</a></p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="step-4-portal">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Step 4: Portal (Optional)</h2>
+        <p>Use the Portal web UI to manage and configure HomeClaw easily.</p>
+
+        <h3>Start Portal</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Start Portal</p>
+          <pre class="quickstart-code"><code>python -m main portal</code></pre>
+        </div>
+
+        <h3>Access Portal</h3>
+        <p>Open your browser and navigate to:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Portal URL</p>
+          <pre class="quickstart-code"><code>http://127.0.0.1:18472</code></pre>
+        </div>
+
+        <h3>Portal Features</h3>
+        <ul>
+          <li><strong>Configuration:</strong> Edit core.yml, llm.yml, user.yml</li>
+          <li><strong>User Management:</strong> Add users and AI friends</li>
+          <li><strong>Skills:</strong> Search and install from ClawHub</li>
+          <li><strong>Start/Stop:</strong> Control Core and channels</li>
+        </ul>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(33,150,243,.15); border-left:4px solid #2196f3; border-radius:4px;">
+          <strong>Note:</strong> Portal is for local management only. It cannot be accessed remotely.
+        </div>
+
+        <p><a href="portal.html">→ Portal guide</a></p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="step-5-remote">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Step 5: Remote Access</h2>
+        <p>Set up remote access to use HomeClaw from anywhere.</p>
+
+        <h3>Enable Authentication</h3>
+        <p>First, secure your Core with API key authentication:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Enable auth in config/core.yml</p>
+          <pre class="quickstart-code"><code>auth_enable: true
+auth_api_key: your-secure-api-key-here</code></pre>
+        </div>
+
+        <h3>Choose a Tunnel Method</h3>
+        <div class="tunnel-options">
+          <div class="tunnel-option">
+            <h4>Pinggy (Recommended)</h4>
+            <p>Built-in support with QR code scanning</p>
+            <div class="doc-keys">
+              <p class="doc-keys-title">Configure in core.yml</p>
+              <pre class="quickstart-code"><code>pinggy:
+  token: your-pinggy-token
+  enabled: true</code></pre>
+            </div>
+          </div>
+          <div class="tunnel-option">
+            <h4>Cloudflare Tunnel</h4>
+            <p>Free, reliable, no account needed</p>
+            <div class="doc-keys">
+              <p class="doc-keys-title">Start tunnel</p>
+              <pre class="quickstart-code"><code>cloudflared tunnel --url http://localhost:9000</code></pre>
+            </div>
+          </div>
+          <div class="tunnel-option">
+            <h4>Tailscale</h4>
+            <p>Private mesh VPN, works like local network</p>
+            <div class="doc-keys">
+              <p class="doc-keys-title">Install and connect</p>
+              <pre class="quickstart-code"><code>tailscale up</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <h3>Connect Companion Remotely</h3>
+        <ol>
+          <li>Start your tunnel service</li>
+          <li>Get the public URL (e.g., <code>https://xxx.trycloudflare.com</code>)</li>
+          <li>In Companion app, enter this URL as Core URL</li>
+          <li>Enter your API key</li>
+          <li>Connect and chat from anywhere</li>
+        </ol>
+
+        <p><a href="remote-access.html">→ Remote access guide</a></p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="step-6-cursor-claude">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Step 6: Cursor & Claude Code</h2>
+        <p>Use Cursor IDE and Claude Code from your phone for remote coding.</p>
+
+        <h3>Prerequisites</h3>
+        <ul>
+          <li><strong>Cursor IDE</strong> installed on your dev machine</li>
+          <li><strong>Claude Code CLI</strong> installed (<code>npm install -g @anthropic-ai/claude-code</code>)</li>
+          <li><strong>API Keys:</strong> Cursor API key or Anthropic/Minimax key</li>
+        </ul>
+
+        <h3>Start Cursor Bridge</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Start the bridge on your dev machine</p>
+          <pre class="quickstart-code"><code>python -m external_plugins.cursor_bridge.server</code></pre>
+        </div>
+
+        <h3>Add Friends in user.yml</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Add Cursor and ClaudeCode friends</p>
+          <pre class="quickstart-code"><code>users:
+  - id: yourname
+    friends:
+      - name: Cursor
+        preset: cursor
+      - name: ClaudeCode
+        preset: claudecode</code></pre>
+        </div>
+
+        <h3>Use from Companion</h3>
+        <ol>
+          <li>Open Companion app</li>
+          <li>Select <strong>Cursor</strong> or <strong>ClaudeCode</strong> friend</li>
+          <li>Say "Open /path/to/project in Cursor"</li>
+          <li>Send coding tasks like "Add unit tests for auth module"</li>
+          <li>See results returned to your phone</li>
+        </ol>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(76,175,80,.15); border-left:4px solid #4caf50; border-radius:4px;">
+          <strong>Tip:</strong> For mobile use, set up remote access first so your phone can reach Core, and ensure Core can reach the bridge on your dev machine.
+        </div>
+
+        <p><a href="cursor-claudecode.html">→ Cursor & Claude Code guide</a></p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="next-steps">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Next Steps</h2>
+        <p>Now that you have HomeClaw running, explore more features:</p>
+
+        <div class="next-steps-grid">
+          <a href="use-homeclaw.html" class="next-step-card">
+            <h4>Configure Models</h4>
+            <p>Set up local models, cloud APIs, and Mix Mode</p>
+          </a>
+          <a href="family-social.html" class="next-step-card">
+            <h4>Family Social Network</h4>
+            <p>Add family members and AI friends</p>
+          </a>
+          <a href="skills-clawhub.html" class="next-step-card">
+            <h4>Install Skills</h4>
+            <p>Extend HomeClaw with skills from ClawHub</p>
+          </a>
+          <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener" class="next-step-card">
+            <h4>Full Documentation</h4>
+            <p>Complete guides and API reference</p>
+          </a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2024 HomeClaw. <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">GitHub</a> | <a href="mailto:shileipeng@gmail.com">Contact</a></p>
+    </div>
+  </footer>
+
+  <script>
+    document.querySelectorAll('.install-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.install-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.install-tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(tab.dataset.tab).classList.add('active');
+      });
+    });
+  </script>
+</body>
+</html>

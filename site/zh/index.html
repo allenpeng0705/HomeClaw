@@ -10,10 +10,6 @@
   <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
-  <!-- Decorative elements -->
-  <div class="decorative-circle decorative-circle-1"></div>
-  <div class="decorative-circle decorative-circle-2"></div>
-  
   <header class="site-nav-wrap">
   <nav class="site-nav" aria-label="主导航">
     <div class="site-nav-inner">
@@ -32,27 +28,10 @@
       </button>
       
       <div class="site-links">
-        <div class="nav-group">
-          <a href="index.html" class="nav-link active">首页</a>
-          <a href="docs.html#quickstart" class="nav-link">快速开始</a>
-          <a href="docs.html" class="nav-link">文档</a>
-        </div>
-        <div class="nav-group">
-          <a href="channels-companion.html" class="nav-link">渠道与伴侣</a>
-          <a href="plugins-skills.html" class="nav-link">插件与技能</a>
-          <a href="core-config.html" class="nav-link">Core 配置</a>
-        </div>
-        <div class="nav-group">
-          <a href="docs.html#deploy-cloud" class="nav-link">部署到云</a>
-          <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener" class="nav-link">完整文档</a>
-          <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener" class="nav-link github-link">
-            <svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-            GitHub
-          </a>
-        </div>
-        <div class="nav-group lang-group">
-          <span class="lang-switch"><a href="../en/index.html">EN</a> | 中文</span>
-        </div>
+        <a href="index.html" class="nav-link active">首页</a>
+        <a href="quickstart.html" class="nav-link">快速开始</a>
+        <a href="docs.html" class="nav-link">文档</a>
+        <span class="lang-switch"><a href="../en/index.html">EN</a> | 中文</span>
       </div>
     </div>
   </nav>
@@ -61,35 +40,98 @@
   <main>
     <section class="hero container">
       <div class="hero-content">
+        <div class="hero-logo-wrap">
+          <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="hero-logo" width="80" height="80">
+        </div>
         <div class="hero-text">
           <h1 class="hero-title">HomeClaw</h1>
           <p class="hero-tagline">运行在你机器上的 AI 助手。你的数据，你做主。</p>
-          <p class="hero-platform">
-            支持 <strong>Mac、Windows、Linux</strong>（Python 技术栈）。 
-            <strong>伴侣应用</strong>（Mac、Windows、iPhone、Android）用于聊天、 
-            <strong>好友</strong>（AI + 用户间）与 <strong>技能</strong>（经 ClawHub 安装）。 
-            <strong>渠道</strong>（WebChat、Telegram、Discord 等）及任意语言插件。
-          </p>
           <div class="hero-cta">
             <a href="https://github.com/allenpeng0705/HomeClaw" class="btn btn-primary" target="_blank" rel="noopener">
               <svg class="btn-icon" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
               GitHub
             </a>
+            <a href="quickstart.html" class="btn btn-secondary">快速开始</a>
             <a href="https://allenpeng0705.github.io/HomeClaw/" class="btn btn-secondary" target="_blank" rel="noopener">文档站</a>
-            <a href="docs.html" class="btn btn-secondary">本站文档</a>
           </div>
         </div>
-        <div class="hero-image">
-          <div class="hero-img-container">
-            <img src="../assets/homeclaw-promo-zh.png" alt="HomeClaw：混合模式、插件、技能、渠道、伴侣应用、多智能体" class="hero-img" width="720" height="auto">
-            <div class="hero-img-overlay">
-              <div class="hero-features">
-                <span class="hero-feature-badge">混合模式</span>
-                <span class="hero-feature-badge">插件</span>
-                <span class="hero-feature-badge">技能</span>
-                <span class="hero-feature-badge">渠道</span>
-                <span class="hero-feature-badge">伴侣应用</span>
-              </div>
+      </div>
+
+      <div class="hero-features">
+        <div class="hero-feature-grid">
+          <div class="hero-feature-item">
+            <div class="hero-feature-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+            </div>
+            <div class="hero-feature-content">
+              <h3>本地优先</h3>
+              <p>运行在 Mac、Windows、Linux。数据留在你的机器上。</p>
+            </div>
+          </div>
+          <div class="hero-feature-item">
+            <div class="hero-feature-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+              </svg>
+            </div>
+            <div class="hero-feature-content">
+              <h3>混合模式</h3>
+              <p>自动在本地和云端模型间路由。节省成本，保持质量。</p>
+            </div>
+          </div>
+          <div class="hero-feature-item">
+            <div class="hero-feature-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                <polyline points="2 17 12 22 22 17"></polyline>
+                <polyline points="2 12 12 17 22 12"></polyline>
+              </svg>
+            </div>
+            <div class="hero-feature-content">
+              <h3>插件与技能</h3>
+              <p>用任意语言扩展插件。从 ClawHub 安装技能。</p>
+            </div>
+          </div>
+          <div class="hero-feature-item">
+            <div class="hero-feature-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+            </div>
+            <div class="hero-feature-content">
+              <h3>家庭社交</h3>
+              <p>私人社交网络。AI 好友、家庭成员、安全消息。</p>
+            </div>
+          </div>
+          <div class="hero-feature-item">
+            <div class="hero-feature-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                <line x1="12" y1="18" x2="12.01" y2="18"></line>
+              </svg>
+            </div>
+            <div class="hero-feature-content">
+              <h3>伴侣应用</h3>
+              <p>Mac、Windows、iPhone、Android。聊天、管理、远程控制。</p>
+            </div>
+          </div>
+          <div class="hero-feature-item">
+            <div class="hero-feature-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="16 18 22 12 16 6"></polyline>
+                <polyline points="8 6 2 12 8 18"></polyline>
+              </svg>
+            </div>
+            <div class="hero-feature-content">
+              <h3>Cursor 与 ClaudeCode</h3>
+              <p>从手机远程编码。开发机上的 AI 代理。</p>
             </div>
           </div>
         </div>
@@ -98,7 +140,7 @@
       <div class="start-here">
         <h2>从这里开始 — 快速找到所需</h2>
         <div class="feature-grid">
-          <div class="feature-card">
+          <a href="install.html" class="feature-card">
             <div class="feature-card-icon">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
@@ -107,10 +149,10 @@
               </svg>
             </div>
             <h3>如何安装</h3>
-            <p><strong>第一步：</strong>先克隆仓库，再运行安装脚本。<strong>Mac/Linux：</strong><code>chmod +x install.sh</code> 后 <code>./install.sh</code>，或直接 <code>bash install.sh</code>。<strong>Windows：</strong>使用 <strong>PowerShell</strong> 运行 <code>.\install.ps1</code> 或 <strong><code>install.bat</code></strong>（若提示“未数字签名”：使用 <code>install.bat</code> 或 <code>powershell -ExecutionPolicy Bypass -File .\install.ps1</code>）。脚本完成后会打开 Portal。</p>
-            <a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">安装指南 →</a>
-          </div>
-          <div class="feature-card">
+            <p><strong>第一步：</strong>先克隆仓库，再运行安装脚本。<strong>Mac/Linux：</strong><code>chmod +x install.sh</code> 后 <code>./install.sh</code>，或直接 <code>bash install.sh</code>。<strong>Windows：</strong>使用 <strong>PowerShell</strong> 运行 <code>.\install.ps1</code> 或 <strong><code>install.bat</code></strong>（若提示"未数字签名"：使用 <code>install.bat</code> 或 <code>powershell -ExecutionPolicy Bypass -File .\install.ps1</code>）。脚本完成后会打开 Portal。</p>
+            <span class="feature-card-link">安装指南 →</span>
+          </a>
+          <a href="use-homeclaw.html" class="feature-card">
             <div class="feature-card-icon">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
@@ -118,9 +160,9 @@
             </div>
             <h3>如何使用 HomeClaw</h3>
             <p>启动 Core，然后通过伴侣应用或渠道（WebChat、Telegram 等）聊天。</p>
-            <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">入门指南 →</a>
-          </div>
-          <div class="feature-card">
+            <span class="feature-card-link">入门指南 →</span>
+          </a>
+          <a href="companion-app.html" class="feature-card">
             <div class="feature-card-icon">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
@@ -130,9 +172,9 @@
             </div>
             <h3>伴侣应用</h3>
             <p>在哪里找：仓库中的 <strong>clients/HomeClawApp/</strong>。支持 Mac、Windows、iPhone、Android。</p>
-            <a href="channels-companion.html#companion-platforms">查找与使用伴侣 →</a>
-          </div>
-          <div class="feature-card">
+            <span class="feature-card-link">查找与使用伴侣 →</span>
+          </a>
+          <a href="portal.html" class="feature-card">
             <div class="feature-card-icon">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="12" r="10"></circle>
@@ -142,23 +184,59 @@
             </div>
             <h3>Portal</h3>
             <p>管理配置、启动 Core/渠道的 Web 界面。<code>python -m main portal</code> → http://127.0.0.1:18472</p>
-            <a href="https://allenpeng0705.github.io/HomeClaw/platform/#portal" target="_blank" rel="noopener">Portal 说明 →</a>
-          </div>
+            <span class="feature-card-link">Portal 说明 →</span>
+          </a>
+          <a href="family-social.html" class="feature-card">
+            <div class="feature-card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+            </div>
+            <h3>家庭社交网络</h3>
+            <p>为您的家人创建一个私人社交网络。在家庭网络内安全地分享时刻、聊天和保持联系。</p>
+            <span class="feature-card-link">家庭网络 →</span>
+          </a>
+          <a href="remote-access.html" class="feature-card">
+            <div class="feature-card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path>
+                <path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path>
+                <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path>
+                <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path>
+              </svg>
+            </div>
+            <h3>远程访问</h3>
+            <p>使用 Pinggy、Cloudflare Tunnel 或 Ngrok 从任何地方访问 HomeClaw。轻松设置安全的远程连接。</p>
+            <span class="feature-card-link">远程访问 →</span>
+          </a>
+          <a href="skills-clawhub.html" class="feature-card">
+            <div class="feature-card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                <polyline points="2 17 12 22 22 17"></polyline>
+                <polyline points="2 12 12 17 22 12"></polyline>
+              </svg>
+            </div>
+            <h3>ClawHub 技能</h3>
+            <p>从 ClawHub 注册表扩展 HomeClaw 技能。轻松搜索、下载、转换和安装 OpenClaw 技能。</p>
+            <span class="feature-card-link">ClawHub 技能 →</span>
+          </a>
+          <a href="cursor-claudecode.html" class="feature-card">
+            <div class="feature-card-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="16 18 22 12 16 6"></polyline>
+                <polyline points="8 6 2 12 8 18"></polyline>
+              </svg>
+            </div>
+            <h3>Cursor 和 ClaudeCode</h3>
+            <p>从手机使用 Cursor IDE 和 Claude Code CLI。打开项目、运行 AI 代理并远程查看结果。</p>
+            <span class="feature-card-link">Cursor &amp; ClaudeCode →</span>
+          </a>
         </div>
       </div>
-    </section>
-
-    <section class="section container quickstart-section">
-      <h2>快速开始</h2>
-      <p class="lead">运行 HomeClaw 后，可通过<strong>伴侣应用</strong>和/或<strong>渠道</strong>（WebChat、Telegram 等）聊天。它们都连接同一个 <strong>Core</strong>——只需启动一次 Core，即可同时使用应用和任意渠道。</p>
-      <ol class="quickstart-steps">
-        <li><strong>安装（第一步）</strong> — 运行安装脚本。若尚未克隆仓库：<code>git clone https://github.com/allenpeng0705/HomeClaw.git</code>，<code>cd HomeClaw</code>。然后 <strong>Mac/Linux：</strong><code>chmod +x install.sh</code>（一次性）再 <code>./install.sh</code>，或 <code>bash install.sh</code>。<strong>Windows：</strong>打开 <strong>PowerShell</strong>（非 CMD），运行 <code>.\install.ps1</code> 或 <strong><code>install.bat</code></strong>；若提示“未数字签名”请使用 <code>install.bat</code> 或运行 <code>powershell -ExecutionPolicy Bypass -File .\install.ps1</code>（或查看<a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">安装指南</a>）。脚本会配置依赖并打开 <strong>Portal</strong> http://127.0.0.1:18472。（可选：<a href="https://allenpeng0705.github.io/HomeClaw/install/" target="_blank" rel="noopener">手动安装</a> 使用 <code>pip install -r requirements.txt</code>。）</li>
-        <li><strong>配置（可选）</strong> — 编辑 <code>config/core.yml</code> 和 <code>config/user.yml</code>，或使用 Portal。云端模型需设 API Key；本地模型见 <code>llama.cpp-master/README.md</code>。</li>
-        <li><strong>启动 Core</strong> — <code>python -m main start</code>。Core（端口 9000）是伴侣应用与所有渠道的统一后端。</li>
-        <li><strong>聊天</strong> — <strong>伴侣应用：</strong>从 <code>clients/HomeClawApp/</code> 安装，在设置中将 Core URL 设为 <code>http://127.0.0.1:9000</code>，在 user.yml 中添加用户，打开聊天。<strong>渠道：</strong>Core 运行后执行 <code>python -m channels.run webchat</code> → http://localhost:8014（在 <code>channels/.env</code> 中设置 <code>CORE_URL</code>）。可同时使用；同一智能体、同一记忆。</li>
-      </ol>
-      <p><strong>Windows：</strong>步骤相同；若出现编译错误，请安装 <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">Visual C++ 生成工具</a>（见完整文档）。运行 <code>python -m main doctor</code> 可检查配置与 LLM 连通性。</p>
-      <p><a href="docs.html#quickstart" class="btn btn-secondary">本站完整快速开始</a> · <a href="https://allenpeng0705.github.io/HomeClaw/getting-started/" target="_blank" rel="noopener">入门（完整文档）</a></p>
     </section>
 
     <section class="section container">
@@ -250,28 +328,7 @@
     <section class="section container">
       <h2>快速链接</h2>
       <div class="feature-grid">
-        <div class="feature-card">
-          <div class="feature-card-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-            </svg>
-          </div>
-          <h3>GitHub</h3>
-          <p>源码、Issues、发布。</p>
-          <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">仓库 →</a>
-        </div>
-        <div class="feature-card">
-          <div class="feature-card-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
-            </svg>
-          </div>
-          <h3>完整文档</h3>
-          <p>安装、配置、插件、混合模式、渠道、远程访问。</p>
-          <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">文档站 →</a>
-        </div>
-        <div class="feature-card">
+        <a href="docs.html#deploy-cloud" class="feature-card">
           <div class="feature-card-icon">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
@@ -281,9 +338,9 @@
           </div>
           <h3>部署到云</h3>
           <p>在阿里云 ECS、AWS EC2 或任意 VPS 上运行，常驻在线。</p>
-          <a href="docs.html#deploy-cloud">部署指南 →</a>
-        </div>
-        <div class="feature-card">
+          <span class="feature-card-link">部署指南 →</span>
+        </a>
+        <a href="plugins-skills.html" class="feature-card">
           <div class="feature-card-icon">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
@@ -295,8 +352,8 @@
           </div>
           <h3>编写插件与技能</h3>
           <p>如何编写插件（任意语言）与技能。示例与未来插件/技能站。</p>
-          <a href="plugins-skills.html">指南 →</a>
-        </div>
+          <span class="feature-card-link">指南 →</span>
+        </a>
       </div>
     </section>
 
@@ -386,12 +443,6 @@
       featureCards.forEach((card, index) => {
         card.classList.add('animate-on-scroll', `delay-${index * 100}`);
       });
-      
-      // Quickstart section
-      const quickstartSection = document.querySelector('.quickstart-section');
-      if (quickstartSection) {
-        quickstartSection.classList.add('animate-on-scroll');
-      }
       
       // Contact section
       const contactSection = document.querySelector('#contact');
