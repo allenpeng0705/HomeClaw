@@ -3,6 +3,9 @@
 #   pip install -r requirements.txt && pip install -r requirements-document.txt
 # install.sh / install.ps1 run this automatically.
 numba>=0.59.0
-opencv-python==4.13.0.90
-unstructured-inference==0.8.1
+# unstructured[all-docs]==0.18.2 requires unstructured-inference>=1.0.5.
+# Pin 1.1.1 (not 1.1.2+): newer inference requires opencv-python>=4.12, which
+# conflicts with the stable opencv pin below for numpy<2 stacks.
+opencv-python==4.10.0.84
+unstructured-inference==1.1.1
 unstructured[all-docs]==0.18.2

@@ -432,12 +432,15 @@ trae_agent_enabled: false
 # When true, Core starts the Cursor Bridge on startup. If the bridge reports "agent not found", set cursor_bridge_agent_path to the full path (PowerShell: (Get-Command agent).Source).
 cursor_bridge_auto_start: true
 # cursor_bridge_port: 3104   # optional; default 3104; must match plugins/CursorBridge/plugin.yaml config.base_url
-# cursor_bridge_agent_path: "C:\\Users\\You\\AppData\\Local\\Programs\\cursor\\agent.exe"   # optional; use when Core starts the bridge and agent is not in Core's PATH
+# cursor_bridge_agent_path: "C:\\Users\\You\\AppData\\Local\\Programs\\cursor\\agent.exe"   # Windows: (Get-Command agent).Source
+# cursor_bridge_agent_path: "/Users/you/.local/bin/agent"   # macOS/Linux: after `curl https://cursor.com/install -fsS | bash`, run `which agent` and paste the full path here (Core often lacks ~/.local/bin in PATH)
 # cursor_bridge_cursor_cli_path: "C:\\Users\\You\\AppData\\Local\\Programs\\cursor\\cursor.cmd"   # optional; use when "open project" opens File Explorer instead of Cursor (PowerShell: (Get-Command cursor).Source)
 # cursor_bridge_cursor_api_key: "your-cursor-api-key"   # optional; use when agent says "Authentication required" (or set CURSOR_API_KEY in env before starting Core). Prefer env for secrets.
 # cursor_bridge_bridge_api_key: "set-a-random-secret"   # optional; protects the bridge HTTP API. When set, Core starts bridge with CURSOR_BRIDGE_API_KEY and sends X-HomeClaw-Bridge-Key on calls.
 cursor_bridge_forward_logs: true   # set true to see bridge/agent logs in Core's terminal (debug "Agent exited with code 1")
-cursor_bridge_claude_settings_path: "C:\\Users\\PS\\.claude\\settings.json"   # optional; full path to Claude Code settings.json so the bridge loads auth/env from that file (fixes 401 when bridge runs under a different user)
+#cursor_bridge_claude_settings_path: "C:\\Users\\PS\\.claude\\settings.json"   # optional; full path to Claude Code settings.json so the bridge loads auth/env from that file (fixes 401 when bridge runs under a different user)
+cursor_bridge_claude_continue_session: true   # default true: claude -p uses --resume <id> per project when stored (else --continue). Set false for a new session every message.
+cursor_bridge_cursor_continue_session: true   # default true: Cursor agent -p uses --resume <id> per project when stored (else --continue). Set false for a new session every message.
 #cursor_bridge_trae_agent_path: "D:\\mygithub\\HomeClaw\\tools\\trae-agent\\.venv\\Scripts\\trae-cli.exe"   # optional; full path to trae-cli (from clone: uv sync then .venv\Scripts\trae-cli.exe, or after pip install -e .)
 #cursor_bridge_trae_agent_config: "D:\\mygithub\\HomeClaw\\tools\\trae-agent\\trae_config.yaml"   # optional; full path to trae_config.yaml (API key + model). See github.com/bytedance/trae-agent
 

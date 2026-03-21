@@ -1158,7 +1158,11 @@ class CoreService {
     if (files != null && files.isNotEmpty) body['files'] = files;
     if (cursorAgentYolo != null) body['cursor_agent_yolo'] = cursorAgentYolo;
     if (claudeSkipPermissions != null) body['claude_skip_permissions'] = claudeSkipPermissions;
-    if (useAsync) body['async'] = true;
+    if (useAsync) {
+      body['async'] = true;
+      // Lets Core stream Cursor CLI stream-json into GET /inbound/result text_preview while polling (Cursor bridge run_agent).
+      if (useAsyncForBridge) body['bridge_agent_stream_preview'] = true;
+    }
     if (useStreamPath) body['stream'] = true;
 
     // Establish WebSocket for push (reminders, cron) for both local and remote Core.
@@ -1199,9 +1203,11 @@ class CoreService {
     return result;
   }
 
-  /// GET /api/cursor-bridge/status (Companion auth). Returns active_cwd (or empty string).
+  /// GET /api/cursor-bridge/status (Companion auth). Full JSON may include:
+  /// `active_cwd`, `backend`, `cursor_stored_session_active`, `claude_stored_session_active`,
+  /// `cursor_stored_sessions_count`, `claude_stored_sessions_count`.
   /// backend: "cursor" | "claude" | "trae" (default "cursor").
-  Future<String> getCursorBridgeActiveCwd({String backend = 'cursor'}) async {
+  Future<Map<String, dynamic>> getCursorBridgeStatus({String backend = 'cursor'}) async {
     final b = backend.trim().toLowerCase();
     final eff = (b == 'trae') ? 'trae' : ((b == 'claude') ? 'claude' : 'cursor');
     final url = Uri.parse('$_baseUrl/api/cursor-bridge/status?backend=$eff');
@@ -1216,7 +1222,15 @@ class CoreService {
       final short = (response.body).toString();
       throw Exception(short.isNotEmpty ? short : 'Status failed (${response.statusCode})');
     }
-    final map = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    final raw = jsonDecode(response.body);
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return <String, dynamic>{};
+  }
+
+  /// Active project cwd on the bridge machine (see [getCursorBridgeStatus] for session flags).
+  Future<String> getCursorBridgeActiveCwd({String backend = 'cursor'}) async {
+    final map = await getCursorBridgeStatus(backend: backend);
     return (map['active_cwd'] as String?)?.trim() ?? '';
   }
 
@@ -1727,7 +1741,12 @@ class CoreService {
       }
       final status = map?['status'] as String?;
       if (response.statusCode == 202 && status == 'pending') {
-        onProgress('Still working…');
+        final preview = (map?['text_preview'] as String?)?.trim();
+        if (preview != null && preview.isNotEmpty) {
+          onProgress(preview);
+        } else {
+          onProgress('Still working…');
+        }
         await Future<void>.delayed(Duration(seconds: 2));
         continue;
       }

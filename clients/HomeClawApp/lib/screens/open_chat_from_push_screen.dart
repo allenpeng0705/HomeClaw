@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/homeclaw_snackbars.dart';
 
 import '../core_service.dart';
 import '../utils/friend_localization.dart';
@@ -98,7 +99,7 @@ class _OpenChatFromPushScreenState extends State<OpenChatFromPushScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    HomeClawInlineErrorCard(message: _error!, textAlign: TextAlign.center),
                     const SizedBox(height: 16),
                     FilledButton(
                       onPressed: () => Navigator.maybeOf(context)?.maybePop(),

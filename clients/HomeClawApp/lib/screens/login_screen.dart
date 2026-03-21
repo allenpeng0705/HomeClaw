@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core_service.dart';
+import '../widgets/homeclaw_snackbars.dart';
 import 'friend_list_screen.dart';
 
 /// Login screen: Core URL, API key (persistent), username picklist, password.
@@ -232,7 +233,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             if (_error != null) ...[
               const SizedBox(height: 16),
-              SelectableText(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              HomeClawInlineErrorCard(message: _error!),
             ],
             const SizedBox(height: 24),
             FilledButton(
@@ -285,7 +286,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
     if (_error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Connect failed: $_error'), backgroundColor: Theme.of(context).colorScheme.errorContainer),
+        homeClawErrorSnackBar(context, 'Connect failed: $_error'),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connection refreshed')));

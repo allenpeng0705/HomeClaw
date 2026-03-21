@@ -6,10 +6,12 @@ HomeClaw can act as an **MCP client**: it connects to external [Model Context Pr
 
 ## 1. Install the MCP client
 
-The MCP client is **optional**. Install it when you want to use MCP servers:
+The MCP client is **optional**. The PyPI package **`mcp` requires Python 3.10+** (no wheels for 3.9). `requirements.txt` only installs it when `python_version >= "3.10"`.
+
+Install manually when you want MCP servers on a supported Python:
 
 ```bash
-pip install mcp
+pip install "mcp>=1.0.0"
 ```
 
 If `mcp` is not installed, the tools return a JSON error explaining that the package is required.

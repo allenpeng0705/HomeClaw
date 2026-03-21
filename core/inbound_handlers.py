@@ -34,6 +34,9 @@ async def handle_inbound_request(
 
 async def run_async_inbound(core: Any, request_id: str, request: InboundRequest) -> None:
     """Background task for async /inbound: run the request and store result for GET /inbound/result. Same response shape as sync /inbound. Respects reply_accepts: text-only clients get only text or image_links. Supports cancellation via POST /inbound/cancel."""
+    from core.inbound_async_context import ASYNC_INBOUND_REQUEST_ID
+
+    _tok = ASYNC_INBOUND_REQUEST_ID.set(request_id)
     try:
         ok, text, status, image_paths = await handle_inbound_request(core, request)
         try:
@@ -97,9 +100,14 @@ async def run_async_inbound(core: Any, request_id: str, request: InboundRequest)
                             pass
             except Exception:
                 pass
-        core._inbound_async_results[request_id] = entry
+        _lk = getattr(core, "_inbound_async_results_lock", None)
+        if _lk is not None:
+            with _lk:
+                core._inbound_async_results[request_id] = entry
+        else:
+            core._inbound_async_results[request_id] = entry
     except asyncio.CancelledError:
-        core._inbound_async_results[request_id] = {
+        _ce = {
             "status": "cancelled",
             "ok": False,
             "text": "",
@@ -107,10 +115,16 @@ async def run_async_inbound(core: Any, request_id: str, request: InboundRequest)
             "error": "Request was cancelled by the client.",
             "created_at": time.time(),
         }
+        _lk = getattr(core, "_inbound_async_results_lock", None)
+        if _lk is not None:
+            with _lk:
+                core._inbound_async_results[request_id] = _ce
+        else:
+            core._inbound_async_results[request_id] = _ce
         logger.info("Async inbound request_id=%s was cancelled", request_id)
     except Exception as e:
         logger.exception(e)
-        core._inbound_async_results[request_id] = {
+        _ee = {
             "status": "done",
             "ok": False,
             "text": "",
@@ -118,7 +132,17 @@ async def run_async_inbound(core: Any, request_id: str, request: InboundRequest)
             "error": (str(e) or "Internal error")[:2000],
             "created_at": time.time(),
         }
+        _lk = getattr(core, "_inbound_async_results_lock", None)
+        if _lk is not None:
+            with _lk:
+                core._inbound_async_results[request_id] = _ee
+        else:
+            core._inbound_async_results[request_id] = _ee
     finally:
+        try:
+            ASYNC_INBOUND_REQUEST_ID.reset(_tok)
+        except Exception:
+            pass
         tasks = getattr(core, "_inbound_async_tasks", None)
         if isinstance(tasks, dict):
             tasks.pop(request_id, None)
@@ -201,6 +225,8 @@ async def handle_inbound_request_impl(
     loc = getattr(request, "location", None)
     if isinstance(loc, str) and loc.strip():
         request_metadata["location"] = loc.strip()[:2000]
+    if getattr(request, "bridge_agent_stream_preview", None):
+        request_metadata["bridge_agent_stream_preview"] = True
     inbound_user_id = (getattr(request, "user_id", None) or "").strip() or "companion"
     inbound_app_id = getattr(request, "app_id", None) or "homeclaw"
     _fid = getattr(request, "friend_id", None)

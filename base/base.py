@@ -106,8 +106,10 @@ class InboundRequest(BaseModel):
     cursor_agent_yolo: Optional[bool] = None
     # Claude Code preset only: merged into bridge run_agent as skip_permissions when set (true = --dangerously-skip-permissions). Omitted = strict headless (no skip).
     claude_skip_permissions: Optional[bool] = None
+    # When true with async: true, Core may stream Cursor CLI stream-json chunks into GET /inbound/result text_preview (Cursor bridge only; Claude falls back to final result).
+    bridge_agent_stream_preview: Optional[bool] = None
 
-    @field_validator("cursor_agent_yolo", "claude_skip_permissions", mode="before")
+    @field_validator("cursor_agent_yolo", "claude_skip_permissions", "bridge_agent_stream_preview", mode="before")
     @classmethod
     def _coerce_optional_bridge_flags(cls, v: Any) -> Any:
         """Accept true/false from JSON bool, 0/1, or common string forms (WebChat / loose clients)."""
@@ -1076,6 +1078,10 @@ class CoreMetadata:
     cursor_bridge_bridge_api_key: str = ""  # optional shared-secret to protect Cursor Bridge HTTP API. When set, Core passes CURSOR_BRIDGE_API_KEY to the bridge and also sends X-HomeClaw-Bridge-Key on HTTP calls.
     cursor_bridge_forward_logs: bool = False  # when True and cursor_bridge_auto_start, bridge stderr is not discarded so you see agent/bridge logs in Core's terminal (for debugging exit code 1 etc.)
     cursor_bridge_claude_settings_path: str = ""  # optional full path to Claude Code settings.json; when set, passed as CLAUDE_SETTINGS_PATH to the bridge (so it loads auth from that file). Set in config/skills_and_plugins.yml or core.yml.
+    # When true (default): bridge passes --continue to claude -p so each run resumes Claude Code's most recent session in the active project cwd (see code.claude.com headless docs). Set false for a fresh claude -p session on every Companion message.
+    cursor_bridge_claude_continue_session: bool = True
+    # When true (default): bridge passes --resume/--continue to Cursor CLI agent -p (see cursor.com/docs/cli). Set false for a fresh agent session on every Companion message.
+    cursor_bridge_cursor_continue_session: bool = True
 
     # When false (default): do not register plugins/TraeBridge, do not pass TRAE_AGENT_* to the bridge, and Trae preset replies with a config hint. Set true to enable Trae Agent (experimental).
     trae_agent_enabled: bool = False
@@ -1195,7 +1201,7 @@ class CoreMetadata:
                         _ext_data = yaml.safe_load(_f)
                     if isinstance(_ext_data, dict):
                         for _k, _v in _ext_data.items():
-                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k in ('tools', 'external_skills_dir', 'clawhub_download_dir', 'intent_router', 'planner_executor', 'identity_capabilities_shortcut', 'cursor_bridge_auto_start', 'cursor_bridge_port', 'cursor_bridge_agent_path', 'cursor_bridge_cursor_cli_path', 'cursor_bridge_cursor_api_key', 'cursor_bridge_bridge_api_key', 'cursor_bridge_forward_logs', 'cursor_bridge_claude_settings_path', 'trae_agent_enabled', 'cursor_bridge_trae_agent_path', 'cursor_bridge_trae_agent_config', 'claude_code_path', 'claude_code_api_key')):
+                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k in ('tools', 'external_skills_dir', 'clawhub_download_dir', 'intent_router', 'planner_executor', 'identity_capabilities_shortcut', 'cursor_bridge_auto_start', 'cursor_bridge_port', 'cursor_bridge_agent_path', 'cursor_bridge_cursor_cli_path', 'cursor_bridge_cursor_api_key', 'cursor_bridge_bridge_api_key', 'cursor_bridge_forward_logs', 'cursor_bridge_claude_settings_path', 'cursor_bridge_claude_continue_session', 'cursor_bridge_cursor_continue_session', 'trae_agent_enabled', 'cursor_bridge_trae_agent_path', 'cursor_bridge_trae_agent_config', 'claude_code_path', 'claude_code_api_key')):
                                 continue
                             if _k == 'identity_capabilities_shortcut' and not isinstance(_v, dict):
                                 logging.warning("skills_and_plugins config %s: identity_capabilities_shortcut must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
@@ -1572,6 +1578,8 @@ class CoreMetadata:
             cursor_bridge_bridge_api_key=(str(data.get('cursor_bridge_bridge_api_key') or '').strip()),
             cursor_bridge_forward_logs=bool(data.get('cursor_bridge_forward_logs', False)),
             cursor_bridge_claude_settings_path=(str(data.get('cursor_bridge_claude_settings_path') or '').strip()),
+            cursor_bridge_claude_continue_session=bool(data.get('cursor_bridge_claude_continue_session', True)),
+            cursor_bridge_cursor_continue_session=bool(data.get('cursor_bridge_cursor_continue_session', True)),
             trae_agent_enabled=bool(data.get('trae_agent_enabled', False)),
             cursor_bridge_trae_agent_path=(str(data.get('cursor_bridge_trae_agent_path') or '').strip()),
             cursor_bridge_trae_agent_config=(str(data.get('cursor_bridge_trae_agent_config') or '').strip()),

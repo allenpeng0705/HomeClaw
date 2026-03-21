@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:home_claw_app/l10n/app_localizations.dart';
 import '../core_service.dart';
+import '../widgets/homeclaw_snackbars.dart';
 import '../utils/friend_localization.dart';
 import 'add_ai_friend_screen.dart';
 import 'add_friend_screen.dart';
@@ -455,7 +456,7 @@ class _FriendTileState extends State<_FriendTile> {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to remove: $e'), backgroundColor: Theme.of(context).colorScheme.errorContainer),
+          homeClawErrorSnackBar(context, 'Failed to remove: $e'),
         );
       }
     }

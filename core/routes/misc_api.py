@@ -67,7 +67,22 @@ def get_api_cursor_bridge_status_handler(core):
             except Exception:
                 obj = {}
             active = (obj.get("active_cwd") or "").strip() if isinstance(obj, dict) else ""
-            return JSONResponse(content={"active_cwd": active})
+            payload: dict = {"active_cwd": active, "backend": backend}
+            if isinstance(obj, dict):
+                cid = (obj.get("cursor_stored_session_id") or "").strip()
+                lid = (obj.get("claude_stored_session_id") or "").strip()
+                payload["cursor_stored_session_active"] = bool(cid)
+                payload["claude_stored_session_active"] = bool(lid)
+                try:
+                    cc = obj.get("cursor_stored_sessions_count")
+                    lc = obj.get("claude_stored_sessions_count")
+                    if isinstance(cc, int):
+                        payload["cursor_stored_sessions_count"] = cc
+                    if isinstance(lc, int):
+                        payload["claude_stored_sessions_count"] = lc
+                except Exception:
+                    pass
+            return JSONResponse(content=payload)
         except Exception as e:
             logger.exception(e)
             return JSONResponse(status_code=500, content={"detail": str(e)})

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core_service.dart';
+import '../widgets/homeclaw_snackbars.dart';
 
 /// Friend requests: list pending requests, Accept / Reject.
 class FriendRequestsScreen extends StatefulWidget {
@@ -59,7 +60,7 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Accept failed: $e'), backgroundColor: Theme.of(context).colorScheme.errorContainer),
+          homeClawErrorSnackBar(context, 'Accept failed: $e'),
         );
       }
     } finally {
@@ -77,7 +78,7 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Reject failed: $e'), backgroundColor: Theme.of(context).colorScheme.errorContainer),
+          homeClawErrorSnackBar(context, 'Reject failed: $e'),
         );
       }
     } finally {
@@ -103,7 +104,7 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(_error!, style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Theme.of(context).colorScheme.error)),
+                        HomeClawInlineErrorCard(message: _error!),
                         const SizedBox(height: 16),
                         FilledButton(onPressed: _load, child: const Text('Retry')),
                       ],

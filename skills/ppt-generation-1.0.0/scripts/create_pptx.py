@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.9"
 # dependencies = [
-#     "python-pptx>=0.6.21",
+#     "python-pptx>=1.0.1",
 # ]
 # ///
 """

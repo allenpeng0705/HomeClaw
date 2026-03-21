@@ -700,10 +700,18 @@ def register_all_routes(core: Any) -> None:
         try:
             if getattr(request, "async_mode", False):
                 request_id = str(uuid.uuid4())
-                core._inbound_async_results[request_id] = {
+                _pending_entry = {
                     "status": "pending",
                     "created_at": time.time(),
+                    "text": "",
+                    "format": "markdown",
                 }
+                _lk = getattr(core, "_inbound_async_results_lock", None)
+                if _lk is not None:
+                    with _lk:
+                        core._inbound_async_results[request_id] = _pending_entry
+                else:
+                    core._inbound_async_results[request_id] = _pending_entry
                 task = asyncio.create_task(core._run_async_inbound(request_id, request))
                 if getattr(core, "_inbound_async_tasks", None) is not None:
                     core._inbound_async_tasks[request_id] = task

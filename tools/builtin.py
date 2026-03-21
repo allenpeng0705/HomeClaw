@@ -5362,7 +5362,27 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
             from base.base import PromptRequest
             req_copy = request.model_copy(deep=True)
             req_copy.request_metadata = request_meta
-            result = await plugin_manager.run_external_plugin(plugin, req_copy)
+            # Async inbound + Cursor bridge run_agent: stream NDJSON from bridge into GET /inbound/result text_preview.
+            try:
+                from core.inbound_async_context import ASYNC_INBOUND_REQUEST_ID
+
+                _async_rid = ASYNC_INBOUND_REQUEST_ID.get()
+            except Exception:
+                _async_rid = None
+            _pid_norm = plugin_id.replace("-", "_")
+            _use_bridge_stream = (
+                _async_rid
+                and request_meta.get("bridge_agent_stream_preview")
+                and capability_id == "run_agent"
+                and _pid_norm == "cursor_bridge"
+                and str((plugin.get("type") or "")).lower() == "http"
+            )
+            if _use_bridge_stream:
+                result = await plugin_manager.run_external_plugin_http_cursor_bridge_stream(
+                    plugin, req_copy, core, _async_rid
+                )
+            else:
+                result = await plugin_manager.run_external_plugin(plugin, req_copy)
             if isinstance(result, PluginResult):
                 if not result.success:
                     result_text = result.error or result.text or "Plugin returned an error"

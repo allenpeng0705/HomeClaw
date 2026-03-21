@@ -20,13 +20,28 @@ This doc reviews how HomeClaw integrates with **Cursor**, **Claude Code**, and *
 | `open_file` | Open a single file in Cursor. |
 | `run_agent` | Run Cursor CLI **agent** with a task; returns output (non-interactive). |
 | `run_command` | Run a shell command (e.g. `npm test`) and return output. |
-| `get_status` | Return active project cwd and bridge status. |
+| `get_status` | Return active cwd, optional `cursor_stored_session_id`, and other bridge fields. |
+| `clear_cursor_session` | Clear the persisted Cursor agent `session_id` for a project (next `run_agent` uses `--continue`). |
 | `run_agent_interactive` | Start Cursor agent in a PTY; Companion/WebChat use interactive_read/write/stop. |
 | `run_command_interactive` | Start a shell in a PTY for interactive use. |
 | `interactive_read` / `interactive_write` / `interactive_stop` | Operate on a bridge interactive session. |
 
 - **Active CWD:** The bridge keeps a **cursor** active project path (and a separate one for **claude**). It’s set by `open_project` / `open_file` and used as default `cwd` for `run_agent` / `run_command`. State is persisted in `~/.homeclaw/cursor_bridge_state.json`.
 - **Routing:** For the Cursor friend, `_cursor_bridge_capability_and_params()` maps the user message to one of the capabilities above (e.g. “open X in Cursor” → `open_project`, “run agent to fix the bug” → `run_agent`).
+
+### 2.1 Cursor CLI session continuation (Companion `run_agent`)
+
+The Cursor Agent CLI supports **`--continue`** (previous session) and **`--resume <session_id>`** with **`-p` / `--print`** ([parameters](https://cursor.com/docs/cli/reference/parameters)). JSON output includes **`session_id`** ([output format](https://cursor.com/docs/cli/reference/output-format)).
+
+When **`cursor_bridge_cursor_continue_session`** is **`true`** (default), Core sets **`CURSOR_BRIDGE_CURSOR_CONTINUE=1`** for the bridge. The bridge then:
+
+1. Uses **`--resume <id>`** when a **`session_id`** is stored for the **normalized active Cursor project path** (from the last successful JSON run).
+2. Otherwise uses **`--continue`**.
+3. Persists **`session_id`** in **`cursor_bridge_state.json`** under **`cursor_sessions`**; on stale **`--resume`** errors, clears that entry and retries once with **`--continue`**.
+
+Set **`cursor_bridge_cursor_continue_session: false`** for a **new** agent session every message. Manual bridge: set or unset **`CURSOR_BRIDGE_CURSOR_CONTINUE`** yourself.
+
+**Companion phrases:** e.g. **“clear cursor session”**, **“new cursor session”** → **`clear_cursor_session`**.
 
 ---
 
@@ -37,7 +52,8 @@ This doc reviews how HomeClaw integrates with **Cursor**, **Claude Code**, and *
 | `set_cwd` | Set the **claude** active project path on the bridge. |
 | `run_agent` | Run **Claude Code CLI** (`claude`) with a task; uses `--dangerously-skip-permissions` and optional `--output-format json`; returns output. |
 | `run_command` | Run a shell command in the active project. |
-| `get_status` | Return bridge status (including claude active cwd). |
+| `get_status` | Return bridge status (including claude active cwd and optional `claude_stored_session_id`). |
+| `clear_claude_session` | Clear the persisted Claude Code `session_id` for a project so the next `run_agent` falls back to `--continue`. |
 | `run_agent_interactive` | Start Claude Code CLI in a PTY for interactive use. |
 | `run_command_interactive` | Start a shell in a PTY. |
 | `interactive_read` / `interactive_write` / `interactive_stop` | Same as Cursor. |
@@ -46,6 +62,23 @@ This doc reviews how HomeClaw integrates with **Cursor**, **Claude Code**, and *
 - **Routing:** For the ClaudeCode friend, `_claude_bridge_capability_and_params()` does the same kind of pattern routing to these capabilities.
 
 When you send a task via `run_agent`, the **Claude Code CLI** runs on the bridge machine. If you have configured MCP servers in Claude Code (e.g. `claude mcp add`), the CLI can use those **inside** that run (e.g. GitHub, Notion). The bridge does not expose those MCP servers to HomeClaw directly; it only sends the task and returns the CLI output.
+
+### 3.1 Claude Code session vs Companion chat
+
+**Claude Code has its own sessions** (stored per project directory). The official CLI supports headless continuation with **`--continue`** (last session in cwd) or **`--resume <session_id>`** together with **`-p`** (see [Run Claude Code programmatically](https://code.claude.com/docs/en/headless)).
+
+**Default (since this behavior was added):** When **`cursor_bridge_claude_continue_session`** is **`true`**, the bridge:
+
+1. If it has a **stored `session_id`** for the **normalized active Claude project path** (from the last successful JSON line output), it runs **`claude -p "<task>" --resume <id> --output-format json`**.
+2. Otherwise it uses **`--continue`** as before.
+
+Session ids are persisted in **`~/.homeclaw/cursor_bridge_state.json`** under **`claude_sessions`** (keys are per-project paths). If **`--resume`** fails with a “stale” session error, the bridge clears that entry and retries once with **`--continue`**.
+
+Set **`cursor_bridge_claude_continue_session: false`** if you want **every** Companion message to start a **new** Claude Code session (no `--continue` / `--resume`). Restart Core after changing it. If you run the bridge **manually** without Core auto-start, set **`CURSOR_BRIDGE_CLAUDE_CONTINUE=1`** yourself when you want continuation, or omit it for isolated runs.
+
+**Companion phrases:** Say e.g. **“clear claude session”** or **“new claude session”** to call **`clear_claude_session`** (or use the capability from tools).
+
+**Note:** This resumes **Claude Code’s** thread for that directory, not a verbatim dump of the Companion UI transcript. For a clean run in the same repo, clear the stored session, set the option to `false`, or use another cwd.
 
 ---
 

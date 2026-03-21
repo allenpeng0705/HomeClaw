@@ -270,6 +270,14 @@ def _cursor_bridge_capability_and_params(query: str) -> tuple:
             return "run_command", {"command": rest}
         if len(rest) < 50 and "agent" not in rest.lower() and " the " not in rest.lower():
             return "run_command", {"command": rest}
+    if q_lower in (
+        "clear cursor session",
+        "new cursor session",
+        "reset cursor session",
+        "forget cursor session",
+        "start fresh cursor session",
+    ):
+        return "clear_cursor_session", {}
     # ---- default: run_agent (natural-language task) ----
     return "run_agent", {"task": q}
 
@@ -367,6 +375,14 @@ def _claude_bridge_capability_and_params(query: str) -> tuple:
         rest = q[8:].strip()
         if any(rest.lower().startswith(p) for p in run_command_prefixes) or (len(rest) < 50 and " the " not in rest.lower()):
             return "run_command", {"command": rest}
+    if q_lower in (
+        "clear claude session",
+        "new claude session",
+        "reset claude session",
+        "forget claude session",
+        "start fresh claude session",
+    ):
+        return "clear_claude_session", {}
     return "run_agent", {"task": q}
 
 

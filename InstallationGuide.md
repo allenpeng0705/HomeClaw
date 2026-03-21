@@ -27,6 +27,10 @@ The script will:
 
 **Dependency conflicts about semantic-kernel?** Pip may warn that `semantic-kernel` expects older versions of aiofiles, numpy, openai, pydantic, etc. HomeClaw does not use semantic-kernel (it is a transitive dependency of Cognee). You can ignore these warnings; Core and Cognee memory work with the installed versions. If you hit a real runtime error, try a fresh venv or report the issue.
 
+**Conda + pip:** If you use Anaconda, `pip install` may target your active env (e.g. `pytorch`). Pip can print “conflict” lines for packages already in that env (e.g. `cognee`, `instructor` vs `openai` 2.x). HomeClaw pins `openai` 2.x in `requirements-constraints.txt`. For a clean tree, use a **dedicated conda env** for HomeClaw or the repo **`.venv`** (see `install.sh` messages).
+
+**Document stack (`requirements-document.txt`):** Must use `unstructured-inference` **≥ 1.0.5** with `unstructured[all-docs]==0.18.2` (older inference pins conflict). The repo pins a compatible pair; install with the same constraints as the script: `pip install -r requirements-document.txt -c requirements-constraints.txt`.
+
 ---
 
 ## Manual install (summary)

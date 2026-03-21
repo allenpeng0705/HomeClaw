@@ -2,15 +2,37 @@
 
 **Your home, your AI, your control.**
 
-HomeClaw is an AI assistant that runs on your own hardware. It supports cloud models (OpenAI, Gemini, DeepSeek), local models (llama.cpp), or both together. Memory, plugins, and multi-user — all self-hosted.
+HomeClaw is a self-hosted AI assistant that runs on your own hardware — your Mac, Windows PC, or Linux server. Use cloud models (OpenAI, Gemini, DeepSeek), local models (llama.cpp), or both. Memory, plugins, multi-user, and full privacy — all under your roof.
 
 ---
 
-## Get started in 3 steps
+## How people use HomeClaw
 
-### 1. Install
+<div class="grid cards" markdown>
 
-Clone the repo and run the install script:
+- **Personal assistant on your phone**
+
+    Install HomeClaw on your home computer, connect the [Companion App](companion-app.md) on your iPhone or Android, and chat with your AI from anywhere — at home on Wi-Fi or on the go via a [secure tunnel](remote-access.md).
+
+- **Family AI network**
+
+    Add family members as users, give each person their own [AI friends](friends-and-family.md) with different personalities, and share a single HomeClaw server. Everyone gets private conversations and memory.
+
+- **Developer workstation**
+
+    Use HomeClaw to drive [Cursor and Claude Code](coding-with-homeclaw.md) from your phone or any device. Open projects, run agents, execute commands — all through chat.
+
+- **Team or group chat**
+
+    Connect HomeClaw to [Telegram, Discord, or Slack](channels.md) so your group can talk to the same AI. Each user gets their own identity and memory.
+
+</div>
+
+---
+
+## Get started in 5 minutes
+
+### 1. Install HomeClaw
 
 **Mac / Linux:**
 
@@ -28,52 +50,80 @@ cd HomeClaw
 .\install.ps1
 ```
 
-The script installs dependencies and opens the **Portal** (web UI) when done. See [Install](install.md) for details.
+The install script sets up everything and opens the **[Portal](portal.md)** — a web UI where you configure your LLM, create users, and start Core.
 
-### 2. Configure your LLM
+### 2. Set up your LLM
 
-Set an API key for a cloud model (fastest way to start):
+The fastest way to start: set a cloud API key.
 
 ```bash
-# Example: Google Gemini
 export GEMINI_API_KEY="your-key-here"
 ```
 
-Or configure a local model — see [Models](models.md).
+Or use any supported provider (OpenAI, DeepSeek, Anthropic, etc.) — see [Models](models.md). You can also run a local model with llama.cpp for full privacy.
 
-### 3. Start Core and use the Companion App
+### 3. Start Core
 
 ```bash
 python -m main start
 ```
 
-Then open the **[Companion App](companion-app.md)** on your Mac, Windows, iPhone, or Android — set the Core URL to `http://127.0.0.1:9000` and start chatting.
+Core is the brain of HomeClaw. It listens on port 9000 and handles all conversations, memory, tools, and plugins.
 
-The Companion App is the easiest way to use HomeClaw: chat, voice, file attachments, manage config, and install skills — all from one app. **[Learn more about the Companion App →](companion-app.md)**
+### 4. Connect the Companion App
+
+Download or build the **[Companion App](companion-app.md)** on your phone or desktop:
+
+1. Set **Core URL** to `http://127.0.0.1:9000` (same machine) or your local IP (same Wi-Fi).
+2. Start chatting.
+
+Want to use it from outside your home? Set up a [tunnel with Cloudflare, Pinggy, or ngrok](remote-access.md) — takes 2 minutes.
+
+### 5. Explore
+
+| What to do next | Guide |
+|-----------------|-------|
+| Use the Portal to manage settings | [Portal Guide](portal.md) |
+| Add AI friends with unique personalities | [Friends & Family](friends-and-family.md) |
+| Connect Telegram, Discord, or WebChat | [Channels](channels.md) |
+| Access HomeClaw from anywhere | [Remote Access (tunnels)](remote-access.md) |
+| Use Cursor or Claude Code via HomeClaw | [Coding with HomeClaw](coding-with-homeclaw.md) |
+| Browse and install skills from ClawHub | [Companion App → Skills](companion-app.md#skills-clawhub) |
 
 ---
 
-## Other ways to connect
+## Architecture at a glance
 
-Already have Telegram, Discord, or prefer a browser? Run a **[channel](channels.md)** alongside (or instead of) the Companion App — they all talk to the same Core and share the same memory.
-
-```bash
-python -m channels.run webchat     # browser at http://localhost:8014
-python -m channels.run telegram    # Telegram bot
-python -m channels.run discord     # Discord bot
 ```
+┌─────────────────────────────────────────────────┐
+│                  HomeClaw Core                   │
+│  LLM · Memory · Tools · Plugins · Skills        │
+│                  (port 9000)                     │
+└────────┬──────────┬──────────┬──────────┬───────┘
+         │          │          │          │
+    Companion   WebChat    Telegram   Discord
+      App       (browser)    bot        bot
+   (phone/      :8014
+    desktop)
+```
+
+All clients talk to the same Core. They share the same AI, memory, and configuration — but each user gets private conversations.
 
 ---
 
 ## What makes HomeClaw different
 
-| | |
-|---|---|
-| **Companion App** | Flutter app for Mac, Windows, iPhone, Android — chat, voice, manage config, install skills. [Details →](companion-app.md) |
-| **Cloud + Local models** | Use OpenAI, Gemini, DeepSeek, or local GGUF models via llama.cpp — or both together. [Details →](models.md) |
+| Feature | Description |
+|---------|-------------|
+| **Companion App** | Flutter app for Mac, Windows, iPhone, Android — chat, voice, manage settings, install skills. [Details →](companion-app.md) |
+| **Portal** | Web UI to configure HomeClaw, manage users, start services. [Details →](portal.md) |
+| **Cloud + Local models** | Use OpenAI, Gemini, DeepSeek, or local GGUF models — or both together. [Details →](models.md) |
+| **AI Friends** | Create multiple AI personalities — study buddy, note-taker, coding assistant. [Details →](friends-and-family.md) |
 | **Memory** | RAG + agent memory. Your assistant remembers context across conversations. |
-| **Plugins** | Built-in (Python) and external (any language). Weather, news, email, browser, and more. [Details →](plugins.md) |
-| **Skills** | OpenClaw-style workflows the LLM executes with tools. Install from ClawHub via the Companion App. |
+| **Channels** | Reach HomeClaw from Telegram, Discord, Slack, email, WebChat, or CLI. [Details →](channels.md) |
+| **Plugins & Skills** | Weather, news, browser, email, and more. Install skills from ClawHub. [Details →](plugins.md) |
+| **Remote Access** | Cloudflare Tunnel, Pinggy, ngrok, Tailscale — use HomeClaw from anywhere. [Details →](remote-access.md) |
+| **Coding Bridge** | Drive Cursor and Claude Code from your phone. [Details →](coding-with-homeclaw.md) |
 | **Multi-user** | Each user gets isolated chat history, memory, and profile. |
 | **Self-hosted** | Runs on your machine. Your data stays yours. |
 
@@ -82,6 +132,6 @@ python -m channels.run discord     # Discord bot
 ## Learn more
 
 - [Getting started (full walkthrough)](getting-started.md)
-- [Introducing HomeClaw](introducing-homeclaw.md)
+- [Introducing HomeClaw (vision and design)](introducing-homeclaw.md)
 - [Story — why and how it was built](story.md)
 - [Help & troubleshooting](help.md)

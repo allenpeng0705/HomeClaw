@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core_service.dart';
+import '../widgets/homeclaw_snackbars.dart';
 
 /// Add Friend: list users (excluding self), tap to send a friend request.
 class AddFriendScreen extends StatefulWidget {
@@ -84,7 +85,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e'), backgroundColor: Theme.of(context).colorScheme.errorContainer),
+          homeClawErrorSnackBar(context, 'Failed: $e'),
         );
       }
     } finally {
@@ -110,7 +111,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        SelectableText(_error!, style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: Theme.of(context).colorScheme.error)),
+                        HomeClawInlineErrorCard(message: _error!),
                         const SizedBox(height: 16),
                         FilledButton(onPressed: _load, child: const Text('Retry')),
                       ],

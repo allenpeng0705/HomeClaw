@@ -53,8 +53,20 @@ capabilities:
         required: false
   - id: get_status
     name: Get Bridge status
-    description: Return bridge state (active cwd, default cwd, auth enabled).
+    description: Return bridge state (active cwd, default cwd, auth enabled, optional claude_stored_session_id).
     parameters: []
+  - id: clear_claude_session
+    name: Clear stored Claude Code session
+    description: Remove the persisted Claude Code session id for a project so the next run_agent uses --continue instead of --resume. Optional path/cwd; defaults to active Claude project.
+    parameters:
+      - name: path
+        type: string
+        required: false
+        description: Project folder (alias cwd).
+      - name: cwd
+        type: string
+        required: false
+        description: Project folder to clear stored session for.
   - id: run_agent_interactive
     name: Start Claude Code interactively (PTY)
     description: Start the Claude Code CLI in an interactive PTY on the bridge machine. Returns session_id and initial_output; use interactive_read/interactive_write/interactive_stop for the same session.

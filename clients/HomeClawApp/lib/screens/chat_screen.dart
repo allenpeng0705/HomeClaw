@@ -20,6 +20,7 @@ import 'package:record/record.dart';
 import 'package:video_player/video_player.dart';
 import '../chat_history_store.dart';
 import '../core_service.dart';
+import '../widgets/homeclaw_snackbars.dart';
 import 'canvas_screen.dart';
 import 'settings_screen.dart';
 
@@ -111,6 +112,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _wasRouteCurrent = false;
   Uint8List? _chatPartnerAvatar;
   String _cursorActiveCwd = '';
+  /// Dev bridge: stored Cursor/Claude session exists for active project (from GET /api/cursor-bridge/status).
+  bool _devBridgeStoredSessionActive = false;
   String? _interactiveSessionId;
   int _interactiveLastSeq = 1;
   final TextEditingController _interactiveInputController = TextEditingController();
@@ -170,9 +173,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       final fid = (widget.friendId ?? '').trim().toLowerCase();
       final backend = fid == 'trae' ? 'trae' : (fid == 'claudecode' ? 'claude' : 'cursor');
-      final cwd = await widget.coreService.getCursorBridgeActiveCwd(backend: backend);
+      final map = await widget.coreService.getCursorBridgeStatus(backend: backend);
+      final cwd = (map['active_cwd'] as String?)?.trim() ?? '';
+      var linked = false;
+      if (fid == 'cursor') {
+        linked = map['cursor_stored_session_active'] == true;
+      } else if (fid == 'claudecode') {
+        linked = map['claude_stored_session_active'] == true;
+      }
       if (!mounted) return;
-      setState(() => _cursorActiveCwd = cwd);
+      setState(() {
+        _cursorActiveCwd = cwd;
+        _devBridgeStoredSessionActive = linked;
+      });
     } catch (_) {
       // Keep previous value on failure.
     }
@@ -570,13 +583,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final summary = ok
           ? 'KB sync: $msg (added: $added, removed: $removed)'
           : 'Sync failed: $msg';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(summary), backgroundColor: ok ? null : Theme.of(context).colorScheme.errorContainer),
-      );
+      if (ok) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(summary)));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(homeClawErrorSnackBar(context, summary));
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sync failed: $e'), backgroundColor: Theme.of(context).colorScheme.errorContainer),
+        homeClawErrorSnackBar(context, 'Sync failed: $e'),
       );
     }
   }
@@ -1790,6 +1805,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
+                    if (_isDevBridgeFriend &&
+                        _devBridgeStoredSessionActive &&
+                        (widget.friendId ?? '').trim().toLowerCase() != 'trae')
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Chip(
+                            avatar: Icon(
+                              Icons.link,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            label: Text(
+                              (widget.friendId ?? '').trim().toLowerCase() == 'claudecode'
+                                  ? 'Claude session linked'
+                                  : 'Cursor session linked',
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -1952,6 +1992,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 final msgIndex = _loadingMoreMessages ? i - 1 : i;
                 final entry = _messages[msgIndex];
                 final isUser = entry.value;
+                final isErrorBubble = !isUser && entry.key.startsWith('Error:');
                 final imageUrls = msgIndex < _messageImages.length ? _messageImages[msgIndex] : null;
                 final audioUrls = msgIndex < _messageAudios.length ? _messageAudios[msgIndex] : null;
                 final videoUrls = msgIndex < _messageVideos.length ? _messageVideos[msgIndex] : null;
@@ -1966,7 +2007,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           decoration: BoxDecoration(
-                            color: isUser ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.surfaceContainerHighest,
+                            color: isUser
+                                ? Theme.of(context).colorScheme.primaryContainer
+                                : (isErrorBubble
+                                    ? Theme.of(context).colorScheme.errorContainer
+                                    : Theme.of(context).colorScheme.surfaceContainerHighest),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Column(
@@ -2037,6 +2082,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 isUser: isUser,
                                 plainText: _isDevBridgeFriend && widget.coreService.cursorChatPlainText,
                                 theme: Theme.of(context),
+                                isErrorMessage: isErrorBubble,
                               ),
                             ],
                           ),
@@ -2505,12 +2551,15 @@ class _ChatMessageText extends StatelessWidget {
   final bool isUser;
   final bool plainText;
   final ThemeData theme;
+  /// High-contrast text on [ColorScheme.errorContainer] bubbles (e.g. connection errors).
+  final bool isErrorMessage;
 
   const _ChatMessageText({
     required this.text,
     required this.isUser,
     required this.plainText,
     required this.theme,
+    this.isErrorMessage = false,
   });
 
   /// File extensions that should open with system default app (e.g. PPT, PDF, DOC).
@@ -2565,20 +2614,25 @@ class _ChatMessageText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final effectiveText = text.isEmpty ? '\u200B' : text;
+    final errorFg = isErrorMessage ? theme.colorScheme.onErrorContainer : null;
     if (plainText) {
       return SelectableText(
         effectiveText,
-        style: theme.textTheme.bodyLarge,
+        style: theme.textTheme.bodyLarge?.copyWith(color: errorFg),
       );
     }
+    final bodyLarge = theme.textTheme.bodyLarge;
+    final bodyMedium = theme.textTheme.bodyMedium;
+    final pStyle = errorFg != null ? bodyLarge?.copyWith(color: errorFg) : bodyLarge;
     final styleSheet = MarkdownStyleSheet.fromTheme(theme).copyWith(
-      p: theme.textTheme.bodyLarge,
-      listBullet: theme.textTheme.bodyLarge,
-      h1: theme.textTheme.headlineSmall,
-      h2: theme.textTheme.titleLarge,
-      h3: theme.textTheme.titleMedium,
-      code: theme.textTheme.bodyMedium?.copyWith(
+      p: pStyle,
+      listBullet: pStyle,
+      h1: errorFg != null ? theme.textTheme.headlineSmall?.copyWith(color: errorFg) : theme.textTheme.headlineSmall,
+      h2: errorFg != null ? theme.textTheme.titleLarge?.copyWith(color: errorFg) : theme.textTheme.titleLarge,
+      h3: errorFg != null ? theme.textTheme.titleMedium?.copyWith(color: errorFg) : theme.textTheme.titleMedium,
+      code: bodyMedium?.copyWith(
         fontFamily: 'monospace',
+        color: errorFg ?? bodyMedium.color,
         backgroundColor: theme.colorScheme.surfaceContainerHighest,
       ),
       codeblockDecoration: BoxDecoration(
@@ -2586,11 +2640,14 @@ class _ChatMessageText extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       blockquote: theme.textTheme.bodyMedium?.copyWith(
-        color: theme.colorScheme.onSurfaceVariant,
+        color: errorFg ?? theme.colorScheme.onSurfaceVariant,
       ),
       blockquoteDecoration: BoxDecoration(
         border: Border(
-          left: BorderSide(color: theme.colorScheme.primary, width: 4),
+          left: BorderSide(
+            color: errorFg ?? theme.colorScheme.primary,
+            width: 4,
+          ),
         ),
       ),
     );

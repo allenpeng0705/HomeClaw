@@ -8,10 +8,14 @@ Troubleshooting and where to find more.
 
 | You want to… | Go here |
 |--------------|--------|
-| **Install** HomeClaw | [Install](install.md) — **first step:** Mac/Linux: `chmod +x install.sh` then `./install.sh` (or `bash install.sh`). Windows: run `.\install.ps1` or **`install.bat`** in **PowerShell** (see install guide for execution policy). Or manual clone + pip install. |
-| **Use** HomeClaw (run Core, chat) | [Getting started](getting-started.md) — run Core, then use the Companion app or channels (WebChat, Telegram, etc.). |
-| **Find the Companion app** | [Companion app](companion-app.md) — build from **clients/HomeClawApp/** in the repo; set Core URL in Settings. |
-| **Open the Portal** | [Platform → Portal](platform.md#portal) — run `python -m main portal`, open http://127.0.0.1:18472. |
+| **Install** HomeClaw | [Install](install.md) — Mac/Linux: `bash install.sh`. Windows: `.\install.ps1` or `install.bat`. |
+| **Get started** (run Core, chat) | [Getting started](getting-started.md) — full walkthrough from install to chatting. |
+| **Use the Companion App** | [Companion App](companion-app.md) — build from `clients/HomeClawApp/`; set Core URL in Settings. |
+| **Open the Portal** | [Portal Guide](portal.md) — run `python -m main portal`, open http://127.0.0.1:18472. |
+| **Connect from anywhere** | [Remote Access](remote-access.md) — Pinggy, Cloudflare Tunnel, ngrok, Tailscale. |
+| **Add AI friends / family** | [Friends & Family](friends-and-family.md) — create AI personalities, add family members. |
+| **Set up Telegram / Discord** | [Channels](channels.md) — connect HomeClaw to Telegram, Discord, Slack, WebChat. |
+| **Use Cursor / Claude Code** | [Coding with HomeClaw](coding-with-homeclaw.md) — drive IDEs from your phone. |
 
 ---
 

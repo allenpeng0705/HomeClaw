@@ -363,6 +363,108 @@ class PluginManager:
             return PluginResult(success=False, error="Error: MCP plugins not yet implemented. Use type http or subprocess for now.")
         return PluginResult(success=False, error=f"Error: unknown plugin type {plugin_type}")
 
+    async def run_external_plugin_http_cursor_bridge_stream(
+        self,
+        descriptor: Dict[str, Any],
+        request: PromptRequest,
+        core: Any,
+        async_request_id: str,
+    ) -> PluginResult:
+        """Consume Cursor Bridge POST /run with NDJSON (stream_agent); push text into async inbound preview."""
+        plugin_type = (descriptor.get("type") or "").lower()
+        if plugin_type != "http":
+            return PluginResult(success=False, error="bridge stream requires http plugin")
+        config = descriptor.get("config") or {}
+        timeout = float(config.get("timeout_sec", 420))
+        plugin_id = (descriptor.get("id") or "").strip().lower().replace(" ", "_")
+        cap_id = (request.request_metadata or {}).get("capability_id")
+        cap_params = (request.request_metadata or {}).get("capability_parameters")
+        req = PluginRequest(
+            request_id=request.request_id,
+            plugin_id=plugin_id,
+            user_input=request.text or "",
+            user_id=request.user_id or "",
+            user_name=request.user_name or "",
+            channel_name=request.channel_name or "",
+            channel_type=getattr(request.channelType, "value", str(request.channelType)),
+            app_id=request.app_id or "",
+            metadata={**(request.request_metadata or {}), "stream_agent": True},
+            capability_id=cap_id,
+            capability_parameters=cap_params,
+        )
+        base_url = (config.get("base_url") or "").rstrip("/")
+        path = (config.get("path") or "/run").lstrip("/")
+        url = f"{base_url}/{path}" if path else base_url
+        if not base_url:
+            return PluginResult(success=False, error=f"Error: plugin {plugin_id} type http has no base_url in config.")
+        headers = {}
+        try:
+            bridge_key = (config.get("bridge_api_key") or "").strip()
+            if bridge_key:
+                headers["X-HomeClaw-Bridge-Key"] = bridge_key
+        except Exception:
+            headers = {}
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+                async with client.stream("POST", url, json=req.model_dump(), headers=headers or None) as resp:
+                    if resp.status_code != 200:
+                        body = (await resp.aread()).decode("utf-8", errors="replace")[:500]
+                        return PluginResult(
+                            success=False,
+                            error=f"Error: plugin returned {resp.status_code}: {body}".strip(),
+                        )
+                    buf = b""
+                    final_obj = None
+                    async for chunk in resp.aiter_bytes():
+                        buf += chunk
+                        while b"\n" in buf:
+                            line, buf = buf.split(b"\n", 1)
+                            ls = line.strip()
+                            if not ls:
+                                continue
+                            try:
+                                obj = json.loads(ls.decode("utf-8", errors="replace"))
+                            except Exception:
+                                continue
+                            if not isinstance(obj, dict):
+                                continue
+                            ev = obj.get("event")
+                            if ev == "preview":
+                                tx = obj.get("text")
+                                if tx and core is not None and hasattr(core, "update_inbound_async_preview"):
+                                    try:
+                                        core.update_inbound_async_preview(async_request_id, str(tx))
+                                    except Exception:
+                                        pass
+                            elif ev == "done":
+                                final_obj = obj
+                                break
+                    if buf.strip() and final_obj is None:
+                        try:
+                            obj = json.loads(buf.strip().decode("utf-8", errors="replace"))
+                            if isinstance(obj, dict) and obj.get("event") == "done":
+                                final_obj = obj
+                        except Exception:
+                            pass
+                    if final_obj is None:
+                        return PluginResult(success=False, error="Bridge stream ended without a done event.")
+                    ok = bool(final_obj.get("success"))
+                    if ok:
+                        return PluginResult(
+                            success=True,
+                            text=(final_obj.get("text") or "").strip() or "(no output)",
+                            metadata=dict(final_obj.get("metadata") or {}) if isinstance(final_obj.get("metadata"), dict) else {},
+                        )
+                    return PluginResult(
+                        success=False,
+                        error=(final_obj.get("error") or final_obj.get("text") or "Bridge stream failed"),
+                    )
+        except Exception as e:
+            logger.warning("Plugin HTTP stream failed: plugin_id={} url={} error={}", plugin_id, url, e)
+            return PluginResult(success=False, error=f"Error streaming plugin {plugin_id}: {e!s}")
+
     def get_capability(self, plugin_or_descriptor: Any, capability_id: str) -> Optional[Dict[str, Any]]:
         """Get capability by id from a plugin (BasePlugin with registration) or external descriptor."""
         if not capability_id:

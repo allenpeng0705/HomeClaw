@@ -238,6 +238,7 @@ class Core(CoreInterface):
             self._inbound_async_results_ttl_sec = 300  # done/cancelled: remove after this many sec so client has time to fetch
             self._inbound_async_pending_ttl_sec = 1800  # pending: don't expire before this (e.g. long LLM run); avoid 404 while task still running
             self._inbound_async_tasks: Dict[str, asyncio.Task] = {}  # request_id -> Task for async /inbound; used by POST /inbound/cancel
+            self._inbound_async_results_lock = threading.Lock()  # guard preview text updates vs final run_async_inbound write
             self._ws_sessions: Dict[str, WebSocket] = {}  # session_id -> WebSocket for push (Companion/channel holds /ws open; Core pushes async result and proactive messages)
             self._ws_user_by_session: Dict[str, str] = {}  # session_id -> user_id (so we can deliver_to_user for cron/reminder)
             #self.active_plugin = None
@@ -521,6 +522,18 @@ class Core(CoreInterface):
         if claude_settings_path:
             env["CLAUDE_SETTINGS_PATH"] = claude_settings_path
             _component_log("cursor_bridge", f"CLAUDE_SETTINGS_PATH={claude_settings_path}")
+        if getattr(meta, "cursor_bridge_claude_continue_session", True):
+            env["CURSOR_BRIDGE_CLAUDE_CONTINUE"] = "1"
+            _component_log(
+                "cursor_bridge",
+                "CURSOR_BRIDGE_CLAUDE_CONTINUE=1 (Claude Code: --resume <id> per project when stored, else --continue)",
+            )
+        if getattr(meta, "cursor_bridge_cursor_continue_session", True):
+            env["CURSOR_BRIDGE_CURSOR_CONTINUE"] = "1"
+            _component_log(
+                "cursor_bridge",
+                "CURSOR_BRIDGE_CURSOR_CONTINUE=1 (Cursor agent: --resume <id> per project when stored, else --continue)",
+            )
         if getattr(meta, "trae_agent_enabled", False):
             trae_agent_path = (getattr(meta, "cursor_bridge_trae_agent_path", None) or "").strip()
             if not trae_agent_path:
@@ -657,6 +670,21 @@ class Core(CoreInterface):
     async def _run_async_inbound(self, request_id: str, request: InboundRequest) -> None:
         """Background task for async /inbound. Delegates to core.inbound_handlers.run_async_inbound."""
         await _run_async_inbound_fn(self, request_id, request)
+
+    def update_inbound_async_preview(self, request_id: str, text: str) -> None:
+        """Update pending async /inbound entry so GET /inbound/result can return text_preview (bridge CLI streaming). Never raises."""
+        try:
+            rid = (request_id or "").strip()
+            if not rid:
+                return
+            with self._inbound_async_results_lock:
+                ent = self._inbound_async_results.get(rid)
+                if not ent or ent.get("status") != "pending":
+                    return
+                ent["text"] = (text or "")[:400000]
+                ent["format"] = "markdown"
+        except Exception:
+            pass
 
     async def _handle_inbound_request_impl(self, request: InboundRequest, progress_queue: Optional[asyncio.Queue] = None) -> Tuple[bool, str, int, Optional[List[str]]]:
         """Implementation of _handle_inbound_request. Delegates to core.inbound_handlers.handle_inbound_request_impl."""
