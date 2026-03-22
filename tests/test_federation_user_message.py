@@ -7,6 +7,7 @@ Run: python -m pytest tests/test_federation_user_message.py -v
 import json
 import os
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 
 from base.base import Friend, User
 from base.federation import (
@@ -83,6 +84,33 @@ def test_user_inbox_append_metadata():
             last = msgs[-1]
             assert last.get("from_instance_id") == "remote"
             assert last.get("source") == "federation"
+
+
+def test_user_inbox_append_concurrent_no_drop():
+    from unittest.mock import patch
+
+    from core.user_inbox import append_message, get_messages
+
+    with tempfile.TemporaryDirectory() as td:
+        with patch("core.user_inbox.Util") as mock_u:
+            mock_u.return_value.data_path.return_value = td
+            total = 40
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                futs = [
+                    pool.submit(
+                        append_message,
+                        "u1",
+                        f"u{i}",
+                        f"User{i}",
+                        f"hello-{i}",
+                    )
+                    for i in range(total)
+                ]
+            mids = [f.result() for f in futs]
+            assert all(mids)
+            msgs = get_messages("u1", limit=500)
+            assert len(msgs) == total
+            assert len({m.get("id") for m in msgs if isinstance(m, dict)}) == total
 
 
 def _bob_user_yaml_friend_alice():

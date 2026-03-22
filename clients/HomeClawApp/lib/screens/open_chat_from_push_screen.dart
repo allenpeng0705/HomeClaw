@@ -52,13 +52,17 @@ class _OpenChatFromPushScreenState extends State<OpenChatFromPushScreen> {
       }
       if (!mounted) return;
       if (match == null) {
-        match = list.isNotEmpty ? list.first : null;
-        // Prefer HomeClaw if no exact match (reminder is usually from system).
-        for (final f in list) {
-          if ((f['name'] as String?)?.trim().toLowerCase() == 'homeclaw') {
-            match = f;
-            break;
+        if (name.isEmpty) {
+          // If push payload did not include sender, only auto-open HomeClaw.
+          for (final f in list) {
+            if ((f['name'] as String?)?.trim().toLowerCase() == 'homeclaw') {
+              match = f;
+              break;
+            }
           }
+        } else {
+          setState(() => _error = 'Friend not found: $name');
+          return;
         }
       }
       if (match == null) {

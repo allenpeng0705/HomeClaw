@@ -110,7 +110,7 @@ def get_api_federated_friend_request_accept_handler(core):
         token_user: tuple = Depends(companion_auth.get_companion_token_user),
     ):
         try:
-            user_id, user = token_user
+            user_id, _ = token_user
             user_id = (user_id or "").strip()
             rid = (body.request_id or "").strip()
             if not rid:
@@ -144,16 +144,8 @@ def get_api_federated_friend_request_accept_handler(core):
                             logger.warning("federated accept: reciprocal sync failed: {}", sync_res)
                 else:
                     logger.warning("federated accept: no peer row for instance {}", requester_inst)
-            try:
-                if hasattr(core, "deliver_to_user") and parsed:
-                    await core.deliver_to_user(
-                        parsed[0],
-                        f"{(getattr(user, 'name', None) or user_id)} accepted your federated friend request.",
-                        source="federated_friend_request",
-                        from_friend=(getattr(user, "name", None) or user_id or "").strip(),
-                    )
-            except Exception as e:
-                logger.debug("federated accept: notify requester failed: {}", e)
+            # Do not call local deliver_to_user(requester_local_id) here:
+            # requester_local_id belongs to the remote Core and may collide with a local user id.
             return JSONResponse(status_code=200, content={"ok": True})
         except Exception as e:
             logger.warning("POST /api/federated-friend-request/accept failed: {}", e)
