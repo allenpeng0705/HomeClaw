@@ -180,8 +180,31 @@ completion_vision:
 #   seed: null
 #   stop: ["<|im_end|>"]       # match your tool_selection model (e.g. ["<|return|>"] for gpt_oss)
 
-# ——— 2. Local models (llama.cpp server per model, or Ollama) ———
-# Default: llama.cpp — path = GGUF path relative to model_path; Core starts one server per model.
+# ——— 2. Local model catalog (`local_models:` array) ———
+#
+# User guide (step-by-step): docs/llm-catalog-howto.md — https://allenpeng0705.github.io/HomeClaw/llm-catalog-howto/
+#
+# This list is the canonical catalog of local LLM refs. You do NOT need every GGUF on disk before
+# defining an entry: keep rows for models you plan to use (ports, capabilities, aliases) and
+# point main_llm / embedding_llm / vision_llm / sessions_spawn only at entries that are ready.
+#
+# Core starts llama.cpp servers only for models actually in use at boot (e.g. main, embedding,
+# mix-mode classifier). Other catalog entries do not load until something targets that ref.
+#
+# Per-entry fields (typical):
+#   id           — stable key; ref is local_models/<id> (required).
+#   alias        — human label for UIs / logs.
+#   path         — GGUF relative to model_path (or Ollama model name when type: ollama).
+#   host, port   — unique port per concurrent llama-server (required for llama.cpp).
+#   capabilities — e.g. [Chat], [embedding], [Math], … used by capability-based selection.
+#   available    — optional; default true. Set false for placeholders (weights not installed yet):
+#                  excluded from automatic capability routing; still listed in models_list with
+#                  available: false; explicit llm_name in spawn still resolves the entry.
+#   type: ollama — Core does not start a process; Ollama daemon must be running.
+#
+# Optional: mmproj, lora, lora_base, supported_media — same as before.
+#
+# Default: llama.cpp — path = GGUF path relative to model_path; Core starts one server per model when needed.
 # Optional per model: mmproj (vision), lora (adapter(s)), lora_base (optional base for LoRA).
 #   mmproj: path to projector .gguf; llama-server -m <path> --mmproj <mmproj>
 #   lora: single path or array of paths to LoRA adapter .gguf; each gets --lora <path> (multi-LoRA if supported)
@@ -190,6 +213,16 @@ completion_vision:
 #   If omitted: local model defaults to [] (text-only) unless mmproj is set, then [image]. Cloud model defaults to [image, audio, video].
 #   Use supported_media to override (e.g. restrict cloud to [image] or enable image for a local model without mmproj).
 # Paths are relative to model_path (same as path).
+#
+# Example placeholders (uncomment when you add weights; use available: false until then):
+#   - id: math_specialist_7b
+#     alias: Math 7B
+#     path: Qwen2.5-Math-7B-Instruct-Q4_K_M.gguf
+#     host: 127.0.0.1
+#     port: 5032
+#     capabilities: [Math, Chat]
+#     available: false
+#
 local_models:
   - id: Qwen3-Embedding-0.6B
     alias: Qwen3-Embedding-0.6B
@@ -314,7 +347,9 @@ local_models:
     capabilities: [Chat]
 
 
-# ——— 3. Cloud models (LiteLLM; one service per entry, each host/port) ———
+# ——— 3. Cloud model catalog (`cloud_models:` array) ———
+# Same idea as local_models: list every cloud endpoint you might use; refs are cloud_models/<id>.
+# Optional available: false excludes an entry from automatic capability routing (placeholders).
 # api_key_name: env var name (e.g. GEMINI_API_KEY); Core uses that env var for the key. Optional api_key: set the key here instead of env (use for convenience only; avoid committing secrets).
 # Start LiteLLM per model or use one proxy. See https://github.com/BerriAI/litellm and docs.litellm.ai/docs/providers
 # Use as main LLM (Chat/Functioncall) or as embedding model (capabilities: [embedding]); main and embedding can mix local + cloud.

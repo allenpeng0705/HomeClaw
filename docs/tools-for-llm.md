@@ -102,7 +102,7 @@ This document lists all **built-in tools** with their **name** and **description
 
 | Tool | Description |
 |------|-------------|
-| **models_list** | List available model refs and main_llm. For sessions_spawn: omit llm_name to use main_llm; to use a different model pass one ref from the list — prefer a smaller/faster one (e.g. 7B in the id) for quick sub-tasks. |
+| **models_list** | List model refs from the `llm.yml` catalog (`local_models` / `cloud_models`), `main_llm`, and per-model `capabilities` plus **`available`** (false = placeholder; skipped for capability-based spawn). |
 | **agents_list** | List agent ids. In HomeClaw returns single-agent note. |
 | **image** | Analyze an image with the vision/multimodal model. Provide image as path (relative to homeclaw_root) or url, and optional prompt (e.g. 'What is in this image?'). Requires a vision-capable LLM. |
 | **echo** | Echo back the given text. Useful for testing. |

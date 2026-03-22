@@ -531,6 +531,12 @@ class Util:
             pass
         return 11434
 
+    def model_entry_available(self, entry: Optional[Dict[str, Any]]) -> bool:
+        """False only when config sets available: false on a local_models/cloud_models entry (catalog placeholder). Default True when missing."""
+        if not entry or not isinstance(entry, dict):
+            return True
+        return entry.get("available") is not False
+
     def _get_model_entry(self, model_id: str):
         """Resolve model id to (entry_dict, 'local'|'ollama'|'litellm'). model_id can be 'local_models/<id>', 'cloud_models/<id>', or plain id. Returns (None, None) if not found."""
         list_key, raw_id = self._parse_model_ref(model_id)
@@ -2881,20 +2887,20 @@ class Util:
         cap = str(capability).strip().lower()
         main_llm_name = self.core_metadata.main_llm
         entry, _ = self._get_model_entry(main_llm_name)
-        if entry:
+        if entry and self.model_entry_available(entry):
             caps = entry.get("capabilities") or []
             if any((str(c).strip().lower() == cap for c in caps)):
                 return main_llm_name
         for m in (self.core_metadata.local_models or []):
             mid = m.get("id")
-            if not mid:
+            if not mid or not self.model_entry_available(m):
                 continue
             caps = m.get("capabilities") or []
             if any((str(c).strip().lower() == cap for c in caps)):
                 return f"local_models/{mid}"
         for m in (self.core_metadata.cloud_models or []):
             mid = m.get("id")
-            if not mid:
+            if not mid or not self.model_entry_available(m):
                 continue
             caps = m.get("capabilities") or []
             if any((str(c).strip().lower() == cap for c in caps)):

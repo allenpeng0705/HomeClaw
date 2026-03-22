@@ -128,6 +128,12 @@ Run on Aliyun ECS, AWS EC2, or any VPS. Always on, same install.
 ### [Writing plugins & skills](writing-plugins-and-skills.md)
 How to write plugins (any language) and skills. Examples and future marketplace.
 
+### [Model selection & lifecycle](model-selection-and-lifecycle.md)
+When HomeClaw uses main vs embedding vs vision vs spawn, mix mode, and (planned) on-demand specialists — with diagrams.
+
+### [LLM catalog how-to](llm-catalog-howto.md)
+How to list models in `llm.yml`, use `available`, capabilities, and `sessions_spawn`.
+
 ---
 
 ## Channels & Companion App

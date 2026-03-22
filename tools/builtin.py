@@ -2386,6 +2386,7 @@ async def _models_list_executor(arguments: Dict[str, Any], context: ToolContext)
                     "ref": f"local_models/{mid}",
                     "alias": m.get("alias") or mid,
                     "capabilities": m.get("capabilities") or [],
+                    "available": util.model_entry_available(m),
                 })
         for m in (util.core_metadata.cloud_models or []):
             mid = m.get("id")
@@ -2394,14 +2395,15 @@ async def _models_list_executor(arguments: Dict[str, Any], context: ToolContext)
                     "ref": f"cloud_models/{mid}",
                     "alias": m.get("alias") or mid,
                     "capabilities": m.get("capabilities") or [],
+                    "available": util.model_entry_available(m),
                 })
         if not model_details and refs:
-            model_details = [{"ref": r, "alias": r, "capabilities": []} for r in refs]
+            model_details = [{"ref": r, "alias": r, "capabilities": [], "available": True} for r in refs]
         return json.dumps({
             "models": refs,
             "model_details": model_details,
             "main_llm": main_llm,
-            "message": "For sessions_spawn: use llm_name (a ref from 'models') or capability (e.g. 'Chat') to select model. Omit both to use main_llm. capability selects a model that has that capability in config.",
+            "message": "local_models + cloud_models in llm.yml are the catalog: every entry is a valid ref (local_models/<id>). Use llm_name from 'models' or capability for sessions_spawn. capability ignores entries with available: false. GGUF may not exist yet—placeholders use available: false until weights are installed.",
         }, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e), "models": [], "model_details": [], "main_llm": ""})

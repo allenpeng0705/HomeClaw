@@ -1,0 +1,32 @@
+flowchart LR
+  subgraph UserFacing["You / channels"]
+    C[Companion / WebChat / Telegram / …]
+  end
+
+  subgraph Core["Core"]
+    CH[Chat + tool loop]
+    RAG[RAG / memory index]
+    IMG[Image / multimodal path]
+    MIX[Mix-mode router]
+    SPAWN[sessions_spawn]
+  end
+
+  subgraph Models["Model roles (typical)"]
+    M[main_llm — chat, tools, default reasoning]
+    E[embedding_llm — vectors for RAG / skills]
+    V[vision_llm — image understanding when main is not vision]
+    T[tool_selection_llm — optional smaller model for tool JSON]
+    SLM[classifier / SLM — mix mode local vs cloud]
+    X[Other local_models — specialists, spawn, future on_demand]
+  end
+
+  C --> CH
+  CH --> M
+  CH --> T
+  CH --> SPAWN
+  SPAWN -->|optional other ref| X
+  RAG --> E
+  IMG --> V
+  IMG --> M
+  MIX --> M
+  MIX --> SLM

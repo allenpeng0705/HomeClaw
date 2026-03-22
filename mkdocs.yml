@@ -68,6 +68,8 @@ nav:
     - Per-user sandbox and file links: per-user-sandbox-and-file-links.md
     - Mix mode and reports: mix-mode-and-reports.md
     - Hybrid router scripts: hybrid-router-scripts.md
+    - Model selection & lifecycle: model-selection-and-lifecycle.md
+    - LLM catalog how-to (llm.yml): llm-catalog-howto.md
   - Reference:
     - Companion App vs Channels: companion-vs-channels.md
     - Companion App (macOS permissions): companion-app-macos-permissions.md
