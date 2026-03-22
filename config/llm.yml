@@ -196,7 +196,10 @@ completion_vision:
 #   alias        — human label for UIs / logs.
 #   path         — GGUF relative to model_path (or Ollama model name when type: ollama).
 #   host, port   — unique port per concurrent llama-server (required for llama.cpp).
-#   capabilities — e.g. [Chat], [embedding], [Math], … used by capability-based selection.
+#   capabilities — e.g. [Chat], [embedding], [Math], … used by capability-based selection (coarse tags).
+#   description  — optional free text: what this model is for (strengths, size, latency). Shown in models_list
+#                  so the main LLM and humans can pick the right ref when capabilities overlap. Not used yet for
+#                  automatic routing (no embedding match on descriptions in Core today).
 #   available    — optional; default true. Set false for placeholders (weights not installed yet):
 #                  excluded from automatic capability routing; still listed in models_list with
 #                  available: false; explicit llm_name in spawn still resolves the entry.
@@ -230,6 +233,7 @@ local_models:
     host: 127.0.0.1
     port: 5066
     capabilities: [embedding]
+    description: "Small local embedding model for RAG and memory indexing; fast, not for chat."
   # Example vision model (uncomment and set paths): mmproj required; supported_media defaults to [image]
   # - id: llava_1_5_7b
   #   alias: LLaVA 1.5 7B
@@ -349,6 +353,7 @@ local_models:
 
 # ——— 3. Cloud model catalog (`cloud_models:` array) ———
 # Same idea as local_models: list every cloud endpoint you might use; refs are cloud_models/<id>.
+# Optional description: same as local_models — shown in models_list for agent/human selection.
 # Optional available: false excludes an entry from automatic capability routing (placeholders).
 # api_key_name: env var name (e.g. GEMINI_API_KEY); Core uses that env var for the key. Optional api_key: set the key here instead of env (use for convenience only; avoid committing secrets).
 # Start LiteLLM per model or use one proxy. See https://github.com/BerriAI/litellm and docs.litellm.ai/docs/providers

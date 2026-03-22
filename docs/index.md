@@ -100,6 +100,8 @@ The **HomeClaw Companion** is a Flutter-based client for Mac, Windows, iPhone, a
 
 One HomeClaw instance = one agent. To get more agents, run more instances—different ports, different configs if you like. No central orchestrator. Point the Companion app or any channel at the right port. Separate roles, isolation, or scale: just run more processes.
 
+[Multi-instance: peers, pairing, peer_call](multi-instance-peers.md)
+
 ### 6. Memory
 
 ![Memory](assets/section-memory.png){ align=right width=280 }

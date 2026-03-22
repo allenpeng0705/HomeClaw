@@ -10,6 +10,7 @@ This document **summarizes** the social network model for **one HomeClaw** (incl
 - [MultiUserSupport.md](MultiUserSupport.md) — users, friends, channels
 - [UserFriendsModelFullDesign.md](UserFriendsModelFullDesign.md) — friends list, (user_id, friend_id)
 - [UserToUserMessagingViaCompanion.md](UserToUserMessagingViaCompanion.md) — user-to-user in one instance
+- [FederatedCompanionUserMessaging.md](FederatedCompanionUserMessaging.md) — **phased plan** for Companion user-to-user **across instances** (non-breaking; `federation_enabled`, extended friend model, Core–Core `/api/federation/*`)
 - [CompanionEncryptionAndSecurity.md](CompanionEncryptionAndSecurity.md) — encryption Companion–Core, app-layer, E2E
 - [CompanionPushNotifications.md](CompanionPushNotifications.md) — push, multi-user, multi-device
 
@@ -134,7 +135,7 @@ So that we can add multi-HomeClaw later without breaking the current model, the 
 - **Implement** the single-instance social network and security as in Part 1 and in the related docs (user-to-user, app-layer encryption, push, no breaking http).
 - **Do not** hard-code “one instance only” in identity or friend model: e.g. friend type `user` can later get an optional `instance_id` or `remote_id` for cross-instance.
 - **Design for the future upgrade:** While implementing, follow the "Design for future upgrade" rules above. Message path, delivery, and encryption are already expressed so that multi-HomeClaw is an extension (Core(A) → Core(B) → Companion(B)), not a rewrite.
-- **Later:** Implement multi-HomeClaw (instance discovery, Core–Core link, cross-instance user identity, routing, and encryption) following Part 2. The bigger social network then builds on the same concepts: Companion ↔ Core ↔ Companion, with Cores talking to each other when the recipient is on another instance.
+- **Later:** Implement multi-HomeClaw (instance discovery, Core–Core link, cross-instance user identity, routing, and encryption) following Part 2. The bigger social network then builds on the same concepts: Companion ↔ Core ↔ Companion, with Cores talking to each other when the recipient is on another instance. **Concrete phased plan (Companion P2P across instances, backward compatible):** [FederatedCompanionUserMessaging.md](FederatedCompanionUserMessaging.md).
 
 This keeps one HomeClaw’s social network and security clearly summarized and ensures the design **considers and supports** the future upgrade to multi-HomeClaw (bigger social network) without a redesign.
 

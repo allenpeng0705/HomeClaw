@@ -29,6 +29,8 @@ Each user has a **friends list** — different assistants with different persona
 | Note | `note` | Note-taking |
 | Cursor | `cursor` | Cursor Bridge — open projects, run agents on your dev machine |
 
+**Dedicated model per friend (math, science, …):** In `config/friend_presets.yml`, add a preset with optional **`llm_ref`** (e.g. `local_models/your_id` or `cloud_models/Your-Cloud-Id`). In `user.yml`, add a friend with **`preset: math`** (or your preset name). That Companion friend then uses that model for the whole chat (overrides mix-mode route for that session). Use **`tools_preset: tutor`** for a light tool set (`time`, `sessions_spawn`, `models_list`, `web_search`). See comments in **`friend_presets.yml`** for commented **`math`** / **`science`** examples and [LLM catalog how-to](llm-catalog-howto.md).
+
 Friends are configured in `config/user.yml` under each user's `friends:` list. The Companion App shows them so you can switch between assistants. See [Friends & Family](friends-and-family.md) for how to add friends and set up a family AI network.
 
 ### Manage Core

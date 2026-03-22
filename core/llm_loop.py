@@ -835,22 +835,42 @@ async def answer_from_memory(
         except Exception:
             pass
 
-        # Friend preset (Step 5): model_routing local_only — in cloud-only mode refuse; in mix mode force local for this friend.
+        # Friend preset (Step 5): model_routing local_only; optional llm_ref = dedicated model for this Companion friend.
         if _current_friend:
             try:
                 preset_name = (getattr(_current_friend, "preset", None) or "").strip()
                 if preset_name:
                     preset_cfg = get_friend_preset_config(preset_name)
-                    if isinstance(preset_cfg, dict) and str(preset_cfg.get("model_routing") or "").strip().lower() == "local_only":
-                        if main_llm_mode == "cloud":
-                            return ("This friend is configured to use only a local model. Please switch to local or mix mode in Core settings to use it.", None)
-                        if main_llm_mode == "mix" and effective_llm_name:
-                            main_llm_cloud = (getattr(Util().core_metadata, "main_llm_cloud", None) or "").strip()
-                            if main_llm_cloud and effective_llm_name == main_llm_cloud:
-                                main_llm_local = (getattr(Util().core_metadata, "main_llm_local", None) or "").strip()
-                                if main_llm_local:
-                                    effective_llm_name = main_llm_local
-                                    logger.debug("Friend preset local_only: forcing local model for this friend.")
+                    if isinstance(preset_cfg, dict):
+                        if str(preset_cfg.get("model_routing") or "").strip().lower() == "local_only":
+                            if main_llm_mode == "cloud":
+                                return ("This friend is configured to use only a local model. Please switch to local or mix mode in Core settings to use it.", None)
+                            if main_llm_mode == "mix" and effective_llm_name:
+                                main_llm_cloud = (getattr(Util().core_metadata, "main_llm_cloud", None) or "").strip()
+                                if main_llm_cloud and effective_llm_name == main_llm_cloud:
+                                    main_llm_local = (getattr(Util().core_metadata, "main_llm_local", None) or "").strip()
+                                    if main_llm_local:
+                                        effective_llm_name = main_llm_local
+                                        logger.debug("Friend preset local_only: forcing local model for this friend.")
+                        _pref_llm = (
+                            str(preset_cfg.get("llm_ref") or preset_cfg.get("main_llm_ref") or "").strip()
+                        )
+                        _um = getattr(Util(), "core_metadata", None)
+                        if _pref_llm and _um is not None:
+                            _ent, _ = Util()._get_model_entry(_pref_llm)
+                            if _ent and Util().model_entry_available(_ent):
+                                effective_llm_name = _pref_llm
+                                logger.debug(
+                                    "Friend preset llm_ref: using {} for preset '{}'.",
+                                    _pref_llm,
+                                    preset_name,
+                                )
+                            else:
+                                logger.warning(
+                                    "Friend preset '{}' llm_ref '{}' ignored (unknown ref or available: false).",
+                                    preset_name,
+                                    _pref_llm,
+                                )
             except Exception:
                 pass
 
@@ -2296,6 +2316,57 @@ async def answer_from_memory(
                     break
             except Exception as _e:
                 logger.debug("Phase 1.1 run_skill enum patch failed: {}", _e)
+        # Append LLM catalog (capabilities + descriptions per ref) to models_list / sessions_spawn tool descriptions so the model can choose llm_name without calling models_list first.
+        try:
+            _tc_inj = tools_cfg_for_desc if isinstance(tools_cfg_for_desc, dict) else {}
+            if _tc_inj.get("llm_catalog_inject_enabled", True) is not False and all_tools:
+                try:
+                    _mc_inj = int(_tc_inj.get("llm_catalog_inject_max_chars") or 14000)
+                except (TypeError, ValueError):
+                    _mc_inj = 14000
+                _cat_inj = Util().format_llm_catalog_for_tool_prompt(max_chars=_mc_inj)
+                if _cat_inj:
+                    _suffix_inj = "\n\n" + _cat_inj
+                    for t in all_tools:
+                        if not isinstance(t, dict):
+                            continue
+                        fn = t.get("function")
+                        if not isinstance(fn, dict):
+                            continue
+                        _tn = (fn.get("name") or "").strip()
+                        if _tn not in ("models_list", "sessions_spawn"):
+                            continue
+                        base_d = fn.get("description")
+                        base_d = base_d if isinstance(base_d, str) else (str(base_d) if base_d is not None else "")
+                        fn["description"] = (base_d + _suffix_inj) if base_d.strip() else _suffix_inj
+        except Exception as _e:
+            logger.debug("LLM catalog tool description inject failed: {}", _e)
+        # Append peer roster (peers.yml) to peer_call tool description for instance_id selection.
+        try:
+            _tc_peer = tools_cfg_for_desc if isinstance(tools_cfg_for_desc, dict) else {}
+            if _tc_peer.get("peer_roster_inject_enabled", True) is not False and all_tools:
+                try:
+                    _pr_max = int(_tc_peer.get("peer_roster_inject_max_chars") or 5000)
+                except (TypeError, ValueError):
+                    _pr_max = 5000
+                from base.peer_registry import format_peer_roster_for_tool_prompt
+
+                _peer_txt = format_peer_roster_for_tool_prompt(max_chars=_pr_max)
+                if _peer_txt:
+                    _suf_peer = "\n\n" + _peer_txt
+                    for t in all_tools:
+                        if not isinstance(t, dict):
+                            continue
+                        fn = t.get("function")
+                        if not isinstance(fn, dict):
+                            continue
+                        if (fn.get("name") or "").strip() != "peer_call":
+                            continue
+                        base_d = fn.get("description")
+                        base_d = base_d if isinstance(base_d, str) else (str(base_d) if base_d is not None else "")
+                        fn["description"] = (base_d + _suf_peer) if base_d.strip() else _suf_peer
+        except Exception as _e:
+            logger.debug("Peer roster tool description inject failed: {}", _e)
         openai_tools = all_tools if (all_tools and (unified or len(all_tools) > 0)) else None
         tool_names = [((t or {}).get("function") or {}).get("name") for t in (openai_tools or []) if isinstance(t, dict)]
         logger.debug(

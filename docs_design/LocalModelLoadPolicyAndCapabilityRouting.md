@@ -69,7 +69,7 @@ local_models:
 **Semantics:**
 
 - **`capabilities`**: list of strings (case-insensitive match in code). Standardize doc’d tags: `Chat`, `Vision`, `Embedding`, `Math`, `Code`, `ToolSelection`, `Classifier`, … (extensible).
-- **`description`**: free text; **v1** = metadata only (exposed in `models_list` API); **v2** = optional embedding match for “task text → best model” (see §8).
+- **`description`**: free text; **v1** = exposed in **`models_list`** JSON for the main LLM to choose **`llm_name`** (capabilities stay coarse); **v2** = optional embedding match for “task text → best model” (see §8).
 - **`priority`**: when multiple locals match a capability, pick highest `priority`; tie-breaker = stable order in YAML, then `id`.
 
 ### 4.3 Pins (hard rules in code — not configurable)

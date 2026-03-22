@@ -12,7 +12,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
 import 'chat_history_store.dart';
+import 'federation_e2e_crypto.dart';
 import 'node_service.dart';
 
 /// HomeClaw Core API client.
@@ -42,6 +45,11 @@ class CoreService {
   String? _apiKey;
   String? _sessionToken;
   String? _sessionUserId;
+  /// Set from login and GET /api/me/friends when Core has federation_enabled.
+  bool _federationEnabled = false;
+  /// P5: optional hc-e2e-v1 for federated user messages (from login /api/me /api/me/friends).
+  bool _federationE2eEnabled = false;
+  bool _federationE2eRequireEncrypted = false;
   List<String> _execAllowlist = [];
   String? _canvasUrl;
   String? _nodesUrl;
@@ -56,6 +64,9 @@ class CoreService {
   String? get apiKey => _apiKey;
   String? get sessionToken => _sessionToken;
   String? get sessionUserId => _sessionUserId;
+  bool get federationEnabled => _federationEnabled;
+  bool get federationE2eEnabled => _federationE2eEnabled;
+  bool get federationE2eRequireEncrypted => _federationE2eRequireEncrypted;
   bool get isLoggedIn => _sessionToken != null && _sessionToken!.isNotEmpty && _sessionUserId != null && _sessionUserId!.isNotEmpty;
   List<String> get execAllowlist => List.unmodifiable(_execAllowlist);
   String? get canvasUrl => _canvasUrl;
@@ -207,6 +218,9 @@ class CoreService {
   Future<void> clearSession() async {
     _sessionToken = null;
     _sessionUserId = null;
+    _federationEnabled = false;
+    _federationE2eEnabled = false;
+    _federationE2eRequireEncrypted = false;
     await clearUserAvatarCache();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyCompanionToken);
@@ -277,6 +291,8 @@ class CoreService {
         final token = (map?['token'] as String?)?.trim() ?? '';
         if (userId.isEmpty || token.isEmpty) throw Exception('Login response missing user_id or token');
         await saveSession(token: token, userId: userId);
+        _federationEnabled = map?['federation_enabled'] == true;
+        _applyFederationE2eFlags(map);
         await saveCredentials(username: username.trim(), password: password);
         return map ?? {};
       } catch (e) {
@@ -301,7 +317,12 @@ class CoreService {
       throw Exception('Session expired; please log in again');
     }
     if (response.statusCode != 200) throw Exception('GET /api/me failed: ${response.body}');
-    return jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    final me = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    if (me.containsKey('federation_enabled')) {
+      _federationEnabled = me['federation_enabled'] == true;
+    }
+    _applyFederationE2eFlags(me);
+    return me;
   }
 
   /// GET /api/me/friends with Bearer token. Returns {friends: [...]}. 401 if token invalid.
@@ -316,6 +337,10 @@ class CoreService {
     }
     if (response.statusCode != 200) throw Exception('GET /api/me/friends failed: ${response.body}');
     final map = jsonDecode(response.body) as Map<String, dynamic>?;
+    if (map != null && map.containsKey('federation_enabled')) {
+      _federationEnabled = map['federation_enabled'] == true;
+    }
+    if (map != null) _applyFederationE2eFlags(map);
     final list = map?['friends'];
     if (list is! List<dynamic>) return [];
     final out = <Map<String, dynamic>>[];
@@ -324,6 +349,105 @@ class CoreService {
       else if (e is Map) out.add(Map<String, dynamic>.from(e));
     }
     return out;
+  }
+
+  void _applyFederationE2eFlags(Map<String, dynamic>? map) {
+    if (map == null) return;
+    if (map.containsKey('federation_e2e_enabled')) {
+      _federationE2eEnabled = map['federation_e2e_enabled'] == true;
+    }
+    if (map.containsKey('federation_e2e_require_encrypted')) {
+      _federationE2eRequireEncrypted = map['federation_e2e_require_encrypted'] == true;
+    }
+  }
+
+  static const FlutterSecureStorage _e2eSecureStorage = FlutterSecureStorage();
+
+  /// When [federationE2eEnabled], register this device's X25519 public key on Core if missing.
+  Future<void> ensureFederationE2eKeysRegistered() async {
+    if (!_federationE2eEnabled || !isLoggedIn) return;
+    try {
+      final st = await getFederationE2eKeyStatus();
+      if (st['registered'] == true) return;
+      final kp = await FederationE2eCrypto.loadOrCreateKeyPair(_e2eSecureStorage);
+      final b64 = await FederationE2eCrypto.publicKeyB64(kp);
+      await putFederationE2ePublicKey(b64);
+    } catch (_) {}
+  }
+
+  Future<Map<String, dynamic>> getFederationE2eKeyStatus() async {
+    final url = Uri.parse('$_baseUrl/api/me/federation-e2e-key-status');
+    final response = await http.get(url, headers: _authHeaders(forCompanionApi: true)).timeout(const Duration(seconds: 10));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
+    if (response.statusCode != 200) {
+      throw Exception('GET federation-e2e-key-status failed: ${response.body}');
+    }
+    try {
+      return jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    } catch (_) {
+      return {'registered': false, 'federation_e2e_enabled': _federationE2eEnabled};
+    }
+  }
+
+  Future<void> putFederationE2ePublicKey(String publicKeyB64) async {
+    final url = Uri.parse('$_baseUrl/api/me/federation-e2e-key');
+    final response = await http
+        .put(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+          body: jsonEncode({'public_key_b64': publicKeyB64.trim()}),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(response.body.isNotEmpty ? response.body : 'PUT federation-e2e-key failed ${response.statusCode}');
+    }
+  }
+
+  /// Remote user's public key (base64), or null if not registered (404).
+  Future<String?> getFederationPeerE2ePublicKey({
+    required String peerInstanceId,
+    required String remoteUserId,
+  }) async {
+    final url = Uri.parse('$_baseUrl/api/me/federation-peer-e2e-public-key').replace(
+      queryParameters: {
+        'peer_instance_id': peerInstanceId.trim(),
+        'remote_user_id': remoteUserId.trim(),
+      },
+    );
+    final response = await http.get(url, headers: _authHeaders(forCompanionApi: true)).timeout(const Duration(seconds: 20));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
+    if (response.statusCode == 404) return null;
+    if (response.statusCode != 200) {
+      throw Exception('Peer E2E key lookup failed: ${response.statusCode} ${response.body}');
+    }
+    final Map<String, dynamic>? map;
+    try {
+      map = jsonDecode(response.body) as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    }
+    final raw = map?['public_key_b64'];
+    final pk = raw is String ? raw.trim() : (raw != null ? raw.toString().trim() : '');
+    if (pk.isEmpty) return null;
+    return pk;
+  }
+
+  /// Decrypt hc-e2e-v1 inbox payload using the local secure key, or null if unavailable.
+  Future<String?> decryptFederatedE2eIfPresent(Map<String, dynamic>? e2e) async {
+    if (e2e == null || e2e.isEmpty) return null;
+    final kp = await FederationE2eCrypto.tryLoadKeyPair(_e2eSecureStorage);
+    if (kp == null) return null;
+    return FederationE2eCrypto.decryptEnvelopeUtf8(e2e: e2e, recipientKeyPair: kp);
   }
 
   /// URL for current user's avatar (GET with Bearer returns image). Use [fetchAvatarWithAuth] to load with auth.
@@ -517,6 +641,7 @@ class CoreService {
     List<String>? audios,
     List<String>? videos,
     List<String>? fileLinks,
+    Map<String, dynamic>? e2e,
   }) async {
     final url = Uri.parse('$_baseUrl/api/user-message');
     final body = <String, dynamic>{
@@ -528,6 +653,7 @@ class CoreService {
     if (audios != null && audios.isNotEmpty) body['audios'] = audios;
     if (videos != null && videos.isNotEmpty) body['videos'] = videos;
     if (fileLinks != null && fileLinks.isNotEmpty) body['file_links'] = fileLinks;
+    if (e2e != null && e2e.isNotEmpty) body['e2e'] = e2e;
     final response = await http
         .post(
           url,
@@ -539,7 +665,11 @@ class CoreService {
       final err = response.body;
       throw Exception('User message failed ${response.statusCode}: $err');
     }
-    return jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    try {
+      return jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    } catch (_) {
+      return {'ok': true};
+    }
   }
 
   /// GET /api/users — list users (id, name) excluding current user. Uses Bearer token. For Add Friend screen.
@@ -614,6 +744,89 @@ class CoreService {
           body: jsonEncode({'request_id': requestId.trim()}),
         )
         .timeout(const Duration(seconds: 15));
+    if (response.statusCode != 200) {
+      throw Exception(response.body.isNotEmpty ? response.body : 'Reject failed ${response.statusCode}');
+    }
+  }
+
+  /// GET /api/federated-friend-requests — pending cross-instance requests. Requires federation_enabled on Core.
+  Future<List<Map<String, dynamic>>> getFederatedFriendRequests() async {
+    final url = Uri.parse('$_baseUrl/api/federated-friend-requests');
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
+    if (response.statusCode != 200) {
+      throw Exception('GET federated-friend-requests failed: ${response.statusCode} ${response.body}');
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>?;
+    final list = map?['requests'] as List<dynamic>?;
+    if (list == null) return [];
+    return list.whereType<Map<String, dynamic>>().toList();
+  }
+
+  /// POST /api/federated-friend-request — send request to a user on another Core ([peerInstanceId] = peers.yml instance_id).
+  Future<void> sendFederatedFriendRequest({
+    required String toUserId,
+    required String peerInstanceId,
+    String? message,
+  }) async {
+    final url = Uri.parse('$_baseUrl/api/federated-friend-request');
+    final body = <String, dynamic>{
+      'to_user_id': toUserId.trim(),
+      'peer_instance_id': peerInstanceId.trim(),
+    };
+    if (message != null && message.trim().isNotEmpty) body['message'] = message.trim();
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 20));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(response.body.isNotEmpty ? response.body : 'Send failed ${response.statusCode}');
+    }
+  }
+
+  Future<void> acceptFederatedFriendRequest(String requestId) async {
+    final url = Uri.parse('$_baseUrl/api/federated-friend-request/accept');
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+          body: jsonEncode({'request_id': requestId.trim()}),
+        )
+        .timeout(const Duration(seconds: 20));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(response.body.isNotEmpty ? response.body : 'Accept failed ${response.statusCode}');
+    }
+  }
+
+  Future<void> rejectFederatedFriendRequest(String requestId) async {
+    final url = Uri.parse('$_baseUrl/api/federated-friend-request/reject');
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+          body: jsonEncode({'request_id': requestId.trim()}),
+        )
+        .timeout(const Duration(seconds: 20));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
     if (response.statusCode != 200) {
       throw Exception(response.body.isNotEmpty ? response.body : 'Reject failed ${response.statusCode}');
     }

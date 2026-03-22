@@ -1,0 +1,11 @@
+# Copy to peers.yml so this Core can call other HomeClaw instances via the peer_call tool.
+# Secrets: prefer api_key_env pointing to an environment variable (do not commit real keys).
+
+peers:
+  - instance_id: "worker-vision"
+    display_name: "Garage vision worker"
+    base_url: "https://worker-vision.example.ts.net:9000"
+    inbound_user_id: "peer_from_main"
+    api_key_env: "PEER_KEY_WORKER_VISION"
+    capabilities:
+      - vision

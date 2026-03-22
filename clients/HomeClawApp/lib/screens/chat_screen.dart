@@ -20,6 +20,7 @@ import 'package:record/record.dart';
 import 'package:video_player/video_player.dart';
 import '../chat_history_store.dart';
 import '../core_service.dart';
+import '../federation_e2e_crypto.dart';
 import '../widgets/homeclaw_snackbars.dart';
 import 'canvas_screen.dart';
 import 'settings_screen.dart';
@@ -35,6 +36,8 @@ class ChatScreen extends StatefulWidget {
   final bool isUserFriend;
   /// When [isUserFriend], the other user's id (for sendUserMessage and filtering inbox).
   final String? toUserId;
+  /// When set, user chat is with someone on another Core (show in app bar).
+  final String? remotePeerInstanceId;
 
   const ChatScreen({
     super.key,
@@ -45,6 +48,7 @@ class ChatScreen extends StatefulWidget {
     this.initialMessage,
     this.isUserFriend = false,
     this.toUserId,
+    this.remotePeerInstanceId,
   });
 
   @override
@@ -291,6 +295,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _loadClaudeSkipPermissionsPref();
     _scrollController.addListener(_onScrollForPagination);
     if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
+      if ((widget.remotePeerInstanceId?.trim().isNotEmpty ?? false) && widget.coreService.federationE2eEnabled) {
+        unawaited(widget.coreService.ensureFederationE2eKeysRegistered());
+      }
       _loadUserInbox();
       _userInboxPollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
         if (mounted && widget.isUserFriend && widget.toUserId != null) _loadUserInbox();
@@ -490,17 +497,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _messageVideos.clear();
       for (final m in list) {
         if (m is! Map) continue;
-        final text = (m['text'] as String?)?.trim() ?? '';
-        final from = (m['from_user_id'] as String?)?.trim() ?? '';
+        final mmap = m is Map<String, dynamic> ? m : Map<String, dynamic>.from(m);
+        var text = (mmap['text'] as String?)?.trim() ?? '';
+        final from = (mmap['from_user_id'] as String?)?.trim() ?? '';
         final isUser = from == myId;
+        final e2eRaw = mmap['e2e'];
+        Map<String, dynamic>? e2eMap;
+        if (e2eRaw is Map<String, dynamic>) {
+          e2eMap = e2eRaw;
+        } else if (e2eRaw is Map) {
+          e2eMap = Map<String, dynamic>.from(e2eRaw);
+        }
+        if (e2eMap != null && e2eMap.isNotEmpty) {
+          final decrypted = await widget.coreService.decryptFederatedE2eIfPresent(e2eMap);
+          if (decrypted != null && decrypted.isNotEmpty) {
+            text = decrypted;
+          } else if (text.isEmpty) {
+            text = '[Encrypted message]';
+          }
+        }
+        if (!isUser && (mmap['source'] as String?)?.trim() == 'federation' && text.isNotEmpty) {
+          text = '◇ $text';
+        }
         _messages.add(MapEntry(text.isEmpty ? '(attachment)' : text, isUser));
-        final imgList = m['images'] as List<dynamic>?;
+        final imgList = mmap['images'] as List<dynamic>?;
         final images = imgList != null ? imgList.whereType<String>().toList() : null;
         _messageImages.add(images != null && images.isNotEmpty ? images : null);
-        final audList = m['audios'] as List<dynamic>?;
+        final audList = mmap['audios'] as List<dynamic>?;
         final audios = audList != null ? audList.whereType<String>().toList() : null;
         _messageAudios.add(audios != null && audios.isNotEmpty ? audios : null);
-        final vidList = m['videos'] as List<dynamic>?;
+        final vidList = mmap['videos'] as List<dynamic>?;
         final videos = vidList != null ? vidList.whereType<String>().toList() : null;
         _messageVideos.add(videos != null && videos.isNotEmpty ? videos : null);
       }
@@ -608,8 +634,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _onPushMessage(Map<String, dynamic> push) {
     final text = push['text'] as String? ?? '';
-    if (text.isEmpty) return;
     final source = (push['source'] as String?)?.trim() ?? 'push';
+    final e2eEncrypted = push['e2e_encrypted'] == true;
     // User-to-user: refresh inbox so the new message appears; match by from_user_id or from_friend.
     if (widget.isUserFriend && widget.toUserId != null && source == 'user_message') {
       final fromUserId = (push['from_user_id'] as String?)?.trim();
@@ -622,6 +648,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         return;
       }
     }
+    if (text.isEmpty && !e2eEncrypted) return;
     final pushFriendId = (push['friend_id'] ?? push['from_friend']) as String?;
     final pushFriend = (pushFriendId?.toString().trim() ?? '').isEmpty ? 'HomeClaw' : pushFriendId!.trim();
     final thisFriend = (widget.friendId?.trim() ?? '').isEmpty ? 'HomeClaw' : widget.friendId!.trim();
@@ -755,20 +782,55 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // User-to-user: send via POST /api/user-message; no AI reply.
     if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
       try {
+        Map<String, dynamic>? e2eEnvelope;
+        final rid = widget.remotePeerInstanceId?.trim();
+        final fedE2e = widget.coreService.federationE2eEnabled;
+        final requireE2e = widget.coreService.federationE2eRequireEncrypted;
+        final textOnly = text.isNotEmpty && imagesToSend.isEmpty && videosToSend.isEmpty && filesToSend.isEmpty;
+        if (rid != null && rid.isNotEmpty && fedE2e) {
+          if (requireE2e && !textOnly) {
+            throw Exception('This chat requires encrypted text-only messages (no images, video, or files).');
+          }
+          if (textOnly) {
+            await widget.coreService.ensureFederationE2eKeysRegistered();
+            final peerPk = await widget.coreService.getFederationPeerE2ePublicKey(
+              peerInstanceId: rid,
+              remoteUserId: widget.toUserId!.trim(),
+            );
+            if (requireE2e && (peerPk == null || peerPk.isEmpty)) {
+              throw Exception('Encrypted messaging is required but the other user has not registered a key on their Core yet.');
+            }
+            if (peerPk != null && peerPk.isNotEmpty) {
+              try {
+                final raw = Uint8List.fromList(base64Decode(peerPk));
+                if (raw.length != 32) {
+                  if (requireE2e) {
+                    throw Exception('Peer public key from server is not a valid 32-byte X25519 key.');
+                  }
+                } else {
+                  final env = await FederationE2eCrypto.encryptEnvelopeUtf8(
+                    plaintext: text.isEmpty ? '(attachment)' : text,
+                    recipientPublicKey32: raw,
+                  );
+                  e2eEnvelope = Map<String, dynamic>.from(env);
+                }
+              } catch (_) {
+                if (requireE2e) rethrow;
+              }
+            }
+          }
+        }
         await widget.coreService.sendUserMessage(
           fromUserId: widget.userId,
           toUserId: widget.toUserId!.trim(),
-          text: text.isEmpty ? '(attachment)' : text,
+          text: e2eEnvelope != null ? '' : (text.isEmpty ? '(attachment)' : text),
           images: userImageDataUrls.isEmpty ? null : userImageDataUrls,
           videos: userVideoDataUrls.isEmpty ? null : userVideoDataUrls,
+          e2e: e2eEnvelope,
         );
         if (mounted) {
           _stopLoadingStatusTimer();
           setState(() {
-            _messages.add(MapEntry(text.isEmpty ? '(attachment)' : text, true));
-            _messageImages.add(userImageDataUrls.isEmpty ? null : userImageDataUrls);
-            _messageAudios.add(null);
-            _messageVideos.add(userVideoDataUrls.isEmpty ? null : userVideoDataUrls);
             _loading = false;
             _loadingMessage = null;
           });
@@ -1016,6 +1078,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (filePath == null || filePath.isEmpty) return;
       final file = File(filePath);
       if (!await file.exists()) return;
+      if (widget.coreService.federationE2eRequireEncrypted && (widget.remotePeerInstanceId?.trim().isNotEmpty ?? false)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Voice messages are not available when this Core requires encrypted federation chat.')),
+          );
+        }
+        return;
+      }
       final bytes = await file.readAsBytes();
       final b64 = base64Encode(bytes);
       final dataUrl = 'data:audio/mp4;base64,$b64';
@@ -1799,6 +1869,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(widget.userName, overflow: TextOverflow.ellipsis),
+                    if (widget.isUserFriend && (widget.remotePeerInstanceId ?? '').trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Chip(
+                            avatar: Icon(
+                              Icons.cloud_outlined,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            label: Text(
+                              'Remote · ${widget.remotePeerInstanceId!.trim()}',
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                          ),
+                        ),
+                      ),
                     if (_isDevBridgeFriend && _cursorActiveCwd.trim().isNotEmpty)
                       Text(
                         'Project: ${path.basename(_cursorActiveCwd.trim())}',

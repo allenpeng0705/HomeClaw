@@ -102,7 +102,7 @@ This document lists all **built-in tools** with their **name** and **description
 
 | Tool | Description |
 |------|-------------|
-| **models_list** | List model refs from the `llm.yml` catalog (`local_models` / `cloud_models`), `main_llm`, and per-model `capabilities` plus **`available`** (false = placeholder; skipped for capability-based spawn). |
+| **models_list** | List catalog refs, `main_llm`, per-model **`capabilities`**, **`description`**, **`available`**. The same catalog text is also **injected into this tool’s description** in the prompt (and into **`sessions_spawn`**) when **`tools.llm_catalog_inject_enabled`** is true in **core.yml**. |
 | **agents_list** | List agent ids. In HomeClaw returns single-agent note. |
 | **image** | Analyze an image with the vision/multimodal model. Provide image as path (relative to homeclaw_root) or url, and optional prompt (e.g. 'What is in this image?'). Requires a vision-capable LLM. |
 | **echo** | Echo back the given text. Useful for testing. |

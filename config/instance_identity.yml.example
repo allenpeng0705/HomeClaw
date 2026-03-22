@@ -1,0 +1,13 @@
+# Copy to instance_identity.yml (same folder) to identify this Core for multi-instance pairing.
+# Workspace IDENTITY.md is LLM persona only; this file is machine-oriented identity.
+
+instance_id: "my-home-core"
+display_name: "Home Core (living room)"
+capabilities:
+  - chat
+  - vision
+# Public URL other instances use in peers.yml (HTTPS recommended behind Tailscale/reverse proxy).
+# public_base_url: "https://my-core.example.ts.net:9000"
+# user_id peers use when calling THIS Core's POST /inbound (must exist in user.yml). Sent on invite-accept for symmetric recipient_import_peer.
+# pairing_inbound_user_id: "peer_service"
+# version_hint: "HomeClaw main"

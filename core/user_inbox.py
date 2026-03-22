@@ -42,6 +42,8 @@ def append_message(
     audios: Optional[List[str]] = None,
     videos: Optional[List[str]] = None,
     file_links: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    e2e: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     """
     Append a user-to-user message to the recipient's inbox. Returns message id or None on failure.
@@ -81,6 +83,12 @@ def append_message(
             entry["videos"] = list(videos)[:5]
         if file_links and isinstance(file_links, (list, tuple)):
             entry["file_links"] = list(file_links)[:20]
+        if e2e and isinstance(e2e, dict):
+            entry["e2e"] = dict(e2e)
+        if metadata and isinstance(metadata, dict):
+            for k, v in metadata.items():
+                if v is not None and k not in entry:
+                    entry[k] = v
         messages.append(entry)
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"messages": messages[-500:]}, f, ensure_ascii=False, indent=2)

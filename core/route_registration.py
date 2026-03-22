@@ -40,8 +40,12 @@ from core.routes import (
     companion_auth,
     companion_push_api,
     config_api,
+    federated_friend_request_api,
+    federation_api,
+    federation_e2e_api,
     friend_request_api,
     me_api,
+    peer_api,
     user_message_api,
     files,
     inbound as inbound_routes,
@@ -125,6 +129,23 @@ def register_all_routes(core: Any) -> None:
         config_api.get_api_config_core_patch_handler(core),
         methods=["PATCH"],
         dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    # Multi-instance: identity (public) + pairing invites (create auth'd; consume token-only)
+    app.add_api_route(
+        "/api/instance/identity",
+        peer_api.get_api_instance_identity_get_handler(core),
+        methods=["GET"],
+    )
+    app.add_api_route(
+        "/api/peer/invite/create",
+        peer_api.get_api_peer_invite_create_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/peer/invite/consume",
+        peer_api.get_api_peer_invite_consume_handler(core),
+        methods=["POST"],
     )
     app.add_api_route(
         "/api/config/friend-presets",
@@ -390,6 +411,48 @@ def register_all_routes(core: Any) -> None:
         dependencies=[Depends(auth.verify_inbound_auth)],
     )
     app.add_api_route(
+        "/api/federation/user-message",
+        federation_api.get_federation_user_message_post_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/federation/friend-request",
+        federation_api.get_federation_friend_request_post_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/federation/friend-relationship-reciprocal",
+        federation_api.get_federation_friend_relationship_reciprocal_post_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/federation/e2e-public-key",
+        federation_e2e_api.get_federation_e2e_public_key_get_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/me/federation-e2e-key",
+        federation_e2e_api.get_api_me_federation_e2e_key_put_handler(core),
+        methods=["PUT"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/me/federation-e2e-key-status",
+        federation_e2e_api.get_api_me_federation_e2e_key_status_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/me/federation-peer-e2e-public-key",
+        federation_e2e_api.get_api_me_federation_peer_e2e_public_key_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
         "/api/user-message",
         user_message_api.get_user_message_post_handler(core),
         methods=["POST"],
@@ -512,6 +575,30 @@ def register_all_routes(core: Any) -> None:
     app.add_api_route(
         "/api/friend-request/reject",
         friend_request_api.get_api_friend_request_reject_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/federated-friend-request",
+        federated_friend_request_api.get_api_federated_friend_request_send_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/federated-friend-requests",
+        federated_friend_request_api.get_api_federated_friend_requests_list_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/federated-friend-request/accept",
+        federated_friend_request_api.get_api_federated_friend_request_accept_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/federated-friend-request/reject",
+        federated_friend_request_api.get_api_federated_friend_request_reject_handler(core),
         methods=["POST"],
         dependencies=[Depends(companion_auth.get_companion_token_user)],
     )

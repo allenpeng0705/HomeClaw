@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import signal
@@ -95,6 +96,101 @@ def run_onboard():
     print("Config saved. Run 'python -m main doctor' to check connectivity, or 'python -m main start' to start.")
 
 
+def run_peer_invite_create(ttl_seconds: int = 900) -> None:
+    """POST /api/peer/invite/create on local Core (requires Core running and auth key from core.yml if auth_enabled)."""
+    if not os.path.isfile(core_config_file_path):
+        print("Config not found:", core_config_file_path)
+        return
+    cfg = read_config(core_config_file_path)
+    port = int(cfg.get("port", 9000) or 9000)
+    host = (cfg.get("host") or "127.0.0.1").strip()
+    connect_host = "127.0.0.1" if host in ("0.0.0.0", "::", "[::]") else host
+    url = f"http://{connect_host}:{port}/api/peer/invite/create"
+    headers = {"Content-Type": "application/json"}
+    if bool(cfg.get("auth_enabled", False)):
+        ak = (cfg.get("auth_api_key") or "").strip()
+        if ak:
+            headers["X-API-Key"] = ak
+    try:
+        r = requests.post(url, json={"ttl_seconds": int(ttl_seconds)}, headers=headers, timeout=30)
+        print(r.status_code, r.text)
+    except Exception as e:
+        print("Request failed:", e)
+
+
+def run_peer_import(file_path: str, api_key_env: str = "") -> None:
+    """Merge a peer entry from JSON/YAML (e.g. saved invite-consume response) into config/peers.yml."""
+    from base.peer_registry import merge_peer_entry, peer_dict_from_import_payload
+
+    path = os.path.abspath(os.path.expanduser(file_path.strip()))
+    if not os.path.isfile(path):
+        print("File not found:", path)
+        sys.exit(2)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw_text = f.read()
+        if path.lower().endswith(".json"):
+            data = json.loads(raw_text)
+        else:
+            data = yaml.safe_load(raw_text)
+    except Exception as e:
+        print("Failed to read config:", e)
+        sys.exit(2)
+    peer = peer_dict_from_import_payload(data)
+    if not peer:
+        print("No peer object found: need top-level 'peer' { ... } or flat instance_id + base_url + inbound_user_id")
+        sys.exit(2)
+    if (api_key_env or "").strip():
+        peer["api_key_env"] = api_key_env.strip()
+    ok, msg = merge_peer_entry(peer)
+    print(msg)
+    if not ok:
+        sys.exit(1)
+
+
+def run_peer_list() -> None:
+    """Print configured peers from config/peers.yml as JSON."""
+    from base.peer_registry import load_peers_list
+
+    print(json.dumps(load_peers_list(), indent=2, ensure_ascii=False))
+
+
+def run_peer_invite_accept(
+    peer_base_url: str,
+    invite_id: str,
+    token: str,
+    my_instance_id: str = "",
+    my_display_name: str = "",
+) -> None:
+    """POST /api/peer/invite/consume on the peer Core (no API key; invite token is the secret)."""
+    url = peer_base_url.rstrip("/") + "/api/peer/invite/consume"
+    body = {
+        "invite_id": invite_id.strip(),
+        "invite_token": token.strip(),
+        "instance_id": (my_instance_id or "").strip(),
+        "display_name": (my_display_name or "").strip(),
+        "initiator_base_url": "",
+        "initiator_inbound_user_id": "",
+    }
+    try:
+        from base.peer_registry import load_instance_identity
+
+        ident = load_instance_identity()
+        body["initiator_base_url"] = (ident.get("public_base_url") or "").strip().rstrip("/")
+        body["initiator_inbound_user_id"] = (ident.get("pairing_inbound_user_id") or "").strip()
+        if not body["instance_id"]:
+            body["instance_id"] = (ident.get("instance_id") or "").strip()
+        if not body["display_name"]:
+            body["display_name"] = (ident.get("display_name") or "").strip()
+    except Exception:
+        pass
+    try:
+        r = requests.post(url, json=body, timeout=30)
+        print(r.status_code, r.text)
+    except Exception as e:
+        print("Request failed:", e)
+
+
 def run_doctor():
     """Check config, connectivity, and LLM reachability; report issues."""
     issues = []
@@ -177,6 +273,78 @@ def run_doctor():
             issues.append("embedding_llm not reachable (health check failed): " + (meta.embedding_llm or ""))
     except Exception as e:
         issues.append("LLM health check error: " + str(e))
+    # Optional multi-instance peer files (config/instance_identity.yml, config/peers.yml)
+    try:
+        from base.peer_registry import (
+            INSTANCE_IDENTITY_FILENAME,
+            PEERS_FILENAME,
+            load_instance_identity,
+            load_peers_list,
+        )
+
+        cfg_dir = path
+        id_path = os.path.join(cfg_dir, INSTANCE_IDENTITY_FILENAME)
+        if os.path.isfile(id_path):
+            ident = load_instance_identity(cfg_dir)
+            if (ident.get("instance_id") or "").strip():
+                ok.append("instance_identity.yml: instance_id=" + (ident.get("instance_id") or "").strip())
+            else:
+                issues.append(
+                    "instance_identity.yml exists but instance_id is empty "
+                    "(set a stable id for pairing / peer_call)"
+                )
+        else:
+            ok.append("instance_identity.yml absent (optional; see config/instance_identity.yml.example)")
+        peers_path = os.path.join(cfg_dir, PEERS_FILENAME)
+        if os.path.isfile(peers_path):
+            plist = load_peers_list(cfg_dir)
+            if plist:
+                ok.append("peers.yml: {} peer(s) configured".format(len(plist)))
+                for p in plist:
+                    pid = (p.get("instance_id") or "?").strip()
+                    if not (p.get("inbound_user_id") or "").strip():
+                        issues.append("peers.yml peer '{}': inbound_user_id missing".format(pid))
+                    envn = (p.get("api_key_env") or "").strip()
+                    if envn and not (os.environ.get(envn) or "").strip():
+                        issues.append(
+                            "peers.yml peer '{}': api_key_env {} is not set in the environment".format(pid, envn)
+                        )
+                any_https = any(
+                    str((p.get("base_url") or "")).strip().lower().startswith("https:")
+                    for p in plist
+                )
+                if any_https:
+                    pub = ""
+                    if os.path.isfile(id_path):
+                        pub = (load_instance_identity(cfg_dir).get("public_base_url") or "").strip()
+                    if not pub:
+                        issues.append(
+                            "peers.yml: peer(s) use https:// but instance_identity.yml has no public_base_url "
+                            "(set public_base_url so pairing returns a stable URL for peer_call / peers.yml)"
+                        )
+            else:
+                ok.append("peers.yml present but peers list is empty")
+        else:
+            ok.append("peers.yml absent (optional; see config/peers.yml.example)")
+    except Exception as e:
+        issues.append("Peer / instance identity check failed: " + str(e))
+    # Federated user messaging: peer_instance_id on friends requires federation_enabled
+    try:
+        if not bool(config.get("federation_enabled", False)):
+            warned = False
+            for u in Util().get_users() or []:
+                for f in getattr(u, "friends", None) or []:
+                    if (getattr(f, "peer_instance_id", None) or "").strip():
+                        issues.append(
+                            "Federation: a user friend has peer_instance_id but federation_enabled is false in core.yml "
+                            "(enable federation or remove peer_instance_id)."
+                        )
+                        warned = True
+                        break
+                if warned:
+                    break
+    except Exception as e:
+        issues.append("Federation friend check failed: " + str(e))
     print("Doctor report:")
     for s in ok:
         print("  OK:", s)
@@ -640,8 +808,8 @@ if __name__ == "__main__":
         "command",
         nargs="?",
         default="start",
-        choices=["start", "onboard", "doctor", "ollama", "portal", "skills"],
-        help="start (default): run Core; onboard: wizard; doctor: check config; ollama: list/pull/set-main Ollama models; portal: run Portal server (config and onboarding); skills: search/install OpenClaw skills via ClawHub",
+        choices=["start", "onboard", "doctor", "ollama", "portal", "skills", "peer"],
+        help="start (default): run Core; onboard: wizard; doctor: check config; peer: multi-instance CLI (invite-create, invite-accept, import, list); ollama: …; portal: …; skills: ClawHub",
     )
     parser.add_argument(
         "ollama_action",
@@ -709,6 +877,50 @@ if __name__ == "__main__":
             run_onboard()
         elif args.command == "doctor":
             run_doctor()
+        elif args.command == "peer":
+            sub = (args.ollama_action or "").strip().lower()
+            extra = list(args.extra or [])
+            if sub == "invite-create":
+                ttl = 900
+                if extra:
+                    try:
+                        ttl = max(60, min(int(str(extra[0]).strip()), 86400))
+                    except (TypeError, ValueError):
+                        print("Invalid ttl_seconds; using 900")
+                run_peer_invite_create(ttl_seconds=ttl)
+            elif sub == "invite-accept":
+                if len(extra) < 3:
+                    print(
+                        "Usage: python -m main peer invite-accept <peer_base_url> <invite_id> <token> "
+                        "[my_instance_id] [my_display_name]"
+                    )
+                    sys.exit(2)
+                run_peer_invite_accept(
+                    extra[0].strip(),
+                    extra[1].strip(),
+                    extra[2].strip(),
+                    extra[3].strip() if len(extra) > 3 else "",
+                    extra[4].strip() if len(extra) > 4 else "",
+                )
+            elif sub == "import":
+                if not extra:
+                    print("Usage: python -m main peer import <file.json_or_yml> [api_key_env_name]")
+                    sys.exit(2)
+                run_peer_import(extra[0], api_key_env=extra[1].strip() if len(extra) > 1 else "")
+            elif sub == "list":
+                run_peer_list()
+            else:
+                print(
+                    "Usage:\n"
+                    "  python -m main peer invite-create [ttl_seconds]\n"
+                    "  python -m main peer invite-accept <peer_base_url> <invite_id> <token> "
+                    "[my_instance_id] [my_display_name]\n"
+                    "  python -m main peer import <file.json_or_yml> [api_key_env_name]\n"
+                    "  python -m main peer list\n"
+                    "Core must be running for invite-create. invite-accept calls the peer's /api/peer/invite/consume. "
+                    "Save invite-accept JSON to a file and run peer import to merge into config/peers.yml."
+                )
+                sys.exit(2)
         elif args.command == "skills":
             from pathlib import Path
             from base.clawhub_integration import clawhub_available, clawhub_search, clawhub_install_and_convert

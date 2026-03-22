@@ -126,6 +126,12 @@ prompt_cache_ttl_seconds: 0   # Unit: seconds. 0 = cache by file mtime; >0 = TTL
 # Optional: require API key for /inbound and /ws when exposing Core on the internet; see docs/RemoteAccess.md
 auth_enabled: false
 auth_api_key: ""   # when auth_enabled: true, require X-API-Key header or Authorization: Bearer <key>
+# peer_pairing_enabled: true   # when false, disable POST /api/peer/invite/create and consume (404). See docs/multi-instance-peers.md
+# federation_enabled: false   # when true, allow cross-instance user-to-user messages via peers.yml + POST /api/federation/user-message; see docs/federated-companion-messaging.md
+# federation_trusted_instances: []   # optional allowlist of remote instance_id strings; empty = any sender allowed if mutual friend link matches
+# federation_require_accepted_relationship: false   # when true, inbound federated user messages require accepted row in federated_friendships.sqlite (not YAML alone)
+# federation_e2e_enabled: false   # P5: allow hc-e2e-v1 envelopes on federated user messages; Companion registers public key via PUT /api/me/federation-e2e-key
+# federation_e2e_require_encrypted: false   # when true, federated user messages must use E2E envelope (no plaintext)
 # Tool layer config (used when use_tools: true). Cross-platform (Mac/Linux/Windows) where possible.
 # Built-in tools: time, cron_*, sessions_*, session_status; memory_search, memory_get; file_*,
 # folder_list; fetch_url, web_search; browser_*; exec, process_*; image; channel_send; run_skill;

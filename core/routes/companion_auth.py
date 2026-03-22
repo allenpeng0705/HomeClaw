@@ -24,6 +24,31 @@ _TOKENS_LOADED = False
 _TOKENS_FILENAME = "companion_tokens.json"
 
 
+def _companion_federation_enabled() -> bool:
+    """True when core.yml has federation_enabled (cross-instance Companion features). Never raises."""
+    try:
+        return bool(getattr(Util().get_core_metadata(), "federation_enabled", False))
+    except Exception:
+        return False
+
+
+def _companion_federation_client_config() -> Dict[str, Any]:
+    """Flags for Companion: federation and optional E2E (P5). Never raises."""
+    try:
+        meta = Util().get_core_metadata()
+        return {
+            "federation_enabled": bool(getattr(meta, "federation_enabled", False)),
+            "federation_e2e_enabled": bool(getattr(meta, "federation_e2e_enabled", False)),
+            "federation_e2e_require_encrypted": bool(getattr(meta, "federation_e2e_require_encrypted", False)),
+        }
+    except Exception:
+        return {
+            "federation_enabled": False,
+            "federation_e2e_enabled": False,
+            "federation_e2e_require_encrypted": False,
+        }
+
+
 def _tokens_path() -> Path:
     """Path to persisted companion tokens file. Under data_path (e.g. database/). Never raises."""
     try:
@@ -157,10 +182,13 @@ def _user_to_friends_list(user: User) -> List[Dict[str, Any]]:
                 if ftype not in ("user", "ai", "remote_ai", "remote_user"):
                     ftype = "ai"
                 item["type"] = ftype
-                if ftype == "user":
+                if ftype in ("user", "remote_user"):
                     uid = (getattr(f, "user_id", None) or "").strip()
                     if uid:
                         item["user_id"] = uid
+                    pinst = (getattr(f, "peer_instance_id", None) or "").strip()
+                    if pinst:
+                        item["peer_instance_id"] = pinst
                 out.append(item)
             except Exception:
                 continue
@@ -281,12 +309,7 @@ def get_api_auth_login_handler(core):  # noqa: ARG001
             _clean_expired_tokens()
             _save_tokens_to_disk()
             friends = _user_to_friends_list(user)
-            return JSONResponse(content={
-                "user_id": user_id,
-                "token": token,
-                "name": name,
-                "friends": friends,
-            })
+            return JSONResponse(content={"user_id": user_id, "token": token, "name": name, "friends": friends, **_companion_federation_client_config()})
         except Exception as e:
             logger.exception("companion_auth: login failed: {}", e)
             return JSONResponse(status_code=500, content={"detail": "Login failed"})
@@ -306,7 +329,7 @@ def get_api_me_handler(core):  # noqa: ARG001
             except (TypeError, ValueError):
                 name = user_id
             friends = _user_to_friends_list(user)
-            return JSONResponse(content={"user_id": user_id, "name": name, "friends": friends})
+            return JSONResponse(content={"user_id": user_id, "name": name, "friends": friends, **_companion_federation_client_config()})
         except HTTPException:
             raise
         except Exception as e:
@@ -324,7 +347,7 @@ def get_api_me_friends_handler(core):  # noqa: ARG001
         try:
             _user_id, user = token_user
             friends = _user_to_friends_list(user)
-            return JSONResponse(content={"friends": friends})
+            return JSONResponse(content={"friends": friends, **_companion_federation_client_config()})
         except HTTPException:
             raise
         except Exception as e:

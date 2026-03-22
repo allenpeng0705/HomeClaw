@@ -537,6 +537,18 @@ class Util:
             return True
         return entry.get("available") is not False
 
+    @staticmethod
+    def _normalize_capability_list(val: Any) -> List[Any]:
+        """YAML may list capabilities as a string or list; normalize for matching and display."""
+        if val is None:
+            return []
+        if isinstance(val, str):
+            s = val.strip()
+            return [s] if s else []
+        if isinstance(val, list):
+            return val
+        return []
+
     def _get_model_entry(self, model_id: str):
         """Resolve model id to (entry_dict, 'local'|'ollama'|'litellm'). model_id can be 'local_models/<id>', 'cloud_models/<id>', or plain id. Returns (None, None) if not found."""
         list_key, raw_id = self._parse_model_ref(model_id)
@@ -2742,6 +2754,7 @@ class Util:
                         preset=new_preset,
                         type=ftype,
                         user_id=None,
+                        peer_instance_id=getattr(f, "peer_instance_id", None),
                     )
                     u.friends = friends
                     self.save_users(users)
@@ -2884,29 +2897,116 @@ class Util:
         """Return a model ref (local_models/<id> or cloud_models/<id>) that has the given capability in its capabilities array. Prefer main_llm if it has the capability; else first match in local then cloud. Case-insensitive. Returns None if no model has that capability."""
         if not capability or not str(capability).strip():
             return None
+        meta = getattr(self, "core_metadata", None)
+        if not meta:
+            return None
         cap = str(capability).strip().lower()
-        main_llm_name = self.core_metadata.main_llm
-        entry, _ = self._get_model_entry(main_llm_name)
-        if entry and self.model_entry_available(entry):
-            caps = entry.get("capabilities") or []
-            if any((str(c).strip().lower() == cap for c in caps)):
-                return main_llm_name
-        for m in (self.core_metadata.local_models or []):
-            mid = m.get("id")
-            if not mid or not self.model_entry_available(m):
+        main_llm_name = (getattr(meta, "main_llm", None) or "").strip()
+        if main_llm_name:
+            entry, _ = self._get_model_entry(main_llm_name)
+            if entry and self.model_entry_available(entry):
+                caps = self._normalize_capability_list(entry.get("capabilities"))
+                if any((str(c).strip().lower() == cap for c in caps if c is not None)):
+                    return main_llm_name
+        for m in (meta.local_models or []):
+            if not isinstance(m, dict):
                 continue
-            caps = m.get("capabilities") or []
-            if any((str(c).strip().lower() == cap for c in caps)):
-                return f"local_models/{mid}"
-        for m in (self.core_metadata.cloud_models or []):
             mid = m.get("id")
-            if not mid or not self.model_entry_available(m):
+            mid_s = str(mid).strip() if mid is not None else ""
+            if not mid_s or not self.model_entry_available(m):
                 continue
-            caps = m.get("capabilities") or []
-            if any((str(c).strip().lower() == cap for c in caps)):
-                return f"cloud_models/{mid}"
+            caps = self._normalize_capability_list(m.get("capabilities"))
+            if any((str(c).strip().lower() == cap for c in caps if c is not None)):
+                return f"local_models/{mid_s}"
+        for m in (meta.cloud_models or []):
+            if not isinstance(m, dict):
+                continue
+            mid = m.get("id")
+            mid_s = str(mid).strip() if mid is not None else ""
+            if not mid_s or not self.model_entry_available(m):
+                continue
+            caps = self._normalize_capability_list(m.get("capabilities"))
+            if any((str(c).strip().lower() == cap for c in caps if c is not None)):
+                return f"cloud_models/{mid_s}"
         return None
-        
+
+    def format_llm_catalog_for_tool_prompt(self, max_chars: int = 14000) -> str:
+        """
+        Build a compact text block of local_models + cloud_models (ref, capabilities, available, alias, description)
+        for appending to models_list / sessions_spawn tool descriptions in the LLM prompt.
+        """
+        try:
+            try:
+                max_chars = max(400, int(max_chars))
+            except (TypeError, ValueError):
+                max_chars = 14000
+            meta = getattr(self, "core_metadata", None)
+            if not meta:
+                return ""
+            lines: List[str] = [
+                "## Current LLM catalog (for models_list and sessions_spawn)",
+                "Each entry: ref | capabilities | available | alias | description",
+                "Use description + capabilities to choose llm_name; use capability= only when tags match (ignores available:false).",
+                "---",
+            ]
+            main_llm = (getattr(meta, "main_llm", None) or "").strip()
+            if main_llm:
+                lines.append(f"Default chat main_llm: {main_llm}")
+                lines.append("---")
+            count = 0
+            for m in (meta.local_models or []):
+                if not isinstance(m, dict):
+                    continue
+                mid = m.get("id")
+                mid_s = str(mid).strip() if mid is not None else ""
+                if not mid_s:
+                    continue
+                count += 1
+                ref = f"local_models/{mid_s}"
+                caps = self._normalize_capability_list(m.get("capabilities"))
+                cap_s = ",".join(str(c) for c in caps if c is not None) if caps else "-"
+                avail = "true" if self.model_entry_available(m) else "false"
+                alias = str(m.get("alias") or mid_s).strip() or mid_s
+                desc_raw = m.get("description")
+                desc = str(desc_raw).strip() if desc_raw is not None else ""
+                if desc:
+                    desc = " ".join(desc.split())
+                line = f"- {ref} | [{cap_s}] | {avail} | {alias}"
+                if desc:
+                    line += f" | {desc}"
+                lines.append(line)
+            for m in (meta.cloud_models or []):
+                if not isinstance(m, dict):
+                    continue
+                mid = m.get("id")
+                mid_s = str(mid).strip() if mid is not None else ""
+                if not mid_s:
+                    continue
+                count += 1
+                ref = f"cloud_models/{mid_s}"
+                caps = self._normalize_capability_list(m.get("capabilities"))
+                cap_s = ",".join(str(c) for c in caps if c is not None) if caps else "-"
+                avail = "true" if self.model_entry_available(m) else "false"
+                alias = str(m.get("alias") or mid_s).strip() or mid_s
+                desc_raw = m.get("description")
+                desc = str(desc_raw).strip() if desc_raw is not None else ""
+                if desc:
+                    desc = " ".join(desc.split())
+                line = f"- {ref} | [{cap_s}] | {avail} | {alias}"
+                if desc:
+                    line += f" | {desc}"
+                lines.append(line)
+            if count == 0:
+                return ""
+            body = "\n".join(lines)
+            if len(body) > max_chars:
+                cut = max(0, max_chars - 24)
+                body = body[:cut].rstrip() + "\n…(catalog truncated)"
+            return body
+        except Exception as e:
+            logger.debug("format_llm_catalog_for_tool_prompt failed: {}", e)
+            return ""
+
     def get_llm(self, name: str):
         entry, mtype = self._get_model_entry(name)
         if entry is not None:

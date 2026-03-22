@@ -26,6 +26,10 @@ The default friend is **HomeClaw** — your general-purpose assistant with full 
 
 Or create a **custom friend** with any personality you imagine — a study partner, a language tutor, a fitness coach, a creative writing buddy.
 
+### Dedicated model for a friend (math, science, …)
+
+Presets can set **`llm_ref`** in **`config/friend_presets.yml`** so a Companion friend always talks through that catalog model (e.g. `local_models/...` or `cloud_models/...`), overriding mix-mode local/cloud for that chat. Add a friend with **`preset: math`** after you define a **`math:`** preset (see commented examples at the bottom of **`friend_presets.yml`**). Use **`tools_preset: tutor`** for a small tool set. Details: [Companion app — Friends](companion-app.md#friends) and [LLM catalog how-to](llm-catalog-howto.md).
+
 ---
 
 ## Add an AI friend

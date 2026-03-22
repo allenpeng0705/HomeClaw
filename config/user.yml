@@ -56,6 +56,9 @@ users:
         preset: cursor
       - name: ClaudeCode
         preset: claudecode
+      # Dedicated model: define preset "math" (or science) in friend_presets.yml with llm_ref, then uncomment:
+      # - name: Math
+      #   preset: math
 
   - id: PengXiaoFeng
     name: PengXiaoFeng

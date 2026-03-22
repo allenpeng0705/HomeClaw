@@ -33,6 +33,11 @@ const Map<String, String> _localizedNameToPreset = {
   '리마인더': 'reminder', '비공개 메모': 'note',
 };
 
+bool _isPersonFriendType(String? t) {
+  final x = (t ?? '').trim().toLowerCase();
+  return x == 'user' || x == 'remote_user';
+}
+
 /// Derive preset key from friend name when API does not return preset (e.g. Reminder→reminder, Note/Notes→note, Finder/Files→finder).
 /// Handles English and localized names (zh, es, fr, de, it, ja, ko) so thumbnails show regardless of locale.
 String? _presetKeyFromFriendName(String name) {
@@ -88,6 +93,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
     _pushSubscription = widget.coreService.pushMessageStream.listen((push) {
       final source = (push['source'] as String?)?.trim();
       if (source == 'user_message' && mounted) _loadUnreadState();
+      if (source == 'federated_friend_request' && mounted) _loadFriends();
     });
   }
 
@@ -105,7 +111,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
       final list = data['messages'] as List<dynamic>? ?? [];
       final unread = <String>{};
       for (final f in _friends) {
-        if ((f['type'] as String?)?.trim().toLowerCase() != 'user') continue;
+        if (!_isPersonFriendType(f['type'] as String?)) continue;
         final otherId = (f['user_id'] as String?)?.trim();
         if (otherId == null || otherId.isEmpty) continue;
         final lastRead = await widget.coreService.getUserInboxLastRead(userId, otherId);
@@ -138,6 +144,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
       _error = null;
     });
     try {
+      unawaited(widget.coreService.ensureFederationE2eKeysRegistered());
       final list = await widget.coreService.getFriends();
       final sorted = List<Map<String, dynamic>>.from(list);
       sortFriendsWithSystemFirst(sorted);
@@ -182,13 +189,15 @@ class _FriendListScreenState extends State<FriendListScreen> {
       }
     }
     if (match == null) return;
+    final m = match;
     final userId = widget.coreService.sessionUserId;
     if (userId == null || userId.isEmpty) return;
-    final friendId = (match['name'] as String?)?.trim() ?? 'HomeClaw';
-    final isUserFriend = (match['type'] as String?)?.trim().toLowerCase() == 'user';
-    final toUserId = (match['user_id'] as String?)?.trim();
+    final friendId = (m['name'] as String?)?.trim() ?? 'HomeClaw';
+    final isUserFriend = _isPersonFriendType(m['type'] as String?);
+    final toUserId = (m['user_id'] as String?)?.trim();
     final locale = Localizations.localeOf(context);
-    final displayName = localizedFriendDisplayName(friend: match, locale: locale);
+    final displayName = localizedFriendDisplayName(friend: m, locale: locale);
+    final remotePeer = _peerInstanceIdFromFriend(m);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       Navigator.maybeOf(context)?.push(
@@ -201,10 +210,16 @@ class _FriendListScreenState extends State<FriendListScreen> {
             initialMessage: widget.initialMessage,
             isUserFriend: isUserFriend,
             toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
+            remotePeerInstanceId: remotePeer,
           ),
         ),
       );
     });
+  }
+
+  String? _peerInstanceIdFromFriend(Map<String, dynamic> f) {
+    final p = (f['peer_instance_id'] as String?)?.trim();
+    return p != null && p.isNotEmpty ? p : null;
   }
 
   Future<void> _logout() async {
@@ -334,8 +349,9 @@ class _FriendListScreenState extends State<FriendListScreen> {
                         final friendId = (f['name'] as String?)?.trim() ?? 'HomeClaw';
                         final locale = Localizations.localeOf(context);
                         final displayName = localizedFriendDisplayName(friend: f, locale: locale);
-                        final isUserFriend = (f['type'] as String?)?.trim().toLowerCase() == 'user';
+                        final isUserFriend = _isPersonFriendType(f['type'] as String?);
                         final toUserId = (f['user_id'] as String?)?.trim();
+                        final peerInst = (f['peer_instance_id'] as String?)?.trim();
                         final hasUnread = isUserFriend && toUserId != null && _unreadUserIds.contains(toUserId);
                         final preset = (f['preset'] as String?)?.trim();
                         final presetForAvatar = preset?.isNotEmpty == true
@@ -350,6 +366,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
                           initialMessage: index == 0 ? widget.initialMessage : null,
                           isUserFriend: isUserFriend,
                           toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
+                          peerInstanceId: peerInst != null && peerInst.isNotEmpty ? peerInst : null,
                           hasUnread: hasUnread,
                           onRemoved: _loadFriends,
                           onReturnFromChat: _loadUnreadState,
@@ -372,6 +389,8 @@ class _FriendTile extends StatefulWidget {
   final bool isUserFriend;
   /// When [isUserFriend], the other user's id for POST /api/user-message.
   final String? toUserId;
+  /// When set, friend is on another Core (federated); show remote badge.
+  final String? peerInstanceId;
   /// When true, show a red dot to indicate new messages from this user.
   final bool hasUnread;
   final VoidCallback? onRemoved;
@@ -387,6 +406,7 @@ class _FriendTile extends StatefulWidget {
     this.initialMessage,
     this.isUserFriend = false,
     this.toUserId,
+    this.peerInstanceId,
     this.hasUnread = false,
     this.onRemoved,
     this.onReturnFromChat,
@@ -523,10 +543,27 @@ class _FriendTileState extends State<_FriendTile> {
                   ),
                 ),
               ),
+            if (widget.isUserFriend && (widget.peerInstanceId ?? '').trim().isNotEmpty)
+              Positioned(
+                right: -4,
+                bottom: -2,
+                child: Icon(
+                  Icons.cloud_outlined,
+                  size: 16,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
           ],
         ),
         title: Text(widget.displayName),
-        subtitle: widget.isUserFriend ? Text('User', style: Theme.of(context).textTheme.bodySmall) : null,
+        subtitle: widget.isUserFriend
+            ? Text(
+                (widget.peerInstanceId ?? '').trim().isNotEmpty
+                    ? 'Remote · ${widget.peerInstanceId!.trim()}'
+                    : 'User',
+                style: Theme.of(context).textTheme.bodySmall,
+              )
+            : null,
         onLongPress: _canRemove ? () => _removeFriend(context) : null,
         onTap: () {
           Navigator.push(
@@ -540,6 +577,7 @@ class _FriendTileState extends State<_FriendTile> {
                 initialMessage: widget.initialMessage,
                 isUserFriend: widget.isUserFriend,
                 toUserId: widget.toUserId,
+                remotePeerInstanceId: widget.peerInstanceId,
               ),
             ),
           ).then((_) => widget.onReturnFromChat?.call());

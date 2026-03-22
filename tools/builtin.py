@@ -2371,39 +2371,108 @@ async def _sessions_spawn_executor(arguments: Dict[str, Any], context: ToolConte
         return json.dumps({"error": str(e)})
 
 
+async def _peer_call_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """POST /inbound on another HomeClaw Core listed in config/peers.yml (or override base_url)."""
+    try:
+        from base.peer_registry import (
+            find_peer_by_instance_id,
+            post_inbound_sync,
+            resolve_peer_api_key,
+        )
+
+        text = (arguments.get("text") or arguments.get("message") or arguments.get("task") or "").strip()
+        if not text:
+            return json.dumps({"error": "text (or message/task) is required", "ok": False})
+        instance_id = (arguments.get("instance_id") or arguments.get("peer") or "").strip()
+        base_url = (arguments.get("base_url") or "").strip().rstrip("/")
+        user_id = (arguments.get("inbound_user_id") or arguments.get("user_id") or "").strip()
+        api_key = (arguments.get("api_key") or "").strip() or None
+        peer = find_peer_by_instance_id(instance_id) if instance_id else None
+        if peer:
+            base_url = (peer.get("base_url") or base_url or "").strip().rstrip("/")
+            if not user_id:
+                user_id = (peer.get("inbound_user_id") or "").strip()
+            if not api_key:
+                api_key = resolve_peer_api_key(peer)
+        if not base_url:
+            return json.dumps(
+                {
+                    "error": "Unknown peer: pass instance_id (must match config/peers.yml) or base_url",
+                    "ok": False,
+                },
+                ensure_ascii=False,
+            )
+        if not user_id:
+            return json.dumps(
+                {
+                    "error": "inbound_user_id required (set in peers.yml for this peer or pass inbound_user_id)",
+                    "ok": False,
+                },
+                ensure_ascii=False,
+            )
+        try:
+            timeout = float(arguments.get("timeout_seconds") or 120)
+        except (TypeError, ValueError):
+            timeout = 120.0
+        timeout = max(10.0, min(timeout, 600.0))
+        data = post_inbound_sync(base_url, user_id, text, api_key=api_key, timeout=timeout)
+        return json.dumps(data, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": str(e), "ok": False}, ensure_ascii=False)
+
+
 async def _models_list_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """List available model refs with capabilities (from config). Use ref as llm_name in sessions_spawn, or use capability (e.g. Chat) in sessions_spawn to select by capability."""
+    """List model refs with capabilities, optional description, available (from llm.yml). Agent uses description + capabilities to choose llm_name for sessions_spawn."""
     try:
         from base.util import Util
         util = Util()
+        meta = getattr(util, "core_metadata", None)
+        if not meta:
+            return json.dumps({"models": [], "model_details": [], "main_llm": "", "message": "Core metadata not loaded."})
         refs = util.get_llms()
-        main_llm = getattr(util.core_metadata, "main_llm", "") or ""
+        main_llm = (getattr(meta, "main_llm", None) or "") or ""
         model_details = []
-        for m in (util.core_metadata.local_models or []):
+        for m in (meta.local_models or []):
+            if not isinstance(m, dict):
+                continue
             mid = m.get("id")
-            if mid:
-                model_details.append({
-                    "ref": f"local_models/{mid}",
-                    "alias": m.get("alias") or mid,
-                    "capabilities": m.get("capabilities") or [],
-                    "available": util.model_entry_available(m),
-                })
-        for m in (util.core_metadata.cloud_models or []):
+            mid_s = str(mid).strip() if mid is not None else ""
+            if not mid_s:
+                continue
+            _desc = m.get("description")
+            if _desc is not None and not isinstance(_desc, str):
+                _desc = str(_desc)
+            model_details.append({
+                "ref": f"local_models/{mid_s}",
+                "alias": str(m.get("alias") or mid_s).strip() or mid_s,
+                "capabilities": Util._normalize_capability_list(m.get("capabilities")),
+                "description": (_desc or "").strip() if isinstance(_desc, str) else "",
+                "available": util.model_entry_available(m),
+            })
+        for m in (meta.cloud_models or []):
+            if not isinstance(m, dict):
+                continue
             mid = m.get("id")
-            if mid:
-                model_details.append({
-                    "ref": f"cloud_models/{mid}",
-                    "alias": m.get("alias") or mid,
-                    "capabilities": m.get("capabilities") or [],
-                    "available": util.model_entry_available(m),
-                })
+            mid_s = str(mid).strip() if mid is not None else ""
+            if not mid_s:
+                continue
+            _desc = m.get("description")
+            if _desc is not None and not isinstance(_desc, str):
+                _desc = str(_desc)
+            model_details.append({
+                "ref": f"cloud_models/{mid_s}",
+                "alias": str(m.get("alias") or mid_s).strip() or mid_s,
+                "capabilities": Util._normalize_capability_list(m.get("capabilities")),
+                "description": (_desc or "").strip() if isinstance(_desc, str) else "",
+                "available": util.model_entry_available(m),
+            })
         if not model_details and refs:
-            model_details = [{"ref": r, "alias": r, "capabilities": [], "available": True} for r in refs]
+            model_details = [{"ref": r, "alias": r, "capabilities": [], "description": "", "available": True} for r in refs]
         return json.dumps({
             "models": refs,
             "model_details": model_details,
             "main_llm": main_llm,
-            "message": "local_models + cloud_models in llm.yml are the catalog: every entry is a valid ref (local_models/<id>). Use llm_name from 'models' or capability for sessions_spawn. capability ignores entries with available: false. GGUF may not exist yet—placeholders use available: false until weights are installed.",
+            "message": "Catalog entries include optional description (human + LLM-readable). Match user intent to ref+capabilities+description when choosing llm_name for sessions_spawn. capability-based spawn still uses tags only—not descriptions (automatic description routing is future).",
         }, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e), "models": [], "model_details": [], "main_llm": ""})
@@ -6046,19 +6115,59 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="sessions_spawn",
-            description="Sub-agent run: run a one-off task with isolated context (no prior conversation); ideal for a focused subtask. Returns the model reply. Select model by llm_name (ref from models_list) or capability (e.g. 'Chat'). Omit both to use main_llm.",
+            description="Sub-agent run: one-off task, isolated context (no prior chat), no tools inside spawn. Returns the model reply. Pick llm_name from the LLM catalog block appended below (or call models_list). Or pass capability= for tag-based auto-pick. Omit both for main_llm.",
             parameters={
                 "type": "object",
                 "properties": {
                     "task": {"type": "string", "description": "The question or instruction for the sub-agent (one-off run)."},
                     "message": {"type": "string", "description": "Alias for task."},
                     "text": {"type": "string", "description": "Alias for task."},
-                    "llm_name": {"type": "string", "description": "Optional. Model ref (e.g. local_models/<id> or cloud_models/<id>) from models_list. Omit to use main_llm or capability."},
-                    "capability": {"type": "string", "description": "Optional. Select model by capability from config (e.g. 'Chat'). Use models_list to see model_details.capabilities. If set, overrides llm_name; system picks a model that has this capability."},
+                    "llm_name": {"type": "string", "description": "Exact ref from the catalog block on this tool (e.g. local_models/<id>). Omit if using capability or main_llm."},
+                    "capability": {"type": "string", "description": "Tag from catalog (e.g. Chat, Math). Resolves to first matching available model; ignores description. Omit if llm_name is set."},
                 },
                 "required": ["task"],
             },
             execute_async=_sessions_spawn_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="peer_call",
+            description="Call another HomeClaw Core over HTTP (POST /inbound). Use instance_id from the peer roster block below (config/peers.yml) or pass base_url for a one-off. Requires inbound_user_id and API key (from peers.yml api_key_env or argument) when the peer has auth_enabled.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "instance_id": {
+                        "type": "string",
+                        "description": "Peer id from the roster below (must match peers.yml instance_id).",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Message or task text sent to the peer Core as the inbound user message.",
+                    },
+                    "message": {"type": "string", "description": "Alias for text."},
+                    "task": {"type": "string", "description": "Alias for text."},
+                    "base_url": {
+                        "type": "string",
+                        "description": "Optional override (e.g. https://peer:9000). If instance_id matches peers.yml, base_url from config is used.",
+                    },
+                    "inbound_user_id": {
+                        "type": "string",
+                        "description": "Optional override; default from peers.yml (must be allowed on peer's user.yml).",
+                    },
+                    "api_key": {
+                        "type": "string",
+                        "description": "Optional X-API-Key for peer; prefer api_key_env in peers.yml instead of passing here.",
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "description": "HTTP timeout (default 120, max 600).",
+                        "default": 120,
+                    },
+                },
+                "required": ["text"],
+            },
+            execute_async=_peer_call_executor,
         )
     )
 
@@ -6669,7 +6778,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="models_list",
-            description="List available model refs and main_llm. For sessions_spawn: omit llm_name to use main_llm; to use a different model pass one ref from the list — prefer a smaller/faster one (e.g. 7B in the id) for quick sub-tasks.",
+            description="List model refs, capabilities, optional per-model description (from llm.yml), available flag, and main_llm. Use model_details.description and capabilities to pick llm_name for sessions_spawn when capability alone is ambiguous.",
             parameters={"type": "object", "properties": {}, "required": []},
             execute_async=_models_list_executor,
         )

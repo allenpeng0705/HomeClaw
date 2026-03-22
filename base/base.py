@@ -292,6 +292,8 @@ class Friend:
     # User-type friend (another user in same HomeClaw): type="user", user_id=<id>. When set, Core forwards user-to-user messages; no LLM. Omitted or not "user" = core_role (AI).
     type: Optional[str] = None  # "user" = friend is another user (user_id required); else AI friend
     user_id: Optional[str] = None  # when type=="user", the other user's id (must exist in user.yml)
+    # When set, user_id is resolved on another HomeClaw instance (peers.yml instance_id). Federation must be enabled on both Cores. See docs_design/FederatedCompanionUserMessaging.md.
+    peer_instance_id: Optional[str] = None
 
 
 @dataclass
@@ -483,14 +485,26 @@ class User:
                 if ftype not in ("user", "ai", "remote_ai", "remote_user"):
                     ftype = "ai"  # explicit default for AI friends
                 uid_friend = (f.get('user_id') or "").strip() if ftype in ("user", "remote_user") else None
-                result.append(Friend(name=fname, relation=relation, who=fwho, identity=identity, preset=preset, type=ftype, user_id=uid_friend))
+                peer_inst = (f.get("peer_instance_id") or f.get("remote_instance_id") or "").strip() or None
+                result.append(
+                    Friend(
+                        name=fname,
+                        relation=relation,
+                        who=fwho,
+                        identity=identity,
+                        preset=preset,
+                        type=ftype,
+                        user_id=uid_friend,
+                        peer_instance_id=peer_inst,
+                    )
+                )
             except Exception:
                 continue
         if not result:
-            return [Friend(name='HomeClaw', relation=None, who=None, identity=None, preset=None, type='ai', user_id=None)]
+            return [Friend(name='HomeClaw', relation=None, who=None, identity=None, preset=None, type='ai', user_id=None, peer_instance_id=None)]
         first_name = (result[0].name or '').strip().lower()
         if first_name != 'homeclaw':
-            result.insert(0, Friend(name='HomeClaw', relation=None, who=None, identity=None, preset=None, type='ai', user_id=None))
+            result.insert(0, Friend(name='HomeClaw', relation=None, who=None, identity=None, preset=None, type='ai', user_id=None, peer_instance_id=None))
         return result
 
     @staticmethod
@@ -504,8 +518,11 @@ class User:
                 entry = {"name": (getattr(f, "name", None) or "").strip() or "Friend"}
                 ftype = (getattr(f, "type", None) or "").strip().lower() or "ai"
                 entry["type"] = ftype if ftype in ("user", "ai", "remote_ai", "remote_user") else "ai"
-                if ftype == "user" and getattr(f, "user_id", None):
+                if ftype in ("user", "remote_user") and getattr(f, "user_id", None):
                     entry["user_id"] = (f.user_id or "").strip()
+                pinst = getattr(f, "peer_instance_id", None)
+                if pinst and str(pinst).strip():
+                    entry["peer_instance_id"] = str(pinst).strip()
                 if getattr(f, "relation", None) is not None:
                     entry["relation"] = f.relation
                 if isinstance(getattr(f, "who", None), dict) and f.who:
@@ -1052,6 +1069,18 @@ class CoreMetadata:
     prompt_cache_ttl_seconds: float = 0  # 0 = cache by mtime only; >0 = TTL in seconds
     auth_enabled: bool = False  # when True, require API key for /inbound and /ws; see RemoteAccess.md
     auth_api_key: str = ""  # key to require (X-API-Key header or Authorization: Bearer <key>); also used to sign file links when core_public_url is set
+    # When False, POST /api/peer/invite/create and consume are disabled (404). Default True when missing.
+    peer_pairing_enabled: bool = True
+    # When True, cross-instance user-to-user messaging (Companion) may use peers.yml; see docs_design/FederatedCompanionUserMessaging.md.
+    federation_enabled: bool = False
+    # When non-empty, this Core only accepts inbound federated user messages from these remote instance_ids (mutual friend link still required).
+    federation_trusted_instances: List[str] = field(default_factory=list)
+    # When True, inbound federated user messages require an accepted row in federated_friendships.sqlite (YAML friend alone is not enough).
+    federation_require_accepted_relationship: bool = False
+    # P5: optional E2E for federated user messages (Companion encrypts; Core stores/forwards ciphertext).
+    federation_e2e_enabled: bool = False
+    # When True, federated user messages must include a valid hc-e2e-v1 envelope (no plaintext body).
+    federation_e2e_require_encrypted: bool = False
     # Optional: shared secret for application-layer encryption (Companion–Core). When set, Core decrypts encrypted inbound bodies and encrypts responses. See docs_design/CompanionEncryptionAndSecurity.md.
     app_layer_encryption_secret: str = ""
     core_public_url: str = ""  # public URL that reaches Core (e.g. https://homeclaw.example.com). Used for file/report links: core_public_url/files/out?path=...&token=...
@@ -1174,6 +1203,17 @@ class CoreMetadata:
         if raw is None:
             return 20000
         return max(0, int(raw) if raw != '' else 20000)
+
+    @staticmethod
+    def _norm_federation_trusted_instances(raw: Any) -> List[str]:
+        if raw is None:
+            return []
+        if isinstance(raw, str):
+            s = raw.strip()
+            return [s] if s else []
+        if isinstance(raw, list):
+            return [str(x).strip() for x in raw if x is not None and str(x).strip()]
+        return []
 
     @staticmethod
     def from_yaml(yaml_file: str) -> 'CoreMetadata':
@@ -1552,6 +1592,14 @@ class CoreMetadata:
             prompt_cache_ttl_seconds=float(data.get('prompt_cache_ttl_seconds', 0) or 0),
             auth_enabled=data.get('auth_enabled', False),
             auth_api_key=(decrypt_auth_api_key(data.get('auth_api_key')) or '').strip(),
+            peer_pairing_enabled=bool(data.get('peer_pairing_enabled', True)),
+            federation_enabled=bool(data.get('federation_enabled', False)),
+            federation_trusted_instances=CoreMetadata._norm_federation_trusted_instances(
+                data.get('federation_trusted_instances')
+            ),
+            federation_require_accepted_relationship=bool(data.get('federation_require_accepted_relationship', False)),
+            federation_e2e_enabled=bool(data.get('federation_e2e_enabled', False)),
+            federation_e2e_require_encrypted=bool(data.get('federation_e2e_require_encrypted', False)),
             app_layer_encryption_secret=(data.get('app_layer_encryption_secret') or '').strip(),
             core_public_url=(data.get('core_public_url') or '').strip(),
             file_link_style=(data.get('file_link_style') or 'token').strip().lower() or 'token',
@@ -1687,6 +1735,12 @@ class CoreMetadata:
                 'prompt_cache_ttl_seconds': getattr(core, 'prompt_cache_ttl_seconds', 0),
                 'auth_enabled': getattr(core, 'auth_enabled', False),
                 'auth_api_key': encrypt_auth_api_key(getattr(core, 'auth_api_key', '') or '') or '',
+                'peer_pairing_enabled': getattr(core, 'peer_pairing_enabled', True),
+                'federation_enabled': getattr(core, 'federation_enabled', False),
+                'federation_trusted_instances': list(getattr(core, 'federation_trusted_instances', None) or []),
+                'federation_require_accepted_relationship': getattr(core, 'federation_require_accepted_relationship', False),
+                'federation_e2e_enabled': getattr(core, 'federation_e2e_enabled', False),
+                'federation_e2e_require_encrypted': getattr(core, 'federation_e2e_require_encrypted', False),
                 'app_layer_encryption_secret': getattr(core, 'app_layer_encryption_secret', '') or '',
                 'core_public_url': getattr(core, 'core_public_url', '') or '',
                 'file_link_style': getattr(core, 'file_link_style', 'token') or 'token',

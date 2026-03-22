@@ -58,6 +58,7 @@ class CoreInterface(ABC):
         source: str = "push",
         from_friend: str = "HomeClaw",
         from_user_id: Optional[str] = None,
+        e2e_encrypted: bool = False,
     ) -> None:
         """Push a message to a user: to WebSocket(s) registered for this user_id (Companion/channel) and/or to channel by channel_key. from_friend: which friend the push is from. from_user_id: for user_message. audios: voice; videos: short video. Default: fall back to send_response_to_latest_channel."""
         await self.send_response_to_latest_channel(text)
