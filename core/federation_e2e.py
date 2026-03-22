@@ -10,6 +10,8 @@ import base64
 from typing import Any, Dict, Optional, Tuple
 
 HC_E2E_V1 = "hc-e2e-v1"
+MAX_CIPHERTEXT_BYTES = 64 * 1024
+MAX_CIPHERTEXT_B64_CHARS = ((MAX_CIPHERTEXT_BYTES + 2) // 3) * 4
 
 
 def validate_e2e_envelope(raw: Any) -> Tuple[bool, str]:
@@ -20,21 +22,32 @@ def validate_e2e_envelope(raw: Any) -> Tuple[bool, str]:
     if algo != HC_E2E_V1:
         return False, "unsupported_algo"
     try:
-        epk = base64.b64decode((raw.get("ephemeral_public_key_b64") or raw.get("ephemeral_public_key") or "").strip(), validate=True)
+        epk_b64 = (raw.get("ephemeral_public_key_b64") or raw.get("ephemeral_public_key") or "").strip()
+        if len(epk_b64) > 128:
+            return False, "ephemeral_key_too_large"
+        epk = base64.b64decode(epk_b64, validate=True)
         if len(epk) != 32:
             return False, "bad_ephemeral_key_length"
     except Exception:
         return False, "bad_ephemeral_key_b64"
     try:
-        nonce = base64.b64decode((raw.get("nonce_b64") or raw.get("nonce") or "").strip(), validate=True)
+        nonce_b64 = (raw.get("nonce_b64") or raw.get("nonce") or "").strip()
+        if len(nonce_b64) > 64:
+            return False, "nonce_too_large"
+        nonce = base64.b64decode(nonce_b64, validate=True)
         if len(nonce) != 12:
             return False, "bad_nonce_length"
     except Exception:
         return False, "bad_nonce_b64"
     try:
-        ct = base64.b64decode((raw.get("ciphertext_b64") or raw.get("ciphertext") or "").strip(), validate=True)
+        ct_b64 = (raw.get("ciphertext_b64") or raw.get("ciphertext") or "").strip()
+        if len(ct_b64) > MAX_CIPHERTEXT_B64_CHARS:
+            return False, "ciphertext_too_large"
+        ct = base64.b64decode(ct_b64, validate=True)
         if len(ct) < 16:
             return False, "ciphertext_too_short"
+        if len(ct) > MAX_CIPHERTEXT_BYTES:
+            return False, "ciphertext_too_large"
     except Exception:
         return False, "bad_ciphertext_b64"
     return True, ""

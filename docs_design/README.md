@@ -6,7 +6,7 @@ This folder (**docs_design/**) holds **design documents and internal guides** (P
 
 - **SocialNetworkDesign.md** — **Summary** of the social network for one HomeClaw (users, friends AI + user-type, channels, Companion, user-to-user, push, security) and **future extension** to multi-HomeClaw (instances connect; users across instances communicate). Summarize first, then implement.
 
-- **FederatedCompanionUserMessaging.md** — **Plan** for Companion **user-to-user chat across HomeClaw instances**: non-breaking friend schema (`peer_instance_id`), `federation_enabled`, dedicated **`POST /api/federation/user-message`**, reuse **`peers.yml`** trust, phased P0–P5 (request/accept, Companion UI, optional E2E).
+- **FederatedCompanionUserMessaging.md** — Plan + implementation notes for Companion **user-to-user chat across HomeClaw instances**: non-breaking friend schema (`peer_instance_id`), `federation_enabled`, dedicated **`POST /api/federation/user-message`**, reuse **`peers.yml`** trust, phased P0–P5 (request/accept, Companion UI, optional E2E). Operator guide: `docs/federated-companion-messaging.md`.
 
 - **MultiInstanceIdentityRosterAndPairing.md** — Multi-HomeClaw coordination: **`instance_identity.yml`**, **`peers.yml`**, **`peer_call`**, pairing API + **`python -m main peer`** (invite-create / invite-accept / **import** / list), consume rate limit. Connection uses **`POST /inbound`**.
 

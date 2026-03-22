@@ -170,6 +170,17 @@ Once you set up a [tunnel](remote-access.md) (Cloudflare, Pinggy, or ngrok), eve
 
 Besides AI friends, you can also add other HomeClaw users as "friends" in the Companion App. This lets you see who else is on the system and potentially share resources, though conversations remain private.
 
+### Chat with a user on another HomeClaw instance
+
+HomeClaw also supports remote user friends across instances (federation).  
+Use this when your friend is on a different Core:
+
+1. Configure both Cores with `instance_identity.yml` + `peers.yml`.
+2. Enable federation keys in `config/core.yml`.
+3. In Companion, add the remote friend with `peer_instance_id`, then complete the remote friend-request flow.
+
+See full setup and limitations: [Federated Companion messaging](federated-companion-messaging.md).
+
 ---
 
 ## How friend folders work

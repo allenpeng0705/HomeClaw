@@ -227,6 +227,20 @@ When Core is reachable from the internet (e.g. Cloudflare Tunnel, Tailscale Funn
 
 Use a long, random value (e.g. 32+ characters). See [Remote access](remote-access.md).
 
+### Federation (cross-instance Companion user chat)
+
+If you use cross-instance user messaging, these `core.yml` keys matter:
+
+| Setting | Meaning |
+|--------|--------|
+| **`federation_enabled`** | Master switch for cross-instance Companion user messaging routes. |
+| **`federation_trusted_instances`** | Optional allowlist of sender `instance_id` values. Empty means no extra instance-id filter beyond friend/relationship checks. |
+| **`federation_require_accepted_relationship`** | Require accepted relationship in `federated_friendships` before delivery. |
+| **`federation_e2e_enabled`** | Allow optional `hc-e2e-v1` encrypted envelope on federated user messages. |
+| **`federation_e2e_require_encrypted`** | Reject federated user messages unless encrypted (`e2e` envelope present and valid). |
+
+For setup and usage details (friends, API flow, limitations), see [Federated Companion messaging](federated-companion-messaging.md).
+
 ### Public URL and Pinggy (Companion scan-to-connect)
 
 When you want to reach Core from another network (e.g. Companion on your phone), **GET /pinggy** shows a public URL and a **QR code** for the Companion app (Settings → Scan QR to connect). You can supply the URL in either of two ways:
