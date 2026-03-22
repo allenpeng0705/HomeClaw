@@ -94,3 +94,11 @@ external_plugins/quote-java/target/classes/QuotePlugin.class
 /tools/trae-agent
 site/.DS_Store
 /dist
+site/assets/HomeClaw-Introduction-ZH.mp4
+*.mp4
+site/assets/HomeClaw-Introduction-ZH.pptx
+site/assets/HomeClaw-Introduction.pdf
+site/assets/HomeClaw-Introduction.pptx
+site/assets/ppt-background.png
+site/create_ppt.py
+site/create_ppt_zh.py

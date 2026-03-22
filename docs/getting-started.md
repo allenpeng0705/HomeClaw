@@ -1,185 +1,327 @@
-# Getting started
+# QuickStart
 
-This guide takes you from zero to chatting with HomeClaw. By the end, you'll have Core running and be talking to your AI from the Companion App.
+Get HomeClaw up and running in minutes.
+
+Follow these simple steps to install, configure, and start using HomeClaw with the Companion app, Portal, and remote access.
+
+## Prerequisites
+
+Before installing HomeClaw, make sure you have:
+
+- **Python 3.11+** — Required for running HomeClaw Core
+- **Git** — For cloning the repository
+- **API Keys (Optional)** — For cloud LLM models (OpenAI, Anthropic, etc.)
+
+!!! tip "Local Models Work Too"
+    HomeClaw can run with local models only. Cloud API keys are optional for Mix Mode.
+
+---
+
+## Suggested Models
+
+HomeClaw works with local GGUF models. **Only the main chat model is required to run HomeClaw.** Other models are optional and enhance specific features.
+
+!!! warning "Required: Main Chat Model"
+    This is the only model you need to get started. All other models below are optional enhancements.
+
+### Main Chat Model (Required)
+
+The main model handles conversations and tool calls. Choose one:
+
+```
+Qwen3VL-4B-Instruct-Q4_K_M.gguf
+mmproj-Qwen3VL-4B-Instruct-F16.gguf
+```
+
+**Alternative options:**
+
+- `Qwen3VL-2B-Instruct-Q4_K_M.gguf` — Lighter, faster, less VRAM
+- `Qwen3-VL-8B-Instruct-Q4_K_M.gguf` — More capable, requires more VRAM
+- `gpt-oss-20b-Q4_K_M.gguf` — Text-only, larger model
+
+### Embedding Model (Optional)
+
+Used for memory, RAG, and semantic search. Without this, memory features will be limited:
+
+```
+Qwen3-Embedding-0.6B-Q8_0.gguf
+```
+
+### Vision Model (Optional)
+
+For image understanding. The Qwen3VL models above have built-in vision support, so you only need a separate vision model if using a text-only main model:
+
+```
+Qwen3VL-2B-Instruct-Q4_K_M.gguf
+mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf
+```
+
+### Tool Selection Model (Optional)
+
+Fine-tuned for function calling, improves tool accuracy:
+
+```
+Qwen3-4B-Function-Calling-Pro.gguf
+```
+
+!!! success "Download Models"
+    Download models from [Hugging Face](https://huggingface.co/models?sort=trending&search=gguf) — Search for the GGUF versions. Place them in the `models/` folder.
 
 ---
 
 ## Step 1: Install HomeClaw
 
-### Mac / Linux
+Clone the repository and run the installation script for your platform.
+
+### Clone Repository
 
 ```bash
 git clone https://github.com/allenpeng0705/HomeClaw.git
 cd HomeClaw
-bash install.sh
 ```
 
-### Windows
+### Run Install Script
 
-```powershell
-git clone https://github.com/allenpeng0705/HomeClaw.git
-cd HomeClaw
-.\install.ps1
-```
+Choose the script for your operating system:
 
-If PowerShell blocks the script, use `install.bat` instead, or run:
-`powershell -ExecutionPolicy Bypass -File .\install.ps1`
+=== "Mac / Linux"
 
-### What the install script does
+    ```bash
+    chmod +x install.sh
+    ./install.sh
+    ```
 
-1. Checks for Python 3.9+ and Node.js (installs them if missing)
-2. Runs `pip install -r requirements.txt`
-3. Sets up llama.cpp (for local models)
-4. Opens the **[Portal](portal.md)** in your browser at http://127.0.0.1:18472
+    The script will:
 
-### Manual install (if you prefer)
+    - Install Python dependencies
+    - Download llama.cpp binaries
+    - Download default models (optional)
+    - Create default configuration files
 
-```bash
-git clone https://github.com/allenpeng0705/HomeClaw.git
-cd HomeClaw
-pip install -r requirements.txt
-```
+=== "Windows (PowerShell)"
+
+    ```powershell
+    .\install.ps1
+    ```
+
+=== "Windows (Command Prompt)"
+
+    ```cmd
+    install.bat
+    ```
+
+[→ Detailed installation guide](install.md)
 
 ---
 
-## Step 2: Use the Portal to configure
+## Step 2: Run Core
 
-The **[Portal](portal.md)** is a web UI that opens automatically after install. If you need to open it later:
+Start the HomeClaw Core server to begin using your AI assistant.
 
-```bash
-python -m main portal
-```
-
-In the Portal you can:
-
-- **Create an admin account** (first time)
-- **Set your LLM** — pick a cloud model and enter your API key, or configure a local model
-- **Manage users** — add family members or yourself
-- **Start Core** — launch the AI engine directly from the Portal
-
-See the full [Portal Guide](portal.md) for details.
-
-### Quick LLM setup (no Portal needed)
-
-If you prefer the command line, set an API key and go:
-
-```bash
-# Google Gemini (recommended for getting started)
-export GEMINI_API_KEY="your-key-here"
-
-# Or OpenAI
-export OPENAI_API_KEY="your-key-here"
-
-# Or DeepSeek
-export DEEPSEEK_API_KEY="your-key-here"
-```
-
-See [Models](models.md) for all supported providers and local model setup.
-
----
-
-## Step 3: Start Core
+### Start Core
 
 ```bash
 python -m main start
 ```
 
-Core is the brain of HomeClaw. It handles all conversations, memory, tools, and plugins. By default it listens on **port 9000**.
+### What Happens
 
-**Verify it's running:**
+- Core starts on default port **9000**
+- WebChat becomes available at `http://127.0.0.1:9000`
+- API endpoints are ready for Companion app
+- Default model configuration is loaded from `config/llm.yml`
 
-```bash
-curl -s http://127.0.0.1:9000/ready
-# Should return 200
+### Verify Core is Running
+
+Open your browser and visit:
+
+```
+http://127.0.0.1:9000
 ```
 
-**Check your setup:**
+### Configure Models (Optional)
 
-```bash
-python -m main doctor
-```
+Edit `config/llm.yml` to configure your models:
 
-This checks config, workspace, and LLM connectivity. Fix any reported issues before continuing.
+- **Local models:** Place GGUF files in `models/` folder
+- **Cloud models:** Add API keys for OpenAI, Anthropic, etc.
+- **Mix Mode:** Enable automatic routing between local and cloud
+
+[→ How to configure models](models.md)
 
 ---
 
-## Step 4: Connect the Companion App
+## Step 3: Companion App
 
-The **[Companion App](companion-app.md)** is the easiest way to use HomeClaw. It works on Mac, Windows, iPhone, and Android.
+Download and configure the Companion app for the best HomeClaw experience.
 
-### Get the app
+### Download Companion App
 
-**Build from source** (in the repo):
+Get the app for your platform from [GitHub Releases](https://github.com/allenpeng0705/HomeClaw/releases):
 
-```bash
-cd clients/HomeClawApp
-flutter pub get
-flutter run
-```
-
-Or install from **TestFlight / App Store** if a build is available.
+| Platform | Download |
+|----------|----------|
+| iPhone | App Store (coming soon) or build from source |
+| Android | Download APK from GitHub Releases |
+| Mac | Download .dmg from GitHub Releases |
+| Windows | Download .exe from GitHub Releases |
 
 ### Connect to Core
 
-1. Open the Companion App
+1. Open Companion app
 2. Go to **Settings**
-3. Set **Core URL** to:
-    - `http://127.0.0.1:9000` — if the app is on the same machine as Core
-    - `http://192.168.x.x:9000` — if on the same Wi-Fi (replace with your machine's local IP)
-4. Start chatting!
+3. Enter Core URL: `http://127.0.0.1:9000` (for local)
+4. If authentication is enabled, enter your API key
+5. Tap **Connect**
 
-### Connect from anywhere (phone on cellular, laptop away from home)
+### Features
 
-To use the Companion App from outside your home network, set up a tunnel:
+- **Chat:** Talk to your AI assistant
+- **Friends:** AI friends and family members
+- **Manage Core:** Edit configuration files
+- **Skills:** Install skills from ClawHub
 
-| Method | Setup time | Best for |
-|--------|-----------|----------|
-| **[Pinggy](remote-access.md#pinggy-built-in)** | 1 min | Built into HomeClaw; scan QR code to connect |
-| **[Cloudflare Tunnel](remote-access.md#cloudflare-tunnel)** | 5 min | Free, stable public URL |
-| **[ngrok](remote-access.md#ngrok)** | 3 min | Quick testing, easy setup |
-| **[Tailscale](remote-access.md#tailscale)** | 5 min | Private network, no public exposure |
-
-See the full [Remote Access guide](remote-access.md) for step-by-step instructions.
+[→ Companion app guide](companion-app.md)
 
 ---
 
-## Step 5: Add a channel (optional)
+## Step 4: Portal (Optional)
 
-Already use Telegram, Discord, or prefer a browser? Add a **[channel](channels.md)** so you can reach HomeClaw from your favorite platform:
+Use the Portal web UI to manage and configure HomeClaw easily.
+
+### Start Portal
 
 ```bash
-python -m channels.run webchat     # browser at http://localhost:8014
-python -m channels.run telegram    # Telegram bot
-python -m channels.run discord     # Discord bot
+python -m main portal
 ```
 
-The Companion App and all channels share the same Core, memory, and user identity. See [Channels](channels.md) for setup.
+### Access Portal
+
+Open your browser and navigate to:
+
+```
+http://127.0.0.1:18472
+```
+
+### Portal Features
+
+- **Configuration:** Edit core.yml, llm.yml, user.yml
+- **User Management:** Add users and AI friends
+- **Skills:** Search and install from ClawHub
+- **Start/Stop:** Control Core and channels
+
+!!! info "Local Only"
+    Portal is for local management only. It cannot be accessed remotely.
+
+[→ Portal guide](portal.md)
 
 ---
 
-## Step 6: Set up your AI friends (optional)
+## Step 5: Remote Access
 
-HomeClaw lets you create multiple AI personalities — each with its own conversation and memory:
+Set up remote access to use HomeClaw from anywhere.
 
-- **HomeClaw** — Your main general assistant (default)
-- **Reminder** — Scheduling and reminders
-- **Note** — Note-taking
-- **Cursor** — Open projects and run agents in Cursor IDE
-- **ClaudeCode** — Run Claude Code CLI tasks
-- Custom friends with any personality you design
+### Enable Authentication
 
-See [Friends & Family](friends-and-family.md) to add friends and set up a family AI network.
+First, secure your Core with API key authentication:
+
+```yaml
+# config/core.yml
+auth_enable: true
+auth_api_key: your-secure-api-key-here
+```
+
+### Choose a Tunnel Method
+
+#### Pinggy (Recommended)
+
+Built-in support with QR code scanning:
+
+```yaml
+# config/core.yml
+pinggy:
+  token: your-pinggy-token
+  enabled: true
+```
+
+#### Cloudflare Tunnel
+
+Free, reliable, no account needed:
+
+```bash
+cloudflared tunnel --url http://localhost:9000
+```
+
+#### Tailscale
+
+Private mesh VPN, works like local network:
+
+```bash
+tailscale up
+```
+
+### Connect Companion Remotely
+
+1. Start your tunnel service
+2. Get the public URL (e.g., `https://xxx.trycloudflare.com`)
+3. In Companion app, enter this URL as Core URL
+4. Enter your API key
+5. Connect and chat from anywhere
+
+[→ Remote access guide](remote-access.md)
 
 ---
 
-## What's next?
+## Step 6: Cursor & Claude Code
 
-| Goal | Guide |
-|------|-------|
-| Learn about the Portal | [Portal Guide](portal.md) |
-| Set up remote access | [Remote Access](remote-access.md) |
-| Add family members and AI friends | [Friends & Family](friends-and-family.md) |
-| Connect Telegram or Discord | [Channels](channels.md) |
-| Use Cursor or Claude Code | [Coding with HomeClaw](coding-with-homeclaw.md) |
-| Install skills from ClawHub | [Companion App → Skills](companion-app.md#skills-clawhub) |
-| Troubleshoot issues | [Help](help.md) |
+Use Cursor IDE and Claude Code from your phone for remote coding.
+
+### Prerequisites
+
+- **Cursor IDE** installed on your dev machine
+- **Claude Code CLI** installed (`npm install -g @anthropic-ai/claude-code`)
+- **API Keys:** Cursor API key or Anthropic/Minimax key
+
+### Start Cursor Bridge
+
+```bash
+python -m external_plugins.cursor_bridge.server
+```
+
+### Add Friends in user.yml
+
+```yaml
+users:
+  - id: yourname
+    friends:
+      - name: Cursor
+        preset: cursor
+      - name: ClaudeCode
+        preset: claudecode
+```
+
+### Use from Companion
+
+1. Open Companion app
+2. Select **Cursor** or **ClaudeCode** friend
+3. Say "Open /path/to/project in Cursor"
+4. Send coding tasks like "Add unit tests for auth module"
+5. See results returned to your phone
+
+!!! tip "Mobile Tip"
+    For mobile use, set up remote access first so your phone can reach Core, and ensure Core can reach the bridge on your dev machine.
+
+[→ Cursor & Claude Code guide](coding-with-homeclaw.md)
+
+---
+
+## Next Steps
+
+Now that you have HomeClaw running, explore more features:
+
+| Guide | Description |
+|-------|-------------|
+| [Configure Models](models.md) | Set up local models, cloud APIs, and Mix Mode |
+| [Family Social Network](friends-and-family.md) | Add family members and AI friends |
+| [Install Skills](writing-plugins-and-skills.md) | Extend HomeClaw with skills from ClawHub |
+| [Full Documentation](https://allenpeng0705.github.io/HomeClaw/) | Complete guides and API reference |
