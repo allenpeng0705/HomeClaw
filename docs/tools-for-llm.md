@@ -32,7 +32,7 @@ This document lists all **built-in tools** with their **name** and **description
 | **sessions_transcript** | Get the conversation transcript for the current session (or a given session_id). Returns a list of messages with role, content, and timestamp. |
 | **sessions_list** | List chat sessions for the current app/user. Returns session_id, app_id, user_name, user_id, created_at. |
 | **sessions_send** | Send a message to another session and get that session's agent reply. Use session_id (from sessions_list) or app_id + user_id to target. Returns the reply from the target session. |
-| **sessions_spawn** | Sub-agent run: run a one-off task and get the model reply. Select model by llm_name (ref from models_list) or capability (e.g. 'Chat' — selects a model that has that capability in config). Omit both to use main_llm. |
+| **sessions_spawn** | Sub-agent run: run a one-off task and get the model reply. Select model by llm_name (ref from models_list) or capability (e.g. 'Chat' — selects a model that has that capability in config). Omit both to use main_llm. Spawned runs are one-off inference tasks (not full nested tool loops). |
 | **channel_send** | Send an additional message to the channel that last sent a request (same conversation channel). Use when you want to send more than one continuous message to the user in that channel. Works with full channels (async delivery); for sync /inbound the client only gets one response per request. |
 | **usage_report** | Get the current usage report: hybrid router stats (mix mode) and cloud model request counts. Use when the user asks for cost, usage, or how many requests went to cloud vs local. Returns summary and by-layer breakdown. |
 

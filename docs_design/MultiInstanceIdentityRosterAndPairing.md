@@ -185,4 +185,4 @@ All behind **`auth_enabled`** + admin API key or local-only binding:
 |------|--------|
 | 2025-03-22 | Initial plan: minimal identity + roster + invite/pairing workflow. |
 | 2025-03-22 | Implemented: `base/peer_registry.py`, routes under `/api/instance/identity` and `/api/peer/invite/*`, `peer_call` tool, `main peer` CLI, doctor checks, example YAML files. |
-| 2025-03-22 | Added: `peer import` / `peer list`, per-IP rate limit on invite consume (30/min). |
+| 2025-03-22 | Added: `peer import` / `peer list`, dual per-IP consume rate limits (45/min all attempts + 18/min failed verifies). |

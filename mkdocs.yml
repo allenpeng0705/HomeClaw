@@ -52,6 +52,7 @@ nav:
     - Companion App: companion-app.md
     - Channels (Telegram, Discord, WebChat): channels.md
     - Friends & Family: friends-and-family.md
+    - Federated Companion messaging: federated-companion-messaging.md
     - Coding with HomeClaw (Cursor, Claude Code): coding-with-homeclaw.md
   - Connect Remotely:
     - Remote Access (tunnels): remote-access.md
