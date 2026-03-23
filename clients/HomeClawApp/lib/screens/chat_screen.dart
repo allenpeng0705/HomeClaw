@@ -1014,14 +1014,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (isUserToUserSend && imagesToSend.isNotEmpty && mounted) {
       setState(() => _activeUserSendStage = 'Compressing image...');
     }
-    // Build display URLs for attached images so they show in the user's message bubble
-    final userImageDataUrls = imagesToSend.isNotEmpty
-        ? await (widget.isUserFriend
-            ? _filePathsToUserMessageImageDataUrls(
-                imagesToSend,
-                strictForFederation: federatedUserChat,
-              )
-            : _filePathsToImageDataUrls(imagesToSend))
+    // User-to-user: show local file paths until upload+send completes (Core uses paths/URLs, not base64).
+    // Other chats: data URLs for preview in the bubble.
+    final userImageRefs = imagesToSend.isNotEmpty
+        ? (isUserToUserSend
+            ? List<String>.from(imagesToSend)
+            : (widget.isUserFriend
+                ? await _filePathsToUserMessageImageDataUrls(
+                    imagesToSend,
+                    strictForFederation: federatedUserChat,
+                  )
+                : await _filePathsToImageDataUrls(imagesToSend)))
         : <String>[];
     // Keep send path independent from preview generation (media is uploaded directly for user-to-user below).
     // One short video for user-to-user (max 15MB, ~10s), keep local ref for optimistic bubble.
@@ -1044,7 +1047,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _pendingVideoPaths.clear();
       _pendingFilePaths.clear();
       _messages.add(MapEntry(text.isEmpty ? '(attachment)' : text, true));
-      _messageImages.add(userImageDataUrls.isEmpty ? null : userImageDataUrls);
+      _messageImages.add(userImageRefs.isEmpty ? null : userImageRefs);
       _messageAudios.add(null);
       _messageVideos.add(userVideoRefs.isEmpty ? null : userVideoRefs);
       _messageFileLabels.add(outgoingFileNames.isEmpty ? null : outgoingFileNames);
@@ -1218,12 +1221,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           videoPaths = uploaded.skip(nI).take(nV).toList();
           filePaths = uploaded.skip(nI + nV).toList();
         } catch (_) {
-          // Same fallback as web chat: if upload fails, send images as data URLs so message still goes through.
-          final dataUrls = await _filePathsToImageDataUrls(imagesToSend);
-          if (dataUrls.isNotEmpty) {
-            imagePaths = dataUrls;
-          }
-          // Videos and documents not sent on upload failure to avoid huge payloads.
+          // Require successful upload; no base64 fallback (keeps assistant path path/URL-based).
         }
       }
       String? locationStr;
@@ -1633,52 +1631,89 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return;
     }
     _voiceInputCancelled = false;
-    setState(() {
-      _voiceTranscript = '';
-      _inputController.clear();
-    });
-    _voiceSubscription = _voice.voiceEventStream.listen(
-        (event) {
-        if (!mounted) return;
-        final partial = event['partial'] as String?;
-        final finalText = event['final'] as String?;
-        if (finalText != null && finalText.isNotEmpty) {
-          setState(() {
-            _voiceTranscript = finalText;
-            _inputController.text = finalText;
-            _inputController.selection = TextSelection.collapsed(offset: finalText.length);
-          });
-          // Only auto-send from "final" if not cancelled and not already sending.
-          if (!_voiceInputCancelled && !_loading) {
-            _send().then((_) {
-              if (mounted) setState(() => _voiceTranscript = '');
-            });
-          }
-        } else if (partial != null && partial.isNotEmpty) {
-          setState(() {
-            _voiceTranscript = partial;
-            _inputController.text = partial;
-            _inputController.selection = TextSelection.collapsed(offset: partial.length);
-          });
-        }
-      },
-      onError: (e) {
-        if (mounted) {
-          setState(() => _voiceListening = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Voice error: $e')),
-          );
-        }
-      },
-    );
     try {
+      await _voiceSubscription?.cancel();
+      _voiceSubscription = null;
+      if (mounted) {
+        setState(() {
+          _voiceTranscript = '';
+          _inputController.clear();
+        });
+      }
+      _voiceSubscription = _voice.voiceEventStream.listen(
+        (event) {
+          try {
+            if (!mounted) return;
+            final partialRaw = event['partial'];
+            final finalRaw = event['final'];
+            final partial = partialRaw is String
+                ? partialRaw
+                : (partialRaw != null ? partialRaw.toString() : null);
+            final finalText = finalRaw is String
+                ? finalRaw
+                : (finalRaw != null ? finalRaw.toString() : null);
+            if (finalText != null && finalText.isNotEmpty) {
+              if (!mounted) return;
+              setState(() {
+                _voiceTranscript = finalText;
+                _inputController.text = finalText;
+                final len = finalText.length;
+                _inputController.selection = TextSelection.collapsed(
+                  offset: len.clamp(0, _inputController.text.length),
+                );
+              });
+              if (!_voiceInputCancelled && !_loading) {
+                _send().then((_) {
+                  if (mounted) setState(() => _voiceTranscript = '');
+                });
+              }
+            } else if (partial != null && partial.isNotEmpty) {
+              if (!mounted) return;
+              setState(() {
+                _voiceTranscript = partial;
+                _inputController.text = partial;
+                final len = partial.length;
+                _inputController.selection = TextSelection.collapsed(
+                  offset: len.clamp(0, _inputController.text.length),
+                );
+              });
+            }
+          } catch (e, st) {
+            FlutterError.reportError(FlutterErrorDetails(exception: e, stack: st));
+            if (mounted) {
+              setState(() => _voiceListening = false);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Voice handler error: $e')),
+              );
+            }
+          }
+        },
+        onError: (e) {
+          if (mounted) {
+            setState(() => _voiceListening = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Voice error: $e')),
+            );
+          }
+        },
+      );
       await _voice.startVoiceListening(locale: _voiceInputLocale);
       if (mounted) setState(() => _voiceListening = true);
-    } catch (e) {
+    } catch (e, st) {
+      await _voiceSubscription?.cancel();
+      _voiceSubscription = null;
+      try {
+        await _voice.stopVoiceListening();
+      } catch (_) {}
+      FlutterError.reportError(FlutterErrorDetails(exception: e, stack: st));
       if (mounted) {
         setState(() => _voiceListening = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Voice failed: $e. On macOS, allow Microphone in System Settings > Privacy.')),
+          SnackBar(
+            content: Text(
+              'Voice failed: $e. On macOS/iOS allow Microphone + Speech Recognition; on macOS see homeclaw_voice README if the app crashes in the speech plugin.',
+            ),
+          ),
         );
       }
     }
@@ -2348,9 +2383,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  bool _isLocalThreadImageFilePath(String ref) {
+    final t = ref.trim();
+    if (t.isEmpty ||
+        t.startsWith('data:') ||
+        t.startsWith('http://') ||
+        t.startsWith('https://') ||
+        t.startsWith('/files/') ||
+        t.startsWith('/files/out')) {
+      return false;
+    }
+    final e = path.extension(t).toLowerCase();
+    if (!const ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.bmp'].contains(e)) {
+      return false;
+    }
+    try {
+      return File(t).existsSync();
+    } catch (_) {
+      return false;
+    }
+  }
+
   bool _isDisplayableThreadImage(String ref) {
     final t = ref.trim();
     if (t.startsWith('data:image/')) return true;
+    if (_isLocalThreadImageFilePath(t)) return true;
     final u = Uri.tryParse(t);
     if (u != null && u.hasScheme && (u.scheme == 'http' || u.scheme == 'https')) return true;
     // Only treat Core file routes as network-loadable relative paths.
@@ -2376,6 +2433,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     const w = 280.0;
     final cs = Theme.of(context).colorScheme;
     final trimmed = imageRef.trim();
+    if (_isLocalThreadImageFilePath(trimmed)) {
+      return RepaintBoundary(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.file(
+            File(trimmed),
+            width: w,
+            fit: BoxFit.contain,
+            gaplessPlayback: true,
+            errorBuilder: (_, __, ___) => Icon(Icons.broken_image_outlined, color: cs.outline, size: 40),
+          ),
+        ),
+      );
+    }
     if (trimmed.startsWith('data:image/')) {
       final bytes = _decodeDataUrlToBytes(trimmed);
       if (bytes == null || bytes.isEmpty) {

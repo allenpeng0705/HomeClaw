@@ -3,9 +3,7 @@ User-to-user message inbox: store and list messages for a user (single HomeClaw 
 Messages are stored under data_path()/user_inbox/{user_id}.json. Used by POST /api/user-message and GET /api/user-inbox.
 """
 
-import base64
 import json
-import mimetypes
 import os
 import time
 import uuid
@@ -16,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from base.util import Util
+from core.result_viewer import file_absolute_path_to_view_url, file_view_url_to_core_relative
 
 _INBOX_LOCKS: Dict[str, Lock] = {}
 _INBOX_LOCKS_GUARD = Lock()
@@ -29,36 +28,20 @@ def _inbox_dir() -> Path:
         return Path("user_inbox")
 
 
-# Inline Companion upload files in API responses so mobile apps never receive server-only absolute paths.
-_CLIENT_INLINE_UPLOAD_MAX_BYTES = 12 * 1024 * 1024
-
-
-def _inline_database_upload_path(ref: str, max_bytes: int) -> Optional[str]:
-    """If ref points to a file under <project>/database/uploads/, return a data URL; else None."""
-    try:
-        p = Path((ref or "").strip())
-        if not p.is_absolute() or not p.is_file():
-            return None
-        root = Path(Util().root_path()).resolve()
-        upload_root = (root / "database" / "uploads").resolve()
-        full = p.resolve()
-        try:
-            full.relative_to(upload_root)
-        except ValueError:
-            return None
-        sz = full.stat().st_size
-        if sz > max_bytes:
-            return None
-        data = full.read_bytes()
-        mime = mimetypes.guess_type(str(full))[0] or "application/octet-stream"
-        b64 = base64.b64encode(data).decode("ascii")
-        return f"data:{mime};base64,{b64}"
-    except Exception:
+def _absolute_path_ref_to_client_url(ref: str) -> Optional[str]:
+    """Turn a server-only absolute path into a /files/... or https://... URL clients can load."""
+    url, _err = file_absolute_path_to_view_url(ref)
+    if not url:
         return None
+    return file_view_url_to_core_relative(url)
 
 
-def sanitize_media_ref_list_for_client(refs: Any, max_each_bytes: int = _CLIENT_INLINE_UPLOAD_MAX_BYTES) -> Any:
-    """Replace database/uploads paths with data URLs; pass through data:, http(s):, /files/... ."""
+def sanitize_media_ref_list_for_client(refs: Any, max_each_bytes: int = 0) -> Any:
+    """Replace absolute sandbox paths with file-view URLs; pass through data:, http(s):, /files/...
+
+    ``max_each_bytes`` is ignored (kept for API compatibility); media is served via /files/... not base64.
+    """
+    _ = max_each_bytes
     if not isinstance(refs, list):
         return refs
     out: List[str] = []
@@ -75,12 +58,12 @@ def sanitize_media_ref_list_for_client(refs: Any, max_each_bytes: int = _CLIENT_
         if lower.startswith("/files/") or lower.startswith("/files/out"):
             out.append(s)
             continue
-        inlined = _inline_database_upload_path(s, max_each_bytes)
-        out.append(inlined if inlined else s)
+        mapped = _absolute_path_ref_to_client_url(s)
+        out.append(mapped if mapped else s)
     return out
 
 
-def sanitize_message_dict_for_client(msg: Dict[str, Any], max_each_bytes: int = _CLIENT_INLINE_UPLOAD_MAX_BYTES) -> Dict[str, Any]:
+def sanitize_message_dict_for_client(msg: Dict[str, Any], max_each_bytes: int = 0) -> Dict[str, Any]:
     """Copy of one inbox message with upload-dir paths expanded for clients (Companion)."""
     if not isinstance(msg, dict):
         return msg
@@ -91,7 +74,7 @@ def sanitize_message_dict_for_client(msg: Dict[str, Any], max_each_bytes: int = 
     return out
 
 
-def sanitize_messages_list_for_client(messages: List[Any], max_each_bytes: int = _CLIENT_INLINE_UPLOAD_MAX_BYTES) -> List[Any]:
+def sanitize_messages_list_for_client(messages: List[Any], max_each_bytes: int = 0) -> List[Any]:
     return [sanitize_message_dict_for_client(dict(m), max_each_bytes=max_each_bytes) if isinstance(m, dict) else m for m in messages]
 
 

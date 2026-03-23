@@ -19,7 +19,7 @@ import re
 import time
 from pathlib import Path
 from typing import List, Optional, Tuple
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlparse
 
 from loguru import logger
 
@@ -254,6 +254,62 @@ def build_file_view_link(scope: str, path: str) -> Tuple[Optional[str], Optional
     except Exception as e:
         logger.debug("build_file_view_link failed: {}", e)
         return (None, "Could not generate file link; check core_public_url and auth_api_key in config.")
+
+
+def file_absolute_path_to_view_url(path_str: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    If ``path_str`` is an absolute path to a file under ``homeclaw_root``, return a file view URL
+    from ``build_file_view_link`` (same paths served by GET /files/out). Otherwise (None, reason).
+    Never raises.
+    """
+    try:
+        from pathlib import Path
+
+        from base.util import Util
+
+        p = Path((path_str or "").strip())
+        if not p.is_absolute() or not p.is_file():
+            return (None, "not an absolute file path")
+        full = p.resolve()
+        meta = Util().get_core_metadata()
+        base_str = str(getattr(meta, "homeclaw_root", None) or "").strip()
+        if not base_str:
+            return (None, "homeclaw_root not configured")
+        base = Path(base_str).resolve()
+        try:
+            rel = full.relative_to(base)
+        except ValueError:
+            return (None, "path not under homeclaw_root")
+        rel_posix = rel.as_posix()
+        parts = rel_posix.split("/", 1)
+        if len(parts) < 2:
+            return (None, "invalid sandbox layout")
+        url, err = build_file_view_link(parts[0], parts[1])
+        if url and not err:
+            return (url, None)
+        return (None, err or "could not build file link")
+    except Exception as e:
+        logger.debug("file_absolute_path_to_view_url failed: {}", e)
+        return (None, "could not build file link")
+
+
+def file_view_url_to_core_relative(url: str) -> str:
+    """
+    If ``url`` is http(s) to this Core's /files routes on a loopback host, return ``/files/...?...`` only
+    so mobile/web clients can prefix their own reachable ``baseUrl`` (emulator, LAN).
+    """
+    try:
+        u = urlparse((url or "").strip())
+        if u.scheme not in ("http", "https") or not u.path:
+            return url
+        host = (u.hostname or "").lower()
+        if host not in ("127.0.0.1", "localhost", "::1", "0.0.0.0"):
+            return url
+        if not (u.path.startswith("/files/") or u.path.startswith("/files/out")):
+            return url
+        return u.path + (("?" + u.query) if u.query else "")
+    except Exception:
+        return url
 
 
 # When a tunnel (e.g. Pinggy) provides a URL at runtime, Core sets it here so file/report/folder links use it when core_public_url is not in config.

@@ -86,8 +86,10 @@ class HomeclawVoice {
       );
     }
     if (!_speech.isAvailable) {
-      _eventController.addError(Exception('Speech recognition not available'));
-      return;
+      // Throw so callers do not assume listening started (addError alone completes the Future without an error).
+      throw Exception(
+        'Speech recognition not available. Enable it in system settings or pick another input device.',
+      );
     }
     _listening = true;
     await _speech.listen(
@@ -111,11 +113,10 @@ class HomeclawVoice {
   Future<void> _startVoskListening() async {
     final modelPath = Platform.environment['VOSK_MODEL'];
     if (modelPath == null || modelPath.isEmpty) {
-      _eventController.addError(Exception(
+      throw Exception(
         'On Linux set VOSK_MODEL to the path of a Vosk model (e.g. ~/vosk-model-small-en-us-0.15). '
         'Install: pip install vosk sounddevice',
-      ));
-      return;
+      );
     }
     // Use embedded script (not an asset) so .py is never in the app bundle (iOS signing).
     const scriptContent = voskListenScript;
@@ -124,8 +125,7 @@ class HomeclawVoice {
       _voskScriptFile = File('${_voskTempDir!.path}/vosk_listen.py');
       await _voskScriptFile!.writeAsString(scriptContent);
     } catch (e) {
-      _eventController.addError(Exception('Failed to write Vosk script: $e'));
-      return;
+      throw Exception('Failed to write Vosk script: $e');
     }
     try {
       _voskProcess = await Process.start(
@@ -135,11 +135,10 @@ class HomeclawVoice {
         runInShell: false,
       );
     } catch (e) {
-      _eventController.addError(Exception('Failed to start Vosk: $e'));
       _voskScriptFile?.deleteSync();
       _voskTempDir?.deleteSync(recursive: true);
       _voskTempDir = null;
-      return;
+      throw Exception('Failed to start Vosk: $e');
     }
     _listening = true;
     _voskProcess!.stderr.listen((_) {});
