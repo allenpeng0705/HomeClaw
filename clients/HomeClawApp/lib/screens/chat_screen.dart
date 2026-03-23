@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show max;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:homeclaw_voice/homeclaw_voice.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:geolocator/geolocator.dart';
@@ -749,8 +751,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final filesToSend = List<String>.from(_pendingFilePaths);
     // Build display URLs for attached images so they show in the user's message bubble
     final userImageDataUrls = imagesToSend.isNotEmpty
-        ? await _filePathsToImageDataUrls(imagesToSend)
+        ? await (widget.isUserFriend
+            ? _filePathsToUserMessageImageDataUrls(imagesToSend)
+            : _filePathsToImageDataUrls(imagesToSend))
         : <String>[];
+    if (widget.isUserFriend && imagesToSend.isNotEmpty && userImageDataUrls.isEmpty) {
+      _stopLoadingStatusTimer();
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _loadingMessage = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not prepare images to send. Try a different photo format or size.')),
+        );
+      }
+      return;
+    }
     // One short video for user-to-user (max 15MB, ~10s)
     final userVideoDataUrls = videosToSend.isNotEmpty
         ? await _filePathsToVideoDataUrls([videosToSend.first])
@@ -765,7 +782,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       setState(() => _loading = false);
       return;
     }
+    int? optimisticIndex;
     setState(() {
+      optimisticIndex = _messages.length;
       _pendingImagePaths.clear();
       _pendingVideoPaths.clear();
       _pendingFilePaths.clear();
@@ -839,7 +858,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       } catch (e) {
         if (mounted) {
           _stopLoadingStatusTimer();
+          final errText = e.toString();
+          final likelyPayloadOrTimeout = errText.contains('413') ||
+              errText.toLowerCase().contains('payload') ||
+              errText.contains('502') ||
+              errText.toLowerCase().contains('timed out');
           setState(() {
+            if (optimisticIndex != null && optimisticIndex! >= 0 && optimisticIndex! < _messages.length) {
+              _messages.removeAt(optimisticIndex!);
+              if (optimisticIndex! < _messageImages.length) _messageImages.removeAt(optimisticIndex!);
+              if (optimisticIndex! < _messageAudios.length) _messageAudios.removeAt(optimisticIndex!);
+              if (optimisticIndex! < _messageVideos.length) _messageVideos.removeAt(optimisticIndex!);
+            }
+            _pendingImagePaths
+              ..clear()
+              ..addAll(imagesToSend);
+            _pendingVideoPaths
+              ..clear()
+              ..addAll(videosToSend);
+            _pendingFilePaths
+              ..clear()
+              ..addAll(filesToSend);
             _messages.add(MapEntry('Error: $e', false));
             _messageImages.add(null);
             _messageAudios.add(null);
@@ -847,6 +886,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _loading = false;
             _loadingMessage = null;
           });
+          if (likelyPayloadOrTimeout) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Remote send failed (likely payload/timeout). Attachment is kept so you can retry with a smaller image.',
+                ),
+              ),
+            );
+          }
           _scrollToBottom();
         }
       }
@@ -994,6 +1042,89 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Build data URL for one short video (e.g. 10s). Max one video, max 15MB. Returns empty list if none or too large.
   static const int _maxVideoBytes = 15 * 1024 * 1024;
+
+  /// User-to-user (incl. federation): resize + JPEG so JSON bodies stay under typical proxy limits.
+  static const int _userMsgImageMaxJpegBytes = 2 * 1024 * 1024;
+  static const double _userMsgImageMaxLongEdge = 2048;
+
+  /// Encode [source] as JPEG data URL, shrinking dimensions and quality until under [_userMsgImageMaxJpegBytes].
+  String? _imageToUserMessageJpegDataUrl(img.Image source) {
+    var maxLong = _userMsgImageMaxLongEdge;
+    Uint8List? smallest;
+    for (var shrinkRound = 0; shrinkRound < 24; shrinkRound++) {
+      final w = source.width;
+      final h = source.height;
+      final long = w > h ? w : h;
+      final img.Image frame;
+      if (long > maxLong) {
+        int tw;
+        int th;
+        if (w >= h) {
+          tw = maxLong.round();
+          th = max((h * maxLong / w).round(), 1);
+        } else {
+          th = maxLong.round();
+          tw = max((w * maxLong / h).round(), 1);
+        }
+        frame = img.copyResize(source, width: tw, height: th, interpolation: img.Interpolation.linear);
+      } else {
+        frame = source;
+      }
+      for (var q = 90; q >= 28; q -= 6) {
+        final jpg = Uint8List.fromList(img.encodeJpg(frame, quality: q));
+        if (smallest == null || jpg.length < smallest.length) {
+          smallest = jpg;
+        }
+        if (jpg.length <= _userMsgImageMaxJpegBytes) {
+          return 'data:image/jpeg;base64,${base64Encode(jpg)}';
+        }
+      }
+      maxLong *= 0.78;
+      if (maxLong < 200) {
+        break;
+      }
+    }
+    return smallest == null ? null : 'data:image/jpeg;base64,${base64Encode(smallest)}';
+  }
+
+  /// Downscale images before sending to another user (local or federated). Falls back to raw small files if decode fails.
+  Future<List<String>> _filePathsToUserMessageImageDataUrls(List<String> filePaths) async {
+    final out = <String>[];
+    var skippedUndecodableLarge = false;
+    for (final p in filePaths) {
+      final ext = path.extension(p).toLowerCase().replaceFirst('.', '');
+      if (!_imageMime.containsKey(ext)) continue;
+      final file = File(p);
+      if (!await file.exists()) continue;
+      final bytes = await file.readAsBytes();
+      final decoded = img.decodeImage(bytes);
+      if (decoded == null) {
+        if (bytes.length <= _userMsgImageMaxJpegBytes) {
+          out.add('data:${_imageMime[ext]};base64,${base64Encode(bytes)}');
+        } else {
+          skippedUndecodableLarge = true;
+        }
+        continue;
+      }
+      final url = _imageToUserMessageJpegDataUrl(decoded);
+      if (url != null) {
+        out.add(url);
+      }
+    }
+    if (skippedUndecodableLarge && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'An image could not be resized (format not supported). Use JPEG or PNG, or pick a smaller file.',
+            ),
+          ),
+        );
+      });
+    }
+    return out;
+  }
 
   Future<List<String>> _filePathsToVideoDataUrls(List<String> filePaths) async {
     if (filePaths.isEmpty) return [];
