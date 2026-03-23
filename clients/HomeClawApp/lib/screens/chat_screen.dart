@@ -839,12 +839,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             }
           }
         }
+        List<String>? fileLinksToSend;
+        if (filesToSend.isNotEmpty) {
+          final uploaded = await widget.coreService.uploadFiles(filesToSend);
+          fileLinksToSend = uploaded.isNotEmpty ? uploaded : null;
+        }
         await widget.coreService.sendUserMessage(
           fromUserId: widget.userId,
           toUserId: widget.toUserId!.trim(),
-          text: e2eEnvelope != null ? '' : (text.isEmpty ? '(attachment)' : text),
+          text: e2eEnvelope != null ? '' : text,
           images: userImageDataUrls.isEmpty ? null : userImageDataUrls,
           videos: userVideoDataUrls.isEmpty ? null : userVideoDataUrls,
+          fileLinks: fileLinksToSend,
           e2e: e2eEnvelope,
         );
         if (mounted) {
@@ -1178,6 +1184,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// Start push-to-talk recording (user friends only). Call _stopPushToTalkAndSend when user releases.
   Future<void> _startPushToTalk() async {
     if (widget.toUserId == null || widget.toUserId!.trim().isEmpty) return;
+    if (_voiceListening) {
+      await _cancelVoiceInput();
+    }
     final hasPermission = await _voiceRecorder.hasPermission();
     if (!hasPermission) {
       if (mounted) {
@@ -1423,7 +1432,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
         );
       }
-      final xFile = await _imagePicker.pickImage(source: source);
+      final xFile = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 2048,
+        imageQuality: 85,
+      );
       if (mounted) Navigator.of(context).pop();
       if (xFile == null || !mounted) return;
       // Copy to app temp so preview/upload work (macOS Photos returns short-lived paths).
@@ -1438,8 +1451,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         return;
       }
       final filePath = result.path!;
-      final added = await _showMediaPreview(context, type: 'photo', filePath: filePath, label: 'Add this photo to your message?');
-      if (added && mounted) {
+      if (mounted) {
         setState(() => _pendingImagePaths.add(filePath));
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Photo attached. Type a message and Send to include it.')));
       }
@@ -2704,27 +2716,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
-                if (widget.isUserFriend)
-                  GestureDetector(
-                    onLongPressStart: (_) => _startPushToTalk(),
-                    onLongPressEnd: (_) => _stopPushToTalkAndSend(),
-                    child: IconButton(
-                      onPressed: null,
-                      icon: Icon(
-                        _recordingPushToTalk ? Icons.stop : Icons.keyboard_voice,
-                        color: _recordingPushToTalk ? Theme.of(context).colorScheme.error : null,
-                      ),
-                      tooltip: _recordingPushToTalk ? 'Recording… release to send' : 'Hold to talk',
+                GestureDetector(
+                  onLongPressStart: widget.isUserFriend && !_loading ? (_) => _startPushToTalk() : null,
+                  onLongPressEnd: widget.isUserFriend && !_loading ? (_) => _stopPushToTalkAndSend() : null,
+                  child: IconButton(
+                    onPressed: _loading ? null : _toggleVoice,
+                    icon: Icon(
+                      _recordingPushToTalk
+                          ? Icons.stop
+                          : (_voiceListening ? Icons.mic : Icons.mic_none),
+                      color: (_recordingPushToTalk || _voiceListening)
+                          ? Theme.of(context).colorScheme.primary
+                          : null,
                     ),
+                    tooltip: widget.isUserFriend
+                        ? (_recordingPushToTalk
+                            ? 'Recording… release to send voice message'
+                            : (_voiceListening
+                                ? 'Stop voice input (long press for voice message)'
+                                : 'Voice input (long press for voice message)'))
+                        : (_voiceListening ? 'Stop voice input' : 'Voice input'),
                   ),
-                if (widget.isUserFriend) const SizedBox(width: 4),
-                IconButton(
-                  onPressed: _loading ? null : _toggleVoice,
-                  icon: Icon(
-                    _voiceListening ? Icons.mic : Icons.mic_none,
-                    color: _voiceListening ? Theme.of(context).colorScheme.primary : null,
-                  ),
-                  tooltip: _voiceListening ? 'Stop voice input' : 'Voice input',
                 ),
                 const SizedBox(width: 4),
                 Expanded(
@@ -2750,18 +2762,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     ),
                   ),
                 ],
-                if (!_federatedE2eAttachmentsDisabled) ...[
-                  IconButton(
-                    onPressed: _loading ? null : () => _attachPhoto(presetSource: ImageSource.camera),
-                    icon: const Icon(Icons.photo_camera_outlined),
-                    tooltip: 'Take photo',
+                if (!_federatedE2eAttachmentsDisabled)
+                  PopupMenuButton<String>(
+                    enabled: !_loading,
+                    tooltip: 'Photo',
+                    icon: const Icon(Icons.add_a_photo_outlined),
+                    onSelected: (value) async {
+                      switch (value) {
+                        case 'camera':
+                          await _attachPhoto(presetSource: ImageSource.camera);
+                          break;
+                        case 'gallery':
+                          await _attachPhoto(presetSource: ImageSource.gallery);
+                          break;
+                        default:
+                          break;
+                      }
+                    },
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(value: 'camera', child: Text('Take photo')),
+                      PopupMenuItem(value: 'gallery', child: Text('Choose image')),
+                    ],
                   ),
-                  IconButton(
-                    onPressed: _loading ? null : () => _attachPhoto(presetSource: ImageSource.gallery),
-                    icon: const Icon(Icons.photo_library_outlined),
-                    tooltip: 'Attach image',
-                  ),
-                ],
                 const SizedBox(width: 4),
                 IconButton.filled(
                   onPressed: _loading
