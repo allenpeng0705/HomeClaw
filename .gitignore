@@ -93,3 +93,13 @@ external_plugins/quote-java/target/classes/QuotePlugin.class
 /skills/ppt-generation-1.0.0/scripts/__pycache__
 /tools/trae-agent
 site/.DS_Store
+site/assets/HomeClaw-Introduction-ZH.mp4
+site/assets/HomeClaw-Introduction-ZH.pptx
+site/assets/HomeClaw-Introduction.mp4
+site/assets/HomeClaw-Introduction.pdf
+site/assets/HomeClaw-Introduction.pptx
+dist/HomeClawApp.apk
+dist/HomeClawApp.dmg
+site/assets/ppt-background.png
+site/create_ppt.py
+site/create_ppt_zh.py
