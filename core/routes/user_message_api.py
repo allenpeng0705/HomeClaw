@@ -185,6 +185,32 @@ def get_user_message_post_handler(core):
                 sc = int(remote.get("status_code") or 0)
                 if remote.get("ok") and sc == 200:
                     mid = remote.get("message_id")
+                    # Mirror local same-instance behavior: outbound is stored under the recipient's inbox
+                    # file on this Core so GET /api/user-inbox/thread can merge sent + received (see user_inbox.get_thread).
+                    try:
+                        e2e_local = body.e2e.model_dump() if has_e2e and body.e2e else None
+                        meta = {"federated_outbound": True}
+                        if mid:
+                            meta["remote_message_id"] = mid
+                        local_mid = inbox_append(
+                            to_user_id=to_user_id,
+                            from_user_id=from_user_id,
+                            from_user_name=from_name,
+                            text="" if has_e2e else text,
+                            images=None if has_e2e else body.images,
+                            audios=None if has_e2e else body.audios,
+                            videos=None if has_e2e else body.videos,
+                            file_links=None if has_e2e else body.file_links,
+                            metadata=meta,
+                            e2e=e2e_local,
+                        )
+                        if not local_mid:
+                            logger.warning(
+                                "user-message: federated deliver ok but local inbox mirror failed (to={})",
+                                to_user_id,
+                            )
+                    except Exception as e:
+                        logger.warning("user-message: federated local inbox mirror failed: {}", e)
                     return JSONResponse(status_code=200, content={"ok": True, "message_id": mid, "federated": True})
                 err = (remote.get("error") or "federation_failed") if isinstance(remote, dict) else "federation_failed"
                 if sc <= 0:
