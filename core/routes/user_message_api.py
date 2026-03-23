@@ -15,11 +15,12 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from base.base import User
-from base.federation import format_fid
+from base.base import Friend, User
+from base.federation import format_fid, parse_fid
 from base.peer_registry import find_peer_by_instance_id, load_instance_identity, post_federation_user_message_sync, resolve_peer_api_key
 from base.util import Util
 
+from core.federated_friendships_store import list_accepted_for_recipient
 from core.federation_e2e import validate_e2e_envelope
 from core.routes import auth
 from core.routes.federation_api import FederationE2EEnvelopeIn
@@ -35,8 +36,12 @@ def _get_user_by_id(user_id: str) -> Optional[User]:
     return None
 
 
-def _friend_match_for_recipient(from_user: User, to_user_id: str):
-    """Return the user/remote_user friend entry matching to_user_id, or None."""
+def _friend_match_for_recipient(from_user: User, to_user_id: str) -> Optional[Friend]:
+    """Return the user/remote_user friend entry matching to_user_id, or None.
+
+    Checks TinyDB/YAML friends first, then accepted federated rows (SQLite) so UI-only merged
+    remote friends (see companion_auth) can send without duplicating entries in users.json.
+    """
     friends = getattr(from_user, "friends", None) or []
     to_id = (to_user_id or "").strip()
     for f in friends:
@@ -46,6 +51,31 @@ def _friend_match_for_recipient(from_user: User, to_user_id: str):
         uid = (getattr(f, "user_id", None) or "").strip()
         if uid == to_id:
             return f
+    try:
+        meta = Util().get_core_metadata()
+        if not bool(getattr(meta, "federation_enabled", False)):
+            return None
+        sender_local = (getattr(from_user, "id", None) or getattr(from_user, "name", None) or "").strip()
+        if not sender_local or not to_id:
+            return None
+        for row in list_accepted_for_recipient(sender_local):
+            ff = (row.get("from_fid") or "").strip()
+            parsed = parse_fid(ff)
+            if not parsed:
+                continue
+            r_local, r_inst = parsed
+            if r_local != to_id:
+                continue
+            if not r_inst:
+                continue
+            return Friend(
+                name=f"{r_local} · {r_inst}",
+                type="remote_user",
+                user_id=r_local,
+                peer_instance_id=r_inst,
+            )
+    except Exception as e:
+        logger.debug("user-message: federated friend match lookup failed: {}", e)
     return None
 
 
@@ -80,7 +110,10 @@ def get_user_message_post_handler(core):
             if not friend_match:
                 return JSONResponse(
                     status_code=403,
-                    content={"error": "Recipient is not a user-type friend of the sender. Add them in user.yml (type: user, user_id: <id>)."},
+                    content={
+                        "error": "Recipient is not a user-type friend of the sender.",
+                        "hint": "Add them in the friends list (users.json / user.yml: type user, user_id) or complete an accepted federated friend link on both instances.",
+                    },
                 )
             if body.e2e is not None:
                 peer_chk = (getattr(friend_match, "peer_instance_id", None) or "").strip()
