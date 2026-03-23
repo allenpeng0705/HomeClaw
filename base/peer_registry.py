@@ -272,6 +272,35 @@ def peer_invite_consume_record_failed_verify(client_ip: str) -> bool:
         return len(lst) > CONSUME_FAIL_MAX_PER_WINDOW
 
 
+_DEFAULT_PEER_UA = "HomeClawCore/1.0 (+https://github.com/allenpeng0705/HomeClaw; peer-outbound)"
+
+
+def _resolve_peer_outbound_user_agent() -> str:
+    """User-Agent for Core→Core HTTP (peer_call, federation). Env wins, then core.yml peer_outbound_user_agent, else default (not Python-urllib)."""
+    env = (os.environ.get("HOMECLAW_PEER_HTTP_USER_AGENT") or "").strip()
+    if env:
+        return env
+    try:
+        from base.util import Util
+
+        meta = Util().get_core_metadata()
+        ua = (getattr(meta, "peer_outbound_user_agent", None) or "").strip()
+        if ua:
+            return ua
+    except Exception:
+        pass
+    return _DEFAULT_PEER_UA
+
+
+def _add_peer_outbound_headers(req: Any, *, json_body: bool) -> None:
+    """Attach headers so edge/WAF sees a normal API client (Flutter/Dart-like Accept), not bare urllib defaults."""
+    req.add_header("User-Agent", _resolve_peer_outbound_user_agent())
+    req.add_header("Accept", "application/json, */*;q=0.8")
+    req.add_header("Accept-Language", "en-US,en;q=0.9")
+    if json_body:
+        req.add_header("Content-Type", "application/json; charset=utf-8")
+
+
 def format_peer_roster_for_tool_prompt(max_chars: int = 5000) -> str:
     try:
         lines = ["## Configured peer HomeClaw instances (config/peers.yml)", ""]
@@ -313,12 +342,8 @@ def post_inbound_sync(
         {"user_id": user_id, "text": text, "channel_name": "peer"},
         ensure_ascii=False,
     ).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        method="POST",
-        headers={"Content-Type": "application/json; charset=utf-8"},
-    )
+    req = urllib.request.Request(url, data=payload, method="POST")
+    _add_peer_outbound_headers(req, json_body=True)
     if api_key:
         req.add_header("X-API-Key", api_key)
     try:
@@ -370,12 +395,8 @@ def post_federation_json_sync(
         p = "/" + p
     url = base_url.rstrip("/") + p
     payload = json.dumps(body if isinstance(body, dict) else {}, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        method="POST",
-        headers={"Content-Type": "application/json; charset=utf-8"},
-    )
+    req = urllib.request.Request(url, data=payload, method="POST")
+    _add_peer_outbound_headers(req, json_body=True)
     if api_key:
         req.add_header("X-API-Key", api_key)
     try:
@@ -426,6 +447,7 @@ def get_federation_json_sync(
         p = "/" + p
     url = base_url.rstrip("/") + p
     req = urllib.request.Request(url, method="GET")
+    _add_peer_outbound_headers(req, json_body=False)
     if api_key:
         req.add_header("X-API-Key", api_key)
     try:

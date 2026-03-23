@@ -1081,6 +1081,8 @@ class CoreMetadata:
     federation_e2e_enabled: bool = False
     # When True, federated user messages must include a valid hc-e2e-v1 envelope (no plaintext body).
     federation_e2e_require_encrypted: bool = False
+    # Optional User-Agent for Core→Core HTTP (peer_call, federation). Default avoids Python-urllib signature; override to match your edge/WAF rules or env HOMECLAW_PEER_HTTP_USER_AGENT.
+    peer_outbound_user_agent: str = ""
     # Optional: shared secret for application-layer encryption (Companion–Core). When set, Core decrypts encrypted inbound bodies and encrypts responses. See docs_design/CompanionEncryptionAndSecurity.md.
     app_layer_encryption_secret: str = ""
     core_public_url: str = ""  # public URL that reaches Core (e.g. https://homeclaw.example.com). Used for file/report links: core_public_url/files/out?path=...&token=...
@@ -1600,6 +1602,7 @@ class CoreMetadata:
             federation_require_accepted_relationship=bool(data.get('federation_require_accepted_relationship', False)),
             federation_e2e_enabled=bool(data.get('federation_e2e_enabled', False)),
             federation_e2e_require_encrypted=bool(data.get('federation_e2e_require_encrypted', False)),
+            peer_outbound_user_agent=(str(data.get('peer_outbound_user_agent') or '').strip()),
             app_layer_encryption_secret=(data.get('app_layer_encryption_secret') or '').strip(),
             core_public_url=(data.get('core_public_url') or '').strip(),
             file_link_style=(data.get('file_link_style') or 'token').strip().lower() or 'token',
@@ -1741,6 +1744,7 @@ class CoreMetadata:
                 'federation_require_accepted_relationship': getattr(core, 'federation_require_accepted_relationship', False),
                 'federation_e2e_enabled': getattr(core, 'federation_e2e_enabled', False),
                 'federation_e2e_require_encrypted': getattr(core, 'federation_e2e_require_encrypted', False),
+                'peer_outbound_user_agent': getattr(core, 'peer_outbound_user_agent', '') or '',
                 'app_layer_encryption_secret': getattr(core, 'app_layer_encryption_secret', '') or '',
                 'core_public_url': getattr(core, 'core_public_url', '') or '',
                 'file_link_style': getattr(core, 'file_link_style', 'token') or 'token',
