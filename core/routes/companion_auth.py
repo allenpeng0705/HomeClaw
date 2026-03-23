@@ -151,48 +151,103 @@ def _name_to_preset_key(name: str) -> Optional[str]:
     return None
 
 
+def _append_federated_accepted_remote_friends(user: User, out: List[Dict[str, Any]]) -> None:
+    """Append remote user friends from accepted federated rows (SQLite) so Companion shows them without manual user.yml edits."""
+    if not _companion_federation_enabled():
+        return
+    try:
+        from base.federation import parse_fid
+
+        from core.federated_friendships_store import list_accepted_for_recipient
+
+        uid = (str(getattr(user, "id", None) or getattr(user, "name", "") or "").strip())
+        if not uid:
+            return
+        existing = set()
+        for item in out:
+            if not isinstance(item, dict):
+                continue
+            t = (item.get("type") or "").strip().lower()
+            if t not in ("user", "remote_user"):
+                continue
+            u = (item.get("user_id") or "").strip()
+            p = (item.get("peer_instance_id") or "").strip()
+            if u and p:
+                existing.add((u, p))
+        for row in list_accepted_for_recipient(uid):
+            ff = (row.get("from_fid") or "").strip()
+            parsed = parse_fid(ff)
+            if not parsed:
+                continue
+            r_local, r_inst = parsed
+            if not r_local or not r_inst:
+                continue
+            key = (r_local, r_inst)
+            if key in existing:
+                continue
+            out.append(
+                {
+                    "name": f"{r_local} · {r_inst}",
+                    "relation": None,
+                    "who": None,
+                    "identity": None,
+                    "type": "remote_user",
+                    "user_id": r_local,
+                    "peer_instance_id": r_inst,
+                }
+            )
+            existing.add(key)
+    except Exception as e:
+        logger.debug("companion_auth: _append_federated_accepted_remote_friends failed: {}", e)
+
+
 def _user_to_friends_list(user: User) -> List[Dict[str, Any]]:
     """Return list of { name, relation?, who?, identity?, preset?, type?, user_id? } for user.friends. Never raises.
     When type=='user' and user_id is set, this friend is a real person (user-to-user); otherwise AI friend (user→Core).
-    Ensures preset is set for known names (Reminder, Note, Finder) so Companion can show preset thumbnails."""
+    Ensures preset is set for known names (Reminder, Note, Finder) so Companion can show preset thumbnails.
+    When federation_enabled, accepted cross-instance friendships (SQLite) are merged in as remote_user entries."""
     try:
         friends = getattr(user, "friends", None)
         if not isinstance(friends, list) or not friends:
-            return [{"name": "HomeClaw", "relation": None, "who": None, "identity": None, "type": "ai"}]
-        out = []
-        for f in friends:
-            if not hasattr(f, "name"):
-                continue
-            try:
-                fname = (getattr(f, "name", "") or "").strip() or "HomeClaw"
-                item = {
-                    "name": fname,
-                    "relation": getattr(f, "relation", None),
-                    "who": getattr(f, "who", None),
-                    "identity": getattr(f, "identity", None),
-                }
-                preset = getattr(f, "preset", None)
-                if preset is not None and str(preset).strip():
-                    item["preset"] = str(preset).strip()
-                else:
-                    derived = _name_to_preset_key(fname)
-                    if derived:
-                        item["preset"] = derived
-                ftype = (getattr(f, "type", None) or "").strip().lower() or "ai"
-                if ftype not in ("user", "ai", "remote_ai", "remote_user"):
-                    ftype = "ai"
-                item["type"] = ftype
-                if ftype in ("user", "remote_user"):
-                    uid = (getattr(f, "user_id", None) or "").strip()
-                    if uid:
-                        item["user_id"] = uid
-                    pinst = (getattr(f, "peer_instance_id", None) or "").strip()
-                    if pinst:
-                        item["peer_instance_id"] = pinst
-                out.append(item)
-            except Exception:
-                continue
-        return out if out else [{"name": "HomeClaw", "relation": None, "who": None, "identity": None, "type": "ai"}]
+            out = [{"name": "HomeClaw", "relation": None, "who": None, "identity": None, "type": "ai"}]
+        else:
+            out = []
+            for f in friends:
+                if not hasattr(f, "name"):
+                    continue
+                try:
+                    fname = (getattr(f, "name", "") or "").strip() or "HomeClaw"
+                    item = {
+                        "name": fname,
+                        "relation": getattr(f, "relation", None),
+                        "who": getattr(f, "who", None),
+                        "identity": getattr(f, "identity", None),
+                    }
+                    preset = getattr(f, "preset", None)
+                    if preset is not None and str(preset).strip():
+                        item["preset"] = str(preset).strip()
+                    else:
+                        derived = _name_to_preset_key(fname)
+                        if derived:
+                            item["preset"] = derived
+                    ftype = (getattr(f, "type", None) or "").strip().lower() or "ai"
+                    if ftype not in ("user", "ai", "remote_ai", "remote_user"):
+                        ftype = "ai"
+                    item["type"] = ftype
+                    if ftype in ("user", "remote_user"):
+                        uid = (getattr(f, "user_id", None) or "").strip()
+                        if uid:
+                            item["user_id"] = uid
+                        pinst = (getattr(f, "peer_instance_id", None) or "").strip()
+                        if pinst:
+                            item["peer_instance_id"] = pinst
+                    out.append(item)
+                except Exception:
+                    continue
+            if not out:
+                out = [{"name": "HomeClaw", "relation": None, "who": None, "identity": None, "type": "ai"}]
+        _append_federated_accepted_remote_friends(user, out)
+        return out
     except Exception as e:
         logger.debug("companion_auth: _user_to_friends_list failed: {}", e)
         return [{"name": "HomeClaw", "relation": None, "who": None, "identity": None, "type": "ai"}]

@@ -180,6 +180,25 @@ def list_pending_for_local_user(to_local_user_id: str) -> List[Dict[str, Any]]:
         return []
 
 
+def list_accepted_for_recipient(to_local_user_id: str) -> List[Dict[str, Any]]:
+    """Accepted inbound relationships where this user is the local recipient (from_fid = remote user@instance). Newest first."""
+    try:
+        to_u = (to_local_user_id or "").strip()
+        if not to_u:
+            return []
+        with _connect() as c:
+            _ensure_schema(c)
+            cur = c.execute(
+                "SELECT from_fid, message, updated_at FROM federated_friendships "
+                "WHERE to_local_user_id = ? AND state = 'accepted' ORDER BY updated_at DESC",
+                (to_u,),
+            )
+            return [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        logger.debug("federated_friendships list_accepted_for_recipient failed: {}", e)
+        return []
+
+
 def set_state_by_id(request_id: str, to_local_user_id: str, new_state: str) -> Optional[Dict[str, Any]]:
     """
     Set state for a row owned by to_local_user_id. new_state: accepted | rejected | blocked.

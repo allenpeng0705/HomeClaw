@@ -59,6 +59,8 @@ After editing YAML, restart Core so metadata reloads.
 
 ## 4. Friend configuration (`user.yml`)
 
+**Companion friend list:** Login and `GET /api/me/friends` merge **YAML** friends with **accepted** federated relationships from `federated_friendships.sqlite`. Remote contacts appear as `type: remote_user` with display name `remote_user_id · peer_instance_id` unless you already defined the same `user_id` + `peer_instance_id` in `user.yml` (YAML wins; no duplicate).
+
 **Local user friend** (same machine):
 
 ```yaml
