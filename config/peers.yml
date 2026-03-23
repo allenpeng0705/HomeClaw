@@ -2,10 +2,20 @@
 # Secrets: prefer api_key_env pointing to an environment variable (do not commit real keys).
 
 peers:
-  - instance_id: "AllenPeng-win-HomeClaw"
-    display_name: "AP-Win-HomwClaw"
-    base_url: "https://homeclaw.gpt4people.online:9000"
-    inbound_user_id: "allenpeng_win_homeclaw""
+  # Testing for Mac
+  # - instance_id: "AllenPeng-win-HomeClaw"
+  #   display_name: "AP-Win-HomwClaw"
+  #   base_url: "https://homeclaw.gpt4people.online:9000"
+  #   inbound_user_id: "allenpeng_win_homeclaw""
+  #   api_key_env: "1234567890"
+  #   capabilities:
+  #     - vision
+  #     - chat
+  # Testing for Windows
+  - instance_id: "AllenPeng-mac-HomeClaw"
+    display_name: "AP-Mac-HomwClaw"
+    base_url: "https://mymac.gpt4people.online:9000"
+    inbound_user_id: "allenpeng_mac_homeclaw""
     api_key_env: "1234567890"
     capabilities:
       - vision
