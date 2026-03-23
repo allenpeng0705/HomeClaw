@@ -749,10 +749,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final imagesToSend = List<String>.from(_pendingImagePaths);
     final videosToSend = List<String>.from(_pendingVideoPaths);
     final filesToSend = List<String>.from(_pendingFilePaths);
+    final federatedUserChat =
+        widget.isUserFriend && (widget.remotePeerInstanceId?.trim().isNotEmpty ?? false);
     // Build display URLs for attached images so they show in the user's message bubble
     final userImageDataUrls = imagesToSend.isNotEmpty
         ? await (widget.isUserFriend
-            ? _filePathsToUserMessageImageDataUrls(imagesToSend)
+            ? _filePathsToUserMessageImageDataUrls(
+                imagesToSend,
+                strictForFederation: federatedUserChat,
+              )
             : _filePathsToImageDataUrls(imagesToSend))
         : <String>[];
     if (widget.isUserFriend && imagesToSend.isNotEmpty && userImageDataUrls.isEmpty) {
@@ -896,7 +901,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text(
-                  'Remote send failed (likely payload/timeout). Attachment is kept so you can retry with a smaller image.',
+                  'Send failed (network or payload limit). Your photo is still attached above — tap Send again, or pick a smaller image.',
                 ),
               ),
             );
@@ -1049,15 +1054,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// Build data URL for one short video (e.g. 10s). Max one video, max 15MB. Returns empty list if none or too large.
   static const int _maxVideoBytes = 15 * 1024 * 1024;
 
-  /// User-to-user (incl. federation): resize + JPEG so JSON bodies stay under typical proxy limits.
-  static const int _userMsgImageMaxJpegBytes = 2 * 1024 * 1024;
-  static const double _userMsgImageMaxLongEdge = 2048;
+  /// User-to-user on one Core: keep JSON modest (still data URLs for Companion bubbles).
+  static const int _userMsgImageMaxJpegBytes = 768 * 1024;
+  static const double _userMsgImageMaxLongEdge = 1600;
 
-  /// Encode [source] as JPEG data URL, shrinking dimensions and quality until under [_userMsgImageMaxJpegBytes].
-  String? _imageToUserMessageJpegDataUrl(img.Image source) {
-    var maxLong = _userMsgImageMaxLongEdge;
+  /// Cross-instance: stricter — tunnel/proxy body limits; never send an oversized blob.
+  static const int _userMsgFedImageMaxJpegBytes = 384 * 1024;
+  static const double _userMsgFedImageMaxLongEdge = 1280;
+
+  /// Encode [source] as JPEG data URL. Returns null if it cannot get under [maxJpegBytes] (caller skips image).
+  String? _imageToUserMessageJpegDataUrl(
+    img.Image source, {
+    required int maxJpegBytes,
+    required double maxLongEdgeStart,
+  }) {
+    var maxLong = maxLongEdgeStart;
     Uint8List? smallest;
-    for (var shrinkRound = 0; shrinkRound < 24; shrinkRound++) {
+    for (var shrinkRound = 0; shrinkRound < 36; shrinkRound++) {
       final w = source.width;
       final h = source.height;
       final long = w > h ? w : h;
@@ -1076,46 +1089,77 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       } else {
         frame = source;
       }
-      for (var q = 90; q >= 28; q -= 6) {
+      for (var q = 88; q >= 10; q -= 5) {
         final jpg = Uint8List.fromList(img.encodeJpg(frame, quality: q));
         if (smallest == null || jpg.length < smallest.length) {
           smallest = jpg;
         }
-        if (jpg.length <= _userMsgImageMaxJpegBytes) {
+        if (jpg.length <= maxJpegBytes) {
           return 'data:image/jpeg;base64,${base64Encode(jpg)}';
         }
       }
-      maxLong *= 0.78;
-      if (maxLong < 200) {
+      maxLong *= 0.72;
+      if (maxLong < 140) {
         break;
       }
     }
-    return smallest == null ? null : 'data:image/jpeg;base64,${base64Encode(smallest)}';
+    if (smallest != null && smallest.length <= maxJpegBytes) {
+      return 'data:image/jpeg;base64,${base64Encode(smallest)}';
+    }
+    return null;
   }
 
   /// Downscale images before sending to another user (local or federated). Falls back to raw small files if decode fails.
-  Future<List<String>> _filePathsToUserMessageImageDataUrls(List<String> filePaths) async {
+  Future<List<String>> _filePathsToUserMessageImageDataUrls(
+    List<String> filePaths, {
+    bool strictForFederation = false,
+  }) async {
+    final maxJpeg = strictForFederation ? _userMsgFedImageMaxJpegBytes : _userMsgImageMaxJpegBytes;
+    final maxLong = strictForFederation ? _userMsgFedImageMaxLongEdge : _userMsgImageMaxLongEdge;
     final out = <String>[];
     var skippedUndecodableLarge = false;
+    var failedToCompress = false;
+    var attempted = 0;
     for (final p in filePaths) {
       final ext = path.extension(p).toLowerCase().replaceFirst('.', '');
       if (!_imageMime.containsKey(ext)) continue;
       final file = File(p);
       if (!await file.exists()) continue;
+      attempted++;
       final bytes = await file.readAsBytes();
       final decoded = img.decodeImage(bytes);
       if (decoded == null) {
-        if (bytes.length <= _userMsgImageMaxJpegBytes) {
+        if (bytes.length <= maxJpeg) {
           out.add('data:${_imageMime[ext]};base64,${base64Encode(bytes)}');
         } else {
           skippedUndecodableLarge = true;
         }
         continue;
       }
-      final url = _imageToUserMessageJpegDataUrl(decoded);
+      final url = _imageToUserMessageJpegDataUrl(
+        decoded,
+        maxJpegBytes: maxJpeg,
+        maxLongEdgeStart: maxLong,
+      );
       if (url != null) {
         out.add(url);
+      } else {
+        failedToCompress = true;
       }
+    }
+    if (failedToCompress && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              strictForFederation
+                  ? 'Could not shrink a photo under ${(maxJpeg / 1024).round()}KB for remote send. Try another image.'
+                  : 'Could not shrink a photo enough to send. Try another image.',
+            ),
+          ),
+        );
+      });
     }
     if (skippedUndecodableLarge && mounted) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1125,6 +1169,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             content: Text(
               'An image could not be resized (format not supported). Use JPEG or PNG, or pick a smaller file.',
             ),
+          ),
+        );
+      });
+    }
+    if (attempted > 0 &&
+        out.length < attempted &&
+        mounted &&
+        !failedToCompress &&
+        !skippedUndecodableLarge) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Some images were not included (could not resize or unsupported format).'),
           ),
         );
       });

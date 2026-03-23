@@ -688,13 +688,16 @@ class CoreService {
     if (videos != null && videos.isNotEmpty) body['videos'] = videos;
     if (fileLinks != null && fileLinks.isNotEmpty) body['file_links'] = fileLinks;
     if (e2e != null && e2e.isNotEmpty) body['e2e'] = e2e;
+    final hasHeavyMedia = (images != null && images.isNotEmpty) ||
+        (videos != null && videos.isNotEmpty) ||
+        (audios != null && audios.isNotEmpty);
     final response = await http
         .post(
           url,
           headers: {'Content-Type': 'application/json', ..._authHeaders()},
           body: jsonEncode(body),
         )
-        .timeout(const Duration(seconds: 30));
+        .timeout(Duration(seconds: hasHeavyMedia ? 120 : 30));
     if (response.statusCode != 200) {
       final err = response.body;
       throw Exception('User message failed ${response.statusCode}: $err');
