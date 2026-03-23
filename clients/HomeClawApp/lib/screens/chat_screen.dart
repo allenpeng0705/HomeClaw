@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' show max;
 import 'dart:typed_data';
 
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:path/path.dart' as path;
@@ -87,12 +88,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final List<MapEntry<String, bool>> _messages = [];
   /// Optional image data URLs per message (same index as _messages; null or empty when no images).
   final List<List<String>?> _messageImages = [];
-  /// Optional audio data URLs per message (same index as _messages; for user-to-user voice).
+  /// Voice / audio refs per message: local path, data:, http(s), or /files/... (same index as _messages).
   final List<List<String>?> _messageAudios = [];
   /// Optional video data URLs per message (same index as _messages; for user-to-user short video).
   final List<List<String>?> _messageVideos = [];
   /// File attachment display names per message (same index as _messages); for outgoing upload UX and thread file_links.
   final List<List<String>?> _messageFileLabels = [];
+  /// Parallel to [_messageFileLabels]: paths or URLs to open (local path, http(s), /files/...).
+  final List<List<String>?> _messageFileRefs = [];
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   bool _autoFollowBottom = true;
@@ -442,6 +445,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final olderAudios = <List<String>?>[];
       final olderVideos = <List<String>?>[];
       final olderFileLabels = <List<String>?>[];
+      final olderFileRefs = <List<String>?>[];
       for (final m in list) {
         final role = ((m['role']?.toString()) ?? '').trim().toLowerCase();
         final content = ((m['content']?.toString()) ?? '').trim();
@@ -450,6 +454,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         olderAudios.add(null);
         olderVideos.add(null);
         olderFileLabels.add(null);
+        olderFileRefs.add(null);
       }
       final prevMax = _scrollController.position.maxScrollExtent;
       setState(() {
@@ -458,6 +463,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _messageAudios.insertAll(0, olderAudios);
         _messageVideos.insertAll(0, olderVideos);
         _messageFileLabels.insertAll(0, olderFileLabels);
+        _messageFileRefs.insertAll(0, olderFileRefs);
         _loadingMoreMessages = false;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -492,12 +498,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _messageAudios.clear();
       _messageVideos.clear();
       _messageFileLabels.clear();
+      _messageFileRefs.clear();
       for (final e in loaded) {
         _messages.add(e.key);
         _messageImages.add(e.value);
         _messageAudios.add(null);
         _messageVideos.add(null);
         _messageFileLabels.add(null);
+        _messageFileRefs.add(null);
       }
       if (mounted) {
         setState(() {});
@@ -543,6 +551,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messageAudios.clear();
           _messageVideos.clear();
           _messageFileLabels.clear();
+          _messageFileRefs.clear();
           _chatHistoryOffset = 0;
           _hasMoreMessages = list.length >= _pageSize;
         });
@@ -568,11 +577,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _messageAudios.clear();
         _messageVideos.clear();
         _messageFileLabels.clear();
+        _messageFileRefs.clear();
         _messages.addAll(messages);
         _messageImages.addAll(images);
         _messageAudios.addAll(audios);
         _messageVideos.addAll(videos);
         _messageFileLabels.addAll(List<List<String>?>.filled(messages.length, null));
+        _messageFileRefs.addAll(List<List<String>?>.filled(messages.length, null));
         _chatHistoryOffset = 0;
         _hasMoreMessages = list.length >= _pageSize;
       });
@@ -674,6 +685,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messageAudios.clear();
           _messageVideos.clear();
           _messageFileLabels.clear();
+          _messageFileRefs.clear();
         });
       }
       return;
@@ -684,6 +696,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _messageAudios.clear();
     _messageVideos.clear();
     _messageFileLabels.clear();
+    _messageFileRefs.clear();
     for (final m in effectiveList) {
       if (!mounted) return;
       if (pollGeneration >= 0 && pollGeneration != _userInboxFetchGeneration) return;
@@ -724,10 +737,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _messageVideos.add(videos != null && videos.isNotEmpty ? videos : null);
       final flRaw = mmap['file_links'] as List<dynamic>?;
       List<String>? fileLabels;
+      List<String>? fileRefs;
       if (flRaw != null && flRaw.isNotEmpty) {
-        fileLabels = flRaw.map((e) => path.basename(e.toString())).toList();
+        fileRefs = flRaw.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).toList();
+        fileLabels = fileRefs.map((e) => path.basename(e)).toList();
       }
       _messageFileLabels.add(fileLabels != null && fileLabels.isNotEmpty ? fileLabels : null);
+      _messageFileRefs.add(fileRefs != null && fileRefs.isNotEmpty ? fileRefs : null);
     }
     // Mark thread as read up to latest message so friend list unread dot clears.
     double latestTs = DateTime.now().millisecondsSinceEpoch / 1000.0;
@@ -809,6 +825,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _messageAudios.clear();
       _messageVideos.clear();
       _messageFileLabels.clear();
+      _messageFileRefs.clear();
       _lastReply = null;
       _chatHistoryOffset = 0;
       _hasMoreMessages = true;
@@ -915,12 +932,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ? videoList.whereType<String>().toList()
         : (push['video'] is String ? <String>[push['video'] as String] : null);
     if (!mounted) return;
+    final pushFileRaw = push['file_links'] as List<dynamic>?;
+    List<String>? pushFileRefs;
+    List<String>? pushFileLabels;
+    if (pushFileRaw != null && pushFileRaw.isNotEmpty) {
+      pushFileRefs = pushFileRaw.map((e) => e.toString().trim()).where((s) => s.isNotEmpty).toList();
+      pushFileLabels = pushFileRefs.map((e) => path.basename(e)).toList();
+    }
     setState(() {
       _messages.add(MapEntry(text, false));
       _messageImages.add(images != null && images.isNotEmpty ? images : null);
       _messageAudios.add(audios != null && audios.isNotEmpty ? audios : null);
       _messageVideos.add(videos != null && videos.isNotEmpty ? videos : null);
-      _messageFileLabels.add(null);
+      _messageFileLabels.add(pushFileLabels != null && pushFileLabels.isNotEmpty ? pushFileLabels : null);
+      _messageFileRefs.add(pushFileRefs != null && pushFileRefs.isNotEmpty ? pushFileRefs : null);
     });
     _scrollToBottom(force: true);
     _persistChatHistory();
@@ -1051,6 +1076,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _messageAudios.add(null);
       _messageVideos.add(userVideoRefs.isEmpty ? null : userVideoRefs);
       _messageFileLabels.add(outgoingFileNames.isEmpty ? null : outgoingFileNames);
+      _messageFileRefs.add(filesToSend.isEmpty ? null : List<String>.from(filesToSend));
       if (isUserToUserSend) {
         _activeUserSendBubbleIndex = optimisticIndex;
       }
@@ -1161,6 +1187,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               if (optimisticIndex! < _messageAudios.length) _messageAudios.removeAt(optimisticIndex!);
               if (optimisticIndex! < _messageVideos.length) _messageVideos.removeAt(optimisticIndex!);
               if (optimisticIndex! < _messageFileLabels.length) _messageFileLabels.removeAt(optimisticIndex!);
+              if (optimisticIndex! < _messageFileRefs.length) _messageFileRefs.removeAt(optimisticIndex!);
             }
             _pendingImagePaths
               ..clear()
@@ -1176,6 +1203,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _messageAudios.add(null);
             _messageVideos.add(null);
             _messageFileLabels.add(null);
+            _messageFileRefs.add(null);
             _loading = false;
             _loadingMessage = null;
             _activeUserSendBubbleIndex = null;
@@ -1274,6 +1302,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messageAudios.add(null);
           _messageVideos.add(null);
           _messageFileLabels.add(null);
+          _messageFileRefs.add(null);
         });
         _scrollToBottom(force: true);
         await _persistChatHistory();
@@ -1290,6 +1319,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messageAudios.add(null);
           _messageVideos.add(null);
           _messageFileLabels.add(null);
+          _messageFileRefs.add(null);
           _loading = false;
           _loadingMessage = null;
           _activeUserSendBubbleIndex = null;
@@ -1336,6 +1366,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 if (index < _messageAudios.length) _messageAudios.removeAt(index);
                 if (index < _messageVideos.length) _messageVideos.removeAt(index);
                 if (index < _messageFileLabels.length) _messageFileLabels.removeAt(index);
+                if (index < _messageFileRefs.length) _messageFileRefs.removeAt(index);
               });
               _persistChatHistory();
               if (mounted) {
@@ -1594,6 +1625,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messageAudios.add([audioRef]);
           _messageVideos.add(null);
           _messageFileLabels.add(null);
+          _messageFileRefs.add(null);
         });
         _scrollToBottom();
       } catch (e) {
@@ -1838,6 +1870,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messageAudios.add(null);
           _messageVideos.add(null);
           _messageFileLabels.add(null);
+          _messageFileRefs.add(null);
         });
         return;
       }
@@ -1857,6 +1890,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messageAudios.add(null);
           _messageVideos.add(null);
           _messageFileLabels.add(null);
+          _messageFileRefs.add(null);
         });
       }
     }
@@ -1917,6 +1951,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _messageAudios.add(null);
             _messageVideos.add(null);
             _messageFileLabels.add(null);
+            _messageFileRefs.add(null);
           });
           return;
         }
@@ -1930,6 +1965,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _messageAudios.add(null);
             _messageVideos.add(null);
             _messageFileLabels.add(null);
+            _messageFileRefs.add(null);
           });
         return;
       }
@@ -1947,6 +1983,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messageAudios.add(null);
           _messageVideos.add(null);
           _messageFileLabels.add(null);
+          _messageFileRefs.add(null);
         });
       }
     }
@@ -2371,6 +2408,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _messageAudios.add(null);
         _messageVideos.add(null);
         _messageFileLabels.add(null);
+        _messageFileRefs.add(null);
       });
     } catch (e) {
       if (mounted) setState(() {
@@ -2379,6 +2417,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _messageAudios.add(null);
         _messageVideos.add(null);
         _messageFileLabels.add(null);
+        _messageFileRefs.add(null);
       });
     }
   }
@@ -2416,7 +2455,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return false;
   }
 
-  String? _resolveThreadImageNetworkUrl(String ref) {
+  /// Resolve image/audio/video/file refs for network fetch (http(s) or Core-relative `/files/...`).
+  String? _resolveThreadMediaNetworkUrl(String ref) {
     final t = ref.trim();
     final u = Uri.tryParse(t);
     if (u != null && u.hasScheme && (u.scheme == 'http' || u.scheme == 'https')) {
@@ -2427,6 +2467,39 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return '$base$t';
     }
     return null;
+  }
+
+  Future<void> _openUserMessageFileRef(String ref) async {
+    final t = ref.trim();
+    if (t.isEmpty) return;
+    try {
+      if (t.startsWith('data:')) return;
+      final local = File(t);
+      if (await local.exists()) {
+        final ok = await launchUrl(Uri.file(local.absolute.path), mode: LaunchMode.externalApplication);
+        if (!ok && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open file')));
+        }
+        return;
+      }
+      final resolved = _resolveThreadMediaNetworkUrl(t);
+      if (resolved == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No link for this attachment')));
+        }
+        return;
+      }
+      final uri = Uri.tryParse(resolved);
+      if (uri == null || !uri.hasScheme) return;
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not open link')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Open failed: $e')));
+      }
+    }
   }
 
   Widget _threadImagePreview(String imageRef) {
@@ -2465,7 +2538,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       );
     }
-    final resolved = _resolveThreadImageNetworkUrl(imageRef);
+    final resolved = _resolveThreadMediaNetworkUrl(imageRef);
     if (resolved == null) {
       return Icon(Icons.insert_photo_outlined, color: cs.outline, size: 40);
     }
@@ -2809,6 +2882,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 final audioUrls = msgIndex < _messageAudios.length ? _messageAudios[msgIndex] : null;
                 final videoUrls = msgIndex < _messageVideos.length ? _messageVideos[msgIndex] : null;
                 final fileLabels = msgIndex < _messageFileLabels.length ? _messageFileLabels[msgIndex] : null;
+                final fileRefs = msgIndex < _messageFileRefs.length ? _messageFileRefs[msgIndex] : null;
                 return Align(
                   alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
                   child: GestureDetector(
@@ -2869,7 +2943,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     children: audioUrls
                                         .map((audioDataUrl) => Padding(
                                               padding: const EdgeInsets.only(bottom: 6),
-                                              child: _AudioPlayButton(audioRef: audioDataUrl),
+                                              child: _AudioPlayButton(
+                                                audioRef: audioDataUrl,
+                                                coreBaseUrl: widget.coreService.baseUrl,
+                                                coreMediaHeaders: widget.coreService.coreMediaFetchHeaders,
+                                              ),
                                             ))
                                         .toList(),
                                   ),
@@ -2883,7 +2961,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     children: videoUrls
                                         .map((videoDataUrl) => Padding(
                                               padding: const EdgeInsets.only(bottom: 6),
-                                              child: _VideoPlayChip(videoRef: videoDataUrl),
+                                              child: _VideoPlayChip(
+                                                videoRef: videoDataUrl,
+                                                coreBaseUrl: widget.coreService.baseUrl,
+                                                httpHeaders: widget.coreService.coreMediaFetchHeaders,
+                                              ),
                                             ))
                                         .toList(),
                                   ),
@@ -2894,9 +2976,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   child: Wrap(
                                     spacing: 6,
                                     runSpacing: 6,
-                                    children: fileLabels
-                                        .map(
-                                          (name) => Chip(
+                                    children: List<Widget>.generate(fileLabels.length, (fi) {
+                                      final name = fileLabels[fi];
+                                      final ref = (fileRefs != null && fi < fileRefs.length) ? fileRefs[fi] : '';
+                                      return Material(
+                                        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: InkWell(
+                                          onTap: ref.isEmpty ? null : () => _openUserMessageFileRef(ref),
+                                          borderRadius: BorderRadius.circular(8),
+                                          child: Chip(
                                             avatar: Icon(
                                               Icons.insert_drive_file_outlined,
                                               size: 18,
@@ -2915,8 +3004,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                             visualDensity: VisualDensity.compact,
                                             side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                                           ),
-                                        )
-                                        .toList(),
+                                        ),
+                                      );
+                                    }),
                                   ),
                                 ),
                               _ChatMessageText(
@@ -3555,11 +3645,17 @@ class _ChatMessageText extends StatelessWidget {
   }
 }
 
-/// Chip that opens full-screen video player for a video data URL (user-to-user short video).
+/// Chip that opens full-screen video (data URL, local path, http(s), or Core `/files/...`).
 class _VideoPlayChip extends StatelessWidget {
   final String videoRef;
+  final String coreBaseUrl;
+  final Map<String, String>? httpHeaders;
 
-  const _VideoPlayChip({required this.videoRef});
+  const _VideoPlayChip({
+    required this.videoRef,
+    required this.coreBaseUrl,
+    this.httpHeaders,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -3570,7 +3666,11 @@ class _VideoPlayChip extends StatelessWidget {
         onTap: () {
           Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder: (ctx) => _FullScreenVideoPage(videoRef: videoRef),
+              builder: (ctx) => _FullScreenVideoPage(
+                videoRef: videoRef,
+                coreBaseUrl: coreBaseUrl,
+                httpHeaders: httpHeaders,
+              ),
             ),
           );
         },
@@ -3593,11 +3693,17 @@ class _VideoPlayChip extends StatelessWidget {
   }
 }
 
-/// Full-screen video player for a data URL. Writes to temp file and plays with video_player.
+/// Full-screen video player: data URL, local file, http(s), or Core `/files/...`.
 class _FullScreenVideoPage extends StatefulWidget {
   final String videoRef;
+  final String coreBaseUrl;
+  final Map<String, String>? httpHeaders;
 
-  const _FullScreenVideoPage({required this.videoRef});
+  const _FullScreenVideoPage({
+    required this.videoRef,
+    required this.coreBaseUrl,
+    this.httpHeaders,
+  });
 
   @override
   State<_FullScreenVideoPage> createState() => _FullScreenVideoPageState();
@@ -3629,6 +3735,13 @@ class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
         await file.writeAsBytes(bytes);
         if (!mounted) return;
         _controller = VideoPlayerController.file(file);
+      } else if (ref.startsWith('/files/') || ref.startsWith('/files/out')) {
+        final base = widget.coreBaseUrl.replaceFirst(RegExp(r'/$'), '');
+        final url = '$base$ref';
+        _controller = VideoPlayerController.networkUrl(
+          Uri.parse(url),
+          httpHeaders: widget.httpHeaders ?? const {},
+        );
       } else if (ref.startsWith('http://') || ref.startsWith('https://')) {
         _controller = VideoPlayerController.networkUrl(Uri.parse(ref));
       } else if (await File(ref).exists()) {
@@ -3678,11 +3791,17 @@ class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
   }
 }
 
-/// Play button for a voice message (data URL, local path, or http(s) URL).
+/// Play button for a voice message (data URL, local path, http(s), or Core `/files/...`).
 class _AudioPlayButton extends StatefulWidget {
   final String audioRef;
+  final String coreBaseUrl;
+  final Map<String, String>? coreMediaHeaders;
 
-  const _AudioPlayButton({required this.audioRef});
+  const _AudioPlayButton({
+    required this.audioRef,
+    required this.coreBaseUrl,
+    this.coreMediaHeaders,
+  });
 
   @override
   State<_AudioPlayButton> createState() => _AudioPlayButtonState();
@@ -3714,6 +3833,22 @@ class _AudioPlayButtonState extends State<_AudioPlayButton> {
         final file = File(path.join(dir.path, 'voice_${DateTime.now().millisecondsSinceEpoch}.$ext'));
         await file.writeAsBytes(bytes);
         source = DeviceFileSource(file.path);
+      } else if (ref.startsWith('/files/') || ref.startsWith('/files/out')) {
+        final base = widget.coreBaseUrl.replaceFirst(RegExp(r'/$'), '');
+        final url = '$base$ref';
+        final h = widget.coreMediaHeaders;
+        if (h != null && h.isNotEmpty) {
+          final resp = await http.get(Uri.parse(url), headers: h);
+          if (resp.statusCode < 200 || resp.statusCode >= 300) {
+            throw Exception('HTTP ${resp.statusCode}');
+          }
+          final dir = await getTemporaryDirectory();
+          final file = File(path.join(dir.path, 'hc_audio_${DateTime.now().millisecondsSinceEpoch}.m4a'));
+          await file.writeAsBytes(resp.bodyBytes);
+          source = DeviceFileSource(file.path);
+        } else {
+          source = UrlSource(url);
+        }
       } else if (ref.startsWith('http://') || ref.startsWith('https://')) {
         source = UrlSource(ref);
       } else if (await File(ref).exists()) {
