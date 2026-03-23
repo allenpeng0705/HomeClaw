@@ -8,11 +8,15 @@ import os
 import time
 import uuid
 from pathlib import Path
+from threading import Lock
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
 from base.util import Util
+
+_INBOX_LOCKS: Dict[str, Lock] = {}
+_INBOX_LOCKS_GUARD = Lock()
 
 
 def _inbox_dir() -> Path:
@@ -31,6 +35,32 @@ def _inbox_path(user_id: str) -> Path:
         return _inbox_dir() / f"{safe}.json"
     except Exception:
         return _inbox_dir() / "_unknown.json"
+
+
+def _get_inbox_lock(user_id: str) -> Lock:
+    """Return a per-user lock so append operations are process-local serialized."""
+    key = str(_inbox_path(user_id))
+    with _INBOX_LOCKS_GUARD:
+        lock = _INBOX_LOCKS.get(key)
+        if lock is None:
+            lock = Lock()
+            _INBOX_LOCKS[key] = lock
+        return lock
+
+
+def _write_inbox_atomic(path: Path, messages: List[Dict[str, Any]]) -> None:
+    """Write inbox JSON atomically to reduce corruption/loss on concurrent writes."""
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"messages": messages}, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except Exception:
+            pass
 
 
 def append_message(
@@ -57,42 +87,42 @@ def append_message(
             return None
         path = _inbox_path(to_user_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        messages: List[Dict[str, Any]] = []
-        if path.is_file():
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    messages = data.get("messages") if isinstance(data, dict) else []
-                    if not isinstance(messages, list):
-                        messages = []
-            except Exception as e:
-                logger.debug("user_inbox: read failed {}: {}", path, e)
-        msg_id = str(uuid.uuid4())
-        entry = {
-            "id": msg_id,
-            "from_user_id": from_user_id,
-            "from_user_name": from_user_name,
-            "text": text,
-            "created_at": time.time(),
-        }
-        if images and isinstance(images, (list, tuple)):
-            entry["images"] = list(images)[:20]
-        if audios and isinstance(audios, (list, tuple)):
-            entry["audios"] = list(audios)[:10]
-        if videos and isinstance(videos, (list, tuple)):
-            entry["videos"] = list(videos)[:5]
-        if file_links and isinstance(file_links, (list, tuple)):
-            entry["file_links"] = list(file_links)[:20]
-        if e2e and isinstance(e2e, dict):
-            entry["e2e"] = dict(e2e)
-        if metadata and isinstance(metadata, dict):
-            for k, v in metadata.items():
-                if v is not None and k not in entry:
-                    entry[k] = v
-        messages.append(entry)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({"messages": messages[-500:]}, f, ensure_ascii=False, indent=2)
-        return msg_id
+        with _get_inbox_lock(to_user_id):
+            messages: List[Dict[str, Any]] = []
+            if path.is_file():
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        messages = data.get("messages") if isinstance(data, dict) else []
+                        if not isinstance(messages, list):
+                            messages = []
+                except Exception as e:
+                    logger.debug("user_inbox: read failed {}: {}", path, e)
+            msg_id = str(uuid.uuid4())
+            entry = {
+                "id": msg_id,
+                "from_user_id": from_user_id,
+                "from_user_name": from_user_name,
+                "text": text,
+                "created_at": time.time(),
+            }
+            if images and isinstance(images, (list, tuple)):
+                entry["images"] = list(images)[:20]
+            if audios and isinstance(audios, (list, tuple)):
+                entry["audios"] = list(audios)[:10]
+            if videos and isinstance(videos, (list, tuple)):
+                entry["videos"] = list(videos)[:5]
+            if file_links and isinstance(file_links, (list, tuple)):
+                entry["file_links"] = list(file_links)[:20]
+            if e2e and isinstance(e2e, dict):
+                entry["e2e"] = dict(e2e)
+            if metadata and isinstance(metadata, dict):
+                for k, v in metadata.items():
+                    if v is not None and k not in entry:
+                        entry[k] = v
+            messages.append(entry)
+            _write_inbox_atomic(path, messages[-500:])
+            return msg_id
     except Exception as e:
         logger.warning("user_inbox append_message failed: {}", e)
         return None

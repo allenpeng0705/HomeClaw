@@ -138,6 +138,47 @@ class CoreService {
     return false;
   }
 
+  Map<String, dynamic> _decodeJsonMapOrThrow({required String raw, required String endpoint}) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    } catch (_) {}
+    throw Exception('$endpoint returned invalid JSON');
+  }
+
+  List<Map<String, dynamic>> _toListOfMaps(dynamic rawList) {
+    if (rawList is! List) return const <Map<String, dynamic>>[];
+    final out = <Map<String, dynamic>>[];
+    for (final e in rawList) {
+      if (e is Map<String, dynamic>) {
+        out.add(e);
+      } else if (e is Map) {
+        out.add(Map<String, dynamic>.from(e));
+      }
+    }
+    return out;
+  }
+
+  Map<String, dynamic>? _tryDecodeWsMap(dynamic data) {
+    try {
+      String raw;
+      if (data is String) {
+        raw = data;
+      } else if (data is List<int>) {
+        raw = utf8.decode(data);
+      } else {
+        return null;
+      }
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     _baseUrl = (prefs.getString(_keyBaseUrl) ?? _defaultBaseUrl).trim();
@@ -184,8 +225,8 @@ class CoreService {
           ? 'Portal admin auth not available'
           : 'Login failed: ${response.body}');
     }
-    final map = jsonDecode(response.body) as Map<String, dynamic>?;
-    final token = (map?['token'] as String?)?.trim();
+    final map = _decodeJsonMapOrThrow(raw: response.body, endpoint: 'POST /api/portal/auth');
+    final token = (map['token'] as String?)?.trim();
     if (token == null || token.isEmpty) throw Exception('No token in response');
     _portalAdminToken = token;
     final prefs = await SharedPreferences.getInstance();
@@ -317,7 +358,7 @@ class CoreService {
       throw Exception('Session expired; please log in again');
     }
     if (response.statusCode != 200) throw Exception('GET /api/me failed: ${response.body}');
-    final me = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    final me = _decodeJsonMapOrThrow(raw: response.body, endpoint: 'GET /api/me');
     if (me.containsKey('federation_enabled')) {
       _federationEnabled = me['federation_enabled'] == true;
     }
@@ -336,19 +377,12 @@ class CoreService {
       throw Exception('Session expired; please log in again');
     }
     if (response.statusCode != 200) throw Exception('GET /api/me/friends failed: ${response.body}');
-    final map = jsonDecode(response.body) as Map<String, dynamic>?;
-    if (map != null && map.containsKey('federation_enabled')) {
+    final map = _decodeJsonMapOrThrow(raw: response.body, endpoint: 'GET /api/me/friends');
+    if (map.containsKey('federation_enabled')) {
       _federationEnabled = map['federation_enabled'] == true;
     }
-    if (map != null) _applyFederationE2eFlags(map);
-    final list = map?['friends'];
-    if (list is! List<dynamic>) return [];
-    final out = <Map<String, dynamic>>[];
-    for (final e in list) {
-      if (e is Map<String, dynamic>) out.add(e);
-      else if (e is Map) out.add(Map<String, dynamic>.from(e));
-    }
-    return out;
+    _applyFederationE2eFlags(map);
+    return _toListOfMaps(map['friends']);
   }
 
   void _applyFederationE2eFlags(Map<String, dynamic>? map) {
@@ -681,10 +715,8 @@ class CoreService {
     if (response.statusCode != 200) {
       throw Exception('GET /api/users failed: ${response.statusCode} ${response.body}');
     }
-    final map = jsonDecode(response.body) as Map<String, dynamic>?;
-    final list = map?['users'] as List<dynamic>?;
-    if (list == null) return [];
-    return list.whereType<Map<String, dynamic>>().toList();
+    final map = _decodeJsonMapOrThrow(raw: response.body, endpoint: 'GET /api/users');
+    return _toListOfMaps(map['users']);
   }
 
   /// GET /api/friend-requests — pending requests for current user. Uses Bearer token.
@@ -696,10 +728,8 @@ class CoreService {
     if (response.statusCode != 200) {
       throw Exception('GET /api/friend-requests failed: ${response.statusCode} ${response.body}');
     }
-    final map = jsonDecode(response.body) as Map<String, dynamic>?;
-    final list = map?['requests'] as List<dynamic>?;
-    if (list == null) return [];
-    return list.whereType<Map<String, dynamic>>().toList();
+    final map = _decodeJsonMapOrThrow(raw: response.body, endpoint: 'GET /api/friend-requests');
+    return _toListOfMaps(map['requests']);
   }
 
   /// POST /api/friend-request — send friend request to [toUserId]. Optional [message]. Uses Bearer token.
@@ -762,10 +792,8 @@ class CoreService {
     if (response.statusCode != 200) {
       throw Exception('GET federated-friend-requests failed: ${response.statusCode} ${response.body}');
     }
-    final map = jsonDecode(response.body) as Map<String, dynamic>?;
-    final list = map?['requests'] as List<dynamic>?;
-    if (list == null) return [];
-    return list.whereType<Map<String, dynamic>>().toList();
+    final map = _decodeJsonMapOrThrow(raw: response.body, endpoint: 'GET /api/federated-friend-requests');
+    return _toListOfMaps(map['requests']);
   }
 
   /// POST /api/federated-friend-request — send request to a user on another Core ([peerInstanceId] = peers.yml instance_id).
@@ -1639,7 +1667,7 @@ class CoreService {
         (data) {
           if (!completer.isCompleted) {
             try {
-              final msg = jsonDecode(data as String) as Map<String, dynamic>?;
+              final msg = _tryDecodeWsMap(data);
               if (msg != null && msg['event'] == 'connected') {
                 _coreWsSessionId = msg['session_id'] as String?;
                 if (!completer.isCompleted) completer.complete();
@@ -1694,7 +1722,7 @@ class CoreService {
   void _onCoreWsMessage(dynamic data) {
     Map<String, dynamic>? msg;
     try {
-      msg = jsonDecode(data as String) as Map<String, dynamic>?;
+      msg = _tryDecodeWsMap(data);
     } catch (_) {
       return;
     }

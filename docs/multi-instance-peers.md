@@ -81,7 +81,7 @@ Set **`api_key_env`** on import when the key is not in the file:
 
 The main LLM can call **`peer_call`** with **`text`** and **`instance_id`** (from **`peers.yml`**) to send a message to another Core’s **`/inbound`**. Sub-agents spawned with **`sessions_spawn`** do not get tools; only the main agent uses **`peer_call`**.
 
-Optional prompt injection: **`tools.peer_roster_inject_enabled`** / **`peer_roster_inject_max_chars`** in **`config/skills_and_plugins.yml`** (see [Core config](core-config.md)).
+Optional prompt injection: **`tools.peer_roster_inject_enabled`** / **`tools.peer_roster_inject_max_chars`** in **`config/core.yml`** (see [Core config](core-config.md)).
 
 ---
 
@@ -95,13 +95,18 @@ Optional prompt injection: **`tools.peer_roster_inject_enabled`** / **`peer_rost
 
 ---
 
-## Future: Companion user-to-user across instances
+## Companion user-to-user across instances
 
-**Today:** **`peer_call`** is for the **AI** on one Core to call another Core’s **`/inbound`**. It is **not** Companion peer-to-peer chat.
+**`peer_call`** is for the **AI** on one Core to call another Core’s **`/inbound`**. It is not the same path as Companion user chat.
 
-**Planned (design only):** Federated social messaging — same **Companion → Core → … → Companion** path as [user-to-user on one instance](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/UserToUserMessagingViaCompanion.md), extended so Cores relay when the friend lives on another instance. The plan keeps **existing `user-message` / inbox behavior** unless **`federation_enabled`** and optional **`peer_instance_id`** on friends are added.
+For human user-to-user chat across Cores, use federation:
 
-See **[FederatedCompanionUserMessaging.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/FederatedCompanionUserMessaging.md)** (phased P0–P5, non-breaking rules).
+- Enable `federation_enabled` on both Cores.
+- Configure `config/peers.yml` and friend `peer_instance_id` values.
+- Use the Companion remote friend request flow before messaging.
+
+Operator guide: **[Federated Companion user messaging](federated-companion-messaging.md)**  
+Design details and history: **[FederatedCompanionUserMessaging.md](https://github.com/allenpeng0705/HomeClaw/blob/main/docs_design/FederatedCompanionUserMessaging.md)**
 
 ---
 

@@ -102,6 +102,8 @@ One HomeClaw instance = one agent. To get more agents, run more instances—diff
 
 [Multi-instance: peers, pairing, peer_call](multi-instance-peers.md)
 
+[Cross-instance Companion user messaging](federated-companion-messaging.md)
+
 ### 6. Memory
 
 ![Memory](assets/section-memory.png){ align=right width=280 }

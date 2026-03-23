@@ -512,7 +512,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           final decrypted = await widget.coreService.decryptFederatedE2eIfPresent(e2eMap);
           if (decrypted != null && decrypted.isNotEmpty) {
             text = decrypted;
-          } else if (text.isEmpty) {
+          } else {
             text = '[Encrypted message]';
           }
         }

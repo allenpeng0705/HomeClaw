@@ -53,7 +53,20 @@ class NodeService {
   void _onMessage(dynamic data, String nid, List<String> caps) {
     Map<String, dynamic>? msg;
     try {
-      msg = jsonDecode(data as String) as Map<String, dynamic>?;
+      String raw;
+      if (data is String) {
+        raw = data;
+      } else if (data is List<int>) {
+        raw = utf8.decode(data);
+      } else {
+        return;
+      }
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        msg = decoded;
+      } else if (decoded is Map) {
+        msg = Map<String, dynamic>.from(decoded);
+      }
     } catch (_) {
       return;
     }

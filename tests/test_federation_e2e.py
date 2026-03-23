@@ -29,6 +29,17 @@ def test_validate_bad_algo() -> None:
     assert not ok and err == "unsupported_algo"
 
 
+def test_validate_ciphertext_too_large() -> None:
+    env = {
+        "algo": HC_E2E_V1,
+        "ephemeral_public_key_b64": base64.b64encode(b"\x01" * 32).decode("ascii"),
+        "nonce_b64": base64.b64encode(b"\x00" * 12).decode("ascii"),
+        "ciphertext_b64": base64.b64encode(b"\x00" * ((64 * 1024) + 1)).decode("ascii"),
+    }
+    ok, err = validate_e2e_envelope(env)
+    assert not ok and err == "ciphertext_too_large"
+
+
 def test_encrypt_decrypt_roundtrip() -> None:
     try:
         from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
