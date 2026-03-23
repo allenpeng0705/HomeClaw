@@ -1,5 +1,6 @@
 """
 File and sandbox routes: /files/out, /files/{scope}/{path} (static with token), /api/sandbox/list, /api/upload.
+When auth_api_key is unset, ?scope=&path=&dev_unsigned=1 serves the same sandbox paths (dev only; insecure).
 """
 import re
 from datetime import datetime
@@ -14,6 +15,11 @@ from loguru import logger
 from base.util import Util
 
 
+def _dev_unsigned_query_truthy(raw: str) -> bool:
+    v = (raw or "").strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
 def _escape_for_html(s: str) -> str:
     """Escape for HTML attribute/text. Never raises."""
     try:
@@ -26,24 +32,43 @@ def _escape_for_html(s: str) -> str:
 
 def get_files_out_handler(core):  # noqa: ARG001
     """Return handler for GET /files/out (serve file or directory from sandbox)."""
-    async def files_out(path: str = "", token: str = ""):
+    async def files_out(path: str = "", token: str = "", scope: str = "", dev_unsigned: str = ""):
         """
         Serve a file or directory from the sandbox. Same URL as Core (core_public_url).
-        Query: path (e.g. output/report_xxx.html or output), token (signed with auth_api_key).
+        Query: path + token (signed with auth_api_key), or when auth_api_key is unset: scope + path + dev_unsigned=1.
         For a directory, returns an HTML listing with links to files and subdirs (each link has its own token).
         """
         try:
-            from core.result_viewer import verify_file_access_token, build_file_view_link, get_core_public_url
-            payload = verify_file_access_token(token)
-            if not payload:
+            from core.result_viewer import (
+                verify_file_access_token,
+                build_file_view_link,
+                get_core_public_url,
+                file_unsigned_dev_mode_active,
+                validate_file_link_scope_path,
+            )
+            scope_fs = None
+            path_arg = None
+            payload = verify_file_access_token(token) if (token or "").strip() else None
+            if payload:
+                scope_fs, rel_path = payload
+                path_arg = (path or "").replace("\\", "/").strip()
+                if not path_arg:
+                    path_arg = rel_path
+                if path_arg != rel_path:
+                    return JSONResponse(status_code=400, content={"error": "Path mismatch"})
+            elif file_unsigned_dev_mode_active() and _dev_unsigned_query_truthy(dev_unsigned):
+                scope_fs = (unquote(scope) if scope else "").strip()
+                path_arg = (path or "").replace("\\", "/").strip()
+                if not scope_fs or not path_arg:
+                    return JSONResponse(
+                        status_code=400,
+                        content={"error": "scope and path query parameters are required for dev_unsigned links"},
+                    )
+                if not validate_file_link_scope_path(scope_fs, path_arg):
+                    return JSONResponse(status_code=400, content={"error": "Invalid scope or path"})
+            else:
                 logger.debug("files_out: token verification failed (token_len={})", len((token or "").strip()))
                 return JSONResponse(status_code=403, content={"error": "Invalid or expired link"})
-            scope, rel_path = payload
-            path_arg = (path or "").replace("\\", "/").strip()
-            if not path_arg:
-                path_arg = rel_path
-            if path_arg != rel_path:
-                return JSONResponse(status_code=400, content={"error": "Path mismatch"})
             try:
                 meta = Util().get_core_metadata()
                 base_str = str(meta.get_homeclaw_root() or "").strip()
@@ -53,7 +78,7 @@ def get_files_out_handler(core):  # noqa: ARG001
                 return JSONResponse(status_code=503, content={"error": "File serving not configured (homeclaw_root)"})
             try:
                 base = Path(base_str).resolve()
-                full = (base / scope / path_arg).resolve()
+                full = (base / scope_fs / path_arg).resolve()
             except (OSError, RuntimeError, ValueError) as path_err:
                 logger.debug("files_out path resolve failed: {}", path_err)
                 return JSONResponse(status_code=503, content={"error": "File serving path invalid"})
@@ -88,7 +113,7 @@ def get_files_out_handler(core):  # noqa: ARG001
                     except Exception:
                         continue
                     child_rel = f"{path_arg}/{name}".lstrip("/") if path_arg else name
-                    child_link, _ = build_file_view_link(scope, child_rel)
+                    child_link, _ = build_file_view_link(scope_fs, child_rel)
                     href = child_link if child_link else "#"
                     entries.append((name, "dir" if p.is_dir() else "file", href))
                 html_parts = [
@@ -108,12 +133,12 @@ def get_files_out_handler(core):  # noqa: ARG001
                 return HTMLResponse(content="".join(html_parts))
             if not full.is_file():
                 attempted = str(full)
-                logger.info("files/out: file not found scope=%s path=%s resolved=%s", scope, path_arg, attempted)
+                logger.info("files/out: file not found scope=%s path=%s resolved=%s", scope_fs, path_arg, attempted)
                 return JSONResponse(
                     status_code=404,
                     content={
                         "error": "File not found",
-                        "detail": f"Server looked for: {scope}/{path_arg} (resolved to {attempted}). Check that the file exists there and that homeclaw_root in config points to the correct directory.",
+                        "detail": f"Server looked for: {scope_fs}/{path_arg} (resolved to {attempted}). Check that the file exists there and that homeclaw_root in config points to the correct directory.",
                     },
                 )
             media_type = None
@@ -136,21 +161,26 @@ def get_files_static_handler(core):  # noqa: ARG001
     GET /files/{scope}/{path:path}?token=...
     Serves a file only when the token matches (scope, path). So a link for one user only accesses that user's sandbox.
     """
-    from core.result_viewer import verify_file_access_token
+    from core.result_viewer import verify_file_access_token, file_unsigned_dev_mode_active, validate_file_link_scope_path
 
-    async def files_static(scope: str, path: str, token: str = ""):
+    async def files_static(scope: str, path: str, token: str = "", dev_unsigned: str = ""):
         try:
             if not scope or scope.strip().lower() == "out":
                 return JSONResponse(status_code=404, content={"error": "Not found"})
             path_arg = (path or "").replace("\\", "/").strip()
             path_arg = unquote(path_arg)
-            payload = verify_file_access_token(token)
-            if not payload:
-                return JSONResponse(status_code=403, content={"error": "Invalid or expired link"})
-            token_scope, token_path = payload
             scope_clean = unquote(scope).strip()
-            if token_scope != scope_clean or token_path != path_arg:
-                return JSONResponse(status_code=403, content={"error": "Link does not match requested path (access denied)"})
+            authorized = False
+            payload = verify_file_access_token(token) if (token or "").strip() else None
+            if payload:
+                token_scope, token_path = payload
+                if token_scope == scope_clean and token_path == path_arg:
+                    authorized = True
+            elif file_unsigned_dev_mode_active() and _dev_unsigned_query_truthy(dev_unsigned):
+                if validate_file_link_scope_path(scope_clean, path_arg):
+                    authorized = True
+            if not authorized:
+                return JSONResponse(status_code=403, content={"error": "Invalid or expired link"})
             try:
                 meta = Util().get_core_metadata()
                 base_str = str(meta.get_homeclaw_root() or "").strip()

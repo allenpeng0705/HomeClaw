@@ -8,7 +8,9 @@ Auth: same as /inbound (X-API-Key or Bearer when auth_enabled).
 Design: docs_design/UserToUserMessagingViaCompanion.md, SocialNetworkDesign.md.
 """
 
+import base64
 import json
+import mimetypes
 from pathlib import Path
 from typing import Optional
 
@@ -87,52 +89,93 @@ def _friend_match_for_recipient(from_user: User, to_user_id: str) -> Optional[Fr
     return None
 
 
-def _to_shareable_ref_for_federation(item: str) -> str:
-    """Best-effort normalize one media/file ref for cross-core delivery.
+# Cap inline base64 fallback for federation when signed /files/... links are unavailable (no auth_api_key / public URL).
+_FEDERATION_INLINE_DATA_URL_MAX_BYTES = 12 * 1024 * 1024
+
+
+def _companion_upload_to_inline_data_url(full: Path) -> Optional[str]:
+    """If path is under <project>/database/uploads/, embed as data URL (dev / no signed links)."""
+    try:
+        root = Path(Util().root_path()).resolve()
+        full = full.resolve()
+        rel = full.relative_to(root)
+        parts = rel.as_posix().replace("\\", "/").split("/")
+        if len(parts) < 3 or parts[0] != "database" or parts[1] != "uploads":
+            return None
+        sz = full.stat().st_size
+        if sz > _FEDERATION_INLINE_DATA_URL_MAX_BYTES:
+            logger.warning(
+                "user-message: file too large for federated inline fallback ({} bytes); set core_public_url + auth_api_key for URL delivery",
+                sz,
+            )
+            return None
+        data = full.read_bytes()
+        mime = mimetypes.guess_type(str(full))[0] or "application/octet-stream"
+        b64 = base64.b64encode(data).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+    except Exception:
+        return None
+
+
+def _to_shareable_ref_for_federation(item: str) -> tuple[str, bool]:
+    """Normalize one media/file ref for cross-core delivery.
     - data:* and http(s): unchanged
-    - absolute local path under homeclaw_root: converted to signed public URL
-    - otherwise: unchanged
+    - absolute local path under homeclaw_root: converted to signed public URL when possible
+    - else Companion upload under <root>/database/uploads/: inline data URL (testing without auth_api_key)
+    - otherwise: unshareable
     """
     try:
         s = (item or "").strip()
         if not s:
-            return s
+            return s, True
         lower = s.lower()
         if lower.startswith("data:") or lower.startswith("http://") or lower.startswith("https://"):
-            return s
+            return s, True
         p = Path(s)
         if not p.is_absolute() or not p.is_file():
-            return s
+            return s, False
+        full = p.resolve()
         meta = Util().get_core_metadata()
         base_str = str(getattr(meta, "homeclaw_root", None) or "").strip()
-        if not base_str:
-            return s
-        base = Path(base_str).resolve()
-        full = p.resolve()
-        rel = full.relative_to(base)
-        rel_posix = rel.as_posix()
-        parts = rel_posix.split("/", 1)
-        if len(parts) < 2:
-            return s
-        scope = parts[0]
-        inner = parts[1]
-        url, err = build_file_view_link(scope, inner)
-        if url and not err:
-            return url
-        return s
+        if base_str:
+            try:
+                base = Path(base_str).resolve()
+                rel = full.relative_to(base)
+                rel_posix = rel.as_posix()
+                parts = rel_posix.split("/", 1)
+                if len(parts) >= 2:
+                    scope = parts[0]
+                    inner = parts[1]
+                    url, err = build_file_view_link(scope, inner)
+                    if url and not err:
+                        return url, True
+            except ValueError:
+                pass
+        inline = _companion_upload_to_inline_data_url(full)
+        if inline:
+            logger.info(
+                "user-message: federated media uses inline data URL (no signed file link). "
+                "For production, set core_public_url and auth_api_key so peers fetch /files/... instead of large JSON bodies.",
+            )
+            return inline, True
+        return s, False
     except Exception:
-        return item
+        return item, False
 
 
-def _normalize_refs_for_federation(items: Optional[list]) -> Optional[list]:
+def _normalize_refs_for_federation(items: Optional[list]) -> tuple[Optional[list], bool]:
     if not items or not isinstance(items, list):
-        return items
+        return items, True
     out = []
+    ok = True
     for it in items:
         if not isinstance(it, str):
             continue
-        out.append(_to_shareable_ref_for_federation(it))
-    return out
+        ref, shareable = _to_shareable_ref_for_federation(it)
+        out.append(ref)
+        if not shareable:
+            ok = False
+    return out, ok
 
 
 class UserMessageRequest(BaseModel):
@@ -225,10 +268,25 @@ def get_user_message_post_handler(core):
                         )
                 from_name = (getattr(from_user, "name", None) or from_user_id or "").strip()
                 from_fid = format_fid(from_user_id, my_iid)
-                images_payload = None if has_e2e else _normalize_refs_for_federation(body.images)
-                audios_payload = None if has_e2e else _normalize_refs_for_federation(body.audios)
-                videos_payload = None if has_e2e else _normalize_refs_for_federation(body.videos)
-                file_links_payload = None if has_e2e else _normalize_refs_for_federation(body.file_links)
+                if has_e2e:
+                    images_payload, images_ok = None, True
+                    audios_payload, audios_ok = None, True
+                    videos_payload, videos_ok = None, True
+                    file_links_payload, file_links_ok = None, True
+                else:
+                    images_payload, images_ok = _normalize_refs_for_federation(body.images)
+                    audios_payload, audios_ok = _normalize_refs_for_federation(body.audios)
+                    videos_payload, videos_ok = _normalize_refs_for_federation(body.videos)
+                    file_links_payload, file_links_ok = _normalize_refs_for_federation(body.file_links)
+                if not (images_ok and audios_ok and videos_ok and file_links_ok):
+                    return JSONResponse(
+                        status_code=400,
+                        content={
+                            "error": "federation_media_not_shareable",
+                            "hint": "A media/file path is local-only and cannot be fetched by peer Core. "
+                                    "Set core_public_url and auth_api_key so sender can generate signed /files/... links.",
+                        },
+                    )
                 payload = {
                     "from_fid": from_fid,
                     "to_local_user_id": to_user_id,

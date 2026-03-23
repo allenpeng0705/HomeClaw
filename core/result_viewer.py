@@ -3,6 +3,8 @@ File serving and HTML generation for Core.
 
 - Core serves files from the sandbox at GET /files/out?path=...&token=...
   Links use core_public_url (top-level in config). Tokens are signed with auth_api_key.
+- When auth_api_key is unset, file links use unsigned dev mode: GET /files/out?scope=...&path=...&dev_unsigned=1
+  (or static style with ?dev_unsigned=1). Insecure — anyone who can reach Core can request sandbox paths by URL.
 - build_file_view_link(): single place to build file view URLs; use it everywhere for stable, consistent links (token-first, 7-day expiry). Token format is base64(payload)+hex(sig) with no separator so links stay valid when copied or linkified.
 - generate_result_html(): build HTML from title/content for save_result_page tool (saves to user output folder).
 - When a path is a directory, /files/out returns an HTML listing with links to files/subdirs.
@@ -49,6 +51,41 @@ def _get_file_token_secret() -> Optional[bytes]:
     return None
 
 
+def validate_file_link_scope_path(scope: str, path: str) -> bool:
+    """True if scope/path are safe for sandbox file links. Never raises."""
+    try:
+        s = (scope or "").strip()
+        p = (path or "").replace("\\", "/").strip()
+        if not s or not p:
+            return False
+        if ".." in p or p.startswith("/"):
+            return False
+        if "/" in s or ".." in s:
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def file_unsigned_dev_mode_active() -> bool:
+    """True when auth_api_key is unset — Core accepts dev_unsigned file URLs (insecure)."""
+    return _get_file_token_secret() is None
+
+
+_warned_dev_unsigned_file_links = False
+
+
+def _maybe_warn_dev_unsigned_file_links() -> None:
+    global _warned_dev_unsigned_file_links
+    if _warned_dev_unsigned_file_links:
+        return
+    _warned_dev_unsigned_file_links = True
+    logger.warning(
+        "File links use unsigned dev mode because auth_api_key is not set. "
+        "Anyone who can reach Core may request sandbox files by URL. Set auth_api_key for signed /files/... links."
+    )
+
+
 def create_file_access_token(scope: str, path: str, expiry_sec: int = DEFAULT_FILE_VIEW_LINK_EXPIRY_SEC) -> Optional[str]:
     """
     Create a signed token for GET /files/out (open link in browser without API key).
@@ -56,14 +93,16 @@ def create_file_access_token(scope: str, path: str, expiry_sec: int = DEFAULT_FI
     Returns None if auth_api_key is not set in config or path/scope are invalid. Never raises.
     """
     try:
-        if not scope or not path or ".." in path or path.startswith("/") or "/" in scope or ".." in scope:
+        scope_s = (scope or "").strip()
+        path_norm = (path or "").replace("\\", "/").strip()
+        if not validate_file_link_scope_path(scope_s, path_norm):
             return None
         secret = _get_file_token_secret()
         if not secret:
             return None
         logger.debug("files/out token created (secret_len={})", len(secret))
         expiry = int(time.time()) + max(1, min(int(expiry_sec) if isinstance(expiry_sec, (int, float)) else DEFAULT_FILE_VIEW_LINK_EXPIRY_SEC, MAX_FILE_VIEW_LINK_EXPIRY_SEC))
-        payload = f"{scope}\0{path}\0{expiry}"
+        payload = f"{scope_s}\0{path_norm}\0{expiry}"
         full_sig = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
         sig = full_sig[:32]  # shorter link, less likely to be truncated; 16 hex bytes = 64 bits
         b64 = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
@@ -154,13 +193,19 @@ def build_file_view_link(scope: str, path: str) -> Tuple[Optional[str], Optional
     Build a file view URL. Single place for link generation so format and config checks are consistent.
     Returns (url, None) on success, or (None, error_message) when link cannot be generated (caller should show error_message to user).
     - file_link_style "token" (default): signed GET /files/out?token=... (7-day expiry). Requires auth_api_key.
+    - When auth_api_key is unset: unsigned dev GET /files/out?scope=...&path=...&dev_unsigned=1 (uses core_public_url or localhost).
     - file_link_style "static": URL = base_url/ file_static_prefix /scope/path?token=... (e.g. /files/AllenPeng/images/ID1.jpg?token=...). The token is required so the link only accesses that user's sandbox (scope+path); Core serves the file after verifying the token.
     Never raises.
     """
     try:
-        if not scope or not path or ".." in path or path.startswith("/"):
+        scope_s = (scope or "").strip()
+        path_norm = (path or "").replace("\\", "/").strip()
+        if not validate_file_link_scope_path(scope_s, path_norm):
             return (None, "Invalid scope or path for file link.")
+        unsigned_dev = file_unsigned_dev_mode_active()
         base_url = get_result_link_base_url()
+        if not base_url and unsigned_dev:
+            base_url = (get_core_public_url() or "").strip().rstrip("/")
         if not base_url:
             return (None, "Set core_public_url in config (e.g. your tunnel or public URL) for shareable file links.")
         try:
@@ -178,25 +223,34 @@ def build_file_view_link(scope: str, path: str) -> Tuple[Optional[str], Optional
             expiry_sec = DEFAULT_FILE_VIEW_LINK_EXPIRY_SEC
         if link_style == "static":
             # URL path = prefix/scope/path; always add token so the link only accesses this user's sandbox (scope+path).
-            path_encoded = "/".join(quote(seg, safe="") for seg in path.replace("\\", "/").strip("/").split("/"))
-            scope_safe = quote(scope, safe="")
-            token = create_file_access_token(scope, path, expiry_sec=expiry_sec)
-            if not token:
-                return (None, "Set auth_api_key in config for shareable file links.")
+            path_encoded = "/".join(quote(seg, safe="") for seg in path_norm.strip("/").split("/"))
+            scope_safe = quote(scope_s, safe="")
+            token = create_file_access_token(scope_s, path_norm, expiry_sec=expiry_sec)
+            if token:
+                token_safe = "".join(c for c in token if c in _TOKEN_ALPHABET)
+                if len(token_safe) < 33:
+                    return (None, "Could not generate file link (token invalid).")
+                url = f"{base_url.rstrip('/')}/{static_prefix}/{scope_safe}/{path_encoded}?token={token_safe}"
+                return (url, None)
+            if unsigned_dev:
+                _maybe_warn_dev_unsigned_file_links()
+                url = f"{base_url.rstrip('/')}/{static_prefix}/{scope_safe}/{path_encoded}?dev_unsigned=1"
+                return (url, None)
+            return (None, "Set auth_api_key in config for shareable file links.")
+        token = create_file_access_token(scope_s, path_norm, expiry_sec=expiry_sec)
+        if token:
             token_safe = "".join(c for c in token if c in _TOKEN_ALPHABET)
             if len(token_safe) < 33:
                 return (None, "Could not generate file link (token invalid).")
-            url = f"{base_url.rstrip('/')}/{static_prefix}/{scope_safe}/{path_encoded}?token={token_safe}"
+            url = f"{base_url.rstrip('/')}/files/out?token={token_safe}&path={quote(path_norm)}"
             return (url, None)
-        token = create_file_access_token(scope, path, expiry_sec=expiry_sec)
-        if not token:
-            return (None, "Set auth_api_key in config for shareable file links.")
-        # Emit only token alphabet so link is stable (no accidental chars)
-        token_safe = "".join(c for c in token if c in _TOKEN_ALPHABET)
-        if len(token_safe) < 33:
-            return (None, "Could not generate file link (token invalid).")
-        url = f"{base_url}/files/out?token={token_safe}&path={quote(path)}"
-        return (url, None)
+        if unsigned_dev:
+            _maybe_warn_dev_unsigned_file_links()
+            scope_q = quote(scope_s, safe="")
+            path_q = quote(path_norm, safe="")
+            url = f"{base_url.rstrip('/')}/files/out?scope={scope_q}&path={path_q}&dev_unsigned=1"
+            return (url, None)
+        return (None, "Set auth_api_key in config for shareable file links.")
     except Exception as e:
         logger.debug("build_file_view_link failed: {}", e)
         return (None, "Could not generate file link; check core_public_url and auth_api_key in config.")
