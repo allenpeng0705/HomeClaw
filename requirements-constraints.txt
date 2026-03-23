@@ -1,0 +1,15 @@
+# Shared constraints for deterministic installs across environments.
+# Use with: pip install -r requirements.txt -c requirements-constraints.txt
+#
+# Keep core LLM SDK stack aligned (litellm requires openai>=2.8.0).
+openai>=2.8.0,<3.0.0
+jiter>=0.10.0,<1.0.0
+
+# Document stack: unstructured-inference 1.1.1 + opencv 4.10 (numpy<2 friendly).
+numpy>=1.24.0,<2.0.0
+opencv-python==4.10.0.84
+
+# Keep these stable to reduce resolver backtracking.
+fsspec==2024.12.0
+# unstructured[all-docs] 0.18.x requires python-pptx>=1.0.1
+python-pptx>=1.0.1,<2.0.0

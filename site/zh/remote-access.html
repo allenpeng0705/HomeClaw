@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw 远程访问 - 使用 Pinggy、Cloudflare Tunnel、Ngrok、Tailscale 或 SSH 从任何地方连接到您的 HomeClaw。">
+  <title>远程访问 — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="主导航">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">首页</a>
+        <a href="install.html">安装</a>
+        <a href="use-homeclaw.html">使用指南</a>
+        <a href="companion-app.html">伴侣应用</a>
+        <a href="portal.html">Portal</a>
+        <a href="docs.html">文档</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch"><a href="../en/remote-access.html">EN</a> | 中文</span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>远程访问</h1>
+      <p class="lead">从世界任何地方连接到您的 HomeClaw。</p>
+      <p>使用安全的隧道解决方案访问您的家庭社交网络、与 AI 好友聊天，并远程管理您的 HomeClaw。完美支持 iPhone、Android 和远程桌面访问。</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="本页目录">
+      <p class="doc-toc-title">本页目录</p>
+      <ul>
+        <li><a href="#overview">概述</a></li>
+        <li><a href="#pinggy">Pinggy（内置）</a></li>
+        <li><a href="#cloudflare">Cloudflare Tunnel</a></li>
+        <li><a href="#ngrok">Ngrok</a></li>
+        <li><a href="#tailscale">Tailscale</a></li>
+        <li><a href="#ssh">SSH 隧道</a></li>
+        <li><a href="#security">安全</a></li>
+        <li><a href="#companion">连接伴侣应用</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="overview">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>概述</h2>
+        <p>当您离开家时，您仍然可以使用各种隧道解决方案访问您的 HomeClaw 和家庭社交网络。这些方案在您的设备和 HomeClaw 服务器之间创建安全连接。</p>
+
+        <h3>为什么需要远程访问？</h3>
+        <ul>
+          <li><strong>iPhone/Android：</strong> 在任何地方使用移动设备上的伴侣应用</li>
+          <li><strong>家庭社交网络：</strong> 远程与家人保持联系</li>
+          <li><strong>AI 好友：</strong> 随时随地与您的 AI 助手聊天</li>
+          <li><strong>远程工作：</strong> 旅行或工作时访问 HomeClaw</li>
+        </ul>
+
+        <h3>连接方式</h3>
+        <ul>
+          <li><strong>本地局域网：</strong> 在同一网络上时使用本地 IP（例如 <code>http://192.168.1.100:9000</code>）</li>
+          <li><strong>隧道服务：</strong> 离家时使用（Pinggy、Cloudflare、Ngrok 等）</li>
+        </ul>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(244,67,54,.15); border-left:4px solid #f44336; border-radius:4px;">
+          <strong>重要：</strong> 使用远程访问时，请始终启用 API 密钥认证（<code>auth_enable: true</code> 和 <code>auth_api_key</code>）。这可以防止未经授权访问您的 HomeClaw。
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="pinggy">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Pinggy（内置）</h2>
+        <p>Pinggy 是设置远程访问的最简单方式。HomeClaw 内置支持 Pinggy，支持二维码扫描。</p>
+
+        <h3>设置步骤</h3>
+        <ol>
+          <li>从 <a href="https://pinggy.io" target="_blank" rel="noopener">pinggy.io</a> 获取 Pinggy 令牌</li>
+          <li>将令牌添加到您的 <code>config/core.yml</code>：</li>
+        </ol>
+        <div class="doc-keys">
+          <p class="doc-keys-title">在 core.yml 中配置 Pinggy</p>
+          <pre class="quickstart-code"><code>pinggy:
+  token: your-pinggy-token-here
+  enabled: true</code></pre>
+        </div>
+        <ol start="3">
+          <li>启动 HomeClaw Core：<code>python -m main start</code></li>
+          <li>Core 将自动启动 Pinggy 隧道</li>
+          <li>在浏览器中打开 Pinggy URL（例如 <code>http://127.0.0.1:9000/pinggy</code>）</li>
+          <li>使用伴侣应用扫描二维码</li>
+        </ol>
+
+        <h3>二维码连接</h3>
+        <p>连接伴侣应用的最简单方式：</p>
+        <ol>
+          <li>在您的 HomeClaw 服务器上，打开 <code>http://127.0.0.1:9000/pinggy</code></li>
+          <li>将显示一个二维码</li>
+          <li>在伴侣应用中：<strong>设置 → 扫描二维码连接</strong></li>
+          <li>扫描二维码</li>
+          <li>应用自动配置 URL 和 API 密钥</li>
+        </ol>
+
+        <h3>优势</h3>
+        <ul>
+          <li>内置于 HomeClaw - 无需额外软件</li>
+          <li>二维码扫描，方便移动设备设置</li>
+          <li>可使用自定义域名</li>
+          <li>安全加密连接</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="cloudflare">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Cloudflare Tunnel</h2>
+        <p>Cloudflare Tunnel 提供免费、安全的隧道，带有自定义子域名。基本使用无需账户。</p>
+
+        <h3>设置步骤</h3>
+        <ol>
+          <li>在您的 HomeClaw 服务器上安装 cloudflared：</li>
+        </ol>
+        <div class="doc-keys">
+          <p class="doc-keys-title">安装 cloudflared（Mac/Linux）</p>
+          <pre class="quickstart-code"><code>brew install cloudflared</code></pre>
+        </div>
+        <div class="doc-keys">
+          <p class="doc-keys-title">安装 cloudflared（Windows）</p>
+          <pre class="quickstart-code"><code>winget install --id Cloudflare.cloudflared</code></pre>
+        </div>
+        <ol start="2">
+          <li>创建隧道：</li>
+        </ol>
+        <div class="doc-keys">
+          <p class="doc-keys-title">创建 Cloudflare 隧道</p>
+          <pre class="quickstart-code"><code>cloudflared tunnel --url http://localhost:9000</code></pre>
+        </div>
+        <ol start="3">
+          <li>您将获得类似 <code>https://your-subdomain.trycloudflare.com</code> 的 URL</li>
+          <li>在伴侣应用中使用此 URL 作为 Core URL</li>
+        </ol>
+
+        <h3>持久隧道（可选）</h3>
+        <p>使用自定义子域名的永久隧道：</p>
+        <ol>
+          <li>创建 Cloudflare 账户</li>
+          <li>认证 cloudflared：<code>cloudflared login</code></li>
+          <li>创建命名隧道：<code>cloudflared tunnel create homeclaw</code></li>
+          <li>在 Cloudflare 仪表板中配置隧道</li>
+          <li>作为服务运行以自动启动</li>
+        </ol>
+
+        <h3>优势</h3>
+        <ul>
+          <li>免费套餐，额度 generous</li>
+          <li>快速隧道无需账户</li>
+          <li>账户可使用自定义子域名</li>
+          <li>高度可靠和快速</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="ngrok">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Ngrok</h2>
+        <p>Ngrok 是一个流行的隧道服务，为您的本地服务器提供即时公共 URL。</p>
+
+        <h3>设置步骤</h3>
+        <ol>
+          <li>在 <a href="https://ngrok.com" target="_blank" rel="noopener">ngrok.com</a> 注册</li>
+          <li>下载并安装 ngrok</li>
+          <li>使用您的令牌认证：</li>
+        </ol>
+        <div class="doc-keys">
+          <p class="doc-keys-title">认证 ngrok</p>
+          <pre class="quickstart-code"><code>ngrok authtoken your-token-here</code></pre>
+        </div>
+        <ol start="4">
+          <li>启动隧道：</li>
+        </ol>
+        <div class="doc-keys">
+          <p class="doc-keys-title">启动 ngrok 隧道</p>
+          <pre class="quickstart-code"><code>ngrok http 9000</code></pre>
+        </div>
+        <ol start="5">
+          <li>您将获得类似 <code>https://abc123.ngrok.io</code> 的 URL</li>
+          <li>在伴侣应用中使用此 URL</li>
+        </ol>
+
+        <h3>自定义域名（付费）</h3>
+        <p>使用付费 ngrok 套餐，您可以使用自定义域名：</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">自定义域名隧道</p>
+          <pre class="quickstart-code"><code>ngrok http --domain=your-domain.ngrok.io 9000</code></pre>
+        </div>
+
+        <h3>优势</h3>
+        <ul>
+          <li>易于设置和使用</li>
+          <li>提供免费套餐</li>
+          <li>Web 界面用于检查流量</li>
+          <li>付费套餐可使用自定义域名</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="tailscale">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Tailscale</h2>
+        <p>Tailscale 在您的设备之间创建安全的网状 VPN 网络。它就像您在同一个本地网络上一样工作，即使远程也是如此。</p>
+
+        <h3>设置步骤</h3>
+        <ol>
+          <li>在 <a href="https://tailscale.com" target="_blank" rel="noopener">tailscale.com</a> 注册</li>
+          <li>在您的 HomeClaw 服务器上安装 Tailscale：</li>
+        </ol>
+        <div class="doc-keys">
+          <p class="doc-keys-title">安装 Tailscale</p>
+          <pre class="quickstart-code"><code># Mac
+brew install tailscale
+
+# Linux
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# Windows
+# 从 tailscale.com 下载</code></pre>
+        </div>
+        <ol start="3">
+          <li>启动 Tailscale 并认证：</li>
+        </ol>
+        <div class="doc-keys">
+          <p class="doc-keys-title">启动 Tailscale</p>
+          <pre class="quickstart-code"><code>sudo tailscale up</code></pre>
+        </div>
+        <ol start="4">
+          <li>获取您的 HomeClaw 服务器的 Tailscale IP：</li>
+        </ol>
+        <div class="doc-keys">
+          <p class="doc-keys-title">检查 Tailscale IP</p>
+          <pre class="quickstart-code"><code>tailscale ip -4</code></pre>
+        </div>
+        <ol start="5">
+          <li>在您的移动设备或远程计算机上安装 Tailscale</li>
+          <li>连接到同一个 Tailscale 网络</li>
+          <li>在伴侣应用中使用 Tailscale IP：<code>http://100.x.x.x:9000</code></li>
+        </ol>
+
+        <h3>优势</h3>
+        <ul>
+          <li>像本地网络一样工作 - 无需公共 URL</li>
+          <li>个人使用免费（最多 20 台设备）</li>
+          <li>非常安全 - 使用 WireGuard 加密</li>
+          <li>无需端口转发</li>
+          <li>跨多台设备无缝工作</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="ssh">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>SSH 隧道</h2>
+        <p>如果您有一台具有公共 IP 的服务器，您可以使用 SSH 隧道将连接转发到您的 HomeClaw。</p>
+
+        <h3>设置步骤</h3>
+        <ol>
+          <li>拥有一台具有 SSH 访问权限和公共 IP 的服务器</li>
+          <li>从您的 HomeClaw 服务器，创建 SSH 隧道：</li>
+        </ol>
+        <div class="doc-keys">
+          <p class="doc-keys-title">创建 SSH 隧道</p>
+          <pre class="quickstart-code"><code>ssh -R 9000:localhost:9000 user@your-server.com</code></pre>
+        </div>
+        <ol start="3">
+          <li>这将从您的服务器转发端口 9000 到 HomeClaw</li>
+          <li>在伴侣应用中使用您服务器的 IP：<code>http://your-server.com:9000</code></li>
+        </ol>
+
+        <h3>持久 SSH 隧道</h3>
+        <p>使用 autossh 实现持久隧道：</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">安装并使用 autossh</p>
+          <pre class="quickstart-code"><code># 安装 autossh
+brew install autossh  # Mac
+sudo apt install autossh  # Linux
+
+# 创建持久隧道
+autossh -M 0 -N -R 9000:localhost:9000 user@your-server.com</code></pre>
+        </div>
+
+        <h3>优势</h3>
+        <ul>
+          <li>如果您有服务器，则不需要额外的服务</li>
+          <li>非常安全（SSH 加密）</li>
+          <li>完全控制连接</li>
+          <li>不需要第三方服务</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="security">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>安全</h2>
+        <p>将 HomeClaw 暴露到互联网时，安全至关重要。</p>
+
+        <h3>启用认证</h3>
+        <p>始终在 <code>config/core.yml</code> 中启用 API 密钥认证：</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">启用认证</p>
+          <pre class="quickstart-code"><code>auth_enable: true
+auth_api_key: your-very-secure-random-key-here</code></pre>
+        </div>
+
+        <h3>安全最佳实践</h3>
+        <ul>
+          <li><strong>使用强 API 密钥：</strong> 生成长且随机的 API 密钥</li>
+          <li><strong>定期轮换密钥：</strong> 定期更改您的 API 密钥</li>
+          <li><strong>仅使用 HTTPS：</strong> 尽可能使用 HTTPS 隧道（Cloudflare、Ngrok HTTPS）</li>
+          <li><strong>限制访问：</strong> 仅与受信任的家庭成员共享隧道 URL</li>
+          <li><strong>监控连接：</strong> 检查 Core 日志以发现未经授权的访问尝试</li>
+        </ul>
+
+        <h3>防火墙注意事项</h3>
+        <ul>
+          <li>隧道服务处理外部访问 - 不需要端口转发</li>
+          <li>对于 Tailscale，确保防火墙允许 Tailscale 流量</li>
+          <li>SSH 隧道需要 SSH 端口（22）可访问</li>
+        </ul>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(244,67,54,.15); border-left:4px solid #f44336; border-radius:4px;">
+          <strong>警告：</strong> 切勿在未启用认证的情况下将 HomeClaw 暴露到互联网。如果没有 <code>auth_enable: true</code>，任何拥有您隧道 URL 的人都可以访问您的 Core 和数据。
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="companion">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>连接伴侣应用</h2>
+        <p>设置隧道后，连接您的伴侣应用以远程访问 HomeClaw。</p>
+
+        <h3>连接步骤</h3>
+        <ol>
+          <li>在您的设备上打开伴侣应用</li>
+          <li>进入 <strong>设置</strong></li>
+          <li>输入隧道 URL 作为 Core URL：</li>
+        </ol>
+        <ul>
+          <li>Pinggy：<code>https://xxx.pinggy.io</code></li>
+          <li>Cloudflare：<code>https://your-name.trycloudflare.com</code></li>
+          <li>Ngrok：<code>https://abc123.ngrok.io</code></li>
+          <li>Tailscale：<code>http://100.x.x.x:9000</code></li>
+          <li>SSH：<code>http://your-server.com:9000</code></li>
+        </ul>
+        <ol start="4">
+          <li>输入 <code>config/core.yml</code> 中的 API 密钥</li>
+          <li>保存设置</li>
+          <li>点击 <strong>连接</strong></li>
+        </ol>
+
+        <h3>家庭社交网络访问</h3>
+        <p>配置远程访问后，家庭成员可以：</p>
+        <ul>
+          <li>从任何地方与 AI 好友聊天</li>
+          <li>在家庭社交网络中互相发送消息</li>
+          <li>接收新消息的推送通知</li>
+          <li>远程访问文件和提醒</li>
+          <li>连接不稳定时使用离线模式</li>
+        </ul>
+
+        <h3>多台设备</h3>
+        <p>每个家庭成员可以连接多台设备：</p>
+        <ul>
+          <li>iPhone 和 iPad</li>
+          <li>Android 手机和平板电脑</li>
+          <li>Mac 和 Windows 计算机</li>
+          <li>所有设备保持同步</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="comparison">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>方法比较</h2>
+        <p>选择最适合您需求的方法：</p>
+
+        <table style="width:100%; border-collapse: collapse; margin: 1rem 0;">
+          <thead>
+            <tr style="background: var(--surface); border-bottom: 2px solid var(--border);">
+              <th style="padding: 0.75rem; text-align: left;">方法</th>
+              <th style="padding: 0.75rem; text-align: left;">易用性</th>
+              <th style="padding: 0.75rem; text-align: left;">成本</th>
+              <th style="padding: 0.75rem; text-align: left;">最适合</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.75rem;"><strong>Pinggy</strong></td>
+              <td style="padding: 0.75rem;">⭐⭐⭐⭐⭐</td>
+              <td style="padding: 0.75rem;">免费/付费</td>
+              <td style="padding: 0.75rem;">快速设置，二维码</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.75rem;"><strong>Cloudflare</strong></td>
+              <td style="padding: 0.75rem;">⭐⭐⭐⭐</td>
+              <td style="padding: 0.75rem;">免费</td>
+              <td style="padding: 0.75rem;">可靠性，自定义域名</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.75rem;"><strong>Ngrok</strong></td>
+              <td style="padding: 0.75rem;">⭐⭐⭐⭐</td>
+              <td style="padding: 0.75rem;">免费/付费</td>
+              <td style="padding: 0.75rem;">开发者，调试</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.75rem;"><strong>Tailscale</strong></td>
+              <td style="padding: 0.75rem;">⭐⭐⭐</td>
+              <td style="padding: 0.75rem;">免费（20 台设备）</td>
+              <td style="padding: 0.75rem;">多台设备，安全性</td>
+            </tr>
+            <tr>
+              <td style="padding: 0.75rem;"><strong>SSH</strong></td>
+              <td style="padding: 0.75rem;">⭐⭐</td>
+              <td style="padding: 0.75rem;">免费（需要服务器）</td>
+              <td style="padding: 0.75rem;">技术用户，控制</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="next-steps">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>下一步</h2>
+        <p>准备好设置远程访问了吗？</p>
+        <ul>
+          <li><a href="companion-app.html">下载伴侣应用</a></li>
+          <li><a href="family-social.html">设置家庭社交网络</a></li>
+          <li><a href="use-homeclaw.html">学习如何使用 HomeClaw</a></li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">在 GitHub 上贡献</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2026 HomeClaw. 您的数据，您掌控。</p>
+      <p>有问题？联系 <a href="mailto:shileipeng@gmail.com">shileipeng@gmail.com</a> 或 <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

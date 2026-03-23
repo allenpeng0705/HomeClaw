@@ -37,7 +37,19 @@ def get_inbound_result_handler(core):
         if not entry:
             return JSONResponse(status_code=404, content={"error": "Unknown or expired request_id", "status": "gone"})
         if entry.get("status") == "pending":
-            return JSONResponse(status_code=202, content={"status": "pending", "request_id": request_id})
+            _lk = getattr(core, "_inbound_async_results_lock", None)
+            _preview = ""
+            if _lk is not None:
+                with _lk:
+                    _e = results.get(request_id)
+                    if _e and _e.get("status") == "pending":
+                        _preview = (str(_e.get("text") or "")).strip()
+            else:
+                _preview = (str(entry.get("text") or "")).strip()
+            _body: dict = {"status": "pending", "request_id": request_id}
+            if _preview:
+                _body["text_preview"] = _preview
+            return JSONResponse(status_code=202, content=_body)
         body = {"status": entry.get("status", "done"), "text": entry.get("text", ""), "format": entry.get("format", "plain")}
         if entry.get("error"):
             body["error"] = entry["error"]

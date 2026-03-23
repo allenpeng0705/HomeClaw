@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw Skills from ClawHub - Search, download, convert and install OpenClaw skills from ClawHub registry.">
+  <title>Skills from ClawHub — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="Main navigation">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="use-homeclaw.html">How to use</a>
+        <a href="companion-app.html">Companion app</a>
+        <a href="portal.html">Portal</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch">EN | <a href="../zh/skills-from-clawhub.html">中文</a></span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>Skills from ClawHub</h1>
+      <p class="lead">Extend HomeClaw with skills from the ClawHub registry.</p>
+      <p>ClawHub is a public skill registry for OpenClaw-compatible skills. HomeClaw can search, download, convert, and install these skills to extend your assistant's capabilities.</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="On this page">
+      <p class="doc-toc-title">On this page</p>
+      <ul>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#setup">Setup ClawHub Token</a></li>
+        <li><a href="#search">Search Skills</a></li>
+        <li><a href="#install">Install Skills</a></li>
+        <li><a href="#folders">Skills Folders</a></li>
+        <li><a href="#convert">Conversion Process</a></li>
+        <li><a href="#manage">Manage Skills</a></li>
+        <li><a href="#cli">CLI Commands</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="overview">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Overview</h2>
+        <p><strong>ClawHub</strong> (<a href="https://clawhub.ai" target="_blank" rel="noopener">clawhub.ai</a>) is a public registry for OpenClaw skills. It hosts versioned skill bundles with metadata, tags, and discovery features.</p>
+
+        <h3>What are Skills?</h3>
+        <p>Skills are reusable workflows that extend your AI assistant's capabilities. Each skill is a folder containing:</p>
+        <ul>
+          <li><strong>SKILL.md</strong> — Description, instructions, and configuration (YAML frontmatter + Markdown body)</li>
+          <li><strong>scripts/</strong> — Optional Python, Shell, or JavaScript scripts</li>
+          <li><strong>references/</strong> — Optional documentation and examples</li>
+        </ul>
+
+        <h3>Available Skills</h3>
+        <p>Examples of skills available on ClawHub:</p>
+        <ul>
+          <li><strong>maton-api-gateway</strong> — Connect to 100+ web services (Gmail, Google Calendar, Slack, Notion, Salesforce, HubSpot, etc.) via unified API</li>
+          <li><strong>summarize</strong> — Summarize documents and articles</li>
+          <li><strong>weather</strong> — Get weather information</li>
+          <li><strong>html-slides</strong> — Create HTML presentations</li>
+          <li><strong>ppt-generation</strong> — Generate PowerPoint slides</li>
+          <li><strong>image-generation</strong> — Generate images using AI</li>
+          <li><strong>linkedin-writer</strong> — Write LinkedIn posts</li>
+          <li><strong>And many more...</strong></li>
+        </ul>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(33,150,243,.15); border-left:4px solid #2196f3; border-radius:4px;">
+          <strong>Recommended:</strong> The <strong>maton-api-gateway</strong> skill is essential for connecting HomeClaw to 100+ popular web services including Gmail, Google Workspace, Slack, Notion, Salesforce, HubSpot, Stripe, and many more. It provides a unified API interface for all these services.
+        </div>
+
+        <h3>How It Works</h3>
+        <ol>
+          <li><strong>Search</strong> — Find skills on ClawHub by query</li>
+          <li><strong>Download</strong> — Download OpenClaw skill to staging folder</li>
+          <li><strong>Convert</strong> — Convert to HomeClaw format</li>
+          <li><strong>Load</strong> — Core loads the skill automatically</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="setup">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Setup ClawHub Token</h2>
+        <p>To use ClawHub without browser authentication, set up your token in the config.</p>
+
+        <h3>Get Your Token</h3>
+        <ol>
+          <li>Go to <a href="https://clawhub.ai" target="_blank" rel="noopener">clawhub.ai</a></li>
+          <li>Sign in or create an account</li>
+          <li>Get your API token from account settings</li>
+        </ol>
+
+        <h3>Configure in core.yml</h3>
+        <p>Add your ClawHub token to <code>config/core.yml</code>:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Configure ClawHub token</p>
+          <pre class="quickstart-code"><code>clawhub_token: "clh_YourTokenHere"</code></pre>
+        </div>
+
+        <h3>Configure Directories</h3>
+        <p>HomeClaw uses these directories for skills:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Skills directories in core.yml</p>
+          <pre class="quickstart-code"><code>skills_dir: skills
+external_skills_dir: external_skills
+clawhub_download_dir: downloads
+skills_extra_dirs: []</code></pre>
+        </div>
+
+        <table style="width:100%; border-collapse: collapse; margin: 1rem 0;">
+          <thead>
+            <tr style="background: var(--surface); border-bottom: 2px solid var(--border);">
+              <th style="padding: 0.75rem; text-align: left;">Directory</th>
+              <th style="padding: 0.75rem; text-align: left;">Purpose</th>
+              <th style="padding: 0.75rem; text-align: left;">Default</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.75rem;"><code>skills_dir</code></td>
+              <td style="padding: 0.75rem;">Built-in skills (protected)</td>
+              <td style="padding: 0.75rem;"><code>skills/</code></td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.75rem;"><code>external_skills_dir</code></td>
+              <td style="padding: 0.75rem;">Converted ClawHub skills</td>
+              <td style="padding: 0.75rem;"><code>external_skills/</code></td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.75rem;"><code>clawhub_download_dir</code></td>
+              <td style="padding: 0.75rem;">Staging for downloads</td>
+              <td style="padding: 0.75rem;"><code>downloads/</code></td>
+            </tr>
+            <tr>
+              <td style="padding: 0.75rem;"><code>skills_extra_dirs</code></td>
+              <td style="padding: 0.75rem;">Additional skill folders</td>
+              <td style="padding: 0.75rem;"><code>[]</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="search">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Search Skills</h2>
+        <p>Search for skills on ClawHub using the Companion app, Portal, or CLI.</p>
+
+        <h3>Using Companion App</h3>
+        <ol>
+          <li>Open Companion app</li>
+          <li>Go to <strong>Settings → Skills</strong></li>
+          <li>Click <strong>Search Skills</strong></li>
+          <li>Enter your search query</li>
+          <li>Browse results and select a skill to install</li>
+        </ol>
+
+        <h3>Using Portal</h3>
+        <ol>
+          <li>Start Portal: <code>python -m main portal</code></li>
+          <li>Open <code>http://127.0.0.1:18472</code></li>
+          <li>Navigate to <strong>Skills</strong> section</li>
+          <li>Use the search box to find skills</li>
+          <li>Click <strong>Install</strong> on desired skill</li>
+        </ol>
+
+        <h3>Using CLI</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Search skills via CLI</p>
+          <pre class="quickstart-code"><code>python -m main skills search "weather"</code></pre>
+        </div>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Search with limit</p>
+          <pre class="quickstart-code"><code>python -m main skills search "slides" --limit 10</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="install">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Install Skills</h2>
+        <p>Install skills from ClawHub to extend your assistant's capabilities.</p>
+
+        <h3>Installation Flow</h3>
+        <ol>
+          <li><strong>Download</strong> — Skill is downloaded to <code>downloads/</code> folder</li>
+          <li><strong>Convert</strong> — OpenClaw format is converted to HomeClaw format</li>
+          <li><strong>Install</strong> — Converted skill is placed in <code>external_skills/</code></li>
+          <li><strong>Load</strong> — Core automatically loads the skill on next request</li>
+        </ol>
+
+        <h3>Using Companion App</h3>
+        <ol>
+          <li>Search for a skill (see above)</li>
+          <li>Click <strong>Install</strong> on the skill</li>
+          <li>Wait for download and conversion</li>
+          <li>Skill is ready to use</li>
+        </ol>
+
+        <h3>Using Portal</h3>
+        <ol>
+          <li>Search for a skill in Portal</li>
+          <li>Click <strong>Install</strong></li>
+          <li>Specify version if needed (e.g., <code>summarize@1.0.0</code>)</li>
+          <li>Wait for installation to complete</li>
+        </ol>
+
+        <h3>Using CLI</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Install skill via CLI</p>
+          <pre class="quickstart-code"><code>python -m main skills install summarize</code></pre>
+        </div>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Install specific version</p>
+          <pre class="quickstart-code"><code>python -m main skills install summarize@1.0.0</code></pre>
+        </div>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(33,150,243,.15); border-left:4px solid #2196f3; border-radius:4px;">
+          <strong>Note:</strong> Installed skills go to <code>external_skills/</code> folder. Built-in skills in <code>skills/</code> are protected and cannot be removed via the API.
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="folders">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Skills Folders</h2>
+        <p>HomeClaw loads skills from multiple directories in a specific order.</p>
+
+        <h3>Loading Order</h3>
+        <p>Skills are loaded in this order (first match wins):</p>
+        <ol>
+          <li><code>skills_dir</code> — Built-in skills (<code>skills/</code>)</li>
+          <li><code>external_skills_dir</code> — ClawHub installed skills (<code>external_skills/</code>)</li>
+          <li><code>skills_extra_dirs</code> — Additional custom folders</li>
+        </ol>
+
+        <h3>Built-in Skills (skills/)</h3>
+        <p>Protected folder containing core skills that ship with HomeClaw:</p>
+        <ul>
+          <li><strong>html-slides</strong> — Create HTML presentations</li>
+          <li><strong>ppt-generation</strong> — Generate PowerPoint slides</li>
+          <li><strong>image-generation</strong> — Generate images with AI</li>
+          <li><strong>weather</strong> — Weather information</li>
+          <li><strong>summarize</strong> — Document summarization</li>
+          <li><strong>And more...</strong></li>
+        </ul>
+
+        <h3>External Skills (external_skills/)</h3>
+        <p>Folder for skills installed from ClawHub:</p>
+        <ul>
+          <li>Skills are automatically converted to HomeClaw format</li>
+          <li>Can be removed via Companion app, Portal, or CLI</li>
+          <li>When stable, move to <code>skills/</code> for permanent use</li>
+        </ul>
+
+        <h3>Custom Skill Folders</h3>
+        <p>Add additional skill folders in <code>core.yml</code>:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Add custom skill folders</p>
+          <pre class="quickstart-code"><code>skills_extra_dirs:
+  - /path/to/custom/skills
+  - ./my-skills</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="convert">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Conversion Process</h2>
+        <p>OpenClaw skills are automatically converted to HomeClaw format during installation.</p>
+
+        <h3>What Gets Converted</h3>
+        <ul>
+          <li><strong>SKILL.md</strong> — Preserved and adapted</li>
+          <li><strong>scripts/</strong> — Python, Shell, JavaScript files</li>
+          <li><strong>references/</strong> — Documentation and examples</li>
+          <li><strong>skill.yaml</strong> — Merged into SKILL.md frontmatter</li>
+        </ul>
+
+        <h3>Supported Script Types</h3>
+        <table style="width:100%; border-collapse: collapse; margin: 1rem 0;">
+          <thead>
+            <tr style="background: var(--surface); border-bottom: 2px solid var(--border);">
+              <th style="padding: 0.75rem; text-align: left;">Extension</th>
+              <th style="padding: 0.75rem; text-align: left;">Runtime</th>
+              <th style="padding: 0.75rem; text-align: left;">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.75rem;"><code>.py, .pyw</code></td>
+              <td style="padding: 0.75rem;">Python</td>
+              <td style="padding: 0.75rem;">Core's Python interpreter</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.75rem;"><code>.sh, .bash</code></td>
+              <td style="padding: 0.75rem;">Shell</td>
+              <td style="padding: 0.75rem;">Bash shell</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.75rem;"><code>.js, .mjs, .cjs</code></td>
+              <td style="padding: 0.75rem;">Node.js</td>
+              <td style="padding: 0.75rem;">Requires Node.js installed</td>
+            </tr>
+            <tr>
+              <td style="padding: 0.75rem;"><code>.ts</code></td>
+              <td style="padding: 0.75rem;">TypeScript</td>
+              <td style="padding: 0.75rem;">Requires tsx or ts-node</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Manual Conversion</h3>
+        <p>You can also manually convert an OpenClaw skill folder:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Convert skill manually</p>
+          <pre class="quickstart-code"><code>python scripts/convert_openclaw_skill.py /path/to/openclaw/skill external_skills/skill-name</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="manage">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Manage Skills</h2>
+        <p>View, enable, disable, and remove skills through various interfaces.</p>
+
+        <h3>List Installed Skills</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">List skills via CLI</p>
+          <pre class="quickstart-code"><code>python -m main skills list</code></pre>
+        </div>
+
+        <h3>Disable a Skill</h3>
+        <p>Add the skill folder name to the disabled list in <code>core.yml</code>:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Disable skills</p>
+          <pre class="quickstart-code"><code>skills_disabled:
+  - skill-name-1.0.0
+  - another-skill</code></pre>
+        </div>
+
+        <h3>Remove a Skill</h3>
+        <p>Only skills in <code>external_skills/</code> can be removed:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Remove skill via CLI</p>
+          <pre class="quickstart-code"><code>python -m main skills remove skill-name</code></pre>
+        </div>
+
+        <p>Or via Companion app / Portal:</p>
+        <ol>
+          <li>Go to Skills section</li>
+          <li>Find the skill</li>
+          <li>Click <strong>Remove</strong></li>
+        </ol>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(244,67,54,.15); border-left:4px solid #f44336; border-radius:4px;">
+          <strong>Warning:</strong> Built-in skills in <code>skills/</code> cannot be removed. Use <code>skills_disabled</code> to disable them instead.
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="cli">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>CLI Commands</h2>
+        <p>Complete reference for skill management CLI commands.</p>
+
+        <h3>Search</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Search for skills</p>
+          <pre class="quickstart-code"><code>python -m main skills search "query"
+python -m main skills search "query" --limit 10</code></pre>
+        </div>
+
+        <h3>Install</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Install a skill</p>
+          <pre class="quickstart-code"><code>python -m main skills install skill-name
+python -m main skills install skill-name@1.0.0</code></pre>
+        </div>
+
+        <h3>List</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">List installed skills</p>
+          <pre class="quickstart-code"><code>python -m main skills list</code></pre>
+        </div>
+
+        <h3>Remove</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Remove a skill</p>
+          <pre class="quickstart-code"><code>python -m main skills remove skill-name</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="next-steps">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Next Steps</h2>
+        <p>Ready to extend your HomeClaw with skills?</p>
+        <ul>
+          <li><a href="https://clawhub.ai" target="_blank" rel="noopener">Browse skills on ClawHub</a></li>
+          <li><a href="use-homeclaw.html">Learn how to use HomeClaw</a></li>
+          <li><a href="portal.html">Use Portal for easy management</a></li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">Contribute on GitHub</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2026 HomeClaw. Your data, your control.</p>
+      <p>Questions? Contact <a href="mailto:shileipeng@gmail.com">shileipeng@gmail.com</a> or <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

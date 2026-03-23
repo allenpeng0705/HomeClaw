@@ -149,6 +149,7 @@ async def deliver_to_user(
     source: str = "push",
     from_friend: str = "HomeClaw",
     from_user_id: Optional[str] = None,
+    e2e_encrypted: bool = False,
 ) -> None:
     """Push to user: WebSocket sessions, then push notification, then channel. Never raises. audios = voice; videos = short video (e.g. 10s). from_user_id: for user_message, sender id so Companion can match chat thread."""
     try:
@@ -163,7 +164,12 @@ async def deliver_to_user(
             out_text, out_fmt = "", "plain"
         out_text = out_text if out_text is not None else ""
         out_fmt = out_fmt if out_fmt is not None else "plain"
+        if e2e_encrypted:
+            out_text = ""
+            out_fmt = "plain"
         payload = {"event": "push", "source": source, "from_friend": from_friend, "text": out_text, "format": out_fmt}
+        if e2e_encrypted:
+            payload["e2e_encrypted"] = True
         if (from_user_id or "").strip():
             payload["from_user_id"] = (from_user_id or "").strip()
         data_urls = _media_to_data_urls(
@@ -229,7 +235,10 @@ async def deliver_to_user(
                     title = f"Message from {from_friend}"
                 else:
                     title = from_friend
-                body_safe = (out_text if out_text is not None else "")[:1024]
+                if e2e_encrypted and source == "user_message":
+                    body_safe = "Encrypted message — open the app to read"
+                else:
+                    body_safe = (out_text if out_text is not None else "")[:1024]
                 max_tokens = 1
                 push_sent = push_send.send_push_to_user(
                     user_id, title=title, body=body_safe, source=source, from_friend=from_friend, max_tokens_per_user=max_tokens

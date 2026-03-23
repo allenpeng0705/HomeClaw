@@ -206,6 +206,10 @@ Under **`tools:`** you configure:
 | **`browser_enabled`** | If false, Core does not register browser tools; use plugin (e.g. homeclaw-browser) for browser actions. |
 | **`tool_timeout_seconds`** | Per-tool execution timeout; 0 = no timeout. |
 | **`interactive_*`** | Interactive session limits: **interactive_max_sessions_per_user**, **interactive_max_buffer_bytes**, **interactive_idle_ttl_sec**, **interactive_allowed_commands**. See [Interactive sessions](interactive-sessions.md). |
+| **`llm_catalog_inject_enabled`** | Default true. When true, Core appends the current **`llm.yml`** catalog (each ref’s **capabilities** and **description**) to the **`models_list`** and **`sessions_spawn`** tool descriptions in the LLM prompt so the model can pick **`llm_name`** without calling **`models_list` first. Set **false** to save tokens. |
+| **`llm_catalog_inject_max_chars`** | Max length of that catalog block (default **14000**); longer catalogs are truncated with a marker. |
+| **`peer_roster_inject_enabled`** | Default true. When true, Core appends **config/peers.yml** (instance_id, base_url, inbound_user_id, capabilities) to the **`peer_call`** tool description so the model can pick a peer without opening the file. Set **false** to save tokens. |
+| **`peer_roster_inject_max_chars`** | Max length of that roster block (default **5000**). |
 
 API keys for tools (e.g. Tavily, Google CSE) can be set in **core.yml** under the tool block or via **environment variables** where documented. For multi-step tools (need input or confirmation), see [Workflow result envelope](workflow-result-envelope.md).
 
@@ -219,6 +223,7 @@ When Core is reachable from the internet (e.g. Cloudflare Tunnel, Tailscale Funn
 |--------|--------|
 | **`auth_enabled`** | If true, **POST /inbound** and **WebSocket /ws** require an API key. |
 | **`auth_api_key`** | The secret key. Clients must send **X-API-Key** or **Authorization: Bearer &lt;key&gt;** on each request. |
+| **`peer_pairing_enabled`** | Default **true**. If **false**, **POST /api/peer/invite/create** and **POST /api/peer/invite/consume** return **404** (`peer_pairing_disabled`). Use on Cores that must not accept peer pairing. See [Multi-instance peers](multi-instance-peers.md). |
 
 Use a long, random value (e.g. 32+ characters). See [Remote access](remote-access.md).
 

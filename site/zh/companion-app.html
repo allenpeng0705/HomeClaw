@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw 伴侣应用指南。适用于 Mac、Windows、iPhone 和 Android。">
+  <title>伴侣应用 — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="主导航">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">首页</a>
+        <a href="install.html">安装</a>
+        <a href="use-homeclaw.html">如何使用</a>
+        <a href="companion-app.html" class="active">伴侣应用</a>
+        <a href="portal.html">门户</a>
+        <a href="docs.html">文档</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch"><a href="../en/companion-app.html">EN</a> | 中文</span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>HomeClaw 伴侣应用</h1>
+      <p class="lead">与 HomeClaw 交互的最佳方式。适用于 Mac、Windows、iPhone 和 Android。</p>
+      <p>伴侣应用提供了一个美观、直观的界面，用于与 HomeClaw 聊天。它连接到您的 Core，并让您完全访问所有功能，包括记忆、插件和技能。</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="本页内容">
+      <p class="doc-toc-title">本页内容</p>
+      <ul>
+        <li><a href="#download">下载</a></li>
+        <li><a href="#setup">设置</a></li>
+        <li><a href="#features">功能</a></li>
+        <li><a href="#remote">远程访问</a></li>
+        <li><a href="#troubleshooting">故障排除</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="download">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>下载伴侣应用</h2>
+        <p>伴侣应用支持所有主要平台：</p>
+
+        <h3>桌面应用（Mac 和 Windows）</h3>
+        <ul>
+          <li><strong>GitHub Releases：</strong> 从 <a href="https://github.com/allenpeng0705/HomeClaw/releases" target="_blank" rel="noopener">https://github.com/allenpeng0705/HomeClaw/releases</a> 下载</li>
+          <li><strong>从源码构建：</strong> 从仓库中的 <code>clients/HomeClawApp/</code> 编译</li>
+        </ul>
+
+        <h3>移动应用</h3>
+        <ul>
+          <li><strong>Android：</strong> 从 <a href="https://github.com/allenpeng0705/HomeClaw/releases" target="_blank" rel="noopener">GitHub Releases</a> 下载</li>
+          <li><strong>iPhone：</strong> 即将上架 App Store</li>
+        </ul>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(255,152,0,.15); border-left:4px solid #ff9800; border-radius:4px;">
+          <strong>从源码构建：</strong> 对于所有平台，您可以从仓库中的 <code>clients/HomeClawApp/</code> 构建。请参阅 <a href="https://github.com/allenpeng0705/HomeClaw/tree/main/clients/HomeClawApp" target="_blank" rel="noopener">GitHub 上的 HomeClawApp</a> 和 <code>clients/HomeClawApp/README.md</code> 获取构建说明。
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="setup">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>设置伴侣应用</h2>
+        <p>按照以下步骤将伴侣应用连接到您的 HomeClaw Core：</p>
+
+        <h3>步骤 1：安装应用</h3>
+        <ul>
+          <li>为您的平台下载并安装伴侣应用</li>
+          <li>启动应用程序</li>
+        </ul>
+
+        <h3>步骤 2：配置 Core URL</h3>
+        <p>选择您的连接方式：</p>
+
+        <h4>选项 A：本地局域网连接</h4>
+        <p>如果您的设备与 HomeClaw Core 在同一局域网内：</p>
+        <ol>
+          <li>找到您的 Core 的本地 IP 地址（例如 <code>192.168.1.100</code>）</li>
+          <li>在伴侣应用设置中输入：<code>http://&lt;local-ip&gt;:9000</code></li>
+          <li>示例：<code>http://192.168.1.100:9000</code></li>
+        </ol>
+
+        <h4>选项 B：通过隧道远程连接</h4>
+        <p>对于 iPhone、Android 或远程访问，使用隧道服务：</p>
+        <ul>
+          <li><strong>Cloudflare Tunnel：</strong> 设置隧道以获取类似 <code>https://your-subdomain.trycloudflare.com</code> 的域名</li>
+          <li><strong>Pinggy：</strong> 使用 Pinggy 创建带有自定义域名的隧道</li>
+          <li><strong>Ngrok：</strong> 使用 Ngrok 获取公共 URL，如 <code>https://abc123.ngrok.io</code></li>
+        </ul>
+        <p>在伴侣应用中输入隧道 URL 作为您的 Core URL。</p>
+
+        <h3>步骤 3：启用 API 密钥认证（推荐）</h3>
+        <p>使用 API 密钥认证保护您的 Core 连接：</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">在 config/core.yml 中启用认证</p>
+          <pre class="quickstart-code"><code>auth_enable: true
+auth_api_key: your-secure-api-key-here</code></pre>
+        </div>
+        <p>启用认证后：</p>
+        <ol>
+          <li>在伴侣应用中打开设置</li>
+          <li>输入您在 <code>core.yml</code> 中配置的相同 API 密钥</li>
+          <li>保存设置</li>
+        </ol>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(244,67,54,.15); border-left:4px solid #f44336; border-radius:4px;">
+          <strong>重要：</strong> 使用远程访问（隧道）时，请始终启用 API 密钥认证。如果没有认证，任何拥有您隧道 URL 的人都可以访问您的 Core。
+        </div>
+
+        <h3>步骤 4：添加您的用户</h3>
+        <p>通过以下两种方式之一添加您的用户：</p>
+        <ul>
+          <li><strong>方法 1：</strong> 编辑 <code>config/user.yml</code> 并在 <code>im:</code> 下添加您的用户</li>
+          <li><strong>方法 2：</strong> 使用应用中的"管理 Core"功能（如果可用）</li>
+        </ul>
+
+        <h3>步骤 5：连接和聊天</h3>
+        <ol>
+          <li>在应用中点击"连接"</li>
+          <li>等待连接建立</li>
+          <li>开始与 HomeClaw 聊天！</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="features">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>伴侣应用功能</h2>
+        <p>伴侣应用提供丰富的功能集：</p>
+
+        <h3>美观的界面</h3>
+        <p>简洁、现代的设计，带有流畅的动画和直观的导航。</p>
+
+        <h3>完整的 Core 访问</h3>
+        <p>访问所有 Core 功能，包括插件、技能和知识库。</p>
+
+        <h3>记忆管理</h3>
+        <p>查看和管理您的对话历史和记忆。</p>
+
+        <h3>多设备同步</h3>
+        <p>您的对话在连接到同一 Core 的所有设备之间同步。</p>
+
+        <h3>富媒体支持</h3>
+        <p>发送和接收图像、文件和其他媒体类型。</p>
+
+        <h3>通知</h3>
+        <p>当 HomeClaw 回复您的消息时收到通知。</p>
+
+        <h3>离线模式</h3>
+        <p>即使在离线时也可以查看过去的对话（重新连接时消息会同步）。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="remote">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>远程访问</h2>
+        <p>使用伴侣应用从任何地方访问 HomeClaw：</p>
+
+        <h3>二维码扫描（推荐）</h3>
+        <p>使用内置的 Pinggy 隧道进行简单的远程访问：</p>
+        <ol>
+          <li>在 <code>config/core.yml</code> 中设置 <code>pinggy.token</code></li>
+          <li>启动 Core：<code>python -m main start</code></li>
+          <li>Core 启动 Pinggy 隧道并打开 <code>http://127.0.0.1:&lt;port&gt;/pinggy</code></li>
+          <li>在伴侣应用中：<strong>设置 → 扫描二维码连接</strong></li>
+          <li>从 /pinggy 页面扫描二维码</li>
+          <li>应用自动保存 Core URL 和 API 密钥</li>
+        </ol>
+
+        <h3>手动配置</h3>
+        <p>使用以下方法手动配置远程访问：</p>
+        <ul>
+          <li><strong>Tailscale：</strong> 使用 Tailscale IP 作为 Core URL</li>
+          <li><strong>Cloudflare Tunnel：</strong> 使用隧道 URL 作为 Core URL</li>
+          <li><strong>SSH 隧道：</strong> 通过 SSH 将端口转发到 Core</li>
+        </ul>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(33,150,243,.15); border-left:4px solid #2196f3; border-radius:4px;">
+          <strong>安全提示：</strong> 使用远程访问时，请始终在 <code>config/core.yml</code> 中启用 <code>auth_enabled</code> 和 <code>auth_api_key</code> 以保护您的 Core。
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="troubleshooting">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>故障排除</h2>
+        <p>常见问题和解决方案：</p>
+
+        <h3>无法连接到 Core</h3>
+        <ul>
+          <li>确保 Core 正在运行：<code>python -m main start</code></li>
+          <li>检查 Core URL 是否正确（本地：<code>http://127.0.0.1:9000</code> 或局域网 IP）</li>
+          <li>对于远程访问，验证您的隧道是否正在运行</li>
+          <li>验证防火墙设置是否允许连接</li>
+          <li>检查是否启用了认证以及 API 密钥是否正确</li>
+        </ul>
+
+        <h3>连接频繁断开</h3>
+        <ul>
+          <li>检查网络稳定性</li>
+          <li>尝试使用不同的远程访问方法</li>
+          <li>确保 Core 在稳定的连接上运行</li>
+        </ul>
+
+        <h3>消息未同步</h3>
+        <ul>
+          <li>检查两个设备是否都连接到同一个 Core</li>
+          <li>验证 <code>config/user.yml</code> 中的用户配置</li>
+          <li>检查 Core 日志是否有错误</li>
+        </ul>
+
+        <h3>需要更多帮助？</h3>
+        <p>查看 <a href="https://github.com/allenpeng0705/HomeClaw/issues" target="_blank" rel="noopener">GitHub issues</a> 或 <a href="docs.html">完整文档</a> 以获取更详细的故障排除指南。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="next-steps">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>下一步</h2>
+        <p>准备探索更多？</p>
+        <ul>
+          <li><a href="use-homeclaw.html">学习如何使用 HomeClaw</a></li>
+          <li><a href="portal.html">访问门户</a></li>
+          <li><a href="docs.html">阅读完整文档</a></li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">在 GitHub 上贡献</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2026 HomeClaw. 您的数据，您做主。</p>
+      <p>有问题？联系 <a href="mailto:shileipeng@gmail.com">shileipeng@gmail.com</a> 或 <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

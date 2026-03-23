@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw Cursor and ClaudeCode - Use Cursor IDE and Claude Code CLI from your phone or any device via the Companion app.">
+  <title>Cursor and ClaudeCode — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="Main navigation">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="use-homeclaw.html">How to use</a>
+        <a href="companion-app.html">Companion app</a>
+        <a href="portal.html">Portal</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch">EN | <a href="../zh/cursor-and-claudecode.html">中文</a></span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>Cursor and ClaudeCode</h1>
+      <p class="lead">Use Cursor IDE and Claude Code CLI from your phone or any device.</p>
+      <p>Chat with Cursor and Claude Code through the Companion app. Open projects, run AI agents, execute commands, and see results — all from your mobile device or any channel.</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="On this page">
+      <p class="doc-toc-title">On this page</p>
+      <ul>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#requirements">Requirements</a></li>
+        <li><a href="#install">Install Cursor CLI and Claude Code</a></li>
+        <li><a href="#config">Configuration</a></li>
+        <li><a href="#add-friend">Add Cursor/ClaudeCode Friend</a></li>
+        <li><a href="#companion">Use from Companion App</a></li>
+        <li><a href="#mcp">Claude Code MCP Server</a></li>
+        <li><a href="#tips">Tips</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="overview">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Overview</h2>
+        <p>HomeClaw integrates with <strong>Cursor IDE</strong> and <strong>Claude Code CLI</strong> through a bridge server running on your dev machine. This allows you to:</p>
+
+        <ul>
+          <li><strong>Open projects</strong> in Cursor IDE remotely</li>
+          <li><strong>Run AI agents</strong> to fix bugs, write tests, refactor code</li>
+          <li><strong>Execute shell commands</strong> and see results</li>
+          <li><strong>Continue sessions</strong> across multiple messages</li>
+        </ul>
+
+        <h3>How It Works</h3>
+        <table style="width:100%; border-collapse: collapse; margin: 1rem 0;">
+          <thead>
+            <tr style="background: var(--surface); border-bottom: 2px solid var(--border);">
+              <th style="padding: 0.75rem; text-align: left;">Layer</th>
+              <th style="padding: 0.75rem; text-align: left;">Runs on</th>
+              <th style="padding: 0.75rem; text-align: left;">Role</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.75rem;"><strong>Companion app</strong></td>
+              <td style="padding: 0.75rem;">Phone/Tablet</td>
+              <td style="padding: 0.75rem;">UI, sends requests to Core</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.75rem;"><strong>HomeClaw Core</strong></td>
+              <td style="padding: 0.75rem;">Server/LAN</td>
+              <td style="padding: 0.75rem;">Routes to Cursor/ClaudeCode plugins</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.75rem;"><strong>Cursor Bridge</strong></td>
+              <td style="padding: 0.75rem;">Dev machine</td>
+              <td style="padding: 0.75rem;">Runs Cursor/Claude CLI commands</td>
+            </tr>
+            <tr>
+              <td style="padding: 0.75rem;"><strong>Cursor/Claude CLI</strong></td>
+              <td style="padding: 0.75rem;">Dev machine</td>
+              <td style="padding: 0.75rem;">AI agent execution</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(33,150,243,.15); border-left:4px solid #2196f3; border-radius:4px;">
+          <strong>Note:</strong> All file paths refer to the <strong>bridge machine's filesystem</strong>, not your phone. The bridge runs where Cursor and Claude Code are installed.
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="requirements">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Requirements</h2>
+        <p>Before setting up Cursor and ClaudeCode friends, ensure you have the necessary tools installed on your dev machine.</p>
+
+        <h3>For Cursor</h3>
+        <ul>
+          <li><strong>Cursor IDE</strong> — Download from <a href="https://cursor.com" target="_blank" rel="noopener">cursor.com</a></li>
+          <li><strong>Cursor CLI</strong> — Install shell command (see below)</li>
+          <li><strong>Cursor Agent</strong> — CLI for running AI tasks</li>
+        </ul>
+
+        <h3>For Claude Code</h3>
+        <ul>
+          <li><strong>Claude Code CLI</strong> — Install from npm</li>
+          <li><strong>Anthropic API key</strong> — For Claude Code authentication</li>
+        </ul>
+
+        <h3>Bridge Server</h3>
+        <p>The bridge server is included with HomeClaw and runs on your dev machine to connect Core to Cursor/Claude CLI.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="install">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Install Cursor CLI and Claude Code</h2>
+
+        <h3>Option 1: Install with HomeClaw Script</h3>
+        <p>The easiest way — install both during HomeClaw setup:</p>
+
+        <h4>Mac / Linux</h4>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Install with Cursor CLI and Claude Code</p>
+          <pre class="quickstart-code"><code>HOMECLAW_INSTALL_CURSOR_CLI=1 HOMECLAW_INSTALL_CLAUDE_CODE=1 bash install.sh</code></pre>
+        </div>
+
+        <h4>Windows (PowerShell)</h4>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Install with Cursor CLI and Claude Code</p>
+          <pre class="quickstart-code"><code>$env:HOMECLAW_INSTALL_CURSOR_CLI="1"; $env:HOMECLAW_INSTALL_CLAUDE_CODE="1"; .\install.ps1</code></pre>
+        </div>
+
+        <h3>Option 2: Manual Installation</h3>
+
+        <h4>Cursor CLI (Mac / Linux)</h4>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Install Cursor CLI</p>
+          <pre class="quickstart-code"><code>curl https://cursor.com/install -fsS | bash</code></pre>
+        </div>
+
+        <h4>Cursor CLI (Windows PowerShell)</h4>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Install Cursor CLI on Windows</p>
+          <pre class="quickstart-code"><code>irm 'https://cursor.com/install?win32=true' | iex</code></pre>
+        </div>
+
+        <h4>Cursor Shell Command</h4>
+        <p>Install the <code>cursor</code> shell command to open projects from terminal:</p>
+        <ol>
+          <li>Open Cursor IDE</li>
+          <li>Press <code>Cmd+Shift+P</code> (Mac) or <code>Ctrl+Shift+P</code> (Windows/Linux)</li>
+          <li>Type "Shell Command: Install 'cursor' command"</li>
+          <li>Restart your terminal</li>
+        </ol>
+
+        <h4>Claude Code CLI</h4>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Install Claude Code CLI</p>
+          <pre class="quickstart-code"><code>npm install -g @anthropic-ai/claude-code</code></pre>
+        </div>
+
+        <h4>Authenticate Claude Code</h4>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Login to Claude Code</p>
+          <pre class="quickstart-code"><code>claude login</code></pre>
+        </div>
+
+        <h4>Authenticate Cursor Agent</h4>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Login to Cursor Agent</p>
+          <pre class="quickstart-code"><code>agent login</code></pre>
+        </div>
+
+        <p>Or set environment variable:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Set Cursor API key</p>
+          <pre class="quickstart-code"><code>export CURSOR_API_KEY="your-cursor-api-key"</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="config">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Configuration</h2>
+        <p>Configure the Cursor Bridge in <code>config/skills_and_plugins.yml</code>.</p>
+
+        <h3>Auto-start Bridge (Recommended)</h3>
+        <p>Have Core automatically start the bridge server:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Enable auto-start in skills_and_plugins.yml</p>
+          <pre class="quickstart-code"><code>cursor_bridge_auto_start: true
+cursor_bridge_port: 3104</code></pre>
+        </div>
+
+        <h3>Session Continuation</h3>
+        <p>Enable session continuation so the AI remembers context across messages:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Enable session continuation</p>
+          <pre class="quickstart-code"><code>cursor_bridge_cursor_continue_session: true
+cursor_bridge_claude_continue_session: true</code></pre>
+        </div>
+
+        <h3>Specify CLI Paths (If Needed)</h3>
+        <p>If the bridge can't find <code>agent</code> or <code>claude</code>, specify full paths:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Specify CLI paths (Windows example)</p>
+          <pre class="quickstart-code"><code>cursor_bridge_agent_path: "C:\\Users\\You\\AppData\\Local\\Programs\\cursor\\agent.exe"
+claude_code_path: "C:\\Users\\You\\AppData\\Local\\Programs\\claude\\claude.cmd"</code></pre>
+        </div>
+
+        <h3>API Keys</h3>
+        <p>Set API keys if authentication fails:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Set API keys</p>
+          <pre class="quickstart-code"><code>cursor_bridge_cursor_api_key: "your-cursor-api-key"</code></pre>
+        </div>
+
+        <h3>Full Configuration Example</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Complete bridge configuration</p>
+          <pre class="quickstart-code"><code>cursor_bridge_auto_start: true
+cursor_bridge_port: 3104
+cursor_bridge_forward_logs: true
+cursor_bridge_cursor_continue_session: true
+cursor_bridge_claude_continue_session: true
+cursor_bridge_cursor_cli_path: "/usr/local/bin/cursor"
+cursor_bridge_agent_path: "/usr/local/bin/agent"
+claude_code_path: "/usr/local/bin/claude"</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="add-friend">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Add Cursor/ClaudeCode Friend</h2>
+        <p>Add the Cursor or ClaudeCode friend to your user configuration.</p>
+
+        <h3>Using Portal (Recommended)</h3>
+        <ol>
+          <li>Start Portal: <code>python -m main portal</code></li>
+          <li>Open <code>http://127.0.0.1:18472</code></li>
+          <li>Navigate to User Management</li>
+          <li>Select your user</li>
+          <li>Click "Add Friend"</li>
+          <li>Select preset: <strong>Cursor</strong> or <strong>ClaudeCode</strong></li>
+          <li>Save changes</li>
+        </ol>
+
+        <h3>Editing user.yml</h3>
+        <p>Add friends manually to <code>config/user.yml</code>:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Add Cursor friend</p>
+          <pre class="quickstart-code"><code>users:
+  - name: Alice
+    id: alice
+    username: alice
+    password: your-password
+    friends:
+      - name: HomeClaw
+      - name: Cursor
+        preset: cursor</code></pre>
+        </div>
+
+        <div class="doc-keys">
+          <p class="doc-keys-title">Add ClaudeCode friend</p>
+          <pre class="quickstart-code"><code>users:
+  - name: Alice
+    id: alice
+    username: alice
+    password: your-password
+    friends:
+      - name: HomeClaw
+      - name: ClaudeCode
+        preset: claudecode</code></pre>
+        </div>
+
+        <p>Restart Core after making changes:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Restart Core</p>
+          <pre class="quickstart-code"><code>python -m main start</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="companion">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Use from Companion App</h2>
+        <p>Chat with Cursor and ClaudeCode friends from your phone or tablet.</p>
+
+        <h3>Open the Companion App</h3>
+        <ol>
+          <li>Open Companion app on your device</li>
+          <li>Connect to your HomeClaw Core</li>
+          <li>Tap on <strong>Cursor</strong> or <strong>ClaudeCode</strong> in your friends list</li>
+        </ol>
+
+        <h3>Example Commands for Cursor</h3>
+        <ul>
+          <li><strong>"Open /Users/alice/myproject in Cursor"</strong></li>
+          <li><strong>"Run Cursor agent to add unit tests for auth module"</strong></li>
+          <li><strong>"Run npm test and show me the results"</strong></li>
+          <li><strong>"What's the status of the current project?"</strong></li>
+          <li><strong>"Fix the bug in the login component"</strong></li>
+        </ul>
+
+        <h3>Example Commands for ClaudeCode</h3>
+        <ul>
+          <li><strong>"Set project to /Users/alice/myapp"</strong></li>
+          <li><strong>"Run Claude to refactor the database module"</strong></li>
+          <li><strong>"Run Claude agent to fix the failing tests"</strong></li>
+          <li><strong>"Run git status in the project"</strong></li>
+          <li><strong>"Add error handling to the API endpoints"</strong></li>
+        </ul>
+
+        <h3>Session Controls</h3>
+        <p>The Companion app provides quick toggles:</p>
+        <ul>
+          <li><strong>Cursor:</strong> <code>cursor_agent_yolo</code> toggle — enables <code>--yolo</code> flag for auto-running without prompts</li>
+          <li><strong>ClaudeCode:</strong> <code>claude_skip_permissions</code> toggle — enables <code>--dangerously-skip-permissions</code></li>
+        </ul>
+
+        <h3>Clear Session</h3>
+        <p>To start a fresh session:</p>
+        <ul>
+          <li><strong>"Clear cursor session"</strong></li>
+          <li><strong>"New cursor session"</strong></li>
+          <li><strong>"Clear claude session"</strong></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="mcp">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Claude Code MCP Server</h2>
+        <p>Besides the bridge (which runs Claude Code CLI), you can use Claude Code as an <strong>MCP server</strong> — exposing its built-in tools directly to HomeClaw's LLM.</p>
+
+        <h3>What You Get</h3>
+        <ul>
+          <li>HomeClaw's LLM can call Claude Code tools by name: <strong>Read, Write, Edit, Bash, Task, WebFetch</strong>, etc.</li>
+          <li>Fine-grained control from any friend that has MCP tools enabled</li>
+        </ul>
+
+        <h3>Setup MCP Server</h3>
+        <p>First, install the MCP client:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Install MCP client</p>
+          <pre class="quickstart-code"><code>pip install mcp</code></pre>
+        </div>
+
+        <h3>Auto-Register (Recommended)</h3>
+        <p>In <code>config/skills_and_plugins.yml</code>:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Auto-register Claude Code MCP server</p>
+          <pre class="quickstart-code"><code>tools:
+  mcp:
+    enabled: true
+    auto_register_claude_code: true</code></pre>
+        </div>
+
+        <h3>Manual Configuration</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Manual MCP server configuration</p>
+          <pre class="quickstart-code"><code>tools:
+  mcp:
+    enabled: true
+    servers:
+      claude-code:
+        transport: stdio
+        command: claude
+        args: [mcp, serve]
+        env: {}</code></pre>
+        </div>
+
+        <h3>Bridge vs MCP</h3>
+        <table style="width:100%; border-collapse: collapse; margin: 1rem 0;">
+          <thead>
+            <tr style="background: var(--surface); border-bottom: 2px solid var(--border);">
+              <th style="padding: 0.75rem; text-align: left;">Method</th>
+              <th style="padding: 0.75rem; text-align: left;">Best For</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 0.75rem;"><strong>Bridge (ClaudeCode friend)</strong></td>
+              <td style="padding: 0.75rem;">Natural-language tasks: "fix the bug", "add tests". Claude Code CLI runs autonomously.</td>
+            </tr>
+            <tr>
+              <td style="padding: 0.75rem;"><strong>MCP server</strong></td>
+              <td style="padding: 0.75rem;">Fine-grained tool calls: HomeClaw's LLM can call Read, Write, Edit, Bash by name.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>You can use both: ClaudeCode friend for interactive CLI tasks, and MCP for programmatic tool access.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="tips">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Tips</h2>
+
+        <h3>Bridge Must Be Running</h3>
+        <p>The bridge server must be running on your dev machine for Cursor/ClaudeCode friends to work. With <code>cursor_bridge_auto_start: true</code>, Core starts it automatically.</p>
+
+        <h3>Check Bridge Status</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Check bridge health</p>
+          <pre class="quickstart-code"><code>curl http://127.0.0.1:3104/health</code></pre>
+        </div>
+
+        <h3>Remote Access</h3>
+        <p>If Core runs on a different machine than the bridge:</p>
+        <ol>
+          <li>Set <code>base_url</code> in plugin config to bridge machine's IP</li>
+          <li>Allow inbound TCP 3104 on bridge machine's firewall</li>
+          <li>Use Tailscale or VPN for secure access</li>
+        </ol>
+
+        <h3>Session Continuation</h3>
+        <p>With session continuation enabled, the AI remembers context across messages. Each project has its own session, so switching projects maintains separate contexts.</p>
+
+        <h3>View Logs</h3>
+        <p>Enable log forwarding to see bridge output in Core's terminal:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Enable bridge logs</p>
+          <pre class="quickstart-code"><code>cursor_bridge_forward_logs: true</code></pre>
+        </div>
+
+        <h3>Security</h3>
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(244,67,54,.15); border-left:4px solid #f44336; border-radius:4px;">
+          <strong>Warning:</strong> The bridge runs on your dev machine and can execute arbitrary shell commands. Only run it in a trusted environment. If exposing the bridge port, consider adding API key authentication.
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="next-steps">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Next Steps</h2>
+        <p>Ready to code remotely?</p>
+        <ul>
+          <li><a href="companion-app.html">Download Companion app</a></li>
+          <li><a href="remote-access.html">Set up remote access</a></li>
+          <li><a href="skills-from-clawhub.html">Install skills from ClawHub</a></li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">Contribute on GitHub</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2026 HomeClaw. Your data, your control.</p>
+      <p>Questions? Contact <a href="mailto:shileipeng@gmail.com">shileipeng@gmail.com</a> or <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

@@ -3,7 +3,7 @@
   "private": true,
   "description": "Scripts for building docs (e.g. Mermaid diagram export)",
   "scripts": {
-    "diagrams": "mkdir -p assets && mmdc -i diagrams/system-overview.mmd -o assets/system-overview.svg && mmdc -i diagrams/data-flow.mmd -o assets/data-flow.svg",
+    "diagrams": "mkdir -p assets && mmdc -i diagrams/system-overview.mmd -o assets/system-overview.svg && mmdc -i diagrams/data-flow.mmd -o assets/data-flow.svg && mmdc -i diagrams/model-roles-overview.mmd -o assets/model-roles-overview.svg && mmdc -i diagrams/model-selection-decision.mmd -o assets/model-selection-decision.svg && mmdc -i diagrams/model-lifecycle-planned.mmd -o assets/model-lifecycle-planned.svg",
     "diagrams:mac": "PUPPETEER_EXECUTABLE_PATH=\"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" npm run diagrams",
     "install:no-browser": "PUPPETEER_SKIP_DOWNLOAD=true npm install"
   },

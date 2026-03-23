@@ -46,6 +46,13 @@ TOOL_PRESETS: Dict[str, List[str]] = {
         "run_skill",
         "web_search",
     ],
+    # Tutor / academic friend: time + optional spawn and web; pair with friend_presets llm_ref for a dedicated GGUF.
+    "tutor": [
+        "time",
+        "sessions_spawn",
+        "models_list",
+        "web_search",
+    ],
     # Cursor: same as "bridge"; kept for backward compat. Prefer "bridge" for new bridge-style friends.
     "cursor": [
         "time",

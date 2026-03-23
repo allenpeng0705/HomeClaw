@@ -104,6 +104,12 @@ if [ -z "$PYTHON" ]; then
   fi
 fi
 echo "OK: Python $($PYTHON --version 2>&1)"
+# Note: PyPI package `mcp` (MCP client tools) requires Python 3.10+; requirements.txt skips it on 3.9.
+if "$PYTHON" -c "import sys; exit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
+  :
+else
+  echo "Note: Python < 3.10 — optional MCP client (mcp) is not installed. Use 3.10+ for mcp_call / mcp_list_tools, or see docs/mcp.md."
+fi
 
 # ----- Step 2: Node.js -----
 echo ""
@@ -334,19 +340,51 @@ cd "$ROOT"
 if [ -d ".venv" ]; then
   echo "Using existing .venv"
   # shellcheck source=/dev/null
-  . .venv/bin/activate 2>/dev/null || true
+  if . .venv/bin/activate 2>/dev/null; then
+    if [ -x "$ROOT/.venv/bin/python" ]; then
+      PYTHON="$ROOT/.venv/bin/python"
+    fi
+  fi
+  if [ -n "${VIRTUAL_ENV:-}" ] && [ "${VIRTUAL_ENV%/}" = "$ROOT/.venv" ]; then
+    echo "OK: using venv Python: $PYTHON"
+    # .venv may have been created years ago with an older Python than your current `python3.12` on PATH.
+    venv_mm=$("$PYTHON" -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')" 2>/dev/null || echo "?")
+    echo "  (.venv is Python $venv_mm — this is what pip will use, not necessarily your system default.)"
+    if ! "$PYTHON" -c "import sys; exit(0 if sys.version_info >= (3, 10) else 1)" 2>/dev/null; then
+      echo "Warning: .venv is Python $venv_mm (< 3.10). Optional package 'mcp' is skipped; some wheels differ from 3.12."
+      echo "  To use Python 3.12.9 in the project, recreate the venv:"
+      echo "    cd $ROOT && rm -rf .venv && python3.12 -m venv .venv && bash install.sh"
+    fi
+  else
+    echo "Warning: .venv exists but activation did not switch interpreter. Current Python: $PYTHON"
+    echo "If you want strict isolation, run: source .venv/bin/activate  (then re-run install.sh)"
+  fi
+fi
+# Shared pip constraints for deterministic dependency resolution.
+PIP_CONSTRAINTS="$ROOT/requirements-constraints.txt"
+if [ ! -f "$PIP_CONSTRAINTS" ]; then
+  PIP_CONSTRAINTS=""
 fi
 # Upgrade pip first (old pip can cause 403 with some mirrors)
 "$PYTHON" -m pip install --quiet --upgrade pip 2>/dev/null || true
-if ! "$PYTHON" -m pip install --quiet -r requirements.txt; then
+if [ -n "$PIP_CONSTRAINTS" ]; then
+  PIP_MAIN_ARGS=(-r requirements.txt -c "$PIP_CONSTRAINTS")
+else
+  PIP_MAIN_ARGS=(-r requirements.txt)
+fi
+if ! "$PYTHON" -m pip install --quiet "${PIP_MAIN_ARGS[@]}"; then
   echo "First attempt failed. Retrying automatically with official PyPI (ignoring mirror config)..."
   echo "This may take a few minutes (downloading from pypi.org). You will see progress below."
   # Unset mirror env so -i is the only index (pip.conf or PIP_INDEX_URL may point to a mirror that returned 403)
   # Run without --quiet so user sees download/install progress and knows it is not stuck
-  if ! PIP_INDEX_URL= PIP_EXTRA_INDEX_URL= "$PYTHON" -m pip install -r requirements.txt -i https://pypi.org/simple; then
+  if ! PIP_INDEX_URL= PIP_EXTRA_INDEX_URL= "$PYTHON" -m pip install "${PIP_MAIN_ARGS[@]}" -i https://pypi.org/simple; then
     echo "Error: pip install failed."
     echo "  If you saw 403 Forbidden: your pip index (e.g. Tsinghua mirror) may be blocking. Try:"
-    echo "    $PYTHON -m pip install -r requirements.txt -i https://pypi.org/simple"
+    if [ -n "$PIP_CONSTRAINTS" ]; then
+      echo "    $PYTHON -m pip install -r requirements.txt -c requirements-constraints.txt -i https://pypi.org/simple"
+    else
+      echo "    $PYTHON -m pip install -r requirements.txt -i https://pypi.org/simple"
+    fi
     echo "  If you see permission errors: $PYTHON -m pip install --user -r requirements.txt"
     exit 1
   fi
@@ -359,11 +397,20 @@ echo "OK: requirements installed"
 echo ""
 echo "=== Step 5b: Cognee dependencies (memory backend) ==="
 if [ -f "$ROOT/requirements-cognee-deps.txt" ]; then
-  echo "Installing Cognee dependencies (instructor, etc.)..."
-  if PIP_INDEX_URL= PIP_EXTRA_INDEX_URL= "$PYTHON" -m pip install -r "$ROOT/requirements-cognee-deps.txt" -i https://pypi.org/simple; then
-    echo "OK: Cognee dependencies installed"
+  echo "Installing Cognee dependencies (safe mode: avoid overriding core deps like openai/litellm)..."
+  if [ -n "$PIP_CONSTRAINTS" ]; then
+    PIP_COGNEE_ARGS=(--no-deps -r "$ROOT/requirements-cognee-deps.txt" -c "$PIP_CONSTRAINTS")
   else
-    echo "Cognee deps install failed or skipped. To retry: $PYTHON -m pip install -r requirements-cognee-deps.txt -i https://pypi.org/simple"
+    PIP_COGNEE_ARGS=(--no-deps -r "$ROOT/requirements-cognee-deps.txt")
+  fi
+  if PIP_INDEX_URL= PIP_EXTRA_INDEX_URL= "$PYTHON" -m pip install "${PIP_COGNEE_ARGS[@]}" -i https://pypi.org/simple; then
+    echo "OK: Cognee direct dependencies installed (without transitive downgrades)"
+  else
+    if [ -n "$PIP_CONSTRAINTS" ]; then
+      echo "Cognee deps install failed or skipped. To retry: $PYTHON -m pip install --no-deps -r requirements-cognee-deps.txt -c requirements-constraints.txt -i https://pypi.org/simple"
+    else
+      echo "Cognee deps install failed or skipped. To retry: $PYTHON -m pip install --no-deps -r requirements-cognee-deps.txt -i https://pypi.org/simple"
+    fi
   fi
 else
   echo "requirements-cognee-deps.txt not found; skipping."
@@ -374,10 +421,19 @@ echo ""
 echo "=== Step 5c: Document support (document_read: PDF, Word, images) ==="
 if [ -f "$ROOT/requirements-document.txt" ]; then
   echo "Installing document stack (pinned versions)..."
-  if PIP_INDEX_URL= PIP_EXTRA_INDEX_URL= "$PYTHON" -m pip install -r "$ROOT/requirements-document.txt" -i https://pypi.org/simple; then
+  if [ -n "$PIP_CONSTRAINTS" ]; then
+    PIP_DOC_ARGS=(-r "$ROOT/requirements-document.txt" -c "$PIP_CONSTRAINTS")
+  else
+    PIP_DOC_ARGS=(-r "$ROOT/requirements-document.txt")
+  fi
+  if PIP_INDEX_URL= PIP_EXTRA_INDEX_URL= "$PYTHON" -m pip install "${PIP_DOC_ARGS[@]}" -i https://pypi.org/simple; then
     echo "OK: document stack installed"
   else
-    echo "Document stack install failed or skipped. To install later: $PYTHON -m pip install -r requirements-document.txt -i https://pypi.org/simple"
+    if [ -n "$PIP_CONSTRAINTS" ]; then
+      echo "Document stack install failed or skipped. To install later: $PYTHON -m pip install -r requirements-document.txt -c requirements-constraints.txt -i https://pypi.org/simple"
+    else
+      echo "Document stack install failed or skipped. To install later: $PYTHON -m pip install -r requirements-document.txt -i https://pypi.org/simple"
+    fi
   fi
 else
   echo "requirements-document.txt not found; skipping."

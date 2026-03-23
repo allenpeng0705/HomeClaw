@@ -30,6 +30,7 @@ from urllib.parse import quote
 from base.tools import ToolContext, ToolDefinition, ToolRegistry, ROUTING_RESPONSE_ALREADY_SENT
 from base.skills import get_all_skills_dirs, resolve_skill_to_path
 from base.workspace import get_workspace_dir, get_agent_memory_file_path, append_daily_memory
+from base.user_sandbox_folders import FOLDER_NAMES_FOR_USER_MESSAGE, STANDARD_USER_SANDBOX_SUBDIRS
 from base.util import Util, redact_params_for_log
 from base.base import PluginResult, User
 from base.media_io import save_data_url_to_media_folder
@@ -59,6 +60,9 @@ KEYED_SKILLS = {
     "hootsuite-1.0.0": ("hootsuite_access_token", "HOOTSUITE_ACCESS_TOKEN"),
     "weibo-api-1.0.0": ("weibo_access_token", "WEIBO_ACCESS_TOKEN"),
 }
+
+# Shown in folder_list / file_find tool descriptions (keep in sync with base.user_sandbox_folders).
+_USER_SANDBOX_FOLDER_NAMES_FOR_TOOLS = ", ".join(FOLDER_NAMES_FOR_USER_MESSAGE)
 
 
 def _get_keyed_skill_env_overrides(
@@ -2367,37 +2371,108 @@ async def _sessions_spawn_executor(arguments: Dict[str, Any], context: ToolConte
         return json.dumps({"error": str(e)})
 
 
+async def _peer_call_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """POST /inbound on another HomeClaw Core listed in config/peers.yml (or override base_url)."""
+    try:
+        from base.peer_registry import (
+            find_peer_by_instance_id,
+            post_inbound_sync,
+            resolve_peer_api_key,
+        )
+
+        text = (arguments.get("text") or arguments.get("message") or arguments.get("task") or "").strip()
+        if not text:
+            return json.dumps({"error": "text (or message/task) is required", "ok": False})
+        instance_id = (arguments.get("instance_id") or arguments.get("peer") or "").strip()
+        base_url = (arguments.get("base_url") or "").strip().rstrip("/")
+        user_id = (arguments.get("inbound_user_id") or arguments.get("user_id") or "").strip()
+        api_key = (arguments.get("api_key") or "").strip() or None
+        peer = find_peer_by_instance_id(instance_id) if instance_id else None
+        if peer:
+            base_url = (peer.get("base_url") or base_url or "").strip().rstrip("/")
+            if not user_id:
+                user_id = (peer.get("inbound_user_id") or "").strip()
+            if not api_key:
+                api_key = resolve_peer_api_key(peer)
+        if not base_url:
+            return json.dumps(
+                {
+                    "error": "Unknown peer: pass instance_id (must match config/peers.yml) or base_url",
+                    "ok": False,
+                },
+                ensure_ascii=False,
+            )
+        if not user_id:
+            return json.dumps(
+                {
+                    "error": "inbound_user_id required (set in peers.yml for this peer or pass inbound_user_id)",
+                    "ok": False,
+                },
+                ensure_ascii=False,
+            )
+        try:
+            timeout = float(arguments.get("timeout_seconds") or 120)
+        except (TypeError, ValueError):
+            timeout = 120.0
+        timeout = max(10.0, min(timeout, 600.0))
+        data = post_inbound_sync(base_url, user_id, text, api_key=api_key, timeout=timeout)
+        return json.dumps(data, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": str(e), "ok": False}, ensure_ascii=False)
+
+
 async def _models_list_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """List available model refs with capabilities (from config). Use ref as llm_name in sessions_spawn, or use capability (e.g. Chat) in sessions_spawn to select by capability."""
+    """List model refs with capabilities, optional description, available (from llm.yml). Agent uses description + capabilities to choose llm_name for sessions_spawn."""
     try:
         from base.util import Util
         util = Util()
+        meta = getattr(util, "core_metadata", None)
+        if not meta:
+            return json.dumps({"models": [], "model_details": [], "main_llm": "", "message": "Core metadata not loaded."})
         refs = util.get_llms()
-        main_llm = getattr(util.core_metadata, "main_llm", "") or ""
+        main_llm = (getattr(meta, "main_llm", None) or "") or ""
         model_details = []
-        for m in (util.core_metadata.local_models or []):
+        for m in (meta.local_models or []):
+            if not isinstance(m, dict):
+                continue
             mid = m.get("id")
-            if mid:
-                model_details.append({
-                    "ref": f"local_models/{mid}",
-                    "alias": m.get("alias") or mid,
-                    "capabilities": m.get("capabilities") or [],
-                })
-        for m in (util.core_metadata.cloud_models or []):
+            mid_s = str(mid).strip() if mid is not None else ""
+            if not mid_s:
+                continue
+            _desc = m.get("description")
+            if _desc is not None and not isinstance(_desc, str):
+                _desc = str(_desc)
+            model_details.append({
+                "ref": f"local_models/{mid_s}",
+                "alias": str(m.get("alias") or mid_s).strip() or mid_s,
+                "capabilities": Util._normalize_capability_list(m.get("capabilities")),
+                "description": (_desc or "").strip() if isinstance(_desc, str) else "",
+                "available": util.model_entry_available(m),
+            })
+        for m in (meta.cloud_models or []):
+            if not isinstance(m, dict):
+                continue
             mid = m.get("id")
-            if mid:
-                model_details.append({
-                    "ref": f"cloud_models/{mid}",
-                    "alias": m.get("alias") or mid,
-                    "capabilities": m.get("capabilities") or [],
-                })
+            mid_s = str(mid).strip() if mid is not None else ""
+            if not mid_s:
+                continue
+            _desc = m.get("description")
+            if _desc is not None and not isinstance(_desc, str):
+                _desc = str(_desc)
+            model_details.append({
+                "ref": f"cloud_models/{mid_s}",
+                "alias": str(m.get("alias") or mid_s).strip() or mid_s,
+                "capabilities": Util._normalize_capability_list(m.get("capabilities")),
+                "description": (_desc or "").strip() if isinstance(_desc, str) else "",
+                "available": util.model_entry_available(m),
+            })
         if not model_details and refs:
-            model_details = [{"ref": r, "alias": r, "capabilities": []} for r in refs]
+            model_details = [{"ref": r, "alias": r, "capabilities": [], "description": "", "available": True} for r in refs]
         return json.dumps({
             "models": refs,
             "model_details": model_details,
             "main_llm": main_llm,
-            "message": "For sessions_spawn: use llm_name (a ref from 'models') or capability (e.g. 'Chat') to select model. Omit both to use main_llm. capability selects a model that has that capability in config.",
+            "message": "Catalog entries include optional description (human + LLM-readable). Match user intent to ref+capabilities+description when choosing llm_name for sessions_spawn. capability-based spawn still uses tags only—not descriptions (automatic description routing is future).",
         }, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e), "models": [], "model_details": [], "main_llm": ""})
@@ -4209,6 +4284,103 @@ async def _get_file_view_link_executor(arguments: Dict[str, Any], context: ToolC
 # Reserved path prefix for user/companion generated files (reports, images, exports). Use path "output/<filename>" so files land in base/{user_id}/output/ or base/companion/output/. See docs_design/FileSandboxDesign.md.
 FILE_OUTPUT_SUBDIR = "output"
 
+def _resolved_base_is_share_root(base: Optional[Any]) -> bool:
+    """True if resolved base path is the global share directory (homeclaw_root/share), not a user's sandbox."""
+    if base is None:
+        return False
+    try:
+        cfg = _get_tools_config()
+        sd = (cfg.get("file_read_shared_dir") or "share").strip().lower()
+        name = Path(base).name.lower()
+        return bool(sd) and name == sd
+    except Exception:
+        return False
+
+
+def _try_create_standard_sandbox_subdir(full: Path, base: Path) -> bool:
+    """
+    If `full` is under the user sandbox (not share) and the path starts with a standard subfolder name,
+    create the directory tree (mkdir -p). Returns True if `full` is a directory after the call.
+    Never raises.
+    """
+    try:
+        if _resolved_base_is_share_root(base):
+            return False
+        if not _path_under(full, base):
+            return False
+        rel = full.relative_to(base.resolve())
+        parts = rel.parts
+        if not parts:
+            return full.is_dir()
+        first = parts[0].lower()
+        if first not in STANDARD_USER_SANDBOX_SUBDIRS:
+            return False
+        if full.exists() and full.is_file():
+            return False
+        full.mkdir(parents=True, exist_ok=True)
+        return full.is_dir()
+    except (ValueError, OSError) as e:
+        logger.debug("_try_create_standard_sandbox_subdir: %s", e)
+        return False
+
+
+async def _folder_list_fallback_explore(context: ToolContext, path_arg: str) -> str:
+    """
+    When the requested path is not a folder: show sandbox root + shared folder listings so the user (and LLM) can pick a valid path.
+    Returns markdown text (not JSON). Never raises.
+    """
+    lines: List[str] = [
+        f"**Path `{path_arg}`** is not a folder in your sandbox, or it could not be opened. "
+        "Below are **your sandbox root** and the **shared folder** (`share`):\n\n",
+    ]
+    try:
+        max_show = 80
+        for label, pth in (
+            ("Your sandbox root (use path `.` or empty)", "."),
+            ("Shared folder (use path `share`)", "share"),
+        ):
+            r = _resolve_file_path(pth, context, for_write=False)
+            if r is None:
+                lines.append(f"### {label}\n_Not available (check **homeclaw_root** in config)._ \n\n")
+                continue
+            fdir, b = r
+            if not fdir.is_dir():
+                lines.append(f"### {label}\n_Not a directory or missing._\n\n")
+                continue
+            try:
+                children = list(fdir.iterdir())
+            except OSError as e:
+                lines.append(f"### {label}\n_Could not read: {e!s}_\n\n")
+                continue
+            children.sort(key=lambda x: (not x.is_dir(), (x.name or "").lower()))
+            lines.append(f"### {label}\n")
+            if not children:
+                lines.append("_Empty._\n\n")
+                continue
+            for i, p in enumerate(children):
+                if i >= max_show:
+                    lines.append(f"- … _({len(children) - max_show} more)_\n")
+                    break
+                typ = "dir" if p.is_dir() else "file"
+                try:
+                    rp = str(p.relative_to(b)).replace("\\", "/")
+                except ValueError:
+                    rp = getattr(p, "name", "") or "?"
+                nm = getattr(p, "name", "") or rp
+                lines.append(f"- **{nm}** ({typ}) — `{rp}`\n")
+            lines.append("\n")
+    except Exception as e:
+        logger.debug("_folder_list_fallback_explore failed: %s", e)
+        return _file_not_found_msg(context)
+    _names = ", ".join(f"**{n}**" for n in FOLDER_NAMES_FOR_USER_MESSAGE if n != "share")
+    lines.append(
+        f"---\n**Tip:** Standard folders under your sandbox are {_names}. "
+        "Listing one of these paths creates the folder if it did not exist yet. "
+        "Use **`share`** for the **global** shared folder (all users). "
+        "Use **`folder_list(path='…')`** with the exact path from the lists above.\n"
+    )
+    return "".join(lines)
+
 # Polite messages for file tools (never crash; user-friendly responses)
 _FILE_ACCESS_DENIED_MSG = (
     "That path is outside the sandbox. You can only access (1) the user sandbox root and its subfolders (omit path or use subdir name), "
@@ -4651,7 +4823,14 @@ async def _folder_list_executor(arguments: Dict[str, Any], context: ToolContext)
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
         if not full.is_dir():
-            return _file_not_found_msg(context)
+            if full.exists() and full.is_file():
+                return (
+                    f"`{path_arg}` is a **file**, not a folder. Use **document_read** or **file_read** to read it, "
+                    f"or **folder_list** on a parent path (e.g. `documents` if this file is under documents)."
+                )
+            _try_create_standard_sandbox_subdir(full, base)
+        if not full.is_dir():
+            return await _folder_list_fallback_explore(context, path_arg)
         max_entries = _safe_int(arguments.get("max_entries"), 500, 1, 2000)
         entries = []
         path_arg_normalized = (path_arg or ".").strip() in (".", "")
@@ -4705,7 +4884,11 @@ async def _file_find_executor(arguments: Dict[str, Any], context: ToolContext) -
         if not _path_under(full_dir, base):
             return _FILE_ACCESS_DENIED_MSG
         if not full_dir.is_dir():
-            return _file_not_found_msg(context)
+            if full_dir.exists() and full_dir.is_file():
+                return f"`{path_arg}` is a file, not a folder. Use **file_find** with a directory path (e.g. `.` or `documents`)."
+            _try_create_standard_sandbox_subdir(full_dir, base)
+        if not full_dir.is_dir():
+            return await _folder_list_fallback_explore(context, path_arg)
         max_results = _safe_int(arguments.get("max_results"), 200, 1, 2000)
         results = []
         base_for_rel = base if base is not None else full_dir
@@ -5362,7 +5545,27 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
             from base.base import PromptRequest
             req_copy = request.model_copy(deep=True)
             req_copy.request_metadata = request_meta
-            result = await plugin_manager.run_external_plugin(plugin, req_copy)
+            # Async inbound + Cursor bridge run_agent: stream NDJSON from bridge into GET /inbound/result text_preview.
+            try:
+                from core.inbound_async_context import ASYNC_INBOUND_REQUEST_ID
+
+                _async_rid = ASYNC_INBOUND_REQUEST_ID.get()
+            except Exception:
+                _async_rid = None
+            _pid_norm = plugin_id.replace("-", "_")
+            _use_bridge_stream = (
+                _async_rid
+                and request_meta.get("bridge_agent_stream_preview")
+                and capability_id == "run_agent"
+                and _pid_norm == "cursor_bridge"
+                and str((plugin.get("type") or "")).lower() == "http"
+            )
+            if _use_bridge_stream:
+                result = await plugin_manager.run_external_plugin_http_cursor_bridge_stream(
+                    plugin, req_copy, core, _async_rid
+                )
+            else:
+                result = await plugin_manager.run_external_plugin(plugin, req_copy)
             if isinstance(result, PluginResult):
                 if not result.success:
                     result_text = result.error or result.text or "Plugin returned an error"
@@ -5912,19 +6115,59 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="sessions_spawn",
-            description="Sub-agent run: run a one-off task with isolated context (no prior conversation); ideal for a focused subtask. Returns the model reply. Select model by llm_name (ref from models_list) or capability (e.g. 'Chat'). Omit both to use main_llm.",
+            description="Sub-agent run: one-off task, isolated context (no prior chat), no tools inside spawn. Returns the model reply. Pick llm_name from the LLM catalog block appended below (or call models_list). Or pass capability= for tag-based auto-pick. Omit both for main_llm.",
             parameters={
                 "type": "object",
                 "properties": {
                     "task": {"type": "string", "description": "The question or instruction for the sub-agent (one-off run)."},
                     "message": {"type": "string", "description": "Alias for task."},
                     "text": {"type": "string", "description": "Alias for task."},
-                    "llm_name": {"type": "string", "description": "Optional. Model ref (e.g. local_models/<id> or cloud_models/<id>) from models_list. Omit to use main_llm or capability."},
-                    "capability": {"type": "string", "description": "Optional. Select model by capability from config (e.g. 'Chat'). Use models_list to see model_details.capabilities. If set, overrides llm_name; system picks a model that has this capability."},
+                    "llm_name": {"type": "string", "description": "Exact ref from the catalog block on this tool (e.g. local_models/<id>). Omit if using capability or main_llm."},
+                    "capability": {"type": "string", "description": "Tag from catalog (e.g. Chat, Math). Resolves to first matching available model; ignores description. Omit if llm_name is set."},
                 },
                 "required": ["task"],
             },
             execute_async=_sessions_spawn_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="peer_call",
+            description="Call another HomeClaw Core over HTTP (POST /inbound). Use instance_id from the peer roster block below (config/peers.yml) or pass base_url for a one-off. Requires inbound_user_id and API key (from peers.yml api_key_env or argument) when the peer has auth_enabled.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "instance_id": {
+                        "type": "string",
+                        "description": "Peer id from the roster below (must match peers.yml instance_id).",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Message or task text sent to the peer Core as the inbound user message.",
+                    },
+                    "message": {"type": "string", "description": "Alias for text."},
+                    "task": {"type": "string", "description": "Alias for text."},
+                    "base_url": {
+                        "type": "string",
+                        "description": "Optional override (e.g. https://peer:9000). If instance_id matches peers.yml, base_url from config is used.",
+                    },
+                    "inbound_user_id": {
+                        "type": "string",
+                        "description": "Optional override; default from peers.yml (must be allowed on peer's user.yml).",
+                    },
+                    "api_key": {
+                        "type": "string",
+                        "description": "Optional X-API-Key for peer; prefer api_key_env in peers.yml instead of passing here.",
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "description": "HTTP timeout (default 120, max 600).",
+                        "default": 120,
+                    },
+                },
+                "required": ["text"],
+            },
+            execute_async=_peer_call_executor,
         )
     )
 
@@ -6535,7 +6778,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="models_list",
-            description="List available model refs and main_llm. For sessions_spawn: omit llm_name to use main_llm; to use a different model pass one ref from the list — prefer a smaller/faster one (e.g. 7B in the id) for quick sub-tasks.",
+            description="List model refs, capabilities, optional per-model description (from llm.yml), available flag, and main_llm. Use model_details.description and capabilities to pick llm_name for sessions_spawn when capability alone is ambiguous.",
             parameters={"type": "object", "properties": {}, "required": []},
             execute_async=_models_list_executor,
         )
@@ -6789,11 +7032,14 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="folder_list",
-            description="List one level of a directory (subfolders and files). You MUST call this tool when the user asks to list files or what is in a folder (any wording or language). You MUST pass the path argument: extract the folder name from the user's message (e.g. 'images里有哪些文件' → path='images'; 'documents folder' → path='documents'; '看下output里有什么' → path='output'). If the user did not name a folder, use path='.'. User sandbox folders: documents, downloads, output, images, work, knowledge, share. Never call folder_list without the path argument.",
+            description=(
+                "List one level of a directory (subfolders and files). You MUST call this tool when the user asks to list files or what is in a folder (any wording or language). You MUST pass the path argument: extract the folder name from the user's message (e.g. 'images里有哪些文件' → path='images'; 'documents folder' → path='documents'; '看下output里有什么' → path='output'). If the user did not name a folder, use path='.'. "
+                f"Known folder names (user sandbox or global share): {_USER_SANDBOX_FOLDER_NAMES_FOR_TOOLS}. Never call folder_list without the path argument."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Required. The folder to list. Extract from the user's message: the exact folder name they said (e.g. images, documents, output, work, downloads, knowledge, share), or '.' if they did not name a folder (e.g. 'list my files', '我都有哪些文件'). Examples: 'images里有哪些文件' → 'images'; 'documents里有哪些文件' → 'documents'; 'what's in the work folder' → 'work'. Do not omit."},
+                    "path": {"type": "string", "description": f"Required. The folder to list. Extract from the user's message: the exact folder name they said (e.g. {_USER_SANDBOX_FOLDER_NAMES_FOR_TOOLS}), or '.' if they did not name a folder (e.g. 'list my files', '我都有哪些文件'). Examples: 'images里有哪些文件' → 'images'; 'documents里有哪些文件' → 'documents'; 'what's in the work folder' → 'work'. Do not omit."},
                     "max_entries": {"type": "integer", "description": "Max entries to return (default 500).", "default": 500},
                 },
                 "required": ["path"],

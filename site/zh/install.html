@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw 安装指南，适用于 Mac、Windows 和 Linux。分步安装说明。">
+  <title>如何安装 — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="主导航">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">首页</a>
+        <a href="install.html" class="active">安装</a>
+        <a href="use-homeclaw.html">如何使用</a>
+        <a href="companion-app.html">伴侣应用</a>
+        <a href="portal.html">门户</a>
+        <a href="docs.html">文档</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch"><a href="../en/install.html">EN</a> | 中文</span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>如何安装 HomeClaw</h1>
+      <p class="lead">在几分钟内让 HomeClaw 在您的机器上运行。支持 Mac、Windows 和 Linux。</p>
+      <p>HomeClaw 是一个在本地机器上运行的 AI 助手。您的数据由您自己掌控，为您提供完全的控制权和隐私保护。安装简单直接。</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="本页内容">
+      <p class="doc-toc-title">本页内容</p>
+      <ul>
+        <li><a href="#prerequisites">前置要求</a></li>
+        <li><a href="#simple-install">简单安装（推荐）</a></li>
+        <li><a href="#manual-install">手动安装</a></li>
+        <li><a href="#verify">验证安装</a></li>
+        <li><a href="#troubleshooting">故障排除</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="prerequisites">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>前置要求</h2>
+        <p>在安装 HomeClaw 之前，请确保您具备以下条件：</p>
+        <ul>
+          <li><strong>Python 3.11 或更高版本</strong> — 使用 <code>python --version</code> 或 <code>python3 --version</code> 检查</li>
+          <li><strong>Git</strong> — 用于克隆仓库</li>
+          <li><strong>pip</strong> — Python 包管理器（通常随 Python 一起安装）</li>
+        </ul>
+        <p><em>注意：在 Windows 上，如果遇到 C++ 构建错误，请安装 <a href="https://visualstudio.microsoft.com/visual-cpp-build-tools/" target="_blank" rel="noopener">Visual C++ Build Tools</a>。</em></p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="simple-install">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>简单安装（推荐）</h2>
+        <p>安装 HomeClaw 最简单的方法是使用提供的安装脚本。这些脚本会自动处理所有设置。</p>
+
+        <h3>Mac &amp; Linux</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">运行安装脚本</p>
+          <pre class="quickstart-code"><code>./install.sh</code></pre>
+        </div>
+        <p>脚本将自动：</p>
+        <ul>
+          <li>克隆仓库（如果尚未克隆）</li>
+          <li>安装 Python 依赖</li>
+          <li>复制 llama.cpp 二进制分发文件</li>
+          <li>下载所需的模型</li>
+          <li>设置配置文件</li>
+        </ul>
+
+        <h3>Windows</h3>
+        <p>对于 Windows，您可以使用 PowerShell 或命令提示符：</p>
+
+        <div class="doc-keys">
+          <p class="doc-keys-title">选项 1：PowerShell</p>
+          <pre class="quickstart-code"><code>.\install.ps1</code></pre>
+        </div>
+
+        <div class="doc-keys">
+          <p class="doc-keys-title">选项 2：命令提示符</p>
+          <pre class="quickstart-code"><code>install.bat</code></pre>
+        </div>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(76,175,80,.15); border-left:4px solid #4caf50; border-radius:4px;">
+          <strong>脚本的作用：</strong> 安装脚本自动化整个设置过程，包括克隆代码、安装依赖、设置 llama.cpp 二进制文件和下载模型。这是大多数用户推荐的方法。
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="manual-install">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>手动安装</h2>
+        <p>如果您更喜欢不使用安装脚本手动安装 HomeClaw，请按照以下步骤操作：</p>
+
+        <h3>步骤 1：克隆仓库</h3>
+        <div class="doc-keys">
+          <pre class="quickstart-code"><code>git clone https://github.com/allenpeng0705/HomeClaw.git
+cd HomeClaw</code></pre>
+        </div>
+
+        <h3>步骤 2：安装 Python 依赖</h3>
+        <div class="doc-keys">
+          <pre class="quickstart-code"><code>pip install -r requirements.txt</code></pre>
+        </div>
+
+        <h3>步骤 3：复制 llama.cpp 二进制分发文件</h3>
+        <p>下载并复制适合您平台的 llama.cpp 二进制文件：</p>
+        <ul>
+          <li><strong>Mac：</strong> 将二进制文件复制到适当的目录</li>
+          <li><strong>Linux：</strong> 将二进制文件复制到适当的目录</li>
+          <li><strong>Windows：</strong> 将二进制文件复制到适当的目录</li>
+        </ul>
+
+        <h3>步骤 4：下载模型</h3>
+        <p>下载所需的 AI 模型。具体模型取决于您在 <code>config/llm.yml</code> 中的配置。</p>
+
+        <h3>步骤 5：配置并运行</h3>
+        <p>根据需要编辑配置文件，然后运行 HomeClaw：</p>
+        <div class="doc-keys">
+          <pre class="quickstart-code"><code>python -m main start</code></pre>
+        </div>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(255,152,0,.15); border-left:4px solid #ff9800; border-radius:4px;">
+          <strong>注意：</strong> 手动安装需要更多的技术知识。除非您有特定的自定义设置要求，否则我们建议使用安装脚本。
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="verify">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>验证安装</h2>
+        <p>安装完成后，验证一切是否正常工作：</p>
+
+        <div class="doc-keys">
+          <p class="doc-keys-title">启动 HomeClaw</p>
+          <pre class="quickstart-code"><code>python -m main start</code></pre>
+        </div>
+
+        <p>如果 HomeClaw 启动没有错误，并且您可以访问 Web 界面，恭喜！HomeClaw 已成功安装。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="troubleshooting">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>故障排除</h2>
+        <p>常见问题和解决方案：</p>
+
+        <h3>找不到 Python</h3>
+        <p>确保 Python 已安装并添加到系统 PATH。在 Mac 上，您可能需要使用 <code>python3</code> 而不是 <code>python</code>。</p>
+
+        <h3>找不到 pip</h3>
+        <p>确保 pip 已安装。您可以使用以下命令安装：<code>python -m ensurepip --upgrade</code></p>
+
+        <h3>权限被拒绝</h3>
+        <p>在 Mac/Linux 上，确保安装脚本具有执行权限：<code>chmod +x install.sh</code></p>
+
+        <h3>Windows 上出现构建错误</h3>
+        <p>从 Microsoft 网站安装 Visual C++ Build Tools。</p>
+
+        <h3>需要更多帮助？</h3>
+        <p>查看 <a href="https://github.com/allenpeng0705/HomeClaw/issues" target="_blank" rel="noopener">GitHub issues</a> 或 <a href="https://allenpeng0705.github.io/HomeClaw/" target="_blank" rel="noopener">完整文档</a> 以获取更详细的故障排除指南。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="next-steps">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>下一步</h2>
+        <p>现在 HomeClaw 已安装，您可以：</p>
+        <ul>
+          <li><a href="use-homeclaw.html">学习如何使用 HomeClaw</a></li>
+          <li><a href="companion-app.html">设置伴侣应用</a></li>
+          <li><a href="portal.html">访问门户</a></li>
+          <li><a href="docs.html">阅读完整文档</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2026 HomeClaw. 您的数据，您做主。</p>
+      <p>有问题？联系 <a href="mailto:shileipeng@gmail.com">shileipeng@gmail.com</a> 或 <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

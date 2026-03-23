@@ -1,7 +1,7 @@
 name: home_claw_app
 description: HomeClaw companion app - chat with Core on Mac, Windows, Linux, Android, iOS.
 publish_to: 'none'
-version: 1.0.0+17
+version: 1.0.0+18
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -41,6 +41,8 @@ dependencies:
   audioplayers: ^6.1.0
   record: ^6.0.0   # 6.x uses record_linux 1.x compatible with record_platform_interface (fixes iOS build)
   video_player: ^2.9.2
+  cryptography: ^2.9.0
+  flutter_secure_storage: ^10.0.0
 
 dev_dependencies:
   flutter_test:

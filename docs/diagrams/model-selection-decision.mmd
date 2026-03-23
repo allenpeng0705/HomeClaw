@@ -1,0 +1,25 @@
+flowchart TD
+  A[LLM call needed] --> B{Which path?}
+
+  B -->|Default chat / tool turns| C[main_llm from config]
+  B -->|use_tool_selection_llm enabled| D[tool_selection_llm for that turn]
+  D --> C
+
+  B -->|Embedding / RAG / skill index| E[embedding_llm]
+  B -->|User sent image + main not vision| F[vision_llm or describe-then-main]
+  B -->|Mix mode routing| G[hybrid_router / SLM classifier]
+  G -->|local| C
+  G -->|cloud| H[main_llm_cloud or cloud ref]
+
+  B -->|sessions_spawn tool| I{llm_name or capability?}
+  I -->|llm_name set| J[Resolve local_models/id or cloud_models/id]
+  I -->|capability only| K[get_llm_ref_by_capability — prefers main if it matches]
+  J --> L[Single completion — no tools in spawn]
+  K --> L
+
+  B -->|Per-call override in code| M[openai_chat_completion llm_name=…]
+
+  C --> N[Util._resolve_llm → host:port + model id]
+  E --> N
+  J --> N
+  H --> N

@@ -76,8 +76,20 @@ capabilities:
         description: File path to open (absolute or relative to project).
   - id: get_status
     name: Get Cursor Bridge status
-    description: Return the Cursor Bridge current state, including active project cwd and default cwd. Useful for Companion UI and debugging.
+    description: Return the Cursor Bridge current state (active cwd, optional cursor_stored_session_id, claude fields, default cwd). Useful for Companion UI and debugging.
     parameters: []
+  - id: clear_cursor_session
+    name: Clear stored Cursor agent session
+    description: Remove the persisted Cursor CLI session id for a project so the next run_agent uses --continue instead of --resume. Optional path/cwd; defaults to active Cursor project.
+    parameters:
+      - name: path
+        type: string
+        required: false
+        description: Project folder (alias cwd).
+      - name: cwd
+        type: string
+        required: false
+        description: Project directory to clear stored session for.
   - id: run_agent_interactive
     name: Start Cursor agent interactively (PTY)
     description: Start the Cursor CLI agent in an interactive PTY on the bridge machine so the user can type and see output via Companion/WebChat. Returns session_id and initial_output; use interactive_read/interactive_write/interactive_stop for the same session.

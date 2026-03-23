@@ -26,6 +26,7 @@ from base.workspace import (
     trim_content_bootstrap,
     load_friend_identity_file,
 )
+from base.user_sandbox_folders import FOLDER_NAMES_FOR_USER_MESSAGE, STANDARD_USER_SANDBOX_SUBDIRS
 from base.friend_presets import (
     get_tool_names_for_preset,
     get_tool_names_for_preset_value,
@@ -83,6 +84,11 @@ def _is_confirmation_phrase(text: str) -> bool:
 
 
 from tools.builtin import close_browser_session
+
+# System prompt: per-user standard dirs + global share.
+_PRIVATE_STANDARD_FOLDERS_PROMPT = ", ".join(sorted(STANDARD_USER_SANDBOX_SUBDIRS))
+_STANDARD_SANDBOX_FOLDER_NAMES_FOR_PROMPT = _PRIVATE_STANDARD_FOLDERS_PROMPT + ", share (global)"
+
 from core.log_helpers import (
     _component_log,
     _truncate_for_log,
@@ -270,6 +276,14 @@ def _cursor_bridge_capability_and_params(query: str) -> tuple:
             return "run_command", {"command": rest}
         if len(rest) < 50 and "agent" not in rest.lower() and " the " not in rest.lower():
             return "run_command", {"command": rest}
+    if q_lower in (
+        "clear cursor session",
+        "new cursor session",
+        "reset cursor session",
+        "forget cursor session",
+        "start fresh cursor session",
+    ):
+        return "clear_cursor_session", {}
     # ---- default: run_agent (natural-language task) ----
     return "run_agent", {"task": q}
 
@@ -367,6 +381,14 @@ def _claude_bridge_capability_and_params(query: str) -> tuple:
         rest = q[8:].strip()
         if any(rest.lower().startswith(p) for p in run_command_prefixes) or (len(rest) < 50 and " the " not in rest.lower()):
             return "run_command", {"command": rest}
+    if q_lower in (
+        "clear claude session",
+        "new claude session",
+        "reset claude session",
+        "forget claude session",
+        "start fresh claude session",
+    ):
+        return "clear_claude_session", {}
     return "run_agent", {"task": q}
 
 
@@ -813,22 +835,42 @@ async def answer_from_memory(
         except Exception:
             pass
 
-        # Friend preset (Step 5): model_routing local_only — in cloud-only mode refuse; in mix mode force local for this friend.
+        # Friend preset (Step 5): model_routing local_only; optional llm_ref = dedicated model for this Companion friend.
         if _current_friend:
             try:
                 preset_name = (getattr(_current_friend, "preset", None) or "").strip()
                 if preset_name:
                     preset_cfg = get_friend_preset_config(preset_name)
-                    if isinstance(preset_cfg, dict) and str(preset_cfg.get("model_routing") or "").strip().lower() == "local_only":
-                        if main_llm_mode == "cloud":
-                            return ("This friend is configured to use only a local model. Please switch to local or mix mode in Core settings to use it.", None)
-                        if main_llm_mode == "mix" and effective_llm_name:
-                            main_llm_cloud = (getattr(Util().core_metadata, "main_llm_cloud", None) or "").strip()
-                            if main_llm_cloud and effective_llm_name == main_llm_cloud:
-                                main_llm_local = (getattr(Util().core_metadata, "main_llm_local", None) or "").strip()
-                                if main_llm_local:
-                                    effective_llm_name = main_llm_local
-                                    logger.debug("Friend preset local_only: forcing local model for this friend.")
+                    if isinstance(preset_cfg, dict):
+                        if str(preset_cfg.get("model_routing") or "").strip().lower() == "local_only":
+                            if main_llm_mode == "cloud":
+                                return ("This friend is configured to use only a local model. Please switch to local or mix mode in Core settings to use it.", None)
+                            if main_llm_mode == "mix" and effective_llm_name:
+                                main_llm_cloud = (getattr(Util().core_metadata, "main_llm_cloud", None) or "").strip()
+                                if main_llm_cloud and effective_llm_name == main_llm_cloud:
+                                    main_llm_local = (getattr(Util().core_metadata, "main_llm_local", None) or "").strip()
+                                    if main_llm_local:
+                                        effective_llm_name = main_llm_local
+                                        logger.debug("Friend preset local_only: forcing local model for this friend.")
+                        _pref_llm = (
+                            str(preset_cfg.get("llm_ref") or preset_cfg.get("main_llm_ref") or "").strip()
+                        )
+                        _um = getattr(Util(), "core_metadata", None)
+                        if _pref_llm and _um is not None:
+                            _ent, _ = Util()._get_model_entry(_pref_llm)
+                            if _ent and Util().model_entry_available(_ent):
+                                effective_llm_name = _pref_llm
+                                logger.debug(
+                                    "Friend preset llm_ref: using {} for preset '{}'.",
+                                    _pref_llm,
+                                    preset_name,
+                                )
+                            else:
+                                logger.warning(
+                                    "Friend preset '{}' llm_ref '{}' ignored (unknown ref or available: false).",
+                                    preset_name,
+                                    _pref_llm,
+                                )
             except Exception:
                 pass
 
@@ -1417,9 +1459,8 @@ async def answer_from_memory(
                 _q_lo = (query or "").strip().lower()
                 _q_raw = (query or "").strip()
                 if any((p in _q_lo if p.isascii() else p in _q_raw) for p in _list_folder_phrases):
-                    _sandbox_subdirs = ("documents", "downloads", "output", "images", "work", "knowledge", "share")
                     _inferred_path = "."
-                    for _key in _sandbox_subdirs:
+                    for _key in FOLDER_NAMES_FOR_USER_MESSAGE:
                         if _key in _q_lo or _key in _q_raw:
                             _inferred_path = _key
                             break
@@ -1896,7 +1937,7 @@ async def answer_from_memory(
                 _q = query.strip()
                 # Match path like documents/norm-v4.pdf or share/report.docx (relative path under sandbox).
                 _path_match = re.search(
-                    r"(documents|share|output|images|work|downloads|knowledge)/[^\s\]\[\)\,\"\'\n]+\.(?:pdf|docx|doc|pptx|ppt|txt|md|html)",
+                    r"(documents|share|output|images|work|downloads|knowledge|videos|audios)/[^\s\]\[\)\,\"\'\n]+\.(?:pdf|docx|doc|pptx|ppt|txt|md|html|png|jpg|jpeg|gif|webp|mp4|webm|mov|mkv|mp3|wav|m4a|ogg)",
                     _q,
                     re.IGNORECASE,
                 )
@@ -1911,7 +1952,7 @@ async def answer_from_memory(
                 _q_li = (query or "").strip().lower()
                 _q_ri = (query or "").strip()
                 _folder_hint = "."
-                for _k in ("documents", "downloads", "output", "images", "work", "knowledge", "share"):
+                for _k in FOLDER_NAMES_FOR_USER_MESSAGE:
                     if _k in _q_li or _k in _q_ri:
                         _folder_hint = _k
                         break
@@ -2275,6 +2316,57 @@ async def answer_from_memory(
                     break
             except Exception as _e:
                 logger.debug("Phase 1.1 run_skill enum patch failed: {}", _e)
+        # Append LLM catalog (capabilities + descriptions per ref) to models_list / sessions_spawn tool descriptions so the model can choose llm_name without calling models_list first.
+        try:
+            _tc_inj = tools_cfg_for_desc if isinstance(tools_cfg_for_desc, dict) else {}
+            if _tc_inj.get("llm_catalog_inject_enabled", True) is not False and all_tools:
+                try:
+                    _mc_inj = int(_tc_inj.get("llm_catalog_inject_max_chars") or 14000)
+                except (TypeError, ValueError):
+                    _mc_inj = 14000
+                _cat_inj = Util().format_llm_catalog_for_tool_prompt(max_chars=_mc_inj)
+                if _cat_inj:
+                    _suffix_inj = "\n\n" + _cat_inj
+                    for t in all_tools:
+                        if not isinstance(t, dict):
+                            continue
+                        fn = t.get("function")
+                        if not isinstance(fn, dict):
+                            continue
+                        _tn = (fn.get("name") or "").strip()
+                        if _tn not in ("models_list", "sessions_spawn"):
+                            continue
+                        base_d = fn.get("description")
+                        base_d = base_d if isinstance(base_d, str) else (str(base_d) if base_d is not None else "")
+                        fn["description"] = (base_d + _suffix_inj) if base_d.strip() else _suffix_inj
+        except Exception as _e:
+            logger.debug("LLM catalog tool description inject failed: {}", _e)
+        # Append peer roster (peers.yml) to peer_call tool description for instance_id selection.
+        try:
+            _tc_peer = tools_cfg_for_desc if isinstance(tools_cfg_for_desc, dict) else {}
+            if _tc_peer.get("peer_roster_inject_enabled", True) is not False and all_tools:
+                try:
+                    _pr_max = int(_tc_peer.get("peer_roster_inject_max_chars") or 5000)
+                except (TypeError, ValueError):
+                    _pr_max = 5000
+                from base.peer_registry import format_peer_roster_for_tool_prompt
+
+                _peer_txt = format_peer_roster_for_tool_prompt(max_chars=_pr_max)
+                if _peer_txt:
+                    _suf_peer = "\n\n" + _peer_txt
+                    for t in all_tools:
+                        if not isinstance(t, dict):
+                            continue
+                        fn = t.get("function")
+                        if not isinstance(fn, dict):
+                            continue
+                        if (fn.get("name") or "").strip() != "peer_call":
+                            continue
+                        base_d = fn.get("description")
+                        base_d = base_d if isinstance(base_d, str) else (str(base_d) if base_d is not None else "")
+                        fn["description"] = (base_d + _suf_peer) if base_d.strip() else _suf_peer
+        except Exception as _e:
+            logger.debug("Peer roster tool description inject failed: {}", _e)
         openai_tools = all_tools if (all_tools and (unified or len(all_tools) > 0)) else None
         tool_names = [((t or {}).get("function") or {}).get("name") for t in (openai_tools or []) if isinstance(t, dict)]
         logger.debug(
@@ -2368,9 +2460,9 @@ async def answer_from_memory(
                                 "\n\n## File tools — sandbox (only two bases)\n"
                                 "Only these two bases are the search path and working area; their subfolders can be accessed. Any other folder cannot be accessed (sandbox). "
                                 "(1) User sandbox root — omit path or use subdir name; (2) share — path \"share\" or \"share/...\". "
-                                "**User sandbox has these standard folders:** output (generated files, reports, slides), documents, downloads, images, work, knowledge. Use path '' or '.' for root; folder_list(path='documents'), folder_list(path='output'), etc.; use the exact path from the result in document_read or get_file_view_link. "
-                                "**Whenever the user asks to list files or what is in a folder** (any wording or language): you MUST call folder_list(path='<folder>'). Use the folder name they said (documents, images, output, work, downloads, knowledge, share), or path '' or '.' for sandbox root if they did not name a folder. Do NOT reply with text only—the user expects the actual list. "
-                                "**If they name a folder** (e.g. documents, images, output, work): call folder_list(path='that_name'). If they do not name a folder: call folder_list(path='') or folder_list(path='.'). "
+                                f"**Standard folders:** under your private sandbox: {_PRIVATE_STANDARD_FOLDERS_PROMPT}; **share** = global shared folder (all users). Typical roles: **output** = generated reports/slides; **documents** = user docs; **images** / **videos** / **audios** = media; **downloads**, **work**, **knowledge** = as named. Use path '' or '.' for sandbox root; folder_list(path='<folder>'); use the exact path from the result in document_read or get_file_view_link. "
+                                f"**Whenever the user asks to list files or what is in a folder** (any wording or language): you MUST call folder_list(path='<folder>'). Use the folder name they said ({_STANDARD_SANDBOX_FOLDER_NAMES_FOR_PROMPT}), or path '' or '.' for sandbox root if they did not name a folder. Do NOT reply with text only—the user expects the actual list. "
+                                "**If they name a folder**: call folder_list(path='that_name'). If they do not name a folder: call folder_list(path='') or folder_list(path='.'). "
                                 "**Do not invent or fabricate file names, file paths, or URLs** to complete tasks. Use only: (a) values returned by your tool calls (e.g. path from folder_list, file_find), (b) the exact filename or path the user mentioned (e.g. 1.pdf), (c) links returned by save_result_page or get_file_view_link. If you need a path or URL, call the appropriate tool first and use its result. "
                                 "**Never use absolute paths** (e.g. /mnt/, C:\\, /Users/). Use only relative paths under the sandbox: the filename (e.g. 1.pdf) or the path from folder_list/file_find. "
                                 "Do not use workspace, config, or paths outside these two trees. Put generated files in output/ (path \"output/filename\") and return the link. "
@@ -3221,7 +3313,7 @@ async def answer_from_memory(
                             _q_raw = (query or "").strip()
                             if any((p in _q_lo if p.isascii() else p in _q_raw) for p in _list_dir_phrases):
                                 _fallback_path = "."
-                                for _key in ("documents", "downloads", "output", "images", "work", "knowledge", "share"):
+                                for _key in FOLDER_NAMES_FOR_USER_MESSAGE:
                                     if _key in _q_lo or _key in _q_raw:
                                         _fallback_path = _key
                                         break
@@ -3337,7 +3429,7 @@ async def answer_from_memory(
                                 )
                                 if _list_dir_match:
                                     _fallback_path = "."
-                                    for _key in ("documents", "downloads", "output", "images", "work", "knowledge", "share"):
+                                    for _key in FOLDER_NAMES_FOR_USER_MESSAGE:
                                         if _key in _ql_first or _key in _qr_first:
                                             _fallback_path = _key
                                             break
@@ -3546,8 +3638,7 @@ async def answer_from_memory(
                                         ):
                                             # Infer subfolder from query so "documents folder" / "files in documents" list documents/, not root
                                             _fallback_path = "."
-                                            _sandbox_subdirs = ("documents", "downloads", "output", "images", "work", "knowledge", "share")
-                                            for _key in _sandbox_subdirs:
+                                            for _key in FOLDER_NAMES_FOR_USER_MESSAGE:
                                                 if _key in _query_lower or _key in _query_raw:
                                                     _fallback_path = _key
                                                     break

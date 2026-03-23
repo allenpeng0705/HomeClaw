@@ -29,7 +29,9 @@ Each user has a **friends list** — different assistants with different persona
 | Note | `note` | Note-taking |
 | Cursor | `cursor` | Cursor Bridge — open projects, run agents on your dev machine |
 
-Friends are configured in `config/user.yml` under each user's `friends:` list. The Companion App shows them so you can switch between assistants.
+**Dedicated model per friend (math, science, …):** In `config/friend_presets.yml`, add a preset with optional **`llm_ref`** (e.g. `local_models/your_id` or `cloud_models/Your-Cloud-Id`). In `user.yml`, add a friend with **`preset: math`** (or your preset name). That Companion friend then uses that model for the whole chat (overrides mix-mode route for that session). Use **`tools_preset: tutor`** for a light tool set (`time`, `sessions_spawn`, `models_list`, `web_search`). See comments in **`friend_presets.yml`** for commented **`math`** / **`science`** examples and [LLM catalog how-to](llm-catalog-howto.md).
+
+Friends are configured in `config/user.yml` under each user's `friends:` list. The Companion App shows them so you can switch between assistants. See [Friends & Family](friends-and-family.md) for how to add friends and set up a family AI network.
 
 ### Manage Core
 
@@ -100,9 +102,10 @@ If Core runs on a different machine on your local network:
 Expose Core with a tunnel so the app can reach it from anywhere:
 
 - **Scan to connect:** Core can show a QR code at `/pinggy` — scan it from the app's Settings to auto-fill the URL and API key.
-- **Cloudflare Tunnel:** Run `cloudflared tunnel --url http://127.0.0.1:9000`, then use the public URL in the app. [Step-by-step guide →](companion-iphone-cloudflare-tunnel.md)
-- **Tailscale:** Install Tailscale on both machines. Use the Tailscale IP as Core URL. [Details →](remote-access.md)
-- **Pinggy (built-in):** Set `pinggy.token` in `core.yml` and Core starts a tunnel automatically.
+- **Pinggy (built-in, fastest):** Set `pinggy.token` in `core.yml` and Core starts a tunnel automatically. Scan the QR code to connect. [Details →](remote-access.md#pinggy-built-in)
+- **Cloudflare Tunnel:** Run `cloudflared tunnel --url http://127.0.0.1:9000`, then use the public URL in the app. [Details →](remote-access.md#cloudflare-tunnel)
+- **ngrok:** Run `ngrok http 9000` for a quick public URL. [Details →](remote-access.md#ngrok)
+- **Tailscale:** Install Tailscale on both machines. Use the Tailscale IP as Core URL. [Details →](remote-access.md#tailscale)
 
 **Important:** When Core is reachable from the internet, enable auth in `config/core.yml`:
 

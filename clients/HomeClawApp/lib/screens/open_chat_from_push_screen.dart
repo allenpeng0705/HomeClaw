@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/homeclaw_snackbars.dart';
 
 import '../core_service.dart';
 import '../utils/friend_localization.dart';
@@ -65,8 +66,10 @@ class _OpenChatFromPushScreenState extends State<OpenChatFromPushScreen> {
         return;
       }
       final friendId = (match['name'] as String?)?.trim() ?? 'HomeClaw';
-      final isUserFriend = (match['type'] as String?)?.trim().toLowerCase() == 'user';
+      final t = (match['type'] as String?)?.trim().toLowerCase() ?? '';
+      final isUserFriend = t == 'user' || t == 'remote_user';
       final toUserId = (match['user_id'] as String?)?.trim();
+      final peerInst = (match['peer_instance_id'] as String?)?.trim();
       final locale = Localizations.localeOf(context);
       final displayName = localizedFriendDisplayName(friend: match, locale: locale);
       if (!mounted) return;
@@ -79,6 +82,7 @@ class _OpenChatFromPushScreenState extends State<OpenChatFromPushScreen> {
             friendId: friendId,
             isUserFriend: isUserFriend,
             toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
+            remotePeerInstanceId: peerInst != null && peerInst.isNotEmpty ? peerInst : null,
           ),
         ),
       );
@@ -98,7 +102,7 @@ class _OpenChatFromPushScreenState extends State<OpenChatFromPushScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    HomeClawInlineErrorCard(message: _error!, textAlign: TextAlign.center),
                     const SizedBox(height: 16),
                     FilledButton(
                       onPressed: () => Navigator.maybeOf(context)?.maybePop(),

@@ -35,6 +35,14 @@ A simple overview of planned directions. See **README.md** § Roadmap for the sh
 
 ---
 
+## Later: Local model lifecycle & capability routing
+
+**Goal:** Keep **main_llm** and **embedding_llm** always loaded; run other **local** GGUF specialists **on demand** with configurable **idle unload**, and select them by **capabilities** (and later optional **descriptions**) instead of only by path.
+
+**Design:** [LocalModelLoadPolicyAndCapabilityRouting.md](LocalModelLoadPolicyAndCapabilityRouting.md) (global/per-model `load_policy`, refcount, pins, phased implementation).
+
+---
+
 ## Later
 
 - Simpler setup and onboarding.

@@ -20,6 +20,8 @@ import 'package:record/record.dart';
 import 'package:video_player/video_player.dart';
 import '../chat_history_store.dart';
 import '../core_service.dart';
+import '../federation_e2e_crypto.dart';
+import '../widgets/homeclaw_snackbars.dart';
 import 'canvas_screen.dart';
 import 'settings_screen.dart';
 
@@ -34,6 +36,8 @@ class ChatScreen extends StatefulWidget {
   final bool isUserFriend;
   /// When [isUserFriend], the other user's id (for sendUserMessage and filtering inbox).
   final String? toUserId;
+  /// When set, user chat is with someone on another Core (show in app bar).
+  final String? remotePeerInstanceId;
 
   const ChatScreen({
     super.key,
@@ -44,6 +48,7 @@ class ChatScreen extends StatefulWidget {
     this.initialMessage,
     this.isUserFriend = false,
     this.toUserId,
+    this.remotePeerInstanceId,
   });
 
   @override
@@ -111,6 +116,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _wasRouteCurrent = false;
   Uint8List? _chatPartnerAvatar;
   String _cursorActiveCwd = '';
+  /// Dev bridge: stored Cursor/Claude session exists for active project (from GET /api/cursor-bridge/status).
+  bool _devBridgeStoredSessionActive = false;
   String? _interactiveSessionId;
   int _interactiveLastSeq = 1;
   final TextEditingController _interactiveInputController = TextEditingController();
@@ -170,9 +177,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       final fid = (widget.friendId ?? '').trim().toLowerCase();
       final backend = fid == 'trae' ? 'trae' : (fid == 'claudecode' ? 'claude' : 'cursor');
-      final cwd = await widget.coreService.getCursorBridgeActiveCwd(backend: backend);
+      final map = await widget.coreService.getCursorBridgeStatus(backend: backend);
+      final cwd = (map['active_cwd'] as String?)?.trim() ?? '';
+      var linked = false;
+      if (fid == 'cursor') {
+        linked = map['cursor_stored_session_active'] == true;
+      } else if (fid == 'claudecode') {
+        linked = map['claude_stored_session_active'] == true;
+      }
       if (!mounted) return;
-      setState(() => _cursorActiveCwd = cwd);
+      setState(() {
+        _cursorActiveCwd = cwd;
+        _devBridgeStoredSessionActive = linked;
+      });
     } catch (_) {
       // Keep previous value on failure.
     }
@@ -278,6 +295,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _loadClaudeSkipPermissionsPref();
     _scrollController.addListener(_onScrollForPagination);
     if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
+      if ((widget.remotePeerInstanceId?.trim().isNotEmpty ?? false) && widget.coreService.federationE2eEnabled) {
+        unawaited(widget.coreService.ensureFederationE2eKeysRegistered());
+      }
       _loadUserInbox();
       _userInboxPollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
         if (mounted && widget.isUserFriend && widget.toUserId != null) _loadUserInbox();
@@ -477,17 +497,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _messageVideos.clear();
       for (final m in list) {
         if (m is! Map) continue;
-        final text = (m['text'] as String?)?.trim() ?? '';
-        final from = (m['from_user_id'] as String?)?.trim() ?? '';
+        final mmap = m is Map<String, dynamic> ? m : Map<String, dynamic>.from(m);
+        var text = (mmap['text'] as String?)?.trim() ?? '';
+        final from = (mmap['from_user_id'] as String?)?.trim() ?? '';
         final isUser = from == myId;
+        final e2eRaw = mmap['e2e'];
+        Map<String, dynamic>? e2eMap;
+        if (e2eRaw is Map<String, dynamic>) {
+          e2eMap = e2eRaw;
+        } else if (e2eRaw is Map) {
+          e2eMap = Map<String, dynamic>.from(e2eRaw);
+        }
+        if (e2eMap != null && e2eMap.isNotEmpty) {
+          final decrypted = await widget.coreService.decryptFederatedE2eIfPresent(e2eMap);
+          if (decrypted != null && decrypted.isNotEmpty) {
+            text = decrypted;
+          } else if (text.isEmpty) {
+            text = '[Encrypted message]';
+          }
+        }
+        if (!isUser && (mmap['source'] as String?)?.trim() == 'federation' && text.isNotEmpty) {
+          text = '◇ $text';
+        }
         _messages.add(MapEntry(text.isEmpty ? '(attachment)' : text, isUser));
-        final imgList = m['images'] as List<dynamic>?;
+        final imgList = mmap['images'] as List<dynamic>?;
         final images = imgList != null ? imgList.whereType<String>().toList() : null;
         _messageImages.add(images != null && images.isNotEmpty ? images : null);
-        final audList = m['audios'] as List<dynamic>?;
+        final audList = mmap['audios'] as List<dynamic>?;
         final audios = audList != null ? audList.whereType<String>().toList() : null;
         _messageAudios.add(audios != null && audios.isNotEmpty ? audios : null);
-        final vidList = m['videos'] as List<dynamic>?;
+        final vidList = mmap['videos'] as List<dynamic>?;
         final videos = vidList != null ? vidList.whereType<String>().toList() : null;
         _messageVideos.add(videos != null && videos.isNotEmpty ? videos : null);
       }
@@ -570,13 +609,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final summary = ok
           ? 'KB sync: $msg (added: $added, removed: $removed)'
           : 'Sync failed: $msg';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(summary), backgroundColor: ok ? null : Theme.of(context).colorScheme.errorContainer),
-      );
+      if (ok) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(summary)));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(homeClawErrorSnackBar(context, summary));
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Sync failed: $e'), backgroundColor: Theme.of(context).colorScheme.errorContainer),
+        homeClawErrorSnackBar(context, 'Sync failed: $e'),
       );
     }
   }
@@ -593,8 +634,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _onPushMessage(Map<String, dynamic> push) {
     final text = push['text'] as String? ?? '';
-    if (text.isEmpty) return;
     final source = (push['source'] as String?)?.trim() ?? 'push';
+    final e2eEncrypted = push['e2e_encrypted'] == true;
     // User-to-user: refresh inbox so the new message appears; match by from_user_id or from_friend.
     if (widget.isUserFriend && widget.toUserId != null && source == 'user_message') {
       final fromUserId = (push['from_user_id'] as String?)?.trim();
@@ -607,6 +648,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         return;
       }
     }
+    if (text.isEmpty && !e2eEncrypted) return;
     final pushFriendId = (push['friend_id'] ?? push['from_friend']) as String?;
     final pushFriend = (pushFriendId?.toString().trim() ?? '').isEmpty ? 'HomeClaw' : pushFriendId!.trim();
     final thisFriend = (widget.friendId?.trim() ?? '').isEmpty ? 'HomeClaw' : widget.friendId!.trim();
@@ -740,20 +782,55 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // User-to-user: send via POST /api/user-message; no AI reply.
     if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
       try {
+        Map<String, dynamic>? e2eEnvelope;
+        final rid = widget.remotePeerInstanceId?.trim();
+        final fedE2e = widget.coreService.federationE2eEnabled;
+        final requireE2e = widget.coreService.federationE2eRequireEncrypted;
+        final textOnly = text.isNotEmpty && imagesToSend.isEmpty && videosToSend.isEmpty && filesToSend.isEmpty;
+        if (rid != null && rid.isNotEmpty && fedE2e) {
+          if (requireE2e && !textOnly) {
+            throw Exception('This chat requires encrypted text-only messages (no images, video, or files).');
+          }
+          if (textOnly) {
+            await widget.coreService.ensureFederationE2eKeysRegistered();
+            final peerPk = await widget.coreService.getFederationPeerE2ePublicKey(
+              peerInstanceId: rid,
+              remoteUserId: widget.toUserId!.trim(),
+            );
+            if (requireE2e && (peerPk == null || peerPk.isEmpty)) {
+              throw Exception('Encrypted messaging is required but the other user has not registered a key on their Core yet.');
+            }
+            if (peerPk != null && peerPk.isNotEmpty) {
+              try {
+                final raw = Uint8List.fromList(base64Decode(peerPk));
+                if (raw.length != 32) {
+                  if (requireE2e) {
+                    throw Exception('Peer public key from server is not a valid 32-byte X25519 key.');
+                  }
+                } else {
+                  final env = await FederationE2eCrypto.encryptEnvelopeUtf8(
+                    plaintext: text.isEmpty ? '(attachment)' : text,
+                    recipientPublicKey32: raw,
+                  );
+                  e2eEnvelope = Map<String, dynamic>.from(env);
+                }
+              } catch (_) {
+                if (requireE2e) rethrow;
+              }
+            }
+          }
+        }
         await widget.coreService.sendUserMessage(
           fromUserId: widget.userId,
           toUserId: widget.toUserId!.trim(),
-          text: text.isEmpty ? '(attachment)' : text,
+          text: e2eEnvelope != null ? '' : (text.isEmpty ? '(attachment)' : text),
           images: userImageDataUrls.isEmpty ? null : userImageDataUrls,
           videos: userVideoDataUrls.isEmpty ? null : userVideoDataUrls,
+          e2e: e2eEnvelope,
         );
         if (mounted) {
           _stopLoadingStatusTimer();
           setState(() {
-            _messages.add(MapEntry(text.isEmpty ? '(attachment)' : text, true));
-            _messageImages.add(userImageDataUrls.isEmpty ? null : userImageDataUrls);
-            _messageAudios.add(null);
-            _messageVideos.add(userVideoDataUrls.isEmpty ? null : userVideoDataUrls);
             _loading = false;
             _loadingMessage = null;
           });
@@ -1001,6 +1078,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (filePath == null || filePath.isEmpty) return;
       final file = File(filePath);
       if (!await file.exists()) return;
+      if (widget.coreService.federationE2eRequireEncrypted && (widget.remotePeerInstanceId?.trim().isNotEmpty ?? false)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Voice messages are not available when this Core requires encrypted federation chat.')),
+          );
+        }
+        return;
+      }
       final bytes = await file.readAsBytes();
       final b64 = base64Encode(bytes);
       final dataUrl = 'data:audio/mp4;base64,$b64';
@@ -1784,11 +1869,57 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(widget.userName, overflow: TextOverflow.ellipsis),
+                    if (widget.isUserFriend && (widget.remotePeerInstanceId ?? '').trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Chip(
+                            avatar: Icon(
+                              Icons.cloud_outlined,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            label: Text(
+                              'Remote · ${widget.remotePeerInstanceId!.trim()}',
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                          ),
+                        ),
+                      ),
                     if (_isDevBridgeFriend && _cursorActiveCwd.trim().isNotEmpty)
                       Text(
                         'Project: ${path.basename(_cursorActiveCwd.trim())}',
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    if (_isDevBridgeFriend &&
+                        _devBridgeStoredSessionActive &&
+                        (widget.friendId ?? '').trim().toLowerCase() != 'trae')
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Chip(
+                            avatar: Icon(
+                              Icons.link,
+                              size: 16,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            label: Text(
+                              (widget.friendId ?? '').trim().toLowerCase() == 'claudecode'
+                                  ? 'Claude session linked'
+                                  : 'Cursor session linked',
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                          ),
+                        ),
                       ),
                   ],
                 ),
@@ -1952,6 +2083,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 final msgIndex = _loadingMoreMessages ? i - 1 : i;
                 final entry = _messages[msgIndex];
                 final isUser = entry.value;
+                final isErrorBubble = !isUser && entry.key.startsWith('Error:');
                 final imageUrls = msgIndex < _messageImages.length ? _messageImages[msgIndex] : null;
                 final audioUrls = msgIndex < _messageAudios.length ? _messageAudios[msgIndex] : null;
                 final videoUrls = msgIndex < _messageVideos.length ? _messageVideos[msgIndex] : null;
@@ -1966,7 +2098,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           decoration: BoxDecoration(
-                            color: isUser ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.surfaceContainerHighest,
+                            color: isUser
+                                ? Theme.of(context).colorScheme.primaryContainer
+                                : (isErrorBubble
+                                    ? Theme.of(context).colorScheme.errorContainer
+                                    : Theme.of(context).colorScheme.surfaceContainerHighest),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Column(
@@ -2037,6 +2173,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 isUser: isUser,
                                 plainText: _isDevBridgeFriend && widget.coreService.cursorChatPlainText,
                                 theme: Theme.of(context),
+                                isErrorMessage: isErrorBubble,
                               ),
                             ],
                           ),
@@ -2505,12 +2642,15 @@ class _ChatMessageText extends StatelessWidget {
   final bool isUser;
   final bool plainText;
   final ThemeData theme;
+  /// High-contrast text on [ColorScheme.errorContainer] bubbles (e.g. connection errors).
+  final bool isErrorMessage;
 
   const _ChatMessageText({
     required this.text,
     required this.isUser,
     required this.plainText,
     required this.theme,
+    this.isErrorMessage = false,
   });
 
   /// File extensions that should open with system default app (e.g. PPT, PDF, DOC).
@@ -2565,20 +2705,25 @@ class _ChatMessageText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final effectiveText = text.isEmpty ? '\u200B' : text;
+    final errorFg = isErrorMessage ? theme.colorScheme.onErrorContainer : null;
     if (plainText) {
       return SelectableText(
         effectiveText,
-        style: theme.textTheme.bodyLarge,
+        style: theme.textTheme.bodyLarge?.copyWith(color: errorFg),
       );
     }
+    final bodyLarge = theme.textTheme.bodyLarge;
+    final bodyMedium = theme.textTheme.bodyMedium;
+    final pStyle = errorFg != null ? bodyLarge?.copyWith(color: errorFg) : bodyLarge;
     final styleSheet = MarkdownStyleSheet.fromTheme(theme).copyWith(
-      p: theme.textTheme.bodyLarge,
-      listBullet: theme.textTheme.bodyLarge,
-      h1: theme.textTheme.headlineSmall,
-      h2: theme.textTheme.titleLarge,
-      h3: theme.textTheme.titleMedium,
-      code: theme.textTheme.bodyMedium?.copyWith(
+      p: pStyle,
+      listBullet: pStyle,
+      h1: errorFg != null ? theme.textTheme.headlineSmall?.copyWith(color: errorFg) : theme.textTheme.headlineSmall,
+      h2: errorFg != null ? theme.textTheme.titleLarge?.copyWith(color: errorFg) : theme.textTheme.titleLarge,
+      h3: errorFg != null ? theme.textTheme.titleMedium?.copyWith(color: errorFg) : theme.textTheme.titleMedium,
+      code: bodyMedium?.copyWith(
         fontFamily: 'monospace',
+        color: errorFg ?? bodyMedium.color,
         backgroundColor: theme.colorScheme.surfaceContainerHighest,
       ),
       codeblockDecoration: BoxDecoration(
@@ -2586,11 +2731,14 @@ class _ChatMessageText extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       blockquote: theme.textTheme.bodyMedium?.copyWith(
-        color: theme.colorScheme.onSurfaceVariant,
+        color: errorFg ?? theme.colorScheme.onSurfaceVariant,
       ),
       blockquoteDecoration: BoxDecoration(
         border: Border(
-          left: BorderSide(color: theme.colorScheme.primary, width: 4),
+          left: BorderSide(
+            color: errorFg ?? theme.colorScheme.primary,
+            width: 4,
+          ),
         ),
       ),
     );

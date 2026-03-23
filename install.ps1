@@ -99,6 +99,12 @@ if (-not $PythonExe) {
 }
 $pyVer = & $PythonExe --version 2>&1
 Write-Host "OK: Python $pyVer"
+try {
+  & $PythonExe -c "import sys; exit(0 if sys.version_info >= (3, 10) else 1)" 2>$null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Note: Python < 3.10 — optional MCP client (mcp) is not installed. Use 3.10+ for mcp_call / mcp_list_tools, or see docs/mcp.md."
+  }
+} catch {}
 
 # ----- Step 2: Node.js -----
 Write-Host ""
@@ -371,11 +377,30 @@ Set-Location $Root
 if (Test-Path (Join-Path $Root ".venv\Scripts\Activate.ps1")) {
   Write-Host "Using existing .venv"
   try { . (Join-Path $Root ".venv\Scripts\Activate.ps1") } catch {}
+  if (Test-Path (Join-Path $Root ".venv\Scripts\python.exe")) {
+    $PythonExe = (Join-Path $Root ".venv\Scripts\python.exe")
+  }
+  if (($env:VIRTUAL_ENV -replace '[\\/]+$','') -eq ((Join-Path $Root ".venv") -replace '[\\/]+$','')) {
+    Write-Host "OK: using venv Python: $PythonExe"
+    $venvMm = & $PythonExe -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')" 2>$null
+    if ($venvMm) { Write-Host "  (.venv is Python $venvMm — pip uses this, not necessarily your system default.)" }
+    & $PythonExe -c "import sys; exit(0 if sys.version_info >= (3, 10) else 1)" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "Warning: .venv is Python $venvMm (< 3.10). Optional package 'mcp' is skipped."
+      Write-Host "  Recreate with Python 3.12:  cd $Root; Remove-Item -Recurse -Force .venv; py -3.12 -m venv .venv; .\install.ps1"
+    }
+  } else {
+    Write-Host "Warning: .venv exists but activation did not switch interpreter. Current Python: $PythonExe"
+  }
 }
+# Shared pip constraints for deterministic dependency resolution.
+$PipConstraints = Join-Path $Root "requirements-constraints.txt"
+if (-not (Test-Path $PipConstraints)) { $PipConstraints = $null }
 # Upgrade pip first (old pip can cause 403 with some mirrors)
 $pipUpgradeArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "-q", "--upgrade", "pip") } else { @("-m", "pip", "install", "-q", "--upgrade", "pip") }
 & $PythonExe $pipUpgradeArgs 2>$null
 $pipArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "-q", "-r", "requirements.txt") } else { @("-m", "pip", "install", "-q", "-r", "requirements.txt") }
+if ($PipConstraints) { $pipArgs += @("-c", $PipConstraints) }
 & $PythonExe $pipArgs
 if ($LASTEXITCODE -ne 0) {
   Write-Host "First attempt failed. Retrying automatically with official PyPI (ignoring mirror config)..."
@@ -384,6 +409,7 @@ if ($LASTEXITCODE -ne 0) {
   $env:PIP_EXTRA_INDEX_URL = $null
   # Retry without -q so user sees download/install progress and knows it is not stuck
   $pipRetryArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "-r", "requirements.txt", "-i", "https://pypi.org/simple") } else { @("-m", "pip", "install", "-r", "requirements.txt", "-i", "https://pypi.org/simple") }
+  if ($PipConstraints) { $pipRetryArgs += @("-c", $PipConstraints) }
   & $PythonExe $pipRetryArgs
   if ($LASTEXITCODE -ne 0) {
     Write-Host "Error: pip install failed."
@@ -402,12 +428,13 @@ Write-Host ""
 Write-Host "=== Step 5b: Cognee dependencies (memory backend) ==="
 $cogneeDepsPath = Join-Path $Root "requirements-cognee-deps.txt"
 if (Test-Path $cogneeDepsPath) {
-  Write-Host "Installing Cognee dependencies (instructor, etc.)..."
+  Write-Host "Installing Cognee dependencies (safe mode: avoid overriding core deps like openai/litellm)..."
   $env:PIP_INDEX_URL = $null
   $env:PIP_EXTRA_INDEX_URL = $null
-  $cogneeDepsArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "-r", $cogneeDepsPath, "-i", "https://pypi.org/simple") } else { @("-m", "pip", "install", "-r", $cogneeDepsPath, "-i", "https://pypi.org/simple") }
+  $cogneeDepsArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "--no-deps", "-r", $cogneeDepsPath, "-i", "https://pypi.org/simple") } else { @("-m", "pip", "install", "--no-deps", "-r", $cogneeDepsPath, "-i", "https://pypi.org/simple") }
+  if ($PipConstraints) { $cogneeDepsArgs += @("-c", $PipConstraints) }
   & $PythonExe $cogneeDepsArgs
-  if ($LASTEXITCODE -eq 0) { Write-Host "OK: Cognee dependencies installed" } else { Write-Host "Cognee deps install failed or skipped. To retry: pip install -r requirements-cognee-deps.txt -i https://pypi.org/simple" }
+  if ($LASTEXITCODE -eq 0) { Write-Host "OK: Cognee direct dependencies installed (without transitive downgrades)" } else { Write-Host "Cognee deps install failed or skipped. To retry: pip install --no-deps -r requirements-cognee-deps.txt -i https://pypi.org/simple" }
 } else {
   Write-Host "requirements-cognee-deps.txt not found; skipping."
 }
@@ -420,8 +447,9 @@ if (Test-Path (Join-Path $Root "requirements-document.txt")) {
   $env:PIP_INDEX_URL = $null
   $env:PIP_EXTRA_INDEX_URL = $null
   $docArgs = if ($PythonExe -eq "py") { @("-3", "-m", "pip", "install", "-r", (Join-Path $Root "requirements-document.txt"), "-i", "https://pypi.org/simple") } else { @("-m", "pip", "install", "-r", (Join-Path $Root "requirements-document.txt"), "-i", "https://pypi.org/simple") }
+  if ($PipConstraints) { $docArgs += @("-c", $PipConstraints) }
   & $PythonExe $docArgs
-  if ($LASTEXITCODE -eq 0) { Write-Host "OK: document stack installed" } else { Write-Host "Document stack install failed or skipped. To install later: $PythonExe -m pip install -r requirements-document.txt -i https://pypi.org/simple" }
+  if ($LASTEXITCODE -eq 0) { Write-Host "OK: document stack installed" } else { Write-Host "Document stack install failed or skipped. To install later: $PythonExe -m pip install -r requirements-document.txt -c requirements-constraints.txt -i https://pypi.org/simple" }
 } else {
   Write-Host "requirements-document.txt not found; skipping."
 }

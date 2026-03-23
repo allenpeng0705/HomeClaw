@@ -2,6 +2,10 @@
 
 HomeClaw supports **cloud** LLMs (OpenAI, **Gemini**, DeepSeek, etc. via LiteLLM) and **local** LLMs (llama.cpp, GGUF). You can use one or both; main and embedding model are configured separately. **Cloud and local can work together** for better capability and cost. **Multimodal** (images, audio, video) works with both **cloud** (e.g. **Gemini**, GPT-4o) and **local models** (e.g. Qwen2-VL with mmproj)—tested with both; all work well.
 
+**Which model is used when?** For a concise map (main vs embedding vs vision vs spawn, mix mode, and planned on-demand specialists), see **[Model selection and lifecycle](model-selection-and-lifecycle.md)** — includes diagrams built from `docs/diagrams/*.mmd`.
+
+**How to fill in `local_models` / `cloud_models` and `available`?** See **[LLM catalog how-to](llm-catalog-howto.md)** — step-by-step and field reference.
+
 ---
 
 ## Cloud models
@@ -19,7 +23,8 @@ Supported providers include OpenAI, Google Gemini, DeepSeek, Anthropic, Groq, Mi
 ## Local models
 
 - Run **GGUF** models via a **llama.cpp** server. Place model files in a `models/` directory (or path set by **`model_path`** in `config/core.yml`).
-- In **`config/core.yml`**, under **`local_models`**, add entries with `id`, `path` (relative to `model_path`), `host`, `port`. Set **`main_llm`** and **`embedding_llm`** to e.g. `local_models/<id>`.
+- **`local_models` in `config/llm.yml`** (when merged from `llm_config_file`) is your **catalog**: list every local ref you want to configure (`id`, `path`, `host`, `port`, optional `capabilities`, optional **`available: false`** for rows without weights yet). Core does not load every catalog entry at startup—only what **`main_llm`**, **`embedding_llm`**, mix-mode classifier, etc. actually use. See the §2 header in **`llm.yml`**.
+- In **`config/core.yml`**, under **`local_models`** (or via merged **`llm.yml`**), add entries with `id`, `path` (relative to `model_path`), `host`, `port`. Set **`main_llm`** and **`embedding_llm`** to e.g. `local_models/<id>`.
 - **Copy llama.cpp's binary distribution** into `llama.cpp-master/<platform>/` for your device type (mac/, win_cuda/, linux_cpu/, etc.; see `llama.cpp-master/README.md` in the repo). Used for both main and embedding local models. Then start the llama.cpp server(s) for each model.
 
 ---

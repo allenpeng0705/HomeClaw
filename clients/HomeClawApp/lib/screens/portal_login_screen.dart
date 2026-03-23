@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/homeclaw_snackbars.dart';
 
 import '../core_service.dart';
 import 'portal_ui_screen.dart';
@@ -101,10 +102,7 @@ class _PortalLoginScreenState extends State<PortalLoginScreen> {
               ),
               if (_error != null) ...[
                 const SizedBox(height: 16),
-                Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 14),
-                ),
+                HomeClawInlineErrorCard(message: _error!),
               ],
               const SizedBox(height: 24),
               FilledButton(

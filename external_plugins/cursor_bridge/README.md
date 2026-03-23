@@ -39,6 +39,10 @@ cursor_bridge_auto_start: true
 
 Then start Core as usual (`python -m main start`). If you see "agent not found", add `cursor_bridge_agent_path` with the output of `(Get-Command agent).Source` in PowerShell. No separate terminal needed.
 
+**Cursor agent session continuation:** When **`CURSOR_BRIDGE_CURSOR_CONTINUE=1`** (Core default via **`cursor_bridge_cursor_continue_session: true`**), the bridge prefers **`agent --trust … -p "<task>" --resume <session_id> --output-format json`** with a **per-project** id in **`cursor_sessions`** in `~/.homeclaw/cursor_bridge_state.json`; if none is stored, it uses **`--continue`**. Set **`cursor_bridge_cursor_continue_session: false`** for a new session every message. **`clear_cursor_session`** drops the stored id. See [Cursor CLI](https://cursor.com/docs/cli/reference/parameters) and `docs/cursor-claude-code-bridge.md` §2.1.
+
+**Claude Code session continuation:** When **`CURSOR_BRIDGE_CLAUDE_CONTINUE=1`** (Core default), the bridge prefers **`claude -p "<task>" --resume <session_id>`** using **`claude_sessions`** in the same state file; if none is stored, it uses **`--continue`**. Set **`cursor_bridge_claude_continue_session: false`** to start a **new** session every message. **`clear_claude_session`** drops the stored id. See [code.claude.com headless docs](https://code.claude.com/docs/en/headless) and `docs/cursor-claude-code-bridge.md` §3.1.
+
 **Option B — Manual:** From the project root (or any directory). Start the bridge from a terminal where `agent` is on PATH (e.g. where `agent --version` works).
 
 ```bash

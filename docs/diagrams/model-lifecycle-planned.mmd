@@ -1,0 +1,17 @@
+stateDiagram-v2
+  [*] --> Pinned
+  state "Pinned: main_llm + embedding_llm\nnever idle-stopped" as Pinned
+
+  [*] --> Idle
+  state "Idle: specialist unloaded" as Idle
+  state "Loading: start llama-server" as Loading
+  state "Hot: refcount greater 0" as Hot
+  state "Cooling: idle timer" as Cooling
+
+  Idle --> Loading: first request
+  Loading --> Hot: server ready
+  Hot --> Hot: more requests
+  Hot --> Cooling: done refcount 0
+  Hot --> Hot: done refcount still positive
+  Cooling --> Idle: idle_stop_seconds
+  Cooling --> Hot: new request

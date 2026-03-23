@@ -106,7 +106,7 @@ def tool_result_usable_as_final_response(
         _self_raw = cfg.get("self_contained_tools")
         self_contained = tuple(_self_raw) if isinstance(_self_raw, (list, tuple)) else (
             "run_skill", "echo", "time", "profile_get", "profile_list", "models_list", "agents_list",
-            "platform_info", "cwd", "env", "sessions_list", "sessions_send", "sessions_spawn",
+            "platform_info", "cwd", "env", "sessions_list", "sessions_send", "sessions_spawn", "peer_call",
             "cron_list", "cron_status", "cron_schedule", "cron_remove", "cron_update", "cron_run",
             "remind_me", "record_date", "recorded_events_list", "profile_update",
             "append_agent_memory", "append_daily_memory", "usage_report", "channel_send",

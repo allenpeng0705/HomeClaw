@@ -7,7 +7,7 @@ content: |
   ## Tool selection examples
 
   --- File and document ---
-  Rule: Whenever the user asks to list files or what is in a folder (any language), you MUST call folder_list and you MUST pass the path argument. Extract the folder name from the user's words: if they said "images", "documents", "output", etc., use that as path; if they did not name a folder, use path "." Never call folder_list without path. Do not reply with text only.
+  Rule: Whenever the user asks to list files or what is in a folder (any language), you MUST call folder_list and you MUST pass the path argument. Extract the folder name from the user's words: if they said "images", "videos", "audios", "documents", "output", "downloads", "work", "knowledge", or "share", use that as path; if they did not name a folder, use path "." Never call folder_list without path. Do not reply with text only.
 
   User: "What files do I have?" / "List my files." / "我都有哪些文件？" / "有哪些文件？" / "帮我查一下我有哪些文件"
   Thought: User wants file list; no folder named → path is root.
@@ -20,6 +20,10 @@ content: |
   User: "What files are in images?" / "images里有哪些文件？" / "看下images文件夹下有哪些文件" / "show me the images folder"
   Thought: User said "images" → path must be "images" (not root).
   Call: folder_list(path="images")
+
+  User: "List my videos" / "what's in the audios folder" / "videos目录下有什么"
+  Thought: User named videos or audios → use that path.
+  Call: folder_list(path="videos") or folder_list(path="audios")
 
   User: "What's inside the work folder?" / "output里有什么？"
   Thought: User said work or output → use that folder name as path.

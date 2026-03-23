@@ -3,7 +3,7 @@ Cursor Bridge: HTTP server for HomeClaw to run commands, open projects, or chat 
 
 Main features:
 - open_project: open a folder/project in Cursor IDE (so you can then chat with the agent there).
-- run_agent: run Cursor CLI agent with a task in non-interactive mode and return the output (run and see results).
+- run_agent: run Cursor CLI agent with a task in non-interactive mode and return the output; optional per-project --resume/--continue when CURSOR_BRIDGE_CURSOR_CONTINUE=1.
 - run_agent_interactive: start Cursor/Claude agent in a PTY so the user can interact via Companion/WebChat.
 - run_command: run a shell command (e.g. npm test) and return output.
 - run_command_interactive: start a shell command in a PTY for interactive use.
@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI
 from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,67 @@ _ACTIVE_CWD_LOCK = threading.Lock()
 # Track active project per backend so Cursor and ClaudeCode don't step on each other.
 # Keys: "cursor" | "claude" | "trae"
 _ACTIVE_CWD_BY_BACKEND: Dict[str, Optional[str]] = {"cursor": None, "claude": None, "trae": None}
+# Claude Code: last known session_id per normalized project cwd (from JSON output). Used with --resume when CURSOR_BRIDGE_CLAUDE_CONTINUE is on.
+_CLAUDE_SESSION_BY_CWD: Dict[str, str] = {}
+# Cursor CLI agent: last known session_id per normalized project cwd (from --output-format json). Used with --resume when CURSOR_BRIDGE_CURSOR_CONTINUE is on.
+_CURSOR_SESSION_BY_CWD: Dict[str, str] = {}
+
+def _cwd_key(path: str) -> str:
+    """Stable dict key for a project directory (abs + normpath; normcase on Windows)."""
+    try:
+        p = os.path.normpath(os.path.abspath((path or "").strip()))
+        return os.path.normcase(p) if IS_WINDOWS else p
+    except Exception:
+        return (path or "").strip()
+
+
+def _agent_run_work_dir(cwd: Optional[str], active_backend: str) -> str:
+    """Directory for subprocess cwd: must exist. Falls back DEFAULT_CWD → getcwd → '.'. Never raises."""
+    try:
+        w = (cwd or "").strip()
+        if not w:
+            w = (_get_active_cwd(active_backend) or "").strip()
+        if w:
+            try:
+                ap = os.path.abspath(os.path.normpath(w))
+                if os.path.isdir(ap):
+                    return ap
+            except Exception:
+                pass
+        try:
+            dw = os.path.abspath(os.path.normpath(DEFAULT_CWD))
+            if os.path.isdir(dw):
+                return dw
+        except Exception:
+            pass
+        gc = os.getcwd()
+        if gc and os.path.isdir(gc):
+            return gc
+    except Exception:
+        pass
+    try:
+        g = os.getcwd()
+        return g if g else "."
+    except Exception:
+        return "."
+
+
+def _sanitize_stored_session_id_for_cli(s: Optional[Any]) -> Optional[str]:
+    """Reject ids that could break argv or corrupt state (newlines, huge blobs, option-like values)."""
+    if s is None:
+        return None
+    try:
+        t = str(s).strip()
+    except Exception:
+        return None
+    if not t or len(t) > 512:
+        return None
+    if any(c in t for c in "\n\r\x00\t"):
+        return None
+    if t.startswith("-"):
+        return None
+    return t
+
 
 def _load_state() -> None:
     """Load persisted active cwd (best-effort)."""
@@ -110,19 +171,51 @@ def _load_state() -> None:
         cursor_cwd = (obj.get("cursor_active_cwd") or "").strip()
         claude_cwd = (obj.get("claude_active_cwd") or "").strip()
         trae_cwd = (obj.get("trae_active_cwd") or "").strip()
+
+        def _is_dir_safe(p: str) -> bool:
+            try:
+                return bool(p) and os.path.isdir(p)
+            except Exception:
+                return False
+        raw_claude_sessions = obj.get("claude_sessions")
+        claude_sessions: Dict[str, str] = {}
+        if isinstance(raw_claude_sessions, dict):
+            for k, v in raw_claude_sessions.items():
+                if not k or v is None:
+                    continue
+                ks = str(k).strip()
+                vs = _sanitize_stored_session_id_for_cli(v)
+                if ks and vs:
+                    claude_sessions[_cwd_key(ks)] = vs
+        raw_cursor_sessions = obj.get("cursor_sessions")
+        cursor_sessions: Dict[str, str] = {}
+        if isinstance(raw_cursor_sessions, dict):
+            for k, v in raw_cursor_sessions.items():
+                if not k or v is None:
+                    continue
+                ks = str(k).strip()
+                vs = _sanitize_stored_session_id_for_cli(v)
+                if ks and vs:
+                    cursor_sessions[_cwd_key(ks)] = vs
         with _ACTIVE_CWD_LOCK:
-            if cursor_cwd and os.path.isdir(cursor_cwd):
+            if _is_dir_safe(cursor_cwd):
                 _ACTIVE_CWD_BY_BACKEND["cursor"] = cursor_cwd
-            if claude_cwd and os.path.isdir(claude_cwd):
+            if _is_dir_safe(claude_cwd):
                 _ACTIVE_CWD_BY_BACKEND["claude"] = claude_cwd
-            if trae_cwd and os.path.isdir(trae_cwd):
+            if _is_dir_safe(trae_cwd):
                 _ACTIVE_CWD_BY_BACKEND["trae"] = trae_cwd
+            _CLAUDE_SESSION_BY_CWD.clear()
+            _CLAUDE_SESSION_BY_CWD.update(claude_sessions)
+            _CURSOR_SESSION_BY_CWD.clear()
+            _CURSOR_SESSION_BY_CWD.update(cursor_sessions)
         if _ACTIVE_CWD_BY_BACKEND.get("cursor") or _ACTIVE_CWD_BY_BACKEND.get("claude") or _ACTIVE_CWD_BY_BACKEND.get("trae"):
             logger.info(
-                "Loaded cursor bridge state: cursor_active_cwd=%s claude_active_cwd=%s trae_active_cwd=%s",
+                "Loaded cursor bridge state: cursor_active_cwd=%s claude_active_cwd=%s trae_active_cwd=%s claude_sessions=%d cursor_sessions=%d",
                 _ACTIVE_CWD_BY_BACKEND.get("cursor"),
                 _ACTIVE_CWD_BY_BACKEND.get("claude"),
                 _ACTIVE_CWD_BY_BACKEND.get("trae"),
+                len(_CLAUDE_SESSION_BY_CWD),
+                len(_CURSOR_SESSION_BY_CWD),
             )
     except Exception as e:
         logger.warning("Failed to load cursor bridge state: %s", e)
@@ -139,10 +232,19 @@ def _save_state() -> None:
         cursor_cwd = _get_active_cwd("cursor") or ""
         claude_cwd = _get_active_cwd("claude") or ""
         trae_cwd = _get_active_cwd("trae") or ""
+        with _ACTIVE_CWD_LOCK:
+            claude_sessions = dict(_CLAUDE_SESSION_BY_CWD)
+            cursor_sessions = dict(_CURSOR_SESSION_BY_CWD)
         tmp = STATE_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(
-                {"cursor_active_cwd": cursor_cwd, "claude_active_cwd": claude_cwd, "trae_active_cwd": trae_cwd},
+                {
+                    "cursor_active_cwd": cursor_cwd,
+                    "claude_active_cwd": claude_cwd,
+                    "trae_active_cwd": trae_cwd,
+                    "claude_sessions": claude_sessions,
+                    "cursor_sessions": cursor_sessions,
+                },
                 f,
                 ensure_ascii=False,
             )
@@ -192,6 +294,278 @@ def _resolve_path(p: str) -> str:
     if os.path.exists(abs_p):
         return abs_p
     return os.path.normpath(os.path.join(DEFAULT_CWD, s))
+
+
+def _get_claude_session_for_cwd(work_dir: str) -> Optional[str]:
+    try:
+        k = _cwd_key(work_dir)
+        with _ACTIVE_CWD_LOCK:
+            sid = _CLAUDE_SESSION_BY_CWD.get(k)
+        return _sanitize_stored_session_id_for_cli(sid)
+    except Exception:
+        return None
+
+
+def _set_claude_session_for_cwd(work_dir: str, session_id: Optional[str]) -> None:
+    try:
+        k = _cwd_key(work_dir)
+        clean = _sanitize_stored_session_id_for_cli(session_id) if session_id else None
+        with _ACTIVE_CWD_LOCK:
+            if clean:
+                _CLAUDE_SESSION_BY_CWD[k] = clean
+            else:
+                _CLAUDE_SESSION_BY_CWD.pop(k, None)
+        _save_state()
+    except Exception as e:
+        logger.warning("set_claude_session_for_cwd failed: %s", e)
+
+
+def _extract_headless_json_session_id_from_stdout(out: str) -> Optional[str]:
+    """Parse JSON lines (last object lines first) for session_id / sessionId (Claude Code + Cursor agent JSON)."""
+    if not (out or "").strip():
+        return None
+    try:
+        lines = out.strip().splitlines()
+        # Bound work: agents may print noise; scan at most the last N lines from the end
+        scan = lines[-120:] if len(lines) > 120 else lines
+        for line in reversed(scan):
+            s = line.strip()
+            if not s.startswith("{"):
+                continue
+            try:
+                obj = json.loads(s)
+                if not isinstance(obj, dict):
+                    continue
+                sid = obj.get("session_id")
+                if sid is None:
+                    sid = obj.get("sessionId")
+                got = _sanitize_stored_session_id_for_cli(sid)
+                if got:
+                    return got
+            except Exception:
+                continue
+    except Exception:
+        return None
+    return None
+
+
+def _headless_stderr_suggests_stale_session(out: str, err: str) -> bool:
+    """Heuristic: failed --resume because chat/session is gone — not auth or generic CLI errors."""
+    try:
+        t = ((out or "") + "\n" + (err or "")).lower()
+    except Exception:
+        return False
+    if not t.strip():
+        return False
+    # Do not treat auth / permission failures as stale-session (would wrongly drop a valid id)
+    if any(
+        x in t
+        for x in (
+            "authentication required",
+            "invalid api key",
+            "api key",
+            "unauthorized",
+            "not authenticated",
+            "login required",
+            "401",
+            "403",
+            "rate limit",
+        )
+    ):
+        return False
+    if "session" not in t and "chat" not in t:
+        return False
+    return any(
+        m in t
+        for m in (
+            "not found",
+            "does not exist",
+            "no such session",
+            "no such chat",
+            "could not find",
+            "expired",
+            "invalid session",
+            "invalid chat",
+            "unknown session",
+            "unknown chat",
+            "session not found",
+            "chat not found",
+            "session expired",
+        )
+    )
+
+
+def _get_cursor_session_for_cwd(work_dir: str) -> Optional[str]:
+    try:
+        k = _cwd_key(work_dir)
+        with _ACTIVE_CWD_LOCK:
+            sid = _CURSOR_SESSION_BY_CWD.get(k)
+        return _sanitize_stored_session_id_for_cli(sid)
+    except Exception:
+        return None
+
+
+def _set_cursor_session_for_cwd(work_dir: str, session_id: Optional[str]) -> None:
+    try:
+        k = _cwd_key(work_dir)
+        clean = _sanitize_stored_session_id_for_cli(session_id) if session_id else None
+        with _ACTIVE_CWD_LOCK:
+            if clean:
+                _CURSOR_SESSION_BY_CWD[k] = clean
+            else:
+                _CURSOR_SESSION_BY_CWD.pop(k, None)
+        _save_state()
+    except Exception as e:
+        logger.warning("set_cursor_session_for_cwd failed: %s", e)
+
+
+def _strip_output_format_flags(argv: List[str]) -> List[str]:
+    """Remove --output-format <value>, --stream-partial-output, and legacy standalone tokens."""
+    out: List[str] = []
+    i = 0
+    n = len(argv)
+    while i < n:
+        if argv[i] == "--output-format" and i + 1 < n:
+            i += 2
+            continue
+        if argv[i] == "--stream-partial-output":
+            i += 1
+            continue
+        if argv[i] in ("--output-format", "json", "stream-json"):
+            i += 1
+            continue
+        out.append(argv[i])
+        i += 1
+    return out
+
+
+def _claude_tail_argv(task_str: str, use_continue: bool, resume_id: Optional[str]) -> Tuple[List[str], str]:
+    """Claude CLI argv tail after executable and skip_arg. Returns (tail, mode) mode in resume|continue|none."""
+    if resume_id:
+        return (["-p", task_str, "--resume", resume_id, "--output-format", "json"], "resume")
+    if use_continue:
+        return (["-p", task_str, "--continue", "--output-format", "json"], "continue")
+    return (["-p", "--output-format", "json", task_str], "none")
+
+
+def _wrap_claude_argv_for_platform(claude_cmd: str, skip_arg: List[str], tail: List[str]) -> List[str]:
+    if IS_WINDOWS and claude_cmd.lower().endswith(".cmd"):
+        return ["cmd", "/c", claude_cmd, *skip_arg, *tail]
+    if IS_WINDOWS and claude_cmd.lower().endswith(".ps1"):
+        return ["powershell", "-ExecutionPolicy", "Bypass", "-File", claude_cmd, *skip_arg, *tail]
+    return [claude_cmd, *skip_arg, *tail]
+
+
+def _cursor_agent_body_argv(
+    task_str: str,
+    yolo_argv: List[str],
+    use_continue: bool,
+    resume_id: Optional[str],
+) -> Tuple[List[str], str]:
+    """Cursor agent argv after executable: --trust, yolo, -p, ... Returns (body, mode) mode in resume|continue|none."""
+    prefix = ["--trust", *yolo_argv]
+    if resume_id:
+        return (prefix + ["-p", task_str, "--resume", resume_id, "--output-format", "json"], "resume")
+    if use_continue:
+        return (prefix + ["-p", task_str, "--continue", "--output-format", "json"], "continue")
+    return (prefix + ["-p", "--output-format", "json", task_str], "none")
+
+
+def _wrap_cursor_agent_argv(agent_cmd: str, body: List[str]) -> List[str]:
+    if IS_WINDOWS and agent_cmd.lower().endswith(".cmd"):
+        return ["cmd", "/c", agent_cmd, *body]
+    if IS_WINDOWS and agent_cmd.lower().endswith(".ps1"):
+        return ["powershell", "-ExecutionPolicy", "Bypass", "-File", agent_cmd, *body]
+    return [agent_cmd, *body]
+
+
+def _cursor_agent_stream_tail_argv() -> List[str]:
+    """Cursor CLI: streaming NDJSON to stdout (partial output when supported)."""
+    return ["--output-format", "stream-json", "--stream-partial-output"]
+
+
+def _cursor_agent_body_argv_stream(
+    task_str: str,
+    yolo_argv: List[str],
+    use_continue: bool,
+    resume_id: Optional[str],
+) -> Tuple[List[str], str]:
+    """Like _cursor_agent_body_argv but uses stream-json + stream-partial-output."""
+    prefix = ["--trust", *yolo_argv]
+    st = _cursor_agent_stream_tail_argv()
+    if resume_id:
+        return (prefix + ["-p", task_str, "--resume", resume_id, *st], "resume")
+    if use_continue:
+        return (prefix + ["-p", task_str, "--continue", *st], "continue")
+    return (prefix + ["-p", *st, task_str], "none")
+
+
+def _cursor_stream_json_text_fragment(obj: Any) -> str:
+    """Best-effort extract human-readable token(s) from one stream-json line."""
+    if obj is None:
+        return ""
+    if isinstance(obj, str):
+        return obj
+    if not isinstance(obj, dict):
+        return ""
+    for key in ("text", "delta", "content", "message", "result", "output", "value"):
+        v = obj.get(key)
+        if isinstance(v, str) and v.strip():
+            return v
+    msg = obj.get("message")
+    if isinstance(msg, dict):
+        c = msg.get("content")
+        if isinstance(c, str) and c.strip():
+            return c
+        parts = msg.get("parts")
+        if isinstance(parts, list):
+            buf: List[str] = []
+            for p in parts:
+                if isinstance(p, str) and p.strip():
+                    buf.append(p)
+                elif isinstance(p, dict):
+                    t = p.get("text") or p.get("content")
+                    if isinstance(t, str) and t.strip():
+                        buf.append(t)
+            if buf:
+                return "".join(buf)
+    ch = obj.get("choices")
+    if isinstance(ch, list) and ch:
+        d0 = ch[0] if isinstance(ch[0], dict) else None
+        if d0:
+            d = d0.get("delta")
+            if isinstance(d, dict):
+                c = d.get("content")
+                if isinstance(c, str):
+                    return c
+            t = d0.get("text")
+            if isinstance(t, str):
+                return t
+    return ""
+
+
+def _final_assistant_text_from_stream_lines(lines: List[str], accumulated: str) -> str:
+    """Prefer explicit result object from JSON lines; else accumulated stream text."""
+    for s in reversed(lines):
+        t = (s or "").strip()
+        if not t.startswith("{"):
+            continue
+        try:
+            o = json.loads(t)
+        except Exception:
+            continue
+        if not isinstance(o, dict):
+            continue
+        r = o.get("result")
+        if isinstance(r, str) and r.strip():
+            return r.strip()
+        typ = str(o.get("type") or o.get("event") or "").lower()
+        if typ in ("result", "final", "complete", "done"):
+            tx = o.get("text")
+            if isinstance(tx, str) and tx.strip():
+                return tx.strip()
+    acc = (accumulated or "").strip()
+    return acc if acc else "(no output)"
 
 
 # --- Bridge interactive sessions (PTY/ConPTY on bridge machine) ---
@@ -442,15 +816,52 @@ def _agent_interactive_command(backend: str) -> Tuple[str, Optional[str]]:
 
 
 def _status_payload() -> Dict[str, Any]:
-    """Return bridge status for UI/debugging."""
-    return {
-        "default_cwd": DEFAULT_CWD,
-        "cursor_active_cwd": _get_active_cwd("cursor"),
-        "claude_active_cwd": _get_active_cwd("claude"),
-        "trae_active_cwd": _get_active_cwd("trae"),
-        "state_file": STATE_FILE,
-        "auth_enabled": bool(BRIDGE_API_KEY),
-    }
+    """Return bridge status for UI/debugging. Never raises."""
+    try:
+        _claude_cwd = _get_active_cwd("claude")
+        _claude_sid = None
+        try:
+            if _claude_cwd and os.path.isdir(_claude_cwd):
+                _claude_sid = _get_claude_session_for_cwd(_claude_cwd)
+        except Exception:
+            pass
+        _cursor_cwd = _get_active_cwd("cursor")
+        _cursor_sid = None
+        try:
+            if _cursor_cwd and os.path.isdir(_cursor_cwd):
+                _cursor_sid = _get_cursor_session_for_cwd(_cursor_cwd)
+        except Exception:
+            pass
+        with _ACTIVE_CWD_LOCK:
+            _n_claude_sessions = len(_CLAUDE_SESSION_BY_CWD)
+            _n_cursor_sessions = len(_CURSOR_SESSION_BY_CWD)
+        return {
+            "default_cwd": DEFAULT_CWD,
+            "cursor_active_cwd": _cursor_cwd,
+            "cursor_stored_session_id": _cursor_sid,
+            "cursor_stored_sessions_count": _n_cursor_sessions,
+            "claude_active_cwd": _claude_cwd,
+            "claude_stored_session_id": _claude_sid,
+            "claude_stored_sessions_count": _n_claude_sessions,
+            "trae_active_cwd": _get_active_cwd("trae"),
+            "state_file": STATE_FILE,
+            "auth_enabled": bool(BRIDGE_API_KEY),
+        }
+    except Exception as e:
+        logger.warning("status_payload failed: %s", e)
+        return {
+            "default_cwd": DEFAULT_CWD,
+            "cursor_active_cwd": None,
+            "cursor_stored_session_id": None,
+            "cursor_stored_sessions_count": 0,
+            "claude_active_cwd": None,
+            "claude_stored_session_id": None,
+            "claude_stored_sessions_count": 0,
+            "trae_active_cwd": None,
+            "state_file": STATE_FILE,
+            "auth_enabled": bool(BRIDGE_API_KEY),
+            "status_error": str(e),
+        }
 
 
 @app.middleware("http")
@@ -864,26 +1275,16 @@ async def _run_claude_task(
     """Run Claude Code CLI headlessly (-p). Optionally passes --dangerously-skip-permissions when skip_permissions resolves true (see _effective_claude_skip_permissions)."""
     if not (task or str(task).strip()):
         return False, "Error: task is empty."
-    work_dir = (cwd or "").strip()
-    if not work_dir:
-        work_dir = _get_active_cwd("claude") or DEFAULT_CWD
-    if not os.path.isdir(work_dir):
-        work_dir = DEFAULT_CWD
+    work_dir = _agent_run_work_dir(cwd, "claude")
     claude_cmd = _claude_executable()
     task_str = task.strip()
     do_skip = _effective_claude_skip_permissions(skip_permissions)
     skip_arg = ["--dangerously-skip-permissions"] if do_skip else []
-    # Headless + optional skip permissions + JSON output (fallback if unsupported).
-    if IS_WINDOWS and claude_cmd.lower().endswith(".cmd"):
-        run_argv = ["cmd", "/c", claude_cmd, *skip_arg, "-p", "--output-format", "json", task_str]
-    elif IS_WINDOWS and claude_cmd.lower().endswith(".ps1"):
-        run_argv = ["powershell", "-ExecutionPolicy", "Bypass", "-File", claude_cmd, *skip_arg, "-p", "--output-format", "json", task_str]
-    else:
-        run_argv = [claude_cmd, *skip_arg, "-p", "--output-format", "json", task_str]
-    _log_argv = run_argv.copy()
-    if len(_log_argv) > 2 and len(task_str) > 80:
-        _log_argv[-1] = task_str[:80] + "..."
-    logger.info("claude run: argv=%s cwd=%s", _log_argv, work_dir)
+    # Claude Code headless: prefer --resume <id> per project cwd when we have a stored session_id from JSON;
+    # else --continue (last session in cwd). See https://code.claude.com/docs/en/headless
+    # CURSOR_BRIDGE_CLAUDE_CONTINUE=1 when cursor_bridge_claude_continue_session is true.
+    _cont_raw = (os.environ.get("CURSOR_BRIDGE_CLAUDE_CONTINUE") or "").strip().lower()
+    use_continue = _cont_raw in ("1", "true", "yes")
 
     claude_env = _claude_subprocess_env()
 
@@ -911,14 +1312,46 @@ async def _run_claude_task(
         rc = p.returncode if p.returncode is not None else 1
         return rc, out_s, err_s
 
-    try:
-        rc, out, err = await _run_exec(run_argv)
+    async def _claude_exec_with_json_fallback(argv: list[str]) -> tuple[int, str, str, list[str]]:
+        rc, out, err = await _run_exec(argv)
+        cur = argv
+        el = (err or "").lower()
         if rc != 0 and err and (
-            "output-format" in err.lower() or "unknown option" in err.lower() or "unrecognized" in err.lower()
+            "output-format" in el or "unknown option" in el or "unrecognized" in el
         ):
-            fallback_argv = [a for a in run_argv if a not in ("--output-format", "json")]
+            cur = _strip_output_format_flags(argv)
             logger.info("claude retry without --output-format (flag unsupported)")
-            rc, out, err = await _run_exec(fallback_argv)
+            rc, out, err = await _run_exec(cur)
+        return rc, out, err, cur
+
+    try:
+        resume_id_initial = _get_claude_session_for_cwd(work_dir) if use_continue else None
+        tail, cont_mode = _claude_tail_argv(task_str, use_continue, resume_id_initial)
+        run_argv = _wrap_claude_argv_for_platform(claude_cmd, skip_arg, tail)
+        _log_argv = list(run_argv)
+        if len(task_str) > 80:
+            for i, a in enumerate(_log_argv):
+                if a == task_str:
+                    _log_argv = list(_log_argv)
+                    _log_argv[i] = task_str[:80] + "..."
+                    break
+        logger.info(
+            "claude run: argv=%s cwd=%s session_mode=%s stored_resume=%s",
+            _log_argv,
+            work_dir,
+            cont_mode,
+            (resume_id_initial[:16] + "…") if resume_id_initial and len(resume_id_initial) > 16 else resume_id_initial,
+        )
+
+        rc, out, err, run_argv = await _claude_exec_with_json_fallback(run_argv)
+
+        if rc != 0 and cont_mode == "resume" and _headless_stderr_suggests_stale_session(out, err):
+            logger.info("claude --resume failed (stale session); clearing stored id and retrying with --continue")
+            _set_claude_session_for_cwd(work_dir, None)
+            tail2, cont_mode = _claude_tail_argv(task_str, True, None)
+            run_argv = _wrap_claude_argv_for_platform(claude_cmd, skip_arg, tail2)
+            rc, out, err, run_argv = await _claude_exec_with_json_fallback(run_argv)
+
         # Minimax auth fallback: if Bearer-only fails with 401, retry once with X-Api-Key mode.
         try:
             base_url = (claude_env.get("ANTHROPIC_BASE_URL") or claude_env.get("ANTHROPIC_API_URL") or "").strip().lower()
@@ -931,14 +1364,7 @@ async def _run_claude_task(
             if ("minimax" in base_url) and looks_like_auth_401:
                 logger.info("Claude Minimax: 401 with Bearer-only; retrying once with X-Api-Key mode")
                 claude_env = _claude_subprocess_env_minimax_x_api_key()
-                # Re-run the same argv (and the no-output-format fallback if needed)
-                rc, out, err = await _run_exec(run_argv)
-                if rc != 0 and err and (
-                    "output-format" in err.lower() or "unknown option" in err.lower() or "unrecognized" in err.lower()
-                ):
-                    fallback_argv = [a for a in run_argv if a not in ("--output-format", "json")]
-                    logger.info("claude retry without --output-format (flag unsupported) [after minimax auth fallback]")
-                    rc, out, err = await _run_exec(fallback_argv)
+                rc, out, err, run_argv = await _claude_exec_with_json_fallback(run_argv)
         except Exception:
             pass
         if rc != 0:
@@ -968,6 +1394,12 @@ async def _run_claude_task(
                     "turn ON the Companion flash for Claude chat or pass skip_permissions:true on the bridge run_agent call."
                 )
             return False, msg
+        try:
+            sid = _extract_headless_json_session_id_from_stdout(out)
+            if sid:
+                _set_claude_session_for_cwd(work_dir, sid)
+        except Exception:
+            pass
         if out:
             try:
                 last_line = out.strip().splitlines()[-1]
@@ -998,33 +1430,20 @@ async def _run_agent_task(
     timeout_sec: int = 120,
     use_yolo: Optional[bool] = None,
 ) -> tuple:
-    """Run Cursor CLI agent in non-interactive mode: agent -p \"task\". Returns (success, output_or_error). On Windows, .cmd/.ps1 are run via cmd or powershell.
+    """Run Cursor CLI agent in non-interactive mode (--print / -p). Prefers --resume <session_id> per project cwd when
+    CURSOR_BRIDGE_CURSOR_CONTINUE=1 and a stored id exists; else --continue; else plain -p (see cursor.com/docs/cli).
 
     use_yolo: True adds --yolo; None/False does not.
     """
     if not (task or str(task).strip()):
         return False, "Error: task is empty."
-    work_dir = (cwd or "").strip()
-    if not work_dir:
-        work_dir = _get_active_cwd("cursor") or DEFAULT_CWD
-    if not os.path.isdir(work_dir):
-        work_dir = DEFAULT_CWD
+    work_dir = _agent_run_work_dir(cwd, "cursor")
     agent_cmd = _agent_executable()
     task_str = task.strip()
     yolo_argv = _cursor_agent_yolo_argv(use_yolo)
-    # --trust so agent runs non-interactively (avoids "Workspace Trust Required" prompt and exit 1)
-    # Optional --yolo when use_yolo True: allow commands unless denied in cli-config.
-    # --output-format json so the bridge can reliably extract the result text.
-    if IS_WINDOWS and agent_cmd.lower().endswith(".cmd"):
-        run_argv = ["cmd", "/c", agent_cmd, "--trust", *yolo_argv, "-p", "--output-format", "json", task_str]
-    elif IS_WINDOWS and agent_cmd.lower().endswith(".ps1"):
-        run_argv = ["powershell", "-ExecutionPolicy", "Bypass", "-File", agent_cmd, "--trust", *yolo_argv, "-p", "--output-format", "json", task_str]
-    else:
-        run_argv = [agent_cmd, "--trust", *yolo_argv, "-p", "--output-format", "json", task_str]
-    _log_argv = run_argv.copy()
-    if len(_log_argv) > 2 and len(task_str) > 80:
-        _log_argv[-1] = task_str[:80] + "..."
-    logger.info("agent run: argv=%s cwd=%s", _log_argv, work_dir)
+    _csr = (os.environ.get("CURSOR_BRIDGE_CURSOR_CONTINUE") or "").strip().lower()
+    use_continue = _csr in ("1", "true", "yes")
+
     async def _run_exec(argv: list[str]) -> tuple[int, str, str]:
         p = await asyncio.create_subprocess_exec(
             *argv,
@@ -1048,15 +1467,46 @@ async def _run_agent_task(
         rc = p.returncode if p.returncode is not None else 1
         return rc, out_s, err_s
 
-    try:
-        rc, out, err = await _run_exec(run_argv)
-        # If this agent version doesn't support --output-format, retry without it (keep --trust/-p).
+    async def _cursor_exec_with_json_fallback(argv: list[str]) -> tuple[int, str, str, list[str]]:
+        rc, out, err = await _run_exec(argv)
+        cur = argv
+        el = (err or "").lower()
         if rc != 0 and err and (
-            "output-format" in err.lower() or "unknown option" in err.lower() or "unrecognized" in err.lower()
+            "output-format" in el or "unknown option" in el or "unrecognized" in el
         ):
-            fallback_argv = [a for a in run_argv if a not in ("--output-format", "json")]
+            cur = _strip_output_format_flags(argv)
             logger.info("agent retry without --output-format (flag unsupported)")
-            rc, out, err = await _run_exec(fallback_argv)
+            rc, out, err = await _run_exec(cur)
+        return rc, out, err, cur
+
+    try:
+        resume_id_initial = _get_cursor_session_for_cwd(work_dir) if use_continue else None
+        body, cont_mode = _cursor_agent_body_argv(task_str, yolo_argv, use_continue, resume_id_initial)
+        run_argv = _wrap_cursor_agent_argv(agent_cmd, body)
+        _log_argv = list(run_argv)
+        if len(task_str) > 80:
+            for i, a in enumerate(_log_argv):
+                if a == task_str:
+                    _log_argv = list(_log_argv)
+                    _log_argv[i] = task_str[:80] + "..."
+                    break
+        logger.info(
+            "agent run: argv=%s cwd=%s session_mode=%s stored_resume=%s",
+            _log_argv,
+            work_dir,
+            cont_mode,
+            (resume_id_initial[:16] + "…") if resume_id_initial and len(resume_id_initial) > 16 else resume_id_initial,
+        )
+
+        rc, out, err, run_argv = await _cursor_exec_with_json_fallback(run_argv)
+
+        if rc != 0 and cont_mode == "resume" and _headless_stderr_suggests_stale_session(out, err):
+            logger.info("Cursor agent --resume failed (stale session); clearing stored id and retrying with --continue")
+            _set_cursor_session_for_cwd(work_dir, None)
+            body2, cont_mode = _cursor_agent_body_argv(task_str, yolo_argv, True, None)
+            run_argv = _wrap_cursor_agent_argv(agent_cmd, body2)
+            rc, out, err, run_argv = await _cursor_exec_with_json_fallback(run_argv)
+
         if rc != 0:
             logger.warning(
                 "agent exited non-zero: returncode=%s stdout_len=%s stderr_len=%s stdout_preview=%s stderr_preview=%s",
@@ -1080,6 +1530,12 @@ async def _run_agent_task(
                     "If you see 'Authentication required', run 'agent login' or set CURSOR_API_KEY (or cursor_bridge_cursor_api_key in config)."
                 )
             return False, msg
+        try:
+            sid = _extract_headless_json_session_id_from_stdout(out)
+            if sid:
+                _set_cursor_session_for_cwd(work_dir, sid)
+        except Exception:
+            pass
         # Parse JSON output when available (Cursor CLI: --output-format json).
         if out:
             try:
@@ -1111,6 +1567,248 @@ async def _run_agent_task(
         return False, f"Agent timed out after {timeout_sec}s. For long tasks, use Cursor in the IDE or Cloud Agent."
     except Exception as e:
         return False, f"Error: {e!s}"
+
+
+async def _stream_pump_cursor_stdout(
+    run_argv: List[str],
+    work_dir: str,
+    timeout_sec: int,
+):
+    """Async-generate (\"preview\", cumulative_text) then (\"end\", (rc, raw_lines, acc, err_s)) or (\"fatal\", err_msg)."""
+    proc = await asyncio.create_subprocess_exec(
+        *run_argv,
+        cwd=work_dir,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stderr_task = asyncio.create_task(proc.stderr.read())
+    raw_lines: List[str] = []
+    accumulated = ""
+    line_to = float(max(60, min(int(timeout_sec or 120), 600)))
+    try:
+        while True:
+            try:
+                line_b = await asyncio.wait_for(proc.stdout.readline(), timeout=line_to)
+            except asyncio.TimeoutError:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                err_b = await stderr_task
+                err_s = err_b.decode("utf-8", errors="replace") if err_b else ""
+                yield ("fatal", f"Agent output stalled (no line for {int(line_to)}s). stderr: {err_s[:800]}")
+                return
+            if not line_b:
+                break
+            s = line_b.decode("utf-8", errors="replace").rstrip("\r\n")
+            if not s.strip():
+                continue
+            raw_lines.append(s)
+            try:
+                obj = json.loads(s)
+            except Exception:
+                obj = None
+            if isinstance(obj, dict):
+                frag = _cursor_stream_json_text_fragment(obj)
+                if frag:
+                    accumulated += frag
+                    if len(accumulated) > 250000:
+                        accumulated = accumulated[-250000:]
+                    yield ("preview", accumulated)
+        rc = await proc.wait()
+        err_b = await stderr_task
+        err_s = err_b.decode("utf-8", errors="replace") if err_b else ""
+        yield ("end", (rc, raw_lines, accumulated, err_s))
+    except Exception as e:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        yield ("fatal", str(e))
+
+
+async def _ndjson_cursor_run_agent_stream(
+    request_id: str,
+    plugin_id: str,
+    task: str,
+    cwd: Optional[str],
+    timeout_sec: int,
+    use_yolo: Optional[bool],
+):
+    """NDJSON lines: preview events while Cursor CLI streams; final done with PluginResult-like fields."""
+
+    def enc(obj: Dict[str, Any]) -> str:
+        row: Dict[str, Any] = {"request_id": request_id, "plugin_id": plugin_id}
+        row.update(obj)
+        return json.dumps(row, ensure_ascii=False) + "\n"
+
+    if not (task or "").strip():
+        yield enc({"event": "done", "success": False, "text": "", "error": "Error: task is empty."})
+        return
+
+    work_dir = _agent_run_work_dir(cwd, "cursor")
+    agent_cmd = _agent_executable()
+    task_str = task.strip()
+    yolo_argv = _cursor_agent_yolo_argv(use_yolo)
+    _csr = (os.environ.get("CURSOR_BRIDGE_CURSOR_CONTINUE") or "").strip().lower()
+    use_continue = _csr in ("1", "true", "yes")
+    resume_id = _get_cursor_session_for_cwd(work_dir) if use_continue else None
+    force_continue_only = False
+    timeout = max(30, min(int(timeout_sec or 120), 1800))
+    did_stale_retry = False
+
+    while True:
+        body, cont_mode = _cursor_agent_body_argv_stream(
+            task_str,
+            yolo_argv,
+            True if force_continue_only else use_continue,
+            None if force_continue_only else resume_id,
+        )
+        run_argv = _wrap_cursor_agent_argv(agent_cmd, body)
+        _log_argv = list(run_argv)
+        if len(task_str) > 80:
+            for i, a in enumerate(_log_argv):
+                if a == task_str:
+                    _log_argv = list(_log_argv)
+                    _log_argv[i] = task_str[:80] + "..."
+                    break
+        logger.info(
+            "agent stream: argv=%s cwd=%s session_mode=%s",
+            _log_argv,
+            work_dir,
+            cont_mode,
+        )
+
+        end_state = None
+        async for kind, payload in _stream_pump_cursor_stdout(run_argv, work_dir, timeout):
+            if kind == "preview":
+                yield enc({"event": "preview", "text": payload})
+            elif kind == "fatal":
+                yield enc({"event": "done", "success": False, "text": "", "error": str(payload)})
+                return
+            elif kind == "end":
+                end_state = payload
+        if end_state is None:
+            yield enc({"event": "done", "success": False, "text": "", "error": "Stream ended unexpectedly."})
+            return
+
+        rc, raw_lines, acc, err_s = end_state
+        out_join = "\n".join(raw_lines)
+
+        if rc != 0 and (
+            not did_stale_retry
+            and cont_mode == "resume"
+            and _headless_stderr_suggests_stale_session(out_join, err_s)
+        ):
+            logger.info("Cursor agent stream --resume failed (stale session); retry with --continue")
+            did_stale_retry = True
+            _set_cursor_session_for_cwd(work_dir, None)
+            force_continue_only = True
+            resume_id = None
+            continue
+
+        el = (err_s or "").lower()
+        if rc != 0 and el and (
+            "output-format" in el or "unknown option" in el or "unrecognized" in el or "stream-partial" in el
+        ):
+            logger.info("Cursor agent stream flags unsupported; falling back to json agent run")
+            ok, txt = await _run_agent_task(task, cwd=cwd, timeout_sec=timeout_sec, use_yolo=use_yolo)
+            if ok and (txt or "").strip():
+                yield enc(
+                    {
+                        "event": "preview",
+                        "text": "(Live stream unavailable with this CLI; final output only.)\n\n" + txt.strip(),
+                    }
+                )
+            yield enc(
+                {
+                    "event": "done",
+                    "success": bool(ok),
+                    "text": txt if ok else "",
+                    "error": None if ok else txt,
+                }
+            )
+            return
+
+        if rc != 0:
+            parts = [f"Agent exited with code {rc}."]
+            if err_s:
+                parts.append(f"stderr: {err_s}")
+            if out_join:
+                parts.append(f"stdout: {out_join}")
+            msg = "\n".join(parts) if (err_s or out_join) else parts[0]
+            if "Authentication required" in msg or "agent login" in msg.lower() or "CURSOR_API_KEY" in msg:
+                msg += " To fix: run 'agent login' in a terminal, or set CURSOR_API_KEY where the bridge runs."
+            yield enc({"event": "done", "success": False, "text": "", "error": msg})
+            return
+
+        try:
+            sid = _extract_headless_json_session_id_from_stdout(out_join)
+            if sid:
+                _set_cursor_session_for_cwd(work_dir, sid)
+        except Exception:
+            pass
+        final_text = _final_assistant_text_from_stream_lines(raw_lines, acc)
+        if not (final_text or "").strip():
+            final_text = out_join.strip() or (
+                "(no output)\nThe Cursor CLI agent exited successfully but produced no parseable stream or result."
+            )
+        yield enc({"event": "done", "success": True, "text": final_text, "error": None})
+        return
+
+
+async def _ndjson_stream_run_impl(body: Dict[str, Any]):
+    """Async-generate UTF-8 NDJSON lines for POST /run when metadata.stream_agent is set."""
+    request_id = str(body.get("request_id") or "")
+    plugin_id = str(body.get("plugin_id") or "cursor-bridge")
+    user_input = (body.get("user_input") or "").strip()
+    cap_id = (body.get("capability_id") or "ask_cursor").strip().lower().replace(" ", "_").replace("-", "_")
+    params = body.get("capability_parameters") or {}
+    if not isinstance(params, dict):
+        params = {}
+
+    def enc(obj: Dict[str, Any]) -> bytes:
+        row = {"request_id": request_id, "plugin_id": plugin_id, **obj}
+        return (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8")
+
+    if cap_id != "run_agent":
+        yield enc({"event": "done", "success": False, "text": "", "error": "stream_agent requires capability_id run_agent."})
+        return
+
+    task = (params.get("task") or params.get("prompt") or user_input or "").strip()
+    cwd = (params.get("cwd") or "").strip() or None
+    backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
+    timeout = 600
+    try:
+        t = int(params.get("timeout_sec", timeout))
+        if 30 <= t <= 1800:
+            timeout = t
+    except (TypeError, ValueError):
+        pass
+
+    if not task:
+        yield enc({"event": "done", "success": False, "text": "", "error": "run_agent requires task, prompt, or user_input."})
+        return
+
+    if not cwd:
+        cwd = _get_active_cwd(backend) or None
+
+    if backend == "claude":
+        _sk = _parse_claude_skip_permissions_override(params)
+        ok, text = await _run_claude_task(task, cwd=cwd, timeout_sec=timeout, skip_permissions=_sk)
+        yield enc({"event": "done", "success": ok, "text": text if ok else "", "error": None if ok else text})
+        return
+
+    if backend == "trae":
+        ok, text = await _run_trae_task(task, cwd=cwd, timeout_sec=timeout)
+        yield enc({"event": "done", "success": ok, "text": text if ok else "", "error": None if ok else text})
+        return
+
+    yolo_override = _parse_yolo_override(params)
+    async for line in _ndjson_cursor_run_agent_stream(
+        request_id, plugin_id, task, cwd=cwd, timeout_sec=timeout, use_yolo=yolo_override
+    ):
+        yield line.encode("utf-8") if isinstance(line, str) else line
 
 
 def _infer_backend_from_plugin_id(plugin_id: str) -> str:
@@ -1290,6 +1988,41 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
                 if success and os.path.isdir(resolved):
                     _set_active_cwd(resolved, backend="cursor")
 
+    elif cap_id == "clear_claude_session":
+        # Drop stored Claude Code session id for a project (next run_agent uses --continue, not --resume <id>).
+        raw = (params.get("cwd") or params.get("path") or "").strip()
+        if raw:
+            resolved = _resolve_path(raw)
+        else:
+            resolved = (_get_active_cwd("claude") or "").strip()
+        if not resolved or not os.path.isdir(resolved):
+            success = False
+            error = "clear_claude_session requires a valid project directory (set_cwd first or pass path/cwd)."
+        else:
+            try:
+                _set_claude_session_for_cwd(resolved, None)
+                text = f"Cleared stored Claude Code session for: {resolved}"
+            except Exception as e:
+                success = False
+                error = f"clear_claude_session failed: {e!s}"
+
+    elif cap_id == "clear_cursor_session":
+        raw = (params.get("cwd") or params.get("path") or "").strip()
+        if raw:
+            resolved = _resolve_path(raw)
+        else:
+            resolved = (_get_active_cwd("cursor") or "").strip()
+        if not resolved or not os.path.isdir(resolved):
+            success = False
+            error = "clear_cursor_session requires a valid project directory (open_project first or pass path/cwd)."
+        else:
+            try:
+                _set_cursor_session_for_cwd(resolved, None)
+                text = f"Cleared stored Cursor agent session for: {resolved}"
+            except Exception as e:
+                success = False
+                error = f"clear_cursor_session failed: {e!s}"
+
     elif cap_id == "run_agent":
         # Run Cursor / Claude Code / Trae with a task; return output.
         task = (params.get("task") or params.get("prompt") or user_input or "").strip()
@@ -1448,14 +2181,29 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @app.post("/run")
-async def run(body: Dict[str, Any]) -> Dict[str, Any]:
+async def run(request: Request):
     """
     Accept PluginRequest (JSON) from HomeClaw. Dispatch by capability_id; return PluginResult (JSON).
-    Never raises: any unexpected error returns success=False with error message.
+    When metadata.stream_agent is true and capability_id is run_agent, returns NDJSON (application/x-ndjson)
+    with preview lines and a final done line for Core streaming into async /inbound polls.
     """
+    body: Dict[str, Any] = {}
     try:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
         if not isinstance(body, dict):
             body = {}
+        md = body.get("metadata") or {}
+        if not isinstance(md, dict):
+            md = {}
+        cap_id = (body.get("capability_id") or "ask_cursor").strip().lower().replace(" ", "_").replace("-", "_")
+        if md.get("stream_agent") and cap_id == "run_agent":
+            return StreamingResponse(
+                _ndjson_stream_run_impl(body),
+                media_type="application/x-ndjson; charset=utf-8",
+            )
         return await _run_impl(body)
     except Exception as e:
         _b = body if isinstance(body, dict) else {}

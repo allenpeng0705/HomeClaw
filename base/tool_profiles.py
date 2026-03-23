@@ -53,6 +53,7 @@ TOOL_PROFILES: Dict[str, List[str]] = {
     "sessions_list": ["messaging"],
     "sessions_send": ["messaging"],
     "sessions_spawn": ["messaging"],
+    "peer_call": ["messaging", "coding"],
     "sessions_transcript": ["messaging"],
     "route_to_tam": ["messaging"],
     "fetch_url": ["messaging"],

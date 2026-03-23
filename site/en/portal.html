@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw Portal - Web interface for managing and configuring your AI assistant.">
+  <title>Portal — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="Main navigation">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="use-homeclaw.html">How to use</a>
+        <a href="companion-app.html">Companion app</a>
+        <a href="portal.html" class="active">Portal</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch">EN | <a href="../zh/portal.html">中文</a></span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>HomeClaw Portal</h1>
+      <p class="lead">Your local web interface for managing and configuring HomeClaw.</p>
+      <p>The Portal provides a convenient web interface for configuring your HomeClaw instance. Use it to manage models, configure settings, and monitor your system — all from your browser.</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="On this page">
+      <p class="doc-toc-title">On this page</p>
+      <ul>
+        <li><a href="#access">Access Portal</a></li>
+        <li><a href="#features">Portal Features</a></li>
+        <li><a href="#management">Management Tools</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section doc-section-no-img" id="access">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Access Portal</h2>
+        <p>The Portal runs locally and is accessible from your web browser:</p>
+
+        <h3>Start the Portal</h3>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Start Portal</p>
+          <pre class="quickstart-code"><code>python -m main portal</code></pre>
+        </div>
+
+        <h3>Access the Portal</h3>
+        <p>Once started, open your browser and navigate to:</p>
+        <div class="doc-keys">
+          <p class="doc-keys-title">Portal URL</p>
+          <pre class="quickstart-code"><code>http://127.0.0.1:18472</code></pre>
+        </div>
+
+        <div class="doc-callout" style="margin:1.25rem 0; padding:1rem 1.25rem; background:rgba(33,150,243,.15); border-left:4px solid #2196f3; border-radius:4px;">
+          <strong>Note:</strong> The Portal is designed for local access only. It provides a convenient interface for managing your HomeClaw configuration without editing YAML files directly.
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="features">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Portal Features</h2>
+        <p>The Portal offers a comprehensive set of management features:</p>
+
+        <h3>Model Configuration</h3>
+        <p>Configure your local and cloud models through an intuitive interface:</p>
+        <ul>
+          <li>Add and configure local models (GGUF files)</li>
+          <li>Set up cloud model providers (OpenAI, DeepSeek, etc.)</li>
+          <li>Configure Mix Mode for optimal performance</li>
+          <li>Set default models for main LLM and embedding</li>
+        </ul>
+
+        <h3>Settings Management</h3>
+        <p>Manage all HomeClaw settings from the Portal:</p>
+        <ul>
+          <li>Edit <code>core.yml</code> settings</li>
+          <li>Configure user preferences</li>
+          <li>Manage LLM parameters</li>
+          <li>Set up authentication</li>
+        </ul>
+
+        <h3>Plugin Management</h3>
+        <p>Manage your plugins directly from the Portal:</p>
+        <ul>
+          <li>View installed plugins</li>
+          <li>Enable or disable plugins</li>
+          <li>Configure plugin settings</li>
+          <li>Monitor plugin status</li>
+        </ul>
+
+        <h3>Channel Configuration</h3>
+        <p>Configure communication channels:</p>
+        <ul>
+          <li>Set up Telegram bot</li>
+          <li>Configure Discord integration</li>
+          <li>Manage WebChat settings</li>
+          <li>Test channel connections</li>
+        </ul>
+
+        <h3>System Monitoring</h3>
+        <p>Monitor your HomeClaw instance:</p>
+        <ul>
+          <li>View system status</li>
+          <li>Check model availability</li>
+          <li>Monitor resource usage</li>
+          <li>View recent logs</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="management">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Management Tools</h2>
+        <p>Powerful management capabilities accessible from the Portal:</p>
+
+        <h3>Configuration Files</h3>
+        <p>Edit configuration files through the web interface:</p>
+        <ul>
+          <li><strong>core.yml</strong> — Main Core configuration</li>
+          <li><strong>llm.yml</strong> — Model and LLM settings</li>
+          <li><strong>user.yml</strong> — User profiles and preferences</li>
+          <li><strong>plugins/</strong> — Plugin configurations</li>
+        </ul>
+
+        <h3>Service Control</h3>
+        <p>Control HomeClaw services from the Portal:</p>
+        <ul>
+          <li>Start and stop Core</li>
+          <li>Restart services</li>
+          <li>Check service status</li>
+          <li>View service logs</li>
+        </ul>
+
+        <h3>Data Management</h3>
+        <p>Manage your HomeClaw data:</p>
+        <ul>
+          <li>View conversation history</li>
+          <li>Export and import configurations</li>
+          <li>Backup settings</li>
+          <li>Clear cached data</li>
+        </ul>
+
+        <h3>Authentication Setup</h3>
+        <p>Configure security settings:</p>
+        <ul>
+          <li>Enable/disable API key authentication</li>
+          <li>Set or change API key</li>
+          <li>Configure allowed hosts</li>
+          <li>Manage access permissions</li>
+        </ul>
+
+        <div class="doc-keys">
+          <p class="doc-keys-title">Enable authentication in core.yml</p>
+          <pre class="quickstart-code"><code>auth_enable: true
+auth_api_key: your-secure-api-key-here</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="troubleshooting">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Troubleshooting</h2>
+        <p>Common Portal issues and solutions:</p>
+
+        <h3>Cannot Access Portal</h3>
+        <ul>
+          <li>Ensure Portal is running: <code>python -m main portal</code></li>
+          <li>Check if port 18472 is available</li>
+          <li>Verify the URL is correct: <code>http://127.0.0.1:18472</code></li>
+          <li>Check if another process is using the port</li>
+        </ul>
+
+        <h3>Portal Not Starting</h3>
+        <ul>
+          <li>Check Python version (requires 3.11+)</li>
+          <li>Verify all dependencies are installed</li>
+          <li>Check Portal logs for errors</li>
+          <li>Try a different port: <code>python -m main portal --port 18473</code></li>
+        </ul>
+
+        <h3>Configuration Changes Not Saving</h3>
+        <ul>
+          <li>Check file permissions in <code>config/</code> directory</li>
+          <li>Verify YAML syntax is correct</li>
+          <li>Check for conflicting settings</li>
+          <li>Restart Portal after making changes</li>
+        </ul>
+
+        <h3>Need More Help?</h3>
+        <p>Check <a href="https://github.com/allenpeng0705/HomeClaw/issues" target="_blank" rel="noopener">GitHub issues</a> or <a href="docs.html">full documentation</a> for more detailed troubleshooting guides.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="next-steps">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Next Steps</h2>
+        <p>Ready to explore more?</p>
+        <ul>
+          <li><a href="use-homeclaw.html">Learn how to use HomeClaw</a></li>
+          <li><a href="companion-app.html">Set up Companion app</a></li>
+          <li><a href="docs.html">Read the full documentation</a></li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener">Contribute on GitHub</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2026 HomeClaw. Your data, your control.</p>
+      <p>Questions? Contact <a href="mailto:shileipeng@gmail.com">shileipeng@gmail.com</a> or <a href="mailto:shilei.peng@qq.com">shilei.peng@qq.com</a></p>
+    </div>
+  </footer>
+</body>
+</html>

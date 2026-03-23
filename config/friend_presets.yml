@@ -9,6 +9,7 @@
 #   finder   — search/list (file_find, folder_list); read (document_read, file_read); view (get_file_view_link); edit (file_write); save_result_page (e.g. HTML slides from doc)
 #   bridge   — shared by Cursor, ClaudeCode, Trae: time, route_to_plugin, folder_list, file_find (message is pattern-routed to the right bridge; no general LLM tool loop)
 #   cursor   — same as bridge; kept for backward compat
+#   tutor    — time, sessions_spawn, models_list, web_search (use with llm_ref for math/science-dedicated local models)
 # Use tools_preset so the friend only sees the tools it needs (saves tokens, clearer behavior). E.g. Note uses "note" to get save/query/file tools only, no reminder or routing tools.
 #
 # --- Field reference (each key) ---
@@ -20,6 +21,7 @@
 #   Only listed sources are used; e.g. [cognee] = RAG only (saves tokens).
 # history: "full" = full chat history. Or a number = last N turns (e.g. 10 = last 10 user turns + their replies; saves tokens).
 # model_routing: "any" = use configured LLM (local/cloud/mix). "local_only" = refuse in cloud-only mode; in mix, force local.
+# llm_ref (or main_llm_ref): optional. Full ref e.g. local_models/my_math_gguf or cloud_models/Gemini-… — Companion friend uses this model for the whole turn (overrides mix-route main). Entry must exist in llm.yml and not be available: false. Does not auto-start llama-server on a new port; ensure that server is running or use main’s server if same ref.
 # save_policy: "default" = normal. "full" = local model, data stored locally and private; user may store/query secret info (e.g. bank, passwords); do not block.
 # system_prompt: Text appended as "## Friend assistant" at end of system message. Does not replace workspace, identity, date/time, memory, routing.
 
@@ -106,3 +108,28 @@ presets:
   #   model_routing: any
   #   save_policy: default
   #   system_prompt: "You help with reminders and file search. Use only the provided tools."
+
+  # Math / science tutor (Companion): dedicated local or cloud model. Uncomment, set llm_ref to a catalog id, add friend in user.yml (name + preset: math).
+  # math:
+  #   thumbnail: math.png
+  #   tools_preset: tutor
+  #   skills: []
+  #   plugins: []
+  #   memory_sources: [cognee, agent_memory]
+  #   history: 20
+  #   model_routing: local_only   # optional: keep STEPS on local GGUF
+  #   llm_ref: local_models/Qwen3-8B-Q5_K_M   # must match id in config/llm.yml; start llama-server on that port
+  #   save_policy: default
+  #   system_prompt: "You are a math assistant. Show clear steps. Prefer exact reasoning over guessing."
+
+  # science:
+  #   thumbnail: science.png
+  #   tools_preset: tutor
+  #   skills: []
+  #   plugins: []
+  #   memory_sources: [cognee]
+  #   history: 20
+  #   llm_ref: cloud_models/DeepSeek-Chat
+  #   model_routing: any
+  #   save_policy: default
+  #   system_prompt: "You explain science concepts clearly and cite uncertainty when appropriate."
