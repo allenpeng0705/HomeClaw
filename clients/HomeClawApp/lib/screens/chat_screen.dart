@@ -2296,7 +2296,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (t.startsWith('data:image/')) return true;
     final u = Uri.tryParse(t);
     if (u != null && u.hasScheme && (u.scheme == 'http' || u.scheme == 'https')) return true;
-    if (t.startsWith('/')) return true;
+    // Only treat Core file routes as network-loadable relative paths.
+    if (t.startsWith('/files/')) return true;
+    if (t.startsWith('/files/out')) return true;
     return false;
   }
 
@@ -2306,7 +2308,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (u != null && u.hasScheme && (u.scheme == 'http' || u.scheme == 'https')) {
       return t;
     }
-    if (t.startsWith('/')) {
+    if (t.startsWith('/files/') || t.startsWith('/files/out')) {
       final base = widget.coreService.baseUrl.replaceFirst(RegExp(r'/$'), '');
       return '$base$t';
     }
