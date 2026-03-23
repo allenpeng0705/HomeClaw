@@ -65,8 +65,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final List<List<String>?> _messageAudios = [];
   /// Optional video data URLs per message (same index as _messages; for user-to-user short video).
   final List<List<String>?> _messageVideos = [];
+  /// File attachment display names per message (same index as _messages); for outgoing upload UX and thread file_links.
+  final List<List<String>?> _messageFileLabels = [];
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  bool _autoFollowBottom = true;
   bool _loading = false;
 
   /// Pagination: number of messages fetched per page from Core.
@@ -106,6 +109,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// Push-to-talk (user friends only): true while recording.
   bool _recordingPushToTalk = false;
   final AudioRecorder _voiceRecorder = AudioRecorder();
+  int? _activeUserSendBubbleIndex;
+  String? _activeUserSendStage;
+
+  static String _userSendInitialStage({
+    required bool hasImages,
+    required bool hasVideos,
+    required bool hasFiles,
+  }) {
+    if (hasImages) return 'Preparing image...';
+    if (hasVideos) return 'Preparing video...';
+    if (hasFiles) return 'Preparing attachment...';
+    return 'Sending...';
+  }
 
   /// Rotating status messages when waiting for reply (when no progress from Core).
   static const List<String> _loadingStatusMessages = [
@@ -323,6 +339,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _onScrollForPagination() {
+    if (_scrollController.hasClients) {
+      final pos = _scrollController.position;
+      _autoFollowBottom = (pos.maxScrollExtent - pos.pixels) <= 140;
+    }
     if (widget.isUserFriend) return;
     if (_loadingMoreMessages || !_hasMoreMessages) return;
     if (!_scrollController.hasClients) return;
@@ -354,6 +374,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final olderImages = <List<String>?>[];
       final olderAudios = <List<String>?>[];
       final olderVideos = <List<String>?>[];
+      final olderFileLabels = <List<String>?>[];
       for (final m in list) {
         final role = ((m['role']?.toString()) ?? '').trim().toLowerCase();
         final content = ((m['content']?.toString()) ?? '').trim();
@@ -361,6 +382,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         olderImages.add(null);
         olderAudios.add(null);
         olderVideos.add(null);
+        olderFileLabels.add(null);
       }
       final prevMax = _scrollController.position.maxScrollExtent;
       setState(() {
@@ -368,6 +390,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _messageImages.insertAll(0, olderImages);
         _messageAudios.insertAll(0, olderAudios);
         _messageVideos.insertAll(0, olderVideos);
+        _messageFileLabels.insertAll(0, olderFileLabels);
         _loadingMoreMessages = false;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -401,11 +424,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _messageImages.clear();
       _messageAudios.clear();
       _messageVideos.clear();
+      _messageFileLabels.clear();
       for (final e in loaded) {
         _messages.add(e.key);
         _messageImages.add(e.value);
         _messageAudios.add(null);
         _messageVideos.add(null);
+        _messageFileLabels.add(null);
       }
       if (mounted) {
         setState(() {});
@@ -455,10 +480,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _messageImages.clear();
         _messageAudios.clear();
         _messageVideos.clear();
+        _messageFileLabels.clear();
         _messages.addAll(messages);
         _messageImages.addAll(images);
         _messageAudios.addAll(audios);
         _messageVideos.addAll(videos);
+        _messageFileLabels.addAll(List<List<String>?>.filled(messages.length, null));
         _chatHistoryOffset = 0;
         _hasMoreMessages = list.length >= _pageSize;
       });
@@ -488,6 +515,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _messageImages.clear();
             _messageAudios.clear();
             _messageVideos.clear();
+            _messageFileLabels.clear();
           });
         }
         return;
@@ -497,6 +525,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _messageImages.clear();
       _messageAudios.clear();
       _messageVideos.clear();
+      _messageFileLabels.clear();
       for (final m in list) {
         if (m is! Map) continue;
         final mmap = m is Map<String, dynamic> ? m : Map<String, dynamic>.from(m);
@@ -531,6 +560,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final vidList = mmap['videos'] as List<dynamic>?;
         final videos = vidList != null ? vidList.whereType<String>().toList() : null;
         _messageVideos.add(videos != null && videos.isNotEmpty ? videos : null);
+        final flRaw = mmap['file_links'] as List<dynamic>?;
+        List<String>? fileLabels;
+        if (flRaw != null && flRaw.isNotEmpty) {
+          fileLabels = flRaw.map((e) => path.basename(e.toString())).toList();
+        }
+        _messageFileLabels.add(fileLabels != null && fileLabels.isNotEmpty ? fileLabels : null);
       }
       // Mark thread as read up to latest message so friend list unread dot clears.
       double latestTs = DateTime.now().millisecondsSinceEpoch / 1000.0;
@@ -585,6 +620,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _messageImages.clear();
       _messageAudios.clear();
       _messageVideos.clear();
+      _messageFileLabels.clear();
       _lastReply = null;
       _chatHistoryOffset = 0;
       _hasMoreMessages = true;
@@ -675,8 +711,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _messageImages.add(images != null && images.isNotEmpty ? images : null);
       _messageAudios.add(audios != null && audios.isNotEmpty ? audios : null);
       _messageVideos.add(videos != null && videos.isNotEmpty ? videos : null);
+      _messageFileLabels.add(null);
     });
-    _scrollToBottom();
+    _scrollToBottom(force: true);
     _persistChatHistory();
     if (!mounted) return;
     final title = push['source'] == 'reminder' ? 'Reminder' : thisFriend;
@@ -749,8 +786,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final imagesToSend = List<String>.from(_pendingImagePaths);
     final videosToSend = List<String>.from(_pendingVideoPaths);
     final filesToSend = List<String>.from(_pendingFilePaths);
+    final isUserToUserSend = widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty;
+    if (isUserToUserSend && mounted) {
+      setState(() {
+        _activeUserSendStage = _userSendInitialStage(
+          hasImages: imagesToSend.isNotEmpty,
+          hasVideos: videosToSend.isNotEmpty,
+          hasFiles: filesToSend.isNotEmpty,
+        );
+      });
+    }
     final federatedUserChat =
         widget.isUserFriend && (widget.remotePeerInstanceId?.trim().isNotEmpty ?? false);
+    if (isUserToUserSend && videosToSend.isNotEmpty && mounted) {
+      setState(() => _activeUserSendStage = 'Preparing video...');
+    }
+    if (isUserToUserSend && imagesToSend.isNotEmpty && mounted) {
+      setState(() => _activeUserSendStage = 'Compressing image...');
+    }
     // Build display URLs for attached images so they show in the user's message bubble
     final userImageDataUrls = imagesToSend.isNotEmpty
         ? await (widget.isUserFriend
@@ -766,6 +819,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         setState(() {
           _loading = false;
           _loadingMessage = null;
+          _activeUserSendBubbleIndex = null;
+          _activeUserSendStage = null;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not prepare images to send. Try a different photo format or size.')),
@@ -787,6 +842,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       setState(() => _loading = false);
       return;
     }
+    final outgoingFileNames = filesToSend.map((p) => path.basename(p)).toList();
     int? optimisticIndex;
     setState(() {
       optimisticIndex = _messages.length;
@@ -797,6 +853,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _messageImages.add(userImageDataUrls.isEmpty ? null : userImageDataUrls);
       _messageAudios.add(null);
       _messageVideos.add(userVideoDataUrls.isEmpty ? null : userVideoDataUrls);
+      _messageFileLabels.add(outgoingFileNames.isEmpty ? null : outgoingFileNames);
+      if (isUserToUserSend) {
+        _activeUserSendBubbleIndex = optimisticIndex;
+      }
       _loading = true;
       _loadingStatusIndex = 0;
     });
@@ -804,7 +864,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _scrollToBottom();
     _persistChatHistory();
     // User-to-user: send via POST /api/user-message; no AI reply.
-    if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
+    if (isUserToUserSend) {
       try {
         Map<String, dynamic>? e2eEnvelope;
         final rid = widget.remotePeerInstanceId?.trim();
@@ -846,8 +906,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
         List<String>? fileLinksToSend;
         if (filesToSend.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _activeUserSendStage = filesToSend.length <= 1
+                  ? 'Uploading file...'
+                  : 'Uploading ${filesToSend.length} files...';
+            });
+          }
           final uploaded = await widget.coreService.uploadFiles(filesToSend);
           fileLinksToSend = uploaded.isNotEmpty ? uploaded : null;
+        }
+        if (mounted) {
+          setState(() => _activeUserSendStage = 'Sending to friend...');
         }
         await widget.coreService.sendUserMessage(
           fromUserId: widget.userId,
@@ -863,8 +933,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           setState(() {
             _loading = false;
             _loadingMessage = null;
+            _activeUserSendBubbleIndex = null;
+            _activeUserSendStage = null;
           });
-          _scrollToBottom();
+          _scrollToBottom(force: true);
         }
       } catch (e) {
         if (mounted) {
@@ -880,6 +952,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               if (optimisticIndex! < _messageImages.length) _messageImages.removeAt(optimisticIndex!);
               if (optimisticIndex! < _messageAudios.length) _messageAudios.removeAt(optimisticIndex!);
               if (optimisticIndex! < _messageVideos.length) _messageVideos.removeAt(optimisticIndex!);
+              if (optimisticIndex! < _messageFileLabels.length) _messageFileLabels.removeAt(optimisticIndex!);
             }
             _pendingImagePaths
               ..clear()
@@ -894,19 +967,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _messageImages.add(null);
             _messageAudios.add(null);
             _messageVideos.add(null);
+            _messageFileLabels.add(null);
             _loading = false;
             _loadingMessage = null;
+            _activeUserSendBubbleIndex = null;
+            _activeUserSendStage = null;
           });
           if (likelyPayloadOrTimeout) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text(
-                  'Send failed (network or payload limit). Your photo is still attached above — tap Send again, or pick a smaller image.',
+                  'Send failed (network or payload limit). Your attachment is still shown above — tap Send again, or try a smaller file.',
                 ),
               ),
             );
           }
-          _scrollToBottom();
+          _scrollToBottom(force: true);
         }
       }
       return;
@@ -961,6 +1037,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         setState(() {
           _loading = false;
           _loadingMessage = null;
+          _activeUserSendBubbleIndex = null;
+          _activeUserSendStage = null;
         });
         if (cancelled) {
           if (mounted) {
@@ -980,8 +1058,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messageImages.add(imageDataUrls.isEmpty ? null : imageDataUrls);
           _messageAudios.add(null);
           _messageVideos.add(null);
+          _messageFileLabels.add(null);
         });
-        _scrollToBottom();
+        _scrollToBottom(force: true);
         await _persistChatHistory();
         final preview = reply.isEmpty ? 'No reply' : (reply.length > 80 ? '${reply.substring(0, 80)}…' : reply);
         await _native.showNotification(title: 'HomeClaw', body: preview);
@@ -995,8 +1074,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messageImages.add(null);
           _messageAudios.add(null);
           _messageVideos.add(null);
+          _messageFileLabels.add(null);
           _loading = false;
           _loadingMessage = null;
+          _activeUserSendBubbleIndex = null;
+          _activeUserSendStage = null;
         });
         _scrollToBottom();
         _persistChatHistory();
@@ -1025,6 +1107,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 if (index < _messageImages.length) _messageImages.removeAt(index);
                 if (index < _messageAudios.length) _messageAudios.removeAt(index);
                 if (index < _messageVideos.length) _messageVideos.removeAt(index);
+                if (index < _messageFileLabels.length) _messageFileLabels.removeAt(index);
               });
               _persistChatHistory();
               if (mounted) {
@@ -1299,6 +1382,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messages.add(MapEntry('(voice)', true));
           _messageImages.add(null);
           _messageAudios.add([dataUrl]);
+          _messageVideos.add(null);
+          _messageFileLabels.add(null);
         });
         _scrollToBottom();
       } catch (e) {
@@ -1505,6 +1590,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messageImages.add(null);
           _messageAudios.add(null);
           _messageVideos.add(null);
+          _messageFileLabels.add(null);
         });
         return;
       }
@@ -1523,6 +1609,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messageImages.add(null);
           _messageAudios.add(null);
           _messageVideos.add(null);
+          _messageFileLabels.add(null);
         });
       }
     }
@@ -1582,6 +1669,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _messageImages.add(null);
             _messageAudios.add(null);
             _messageVideos.add(null);
+            _messageFileLabels.add(null);
           });
           return;
         }
@@ -1594,6 +1682,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _messageImages.add(null);
             _messageAudios.add(null);
             _messageVideos.add(null);
+            _messageFileLabels.add(null);
           });
         return;
       }
@@ -1610,6 +1699,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _messageImages.add(null);
           _messageAudios.add(null);
           _messageVideos.add(null);
+          _messageFileLabels.add(null);
         });
       }
     }
@@ -2033,6 +2123,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _messageImages.add(null);
         _messageAudios.add(null);
         _messageVideos.add(null);
+        _messageFileLabels.add(null);
       });
     } catch (e) {
       if (mounted) setState(() {
@@ -2040,22 +2131,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _messageImages.add(null);
         _messageAudios.add(null);
         _messageVideos.add(null);
+        _messageFileLabels.add(null);
       });
     }
   }
 
-  /// Scroll the message list to the bottom so the latest message is visible (and not covered by the keyboard).
-  /// Uses jumpTo with a two-frame pass: the first jump triggers lazy item layout which may update
-  /// maxScrollExtent, then the second jump lands at the true bottom.
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+  /// Scroll the message list to the bottom so the latest message is visible.
+  /// Media widgets (images/videos) can expand asynchronously after decode, so we do
+  /// a short follow pass (multi-tick jumpTo) to keep the latest bubble in view.
+  void _scrollToBottom({bool force = false}) {
+    if (!force && !_autoFollowBottom) return;
+    void jumpBottom() {
       if (!mounted || !_scrollController.hasClients) return;
-      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_scrollController.hasClients) return;
+      try {
         _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-      });
-    });
+      } catch (_) {}
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => jumpBottom());
+    for (final ms in const [40, 120, 260, 520, 900]) {
+      Future<void>.delayed(Duration(milliseconds: ms), jumpBottom);
+    }
   }
 
   void _startLoadingStatusTimer() {
@@ -2339,9 +2435,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 final entry = _messages[msgIndex];
                 final isUser = entry.value;
                 final isErrorBubble = !isUser && entry.key.startsWith('Error:');
+                final isUploadingUserBubble =
+                    isUser && _loading && _activeUserSendBubbleIndex != null && _activeUserSendBubbleIndex == msgIndex;
                 final imageUrls = msgIndex < _messageImages.length ? _messageImages[msgIndex] : null;
                 final audioUrls = msgIndex < _messageAudios.length ? _messageAudios[msgIndex] : null;
                 final videoUrls = msgIndex < _messageVideos.length ? _messageVideos[msgIndex] : null;
+                final fileLabels = msgIndex < _messageFileLabels.length ? _messageFileLabels[msgIndex] : null;
                 return Align(
                   alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
                   child: GestureDetector(
@@ -2423,6 +2522,37 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                         .toList(),
                                   ),
                                 ),
+                              if (fileLabels != null && fileLabels.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Wrap(
+                                    spacing: 6,
+                                    runSpacing: 6,
+                                    children: fileLabels
+                                        .map(
+                                          (name) => Chip(
+                                            avatar: Icon(
+                                              Icons.insert_drive_file_outlined,
+                                              size: 18,
+                                              color: Theme.of(context).colorScheme.primary,
+                                            ),
+                                            label: ConstrainedBox(
+                                              constraints: const BoxConstraints(maxWidth: 220),
+                                              child: Text(
+                                                name,
+                                                overflow: TextOverflow.ellipsis,
+                                                maxLines: 2,
+                                                style: Theme.of(context).textTheme.bodySmall,
+                                              ),
+                                            ),
+                                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                            visualDensity: VisualDensity.compact,
+                                            side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+                                          ),
+                                        )
+                                        .toList(),
+                                  ),
+                                ),
                               _ChatMessageText(
                                 text: entry.key,
                                 isUser: isUser,
@@ -2430,6 +2560,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 theme: Theme.of(context),
                                 isErrorMessage: isErrorBubble,
                               ),
+                              if (isUploadingUserBubble)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Theme.of(context).colorScheme.primary,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Flexible(
+                                        child: Text(
+                                          _activeUserSendStage?.trim().isNotEmpty == true
+                                              ? _activeUserSendStage!
+                                              : 'Sending...',
+                                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                              ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                             ],
                           ),
                         ),
@@ -2508,7 +2666,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ],
               ),
             ),
-          if (_loading)
+          if (_loading && !widget.isUserFriend)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Row(
