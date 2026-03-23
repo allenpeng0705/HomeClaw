@@ -205,9 +205,11 @@ def get_user_message_post_handler(core):
                 if not base_url:
                     return JSONResponse(status_code=502, content={"error": "peer base_url missing"})
                 if not api_key:
-                    logger.warning(
-                        "user-message: peers.yml entry for {} has no api_key / api_key_env; "
-                        "peer Core may return 401 if it has auth_enabled. Set api_key, api_key_env, or use_same_auth_api_key_as_local_core.",
+                    # Normal when both Cores run without inbound auth; only noisy as WARNING.
+                    logger.debug(
+                        "user-message: peers.yml entry for {} has no api_key / api_key_env / "
+                        "use_same_auth_api_key_as_local_core; fine if peer has auth disabled. "
+                        "If peer returns 401, set api_key, api_key_env (env var name), or use_same_auth_api_key_as_local_core.",
                         peer_inst,
                     )
                 e2e_on = bool(getattr(meta, "federation_e2e_enabled", False))
