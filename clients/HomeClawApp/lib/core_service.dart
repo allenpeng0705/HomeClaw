@@ -1347,11 +1347,18 @@ class CoreService {
     final url = Uri.parse('$_baseUrl/api/upload');
     final request = http.MultipartRequest('POST', url);
     request.headers.addAll(_authHeaders());
+    var attached = 0;
     for (final p in filePaths) {
       final file = File(p);
       if (!await file.exists()) continue;
+      attached++;
       final name = path.basename(p);
       request.files.add(await http.MultipartFile.fromPath('files', p, filename: name));
+    }
+    if (filePaths.isNotEmpty && attached == 0) {
+      throw Exception(
+        'Upload failed: no files could be read (missing path or permission). Re-pick the photo and try again.',
+      );
     }
     final streamed = await request.send().timeout(Duration(seconds: sendMessageTimeoutSeconds));
     final response = await http.Response.fromStream(streamed);

@@ -34,6 +34,8 @@ from core.user_inbox import (
     clear_thread as inbox_clear_thread,
     get_messages as inbox_get_messages,
     get_thread as inbox_get_thread,
+    sanitize_message_dict_for_client,
+    sanitize_messages_list_for_client,
 )
 
 
@@ -403,11 +405,15 @@ def get_user_inbox_handler(core):  # noqa: ARG001
                 limit = 50
             limit = max(1, min(100, limit))
             messages = inbox_get_messages(user_id, limit=limit, after_id=after_id)
-            # Recipient of all inbox messages is user_id; add to_user_id so Companion can filter threads.
+            out_msgs = []
             for m in messages:
                 if isinstance(m, dict):
-                    m["to_user_id"] = user_id
-            return JSONResponse(status_code=200, content={"user_id": user_id, "messages": messages})
+                    mm = sanitize_message_dict_for_client(dict(m))
+                    mm["to_user_id"] = user_id
+                    out_msgs.append(mm)
+                else:
+                    out_msgs.append(m)
+            return JSONResponse(status_code=200, content={"user_id": user_id, "messages": out_msgs})
         except Exception as e:
             logger.warning("user-inbox GET failed: {}", e)
             return JSONResponse(status_code=500, content={"error": "Internal server error"})
@@ -435,6 +441,7 @@ def get_user_inbox_thread_handler(core):  # noqa: ARG001
                 limit = 100
             limit = max(1, min(200, limit))
             messages = inbox_get_thread(user_id, other_user_id, limit=limit)
+            messages = sanitize_messages_list_for_client(messages)
             return JSONResponse(status_code=200, content={"user_id": user_id, "other_user_id": other_user_id, "messages": messages})
         except Exception as e:
             logger.warning("user-inbox thread GET failed: {}", e)

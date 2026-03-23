@@ -943,6 +943,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _loadingStatusIndex = 0;
     });
     _startLoadingStatusTimer();
+    try {
     if (_voiceListening) {
       // Cancel subscription first so no more "final" events can trigger _send() and cause double send.
       _voiceSubscription?.cancel();
@@ -1255,6 +1256,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         });
         _scrollToBottom();
         _persistChatHistory();
+      }
+    }
+    } finally {
+      _stopLoadingStatusTimer();
+      if (mounted) {
+        setState(() {
+          if (_loading) {
+            _loading = false;
+            _loadingMessage = null;
+            _activeUserSendBubbleIndex = null;
+            _activeUserSendStage = null;
+          }
+        });
       }
     }
   }

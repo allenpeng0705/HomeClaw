@@ -3,7 +3,9 @@ User-to-user message inbox: store and list messages for a user (single HomeClaw 
 Messages are stored under data_path()/user_inbox/{user_id}.json. Used by POST /api/user-message and GET /api/user-inbox.
 """
 
+import base64
 import json
+import mimetypes
 import os
 import time
 import uuid
@@ -25,6 +27,72 @@ def _inbox_dir() -> Path:
         return Path(Util().data_path()) / "user_inbox"
     except Exception:
         return Path("user_inbox")
+
+
+# Inline Companion upload files in API responses so mobile apps never receive server-only absolute paths.
+_CLIENT_INLINE_UPLOAD_MAX_BYTES = 12 * 1024 * 1024
+
+
+def _inline_database_upload_path(ref: str, max_bytes: int) -> Optional[str]:
+    """If ref points to a file under <project>/database/uploads/, return a data URL; else None."""
+    try:
+        p = Path((ref or "").strip())
+        if not p.is_absolute() or not p.is_file():
+            return None
+        root = Path(Util().root_path()).resolve()
+        upload_root = (root / "database" / "uploads").resolve()
+        full = p.resolve()
+        try:
+            full.relative_to(upload_root)
+        except ValueError:
+            return None
+        sz = full.stat().st_size
+        if sz > max_bytes:
+            return None
+        data = full.read_bytes()
+        mime = mimetypes.guess_type(str(full))[0] or "application/octet-stream"
+        b64 = base64.b64encode(data).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+    except Exception:
+        return None
+
+
+def sanitize_media_ref_list_for_client(refs: Any, max_each_bytes: int = _CLIENT_INLINE_UPLOAD_MAX_BYTES) -> Any:
+    """Replace database/uploads paths with data URLs; pass through data:, http(s):, /files/... ."""
+    if not isinstance(refs, list):
+        return refs
+    out: List[str] = []
+    for it in refs:
+        if not isinstance(it, str):
+            continue
+        s = it.strip()
+        if not s:
+            continue
+        lower = s.lower()
+        if lower.startswith("data:") or lower.startswith("http://") or lower.startswith("https://"):
+            out.append(s)
+            continue
+        if lower.startswith("/files/") or lower.startswith("/files/out"):
+            out.append(s)
+            continue
+        inlined = _inline_database_upload_path(s, max_each_bytes)
+        out.append(inlined if inlined else s)
+    return out
+
+
+def sanitize_message_dict_for_client(msg: Dict[str, Any], max_each_bytes: int = _CLIENT_INLINE_UPLOAD_MAX_BYTES) -> Dict[str, Any]:
+    """Copy of one inbox message with upload-dir paths expanded for clients (Companion)."""
+    if not isinstance(msg, dict):
+        return msg
+    out = dict(msg)
+    for key in ("images", "audios", "videos", "file_links"):
+        if key in out:
+            out[key] = sanitize_media_ref_list_for_client(out.get(key), max_each_bytes=max_each_bytes)
+    return out
+
+
+def sanitize_messages_list_for_client(messages: List[Any], max_each_bytes: int = _CLIENT_INLINE_UPLOAD_MAX_BYTES) -> List[Any]:
+    return [sanitize_message_dict_for_client(dict(m), max_each_bytes=max_each_bytes) if isinstance(m, dict) else m for m in messages]
 
 
 def _inbox_path(user_id: str) -> Path:
