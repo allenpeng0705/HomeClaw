@@ -24,7 +24,12 @@ from core.federated_friendships_store import list_accepted_for_recipient
 from core.federation_e2e import validate_e2e_envelope
 from core.routes import auth
 from core.routes.federation_api import FederationE2EEnvelopeIn
-from core.user_inbox import append_message as inbox_append, get_messages as inbox_get_messages, get_thread as inbox_get_thread
+from core.user_inbox import (
+    append_message as inbox_append,
+    clear_thread as inbox_clear_thread,
+    get_messages as inbox_get_messages,
+    get_thread as inbox_get_thread,
+)
 
 
 def _get_user_by_id(user_id: str) -> Optional[User]:
@@ -313,3 +318,33 @@ def get_user_inbox_thread_handler(core):  # noqa: ARG001
             return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
     return get_user_inbox_thread
+
+
+def delete_user_inbox_thread_handler(core):  # noqa: ARG001
+    """Return handler for DELETE /api/user-inbox/thread. Clears conversation between user_id and other_user_id."""
+
+    async def delete_user_inbox_thread(
+        user_id: str = "",
+        other_user_id: str = "",
+        _: None = Depends(auth.verify_inbound_auth),
+    ):
+        try:
+            user_id = (user_id or "").strip()
+            other_user_id = (other_user_id or "").strip()
+            if not user_id or not other_user_id:
+                return JSONResponse(status_code=400, content={"error": "user_id and other_user_id required"})
+            removed = inbox_clear_thread(user_id=user_id, other_user_id=other_user_id)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "ok": True,
+                    "user_id": user_id,
+                    "other_user_id": other_user_id,
+                    "removed": removed,
+                },
+            )
+        except Exception as e:
+            logger.warning("user-inbox thread DELETE failed: {}", e)
+            return JSONResponse(status_code=500, content={"error": "Internal server error"})
+
+    return delete_user_inbox_thread

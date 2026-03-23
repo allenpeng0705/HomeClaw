@@ -471,6 +471,12 @@ def register_all_routes(core: Any) -> None:
         dependencies=[Depends(auth.verify_inbound_auth)],
     )
     app.add_api_route(
+        "/api/user-inbox/thread",
+        user_message_api.delete_user_inbox_thread_handler(core),
+        methods=["DELETE"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
         "/api/auth/login",
         companion_auth.get_api_auth_login_handler(core),
         methods=["POST"],

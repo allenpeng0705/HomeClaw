@@ -203,3 +203,53 @@ def get_thread(
     except Exception as e:
         logger.debug("user_inbox get_thread failed: {}", e)
         return []
+
+
+def clear_thread(
+    user_id: str,
+    other_user_id: str,
+) -> int:
+    """
+    Clear a user-to-user thread from local inbox storage.
+    Removes:
+      - messages in user_id inbox where from_user_id == other_user_id
+      - mirrored outbound messages in other_user_id inbox where from_user_id == user_id
+    Returns number of removed messages.
+    """
+    try:
+        user_id = (user_id or "").strip()
+        other_user_id = (other_user_id or "").strip()
+        if not user_id or not other_user_id or user_id == other_user_id:
+            return 0
+
+        def _clear_side(owner_user_id: str, from_user_id_to_remove: str) -> int:
+            path = _inbox_path(owner_user_id)
+            if not path.is_file():
+                return 0
+            with _get_inbox_lock(owner_user_id):
+                messages: List[Dict[str, Any]] = []
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        raw = data.get("messages") if isinstance(data, dict) else []
+                        if isinstance(raw, list):
+                            messages = [m for m in raw if isinstance(m, dict)]
+                except Exception as e:
+                    logger.debug("user_inbox clear_thread read failed {}: {}", path, e)
+                    return 0
+                kept = [
+                    m
+                    for m in messages
+                    if (m.get("from_user_id") or "").strip() != from_user_id_to_remove
+                ]
+                removed = len(messages) - len(kept)
+                if removed > 0:
+                    _write_inbox_atomic(path, kept[-500:])
+                return removed
+
+        removed_a = _clear_side(owner_user_id=user_id, from_user_id_to_remove=other_user_id)
+        removed_b = _clear_side(owner_user_id=other_user_id, from_user_id_to_remove=user_id)
+        return removed_a + removed_b
+    except Exception as e:
+        logger.warning("user_inbox clear_thread failed: {}", e)
+        return 0

@@ -27,6 +27,32 @@ import '../widgets/homeclaw_snackbars.dart';
 import 'canvas_screen.dart';
 import 'settings_screen.dart';
 
+double? _parseTranscriptTimestampSeconds(Map<String, dynamic> m) {
+  final t = m['timestamp'];
+  if (t == null) return null;
+  if (t is num) return t.toDouble();
+  final s = t.toString().trim();
+  if (s.isEmpty) return null;
+  final asNum = double.tryParse(s);
+  if (asNum != null) return asNum;
+  try {
+    return DateTime.parse(s).millisecondsSinceEpoch / 1000.0;
+  } catch (_) {
+    return null;
+  }
+}
+
+Uint8List? _decodeDataUrlToBytes(String dataUrl) {
+  final comma = dataUrl.indexOf(',');
+  if (comma < 0) return null;
+  try {
+    final b64 = dataUrl.substring(comma + 1).replaceAll(RegExp(r'\s'), '');
+    return base64Decode(b64);
+  } catch (_) {
+    return null;
+  }
+}
+
 class ChatScreen extends StatefulWidget {
   final CoreService coreService;
   final String userId;
@@ -105,12 +131,51 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? _connectionCheckTimer;
   /// When chatting with a user friend, poll inbox so new messages appear without leaving the screen.
   Timer? _userInboxPollTimer;
+  String? _lastUserInboxThreadFingerprint;
+  Timer? _userInboxApplyDebounceTimer;
+  List<dynamic>? _pendingUserInboxList;
+  String? _pendingUserInboxFingerprint;
+  double? _userInboxHideBeforeTs;
+  /// After "Clear chat" on AI threads: hide Core transcript rows at or before this time until new messages arrive.
+  double? _aiChatHideBeforeTs;
+  /// Bumps on each inbox fetch so stale async applies cannot overwrite newer UI.
+  int _userInboxFetchGeneration = 0;
   StreamSubscription<Map<String, dynamic>>? _pushMessageSubscription;
   /// Push-to-talk (user friends only): true while recording.
   bool _recordingPushToTalk = false;
   final AudioRecorder _voiceRecorder = AudioRecorder();
   int? _activeUserSendBubbleIndex;
   String? _activeUserSendStage;
+
+  String _inboxHidePrefKey() =>
+      'companion_inbox_hide_v1_${widget.userId.trim()}_${(widget.toUserId ?? '').trim()}';
+
+  String _aiChatHidePrefKey() =>
+      'companion_ai_hide_v1_${widget.userId.trim()}_${(widget.friendId ?? '').trim()}';
+
+  Future<void> _bootstrapUserFriendInbox() async {
+    final tid = widget.toUserId?.trim();
+    if (tid == null || tid.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    final ts = prefs.getDouble(_inboxHidePrefKey());
+    if (!mounted) return;
+    if (ts != null) {
+      setState(() => _userInboxHideBeforeTs = ts);
+    }
+    await _loadUserInbox();
+  }
+
+  Future<void> _bootstrapAiChatScreen() async {
+    final prefs = await SharedPreferences.getInstance();
+    final ts = prefs.getDouble(_aiChatHidePrefKey());
+    if (!mounted) return;
+    if (ts != null) {
+      setState(() => _aiChatHideBeforeTs = ts);
+    }
+    _loadChatHistory();
+    await _syncChatHistoryFromCore();
+    if (mounted) await _checkPendingInboundAndRefresh();
+  }
 
   static String _userSendInitialStage({
     required bool hasImages,
@@ -316,16 +381,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if ((widget.remotePeerInstanceId?.trim().isNotEmpty ?? false) && widget.coreService.federationE2eEnabled) {
         unawaited(widget.coreService.ensureFederationE2eKeysRegistered());
       }
-      _loadUserInbox();
+      unawaited(_bootstrapUserFriendInbox());
       _userInboxPollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-        if (mounted && widget.isUserFriend && widget.toUserId != null) _loadUserInbox();
+        if (mounted && widget.isUserFriend && widget.toUserId != null) _loadUserInbox(fromPoll: true);
       });
     } else {
-      _loadChatHistory();
-      _syncChatHistoryFromCore();
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        await _checkPendingInboundAndRefresh();
-      });
+      unawaited(_bootstrapAiChatScreen());
     }
     _checkCoreConnection();
     _connectionCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkCoreConnection());
@@ -356,13 +417,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     setState(() => _loadingMoreMessages = true);
     try {
       final friendId = (widget.friendId != null && widget.friendId!.trim().isNotEmpty) ? widget.friendId!.trim() : 'HomeClaw';
-      final list = await widget.coreService.getChatHistory(
+      var list = await widget.coreService.getChatHistory(
         userId: widget.userId,
         friendId: friendId,
         limit: _pageSize,
         offset: _chatHistoryOffset + _messages.length,
       );
       if (!mounted) return;
+      if (_aiChatHideBeforeTs != null) {
+        list = list.where((m) {
+          final ts = _parseTranscriptTimestampSeconds(m);
+          return ts == null || ts > _aiChatHideBeforeTs!;
+        }).toList();
+      }
       if (list.isEmpty || list.length < _pageSize) {
         setState(() => _hasMoreMessages = false);
       }
@@ -461,11 +528,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       final list = await widget.coreService.getChatHistory(userId: widget.userId, friendId: friendId, limit: _pageSize, offset: 0);
       if (list.isEmpty || !mounted) return;
+      var filtered = list;
+      if (_aiChatHideBeforeTs != null) {
+        filtered = list.where((m) {
+          final ts = _parseTranscriptTimestampSeconds(m);
+          return ts == null || ts > _aiChatHideBeforeTs!;
+        }).toList();
+      }
+      if (filtered.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _messages.clear();
+          _messageImages.clear();
+          _messageAudios.clear();
+          _messageVideos.clear();
+          _messageFileLabels.clear();
+          _chatHistoryOffset = 0;
+          _hasMoreMessages = list.length >= _pageSize;
+        });
+        return;
+      }
       final messages = <MapEntry<String, bool>>[];
       final images = <List<String>?>[];
       final audios = <List<String>?>[];
       final videos = <List<String>?>[];
-      for (final m in list) {
+      for (final m in filtered) {
         final role = ((m['role']?.toString()) ?? '').trim().toLowerCase();
         final content = ((m['content']?.toString()) ?? '').trim();
         final isUser = role == 'user';
@@ -496,92 +583,155 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   /// Load full thread (both directions) from GET /api/user-inbox/thread so sent messages do not disappear on poll.
-  Future<void> _loadUserInbox() async {
+  Future<void> _loadUserInbox({bool fromPoll = false}) async {
     if (widget.toUserId == null || widget.toUserId!.trim().isEmpty) return;
+    // Only polled loads use [generation]: a timer tick must not cancel bootstrap / resume fetches.
+    final pollGen = fromPoll ? ++_userInboxFetchGeneration : -1;
     try {
       final data = await widget.coreService.getUserInboxThread(
         userId: widget.userId,
         otherUserId: widget.toUserId!,
         limit: 100,
       );
+      if (!mounted) return;
+      if (pollGen >= 0 && pollGen != _userInboxFetchGeneration) return;
       final list = data['messages'] as List<dynamic>?;
       if (list == null) return;
-      if (list.isEmpty) {
-        // Valid empty thread: clear UI and mark read so friend list does not show a stale red dot.
-        widget.coreService.setUserInboxLastRead(widget.userId, widget.toUserId!, DateTime.now().millisecondsSinceEpoch / 1000.0);
-        if (mounted) {
-          setState(() {
-            _messages.clear();
-            _messageImages.clear();
-            _messageAudios.clear();
-            _messageVideos.clear();
-            _messageFileLabels.clear();
-          });
-        }
+      final fingerprint = _fingerprintUserInboxThread(list);
+      if (fingerprint == _lastUserInboxThreadFingerprint) {
+        return; // No data change: avoid rebuild/scroll flash on polling.
+      }
+      if (fromPoll) {
+        _pendingUserInboxList = List<dynamic>.from(list);
+        _pendingUserInboxFingerprint = fingerprint;
+        _userInboxApplyDebounceTimer?.cancel();
+        _userInboxApplyDebounceTimer = Timer(const Duration(milliseconds: 200), () {
+          if (!mounted || pollGen != _userInboxFetchGeneration) return;
+          final pendingList = _pendingUserInboxList;
+          final pendingFingerprint = _pendingUserInboxFingerprint;
+          _pendingUserInboxList = null;
+          _pendingUserInboxFingerprint = null;
+          if (pendingList == null || pendingFingerprint == null) return;
+          _lastUserInboxThreadFingerprint = pendingFingerprint;
+          unawaited(_applyUserInboxList(pendingList, pollGeneration: pollGen));
+        });
         return;
       }
-      final myId = widget.userId.trim();
-      _messages.clear();
-      _messageImages.clear();
-      _messageAudios.clear();
-      _messageVideos.clear();
-      _messageFileLabels.clear();
-      for (final m in list) {
-        if (m is! Map) continue;
-        final mmap = m is Map<String, dynamic> ? m : Map<String, dynamic>.from(m);
-        var text = (mmap['text'] as String?)?.trim() ?? '';
-        final from = (mmap['from_user_id'] as String?)?.trim() ?? '';
-        final isUser = from == myId;
-        final e2eRaw = mmap['e2e'];
-        Map<String, dynamic>? e2eMap;
-        if (e2eRaw is Map<String, dynamic>) {
-          e2eMap = e2eRaw;
-        } else if (e2eRaw is Map) {
-          e2eMap = Map<String, dynamic>.from(e2eRaw);
-        }
-        if (e2eMap != null && e2eMap.isNotEmpty) {
-          final decrypted = await widget.coreService.decryptFederatedE2eIfPresent(e2eMap);
-          if (decrypted != null && decrypted.isNotEmpty) {
-            text = decrypted;
-          } else {
-            text = '[Encrypted message]';
-          }
-        }
-        if (!isUser && (mmap['source'] as String?)?.trim() == 'federation' && text.isNotEmpty) {
-          text = '◇ $text';
-        }
-        _messages.add(MapEntry(text.isEmpty ? '(attachment)' : text, isUser));
-        final imgList = mmap['images'] as List<dynamic>?;
-        final images = imgList != null ? imgList.whereType<String>().toList() : null;
-        _messageImages.add(images != null && images.isNotEmpty ? images : null);
-        final audList = mmap['audios'] as List<dynamic>?;
-        final audios = audList != null ? audList.whereType<String>().toList() : null;
-        _messageAudios.add(audios != null && audios.isNotEmpty ? audios : null);
-        final vidList = mmap['videos'] as List<dynamic>?;
-        final videos = vidList != null ? vidList.whereType<String>().toList() : null;
-        _messageVideos.add(videos != null && videos.isNotEmpty ? videos : null);
-        final flRaw = mmap['file_links'] as List<dynamic>?;
-        List<String>? fileLabels;
-        if (flRaw != null && flRaw.isNotEmpty) {
-          fileLabels = flRaw.map((e) => path.basename(e.toString())).toList();
-        }
-        _messageFileLabels.add(fileLabels != null && fileLabels.isNotEmpty ? fileLabels : null);
-      }
-      // Mark thread as read up to latest message so friend list unread dot clears.
-      double latestTs = DateTime.now().millisecondsSinceEpoch / 1000.0;
-      for (final m in list) {
-        if (m is! Map) continue;
-        final at = (m['created_at'] as num?)?.toDouble();
-        if (at != null && at > latestTs) latestTs = at;
-      }
-      widget.coreService.setUserInboxLastRead(widget.userId, widget.toUserId!, latestTs);
-      if (mounted) {
-        setState(() {});
-        _scrollToBottom();
-      }
+      _lastUserInboxThreadFingerprint = fingerprint;
+      await _applyUserInboxList(list);
     } catch (_) {
       if (mounted) setState(() {});
     }
+  }
+
+  /// [pollGeneration] when >= 0: abandon apply if a newer poll started. Omit for direct loads (bootstrap, resume).
+  Future<void> _applyUserInboxList(List<dynamic> list, {int pollGeneration = -1}) async {
+    if (!mounted) return;
+    if (pollGeneration >= 0 && pollGeneration != _userInboxFetchGeneration) return;
+    final effectiveList = _userInboxHideBeforeTs == null
+        ? list
+        : list.where((m) {
+            if (m is! Map) return false;
+            final at = (m['created_at'] as num?)?.toDouble() ?? 0.0;
+            return at > _userInboxHideBeforeTs!;
+          }).toList();
+    if (pollGeneration >= 0 && pollGeneration != _userInboxFetchGeneration) return;
+    if (effectiveList.isEmpty) {
+      // Valid empty thread: clear UI and mark read so friend list does not show a stale red dot.
+      widget.coreService.setUserInboxLastRead(widget.userId, widget.toUserId!, DateTime.now().millisecondsSinceEpoch / 1000.0);
+      if (mounted && (pollGeneration < 0 || pollGeneration == _userInboxFetchGeneration)) {
+        setState(() {
+          _messages.clear();
+          _messageImages.clear();
+          _messageAudios.clear();
+          _messageVideos.clear();
+          _messageFileLabels.clear();
+        });
+      }
+      return;
+    }
+    final myId = widget.userId.trim();
+    _messages.clear();
+    _messageImages.clear();
+    _messageAudios.clear();
+    _messageVideos.clear();
+    _messageFileLabels.clear();
+    for (final m in effectiveList) {
+      if (!mounted) return;
+      if (pollGeneration >= 0 && pollGeneration != _userInboxFetchGeneration) return;
+      if (m is! Map) continue;
+      final mmap = m is Map<String, dynamic> ? m : Map<String, dynamic>.from(m);
+      var text = (mmap['text'] as String?)?.trim() ?? '';
+      final from = (mmap['from_user_id'] as String?)?.trim() ?? '';
+      final isUser = from == myId;
+      final e2eRaw = mmap['e2e'];
+      Map<String, dynamic>? e2eMap;
+      if (e2eRaw is Map<String, dynamic>) {
+        e2eMap = e2eRaw;
+      } else if (e2eRaw is Map) {
+        e2eMap = Map<String, dynamic>.from(e2eRaw);
+      }
+      if (e2eMap != null && e2eMap.isNotEmpty) {
+        final decrypted = await widget.coreService.decryptFederatedE2eIfPresent(e2eMap);
+        if (!mounted) return;
+        if (pollGeneration >= 0 && pollGeneration != _userInboxFetchGeneration) return;
+        if (decrypted != null && decrypted.isNotEmpty) {
+          text = decrypted;
+        } else {
+          text = '[Encrypted message]';
+        }
+      }
+      if (!isUser && (mmap['source'] as String?)?.trim() == 'federation' && text.isNotEmpty) {
+        text = '◇ $text';
+      }
+      _messages.add(MapEntry(text.isEmpty ? '(attachment)' : text, isUser));
+      final imgList = mmap['images'] as List<dynamic>?;
+      final images = imgList != null ? imgList.whereType<String>().toList() : null;
+      _messageImages.add(images != null && images.isNotEmpty ? images : null);
+      final audList = mmap['audios'] as List<dynamic>?;
+      final audios = audList != null ? audList.whereType<String>().toList() : null;
+      _messageAudios.add(audios != null && audios.isNotEmpty ? audios : null);
+      final vidList = mmap['videos'] as List<dynamic>?;
+      final videos = vidList != null ? vidList.whereType<String>().toList() : null;
+      _messageVideos.add(videos != null && videos.isNotEmpty ? videos : null);
+      final flRaw = mmap['file_links'] as List<dynamic>?;
+      List<String>? fileLabels;
+      if (flRaw != null && flRaw.isNotEmpty) {
+        fileLabels = flRaw.map((e) => path.basename(e.toString())).toList();
+      }
+      _messageFileLabels.add(fileLabels != null && fileLabels.isNotEmpty ? fileLabels : null);
+    }
+    // Mark thread as read up to latest message so friend list unread dot clears.
+    double latestTs = DateTime.now().millisecondsSinceEpoch / 1000.0;
+    for (final m in effectiveList) {
+      if (m is! Map) continue;
+      final at = (m['created_at'] as num?)?.toDouble();
+      if (at != null && at > latestTs) latestTs = at;
+    }
+    widget.coreService.setUserInboxLastRead(widget.userId, widget.toUserId!, latestTs);
+    if (mounted && (pollGeneration < 0 || pollGeneration == _userInboxFetchGeneration)) {
+      setState(() {});
+      _scrollToBottom();
+    }
+  }
+
+  String _fingerprintUserInboxThread(List<dynamic> list) {
+    final parts = <String>[];
+    for (final m in list) {
+      if (m is! Map) continue;
+      final mm = m is Map<String, dynamic> ? m : Map<String, dynamic>.from(m);
+      final id = (mm['id']?.toString() ?? '').trim();
+      final from = (mm['from_user_id']?.toString() ?? '').trim();
+      final t = mm['created_at'];
+      final textLen = (mm['text']?.toString() ?? '').length;
+      final ni = (mm['images'] as List?)?.length ?? 0;
+      final na = (mm['audios'] as List?)?.length ?? 0;
+      final nv = (mm['videos'] as List?)?.length ?? 0;
+      final nf = (mm['file_links'] as List?)?.length ?? 0;
+      final e2eId = (mm['e2e'] is Map) ? ((mm['e2e'] as Map)['id']?.toString() ?? '') : '';
+      parts.add('$id|$from|$t|$textLen|$ni|$na|$nv|$nf|$e2eId');
+    }
+    return parts.join('\n');
   }
 
   Future<void> _persistChatHistory() async {
@@ -613,6 +763,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _clearChatHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final nowTs = DateTime.now().millisecondsSinceEpoch / 1000.0;
+    // Persist cutoffs so reopening the chat or the next Core sync does not resurrect cleared rows.
+    if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
+      _userInboxHideBeforeTs = nowTs;
+      _lastUserInboxThreadFingerprint = null;
+      await prefs.setDouble(_inboxHidePrefKey(), nowTs);
+    } else {
+      _aiChatHideBeforeTs = nowTs;
+      await prefs.setDouble(_aiChatHidePrefKey(), nowTs);
+    }
     await ChatHistoryStore().clear(widget.userId, widget.friendId);
     if (!mounted) return;
     setState(() {
@@ -625,6 +786,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _chatHistoryOffset = 0;
       _hasMoreMessages = true;
     });
+    if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
+      try {
+        await widget.coreService.clearUserInboxThread(
+          userId: widget.userId,
+          otherUserId: widget.toUserId!.trim(),
+        );
+        _lastUserInboxThreadFingerprint = null;
+        await prefs.remove(_inboxHidePrefKey());
+        if (mounted) setState(() => _userInboxHideBeforeTs = null);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Cleared on this device. Server clear pending: $e')),
+          );
+        }
+      }
+    }
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Chat history cleared')),
@@ -2136,6 +2314,88 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  bool _isDisplayableThreadImage(String ref) {
+    final t = ref.trim();
+    if (t.startsWith('data:image/')) return true;
+    final u = Uri.tryParse(t);
+    if (u != null && u.hasScheme && (u.scheme == 'http' || u.scheme == 'https')) return true;
+    if (t.startsWith('/')) return true;
+    return false;
+  }
+
+  String? _resolveThreadImageNetworkUrl(String ref) {
+    final t = ref.trim();
+    final u = Uri.tryParse(t);
+    if (u != null && u.hasScheme && (u.scheme == 'http' || u.scheme == 'https')) {
+      return t;
+    }
+    if (t.startsWith('/')) {
+      final base = widget.coreService.baseUrl.replaceFirst(RegExp(r'/$'), '');
+      return '$base$t';
+    }
+    return null;
+  }
+
+  Widget _threadImagePreview(String imageRef) {
+    const w = 280.0;
+    final cs = Theme.of(context).colorScheme;
+    final trimmed = imageRef.trim();
+    if (trimmed.startsWith('data:image/')) {
+      final bytes = _decodeDataUrlToBytes(trimmed);
+      if (bytes == null || bytes.isEmpty) {
+        return Icon(Icons.broken_image_outlined, color: cs.outline, size: 40);
+      }
+      return RepaintBoundary(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.memory(
+            bytes,
+            width: w,
+            fit: BoxFit.contain,
+            gaplessPlayback: true,
+            errorBuilder: (_, __, ___) => Icon(Icons.broken_image_outlined, color: cs.outline, size: 40),
+          ),
+        ),
+      );
+    }
+    final resolved = _resolveThreadImageNetworkUrl(imageRef);
+    if (resolved == null) {
+      return Icon(Icons.insert_photo_outlined, color: cs.outline, size: 40);
+    }
+    final sameCorePath = trimmed.startsWith('/');
+    return RepaintBoundary(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.network(
+          resolved,
+          width: w,
+          fit: BoxFit.contain,
+          headers: sameCorePath ? widget.coreService.coreMediaFetchHeaders : null,
+          loadingBuilder: (c, child, prog) {
+            if (prog == null) return child;
+            return SizedBox(
+              width: w,
+              height: 140,
+              child: Center(
+                child: SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    value: prog.expectedTotalBytes != null && prog.expectedTotalBytes! > 0
+                        ? prog.cumulativeBytesLoaded / prog.expectedTotalBytes!
+                        : null,
+                  ),
+                ),
+              ),
+            );
+          },
+          errorBuilder: (_, __, ___) => Icon(Icons.broken_image_outlined, color: cs.outline, size: 40),
+        ),
+      ),
+    );
+  }
+
   /// Scroll the message list to the bottom so the latest message is visible.
   /// Media widgets (images/videos) can expand asynchronously after decode, so we do
   /// a short follow pass (multi-tick jumpTo) to keep the latest bubble in view.
@@ -2173,6 +2433,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _connectionCheckTimer?.cancel();
     _userInboxPollTimer?.cancel();
+    _userInboxApplyDebounceTimer?.cancel();
     _loadingStatusTimer?.cancel();
     _pushMessageSubscription?.cancel();
     _voiceSubscription?.cancel();
@@ -2469,26 +2730,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   child: Column(
                                     mainAxisSize: MainAxisSize.min,
                                     children: imageUrls
-                                        .where((u) => u.startsWith('data:image/'))
-                                        .map((imageDataUrl) => Padding(
+                                        .where((u) => _isDisplayableThreadImage(u))
+                                        .map((imageRef) => Padding(
                                               padding: const EdgeInsets.only(bottom: 6),
                                               child: GestureDetector(
                                                 onTap: () {
+                                                  final t = imageRef.trim();
                                                   Navigator.of(context).push(
                                                     MaterialPageRoute<void>(
-                                                      builder: (ctx) => _FullScreenImagePage(imageDataUrl: imageDataUrl),
+                                                      builder: (ctx) => _FullScreenImagePage(
+                                                        imageRef: imageRef,
+                                                        coreBaseUrl: widget.coreService.baseUrl,
+                                                        fetchHeaders:
+                                                            t.startsWith('/') ? widget.coreService.coreMediaFetchHeaders : null,
+                                                      ),
                                                     ),
                                                   );
                                                 },
-                                                child: ClipRRect(
-                                                  borderRadius: BorderRadius.circular(8),
-                                                  child: Image.memory(
-                                                    base64Decode(imageDataUrl.contains(',') ? imageDataUrl.split(',').last : ''),
-                                                    fit: BoxFit.contain,
-                                                    width: 280,
-                                                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                                  ),
-                                                ),
+                                                child: _threadImagePreview(imageRef),
                                               ),
                                             ))
                                         .toList(),
@@ -3368,15 +3627,72 @@ class _AudioPlayButtonState extends State<_AudioPlayButton> {
 
 /// Full-screen image viewer. Tap anywhere to go back.
 class _FullScreenImagePage extends StatelessWidget {
-  final String imageDataUrl;
+  final String imageRef;
+  final String coreBaseUrl;
+  final Map<String, String>? fetchHeaders;
 
-  const _FullScreenImagePage({required this.imageDataUrl});
+  const _FullScreenImagePage({
+    required this.imageRef,
+    required this.coreBaseUrl,
+    this.fetchHeaders,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final bytes = imageDataUrl.contains(',')
-        ? base64Decode(imageDataUrl.split(',').last)
-        : <int>[];
+    final trimmed = imageRef.trim();
+    Widget bodyChild;
+    if (trimmed.startsWith('data:image/')) {
+      final bytes = _decodeDataUrlToBytes(trimmed);
+      if (bytes != null && bytes.isNotEmpty) {
+        bodyChild = Center(
+          child: InteractiveViewer(
+            minScale: 0.5,
+            maxScale: 4.0,
+            child: Image.memory(
+              bytes,
+              fit: BoxFit.contain,
+              gaplessPlayback: true,
+              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white54, size: 64),
+            ),
+          ),
+        );
+      } else {
+        bodyChild = const Center(child: Icon(Icons.broken_image, color: Colors.white54, size: 64));
+      }
+    } else {
+      String? net;
+      final u = Uri.tryParse(trimmed);
+      if (u != null && u.hasScheme && (u.scheme == 'http' || u.scheme == 'https')) {
+        net = trimmed;
+      } else if (trimmed.startsWith('/')) {
+        final base = coreBaseUrl.replaceFirst(RegExp(r'/$'), '');
+        net = '$base$trimmed';
+      }
+      if (net != null) {
+        bodyChild = Center(
+          child: InteractiveViewer(
+            minScale: 0.5,
+            maxScale: 4.0,
+            child: Image.network(
+              net,
+              fit: BoxFit.contain,
+              headers: fetchHeaders,
+              loadingBuilder: (c, child, prog) {
+                if (prog == null) return child;
+                return const SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: CircularProgressIndicator(color: Colors.white54, strokeWidth: 2),
+                );
+              },
+              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white54, size: 64),
+            ),
+          ),
+        );
+      } else {
+        bodyChild = const Center(child: Icon(Icons.broken_image, color: Colors.white54, size: 64));
+      }
+    }
     return Scaffold(
       backgroundColor: Colors.black,
       body: GestureDetector(
@@ -3385,20 +3701,7 @@ class _FullScreenImagePage extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (bytes.isNotEmpty)
-              Center(
-                child: InteractiveViewer(
-                  minScale: 0.5,
-                  maxScale: 4.0,
-                  child: Image.memory(
-                    Uint8List.fromList(bytes),
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image, color: Colors.white54, size: 64)),
-                  ),
-                ),
-              )
-            else
-              const Center(child: Icon(Icons.broken_image, color: Colors.white54, size: 64)),
+            bodyChild,
             SafeArea(
               child: Align(
                 alignment: Alignment.topRight,

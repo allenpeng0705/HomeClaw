@@ -912,6 +912,24 @@ class CoreService {
     }
   }
 
+  /// DELETE /api/user-inbox/thread — clear full conversation between [userId] and [otherUserId] on Core.
+  Future<void> clearUserInboxThread({
+    required String userId,
+    required String otherUserId,
+  }) async {
+    final query = <String, String>{
+      'user_id': userId.trim(),
+      'other_user_id': otherUserId.trim(),
+    };
+    final url = Uri.parse('$_baseUrl/api/user-inbox/thread').replace(queryParameters: query);
+    final response = await http
+        .delete(url, headers: _authHeaders())
+        .timeout(const Duration(seconds: 20));
+    if (response.statusCode != 200) {
+      throw Exception('DELETE thread failed ${response.statusCode}: ${response.body}');
+    }
+  }
+
   /// GET /api/user-inbox — list messages for [userId]. Uses API key auth.
   /// Returns {user_id, messages: [{id, from_user_id, from_user_name, text, created_at, images?, audios?, ...}]}.
   Future<Map<String, dynamic>> getUserInbox({
@@ -1268,6 +1286,9 @@ class CoreService {
     }
     return headers;
   }
+
+  /// Same auth as Core inbound APIs; use with [Image.network] for URLs on this Core (e.g. resolved upload paths).
+  Map<String, String> get coreMediaFetchHeaders => _authHeaders();
 
   /// Persistent device ID for push registration (one per install; iOS, macOS, Android). Stored in SharedPreferences.
   Future<String> getOrCreateDeviceId() async {
