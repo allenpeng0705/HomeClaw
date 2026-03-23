@@ -8,6 +8,8 @@ Auth: same as /inbound (X-API-Key or Bearer when auth_enabled).
 Design: docs_design/UserToUserMessagingViaCompanion.md, SocialNetworkDesign.md.
 """
 
+import json
+from pathlib import Path
 from typing import Optional
 
 from fastapi import Depends
@@ -24,6 +26,7 @@ from core.federated_friendships_store import list_accepted_for_recipient
 from core.federation_e2e import validate_e2e_envelope
 from core.routes import auth
 from core.routes.federation_api import FederationE2EEnvelopeIn
+from core.result_viewer import build_file_view_link
 from core.user_inbox import (
     append_message as inbox_append,
     clear_thread as inbox_clear_thread,
@@ -82,6 +85,54 @@ def _friend_match_for_recipient(from_user: User, to_user_id: str) -> Optional[Fr
     except Exception as e:
         logger.debug("user-message: federated friend match lookup failed: {}", e)
     return None
+
+
+def _to_shareable_ref_for_federation(item: str) -> str:
+    """Best-effort normalize one media/file ref for cross-core delivery.
+    - data:* and http(s): unchanged
+    - absolute local path under homeclaw_root: converted to signed public URL
+    - otherwise: unchanged
+    """
+    try:
+        s = (item or "").strip()
+        if not s:
+            return s
+        lower = s.lower()
+        if lower.startswith("data:") or lower.startswith("http://") or lower.startswith("https://"):
+            return s
+        p = Path(s)
+        if not p.is_absolute() or not p.is_file():
+            return s
+        meta = Util().get_core_metadata()
+        base_str = str(getattr(meta, "homeclaw_root", None) or "").strip()
+        if not base_str:
+            return s
+        base = Path(base_str).resolve()
+        full = p.resolve()
+        rel = full.relative_to(base)
+        rel_posix = rel.as_posix()
+        parts = rel_posix.split("/", 1)
+        if len(parts) < 2:
+            return s
+        scope = parts[0]
+        inner = parts[1]
+        url, err = build_file_view_link(scope, inner)
+        if url and not err:
+            return url
+        return s
+    except Exception:
+        return item
+
+
+def _normalize_refs_for_federation(items: Optional[list]) -> Optional[list]:
+    if not items or not isinstance(items, list):
+        return items
+    out = []
+    for it in items:
+        if not isinstance(it, str):
+            continue
+        out.append(_to_shareable_ref_for_federation(it))
+    return out
 
 
 class UserMessageRequest(BaseModel):
@@ -174,18 +225,32 @@ def get_user_message_post_handler(core):
                         )
                 from_name = (getattr(from_user, "name", None) or from_user_id or "").strip()
                 from_fid = format_fid(from_user_id, my_iid)
+                images_payload = None if has_e2e else _normalize_refs_for_federation(body.images)
+                audios_payload = None if has_e2e else _normalize_refs_for_federation(body.audios)
+                videos_payload = None if has_e2e else _normalize_refs_for_federation(body.videos)
+                file_links_payload = None if has_e2e else _normalize_refs_for_federation(body.file_links)
                 payload = {
                     "from_fid": from_fid,
                     "to_local_user_id": to_user_id,
                     "text": "" if has_e2e else text,
-                    "images": None if has_e2e else body.images,
-                    "audios": None if has_e2e else body.audios,
-                    "videos": None if has_e2e else body.videos,
-                    "file_links": None if has_e2e else body.file_links,
+                    "images": images_payload,
+                    "audios": audios_payload,
+                    "videos": videos_payload,
+                    "file_links": file_links_payload,
                     "from_display_name": from_name,
                 }
                 if has_e2e and body.e2e:
                     payload["e2e"] = body.e2e.model_dump()
+                try:
+                    approx_bytes = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+                    if approx_bytes > 800_000:
+                        logger.warning(
+                            "user-message: federated POST body ~{} bytes (base64 media inflates JSON). "
+                            "If the peer returns 413/502, raise client_max_body_size on nginx (or similar) between Cores or send a smaller image.",
+                            approx_bytes,
+                        )
+                except Exception:
+                    pass
                 remote = post_federation_user_message_sync(base_url, payload, api_key=api_key)
                 sc = int(remote.get("status_code") or 0)
                 if remote.get("ok") and sc == 200:
@@ -202,10 +267,10 @@ def get_user_message_post_handler(core):
                             from_user_id=from_user_id,
                             from_user_name=from_name,
                             text="" if has_e2e else text,
-                            images=None if has_e2e else body.images,
-                            audios=None if has_e2e else body.audios,
-                            videos=None if has_e2e else body.videos,
-                            file_links=None if has_e2e else body.file_links,
+                            images=images_payload,
+                            audios=audios_payload,
+                            videos=videos_payload,
+                            file_links=file_links_payload,
                             metadata=meta,
                             e2e=e2e_local,
                         )

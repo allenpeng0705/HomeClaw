@@ -111,7 +111,13 @@ def _media_to_data_urls(
     default_mime: str,
     ext_to_mime: Optional[dict] = None,
 ) -> List[str]:
-    """Convert list of data URLs or file paths to data URLs. data_prefix e.g. 'data:image/' or 'data:audio/'. Never raises."""
+    """Convert list of refs to media URLs for websocket push.
+    Accepts:
+    - data URLs (pass-through)
+    - http(s) URLs (pass-through; lets peers fetch directly without base64 in payload)
+    - local file paths (encoded to data URLs)
+    Never raises.
+    """
     result: List[str] = []
     if not items:
         return result
@@ -121,6 +127,9 @@ def _media_to_data_urls(
             continue
         s = item.strip()
         if s.lower().startswith(data_prefix):
+            result.append(s)
+            continue
+        if s.lower().startswith("http://") or s.lower().startswith("https://"):
             result.append(s)
             continue
         if not os.path.isfile(s):

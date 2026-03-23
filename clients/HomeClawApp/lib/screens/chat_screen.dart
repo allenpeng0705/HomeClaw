@@ -991,26 +991,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               )
             : _filePathsToImageDataUrls(imagesToSend))
         : <String>[];
-    if (widget.isUserFriend && imagesToSend.isNotEmpty && userImageDataUrls.isEmpty) {
-      _stopLoadingStatusTimer();
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _loadingMessage = null;
-          _activeUserSendBubbleIndex = null;
-          _activeUserSendStage = null;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not prepare images to send. Try a different photo format or size.')),
-        );
-      }
-      return;
-    }
-    // One short video for user-to-user (max 15MB, ~10s)
-    final userVideoDataUrls = videosToSend.isNotEmpty
-        ? await _filePathsToVideoDataUrls([videosToSend.first])
-        : <String>[];
-    if (videosToSend.isNotEmpty && userVideoDataUrls.isEmpty && mounted) {
+    // Keep send path independent from preview generation (media is uploaded directly for user-to-user below).
+    // One short video for user-to-user (max 15MB, ~10s), keep local ref for optimistic bubble.
+    final userVideoRefs = videosToSend.isNotEmpty ? <String>[videosToSend.first] : <String>[];
+    if (videosToSend.isNotEmpty && userVideoRefs.isEmpty && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Video not sent: keep under 15MB (e.g. ~10 seconds) for user messages.')),
       );
@@ -1030,7 +1014,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _messages.add(MapEntry(text.isEmpty ? '(attachment)' : text, true));
       _messageImages.add(userImageDataUrls.isEmpty ? null : userImageDataUrls);
       _messageAudios.add(null);
-      _messageVideos.add(userVideoDataUrls.isEmpty ? null : userVideoDataUrls);
+      _messageVideos.add(userVideoRefs.isEmpty ? null : userVideoRefs);
       _messageFileLabels.add(outgoingFileNames.isEmpty ? null : outgoingFileNames);
       if (isUserToUserSend) {
         _activeUserSendBubbleIndex = optimisticIndex;
@@ -1082,17 +1066,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             }
           }
         }
+        List<String>? imagesToSendRefs;
+        List<String>? videosToSendRefs;
         List<String>? fileLinksToSend;
-        if (filesToSend.isNotEmpty) {
+        final allToUpload = <String>[...imagesToSend, ...videosToSend, ...filesToSend];
+        if (allToUpload.isNotEmpty) {
           if (mounted) {
             setState(() {
-              _activeUserSendStage = filesToSend.length <= 1
-                  ? 'Uploading file...'
-                  : 'Uploading ${filesToSend.length} files...';
+              _activeUserSendStage = allToUpload.length <= 1
+                  ? 'Uploading attachment...'
+                  : 'Uploading ${allToUpload.length} attachments...';
             });
           }
-          final uploaded = await widget.coreService.uploadFiles(filesToSend);
-          fileLinksToSend = uploaded.isNotEmpty ? uploaded : null;
+          final uploaded = await widget.coreService.uploadFiles(allToUpload);
+          final nI = imagesToSend.length;
+          final nV = videosToSend.length;
+          final nF = filesToSend.length;
+          if (uploaded.length < allToUpload.length) {
+            throw Exception('Upload incomplete: expected ${allToUpload.length}, got ${uploaded.length}.');
+          }
+          imagesToSendRefs = nI > 0 ? uploaded.take(nI).toList() : null;
+          videosToSendRefs = nV > 0 ? uploaded.skip(nI).take(nV).toList() : null;
+          fileLinksToSend = nF > 0 ? uploaded.skip(nI + nV).take(nF).toList() : null;
         }
         if (mounted) {
           setState(() => _activeUserSendStage = 'Sending to friend...');
@@ -1101,8 +1096,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           fromUserId: widget.userId,
           toUserId: widget.toUserId!.trim(),
           text: e2eEnvelope != null ? '' : text,
-          images: userImageDataUrls.isEmpty ? null : userImageDataUrls,
-          videos: userVideoDataUrls.isEmpty ? null : userVideoDataUrls,
+          images: imagesToSendRefs,
+          videos: videosToSendRefs,
           fileLinks: fileLinksToSend,
           e2e: e2eEnvelope,
         );
@@ -1451,23 +1446,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return out;
   }
 
-  Future<List<String>> _filePathsToVideoDataUrls(List<String> filePaths) async {
-    if (filePaths.isEmpty) return [];
-    final file = File(filePaths.first);
-    if (!await file.exists()) return [];
-    final length = await file.length();
-    if (length > _maxVideoBytes) return [];
-    try {
-      final bytes = await file.readAsBytes();
-      final b64 = base64Encode(bytes);
-      final ext = path.extension(filePaths.first).toLowerCase().replaceFirst('.', '');
-      final mime = ext == 'webm' ? 'video/webm' : 'video/mp4';
-      return ['data:$mime;base64,$b64'];
-    } catch (_) {
-      return [];
-    }
-  }
-
   /// Build data URLs for image files (same fallback as web chat when upload fails).
   Future<List<String>> _filePathsToImageDataUrls(List<String> filePaths) async {
     final out = <String>[];
@@ -1527,7 +1505,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// Stop push-to-talk, read file, send as user message with audios, and add to chat.
+  /// Stop push-to-talk, upload audio, send by reference, and add to chat.
   Future<void> _stopPushToTalkAndSend() async {
     if (!_recordingPushToTalk) return;
     try {
@@ -1545,21 +1523,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
         return;
       }
-      final bytes = await file.readAsBytes();
-      final b64 = base64Encode(bytes);
-      final dataUrl = 'data:audio/mp4;base64,$b64';
       try {
+        final uploaded = await widget.coreService.uploadFiles([filePath]);
+        final audioRef = uploaded.isNotEmpty ? uploaded.first : filePath;
         await widget.coreService.sendUserMessage(
           fromUserId: widget.userId,
           toUserId: widget.toUserId!.trim(),
           text: '',
-          audios: [dataUrl],
+          audios: [audioRef],
         );
         if (!mounted) return;
         setState(() {
           _messages.add(MapEntry('(voice)', true));
           _messageImages.add(null);
-          _messageAudios.add([dataUrl]);
+          _messageAudios.add([audioRef]);
           _messageVideos.add(null);
           _messageFileLabels.add(null);
         });
@@ -2762,7 +2739,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     children: audioUrls
                                         .map((audioDataUrl) => Padding(
                                               padding: const EdgeInsets.only(bottom: 6),
-                                              child: _AudioPlayButton(dataUrl: audioDataUrl),
+                                              child: _AudioPlayButton(audioRef: audioDataUrl),
                                             ))
                                         .toList(),
                                   ),
@@ -2776,7 +2753,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     children: videoUrls
                                         .map((videoDataUrl) => Padding(
                                               padding: const EdgeInsets.only(bottom: 6),
-                                              child: _VideoPlayChip(dataUrl: videoDataUrl),
+                                              child: _VideoPlayChip(videoRef: videoDataUrl),
                                             ))
                                         .toList(),
                                   ),
@@ -3450,9 +3427,9 @@ class _ChatMessageText extends StatelessWidget {
 
 /// Chip that opens full-screen video player for a video data URL (user-to-user short video).
 class _VideoPlayChip extends StatelessWidget {
-  final String dataUrl;
+  final String videoRef;
 
-  const _VideoPlayChip({required this.dataUrl});
+  const _VideoPlayChip({required this.videoRef});
 
   @override
   Widget build(BuildContext context) {
@@ -3463,7 +3440,7 @@ class _VideoPlayChip extends StatelessWidget {
         onTap: () {
           Navigator.of(context).push(
             MaterialPageRoute<void>(
-              builder: (ctx) => _FullScreenVideoPage(dataUrl: dataUrl),
+              builder: (ctx) => _FullScreenVideoPage(videoRef: videoRef),
             ),
           );
         },
@@ -3488,9 +3465,9 @@ class _VideoPlayChip extends StatelessWidget {
 
 /// Full-screen video player for a data URL. Writes to temp file and plays with video_player.
 class _FullScreenVideoPage extends StatefulWidget {
-  final String dataUrl;
+  final String videoRef;
 
-  const _FullScreenVideoPage({required this.dataUrl});
+  const _FullScreenVideoPage({required this.videoRef});
 
   @override
   State<_FullScreenVideoPage> createState() => _FullScreenVideoPageState();
@@ -3507,19 +3484,29 @@ class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
   }
 
   Future<void> _initPlayer() async {
-    if (widget.dataUrl.isEmpty || !widget.dataUrl.contains(',')) {
+    final ref = widget.videoRef.trim();
+    if (ref.isEmpty) {
       if (mounted) setState(() => _error = 'Invalid video');
       return;
     }
     try {
-      final b64 = widget.dataUrl.split(',').last;
-      final bytes = base64Decode(b64);
-      final dir = await getTemporaryDirectory();
-      final ext = widget.dataUrl.contains('webm') ? 'webm' : 'mp4';
-      final file = File(path.join(dir.path, 'video_${DateTime.now().millisecondsSinceEpoch}.$ext'));
-      await file.writeAsBytes(bytes);
-      if (!mounted) return;
-      _controller = VideoPlayerController.file(file);
+      if (ref.startsWith('data:video/') && ref.contains(',')) {
+        final b64 = ref.split(',').last;
+        final bytes = base64Decode(b64);
+        final dir = await getTemporaryDirectory();
+        final ext = ref.contains('webm') ? 'webm' : 'mp4';
+        final file = File(path.join(dir.path, 'video_${DateTime.now().millisecondsSinceEpoch}.$ext'));
+        await file.writeAsBytes(bytes);
+        if (!mounted) return;
+        _controller = VideoPlayerController.file(file);
+      } else if (ref.startsWith('http://') || ref.startsWith('https://')) {
+        _controller = VideoPlayerController.networkUrl(Uri.parse(ref));
+      } else if (await File(ref).exists()) {
+        _controller = VideoPlayerController.file(File(ref));
+      } else {
+        if (mounted) setState(() => _error = 'Video file not found');
+        return;
+      }
       await _controller!.initialize();
       if (mounted) setState(() {});
       _controller!.play();
@@ -3561,11 +3548,11 @@ class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
   }
 }
 
-/// Play button for a voice message (audio data URL). Writes to temp file and plays with audioplayers.
+/// Play button for a voice message (data URL, local path, or http(s) URL).
 class _AudioPlayButton extends StatefulWidget {
-  final String dataUrl;
+  final String audioRef;
 
-  const _AudioPlayButton({required this.dataUrl});
+  const _AudioPlayButton({required this.audioRef});
 
   @override
   State<_AudioPlayButton> createState() => _AudioPlayButtonState();
@@ -3584,20 +3571,34 @@ class _AudioPlayButtonState extends State<_AudioPlayButton> {
   }
 
   Future<void> _play() async {
-    if (widget.dataUrl.isEmpty || !widget.dataUrl.contains(',')) return;
+    final ref = widget.audioRef.trim();
+    if (ref.isEmpty) return;
     try {
-      final b64 = widget.dataUrl.split(',').last;
-      final bytes = base64Decode(b64);
-      final dir = await getTemporaryDirectory();
-      final mime = widget.dataUrl.startsWith('data:') ? widget.dataUrl.split(';').first.replaceFirst('data:', '') : 'audio';
-      final ext = mime == 'audio/webm' ? 'webm' : (mime == 'audio/ogg' ? 'ogg' : 'webm');
-      final file = File(path.join(dir.path, 'voice_${DateTime.now().millisecondsSinceEpoch}.$ext'));
-      await file.writeAsBytes(bytes);
+      Source source;
+      if (ref.startsWith('data:audio/') && ref.contains(',')) {
+        final b64 = ref.split(',').last;
+        final bytes = base64Decode(b64);
+        final dir = await getTemporaryDirectory();
+        final mime = ref.startsWith('data:') ? ref.split(';').first.replaceFirst('data:', '') : 'audio';
+        final ext = mime == 'audio/webm' ? 'webm' : (mime == 'audio/ogg' ? 'ogg' : (mime == 'audio/mp4' ? 'm4a' : 'webm'));
+        final file = File(path.join(dir.path, 'voice_${DateTime.now().millisecondsSinceEpoch}.$ext'));
+        await file.writeAsBytes(bytes);
+        source = DeviceFileSource(file.path);
+      } else if (ref.startsWith('http://') || ref.startsWith('https://')) {
+        source = UrlSource(ref);
+      } else if (await File(ref).exists()) {
+        source = DeviceFileSource(ref);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Audio file not found')));
+        }
+        return;
+      }
       _completeSub?.cancel();
       _completeSub = _player.onPlayerComplete.listen((_) {
         if (mounted) setState(() => _playing = false);
       });
-      await _player.play(DeviceFileSource(file.path));
+      await _player.play(source);
       if (mounted) setState(() => _playing = true);
     } catch (_) {
       if (mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Could not play audio')));
