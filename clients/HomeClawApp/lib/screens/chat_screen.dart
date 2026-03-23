@@ -1224,21 +1224,52 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _takePhoto() async {
-    await Future<void>.delayed(const Duration(milliseconds: 300));
+  /// Federated E2E text-only mode: no images, video, files, or voice clips.
+  bool get _federatedE2eAttachmentsDisabled =>
+      widget.isUserFriend &&
+      widget.coreService.federationE2eRequireEncrypted &&
+      (widget.remotePeerInstanceId?.trim().isNotEmpty ?? false);
+
+  void _snackFedE2eMediaBlocked() {
     if (!mounted) return;
-    final source = await showDialog<ImageSource>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Take photo'),
-        content: const Text('Use camera to take a new photo, or choose an existing image from your device.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.of(ctx).pop(ImageSource.camera), child: const Text('Use camera')),
-          FilledButton(onPressed: () => Navigator.of(ctx).pop(ImageSource.gallery), child: const Text('Choose from device')),
-        ],
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Photos, video, and files are not available when this Core requires encrypted federation chat.',
+        ),
       ),
     );
+  }
+
+  /// Pick or capture a photo. [presetSource] skips the source chooser (composer shortcuts).
+  Future<void> _attachPhoto({ImageSource? presetSource}) async {
+    if (_federatedE2eAttachmentsDisabled) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Photos are not available when this Core requires encrypted federation chat.'),
+          ),
+        );
+      }
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    if (!mounted) return;
+    ImageSource? source = presetSource;
+    if (source == null) {
+      source = await showDialog<ImageSource>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Add photo'),
+          content: const Text('Use camera to take a new photo, or choose an existing image from your device.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.of(ctx).pop(ImageSource.camera), child: const Text('Use camera')),
+            FilledButton(onPressed: () => Navigator.of(ctx).pop(ImageSource.gallery), child: const Text('Choose from device')),
+          ],
+        ),
+      );
+    }
     if (source == null || !mounted) return;
     try {
       if (mounted) {
@@ -1250,7 +1281,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               children: [
                 const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
                 const SizedBox(width: 16),
-                Expanded(child: Text(source == ImageSource.camera ? 'Opening camera…' : 'Choosing photo…', textAlign: TextAlign.start)),
+                Expanded(
+                  child: Text(
+                    source == ImageSource.camera ? 'Opening camera…' : 'Choosing photo…',
+                    textAlign: TextAlign.start,
+                  ),
+                ),
               ],
             ),
           ),
@@ -1278,7 +1314,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     } catch (e) {
       if (mounted) {
-        try { Navigator.of(context).pop(); } catch (_) {}
+        try {
+          Navigator.of(context).pop();
+        } catch (_) {}
         setState(() {
           _messages.add(MapEntry('Photo error: $e', false));
           _messageImages.add(null);
@@ -1289,7 +1327,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _takePhoto() async {
+    await _attachPhoto();
+  }
+
   Future<void> _recordVideo() async {
+    if (_federatedE2eAttachmentsDisabled) {
+      _snackFedE2eMediaBlocked();
+      return;
+    }
     await Future<void>.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
     final source = await showDialog<ImageSource>(
@@ -1369,6 +1415,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _recordScreen() async {
+    if (_federatedE2eAttachmentsDisabled) {
+      _snackFedE2eMediaBlocked();
+      return;
+    }
     await Future<void>.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
     try {
@@ -1404,6 +1454,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _attachDocument() async {
+    if (_federatedE2eAttachmentsDisabled) {
+      _snackFedE2eMediaBlocked();
+      return;
+    }
     try {
       final result = await FilePicker.platform.pickFiles(
         allowMultiple: true,
@@ -2040,7 +2094,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               }
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(value: 'photo', child: Text('Take photo')),
+              const PopupMenuItem(value: 'photo', child: Text('Add photo…')),
               const PopupMenuItem(value: 'video', child: Text('Record video')),
               const PopupMenuItem(value: 'document', child: Text('Attach file')),
               const PopupMenuItem(value: 'screen', child: Text('Record screen')),
@@ -2565,7 +2619,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     ),
                   ),
                 ],
-                const SizedBox(width: 8),
+                if (!_federatedE2eAttachmentsDisabled) ...[
+                  IconButton(
+                    onPressed: _loading ? null : () => _attachPhoto(presetSource: ImageSource.camera),
+                    icon: const Icon(Icons.photo_camera_outlined),
+                    tooltip: 'Take photo',
+                  ),
+                  IconButton(
+                    onPressed: _loading ? null : () => _attachPhoto(presetSource: ImageSource.gallery),
+                    icon: const Icon(Icons.photo_library_outlined),
+                    tooltip: 'Attach image',
+                  ),
+                ],
+                const SizedBox(width: 4),
                 IconButton.filled(
                   onPressed: _loading
                       ? null
