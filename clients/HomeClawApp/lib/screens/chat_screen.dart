@@ -628,13 +628,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _applyUserInboxList(List<dynamic> list, {int pollGeneration = -1}) async {
     if (!mounted) return;
     if (pollGeneration >= 0 && pollGeneration != _userInboxFetchGeneration) return;
-    final effectiveList = _userInboxHideBeforeTs == null
+    var effectiveList = _userInboxHideBeforeTs == null
         ? list
         : list.where((m) {
             if (m is! Map) return false;
-            final at = (m['created_at'] as num?)?.toDouble() ?? 0.0;
+            final raw = m['created_at'];
+            final at = raw is num
+                ? raw.toDouble()
+                : (raw is String ? double.tryParse(raw) ?? 0.0 : 0.0);
             return at > _userInboxHideBeforeTs!;
           }).toList();
+    // If some rows should pass the hide filter (max created_at > cutoff) but none did, timestamps
+    // or parsing failed — show full thread and drop stale hide so the chat is not blank.
+    if (effectiveList.isEmpty && list.isNotEmpty && _userInboxHideBeforeTs != null) {
+      var maxAt = 0.0;
+      for (final m in list) {
+        if (m is! Map) continue;
+        final raw = m['created_at'];
+        final at = raw is num
+            ? raw.toDouble()
+            : (raw is String ? double.tryParse(raw) ?? 0.0 : 0.0);
+        if (at > maxAt) maxAt = at;
+      }
+      if (maxAt > _userInboxHideBeforeTs!) {
+        effectiveList = List<dynamic>.from(list);
+        _userInboxHideBeforeTs = null;
+        unawaited(SharedPreferences.getInstance().then((p) => p.remove(_inboxHidePrefKey())));
+      }
+    }
     if (pollGeneration >= 0 && pollGeneration != _userInboxFetchGeneration) return;
     if (effectiveList.isEmpty) {
       // Valid empty thread: clear UI and mark read so friend list does not show a stale red dot.
@@ -765,11 +786,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _clearChatHistory() async {
     final prefs = await SharedPreferences.getInstance();
     final nowTs = DateTime.now().millisecondsSinceEpoch / 1000.0;
-    // Persist cutoffs so reopening the chat or the next Core sync does not resurrect cleared rows.
+    // For user threads, do NOT set hide-before until we know server DELETE failed — otherwise
+    // client clock vs Core clock skew can drop all new messages (receiver sees an empty thread).
     if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
-      _userInboxHideBeforeTs = nowTs;
       _lastUserInboxThreadFingerprint = null;
-      await prefs.setDouble(_inboxHidePrefKey(), nowTs);
     } else {
       _aiChatHideBeforeTs = nowTs;
       await prefs.setDouble(_aiChatHidePrefKey(), nowTs);
@@ -796,7 +816,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         await prefs.remove(_inboxHidePrefKey());
         if (mounted) setState(() => _userInboxHideBeforeTs = null);
       } catch (e) {
+        // Server still has rows: use hide cutoff only as fallback (skew can hide new mail briefly).
+        _userInboxHideBeforeTs = nowTs;
+        await prefs.setDouble(_inboxHidePrefKey(), nowTs);
         if (mounted) {
+          setState(() {});
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Cleared on this device. Server clear pending: $e')),
           );
