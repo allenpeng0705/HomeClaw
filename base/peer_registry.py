@@ -120,6 +120,17 @@ def resolve_peer_api_key(peer_row: Dict[str, Any]) -> Optional[str]:
         v = os.environ.get(env_name)
         if v and str(v).strip():
             return str(v).strip()
+    # Opt-in: same auth_api_key in both cores' core.yml — avoids duplicating the secret in peers.yml.
+    try:
+        if bool(peer_row.get("use_same_auth_api_key_as_local_core")):
+            from base.util import Util
+
+            meta = Util().get_core_metadata()
+            local = (getattr(meta, "auth_api_key", None) or "").strip()
+            if local:
+                return local
+    except Exception:
+        pass
     return None
 
 

@@ -899,9 +899,10 @@ class CoreService {
       'limit': limit.toString(),
     };
     final url = Uri.parse('$_baseUrl/api/user-inbox/thread').replace(queryParameters: query);
+    // Thread payloads can be large (inlined media from Core); allow more than default API timeout.
     final response = await http
         .get(url, headers: _authHeaders())
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 60));
     if (response.statusCode != 200) {
       throw Exception('GET thread failed ${response.statusCode}: ${response.body}');
     }

@@ -619,8 +619,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       _lastUserInboxThreadFingerprint = fingerprint;
       await _applyUserInboxList(list);
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() {});
+      if (mounted && !fromPoll) {
+        final msg = e.toString();
+        final short = msg.length > 200 ? '${msg.substring(0, 200)}…' : msg;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not load chat: $short')),
+        );
+      }
     }
   }
 
@@ -1179,6 +1186,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
             );
+          } else {
+            var hint = errText;
+            if (hint.contains('401') || hint.toLowerCase().contains('api key')) {
+              hint =
+                  "$hint\nIf this is a remote friend: set api_key (or use_same_auth_api_key_as_local_core) in peers.yml on the sender Core to match the peer's auth_api_key.";
+            }
+            if (hint.contains('502') || hint.toLowerCase().contains('federation')) {
+              hint =
+                  "$hint\nFederation: check peer base_url, peer Core logs, nginx client_max_body_size, and that both instances trust the sender.";
+            }
+            final shown = hint.length > 360 ? '${hint.substring(0, 360)}…' : hint;
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(shown)));
           }
           _scrollToBottom(force: true);
         }

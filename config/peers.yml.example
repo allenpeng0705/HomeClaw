@@ -1,5 +1,7 @@
 # Copy to peers.yml so this Core can call other HomeClaw instances via the peer_call tool.
-# Secrets: prefer api_key_env pointing to an environment variable (do not commit real keys).
+# Secrets: prefer api_key_env pointing to an environment variable NAME (do not put the raw key in api_key_env).
+# Federated user messages POST /api/federation/user-message on the peer: if that Core has auth_enabled + auth_api_key,
+# you must supply the matching key via api_key, api_key_env, or use_same_auth_api_key_as_local_core: true.
 
 peers:
   - instance_id: "worker-vision"
@@ -7,5 +9,7 @@ peers:
     base_url: "https://worker-vision.example.ts.net:9000"
     inbound_user_id: "peer_from_main"
     api_key_env: "PEER_KEY_WORKER_VISION"
+    # api_key: "optional-inline-secret"   # alternative to api_key_env (avoid committing real values)
+    # use_same_auth_api_key_as_local_core: true   # send this Core's top-level auth_api_key (both cores use the same key)
     capabilities:
       - vision
