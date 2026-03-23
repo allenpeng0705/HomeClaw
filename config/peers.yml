@@ -1,0 +1,12 @@
+# Copy to peers.yml so this Core can call other HomeClaw instances via the peer_call tool.
+# Secrets: prefer api_key_env pointing to an environment variable (do not commit real keys).
+
+peers:
+  - instance_id: "AllenPeng-win-HomeClaw"
+    display_name: "AP-Win-HomwClaw"
+    base_url: "https://homeclaw.gpt4people.online:9000"
+    inbound_user_id: "allenpeng_win_homeclaw""
+    api_key_env: "1234567890"
+    capabilities:
+      - vision
+      - chat

@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw 子智能体功能指南。学习如何使用 sessions_spawn 生成专用子智能体处理特定任务。">
+  <title>子智能体 — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="主导航">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">首页</a>
+        <a href="install.html">安装</a>
+        <a href="use-homeclaw.html">使用指南</a>
+        <a href="companion-app.html">伴侣应用</a>
+        <a href="portal.html">Portal</a>
+        <a href="docs.html">文档</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch"><a href="../en/sub-agent.html">EN</a> | 中文</span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>子智能体</h1>
+      <p class="lead">使用 sessions_spawn 生成专用子智能体处理特定任务。按能力或名称选择模型，专注完成工作。</p>
+      <p>HomeClaw 的子智能体功能允许您为特定任务生成专用 AI 智能体。每个子智能体作为独立的完成过程运行，使用自己的模型，使您能够为不同类型的工作利用不同的能力和模型。</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="本页内容">
+      <p class="doc-toc-title">本页内容</p>
+      <ul>
+        <li><a href="#what-is-sub-agent">什么是子智能体？</a></li>
+        <li><a href="#how-it-works">工作原理</a></li>
+        <li><a href="#model-selection">模型选择</a></li>
+        <li><a href="#capability-tags">能力标签</a></li>
+        <li><a href="#using-sessions-spawn">使用 sessions_spawn</a></li>
+        <li><a href="#examples">示例</a></li>
+        <li><a href="#configuration">配置</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section" id="what-is-sub-agent">
+      <div class="doc-section-img-wrap" aria-hidden="true">
+        <img src="../assets/section-multi-agent.png" alt="子智能体架构" class="doc-section-img" width="280" height="160" onerror="this.style.display='none'">
+      </div>
+      <div class="doc-section-body">
+        <h2>什么是子智能体？</h2>
+        <p><strong>子智能体</strong>是由主 HomeClaw 智能体生成的专用 AI 智能体，用于处理特定任务。与主智能体不同，子智能体：</p>
+        <ul>
+          <li><strong>作为独立的完成过程运行</strong> — 每个子智能体获得自己的 LLM 调用和响应</li>
+          <li><strong>使用不同的模型</strong> — 您可以指定每个子智能体应该使用哪个模型</li>
+          <li><strong>没有工具</strong> — 子智能体是一次性工作者，将文本返回给主智能体</li>
+          <li><strong>是无状态的</strong> — 它们不维护对话历史或记忆</li>
+        </ul>
+        <p>主智能体使用 <code>sessions_spawn</code> 工具来创建和与子智能体通信，使将专用任务委托给最合适的模型变得容易。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="how-it-works">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>工作原理</h2>
+        <p>当主智能体需要执行专用任务时，它可以调用带有特定参数的 <code>sessions_spawn</code> 工具：</p>
+        <ol>
+          <li><strong>主智能体决定</strong> — 主 LLM 分析任务并确定子智能体是否有帮助</li>
+          <li><strong>工具调用</strong> — 主智能体使用任务详情和模型选择调用 <code>sessions_spawn</code></li>
+          <li><strong>模型选择</strong> — HomeClaw 根据能力或显式名称选择合适的模型</li>
+          <li><strong>子智能体执行</strong> — 选定的模型处理任务并返回结果</li>
+          <li><strong>结果集成</strong> — 主智能体接收子智能体的输出并继续其工作</li>
+        </ol>
+        <p>这种架构使您能够为不同目的使用不同的模型——用于简单任务的快速本地模型、用于复杂推理的强大云模型，或用于数学、视觉或其他能力的专用模型。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="model-selection">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>模型选择</h2>
+        <p>生成子智能体时，您可以通过两种方式指定模型：</p>
+
+        <h3>选项 1：显式模型名称</h3>
+        <p>从您的 LLM 目录中指定确切的模型引用：</p>
+        <pre class="quickstart-code"><code>sessions_spawn(
+  llm_name="local_models/math_specialist",
+  task="解这个方程：x^2 + 5x + 6 = 0"
+)</code></pre>
+
+        <h3>选项 2：基于能力的选择</h3>
+        <p>让 HomeClaw 自动选择具有所需能力的模型：</p>
+        <pre class="quickstart-code"><code>sessions_spawn(
+  capability="Math",
+  task="计算 f(x) = x^3 + 2x^2 + x 的导数"
+)</code></pre>
+
+        <p>HomeClaw 将扫描您的 <code>config/llm.yml</code> 目录并选择第一个具有 <code>Math</code> 能力标签的可用模型。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="capability-tags">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>能力标签</h2>
+        <p>LLM 目录中的能力标签帮助 HomeClaw 自动为每个任务选择合适的模型。常见能力包括：</p>
+
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>能力</th>
+              <th>描述</th>
+              <th>示例模型</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>Chat</code></td>
+              <td>一般对话和推理</td>
+              <td>Llama 3、Gemini、GPT-4</td>
+            </tr>
+            <tr>
+              <td><code>Math</code></td>
+              <td>数学计算和证明</td>
+              <td>Mathstral、专用数学模型</td>
+            </tr>
+            <tr>
+              <td><code>Coding</code></td>
+              <td>代码生成和调试</td>
+              <td>Claude 3.5 Sonnet、GPT-4</td>
+            </tr>
+            <tr>
+              <td><code>Vision</code></td>
+              <td>图像分析和理解</td>
+              <td>LLaVA、GPT-4V</td>
+            </tr>
+            <tr>
+              <td><code>Embedding</code></td>
+              <td>用于 RAG 的向量嵌入</td>
+              <td>BGE、E5、OpenAI 嵌入</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>为模型添加能力</h3>
+        <p>编辑您的 <code>config/llm.yml</code> 为模型添加能力：</p>
+        <pre class="quickstart-code"><code>local_models:
+  - id: math_specialist
+    path: mathstral-7b-Q4_K_M.gguf
+    host: 127.0.0.1
+    port: 5040
+    capabilities: [Math, Coding]
+    description: "专用于数学和编程任务"
+
+cloud_models:
+  - id: GPT-4-Vision
+    provider: openai
+    model: gpt-4-vision-preview
+    capabilities: [Vision, Chat]
+    description: "具有视觉能力的 GPT-4"</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="using-sessions-spawn">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>使用 sessions_spawn</h2>
+        <p>当启用工具时，<code>sessions_spawn</code> 工具对主智能体可用。以下是使用方法：</p>
+
+        <h3>工具参数</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>参数</th>
+              <th>类型</th>
+              <th>必需</th>
+              <th>描述</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>task</code></td>
+              <td>string</td>
+              <td>是</td>
+              <td>子智能体的任务或提示</td>
+            </tr>
+            <tr>
+              <td><code>llm_name</code></td>
+              <td>string</td>
+              <td>否*</td>
+              <td>显式模型引用（例如 <code>local_models/math</code>）</td>
+            </tr>
+            <tr>
+              <td><code>capability</code></td>
+              <td>string</td>
+              <td>否*</td>
+              <td>用于自动模型选择的能力标签</td>
+            </tr>
+            <tr>
+              <td><code>max_tokens</code></td>
+              <td>integer</td>
+              <td>否</td>
+              <td>子智能体响应的最大令牌数</td>
+            </tr>
+            <tr>
+              <td><code>temperature</code></td>
+              <td>float</td>
+              <td>否</td>
+              <td>采样温度（0.0-1.0）</td>
+            </tr>
+          </tbody>
+        </table>
+        <p><em>*必须指定 <code>llm_name</code> 或 <code>capability</code> 之一。</em></p>
+
+        <h3>示例：数学问题</h3>
+        <pre class="quickstart-code"><code>用户: "x^2 从 0 到 3 的积分是多少？"
+
+主智能体: "我将使用数学专家来解决这个问题。"
+
+sessions_spawn(
+  capability="Math",
+  task="计算 x^2 从 0 到 3 的定积分。展示你的工作过程。"
+)
+
+子智能体: "要计算 ∫₀³ x² dx：
+1. 找到原函数：x³/3
+2. 在边界处求值：(3³/3) - (0³/3)
+3. 简化：9 - 0 = 9
+
+积分等于 9。"
+
+主智能体: "x² 从 0 到 3 的积分是 9。"</code></pre>
+
+        <h3>示例：代码审查</h3>
+        <pre class="quickstart-code"><code>用户: "审查这个 Python 函数是否有错误"
+
+主智能体: "我将让编程专家来审查它。"
+
+sessions_spawn(
+  capability="Coding",
+  task="审查这个 Python 代码是否有错误并建议改进：[code]"
+)
+
+子智能体: "发现了 3 个问题：
+1. 文件操作缺少错误处理
+2. 循环中的变量名遮蔽
+3. 计算中潜在的整数溢出
+
+建议的修复：[详细建议]"
+
+主智能体: "代码审查发现了 3 个应该修复的问题..."</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="examples">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>示例</h2>
+
+        <h3>用例 1：多模态分析</h3>
+        <p>使用具有视觉能力的子智能体来分析图像，同时保持主模型用于文本：</p>
+        <pre class="quickstart-code"><code>用户: "这张图片里有什么？[上传 screenshot.jpg]"
+
+主智能体: "我将使用视觉模型来分析图像。"
+
+sessions_spawn(
+  llm_name="cloud_models/GPT-4-Vision",
+  task="描述你在这张图片中看到的内容：[base64 编码的图像]"
+)
+
+子智能体: "这是一个显示代码编辑器的截图，其中有一个 Python 函数..."
+
+主智能体: "图片显示了一个带有函数的 Python 代码编辑器..."</code></pre>
+
+        <h3>用例 2：成本优化</h3>
+        <p>使用快速本地模型处理简单任务，仅在需要时调用昂贵的云模型：</p>
+        <pre class="quickstart-code"><code>用户: "2 + 2 是多少？"
+
+主智能体: "简单计算，使用本地模型。"
+
+sessions_spawn(
+  llm_name="local_models/fast_chat",
+  task="2 + 2 是多少？"
+)
+
+子智能体: "4"
+
+主智能体: "2 + 2 = 4。"</code></pre>
+
+        <h3>用例 3：专业知识</h3>
+        <p>使用具有专门训练的模型处理特定领域任务：</p>
+        <pre class="quickstart-code"><code>用户: "简单解释量子纠缠"
+
+主智能体: "我将使用物理专业模型来解释这个。"
+
+sessions_spawn(
+  capability="Physics",
+  task="用简单的术语为初学者解释量子纠缠"
+)
+
+子智能体: "想象两枚神奇连接的硬币..."
+
+主智能体: "量子纠缠就像两枚神奇连接的硬币..."</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="configuration">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>配置</h2>
+
+        <h3>启用 sessions_spawn 工具</h3>
+        <p>确保在 <code>config/core.yml</code> 中启用了工具：</p>
+        <pre class="quickstart-code"><code>tools:
+  enabled: true
+  # 当启用工具时，sessions_spawn 自动可用</code></pre>
+
+        <h3>配置 LLM 目录</h3>
+        <p>在 <code>config/llm.yml</code> 中设置带有能力的模型：</p>
+        <pre class="quickstart-code"><code>local_models:
+  - id: main_chat
+    path: llama-3-8b-instruct-Q4_K_M.gguf
+    host: 127.0.0.1
+    port: 5040
+    capabilities: [Chat]
+    description: "主聊天模型"
+
+  - id: math_specialist
+    path: mathstral-7b-Q4_K_M.gguf
+    host: 127.0.0.1
+    port: 5041
+    capabilities: [Math]
+    description: "专用于数学任务"
+
+  - id: vision_model
+    path: llava-1.5-7b-Q4_K_M.gguf
+    host: 127.0.0.1
+    port: 5042
+    capabilities: [Vision]
+    mmproj: llava-1.5-7b-mmproj.gguf
+    supported_media: [image]
+    description: "用于图像分析的视觉模型"
+
+cloud_models:
+  - id: GPT-4
+    provider: openai
+    model: gpt-4-turbo-preview
+    capabilities: [Chat, Coding]
+    description: "GPT-4 Turbo"
+
+  - id: Claude-3.5-Sonnet
+    provider: anthropic
+    model: claude-3-5-sonnet-20241022
+    capabilities: [Chat, Coding]
+    description: "Claude 3.5 Sonnet"</code></pre>
+
+        <h3>设置主模型</h3>
+        <p>在 <code>config/core.yml</code> 中配置您的主模型：</p>
+        <pre class="quickstart-code"><code>main_llm: local_models/main_chat
+# 或
+# main_llm: cloud_models/GPT-4</code></pre>
+
+        <h3>可选：工具选择模型</h3>
+        <p>使用更小、更快的模型进行工具选择：</p>
+        <pre class="quickstart-code"><code>use_tool_selection_llm: true
+tool_selection_llm: local_models/fast_chat</code></pre>
+
+        <h3>可选：将模型目录注入提示</h3>
+        <p>让主智能体看到可用的模型和能力：</p>
+        <pre class="quickstart-code"><code>tools:
+  llm_catalog_inject_enabled: true
+  llm_catalog_inject_max_chars: 2000</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>最佳实践</h2>
+        <ul>
+          <li><strong>使用能力以获得灵活性</strong> — 让 HomeClaw 根据任务类型选择合适的模型</li>
+          <li><strong>显式名称以获得控制</strong> — 当您需要特定模型时使用 <code>llm_name</code></li>
+          <li><strong>平衡成本和质量</strong> — 对简单任务使用本地模型，对复杂任务使用云模型</li>
+          <li><strong>保持任务专注</strong> — 子智能体最适合定义明确的单一用途任务</li>
+          <li><strong>监控使用情况</strong> — 检查使用报告以查看哪些模型使用最多</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>故障排除</h2>
+
+        <h3>"未找到具有能力 X 的模型"</h3>
+        <p>检查：</p>
+        <ul>
+          <li>您在 <code>config/llm.yml</code> 中有具有该能力的模型</li>
+          <li>模型被标记为 <code>available: true</code></li>
+          <li>能力拼写完全匹配（不区分大小写）</li>
+        </ul>
+
+        <h3>子智能体返回错误</h3>
+        <p>验证：</p>
+        <ul>
+          <li>指定的模型正在运行且可访问</li>
+          <li>模型文件存在于指定路径</li>
+          <li>主机和端口正确</li>
+        </ul>
+
+        <h3>工具不可用</h3>
+        <p>确保：</p>
+        <ul>
+          <li><code>tools.enabled: true</code> 在 <code>config/core.yml</code> 中</li>
+          <li>配置更改后已重启 Core</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>后续步骤</h2>
+        <ul>
+          <li><a href="use-homeclaw.html">如何使用 HomeClaw</a> — 了解模型和配置</li>
+          <li><a href="multi-homeclaw.html">多 HomeClaw</a> — 运行多个 HomeClaw 实例作为对等节点</li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs/llm-catalog-howto.md">LLM 目录指南</a> — 配置模型的详细指南</li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs/model-selection-and-lifecycle.md">模型选择和生命周期</a> — 深入了解模型选择</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2024 HomeClaw. <a href="https://github.com/allenpeng0705/HomeClaw">GitHub</a></p>
+    </div>
+  </footer>
+
+  <script>
+    const mobileMenuButton = document.querySelector('.mobile-menu-button');
+    const siteLinks = document.querySelector('.site-links');
+
+    if (mobileMenuButton && siteLinks) {
+      mobileMenuButton.addEventListener('click', () => {
+        const isExpanded = mobileMenuButton.getAttribute('aria-expanded') === 'true';
+        mobileMenuButton.setAttribute('aria-expanded', !isExpanded);
+        siteLinks.classList.toggle('active');
+      });
+    }
+
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function (e) {
+        e.preventDefault();
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          target.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+          });
+        }
+      });
+    });
+  </script>
+</body>
+</html>

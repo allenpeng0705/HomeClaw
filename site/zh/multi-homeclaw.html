@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw 多实例指南。学习如何运行多个 HomeClaw 实例作为对等节点，支持跨实例 AI 调用和联邦用户消息。">
+  <title>多 HomeClaw — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="主导航">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">首页</a>
+        <a href="install.html">安装</a>
+        <a href="use-homeclaw.html">使用指南</a>
+        <a href="companion-app.html">伴侣应用</a>
+        <a href="portal.html">Portal</a>
+        <a href="docs.html">文档</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch"><a href="../en/multi-homeclaw.html">EN</a> | 中文</span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>多 HomeClaw</h1>
+      <p class="lead">运行多个 HomeClaw 实例作为对等节点。跨实例 AI 调用（peer_call）、远程用户消息和联邦好友。</p>
+      <p>HomeClaw 的多实例功能允许您运行多个可以相互通信作为对等节点的 HomeClaw Core 实例。这实现了跨实例 AI 调用、联邦用户消息和分布式 AI 系统。</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="本页内容">
+      <p class="doc-toc-title">本页内容</p>
+      <ul>
+        <li><a href="#what-is-multi-homeclaw">什么是多 HomeClaw？</a></li>
+        <li><a href="#use-cases">用例</a></li>
+        <li><a href="#architecture">架构</a></li>
+        <li><a href="#peer-call">peer_call 工具</a></li>
+        <li><a href="#federated-messaging">联邦用户消息</a></li>
+        <li><a href="#setup">设置指南</a></li>
+        <li><a href="#configuration">配置</a></li>
+        <li><a href="#companion-app">伴侣应用集成</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section" id="what-is-multi-homeclaw">
+      <div class="doc-section-img-wrap" aria-hidden="true">
+        <img src="../assets/section-multi-agent.png" alt="多 HomeClaw 架构" class="doc-section-img" width="280" height="160" onerror="this.style.display='none'">
+      </div>
+      <div class="doc-section-body">
+        <h2>什么是多 HomeClaw？</h2>
+        <p><strong>多 HomeClaw</strong>允许您运行多个可以相互通信作为对等节点的 HomeClaw Core 实例。每个实例：</p>
+        <ul>
+          <li><strong>有自己的身份</strong> — 唯一的实例 ID 和显示名称</li>
+          <li><strong>独立运行</strong> — 不同的端口、不同的配置</li>
+          <li><strong>可以调用其他实例</strong> — AI 智能体可以请求对等节点的帮助</li>
+          <li><strong>支持联邦消息</strong> — 用户可以跨实例聊天</li>
+        </ul>
+        <p>没有中心编排器——每个实例独立运行并通过 HTTP 直接与对等节点通信。</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="use-cases">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>用例</h2>
+
+        <h3>1. 分布式 AI 系统</h3>
+        <p>为不同目的运行专用实例：</p>
+        <ul>
+          <li><strong>编程实例</strong> — 优化用于使用 Cursor/ClaudeCode 的代码生成</li>
+          <li><strong>研究实例</strong> — 带有网页浏览和研究工具</li>
+          <li><strong>数学实例</strong> — 专用数学模型用于计算</li>
+          <li><strong>视觉实例</strong> — 具有视觉能力的模型用于图像分析</li>
+        </ul>
+
+        <h3>2. 多位置部署</h3>
+        <p>在多个位置部署 HomeClaw：</p>
+        <ul>
+          <li><strong>家庭服务器</strong> — 家庭使用的主实例</li>
+          <li><strong>办公室服务器</strong> — 工作相关任务和文档</li>
+          <li><strong>云服务器</strong> — 用于远程访问的始终在线实例</li>
+        </ul>
+
+        <h3>3. 联邦社交网络</h3>
+        <p>跨实例创建分布式社交网络：</p>
+        <ul>
+          <li><strong>家庭成员</strong> — 每个家庭有自己的实例</li>
+          <li><strong>朋友</strong> — 与朋友的实例连接</li>
+          <li><strong>远程消息</strong> — 跨实例安全聊天</li>
+        </ul>
+
+        <h3>4. 负载均衡</h3>
+        <p>在多个实例之间分配工作：</p>
+        <ul>
+          <li><strong>高可用性</strong> — 多个实例用于冗余</li>
+          <li><strong>资源优化</strong> — 将任务路由到最合适的实例</li>
+          <li><strong>地理分布</strong> — 从最近的实例为用户服务</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="architecture">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>架构</h2>
+        <p>多 HomeClaw 使用对等网络架构，其中每个实例：</p>
+        <ol>
+          <li><strong>具有唯一身份</strong> — 在 <code>instance_identity.yml</code> 中定义</li>
+          <li><strong>了解对等节点</strong> — 在 <code>peers.yml</code> 中列出</li>
+          <li><strong>通过 HTTP 通信</strong> — 使用 <code>/inbound</code> 端点进行消息传递</li>
+          <li><strong>安全认证</strong> — 使用 API 密钥进行安全通信</li>
+        </ol>
+
+        <h3>通信流程</h3>
+        <pre class="quickstart-code"><code>实例 A                    实例 B
+    |                              |
+    |  POST /inbound               |
+    |  (带认证)                   |
+    |----------------------------->|
+    |                              |
+    |  处理请求                   |
+    |                              |
+    |  响应                         |
+    |<-----------------------------|
+    |                              |</code></pre>
+
+        <h3>关键组件</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>组件</th>
+              <th>文件</th>
+              <th>用途</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>实例身份</td>
+              <td><code>config/instance_identity.yml</code></td>
+              <td>定义实例 ID、显示名称、公共 URL</td>
+            </tr>
+            <tr>
+              <td>对等节点列表</td>
+              <td><code>config/peers.yml</code></td>
+              <td>列出已知对等节点及其连接详情</td>
+            </tr>
+            <tr>
+              <td>联邦配置</td>
+              <td><code>config/core.yml</code></td>
+              <td>启用联邦和端到端加密</td>
+            </tr>
+            <tr>
+              <td>用户配置</td>
+              <td><code>config/user.yml</code></td>
+              <td>定义用户及其远程好友</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="peer-call">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>peer_call 工具</h2>
+        <p><code>peer_call</code> 工具允许一个实例上的 AI 智能体调用另一个实例的 AI。这实现了专用实例可以相互帮助的分布式 AI 系统。</p>
+
+        <h3>peer_call 如何工作</h3>
+        <ol>
+          <li><strong>主智能体决定</strong> — 实例 A 上的 AI 确定需要来自对等节点的帮助</li>
+          <li><strong>工具调用</strong> — 调用带有目标实例和消息的 <code>peer_call</code></li>
+          <li><strong>HTTP 请求</strong> — HomeClaw 向对等节点的 <code>/inbound</code> 端点发送 POST 请求</li>
+          <li><strong>对等节点处理</strong> — 实例 B 的 AI 处理请求</li>
+          <li><strong>返回响应</strong> — 结果被发送回实例 A</li>
+        </ol>
+
+        <h3>peer_call 参数</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>参数</th>
+              <th>类型</th>
+              <th>必需</th>
+              <th>描述</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>instance_id</code></td>
+              <td>string</td>
+              <td>是</td>
+              <td>目标实例 ID（来自 peers.yml）</td>
+            </tr>
+            <tr>
+              <td><code>text</code></td>
+              <td>string</td>
+              <td>是</td>
+              <td>给对等节点的消息或任务</td>
+            </tr>
+            <tr>
+              <td><code>user_id</code></td>
+              <td>string</td>
+              <td>否</td>
+              <td>请求的用户 ID（默认：当前用户）</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>示例：跨实例协作</h3>
+        <pre class="quickstart-code"><code>用户: "分析这段代码并编写测试"
+
+实例 A（通用）：
+"我将让编程专家来分析它。"
+
+peer_call(
+  instance_id="coding-instance",
+  text="分析这个 Python 代码并编写单元测试：[code]"
+)
+
+实例 B（编程专家）：
+"代码分析完成。发现 3 个潜在问题。
+以下是单元测试：[tests]"
+
+实例 A（通用）：
+"编程专家发现了 3 个问题并编写了测试..."</code></pre>
+
+        <h3>示例：分布式研究</h3>
+        <pre class="quickstart-code"><code>用户: "研究 AI 的最新发展"
+
+实例 A（通用）：
+"我将让研究实例来查找这个。"
+
+peer_call(
+  instance_id="research-instance",
+  text="研究最新的 AI 发展并总结关键发现"
+)
+
+实例 B（研究）：
+"最新的 AI 发展包括：
+1. GPT-5 公布，推理能力改进
+2. 匹配 GPT-4 性能的新开源模型
+3. 多模态理解的突破
+..."
+
+实例 A（通用）：
+"以下是我找到的关于最新 AI 发展的信息..."</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="federated-messaging">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>联邦用户消息</h2>
+        <p>联邦消息允许不同 HomeClaw 实例上的用户通过伴侣应用相互聊天。这创建了一个分布式社交网络，其中每个实例维护自己的用户和数据。</p>
+
+        <h3>关键功能</h3>
+        <ul>
+          <li><strong>跨实例聊天</strong> — 用户可以与其他实例上的用户消息</li>
+          <li><strong>联邦好友关系</strong> — 好友关系跨越多个实例</li>
+          <li><strong>可选端到端加密</strong> — 用于隐私的端到端加密</li>
+          <li><strong>远程用户好友</strong> — 从其他实例添加用户作为好友</li>
+        </ul>
+
+        <h3>如何工作</h3>
+        <ol>
+          <li><strong>用户添加远程好友</strong> — 添加带有 <code>peer_instance_id</code> 的另一个实例的用户</li>
+          <li><strong>发送消息</strong> — 伴侣应用向本地 Core 发送消息</li>
+          <li><strong>Core 路由</strong> — 本地 Core 通过 <code>/inbound</code> 转发给对等节点</li>
+          <li><strong>对等节点投递</strong> — 远程 Core 投递给目标用户</li>
+          <li><strong>响应流回</strong> — 回复沿相同路径反向流动</li>
+        </ol>
+
+        <h3>远程好友配置</h3>
+        <p>在 <code>config/user.yml</code> 中添加远程好友：</p>
+        <pre class="quickstart-code"><code>users:
+  - name: Alice
+    id: alice
+    friends:
+      - name: Bob（车库）
+        type: user
+        user_id: bob
+        peer_instance_id: garage-core
+      - name: Charlie（办公室）
+        type: user
+        user_id: charlie
+        peer_instance_id: office-core</code></pre>
+
+        <h3>端到端加密</h3>
+        <p>为联邦消息启用端到端加密：</p>
+        <pre class="quickstart-code"><code># 在两个实例的 config/core.yml 中
+federation_enabled: true
+federation_e2e_enabled: true
+# 可选：要求加密
+# federation_e2e_require_encrypted: true</code></pre>
+
+        <p>启用端到端加密时：</p>
+        <ul>
+          <li>伴侣应用生成 X25519 密钥对</li>
+          <li>公钥向 Core 注册</li>
+          <li>消息在发送前加密</li>
+          <li>只有接收者可以解密消息</li>
+          <li>中继 Core 仅看到密文</li>
+        </ul>
+
+        <h3>伴侣应用体验</h3>
+        <p>在伴侣应用中：</p>
+        <ul>
+          <li><strong>远程好友</strong> — 显示云/远程徽章</li>
+          <li><strong>聊天指示器</strong> — 显示 "Remote · &lt;实例&gt;"</li>
+          <li><strong>消息前缀</strong> — 联邦消息可能显示 "◇" 前缀</li>
+          <li><strong>加密状态</strong> — 加密消息的视觉指示器</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="setup">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>设置指南</h2>
+
+        <h3>步骤 1：配置实例身份</h3>
+        <p>在每个实例上创建 <code>config/instance_identity.yml</code>：</p>
+        <pre class="quickstart-code"><code># 实例 A（家庭）
+instance_id: home-core
+display_name: "家庭服务器"
+public_base_url: https://home.example.ts.net:9000
+pairing_inbound_user_id: companion_home
+
+# 实例 B（车库）
+instance_id: garage-core
+display_name: "车库服务器"
+public_base_url: https://garage.example.ts.net:9000
+pairing_inbound_user_id: companion_garage</code></pre>
+
+        <h3>步骤 2：配置对等节点</h3>
+        <p>在每个实例上创建 <code>config/peers.yml</code>：</p>
+        <pre class="quickstart-code"><code># 在实例 A（家庭）上
+peers:
+  - instance_id: garage-core
+    base_url: https://garage.example.ts.net:9000
+    inbound_user_id: companion_garage
+    api_key_env: PEER_GARAGE_KEY
+
+# 在实例 B（车库）上
+peers:
+  - instance_id: home-core
+    base_url: https://home.example.ts.net:9000
+    inbound_user_id: companion_home
+    api_key_env: PEER_HOME_KEY</code></pre>
+
+        <h3>步骤 3：启用联邦</h3>
+        <p>在 <code>config/core.yml</code> 中配置联邦：</p>
+        <pre class="quickstart-code"><code>federation_enabled: true
+# 可选端到端加密
+federation_e2e_enabled: true
+# 可选：要求加密
+# federation_e2e_require_encrypted: true</code></pre>
+
+        <h3>步骤 4：配置用户</h3>
+        <p>在 <code>config/user.yml</code> 中添加用户和远程好友：</p>
+        <pre class="quickstart-code"><code>users:
+  - name: Alice
+    id: alice
+    im:
+      - companion_alice
+    friends:
+      - name: Bob（车库）
+        type: user
+        user_id: bob
+        peer_instance_id: garage-core
+
+  - name: Bob
+    id: bob
+    im:
+      - companion_bob
+    friends:
+      - name: Alice（家庭）
+        type: user
+        user_id: alice
+        peer_instance_id: home-core</code></pre>
+
+        <h3>步骤 5：设置环境变量</h3>
+        <p>设置对等节点认证的 API 密钥：</p>
+        <pre class="quickstart-code"><code># 在实例 A 上
+export PEER_GARAGE_KEY="your-secure-key-here"
+
+# 在实例 B 上
+export PEER_HOME_KEY="your-secure-key-here"</code></pre>
+
+        <h3>步骤 6：配对实例（可选）</h3>
+        <p>使用 CLI 命令进行自动配对：</p>
+        <pre class="quickstart-code"><code># 在实例 B（接收者）上
+python -m main peer invite-create 3600
+
+# 复制 invite_id、token 和 B 的 URL
+
+# 在实例 A（发起者）上
+python -m main peer invite-accept https://garage:9000 <invite_id> <token> home-core "家庭服务器"
+
+# 保存响应并在两个实例上导入
+python -m main peer import peer.json PEER_KEY</code></pre>
+
+        <h3>步骤 7：重启 Core</h3>
+        <p>重启两个实例以应用配置：</p>
+        <pre class="quickstart-code"><code>python -m main start</code></pre>
+
+        <h3>步骤 8：验证设置</h3>
+        <p>运行 doctor 以验证配置：</p>
+        <pre class="quickstart-code"><code>python -m main doctor</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="configuration">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>配置</h2>
+
+        <h3>实例身份选项</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>选项</th>
+              <th>类型</th>
+              <th>必需</th>
+              <th>描述</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>instance_id</code></td>
+              <td>string</td>
+              <td>是</td>
+              <td>此实例的唯一标识符</td>
+            </tr>
+            <tr>
+              <td><code>display_name</code></td>
+              <td>string</td>
+              <td>否</td>
+              <td>此实例的可读名称</td>
+            </tr>
+            <tr>
+              <td><code>public_base_url</code></td>
+              <td>string</td>
+              <td>否*</td>
+              <td>用于 HTTPS 和配对的公共 URL</td>
+            </tr>
+            <tr>
+              <td><code>pairing_inbound_user_id</code></td>
+              <td>string</td>
+              <td>否</td>
+              <td>用于入站配对请求的用户 ID</td>
+            </tr>
+          </tbody>
+        </table>
+        <p><em>*使用 HTTPS 或代理后配对时必需。</em></p>
+
+        <h3>对等节点配置选项</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>选项</th>
+              <th>类型</th>
+              <th>必需</th>
+              <th>描述</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>instance_id</code></td>
+              <td>string</td>
+              <td>是</td>
+              <td>对等节点的实例 ID</td>
+            </tr>
+            <tr>
+              <td><code>base_url</code></td>
+              <td>string</td>
+              <td>是</td>
+              <td>对等节点的基础 URL</td>
+            </tr>
+            <tr>
+              <td><code>inbound_user_id</code></td>
+              <td>string</td>
+              <td>是</td>
+              <td>此对等节点调用我们时使用的用户 ID</td>
+            </tr>
+            <tr>
+              <td><code>api_key_env</code></td>
+              <td>string</td>
+              <td>否</td>
+              <td>API 密钥的环境变量名称</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>联邦选项</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>选项</th>
+              <th>类型</th>
+              <th>默认值</th>
+              <th>描述</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>federation_enabled</code></td>
+              <td>boolean</td>
+              <td>false</td>
+              <td>启用联邦用户消息</td>
+            </tr>
+            <tr>
+              <td><code>federation_trusted_instances</code></td>
+              <td>list</td>
+              <td>[]</td>
+              <td>允许的远程实例 ID</td>
+            </tr>
+            <tr>
+              <td><code>federation_require_accepted_relationship</code></td>
+              <td>boolean</td>
+              <td>true</td>
+              <td>要求接受的好友关系以投递</td>
+            </tr>
+            <tr>
+              <td><code>federation_e2e_enabled</code></td>
+              <td>boolean</td>
+              <td>false</td>
+              <td>启用端到端加密</td>
+            </tr>
+            <tr>
+              <td><code>federation_e2e_require_encrypted</code></td>
+              <td>boolean</td>
+              <td>false</td>
+              <td>要求联邦消息加密</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>安全设置</h3>
+        <pre class="quickstart-code"><code># 在敏感实例上禁用配对
+peer_pairing_enabled: false
+
+# 配对速率限制
+peer_pairing_rate_limit_all: 45
+peer_pairing_rate_limit_failed: 18</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="companion-app">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>伴侣应用集成</h2>
+        <p>伴侣应用无缝集成多实例 HomeClaw，允许用户与远程好友交互并管理多个实例。</p>
+
+        <h3>连接到多个实例</h3>
+        <p>用户可以通过以下方式连接到不同实例：</p>
+        <ul>
+          <li><strong>切换配置文件</strong> — 不同实例的不同配置文件</li>
+          <li><strong>多个账户</strong> — 分别登录到不同实例</li>
+          <li><strong>远程好友</strong> — 与其他实例上的用户聊天</li>
+        </ul>
+
+        <h3>远程好友管理</h3>
+        <p>在伴侣应用中：</p>
+        <ul>
+          <li><strong>添加远程好友</strong> — 输入用户 ID 和实例 ID</li>
+          <li><strong>查看远程状态</strong> — 查看好友属于哪个实例</li>
+          <li><strong>发送加密消息</strong> — 启用时端到端加密</li>
+          <li><strong>接收联邦消息</strong> — 来自远程实例的消息</li>
+        </ul>
+
+        <h3>联邦功能</h3>
+        <ul>
+          <li><strong>自动密钥注册</strong> — 应用向 Core 注册公钥</li>
+          <li><strong>加密指示器</strong> — 加密消息的视觉反馈</li>
+          <li><strong>远程徽章</strong> — 区分远程和本地好友</li>
+          <li><strong>实例信息</strong> — 查看消息来自哪个实例</li>
+        </ul>
+
+        <h3>用户设置</h3>
+        <ol>
+          <li><strong>配置 Core</strong> — 设置联邦和对等节点</li>
+          <li><strong>添加用户</strong> — 在 <code>user.yml</code> 中创建用户账户</li>
+          <li><strong>连接伴侣</strong> — 设置 Core URL 和 API 密钥</li>
+          <li><strong>添加远程好友</strong> — 从其他实例添加用户</li>
+          <li><strong>开始聊天</strong> — 向远程好友发送消息</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>最佳实践</h2>
+        <ul>
+          <li><strong>使用 HTTPS</strong> — 始终使用 HTTPS 进行对等节点通信</li>
+          <li><strong>设置 public_base_url</strong> — 配置公共 URL 以正确配对</li>
+          <li><strong>启用端到端加密</strong> — 使用加密保护联邦消息</li>
+          <li><strong>使用环境变量</strong> — 安全存储 API 密钥</li>
+          <li><strong>使用 doctor 测试</strong> — 更改后运行 <code>python -m main doctor</code></li>
+          <li><strong>监控日志</strong> — 检查日志以了解联邦和对等节点问题</li>
+          <li><strong>使用配对</strong> — 使用 CLI 配对以更轻松设置</li>
+          <li><strong>限制受信任实例</strong> — 使用 <code>federation_trusted_instances</code> 提高安全性</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>故障排除</h2>
+
+        <h3>"未找到对等节点"</h3>
+        <p>检查：</p>
+        <ul>
+          <li>对等节点在 <code>config/peers.yml</code> 中列出</li>
+          <li><code>instance_id</code> 完全匹配</li>
+          <li>对等节点的 Core 正在运行</li>
+        </ul>
+
+        <h3>"认证失败"</h3>
+        <p>验证：</p>
+        <ul>
+          <li>已设置 API 密钥环境变量</li>
+          <li>API 密钥在两个实例上匹配</li>
+          <li><code>auth_enabled</code> 配置正确</li>
+        </ul>
+
+        <h3>"联邦已禁用"</h3>
+        <p>确保：</p>
+        <ul>
+          <li><code>federation_enabled: true</code> 在 <code>core.yml</code> 中</li>
+          <li>配置更改后已重启 Core</li>
+        </ul>
+
+        <h3>"配对失败"</h3>
+        <p>检查：</p>
+        <ul>
+          <li>接收者上 <code>peer_pairing_enabled: true</code></li>
+          <li>邀请令牌有效且未过期</li>
+          <li>两个实例可以相互访问</li>
+          <li><code>public_base_url</code> 设置正确</li>
+        </ul>
+
+        <h3>"远程好友未收到消息"</h3>
+        <p>验证：</p>
+        <ul>
+          <li>好友使用正确的 <code>peer_instance_id</code> 配置</li>
+          <li>目标用户存在于远程实例上</li>
+          <li>两个实例上都启用了联邦</li>
+          <li>实例之间的网络连接</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>CLI 参考</h2>
+
+        <h3>对等节点命令</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>命令</th>
+              <th>描述</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>python -m main peer invite-create [ttl]</code></td>
+              <td>创建配对邀请（本地 Core 必须正在运行）</td>
+            </tr>
+            <tr>
+              <td><code>python -m main peer invite-accept &lt;url&gt; &lt;id&gt; &lt;token&gt; [instance_id] [display_name]</code></td>
+              <td>使用来自对等节点的邀请</td>
+            </tr>
+            <tr>
+              <td><code>python -m main peer import &lt;file&gt; [api_key_env]</code></td>
+              <td>从 JSON 文件导入对等节点配置</td>
+            </tr>
+            <tr>
+              <td><code>python -m main peer list</code></td>
+              <td>以 JSON 格式列出配置的对等节点</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Doctor 命令</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>命令</th>
+              <th>描述</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>python -m main doctor</code></td>
+              <td>检查配置和连接性</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>后续步骤</h2>
+        <ul>
+          <li><a href="sub-agent.html">子智能体</a> — 了解生成专用子智能体</li>
+          <li><a href="companion-app.html">伴侣应用</a> — 为多实例设置伴侣应用</li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs/multi-instance-peers.md">多实例对等节点文档</a> — 详细技术指南</li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs/federated-companion-messaging.md">联邦消息文档</a> — 深入了解联邦消息</li>
+          <li><a href="remote-access.html">远程访问</a> — 设置隧道以实现远程连接</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2024 HomeClaw. <a href="https://github.com/allenpeng0705/HomeClaw">GitHub</a></p>
+    </div>
+  </footer>
+
+  <script>
+    const mobileMenuButton = document.querySelector('.mobile-menu-button');
+    const siteLinks = document.querySelector('.site-links');
+
+    if (mobileMenuButton && siteLinks) {
+      mobileMenuButton.addEventListener('click', () => {
+        const isExpanded = mobileMenuButton.getAttribute('aria-expanded') === 'true';
+        mobileMenuButton.setAttribute('aria-expanded', !isExpanded);
+        siteLinks.classList.toggle('active');
+      });
+    }
+
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function (e) {
+        e.preventDefault();
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          target.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+          });
+        }
+      });
+    });
+  </script>
+</body>
+</html>

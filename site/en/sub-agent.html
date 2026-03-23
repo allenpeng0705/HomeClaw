@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw Sub-Agent feature guide. Learn how to spawn specialized sub-agents for specific tasks using sessions_spawn.">
+  <title>Sub-Agent — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="Main navigation">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="use-homeclaw.html">How to use</a>
+        <a href="companion-app.html">Companion app</a>
+        <a href="portal.html">Portal</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch">EN | <a href="../zh/sub-agent.html">中文</a></span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>Sub-Agent</h1>
+      <p class="lead">Spawn specialized sub-agents for specific tasks using sessions_spawn. Choose models by capability or name for focused work.</p>
+      <p>HomeClaw's Sub-Agent feature allows you to spawn specialized AI agents for specific tasks. Each sub-agent runs as a separate completion with its own model, enabling you to leverage different capabilities and models for different types of work.</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="On this page">
+      <p class="doc-toc-title">On this page</p>
+      <ul>
+        <li><a href="#what-is-sub-agent">What is Sub-Agent?</a></li>
+        <li><a href="#how-it-works">How It Works</a></li>
+        <li><a href="#model-selection">Model Selection</a></li>
+        <li><a href="#capability-tags">Capability Tags</a></li>
+        <li><a href="#using-sessions-spawn">Using sessions_spawn</a></li>
+        <li><a href="#examples">Examples</a></li>
+        <li><a href="#configuration">Configuration</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section" id="what-is-sub-agent">
+      <div class="doc-section-img-wrap" aria-hidden="true">
+        <img src="../assets/section-multi-agent.png" alt="Sub-Agent architecture" class="doc-section-img" width="280" height="160" onerror="this.style.display='none'">
+      </div>
+      <div class="doc-section-body">
+        <h2>What is Sub-Agent?</h2>
+        <p>A <strong>sub-agent</strong> is a specialized AI agent spawned by the main HomeClaw agent to handle specific tasks. Unlike the main agent, sub-agents:</p>
+        <ul>
+          <li><strong>Run as separate completions</strong> — Each sub-agent gets its own LLM call and response</li>
+          <li><strong>Use different models</strong> — You can specify which model each sub-agent should use</li>
+          <li><strong>Have no tools</strong> — Sub-agents are one-shot workers that return text to the main agent</li>
+          <li><strong>Are stateless</strong> — They don't maintain conversation history or memory</li>
+        </ul>
+        <p>The main agent uses the <code>sessions_spawn</code> tool to create and communicate with sub-agents, making it easy to delegate specialized tasks to the most suitable model.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="how-it-works">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>How It Works</h2>
+        <p>When the main agent needs to perform a specialized task, it can call the <code>sessions_spawn</code> tool with specific parameters:</p>
+        <ol>
+          <li><strong>Main agent decides</strong> — The main LLM analyzes the task and determines if a sub-agent would help</li>
+          <li><strong>Tool invocation</strong> — Main agent calls <code>sessions_spawn</code> with task details and model selection</li>
+          <li><strong>Model selection</strong> — HomeClaw picks the appropriate model based on capability or explicit name</li>
+          <li><strong>Sub-agent execution</strong> — The selected model processes the task and returns results</li>
+          <li><strong>Result integration</strong> — Main agent receives the sub-agent's output and continues its work</li>
+        </ol>
+        <p>This architecture enables you to use different models for different purposes — a fast local model for simple tasks, a powerful cloud model for complex reasoning, or specialized models for math, vision, or other capabilities.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="model-selection">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Model Selection</h2>
+        <p>When spawning a sub-agent, you can specify the model in two ways:</p>
+
+        <h3>Option 1: Explicit Model Name</h3>
+        <p>Specify the exact model reference from your LLM catalog:</p>
+        <pre class="quickstart-code"><code>sessions_spawn(
+  llm_name="local_models/math_specialist",
+  task="Solve this equation: x^2 + 5x + 6 = 0"
+)</code></pre>
+
+        <h3>Option 2: Capability-Based Selection</h3>
+        <p>Let HomeClaw automatically pick a model with the required capability:</p>
+        <pre class="quickstart-code"><code>sessions_spawn(
+  capability="Math",
+  task="Calculate the derivative of f(x) = x^3 + 2x^2 + x"
+)</code></pre>
+
+        <p>HomeClaw will scan your <code>config/llm.yml</code> catalog and select the first available model that has the <code>Math</code> capability tag.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="capability-tags">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Capability Tags</h2>
+        <p>Capability tags in your LLM catalog help HomeClaw automatically select the right model for each task. Common capabilities include:</p>
+
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th>Description</th>
+              <th>Example Models</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>Chat</code></td>
+              <td>General conversation and reasoning</td>
+              <td>Llama 3, Gemini, GPT-4</td>
+            </tr>
+            <tr>
+              <td><code>Math</code></td>
+              <td>Mathematical calculations and proofs</td>
+              <td>Mathstral, specialized math models</td>
+            </tr>
+            <tr>
+              <td><code>Coding</code></td>
+              <td>Code generation and debugging</td>
+              <td>Claude 3.5 Sonnet, GPT-4</td>
+            </tr>
+            <tr>
+              <td><code>Vision</code></td>
+              <td>Image analysis and understanding</td>
+              <td>LLaVA, GPT-4V</td>
+            </tr>
+            <tr>
+              <td><code>Embedding</code></td>
+              <td>Vector embeddings for RAG</td>
+              <td>BGE, E5, OpenAI embeddings</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Adding Capabilities to Models</h3>
+        <p>Edit your <code>config/llm.yml</code> to add capabilities to your models:</p>
+        <pre class="quickstart-code"><code>local_models:
+  - id: math_specialist
+    path: mathstral-7b-Q4_K_M.gguf
+    host: 127.0.0.1
+    port: 5040
+    capabilities: [Math, Coding]
+    description: "Specialized for math and coding tasks"
+
+cloud_models:
+  - id: GPT-4-Vision
+    provider: openai
+    model: gpt-4-vision-preview
+    capabilities: [Vision, Chat]
+    description: "GPT-4 with vision capabilities"</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="using-sessions-spawn">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Using sessions_spawn</h2>
+        <p>The <code>sessions_spawn</code> tool is available to the main agent when tools are enabled. Here's how to use it:</p>
+
+        <h3>Tool Parameters</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Parameter</th>
+              <th>Type</th>
+              <th>Required</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>task</code></td>
+              <td>string</td>
+              <td>Yes</td>
+              <td>The task or prompt for the sub-agent</td>
+            </tr>
+            <tr>
+              <td><code>llm_name</code></td>
+              <td>string</td>
+              <td>No*</td>
+              <td>Explicit model reference (e.g., <code>local_models/math</code>)</td>
+            </tr>
+            <tr>
+              <td><code>capability</code></td>
+              <td>string</td>
+              <td>No*</td>
+              <td>Capability tag for automatic model selection</td>
+            </tr>
+            <tr>
+              <td><code>max_tokens</code></td>
+              <td>integer</td>
+              <td>No</td>
+              <td>Maximum tokens for sub-agent response</td>
+            </tr>
+            <tr>
+              <td><code>temperature</code></td>
+              <td>float</td>
+              <td>No</td>
+              <td>Sampling temperature (0.0-1.0)</td>
+            </tr>
+          </tbody>
+        </table>
+        <p><em>*Either <code>llm_name</code> or <code>capability</code> must be specified.</em></p>
+
+        <h3>Example: Math Problem</h3>
+        <pre class="quickstart-code"><code>User: "What's the integral of x^2 from 0 to 3?"
+
+Main Agent: "I'll use a math specialist to solve this."
+
+sessions_spawn(
+  capability="Math",
+  task="Calculate the definite integral of x^2 from 0 to 3. Show your work."
+)
+
+Sub-Agent: "To calculate ∫₀³ x² dx:
+1. Find the antiderivative: x³/3
+2. Evaluate at bounds: (3³/3) - (0³/3)
+3. Simplify: 9 - 0 = 9
+
+The integral equals 9."
+
+Main Agent: "The integral of x² from 0 to 3 is 9."</code></pre>
+
+        <h3>Example: Code Review</h3>
+        <pre class="quickstart-code"><code>User: "Review this Python function for bugs"
+
+Main Agent: "I'll have a coding specialist review it."
+
+sessions_spawn(
+  capability="Coding",
+  task="Review this Python code for bugs and suggest improvements: [code]"
+)
+
+Sub-Agent: "Found 3 issues:
+1. Missing error handling on file operations
+2. Variable name shadowing in loop
+3. Potential integer overflow in calculation
+
+Suggested fixes: [detailed suggestions]"
+
+Main Agent: "The code review found 3 issues that should be fixed..."</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="examples">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Examples</h2>
+
+        <h3>Use Case 1: Multi-Modal Analysis</h3>
+        <p>Use a vision-capable sub-agent to analyze images while keeping your main model for text:</p>
+        <pre class="quickstart-code"><code>User: "What's in this image? [uploads screenshot.jpg]"
+
+Main Agent: "I'll use a vision model to analyze the image."
+
+sessions_spawn(
+  llm_name="cloud_models/GPT-4-Vision",
+  task="Describe what you see in this image: [base64 encoded image]"
+)
+
+Sub-Agent: "This is a screenshot showing a code editor with a Python function..."
+
+Main Agent: "The image shows a Python code editor with a function that..."</code></pre>
+
+        <h3>Use Case 2: Cost Optimization</h3>
+        <p>Use a fast local model for simple tasks and only call expensive cloud models when needed:</p>
+        <pre class="quickstart-code"><code>User: "What's 2 + 2?"
+
+Main Agent: "Simple calculation, using local model."
+
+sessions_spawn(
+  llm_name="local_models/fast_chat",
+  task="What is 2 + 2?"
+)
+
+Sub-Agent: "4"
+
+Main Agent: "2 + 2 = 4."</code></pre>
+
+        <h3>Use Case 3: Specialized Knowledge</h3>
+        <p>Use models with specialized training for domain-specific tasks:</p>
+        <pre class="quickstart-code"><code>User: "Explain quantum entanglement simply"
+
+Main Agent: "I'll use a physics-specialized model for this."
+
+sessions_spawn(
+  capability="Physics",
+  task="Explain quantum entanglement in simple terms for a beginner"
+)
+
+Sub-Agent: "Imagine two coins that are magically connected..."
+
+Main Agent: "Quantum entanglement is like two coins that are magically connected..."</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="configuration">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Configuration</h2>
+
+        <h3>Enable sessions_spawn Tool</h3>
+        <p>Make sure tools are enabled in <code>config/core.yml</code>:</p>
+        <pre class="quickstart-code"><code>tools:
+  enabled: true
+  # sessions_spawn is automatically available when tools are enabled</code></pre>
+
+        <h3>Configure LLM Catalog</h3>
+        <p>Set up your models in <code>config/llm.yml</code> with capabilities:</p>
+        <pre class="quickstart-code"><code>local_models:
+  - id: main_chat
+    path: llama-3-8b-instruct-Q4_K_M.gguf
+    host: 127.0.0.1
+    port: 5040
+    capabilities: [Chat]
+    description: "Main chat model"
+
+  - id: math_specialist
+    path: mathstral-7b-Q4_K_M.gguf
+    host: 127.0.0.1
+    port: 5041
+    capabilities: [Math]
+    description: "Specialized for math tasks"
+
+  - id: vision_model
+    path: llava-1.5-7b-Q4_K_M.gguf
+    host: 127.0.0.1
+    port: 5042
+    capabilities: [Vision]
+    mmproj: llava-1.5-7b-mmproj.gguf
+    supported_media: [image]
+    description: "Vision model for image analysis"
+
+cloud_models:
+  - id: GPT-4
+    provider: openai
+    model: gpt-4-turbo-preview
+    capabilities: [Chat, Coding]
+    description: "GPT-4 Turbo"
+
+  - id: Claude-3.5-Sonnet
+    provider: anthropic
+    model: claude-3-5-sonnet-20241022
+    capabilities: [Chat, Coding]
+    description: "Claude 3.5 Sonnet"</code></pre>
+
+        <h3>Set Main Model</h3>
+        <p>Configure your main model in <code>config/core.yml</code>:</p>
+        <pre class="quickstart-code"><code>main_llm: local_models/main_chat
+# or
+# main_llm: cloud_models/GPT-4</code></pre>
+
+        <h3>Optional: Tool Selection Model</h3>
+        <p>Use a smaller, faster model for tool selection:</p>
+        <pre class="quickstart-code"><code>use_tool_selection_llm: true
+tool_selection_llm: local_models/fast_chat</code></pre>
+
+        <h3>Optional: Inject Model Catalog into Prompt</h3>
+        <p>Let the main agent see available models and capabilities:</p>
+        <pre class="quickstart-code"><code>tools:
+  llm_catalog_inject_enabled: true
+  llm_catalog_inject_max_chars: 2000</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Best Practices</h2>
+        <ul>
+          <li><strong>Use capabilities for flexibility</strong> — Let HomeClaw pick the right model based on task type</li>
+          <li><strong>Explicit names for control</strong> — Use <code>llm_name</code> when you need a specific model</li>
+          <li><strong>Balance cost and quality</strong> — Use local models for simple tasks, cloud for complex ones</li>
+          <li><strong>Keep tasks focused</strong> — Sub-agents work best for well-defined, single-purpose tasks</li>
+          <li><strong>Monitor usage</strong> — Check usage reports to see which models are being used most</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Troubleshooting</h2>
+
+        <h3>"No model found with capability X"</h3>
+        <p>Check that:</p>
+        <ul>
+          <li>You have models with that capability in <code>config/llm.yml</code></li>
+          <li>The models are marked as <code>available: true</code></li>
+          <li>The capability spelling matches exactly (case-insensitive)</li>
+        </ul>
+
+        <h3>Sub-agent returns errors</h3>
+        <p>Verify that:</p>
+        <ul>
+          <li>The specified model is running and accessible</li>
+          <li>The model file exists at the specified path</li>
+          <li>The host and port are correct</li>
+        </ul>
+
+        <h3>Tools not available</h3>
+        <p>Ensure that:</p>
+        <ul>
+          <li><code>tools.enabled: true</code> in <code>config/core.yml</code></li>
+          <li>Core has been restarted after configuration changes</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Next Steps</h2>
+        <ul>
+          <li><a href="use-homeclaw.html">How to use HomeClaw</a> — Learn about models and configuration</li>
+          <li><a href="multi-homeclaw.html">Multi-HomeClaw</a> — Run multiple HomeClaw instances as peers</li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs/llm-catalog-howto.md">LLM catalog how-to</a> — Detailed guide to configuring models</li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs/model-selection-and-lifecycle.md">Model selection and lifecycle</a> — Deep dive into model selection</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2024 HomeClaw. <a href="https://github.com/allenpeng0705/HomeClaw">GitHub</a></p>
+    </div>
+  </footer>
+
+  <script>
+    const mobileMenuButton = document.querySelector('.mobile-menu-button');
+    const siteLinks = document.querySelector('.site-links');
+
+    if (mobileMenuButton && siteLinks) {
+      mobileMenuButton.addEventListener('click', () => {
+        const isExpanded = mobileMenuButton.getAttribute('aria-expanded') === 'true';
+        mobileMenuButton.setAttribute('aria-expanded', !isExpanded);
+        siteLinks.classList.toggle('active');
+      });
+    }
+
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function (e) {
+        e.preventDefault();
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          target.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+          });
+        }
+      });
+    });
+  </script>
+</body>
+</html>

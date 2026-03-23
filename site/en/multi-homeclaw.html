@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f1419">
+  <meta name="description" content="HomeClaw Multi-HomeClaw guide. Learn how to run multiple HomeClaw instances as peers with cross-instance AI calls and federated user messaging.">
+  <title>Multi-HomeClaw — HomeClaw</title>
+  <link rel="icon" type="image/png" href="../assets/homeclaw-logo.png">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <header class="site-nav-wrap">
+  <nav class="site-nav" aria-label="Main navigation">
+    <div class="site-nav-inner">
+      <a href="index.html" class="site-logo-wrap">
+        <img src="../assets/homeclaw-logo.png" alt="HomeClaw" class="site-logo-img" width="32" height="32">
+        <span>HomeClaw</span>
+      </a>
+      <div class="site-links">
+        <a href="index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="use-homeclaw.html">How to use</a>
+        <a href="companion-app.html">Companion app</a>
+        <a href="portal.html">Portal</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/allenpeng0705/HomeClaw" target="_blank" rel="noopener"><svg class="site-nav-icon site-nav-icon-github" aria-hidden="true" width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> GitHub</a>
+        <span class="lang-switch">EN | <a href="../zh/multi-homeclaw.html">中文</a></span>
+      </div>
+    </div>
+  </nav>
+  </header>
+
+  <main class="container doc-content">
+    <div class="doc-intro">
+      <h1>Multi-HomeClaw</h1>
+      <p class="lead">Run multiple HomeClaw instances as peers. Cross-instance AI calls via peer_call, remote user messaging, and federated friends.</p>
+      <p>HomeClaw's multi-instance feature allows you to run multiple HomeClaw Core instances that can communicate with each other as peers. This enables cross-instance AI calls, federated user messaging, and distributed AI systems.</p>
+    </div>
+
+    <nav class="doc-toc" aria-label="On this page">
+      <p class="doc-toc-title">On this page</p>
+      <ul>
+        <li><a href="#what-is-multi-homeclaw">What is Multi-HomeClaw?</a></li>
+        <li><a href="#use-cases">Use Cases</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#peer-call">peer_call Tool</a></li>
+        <li><a href="#federated-messaging">Federated User Messaging</a></li>
+        <li><a href="#setup">Setup Guide</a></li>
+        <li><a href="#configuration">Configuration</a></li>
+        <li><a href="#companion-app">Companion App Integration</a></li>
+      </ul>
+    </nav>
+
+    <section class="doc-section" id="what-is-multi-homeclaw">
+      <div class="doc-section-img-wrap" aria-hidden="true">
+        <img src="../assets/section-multi-agent.png" alt="Multi-HomeClaw architecture" class="doc-section-img" width="280" height="160" onerror="this.style.display='none'">
+      </div>
+      <div class="doc-section-body">
+        <h2>What is Multi-HomeClaw?</h2>
+        <p><strong>Multi-HomeClaw</strong> allows you to run multiple HomeClaw Core instances that can communicate with each other as peers. Each instance:</p>
+        <ul>
+          <li><strong>Has its own identity</strong> — Unique instance ID and display name</li>
+          <li><strong>Runs independently</strong> — Different ports, different configurations</li>
+          <li><strong>Can call other instances</strong> — AI agents can request help from peers</li>
+          <li><strong>Supports federated messaging</strong> — Users can chat across instances</li>
+        </ul>
+        <p>There's no central orchestrator — each instance operates independently and communicates directly with peers via HTTP.</p>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="use-cases">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Use Cases</h2>
+
+        <h3>1. Distributed AI Systems</h3>
+        <p>Run specialized instances for different purposes:</p>
+        <ul>
+          <li><strong>Coding instance</strong> — Optimized for code generation with Cursor/ClaudeCode</li>
+          <li><strong>Research instance</strong> — With web browsing and research tools</li>
+          <li><strong>Math instance</strong> — Specialized math model for calculations</li>
+          <li><strong>Vision instance</strong> — Vision-capable model for image analysis</li>
+        </ul>
+
+        <h3>2. Multi-Location Deployment</h3>
+        <p>Deploy HomeClaw across multiple locations:</p>
+        <ul>
+          <li><strong>Home server</strong> — Main instance for family use</li>
+          <li><strong>Office server</strong> — Work-related tasks and documents</li>
+          <li><strong>Cloud server</strong> — Always-on instance for remote access</li>
+        </ul>
+
+        <h3>3. Federated Social Network</h3>
+        <p>Create a distributed social network across instances:</p>
+        <ul>
+          <li><strong>Family members</strong> — Each family has their own instance</li>
+          <li><strong>Friends</strong> — Connect with friends' instances</li>
+          <li><strong>Remote messaging</strong> — Chat across instances securely</li>
+        </ul>
+
+        <h3>4. Load Balancing</h3>
+        <p>Distribute work across multiple instances:</p>
+        <ul>
+          <li><strong>High availability</strong> — Multiple instances for redundancy</li>
+          <li><strong>Resource optimization</strong> — Route tasks to most suitable instance</li>
+          <li><strong>Geographic distribution</strong> — Serve users from nearest instance</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="architecture">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Architecture</h2>
+        <p>Multi-HomeClaw uses a peer-to-peer architecture where each instance:</p>
+        <ol>
+          <li><strong>Has unique identity</strong> — Defined in <code>instance_identity.yml</code></li>
+          <li><strong>Knows about peers</strong> — Listed in <code>peers.yml</code></li>
+          <li><strong>Communicates via HTTP</strong> — Uses <code>/inbound</code> endpoint for messages</li>
+          <li><strong>Authenticates securely</strong> — API keys for secure communication</li>
+        </ol>
+
+        <h3>Communication Flow</h3>
+        <pre class="quickstart-code"><code>Instance A                    Instance B
+    |                              |
+    |  POST /inbound               |
+    |  (with auth)                 |
+    |----------------------------->|
+    |                              |
+    |  Process request               |
+    |                              |
+    |  Response                     |
+    |<-----------------------------|
+    |                              |</code></pre>
+
+        <h3>Key Components</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>File</th>
+              <th>Purpose</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Instance Identity</td>
+              <td><code>config/instance_identity.yml</code></td>
+              <td>Defines instance ID, display name, public URL</td>
+            </tr>
+            <tr>
+              <td>Peer Roster</td>
+              <td><code>config/peers.yml</code></td>
+              <td>Lists known peers and their connection details</td>
+            </tr>
+            <tr>
+              <td>Federation Config</td>
+              <td><code>config/core.yml</code></td>
+              <td>Enables federation and E2E encryption</td>
+            </tr>
+            <tr>
+              <td>User Config</td>
+              <td><code>config/user.yml</code></td>
+              <td>Defines users and their remote friends</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="peer-call">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>peer_call Tool</h2>
+        <p>The <code>peer_call</code> tool allows AI agents on one instance to call another instance's AI. This enables distributed AI systems where specialized instances can help each other.</p>
+
+        <h3>How peer_call Works</h3>
+        <ol>
+          <li><strong>Main agent decides</strong> — AI on Instance A determines it needs help from a peer</li>
+          <li><strong>Tool invocation</strong> — Calls <code>peer_call</code> with target instance and message</li>
+          <li><strong>HTTP request</strong> — HomeClaw sends POST request to peer's <code>/inbound</code> endpoint</li>
+          <li><strong>Peer processes</strong> — Instance B's AI processes the request</li>
+          <li><strong>Response returned</strong> — Result is sent back to Instance A</li>
+        </ol>
+
+        <h3>peer_call Parameters</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Parameter</th>
+              <th>Type</th>
+              <th>Required</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>instance_id</code></td>
+              <td>string</td>
+              <td>Yes</td>
+              <td>Target instance ID (from peers.yml)</td>
+            </tr>
+            <tr>
+              <td><code>text</code></td>
+              <td>string</td>
+              <td>Yes</td>
+              <td>Message or task for the peer</td>
+            </tr>
+            <tr>
+              <td><code>user_id</code></td>
+              <td>string</td>
+              <td>No</td>
+              <td>User ID for the request (default: current user)</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Example: Cross-Instance Collaboration</h3>
+        <pre class="quickstart-code"><code>User: "Analyze this code and write tests"
+
+Instance A (General):
+"I'll have the coding specialist analyze this."
+
+peer_call(
+  instance_id="coding-instance",
+  text="Analyze this Python code and write unit tests: [code]"
+)
+
+Instance B (Coding Specialist):
+"Code analysis complete. Found 3 potential issues.
+Here are unit tests: [tests]"
+
+Instance A (General):
+"The coding specialist found 3 issues and wrote tests..."</code></pre>
+
+        <h3>Example: Distributed Research</h3>
+        <pre class="quickstart-code"><code>User: "Research the latest developments in AI"
+
+Instance A (General):
+"I'll have the research instance look this up."
+
+peer_call(
+  instance_id="research-instance",
+  text="Research latest AI developments and summarize key findings"
+)
+
+Instance B (Research):
+"Latest AI developments include:
+1. GPT-5 announcement with improved reasoning
+2. New open-source model matching GPT-4 performance
+3. Breakthrough in multimodal understanding
+..."
+
+Instance A (General):
+"Here's what I found about latest AI developments..."</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="federated-messaging">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Federated User Messaging</h2>
+        <p>Federated messaging allows users on different HomeClaw instances to chat with each other through the Companion app. This creates a distributed social network where each instance maintains its own users and data.</p>
+
+        <h3>Key Features</h3>
+        <ul>
+          <li><strong>Cross-instance chat</strong> — Users can message users on other instances</li>
+          <li><strong>Federated friendships</strong> — Friend relationships span multiple instances</li>
+          <li><strong>Optional E2E encryption</strong> — End-to-end encryption for privacy</li>
+          <li><strong>Remote user friends</strong> — Add users from other instances as friends</li>
+        </ul>
+
+        <h3>How It Works</h3>
+        <ol>
+          <li><strong>User adds remote friend</strong> — Adds user from another instance with <code>peer_instance_id</code></li>
+          <li><strong>Message sent</strong> — Companion app sends message to local Core</li>
+          <li><strong>Core routes</strong> — Local Core forwards to peer instance via <code>/inbound</code></li>
+          <li><strong>Peer delivers</strong> — Remote Core delivers to target user</li>
+          <li><strong>Response flows back</strong> — Reply follows same path in reverse</li>
+        </ol>
+
+        <h3>Remote Friend Configuration</h3>
+        <p>Add remote friends in <code>config/user.yml</code>:</p>
+        <pre class="quickstart-code"><code>users:
+  - name: Alice
+    id: alice
+    friends:
+      - name: Bob (garage)
+        type: user
+        user_id: bob
+        peer_instance_id: garage-core
+      - name: Charlie (office)
+        type: user
+        user_id: charlie
+        peer_instance_id: office-core</code></pre>
+
+        <h3>End-to-End Encryption</h3>
+        <p>Enable E2E encryption for federated messages:</p>
+        <pre class="quickstart-code"><code># In config/core.yml on both instances
+federation_enabled: true
+federation_e2e_enabled: true
+# Optional: require encryption
+# federation_e2e_require_encrypted: true</code></pre>
+
+        <p>When E2E is enabled:</p>
+        <ul>
+          <li>Companion app generates X25519 key pair</li>
+          <li>Public key is registered with Core</li>
+          <li>Messages are encrypted before sending</li>
+          <li>Only recipient can decrypt messages</li>
+          <li>Relaying Cores see only ciphertext</li>
+        </ul>
+
+        <h3>Companion App Experience</h3>
+        <p>In the Companion app:</p>
+        <ul>
+          <li><strong>Remote friends</strong> — Show cloud/remote badge</li>
+          <li><strong>Chat indicator</strong> — Shows "Remote · &lt;instance&gt;"</li>
+          <li><strong>Message prefix</strong> — Federated messages may show "◇" prefix</li>
+          <li><strong>Encryption status</strong> — Visual indicator for encrypted messages</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="setup">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Setup Guide</h2>
+
+        <h3>Step 1: Configure Instance Identity</h3>
+        <p>Create <code>config/instance_identity.yml</code> on each instance:</p>
+        <pre class="quickstart-code"><code># Instance A (home)
+instance_id: home-core
+display_name: "Home Server"
+public_base_url: https://home.example.ts.net:9000
+pairing_inbound_user_id: companion_home
+
+# Instance B (garage)
+instance_id: garage-core
+display_name: "Garage Server"
+public_base_url: https://garage.example.ts.net:9000
+pairing_inbound_user_id: companion_garage</code></pre>
+
+        <h3>Step 2: Configure Peers</h3>
+        <p>Create <code>config/peers.yml</code> on each instance:</p>
+        <pre class="quickstart-code"><code># On Instance A (home)
+peers:
+  - instance_id: garage-core
+    base_url: https://garage.example.ts.net:9000
+    inbound_user_id: companion_garage
+    api_key_env: PEER_GARAGE_KEY
+
+# On Instance B (garage)
+peers:
+  - instance_id: home-core
+    base_url: https://home.example.ts.net:9000
+    inbound_user_id: companion_home
+    api_key_env: PEER_HOME_KEY</code></pre>
+
+        <h3>Step 3: Enable Federation</h3>
+        <p>Configure federation in <code>config/core.yml</code>:</p>
+        <pre class="quickstart-code"><code>federation_enabled: true
+# Optional E2E encryption
+federation_e2e_enabled: true
+# Optional: require encryption
+# federation_e2e_require_encrypted: true</code></pre>
+
+        <h3>Step 4: Configure Users</h3>
+        <p>Add users and remote friends in <code>config/user.yml</code>:</p>
+        <pre class="quickstart-code"><code>users:
+  - name: Alice
+    id: alice
+    im:
+      - companion_alice
+    friends:
+      - name: Bob (garage)
+        type: user
+        user_id: bob
+        peer_instance_id: garage-core
+
+  - name: Bob
+    id: bob
+    im:
+      - companion_bob
+    friends:
+      - name: Alice (home)
+        type: user
+        user_id: alice
+        peer_instance_id: home-core</code></pre>
+
+        <h3>Step 5: Set Environment Variables</h3>
+        <p>Set API keys for peer authentication:</p>
+        <pre class="quickstart-code"><code># On Instance A
+export PEER_GARAGE_KEY="your-secure-key-here"
+
+# On Instance B
+export PEER_HOME_KEY="your-secure-key-here"</code></pre>
+
+        <h3>Step 6: Pair Instances (Optional)</h3>
+        <p>Use CLI commands for automatic pairing:</p>
+        <pre class="quickstart-code"><code># On Instance B (recipient)
+python -m main peer invite-create 3600
+
+# Copy invite_id, token, and B's URL
+
+# On Instance A (initiator)
+python -m main peer invite-accept https://garage:9000 <invite_id> <token> home-core "Home Server"
+
+# Save response and import on both instances
+python -m main peer import peer.json PEER_KEY</code></pre>
+
+        <h3>Step 7: Restart Cores</h3>
+        <p>Restart both instances to apply configuration:</p>
+        <pre class="quickstart-code"><code>python -m main start</code></pre>
+
+        <h3>Step 8: Verify Setup</h3>
+        <p>Run doctor to verify configuration:</p>
+        <pre class="quickstart-code"><code>python -m main doctor</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="configuration">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Configuration</h2>
+
+        <h3>Instance Identity Options</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Option</th>
+              <th>Type</th>
+              <th>Required</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>instance_id</code></td>
+              <td>string</td>
+              <td>Yes</td>
+              <td>Unique identifier for this instance</td>
+            </tr>
+            <tr>
+              <td><code>display_name</code></td>
+              <td>string</td>
+              <td>No</td>
+              <td>Human-readable name for this instance</td>
+            </tr>
+            <tr>
+              <td><code>public_base_url</code></td>
+              <td>string</td>
+              <td>No*</td>
+              <td>Public URL for HTTPS and pairing</td>
+            </tr>
+            <tr>
+              <td><code>pairing_inbound_user_id</code></td>
+              <td>string</td>
+              <td>No</td>
+              <td>User ID for inbound pairing requests</td>
+            </tr>
+          </tbody>
+        </table>
+        <p><em>*Required when using HTTPS or pairing behind proxies.</em></p>
+
+        <h3>Peer Configuration Options</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Option</th>
+              <th>Type</th>
+              <th>Required</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>instance_id</code></td>
+              <td>string</td>
+              <td>Yes</td>
+              <td>Peer's instance ID</td>
+            </tr>
+            <tr>
+              <td><code>base_url</code></td>
+              <td>string</td>
+              <td>Yes</td>
+              <td>Peer's base URL</td>
+            </tr>
+            <tr>
+              <td><code>inbound_user_id</code></td>
+              <td>string</td>
+              <td>Yes</td>
+              <td>User ID this peer uses when calling us</td>
+            </tr>
+            <tr>
+              <td><code>api_key_env</code></td>
+              <td>string</td>
+              <td>No</td>
+              <td>Environment variable name for API key</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Federation Options</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Option</th>
+              <th>Type</th>
+              <th>Default</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>federation_enabled</code></td>
+              <td>boolean</td>
+              <td>false</td>
+              <td>Enable federated user messaging</td>
+            </tr>
+            <tr>
+              <td><code>federation_trusted_instances</code></td>
+              <td>list</td>
+              <td>[]</td>
+              <td>Allowed remote instance IDs</td>
+            </tr>
+            <tr>
+              <td><code>federation_require_accepted_relationship</code></td>
+              <td>boolean</td>
+              <td>true</td>
+              <td>Require accepted friendship for delivery</td>
+            </tr>
+            <tr>
+              <td><code>federation_e2e_enabled</code></td>
+              <td>boolean</td>
+              <td>false</td>
+              <td>Enable end-to-end encryption</td>
+            </tr>
+            <tr>
+              <td><code>federation_e2e_require_encrypted</code></td>
+              <td>boolean</td>
+              <td>false</td>
+              <td>Require encryption for federated messages</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Security Settings</h3>
+        <pre class="quickstart-code"><code># Disable pairing on sensitive instances
+peer_pairing_enabled: false
+
+# Rate limiting for pairing
+peer_pairing_rate_limit_all: 45
+peer_pairing_rate_limit_failed: 18</code></pre>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="companion-app">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Companion App Integration</h2>
+        <p>The Companion app seamlessly integrates with multi-instance HomeClaw, allowing users to interact with remote friends and manage multiple instances.</p>
+
+        <h3>Connecting to Multiple Instances</h3>
+        <p>Users can connect to different instances by:</p>
+        <ul>
+          <li><strong>Switching profiles</strong> — Different profiles for different instances</li>
+          <li><strong>Multiple accounts</strong> — Log in to different instances separately</li>
+          <li><strong>Remote friends</strong> — Chat with users on other instances</li>
+        </ul>
+
+        <h3>Remote Friend Management</h3>
+        <p>In the Companion app:</p>
+        <ul>
+          <li><strong>Add remote friend</strong> — Enter user ID and instance ID</li>
+          <li><strong>View remote status</strong> — See which instance friend belongs to</li>
+          <li><strong>Send encrypted messages</strong> — E2E encryption when enabled</li>
+          <li><strong>Receive federated messages</strong> — Messages from remote instances</li>
+        </ul>
+
+        <h3>Federation Features</h3>
+        <ul>
+          <li><strong>Automatic key registration</strong> — App registers public key with Core</li>
+          <li><strong>Encryption indicators</strong> — Visual feedback for encrypted messages</li>
+          <li><strong>Remote badges</strong> — Distinguish remote from local friends</li>
+          <li><strong>Instance information</strong> — See which instance messages came from</li>
+        </ul>
+
+        <h3>Setup for Users</h3>
+        <ol>
+          <li><strong>Configure Core</strong> — Set up federation and peers</li>
+          <li><strong>Add user</strong> — Create user account in <code>user.yml</code></li>
+          <li><strong>Connect Companion</strong> — Set Core URL and API key</li>
+          <li><strong>Add remote friends</strong> — Add users from other instances</li>
+          <li><strong>Start chatting</strong> — Send messages to remote friends</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Best Practices</h2>
+        <ul>
+          <li><strong>Use HTTPS</strong> — Always use HTTPS for peer communication</li>
+          <li><strong>Set public_base_url</strong> — Configure public URL for proper pairing</li>
+          <li><strong>Enable E2E encryption</strong> — Protect federated messages with encryption</li>
+          <li><strong>Use environment variables</strong> — Store API keys securely</li>
+          <li><strong>Test with doctor</strong> — Run <code>python -m main doctor</code> after changes</li>
+          <li><strong>Monitor logs</strong> — Check logs for federation and peer issues</li>
+          <li><strong>Use pairing</strong> — Use CLI pairing for easier setup</li>
+          <li><strong>Limit trusted instances</strong> — Use <code>federation_trusted_instances</code> for security</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Troubleshooting</h2>
+
+        <h3>"Peer not found"</h3>
+        <p>Check that:</p>
+        <ul>
+          <li>Peer is listed in <code>config/peers.yml</code></li>
+          <li><code>instance_id</code> matches exactly</li>
+          <li>Peer's Core is running</li>
+        </ul>
+
+        <h3>"Authentication failed"</h3>
+        <p>Verify that:</p>
+        <ul>
+          <li>API key environment variable is set</li>
+          <li>API key matches on both instances</li>
+          <li><code>auth_enabled</code> is configured correctly</li>
+        </ul>
+
+        <h3>"Federation disabled"</h3>
+        <p>Ensure that:</p>
+        <ul>
+          <li><code>federation_enabled: true</code> in <code>core.yml</code></li>
+          <li>Core has been restarted after configuration</li>
+        </ul>
+
+        <h3>"Pairing failed"</h3>
+        <p>Check that:</p>
+        <ul>
+          <li><code>peer_pairing_enabled: true</code> on recipient</li>
+          <li>Invite token is valid and not expired</li>
+          <li>Both instances can reach each other</li>
+          <li><code>public_base_url</code> is set correctly</li>
+        </ul>
+
+        <h3>"Remote friend not receiving messages"</h3>
+        <p>Verify that:</p>
+        <ul>
+          <li>Friend is configured with correct <code>peer_instance_id</code></li>
+          <li>Target user exists on remote instance</li>
+          <li>Federation is enabled on both instances</li>
+          <li>Network connectivity between instances</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>CLI Reference</h2>
+
+        <h3>Peer Commands</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>python -m main peer invite-create [ttl]</code></td>
+              <td>Create pairing invite (local Core must be running)</td>
+            </tr>
+            <tr>
+              <td><code>python -m main peer invite-accept &lt;url&gt; &lt;id&gt; &lt;token&gt; [instance_id] [display_name]</code></td>
+              <td>Consume invite from peer</td>
+            </tr>
+            <tr>
+              <td><code>python -m main peer import &lt;file&gt; [api_key_env]</code></td>
+              <td>Import peer configuration from JSON file</td>
+            </tr>
+            <tr>
+              <td><code>python -m main peer list</code></td>
+              <td>List configured peers as JSON</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Doctor Commands</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>python -m main doctor</code></td>
+              <td>Check configuration and connectivity</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Next Steps</h2>
+        <ul>
+          <li><a href="sub-agent.html">Sub-Agent</a> — Learn about spawning specialized sub-agents</li>
+          <li><a href="companion-app.html">Companion App</a> — Set up the Companion app for multi-instance</li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs/multi-instance-peers.md">Multi-instance peers documentation</a> — Detailed technical guide</li>
+          <li><a href="https://github.com/allenpeng0705/HomeClaw/blob/main/docs/federated-companion-messaging.md">Federated messaging documentation</a> — Deep dive into federated messaging</li>
+          <li><a href="remote-access.html">Remote Access</a> — Set up tunnels for remote connectivity</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>&copy; 2024 HomeClaw. <a href="https://github.com/allenpeng0705/HomeClaw">GitHub</a></p>
+    </div>
+  </footer>
+
+  <script>
+    const mobileMenuButton = document.querySelector('.mobile-menu-button');
+    const siteLinks = document.querySelector('.site-links');
+
+    if (mobileMenuButton && siteLinks) {
+      mobileMenuButton.addEventListener('click', () => {
+        const isExpanded = mobileMenuButton.getAttribute('aria-expanded') === 'true';
+        mobileMenuButton.setAttribute('aria-expanded', !isExpanded);
+        siteLinks.classList.toggle('active');
+      });
+    }
+
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function (e) {
+        e.preventDefault();
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          target.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start'
+          });
+        }
+      });
+    });
+  </script>
+</body>
+</html>
