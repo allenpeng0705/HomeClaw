@@ -15,6 +15,30 @@ from loguru import logger
 from base.util import Util
 
 
+def _companion_upload_dir() -> Path:
+    """Store Companion uploads under ``homeclaw_root/database/uploads`` so GET /files/out can serve them.
+
+    When ``homeclaw_root`` is unset or unusable, fall back to ``<project>/database/uploads/``.
+    """
+    try:
+        meta = Util().get_core_metadata()
+        hc = ""
+        try:
+            hc = str(meta.get_homeclaw_root() or "").strip()
+        except Exception:
+            hc = str(getattr(meta, "homeclaw_root", None) or "").strip()
+        if hc:
+            d = Path(hc).expanduser().resolve() / "database" / "uploads"
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+    except Exception as e:
+        logger.warning("Companion upload dir: homeclaw_root failed ({}); using project database/uploads", e)
+    root = Path(Util().root_path()).expanduser().resolve()
+    d = root / "database" / "uploads"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def _dev_unsigned_query_truthy(raw: str) -> bool:
     v = (raw or "").strip().lower()
     return v in ("1", "true", "yes", "on")
@@ -301,9 +325,7 @@ def get_api_upload_handler(core):  # noqa: ARG001
         Upload file(s) (images, videos, or documents). Saves to database/uploads/ and returns absolute paths.
         """
         import uuid
-        root = Path(Util().root_path())
-        upload_dir = root / "database" / "uploads"
-        upload_dir.mkdir(parents=True, exist_ok=True)
+        upload_dir = _companion_upload_dir()
         paths = []
         try:
             for f in files:

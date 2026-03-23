@@ -247,9 +247,11 @@ def get_user_message_post_handler(core):
                         status_code=400,
                         content={
                             "error": "federation_media_not_shareable",
-                            "hint": "Use absolute paths under homeclaw_root (after upload) or http(s) /files/... URLs. "
-                                    "Do not send data: base64 for federation. Set core_public_url to a peer-reachable "
-                                    "base (not localhost) so the peer can GET the sender's /files/... links.",
+                            "hint": "Attachments must resolve to GET /files/... on the sender: use absolute paths under "
+                                    "homeclaw_root (Companion uploads go to homeclaw_root/database/uploads/), or full "
+                                    "http(s) file URLs. Do not send data: base64. If core_public_url is set on both "
+                                    "sides but this still fails, re-upload the file after restarting Core (old uploads "
+                                    "may live only under the repo, outside homeclaw_root).",
                         },
                     )
                 payload = {

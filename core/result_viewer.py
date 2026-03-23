@@ -15,6 +15,7 @@ See docs_design/FileSandboxDesign.md. auth_api_key and core_public_url are in co
 import base64
 import hmac
 import hashlib
+import os
 import re
 import time
 from pathlib import Path
@@ -259,7 +260,10 @@ def build_file_view_link(scope: str, path: str) -> Tuple[Optional[str], Optional
 def file_absolute_path_to_view_url(path_str: str) -> Tuple[Optional[str], Optional[str]]:
     """
     If ``path_str`` is an absolute path to a file under ``homeclaw_root``, return a file view URL
-    from ``build_file_view_link`` (same paths served by GET /files/out). Otherwise (None, reason).
+    from ``build_file_view_link`` (same paths served by GET /files/out).
+
+    Also accepts legacy paths under ``<project>/database/uploads/`` when they are the same inode as
+    ``homeclaw_root/database/uploads/...`` (symlink / bind mount). Otherwise (None, reason).
     Never raises.
     """
     try:
@@ -274,20 +278,57 @@ def file_absolute_path_to_view_url(path_str: str) -> Tuple[Optional[str], Option
         meta = Util().get_core_metadata()
         base_str = str(getattr(meta, "homeclaw_root", None) or "").strip()
         if not base_str:
+            try:
+                base_str = str(meta.get_homeclaw_root() or "").strip()
+            except Exception:
+                base_str = ""
+        if not base_str:
             return (None, "homeclaw_root not configured")
-        base = Path(base_str).resolve()
+        base = Path(base_str).expanduser().resolve()
+
+        def _link(scope: str, inner: str) -> Tuple[Optional[str], Optional[str]]:
+            url, err = build_file_view_link(scope, inner)
+            if url and not err:
+                return (url, None)
+            return (None, err or "could not build file link")
+
         try:
             rel = full.relative_to(base)
         except ValueError:
-            return (None, "path not under homeclaw_root")
-        rel_posix = rel.as_posix()
-        parts = rel_posix.split("/", 1)
-        if len(parts) < 2:
-            return (None, "invalid sandbox layout")
-        url, err = build_file_view_link(parts[0], parts[1])
-        if url and not err:
-            return (url, None)
-        return (None, err or "could not build file link")
+            rel = None
+        if rel is not None:
+            rel_posix = rel.as_posix()
+            parts = rel_posix.split("/", 1)
+            if len(parts) < 2:
+                return (None, "invalid sandbox layout")
+            u, e = _link(parts[0], parts[1])
+            if u:
+                return (u, None)
+            if e:
+                return (None, e)
+
+        # Legacy: upload used <project>/database/uploads while homeclaw_root is elsewhere — only if same file as sandbox.
+        root = Path(Util().root_path()).expanduser().resolve()
+        proj_upload = (root / "database" / "uploads").resolve()
+        try:
+            rel_u = full.relative_to(proj_upload)
+        except ValueError:
+            return (
+                None,
+                "path not under homeclaw_root (set homeclaw_root to your project dir, or re-upload: files now save under homeclaw_root/database/uploads)",
+            )
+        inner = f"uploads/{rel_u.as_posix().replace(chr(92), '/')}"
+        cand = (base / "database" / "uploads" / rel_u).resolve()
+        try:
+            if cand.is_file():
+                if os.path.samefile(full, cand):
+                    return _link("database", inner)
+        except Exception:
+            pass
+        return (
+            None,
+            "upload path is under the repo, not under homeclaw_root; re-send the attachment (Core now stores uploads in homeclaw_root/database/uploads) or align homeclaw_root with your project.",
+        )
     except Exception as e:
         logger.debug("file_absolute_path_to_view_url failed: {}", e)
         return (None, "could not build file link")
