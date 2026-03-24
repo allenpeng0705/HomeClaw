@@ -1,5 +1,5 @@
 """
-Portal config API: load and update the six config files with redaction and backup.
+Portal config API: load and update config files with redaction and backup.
 Used by GET/PATCH /api/config/<name>. Never raises; returns None or False on error.
 """
 import copy
@@ -19,13 +19,18 @@ WHITELIST_CORE = frozenset({
     "memory_kb_config_file", "use_workspace_bootstrap", "workspace_dir", "homeclaw_root",
     "notify_unknown_request", "outbound_markdown_format",
     "llm_max_concurrent_local", "llm_max_concurrent_cloud", "compaction",
-    "skills_dir", "external_skills_dir", "clawhub_download_dir", "skills_extra_dirs", "skills_disabled", "skills_and_plugins_config_file",
+    "skills_dir", "external_skills_dir", "clawhub_download_dir", "clawhub_token", "skills_extra_dirs", "skills_disabled", "skills_and_plugins_config_file",
     "use_prompt_manager", "prompts_dir", "prompt_default_language", "prompt_cache_ttl_seconds",
     "auth_enabled", "auth_api_key", "core_public_url", "file_link_style", "file_static_prefix",
-    "file_view_link_expiry_sec", "inbound_request_timeout_seconds",
+    "file_view_link_expiry_sec", "inbound_request_timeout_seconds", "llm_completion_timeout_seconds",
     "pinggy", "push_notifications", "file_understanding",
     "llm_config_file", "endpoints",
     "portal_url", "portal_secret",  # optional; Portal is in-process on Core or standalone (no proxy)
+    # Multi-instance / federation (peers.yml is still edited as YAML; these are core.yml toggles)
+    "peer_pairing_enabled", "federation_enabled", "peer_call_enabled",
+    "federation_trusted_instances", "federation_require_accepted_relationship",
+    "federation_e2e_enabled", "federation_e2e_require_encrypted",
+    "peer_outbound_user_agent",
 })
 
 
@@ -43,6 +48,8 @@ def _redact_core(data: Dict[str, Any]) -> Dict[str, Any]:
     out = copy.deepcopy(data)
     if isinstance(out.get("auth_api_key"), str) and out["auth_api_key"]:
         out["auth_api_key"] = "***"
+    if isinstance(out.get("clawhub_token"), str) and out["clawhub_token"]:
+        out["clawhub_token"] = "***"
     if isinstance(out.get("portal_secret"), str) and out["portal_secret"]:
         out["portal_secret"] = "***"
     pinggy = out.get("pinggy")
@@ -85,6 +92,88 @@ def _redact_users(users: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def _skills_plugins_form_defaults() -> Dict[str, Any]:
+    """Defaults so bridge keys appear in Portal even when absent in YAML."""
+    return {
+        "trae_agent_enabled": False,
+        "cursor_bridge_auto_start": True,
+        "cursor_bridge_port": 3104,
+        "cursor_bridge_agent_path": "",
+        "cursor_bridge_cursor_cli_path": "",
+        "cursor_bridge_cursor_api_key": "",
+        "cursor_bridge_bridge_api_key": "",
+        "cursor_bridge_forward_logs": True,
+        "cursor_bridge_claude_settings_path": "",
+        "cursor_bridge_claude_continue_session": True,
+        "cursor_bridge_cursor_continue_session": True,
+        "cursor_bridge_trae_agent_path": "",
+        "cursor_bridge_trae_agent_config": "",
+        "claude_code_path": "",
+        "claude_code_api_key": "",
+    }
+
+
+def _redact_skills_and_plugins(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Redact sensitive bridge/API key fields and merge UI defaults."""
+    out = copy.deepcopy(data if isinstance(data, dict) else {})
+    for k, v in _skills_plugins_form_defaults().items():
+        if k not in out:
+            out[k] = v
+    for key in ("cursor_bridge_cursor_api_key", "cursor_bridge_bridge_api_key", "claude_code_api_key"):
+        if isinstance(out.get(key), str) and out[key]:
+            out[key] = "***"
+    return out
+
+
+def _redact_peers(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Return copy of peers.yml with inline secrets redacted (api_key only)."""
+    out = copy.deepcopy(data if isinstance(data, dict) else {})
+    peers = out.get("peers")
+    if not isinstance(peers, list):
+        return out
+    for peer in peers:
+        if not isinstance(peer, dict):
+            continue
+        if isinstance(peer.get("api_key"), str) and peer["api_key"]:
+            peer["api_key"] = "***"
+    return out
+
+
+def _restore_redacted_peer_api_keys(path: str, incoming: List[Any]) -> List[Any]:
+    """Keep existing peers[].api_key when incoming entry sends redacted placeholder."""
+    try:
+        existing = yaml_config.load_yml_preserving(path)
+    except Exception:
+        existing = None
+    existing_peers = (existing or {}).get("peers") if isinstance(existing, dict) else None
+    if not isinstance(existing_peers, list):
+        return incoming
+
+    by_instance_id = {}
+    for peer in existing_peers:
+        if not isinstance(peer, dict):
+            continue
+        pid = str(peer.get("instance_id") or "").strip()
+        if pid:
+            by_instance_id[pid] = peer
+
+    restored: List[Any] = []
+    for entry in incoming:
+        if not isinstance(entry, dict):
+            restored.append(entry)
+            continue
+        e = dict(entry)
+        if e.get("api_key") == "***":
+            pid = str(e.get("instance_id") or "").strip()
+            prev = by_instance_id.get(pid) if pid else None
+            if isinstance(prev, dict) and isinstance(prev.get("api_key"), str) and prev.get("api_key"):
+                e["api_key"] = prev["api_key"]
+            else:
+                e.pop("api_key", None)
+        restored.append(e)
+    return restored
+
+
 def load_config(name: str) -> Optional[Dict[str, Any]]:
     """Load config file; return dict (or None on error). No redaction. Never raises."""
     if name not in config_backup.CONFIG_NAMES:
@@ -96,16 +185,37 @@ def load_config(name: str) -> Optional[Dict[str, Any]]:
     return data if isinstance(data, dict) else {}
 
 
+def _core_portal_form_defaults() -> Dict[str, Any]:
+    """Defaults for Core settings UI when keys are absent from core.yml (aligned with CoreMetadata)."""
+    return {
+        "peer_pairing_enabled": True,
+        "federation_enabled": False,
+        "peer_call_enabled": False,
+        "federation_trusted_instances": [],
+        "federation_require_accepted_relationship": False,
+        "federation_e2e_enabled": False,
+        "federation_e2e_require_encrypted": False,
+        "peer_outbound_user_agent": "",
+        "llm_completion_timeout_seconds": 0,
+        "clawhub_token": "",
+    }
+
+
 def load_config_for_api(name: str) -> Optional[Dict[str, Any]]:
     """Load config and return dict suitable for API (redacted). Never raises."""
     data = load_config(name)
     if data is None:
         if name == "user":
             return {"users": []}
+        if name == "peers":
+            return {"peers": []}
         return None
     if name == "core":
         # Return only whitelisted keys, redacted
         filtered = {k: v for k, v in data.items() if k in WHITELIST_CORE}
+        for dk, dv in _core_portal_form_defaults().items():
+            if dk in WHITELIST_CORE and dk not in filtered:
+                filtered[dk] = dv
         return _redact_core(filtered)
     if name == "llm":
         return _redact_llm(data)
@@ -114,6 +224,10 @@ def load_config_for_api(name: str) -> Optional[Dict[str, Any]]:
         if not isinstance(users, list):
             return {"users": []}
         return {"users": _redact_users(users)}
+    if name == "skills_and_plugins":
+        return _redact_skills_and_plugins(data)
+    if name == "peers":
+        return _redact_peers(data)
     return data
 
 
@@ -125,6 +239,11 @@ def update_config(name: str, body: Dict[str, Any]) -> bool:
     path = str(get_config_path(name))
     if name == "core":
         core_body = dict(body)
+        # Do not persist redacted placeholder or empty as token wipe when user did not change field
+        if "clawhub_token" in core_body:
+            ct = core_body.get("clawhub_token")
+            if not isinstance(ct, str) or not ct.strip() or ct.strip() == "***":
+                del core_body["clawhub_token"]
         if "auth_api_key" in core_body and isinstance(core_body["auth_api_key"], str) and core_body["auth_api_key"].strip() and not core_body["auth_api_key"].strip().startswith("encrypted:"):
             try:
                 from base.auth_api_key_crypto import encrypt_auth_api_key
@@ -137,9 +256,21 @@ def update_config(name: str, body: Dict[str, Any]) -> bool:
     if name == "memory_kb":
         return yaml_config.update_yml_preserving(path, body, whitelist=yaml_config.WHITELIST_MEMORY_KB)
     if name == "skills_and_plugins":
-        return yaml_config.update_yml_preserving(path, body, whitelist=yaml_config.WHITELIST_SKILLS_PLUGINS)
+        body2 = dict(body)
+        for key in ("cursor_bridge_cursor_api_key", "cursor_bridge_bridge_api_key", "claude_code_api_key"):
+            if key in body2:
+                val = body2.get(key)
+                if not isinstance(val, str) or not val.strip() or val.strip() == "***":
+                    del body2[key]
+        return yaml_config.update_yml_preserving(path, body2, whitelist=yaml_config.WHITELIST_SKILLS_PLUGINS)
     if name == "friend_presets":
         return yaml_config.update_yml_preserving(path, body, whitelist=yaml_config.WHITELIST_FRIEND_PRESETS)
+    if name == "peers":
+        peers_body = dict(body)
+        peers = peers_body.get("peers")
+        if isinstance(peers, list):
+            peers_body["peers"] = _restore_redacted_peer_api_keys(path, peers)
+        return yaml_config.update_yml_preserving(path, peers_body, whitelist=yaml_config.WHITELIST_PEERS)
     if name == "user":
         # Only allow merging top-level "users" key (full list replace)
         if "users" in body and isinstance(body["users"], list):

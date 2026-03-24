@@ -49,6 +49,9 @@ def _get_settings_page_content(page: str, saved: bool = False, error: bool = Fal
     if page == "core":
         data = config_api.load_config_for_api("core")
         form_html = _render_core_form_html(data)
+    elif page == "peers":
+        data = config_api.load_config_for_api("peers")
+        form_html = _render_generic_form("peers", data)
     elif page == "advanced":
         data_core = config_api.load_config_for_api("core")
         data_llm = config_api.load_config_for_api("llm")

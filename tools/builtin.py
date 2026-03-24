@@ -3971,6 +3971,13 @@ async def _markdown_to_pdf_executor(arguments: Dict[str, Any], context: ToolCont
     content_str = (content or "").strip()
     if not content_str:
         return "Content is required (Markdown text to convert to PDF)."
+    # VMPrint profile/style (optional): map to draft2final --as/--style.
+    vmp_profile = str(arguments.get("vmprint_profile") or "").strip().lower()
+    if vmp_profile not in ("", "academic", "manuscript", "screenplay", "literature"):
+        return "vmprint_profile must be one of: academic, manuscript, screenplay, literature."
+    if not vmp_profile:
+        vmp_profile = "academic"
+    vmp_style = str(arguments.get("vmprint_style") or "").strip()
     try:
         r = _resolve_file_path(path_arg, context, for_write=True)
         if r is None:
@@ -3994,7 +4001,12 @@ async def _markdown_to_pdf_executor(arguments: Dict[str, Any], context: ToolCont
             vmprint_dir = str(_default_vmp)
         loop = asyncio.get_event_loop()
         pdf_bytes, err = await loop.run_in_executor(
-            None, lambda: _markdown_to_pdf_convert_sync(content_str, vmprint_dir=vmprint_dir)
+            None, lambda: _markdown_to_pdf_convert_sync(
+                content_str,
+                vmprint_dir=vmprint_dir,
+                vmprint_profile=vmp_profile,
+                vmprint_style=vmp_style or None,
+            )
         )
         if err:
             return err
@@ -4017,7 +4029,10 @@ async def _markdown_to_pdf_executor(arguments: Dict[str, Any], context: ToolCont
 
 
 def _markdown_to_pdf_convert_sync(
-    md_content: str, vmprint_dir: Optional[str] = None
+    md_content: str,
+    vmprint_dir: Optional[str] = None,
+    vmprint_profile: str = "academic",
+    vmprint_style: Optional[str] = None,
 ) -> Tuple[Optional[bytes], Optional[str]]:
     """Synchronous Markdown->PDF. Prefer VMPrint when vmprint_dir is set (see github.com/cosmiciron/vmprint), else pandoc then weasyprint."""
     md_content = (md_content or "").strip()
@@ -4051,7 +4066,7 @@ def _markdown_to_pdf_convert_sync(
         )
 
     # 1. VMPrint (draft2final): when tools.markdown_to_pdf.vmprint_dir is set to a clone of https://github.com/cosmiciron/vmprint
-    # Invoke draft2final via node dist/cli.js so argv is exactly [input, --as, academic, --output, out]; npm run dev adds extra args and causes "Unexpected positional argument".
+    # Invoke draft2final via node dist/cli.js directly. We try both --out and --output for compatibility across VMPrint versions.
     cli_js = (vmp / "draft2final" / "dist" / "cli.js") if vmp is not None else None
     if cli_js is not None and cli_js.is_file():
         try:
@@ -4060,13 +4075,25 @@ def _markdown_to_pdf_convert_sync(
                 md_path = f.name
             out_path = md_path + ".pdf"
             try:
-                result = subprocess.run(
-                    ["node", str(cli_js), md_path, "--as", "academic", "--output", out_path],
-                    cwd=str(vmp),
-                    capture_output=True,
-                    timeout=120,
-                    check=False,
-                )
+                base_cmd = ["node", str(cli_js), md_path, "--as", (vmprint_profile or "academic")]
+                if vmprint_style:
+                    base_cmd.extend(["--style", vmprint_style])
+                # Newer examples use --out; keep --output fallback for compatibility.
+                cmd_variants = [
+                    base_cmd + ["--out", out_path],
+                    base_cmd + ["--output", out_path],
+                ]
+                result = None
+                for cmd in cmd_variants:
+                    result = subprocess.run(
+                        cmd,
+                        cwd=str(vmp),
+                        capture_output=True,
+                        timeout=120,
+                        check=False,
+                    )
+                    if result.returncode == 0 and Path(out_path).is_file():
+                        break
                 if result.returncode == 0 and Path(out_path).is_file():
                     pdf_bytes = Path(out_path).read_bytes()
                     Path(out_path).unlink(missing_ok=True)
@@ -4130,6 +4157,177 @@ def _markdown_to_pdf_convert_sync(
         None,
         "No PDF converter available. If VMPrint is installed: add Node.js to the system PATH for the account that runs Core, or run Core from a terminal where 'npm' works. Otherwise: run ./install.sh or install.ps1 for VMPrint, install pandoc, or: pip install markdown weasyprint.",
     )
+
+
+def _resolve_vmprint_dir_from_config() -> Optional[str]:
+    """Resolve VMPrint directory from tools config (relative paths based on project root)."""
+    tools_cfg = _get_tools_config() or {}
+    md2pdf_cfg = tools_cfg.get("markdown_to_pdf") if isinstance(tools_cfg, dict) else {}
+    if not isinstance(md2pdf_cfg, dict):
+        md2pdf_cfg = {}
+    vmprint_dir = (md2pdf_cfg.get("vmprint_dir") or "").strip() or None
+    _project_root = Path(__file__).resolve().parent.parent
+    if vmprint_dir and not os.path.isabs(vmprint_dir):
+        vmprint_dir = str((_project_root / vmprint_dir).resolve())
+    elif not vmprint_dir:
+        vmprint_dir = str((_project_root / "tools" / "vmprint").resolve())
+    return vmprint_dir
+
+
+def _vmprint_render_sync(
+    md_content: str,
+    output_format: str,
+    vmprint_dir: Optional[str],
+    vmprint_profile: str,
+    vmprint_style: Optional[str],
+) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
+    """
+    Render Markdown with VMPrint draft2final.
+    Returns (pdf_bytes, text_output, error). For output_format='pdf' returns pdf_bytes;
+    for 'ast_json' returns text_output (JSON string).
+    """
+    md_content = (md_content or "").strip()
+    if not md_content:
+        return (None, None, "Content is empty.")
+    if output_format not in ("pdf", "ast_json"):
+        return (None, None, "output_format must be one of: pdf, ast_json.")
+
+    # Resolve VMPrint dir with same vmprint/vm_print compatibility logic.
+    def _vmprint_base() -> Optional[Path]:
+        if not vmprint_dir:
+            return None
+        base = Path(vmprint_dir).resolve()
+        if base.is_dir() and (base / "draft2final").is_dir():
+            return base
+        alt = None
+        if str(vmprint_dir).rstrip("/\\").endswith("vmprint"):
+            alt = base.parent / "vm_print"
+        elif str(vmprint_dir).rstrip("/\\").endswith("vm_print"):
+            alt = base.parent / "vmprint"
+        if alt and alt.is_dir() and (alt / "draft2final").is_dir():
+            return alt
+        return None
+
+    vmp = _vmprint_base()
+    if vmp is None:
+        expected = str(Path(vmprint_dir or "tools/vmprint").resolve())
+        return (
+            None,
+            None,
+            f"VMPrint render: VMPrint directory missing or invalid (expected: {expected} with a 'draft2final' subfolder). "
+            "Run ./install.sh (or install.ps1/install.bat), then ensure tools.markdown_to_pdf.vmprint_dir points to your VMPrint path.",
+        )
+
+    cli_js = vmp / "draft2final" / "dist" / "cli.js"
+    if not cli_js.is_file():
+        return (
+            None,
+            None,
+            f"VMPrint render: draft2final CLI not built at {cli_js}. Run: cd {vmp} && npm install && npm run build",
+        )
+
+    suffix = ".pdf" if output_format == "pdf" else ".json"
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w", encoding="utf-8") as f:
+            f.write(md_content)
+            md_path = f.name
+        out_path = md_path + suffix
+        try:
+            base_cmd = ["node", str(cli_js), md_path, "--as", (vmprint_profile or "academic")]
+            if vmprint_style:
+                base_cmd.extend(["--style", vmprint_style])
+            # Prefer --out, keep --output fallback for compatibility.
+            cmd_variants = [
+                base_cmd + ["--out", out_path],
+                base_cmd + ["--output", out_path],
+            ]
+            result = None
+            for cmd in cmd_variants:
+                result = subprocess.run(
+                    cmd,
+                    cwd=str(vmp),
+                    capture_output=True,
+                    timeout=120,
+                    check=False,
+                )
+                if result.returncode == 0 and Path(out_path).is_file():
+                    break
+            if result.returncode == 0 and Path(out_path).is_file():
+                if output_format == "pdf":
+                    return (Path(out_path).read_bytes(), None, None)
+                return (None, Path(out_path).read_text(encoding="utf-8", errors="replace"), None)
+            err = (result.stderr or result.stdout or b"").decode("utf-8", errors="replace").strip() or "unknown"
+            return (None, None, f"VMPrint render failed: {err[:500]}")
+        finally:
+            Path(md_path).unlink(missing_ok=True)
+            Path(out_path).unlink(missing_ok=True)
+    except FileNotFoundError:
+        return (None, None, "VMPrint render failed: Node.js is not available on PATH for the Core process.")
+    except Exception as e:
+        logger.debug("vmprint_render failed: %s", e)
+        return (None, None, f"VMPrint render failed: {e!s}")
+
+
+async def _vmprint_render_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    """Render Markdown via VMPrint draft2final to PDF or AST JSON and save to path."""
+    path_arg = (arguments.get("path") or "").strip()
+    content_str = str(arguments.get("content") or "").strip()
+    output_format = str(arguments.get("output_format") or "").strip().lower() or "pdf"
+    vmp_profile = str(arguments.get("vmprint_profile") or "").strip().lower() or "academic"
+    vmp_style = str(arguments.get("vmprint_style") or "").strip() or None
+    if not path_arg:
+        return "Path is required (e.g. output/report.pdf or output/report.ast.json)."
+    if not content_str:
+        return "Content is required (Markdown text to render)."
+    if output_format not in ("pdf", "ast_json"):
+        return "output_format must be one of: pdf, ast_json."
+    if vmp_profile not in ("academic", "manuscript", "screenplay", "literature"):
+        return "vmprint_profile must be one of: academic, manuscript, screenplay, literature."
+
+    try:
+        r = _resolve_file_path(path_arg, context, for_write=True)
+        if r is None:
+            return _file_resolve_error_msg(path_arg)
+        full, base = r
+        if not _path_under(full, base):
+            return _FILE_ACCESS_DENIED_MSG
+        full.parent.mkdir(parents=True, exist_ok=True)
+        vmprint_dir = _resolve_vmprint_dir_from_config()
+        loop = asyncio.get_event_loop()
+        pdf_bytes, text_out, err = await loop.run_in_executor(
+            None,
+            lambda: _vmprint_render_sync(
+                content_str,
+                output_format=output_format,
+                vmprint_dir=vmprint_dir,
+                vmprint_profile=vmp_profile,
+                vmprint_style=vmp_style,
+            ),
+        )
+        if err:
+            return err
+        if output_format == "pdf":
+            if not pdf_bytes:
+                return "VMPrint render produced no PDF output."
+            full.write_bytes(pdf_bytes)
+        else:
+            if text_out is None:
+                return "VMPrint render produced no AST output."
+            full.write_text(text_out, encoding="utf-8")
+
+        out = json.dumps({"written": True, "path": path_arg, "output_format": output_format})
+        if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
+            scope = _get_file_workspace_subdir(context)
+            if scope:
+                from core.result_viewer import build_file_view_link
+                link, _ = build_file_view_link(scope, path_arg)
+                if link:
+                    return f"VMPrint render saved. CRITICAL: Use ONLY the URL on the next line; copy it exactly—do not modify, truncate, or append anything.\n{link}\n{out}"
+                out = f"{out}\nPath: {path_arg}. To get a view link, set core_public_url and auth_api_key in config/core.yml."
+        return out
+    except Exception as e:
+        logger.debug("vmprint_render executor failed: %s", e)
+        return f"Failed to save VMPrint output: {e!s}"
 
 
 # Image extensions: when get_file_view_link (or run_skill image output) serves these, we may attach the image so the client can show it inline (if size <= max_image_size_for_inline).
@@ -7270,15 +7468,35 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="markdown_to_pdf",
-            description="Convert Markdown content to a PDF file and save it. Use when the user or a skill produces long Markdown (e.g. a summary or report) and you want to give them a downloadable PDF. Pass the Markdown as content and a path under output/ (e.g. output/summary.pdf). Returns the file link so you can include it in your reply. Prefer VMPrint when configured (config: tools.markdown_to_pdf.vmprint_dir to path of github.com/cosmiciron/vmprint clone); else uses pandoc or pip install markdown weasyprint.",
+            description="Convert Markdown content to a PDF file and save it. Use when the user or a skill produces long Markdown (e.g. a summary or report) and you want to give them a downloadable PDF. Pass the Markdown as content and a path under output/ (e.g. output/summary.pdf). Optional: vmprint_profile (academic/manuscript/screenplay/literature) and vmprint_style when VMPrint is used. Returns the file link so you can include it in your reply. Prefer VMPrint when configured (config: tools.markdown_to_pdf.vmprint_dir to path of github.com/cosmiciron/vmprint clone); else uses pandoc or pip install markdown weasyprint.",
             parameters={
                 "type": "object",
                 "properties": {
                     "content": {"type": "string", "description": "The Markdown text to convert to PDF (e.g. a long summary or report)."},
                     "path": {"type": "string", "description": "Relative path for the PDF file (e.g. output/summary.pdf, output/report_2024.pdf). Use output/ so the user gets a view link."},
+                    "vmprint_profile": {"type": "string", "description": "Optional VMPrint document profile when VMPrint is available: academic (default), manuscript, screenplay, literature."},
+                    "vmprint_style": {"type": "string", "description": "Optional VMPrint style name passed to draft2final --style (profile-specific)."},
                 },
                 "required": ["content", "path"],
             },
             execute_async=_markdown_to_pdf_executor,
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="vmprint_render",
+            description="Render Markdown using VMPrint draft2final and save output to a file. Supports output_format='pdf' (default) or 'ast_json' to emit VMPrint transmuted AST JSON. Optional vmprint_profile: academic/manuscript/screenplay/literature, and vmprint_style. Use output/ paths so users can open links.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "Markdown content to render with VMPrint draft2final."},
+                    "path": {"type": "string", "description": "Relative output path (e.g. output/report.pdf or output/report.ast.json)."},
+                    "output_format": {"type": "string", "description": "pdf (default) or ast_json."},
+                    "vmprint_profile": {"type": "string", "description": "Document profile: academic (default), manuscript, screenplay, literature."},
+                    "vmprint_style": {"type": "string", "description": "Optional profile-specific style passed to draft2final --style."},
+                },
+                "required": ["content", "path"],
+            },
+            execute_async=_vmprint_render_executor,
         )
     )

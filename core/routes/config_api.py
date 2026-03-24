@@ -37,6 +37,11 @@ CONFIG_CORE_WHITELIST = frozenset({
     "vision_llm", "vision_llm_host", "vision_llm_port", "vision_llm_start_on_demand", "vision_llm_idle_stop_seconds", "vision_image_max_dimension",
     "completion_vision", "completion_tool_selection",
     "database", "vectorDB", "graphDB", "cognee", "memory_summarization",
+    "peer_pairing_enabled", "federation_enabled", "peer_call_enabled",
+    "federation_trusted_instances", "federation_require_accepted_relationship",
+    "federation_e2e_enabled", "federation_e2e_require_encrypted",
+    "peer_outbound_user_agent", "pinggy", "portal_secret",
+    "memory_kb_config_file", "skills_and_plugins_config_file", "log_to_console",
 })
 CONFIG_CORE_BOOL_KEYS = frozenset({
     "silent", "use_memory", "auth_enabled", "use_tools", "use_skills",
@@ -44,6 +49,9 @@ CONFIG_CORE_BOOL_KEYS = frozenset({
     "use_prompt_manager", "system_plugins_auto_start", "skills_use_vector_search", "skills_refresh_on_startup",
     "skills_incremental_sync", "plugins_use_vector_search", "plugins_refresh_on_startup",
     "orchestrator_unified_with_tools",
+    "peer_pairing_enabled", "federation_enabled", "peer_call_enabled",
+    "federation_require_accepted_relationship", "federation_e2e_enabled", "federation_e2e_require_encrypted",
+    "notify_unknown_request", "log_to_console",
 })
 
 
@@ -98,6 +106,8 @@ def get_api_config_core_get_handler(core):  # noqa: ARG001
                 return JSONResponse(status_code=404, content={"detail": "core.yml not found"})
             data = Util().load_yml_config(str(path)) or {}
             out = {k: _redact_config(v) for k, v in data.items() if k in CONFIG_CORE_WHITELIST}
+            if isinstance(out.get("clawhub_token"), str) and out["clawhub_token"].strip():
+                out["clawhub_token"] = "***"
             return JSONResponse(content=out)
         except Exception as e:
             logger.exception("Config core get failed: {}", e)
@@ -128,6 +138,8 @@ def get_api_config_core_patch_handler(core):  # noqa: ARG001
                 pass
             for k, v in body.items():
                 if k not in CONFIG_CORE_WHITELIST:
+                    continue
+                if k == "clawhub_token" and (v == "***" or v is None or (isinstance(v, str) and not v.strip())):
                     continue
                 if k == "auth_api_key" and (v == "***" or v is None or v == ""):
                     continue

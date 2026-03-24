@@ -12,7 +12,7 @@ from portal.config import get_config_dir
 _log = logging.getLogger(__name__)
 
 # Config file names (without .yml) that support system/previous.
-CONFIG_NAMES = ("core", "llm", "memory_kb", "skills_and_plugins", "user", "friend_presets")
+CONFIG_NAMES = ("core", "llm", "memory_kb", "skills_and_plugins", "user", "friend_presets", "peers")
 
 
 def _config_dir() -> Path:

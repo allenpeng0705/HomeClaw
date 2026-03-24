@@ -139,6 +139,18 @@ def doctor_run():
     return JSONResponse(content=report)
 
 
+@app.get("/api/portal/vmprint/status")
+def vmprint_status():
+    """Return VMPrint status for Guide diagnostics."""
+    return JSONResponse(content=guide_module.run_vmprint_status())
+
+
+@app.post("/api/portal/vmprint/smoke")
+def vmprint_smoke():
+    """Run VMPrint smoke render test and return result."""
+    return JSONResponse(content=guide_module.run_vmprint_smoke_test())
+
+
 # ----- Core start / status / stop (Phase 2.3) -----
 
 def _get_core_base_url() -> Optional[str]:
@@ -1043,7 +1055,7 @@ def _guide_page_content() -> str:
     """Guide to install: steps 1–4 from API, step 5 = Run doctor. One step at a time, Next/Back."""
     return r"""
   <h1 class="title">Guide to install</h1>
-  <p class="subtitle">Step-by-step checks: Python, venv, config, and optional doctor.</p>
+  <p class="subtitle">Step-by-step checks: Python, dependencies, Node, VMPrint, llama.cpp, models, and optional doctor.</p>
   <div id="guide-steps" class="guide-steps">
     <p id="guide-loading">Loading checks…</p>
     <div id="guide-content" style="display:none;">
@@ -1061,26 +1073,36 @@ def _guide_page_content() -> str:
     .guide-step-box.ok { border-left: 4px solid #22c55e; }
     .guide-step-box.fail { border-left: 4px solid #ef4444; }
     .guide-step-box .hint { margin-top: 0.75rem; color: #475569; font-size: 0.9375rem; }
-    #guide-doctor-result { white-space: pre-wrap; font-size: 0.875rem; margin-top: 0.5rem; }
+    #guide-doctor-result, #guide-vmprint-result { white-space: pre-wrap; font-size: 0.875rem; margin-top: 0.5rem; }
   </style>
   <script>
 (function() {
   var steps = [];
   var current = 0;
   var doctorResult = null;
+  var vmprintSmokeResult = null;
   var content = document.getElementById('guide-content');
   var loading = document.getElementById('guide-loading');
   var stepLabel = document.getElementById('guide-step-label');
   var stepBox = document.getElementById('guide-step-box');
 
-  function stepTitles() {
-    var t = ['Python (system or venv)', 'Dependencies', 'Node.js', 'llama.cpp', 'GGUF models', 'Doctor (optional)'];
-    return t;
+  function stepTitleById(id) {
+    var m = {
+      python: 'Python (system or venv)',
+      dependencies: 'Dependencies',
+      node: 'Node.js',
+      vmprint: 'VMPrint',
+      llama_cpp: 'llama.cpp',
+      gguf_models: 'GGUF models'
+    };
+    return m[id] || id || 'Check';
   }
 
   function renderStep() {
-    if (current === 5) {
-      stepLabel.textContent = 'Step 6 of 6: Doctor';
+    var doctorIndex = steps.length;
+    var totalSteps = steps.length + 1; // checks + doctor
+    if (current === doctorIndex) {
+      stepLabel.textContent = 'Step ' + (current + 1) + ' of ' + totalSteps + ': Doctor';
       stepBox.className = 'guide-step-box';
       stepBox.innerHTML = '<p>Run the doctor to check config and LLM connectivity.</p>' +
         '<button type="button" class="btn btn-sm" id="guide-run-doctor">Run doctor</button>' +
@@ -1093,15 +1115,26 @@ def _guide_page_content() -> str:
     }
     var s = steps[current];
     if (!s) {
-      stepLabel.textContent = 'Step ' + (current + 1) + ' of 6: ' + stepTitles()[current];
+      stepLabel.textContent = 'Step ' + (current + 1) + ' of ' + totalSteps + ': Check';
       stepBox.textContent = 'No data.';
       stepBox.className = 'guide-step-box';
       return;
     }
-    stepLabel.textContent = 'Step ' + (current + 1) + ' of 6: ' + stepTitles()[current];
+    stepLabel.textContent = 'Step ' + (current + 1) + ' of ' + totalSteps + ': ' + stepTitleById(s.id);
     stepBox.className = 'guide-step-box ' + (s.ok ? 'ok' : 'fail');
-    stepBox.innerHTML = '<p><strong>' + (s.ok ? 'Pass' : 'Fail') + '</strong>: ' + escapeHtml(s.message) + '</p>' +
+    var html = '<p><strong>' + (s.ok ? 'Pass' : 'Fail') + '</strong>: ' + escapeHtml(s.message) + '</p>' +
       '<p class="hint">' + escapeHtml(s.hint || '').replace(/\n/g, '<br>') + '</p>';
+    if (String(s.id || '') === 'vmprint') {
+      html += '<button type="button" class="btn btn-sm" id="guide-run-vmprint-smoke">Run VMPrint smoke test</button>' +
+        '<pre id="guide-vmprint-result"></pre>';
+    }
+    stepBox.innerHTML = html;
+    if (String(s.id || '') === 'vmprint') {
+      var vbtn = document.getElementById('guide-run-vmprint-smoke');
+      var vpre = document.getElementById('guide-vmprint-result');
+      if (vpre && vmprintSmokeResult) vpre.textContent = vmprintSmokeResult;
+      if (vbtn) vbtn.onclick = runVmprintSmoke;
+    }
   }
 
   function escapeHtml(s) {
@@ -1132,13 +1165,35 @@ def _guide_page_content() -> str:
       });
   }
 
+  function runVmprintSmoke() {
+    var pre = document.getElementById('guide-vmprint-result');
+    if (pre) pre.textContent = 'Running VMPrint smoke test…';
+    fetch('/api/portal/vmprint/smoke', { method: 'POST', headers: { 'Accept': 'application/json' } })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var lines = [];
+        if (data.ok) {
+          lines.push('OK: ' + (data.message || 'VMPrint smoke test passed.'));
+          if (data.stdout) lines.push('\n' + data.stdout);
+        } else {
+          lines.push('Issue: ' + (data.error || 'VMPrint smoke test failed.'));
+        }
+        vmprintSmokeResult = lines.join('\n');
+        if (pre) pre.textContent = vmprintSmokeResult;
+      })
+      .catch(function(e) {
+        vmprintSmokeResult = 'Request failed: ' + e.message;
+        if (pre) pre.textContent = vmprintSmokeResult;
+      });
+  }
+
   function updateButtons() {
     var back = document.getElementById('guide-back');
     var next = document.getElementById('guide-next');
     if (back) back.style.display = current > 0 ? 'inline-block' : 'none';
     if (next) {
       next.style.display = 'inline-block';
-      next.textContent = current < 5 ? 'Next' : 'Done';
+      next.textContent = current < steps.length ? 'Next' : 'Done';
     }
   }
 
@@ -1146,7 +1201,7 @@ def _guide_page_content() -> str:
     if (current > 0) { current--; renderStep(); updateButtons(); }
   };
   document.getElementById('guide-next').onclick = function() {
-    if (current < 5) { current++; renderStep(); updateButtons(); }
+    if (current < steps.length) { current++; renderStep(); updateButtons(); }
   };
 
   fetch('/api/portal/guide/checks')
@@ -1185,6 +1240,12 @@ _CORE_HIDDEN_KEYS = frozenset({
     "memory_kb_config_file", "endpoints", "use_workspace_bootstrap", "outbound_markdown_format",
     "file_link_style", "file_static_prefix", "push_notifications", "file_understanding",
 })
+# Boolean Core keys shown as true/false dropdowns (same pattern as silent).
+_CORE_BOOL_SELECT_KEYS = frozenset({
+    "peer_pairing_enabled", "federation_enabled", "peer_call_enabled",
+    "federation_require_accepted_relationship", "federation_e2e_enabled",
+    "federation_e2e_require_encrypted",
+})
 # Core-only advanced keys (llama_cpp, completion, vision_llm live in llm.yml)
 _CORE_ADVANCED_KEYS = ("push_notifications", "file_understanding")
 # vision_llm is on the LLM page as a dropdown; only these advanced keys stay on Advanced tab
@@ -1194,6 +1255,7 @@ REDACTED_PLACEHOLDER = "***"
 
 SETTINGS_PAGES = [
     ("core", "Core"),
+    ("peers", "Peers"),
     ("llm", "LLM"),
     ("user", "Users"),
     ("advanced", "Advanced"),
@@ -1232,6 +1294,62 @@ def _render_core_form_html(data: Optional[Dict[str, Any]]) -> str:
                 '<div class="form-group"><label>silent</label><select name="silent">'
                 f'<option value="false"{"" if silent_val else " selected"}>false (verbose console)</option>'
                 f'<option value="true"{" selected" if silent_val else ""}>true (less console noise)</option></select></div>'
+            )
+            continue
+        if key == "log_to_console":
+            ltc_val = val is True or str(val).lower() == "true"
+            out.append(
+                '<div class="form-group"><label>log_to_console</label><select name="log_to_console">'
+                f'<option value="false"{"" if ltc_val else " selected"}>false (log file only)</option>'
+                f'<option value="true"{" selected" if ltc_val else ""}>true (also print logs to console)</option></select>'
+                '<p class="form-hint">When false, use tail/Get-Content on logs/core_debug.log to follow logs.</p></div>'
+            )
+            continue
+        if key in _CORE_BOOL_SELECT_KEYS:
+            bval = val is True or str(val).lower() == "true"
+            esc_k = esc(key)
+            sel_f = "" if bval else " selected"
+            sel_t = " selected" if bval else ""
+            hint = ""
+            if key == "peer_pairing_enabled":
+                hint = '<p class="form-hint">When false, peer invite create/consume APIs return 404. See docs/multi-instance-peers.md.</p>'
+            elif key == "federation_enabled":
+                hint = '<p class="form-hint">Companion federation (user messages across instances via peers.yml). Independent of peer_call below.</p>'
+            elif key == "peer_call_enabled":
+                hint = '<p class="form-hint">When false, the LLM cannot use the peer_call tool (no remote /inbound to other Cores). Federation for the Companion stays on if enabled above.</p>'
+            elif key == "federation_require_accepted_relationship":
+                hint = '<p class="form-hint">When true, inbound federated messages may require an accepted row in federated_friendships (stricter than YAML peers alone).</p>'
+            elif key == "federation_e2e_enabled":
+                hint = '<p class="form-hint">Allow hc-e2e-v1 envelopes on federated user messages; Companion can register a public key.</p>'
+            elif key == "federation_e2e_require_encrypted":
+                hint = '<p class="form-hint">When true, federated user messages must use E2E (no plaintext).</p>'
+            out.append(
+                f'<div class="form-group"><label>{esc_k}</label><select name="{esc_k}">'
+                f'<option value="false"{sel_f}>false</option>'
+                f'<option value="true"{sel_t}>true</option></select>{hint}</div>'
+            )
+            continue
+        if key == "clawhub_token":
+            v = "" if is_redacted else esc(str(val) if val is not None else "")
+            out.append(
+                f'<div class="form-group"><label>{esc(key)}</label>'
+                f'<input type="password" name="{esc(key)}" value="{v}" placeholder="•••" autocomplete="off">'
+                '<p class="form-hint">Optional ClawHub CLI token. Leave blank when unchanged; enter a new value to replace. Edit peers in config/peers.yml (not on this page).</p></div>'
+            )
+            continue
+        if key == "federation_trusted_instances":
+            li = val if isinstance(val, list) else []
+            body = "" if is_redacted else esc(json.dumps(li, indent=2))
+            out.append(
+                f'<div class="form-group"><label>{esc(key)}</label><textarea name="{esc(key)}" rows="4" data-json="1">{body}</textarea>'
+                '<p class="form-hint">JSON array of remote instance_id strings (extra sender allowlist). Use [] if you do not need this restriction.</p></div>'
+            )
+            continue
+        if key == "peer_outbound_user_agent":
+            v = "" if is_redacted else esc(str(val) if val is not None else "")
+            out.append(
+                f'<div class="form-group"><label>{esc(key)}</label><input type="text" name="{esc(key)}" value="{v}" placeholder="">'
+                '<p class="form-hint">Optional User-Agent for Core→Core HTTP (peer_call, federation). Empty = default.</p></div>'
             )
             continue
         if isinstance(val, dict) and val and not isinstance(val, list):
@@ -2230,7 +2348,7 @@ async def api_config_users_reset_password(request: Request, user_name: str):
 
 @app.get("/api/config/{name}")
 def api_config_get(request: Request, name: str):
-    """Return config (redacted) for core, llm, memory_kb, skills_and_plugins, user, friend_presets. Auth: session or X-Portal-Secret (middleware)."""
+    """Return config (redacted) for core, peers, llm, memory_kb, skills_and_plugins, user, friend_presets. Auth: session or X-Portal-Secret (middleware)."""
     if name not in config_backup.CONFIG_NAMES:
         return JSONResponse(status_code=404, content={"detail": "Unknown config name"})
     data = config_api.load_config_for_api(name)

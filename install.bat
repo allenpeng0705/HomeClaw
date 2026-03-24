@@ -1,7 +1,7 @@
 @echo off
 REM HomeClaw installer launcher for Windows. Runs install.ps1 with ExecutionPolicy Bypass.
 REM Same flow as install.sh / install.ps1: Python 3.9+, Node, tsx, ClawHub, shallow clone if needed,
-REM VMPrint, auto-create .venv if missing then pip (requirements + constraints), Cognee deps, document stack,
+REM VMPrint (npm install + npm run build in VMPrint root), auto-create .venv if missing then pip (requirements + constraints), Cognee deps, document stack,
 REM MemOS (vendor\memos), llama.cpp hint, start Portal.
 REM Optional: set HOMECLAW_REPO_URL before running to override the default GitHub URL (same as install.sh).
 REM Use this if .\install.ps1 fails with "not digitally signed" (execution policy).

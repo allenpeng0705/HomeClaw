@@ -317,9 +317,9 @@ else
       echo "Installing VMPrint dependencies (npm install) ..."
       (cd "$VMPRINT_DIR" && npm install --silent 2>/dev/null) || true
       if [ -d "$VMPRINT_DIR/node_modules" ]; then
-        echo "Building VMPrint workspaces (transmuters then draft2final) ..."
-        (cd "$VMPRINT_DIR" && npm run build --workspace=@vmprint/transmuter-mkd-mkd --workspace=@vmprint/transmuter-mkd-academic --workspace=@vmprint/transmuter-mkd-literature --workspace=@vmprint/transmuter-mkd-manuscript --workspace=@vmprint/transmuter-mkd-screenplay 2>/dev/null) || true
-        (cd "$VMPRINT_DIR" && npm run build --workspace=draft2final 2>/dev/null) || true
+        echo "Building VMPrint workspace (ordered dependency build) ..."
+        # Use VMPrint root build order (contracts/engine/markdown-core -> draft2final/transmuters).
+        (cd "$VMPRINT_DIR" && npm run build 2>/dev/null) || true
         echo "OK: VMPrint installed at tools/vmprint"
       else
         echo "VMPrint clone present; run manually: cd $VMPRINT_DIR && npm install"

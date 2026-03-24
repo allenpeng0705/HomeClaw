@@ -7,6 +7,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -113,6 +114,19 @@ def run_guide_checks() -> List[Dict[str, Any]]:
         "ok": node_ok,
         "message": node_msg,
         "hint": "Node.js is required for the browser plugin. Install from nodejs.org or your package manager (e.g. brew install node, apt install nodejs).",
+    })
+
+    # 3b. VMPrint (optional but recommended for high-quality markdown_to_pdf)
+    vmprint = run_vmprint_status()
+    steps.append({
+        "id": "vmprint",
+        "ok": bool(vmprint.get("ok")),
+        "message": str(vmprint.get("message") or "unknown"),
+        "hint": (
+            "VMPrint improves Markdown->PDF quality and supports profiles (academic/manuscript/screenplay/literature). "
+            "Install/repair by running install.sh / install.ps1 / install.bat. "
+            "Then click 'Run VMPrint smoke test' in this step."
+        ),
     })
 
     # 4. llama.cpp binary: llama.cpp-master/<platform>/ or on PATH (winget, brew, nix, MacPorts)
@@ -235,3 +249,58 @@ def run_doctor_report() -> Dict[str, Any]:
     except Exception as e:
         result["error"] = str(e)
     return result
+
+
+def run_vmprint_status() -> Dict[str, Any]:
+    """Check VMPrint install/build status. Returns {'ok': bool, 'message': str, ...}."""
+    vmprint_dir = Path(ROOT_DIR) / "tools" / "vmprint"
+    alt_dir = Path(ROOT_DIR) / "tools" / "vm_print"
+    if not vmprint_dir.exists() and alt_dir.exists():
+        vmprint_dir = alt_dir
+    if not vmprint_dir.exists():
+        return {"ok": False, "message": "Not installed (tools/vmprint not found)."}
+    if not (vmprint_dir / "draft2final").is_dir():
+        return {"ok": False, "message": "Invalid VMPrint folder (draft2final missing).", "path": str(vmprint_dir)}
+    if not (vmprint_dir / "node_modules").is_dir():
+        return {"ok": False, "message": "Dependencies missing (node_modules not found).", "path": str(vmprint_dir)}
+    cli_js = vmprint_dir / "draft2final" / "dist" / "cli.js"
+    if not cli_js.is_file():
+        return {
+            "ok": False,
+            "message": "draft2final CLI not built (draft2final/dist/cli.js missing).",
+            "path": str(vmprint_dir),
+        }
+    node_path = shutil.which("node")
+    if not node_path:
+        return {"ok": False, "message": "Node.js not found in PATH for Portal/Core process.", "path": str(vmprint_dir)}
+    return {"ok": True, "message": f"Ready ({vmprint_dir})", "path": str(vmprint_dir), "node": node_path}
+
+
+def run_vmprint_smoke_test() -> Dict[str, Any]:
+    """Run a tiny VMPrint render smoke test. Returns parsed status and output path."""
+    status = run_vmprint_status()
+    if not status.get("ok"):
+        return {"ok": False, "error": status.get("message", "VMPrint not ready"), "status": status}
+    vmprint_dir = Path(status.get("path"))
+    cli_js = vmprint_dir / "draft2final" / "dist" / "cli.js"
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            inp = Path(td) / "smoke.md"
+            outp = Path(td) / "smoke.pdf"
+            inp.write_text("# VMPrint smoke test\n\nThis is a quick render check.\n", encoding="utf-8")
+            # Prefer --out (current upstream docs), keep --output fallback.
+            cmd1 = ["node", str(cli_js), str(inp), "--as", "academic", "--out", str(outp)]
+            r = subprocess.run(cmd1, cwd=str(vmprint_dir), capture_output=True, text=True, timeout=45)
+            if r.returncode != 0 or not outp.exists():
+                cmd2 = ["node", str(cli_js), str(inp), "--as", "academic", "--output", str(outp)]
+                r = subprocess.run(cmd2, cwd=str(vmprint_dir), capture_output=True, text=True, timeout=45)
+            if r.returncode == 0 and outp.exists() and outp.stat().st_size > 0:
+                return {
+                    "ok": True,
+                    "message": f"Smoke test passed ({outp.stat().st_size} bytes PDF).",
+                    "stdout": (r.stdout or "").strip()[:1000],
+                }
+            err = ((r.stderr or "") + "\n" + (r.stdout or "")).strip()[:2000]
+            return {"ok": False, "error": err or f"Render failed (exit {r.returncode})."}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}

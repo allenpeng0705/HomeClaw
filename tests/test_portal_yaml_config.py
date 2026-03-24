@@ -12,6 +12,7 @@ from portal.yaml_config import (
     update_yml_preserving,
     WHITELIST_LLM,
     WHITELIST_FRIEND_PRESETS,
+    WHITELIST_PEERS,
 )
 
 
@@ -91,6 +92,30 @@ def test_update_yml_preserving_empty_updates_returns_true():
     try:
         assert update_yml_preserving(path, {}) is True
         assert update_yml_preserving(path, {"only_unknown": 1}, whitelist=frozenset({"k"})) is True
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_update_yml_preserving_peers_whitelist_only_updates_peers_key():
+    content = "peers:\n  - instance_id: a\nunknown: keep\n"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+        f.write(content)
+        path = f.name
+    try:
+        ok = update_yml_preserving(
+            path,
+            {
+                "peers": [{"instance_id": "b", "base_url": "https://example.com"}],
+                "unknown": "ignored",
+            },
+            whitelist=WHITELIST_PEERS,
+        )
+        assert ok is True
+        data = load_yml_preserving(path)
+        assert data is not None
+        assert isinstance(data.get("peers"), list)
+        assert data["peers"][0].get("instance_id") == "b"
+        assert data.get("unknown") == "keep"
     finally:
         Path(path).unlink(missing_ok=True)
 
