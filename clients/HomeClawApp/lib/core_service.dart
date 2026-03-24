@@ -67,6 +67,7 @@ class CoreService {
   static const String _keyNodesUrl = 'nodes_url';
   static const String _keyShowProgress = 'show_progress_during_long_tasks';
   static const String _keyCursorChatPlainText = 'cursor_chat_plain_text';
+  static const String _keyBridgeAgentStreamPreview = 'bridge_agent_stream_preview';
   static const String _keyCompanionToken = 'companion_session_token';
   static const String _keyCompanionUserId = 'companion_session_user_id';
   static const String _keyCompanionSavedUsername = 'companion_saved_username';
@@ -90,12 +91,14 @@ class CoreService {
   String? _nodesUrl;
   bool _showProgressDuringLongTasks = true;
   bool _cursorChatPlainText = true;
+  bool _bridgeAgentStreamPreview = true;
   String? _portalAdminToken;
 
   String get baseUrl => _baseUrl;
   String? get portalAdminToken => _portalAdminToken;
   bool get showProgressDuringLongTasks => _showProgressDuringLongTasks;
   bool get cursorChatPlainText => _cursorChatPlainText;
+  bool get bridgeAgentStreamPreview => _bridgeAgentStreamPreview;
   String? get apiKey => _apiKey;
   String? get sessionToken => _sessionToken;
   String? get sessionUserId => _sessionUserId;
@@ -234,6 +237,7 @@ class CoreService {
     if (_nodesUrl != null && _nodesUrl!.isEmpty) _nodesUrl = null;
     _showProgressDuringLongTasks = prefs.getBool(_keyShowProgress) ?? true;
     _cursorChatPlainText = prefs.getBool(_keyCursorChatPlainText) ?? true;
+    _bridgeAgentStreamPreview = prefs.getBool(_keyBridgeAgentStreamPreview) ?? true;
     _sessionToken = prefs.getString(_keyCompanionToken)?.trim();
     if (_sessionToken != null && _sessionToken!.isEmpty) _sessionToken = null;
     _sessionUserId = prefs.getString(_keyCompanionUserId)?.trim();
@@ -1050,6 +1054,12 @@ class CoreService {
     await prefs.setBool(_keyCursorChatPlainText, value);
   }
 
+  Future<void> saveBridgeAgentStreamPreview(bool value) async {
+    _bridgeAgentStreamPreview = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyBridgeAgentStreamPreview, value);
+  }
+
   Future<void> saveSettings({required String baseUrl, String? apiKey}) async {
     final trimmed = baseUrl.trim().replaceFirst(RegExp(r'/$'), '');
     _baseUrl = trimmed.isEmpty ? _defaultBaseUrl : trimmed;
@@ -1488,7 +1498,7 @@ class CoreService {
     if (useAsync) {
       body['async'] = true;
       // Lets Core stream Cursor CLI stream-json into GET /inbound/result text_preview while polling (Cursor bridge run_agent).
-      if (useAsyncForBridge) body['bridge_agent_stream_preview'] = true;
+      if (useAsyncForBridge && _bridgeAgentStreamPreview) body['bridge_agent_stream_preview'] = true;
     }
     if (useStreamPath) body['stream'] = true;
 

@@ -251,6 +251,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
             SwitchListTile(
+              title: const Text('Bridge agent streaming preview'),
+              subtitle: const Text(
+                'For Cursor/Claude/Trae bridge chats: stream partial output while polling async results. Turn off if large streaming responses cause errors.',
+              ),
+              value: widget.coreService.bridgeAgentStreamPreview,
+              onChanged: (bool value) async {
+                await widget.coreService.saveBridgeAgentStreamPreview(value);
+                if (mounted) setState(() {});
+              },
+            ),
+            SwitchListTile(
               title: const Text('Cursor chat: plain text (copy-friendly)'),
               subtitle: const Text(
                 'When on, Cursor friend replies are shown as plain selectable text instead of Markdown rendering.',
