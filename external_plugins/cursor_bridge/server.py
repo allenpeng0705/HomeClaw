@@ -349,6 +349,26 @@ def _extract_headless_json_session_id_from_stdout(out: str) -> Optional[str]:
     return None
 
 
+def _cursor_error_is_context_limit(out: str, err: str) -> bool:
+    """Detect Cursor CLI errors related to chunking/separator/context size limits."""
+    t = ((out or "") + "\n" + (err or "")).lower()
+    if not t.strip():
+        return False
+    return any(
+        m in t
+        for m in (
+            "separator is not found",
+            "separator not found",
+            "chunk exceed",
+            "chunk size exceed",
+            "exceeds the maximum",
+            "context too large",
+            "too many chunks",
+            "indexing failed",
+        )
+    )
+
+
 def _headless_stderr_suggests_stale_session(out: str, err: str) -> bool:
     """Heuristic: failed --resume because chat/session is gone — not auth or generic CLI errors."""
     try:
@@ -1524,6 +1544,13 @@ async def _run_agent_task(
             msg = "\n".join(parts) if (err or out) else parts[0]
             if "Authentication required" in msg or "agent login" in msg.lower() or "CURSOR_API_KEY" in msg:
                 msg += " To fix: run 'agent login' in a terminal, or set CURSOR_API_KEY in the environment where the bridge runs. If Core auto-starts the bridge, set cursor_bridge_cursor_api_key in config/skills_and_plugins.yml (or CURSOR_API_KEY before starting Core)."
+            elif _cursor_error_is_context_limit(out, err):
+                msg += (
+                    " Cursor hit a context/chunking limit for this project. "
+                    "Try: (1) use Claude Code instead — pass backend='claude' or route via the claude-bridge plugin; "
+                    "(2) add large/generated folders to .cursorignore (node_modules, dist, vendor, build); "
+                    "(3) split the task into smaller scoped subtasks."
+                )
             elif not (err or out):
                 msg += (
                     " No output from agent. Run in a terminal to see the real error: agent -p \"<your task>\". "
@@ -1731,6 +1758,26 @@ async def _ndjson_cursor_run_agent_stream(
             return
 
         if rc != 0:
+            if _cursor_error_is_context_limit(out_join, err_s):
+                # Cursor stream-json can fail on very long outputs in some CLI builds.
+                # Retry once in non-stream json mode so the user can still get the final answer.
+                logger.info("Cursor stream hit context/chunk limit; retrying once with non-stream run_agent")
+                ok2, txt2 = await _run_agent_task(task, cwd=cwd, timeout_sec=timeout_sec, use_yolo=use_yolo)
+                if ok2:
+                    final_text2 = (txt2 or "").strip() or "(no output)"
+                    yield enc(
+                        {
+                            "event": "preview",
+                            "text": "(Live stream failed on large output; switched to non-stream for final result.)\n\n"
+                            + final_text2,
+                        }
+                    )
+                    yield enc({"event": "done", "success": True, "text": final_text2, "error": None})
+                    return
+                # Keep original stream failure details, but include fallback error to aid debugging.
+                extra = (txt2 or "").strip()
+                if extra:
+                    err_s = (err_s or "") + ("\n" if err_s else "") + f"fallback_error: {extra}"
             parts = [f"Agent exited with code {rc}."]
             if err_s:
                 parts.append(f"stderr: {err_s}")
@@ -1739,6 +1786,11 @@ async def _ndjson_cursor_run_agent_stream(
             msg = "\n".join(parts) if (err_s or out_join) else parts[0]
             if "Authentication required" in msg or "agent login" in msg.lower() or "CURSOR_API_KEY" in msg:
                 msg += " To fix: run 'agent login' in a terminal, or set CURSOR_API_KEY where the bridge runs."
+            elif _cursor_error_is_context_limit(out_join, err_s):
+                msg += (
+                    " Cursor hit a context/chunking limit. "
+                    "Try Claude Code instead (backend='claude') or add large folders to .cursorignore."
+                )
             yield enc({"event": "done", "success": False, "text": "", "error": msg})
             return
 

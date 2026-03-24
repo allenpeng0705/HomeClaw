@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:path/path.dart' as path;
 import 'package:flutter_tts/flutter_tts.dart';
@@ -279,6 +280,41 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } catch (_) {
       // Keep previous value on failure.
     }
+  }
+
+  Future<void> _showActiveProjectPathDialog() async {
+    final full = _cursorActiveCwd.trim();
+    if (full.isEmpty || !mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Active project'),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            full,
+            style: const TextStyle(fontSize: 13),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: full));
+              if (!ctx.mounted) return;
+              Navigator.of(ctx).pop();
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Project path copied')),
+              );
+            },
+            child: const Text('Copy'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _startInteractiveSessionIfNeeded() async {
@@ -2712,10 +2748,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ),
                       ),
                     if (_isDevBridgeFriend && _cursorActiveCwd.trim().isNotEmpty)
-                      Text(
-                        'Project: ${path.basename(_cursorActiveCwd.trim())}',
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Tooltip(
+                          message: _cursorActiveCwd.trim(),
+                          child: GestureDetector(
+                            onTap: () async {
+                              await _showActiveProjectPathDialog();
+                            },
+                            child: Chip(
+                              avatar: Icon(
+                                Icons.folder_outlined,
+                                size: 16,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                              label: Text(
+                                path.basename(_cursorActiveCwd.trim()),
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(horizontal: 6),
+                            ),
+                          ),
+                        ),
                       ),
                     if (_isDevBridgeFriend &&
                         _devBridgeStoredSessionActive &&
