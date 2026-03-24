@@ -1,0 +1,11 @@
+# Default watchlist (edit freely). See watchlist.example.yml for commented examples.
+
+watchlist:
+  - NVDA
+  - AAPL
+
+holdings: []
+
+alert_cooldown_hours: 24
+
+alerts: []

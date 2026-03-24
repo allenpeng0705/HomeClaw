@@ -1,0 +1,46 @@
+# Copy to watchlist.yml in this folder and edit. Yahoo Finance symbols (yfinance).
+#
+# Chinese markets (same Yahoo codes as finance.yahoo.com):
+#   - Shanghai SSE:   6-digit + .SS  e.g. 600519.SS (贵州茅台), 601318.SS
+#   - Shenzhen SZSE:  6-digit + .SZ  e.g. 000001.SZ, 300750.SZ
+#   - Hong Kong:      code + .HK     e.g. 0700.HK (腾讯), 9988.HK
+#   - Indices:       000001.SS (上证综指), 399001.SZ (深证成指), ^HSI (恒生)
+#
+# Examples: US (NVDA), China index, crypto (BTC-USD).
+
+watchlist:
+  - NVDA
+  - AAPL
+  # - "000001.SS"    # 上证综指
+  # - "399001.SZ"    # 深证成指
+  # - "600519.SS"    # example A-share
+  # - "0700.HK"      # example HK
+  # - BTC-USD
+
+# Optional: shares held — used for "portfolio" total value and P&L estimates.
+# Example:
+# holdings:
+#   - symbol: NVDA
+#     shares: 10
+#     avg_cost: 120.0
+holdings: []
+
+# Alert rules (evaluated by: stock_monitor.py check).
+# Cooldown prevents the same alert from firing every cron tick (default 24h).
+alert_cooldown_hours: 24
+
+# Example alerts (one trigger type per rule). Use cron_schedule + run_skill check to get notified.
+# alerts:
+#   - id: nvda-below-800
+#     symbol: NVDA
+#     price_at_or_below: 800.0          # notify when price <= 800
+#   - id: nvda-above-950
+#     symbol: NVDA
+#     price_at_or_above: 950.0          # notify when price >= 950
+#   - id: nvda-big-down-day
+#     symbol: NVDA
+#     day_change_pct_at_or_below: -3.0 # notify when day change <= -3%
+#   - id: btc-100k
+#     symbol: BTC-USD
+#     price_at_or_above: 100000
+alerts: []

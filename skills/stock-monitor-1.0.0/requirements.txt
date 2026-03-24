@@ -1,0 +1,6 @@
+# Stock monitor skill — install only if Core env lacks these (optional):
+#   pip install -r skills/stock-monitor-1.0.0/requirements.txt
+#
+# PyYAML is usually already satisfied by HomeClaw core requirements.txt.
+PyYAML>=6.0
+yfinance>=0.2.40

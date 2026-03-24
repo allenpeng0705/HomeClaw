@@ -522,6 +522,10 @@ tools:
   file_read_max_chars: 5000000
   # run_skill: if set, only these script names under skill/scripts/ are allowed. [] = allow all.
   run_skill_allowlist: []
+  # run_skill: when true (default), if <skill>/requirements.txt exists, Core runs pip install -r once per process before executing a .py script. Set false to disable (install deps manually).
+  run_skill_requirements_txt: true
+  # run_skill: when true (default), if <skill>/package.json exists, Core runs npm install in that folder once per process before .js/.mjs/.cjs/.ts scripts. Requires npm in PATH. Set false to disable.
+  run_skill_npm_install: true
   # run_skill: .py scripts run in subprocess by default; list skill folder names here to run those .py in Core's process.
   run_skill_py_in_process_skills: []
   run_skill_timeout: 300   # seconds

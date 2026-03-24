@@ -51,6 +51,13 @@ except ImportError:
 _process_jobs: Dict[str, Dict[str, Any]] = {}
 _process_jobs_lock = asyncio.Lock()
 
+# run_skill: paths of requirements.txt we already pip-installed this process (avoid repeat work).
+_skill_requirements_pip_done: set[str] = set()
+# run_skill: skill package.json paths we already ran npm install for this process.
+_skill_npm_install_done: set[str] = set()
+# Serialize pip/npm so concurrent run_skill calls do not double-install the same path.
+_skill_auto_install_lock = asyncio.Lock()
+
 # Keyed skills: require API key from user.yml (per user) or from skill config/env (Companion without user).
 # skill_name -> (user_yml_key, env_var)
 KEYED_SKILLS = {
@@ -197,6 +204,111 @@ def _run_py_script_in_process(
         sys.path[:] = old_path
         sys.stdout, sys.stderr = old_stdout, old_stderr
     return out_io.getvalue(), err_io.getvalue()
+
+
+async def _maybe_pip_install_skill_requirements(
+    skill_folder: Path,
+    skill_env: Dict[str, str],
+    config: Dict[str, Any],
+) -> None:
+    """
+    If tools.run_skill_requirements_txt is true (default) and skill_folder/requirements.txt exists,
+    run pip install -r once per Core process. Logs on failure; does not block the script run.
+    """
+    try:
+        if not config.get("run_skill_requirements_txt", True):
+            return
+        req_file = (skill_folder / "requirements.txt").resolve()
+        if not req_file.is_file():
+            return
+        key = str(req_file)
+        async with _skill_auto_install_lock:
+            if key in _skill_requirements_pip_done:
+                return
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-r",
+                str(req_file),
+                "--quiet",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=skill_env,
+            )
+            try:
+                _, err_b = await asyncio.wait_for(proc.communicate(), timeout=300)
+            except asyncio.TimeoutError:
+                logger.warning("run_skill: pip install -r %s timed out after 300s", req_file)
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                return
+            rc = proc.returncode
+            if rc != 0:
+                err_s = (err_b or b"").decode("utf-8", errors="replace")[:4000]
+                logger.warning("run_skill: pip install -r %s failed (rc=%s): %s", req_file, rc, err_s)
+                return
+            _skill_requirements_pip_done.add(key)
+            logger.info("run_skill: installed skill requirements from %s", req_file)
+    except Exception as e:
+        logger.debug("run_skill: requirements.txt install skipped: %s", e)
+
+
+async def _maybe_npm_install_skill_dependencies(
+    skill_folder: Path,
+    skill_env: Dict[str, str],
+    config: Dict[str, Any],
+) -> None:
+    """
+    If tools.run_skill_npm_install is true (default) and skill_folder/package.json exists,
+    run npm install in that folder once per Core process. Logs on failure; does not block the script run.
+    """
+    try:
+        if not config.get("run_skill_npm_install", True):
+            return
+        pkg_json = (skill_folder / "package.json").resolve()
+        if not pkg_json.is_file():
+            return
+        key = str(pkg_json)
+        npm_exe = shutil.which("npm")
+        if not npm_exe:
+            logger.debug("run_skill: npm not in PATH; skipping npm install for %s", skill_folder)
+            return
+        async with _skill_auto_install_lock:
+            if key in _skill_npm_install_done:
+                return
+            proc = await asyncio.create_subprocess_exec(
+                npm_exe,
+                "install",
+                "--no-fund",
+                "--no-audit",
+                "--silent",
+                cwd=str(skill_folder),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=skill_env,
+            )
+            try:
+                _, err_b = await asyncio.wait_for(proc.communicate(), timeout=300)
+            except asyncio.TimeoutError:
+                logger.warning("run_skill: npm install in %s timed out after 300s", skill_folder)
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                return
+            rc = proc.returncode
+            if rc != 0:
+                err_s = (err_b or b"").decode("utf-8", errors="replace")[:4000]
+                logger.warning("run_skill: npm install in %s failed (rc=%s): %s", skill_folder, rc, err_s)
+                return
+            _skill_npm_install_done.add(key)
+            logger.info("run_skill: npm install ok in %s", skill_folder)
+    except Exception as e:
+        logger.debug("run_skill: npm install skipped: %s", e)
 
 
 # Optional: load tool config from core config (exec allowlist, file_read_shared_dir, etc.).
@@ -3037,6 +3149,35 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                         loc = addr.split(",")[0].strip() or addr[:80].strip()
         if loc and isinstance(loc, str):
             skill_env["HOMECLAW_USER_LOCATION"] = loc
+        # Companion may store lat_lng alongside reverse-geocoded text; prefer for wttr.in precision.
+        if core and uid and hasattr(core, "_get_latest_location_entry"):
+            try:
+                entry = core._get_latest_location_entry(uid)
+                if not entry and uid.lower() in ("system", "companion"):
+                    sk = getattr(core, "_LATEST_LOCATION_SHARED_KEY", "companion")
+                    entry = core._get_latest_location_entry(sk)
+                if isinstance(entry, dict):
+                    ll = entry.get("lat_lng")
+                    if isinstance(ll, str) and ll.strip():
+                        skill_env["HOMECLAW_USER_LAT_LNG"] = ll.strip()
+            except Exception:
+                pass
+        # Server clock (same as plugin system context) so skills can label "as of" for any place, e.g. Beijing.
+        if core and callable(getattr(core, "get_system_context_for_plugins", None)):
+            try:
+                sys_ctx = core.get_system_context_for_plugins(uid or None, req)
+                if isinstance(sys_ctx, dict):
+                    dt = sys_ctx.get("datetime")
+                    if isinstance(dt, str) and dt.strip():
+                        skill_env["HOMECLAW_SERVER_DATETIME"] = dt.strip()
+                    iso = sys_ctx.get("datetime_iso")
+                    if isinstance(iso, str) and iso.strip():
+                        skill_env["HOMECLAW_SERVER_DATETIME_ISO"] = iso.strip()
+                    tz = sys_ctx.get("timezone")
+                    if isinstance(tz, str) and tz.strip():
+                        skill_env["HOMECLAW_SERVER_TIMEZONE"] = tz.strip()
+            except Exception:
+                pass
     except Exception:
         pass
     # Env from SKILL.md (script_env frontmatter + Configuration code block): defaults only, do not overwrite existing env.
@@ -3121,6 +3262,7 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
         args_list = []
     try:
         if script_path.suffix.lower() in (".py", ".pyw"):
+            await _maybe_pip_install_skill_requirements(skill_folder, skill_env, config)
             # Default: subprocess (isolated, never break Core). In-process only when skill folder name is in run_skill_py_in_process_skills.
             in_process_list = config.get("run_skill_py_in_process_skills")
             in_process = isinstance(in_process_list, list) and (skill_name in in_process_list)
@@ -3176,6 +3318,7 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
             node_path = shutil.which("node")
             if not node_path:
                 return "Error: Node.js script requires 'node' in PATH. Install Node.js (https://nodejs.org) or use a Python/shell script."
+            await _maybe_npm_install_skill_dependencies(skill_folder, skill_env, config)
             proc = await asyncio.create_subprocess_exec(
                 node_path,
                 str(script_path),
@@ -3194,6 +3337,7 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                     "Install one: npm install -g tsx  (or: npm install -g ts-node). "
                     "Alternatively compile to .js and use run_skill(script='file.js')."
                 )
+            await _maybe_npm_install_skill_dependencies(skill_folder, skill_env, config)
             proc = await asyncio.create_subprocess_exec(
                 ts_runner,
                 str(script_path),
