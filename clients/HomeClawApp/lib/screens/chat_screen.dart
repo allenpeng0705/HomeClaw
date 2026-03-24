@@ -832,13 +832,43 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
     if (widget.isUserFriend && widget.toUserId != null && widget.toUserId!.trim().isNotEmpty) {
       try {
-        await widget.coreService.clearUserInboxThread(
+        final del = await widget.coreService.clearUserInboxThread(
           userId: widget.userId,
           otherUserId: widget.toUserId!.trim(),
         );
         _lastUserInboxThreadFingerprint = null;
         await prefs.remove(_inboxHidePrefKey());
-        if (mounted) setState(() => _userInboxHideBeforeTs = null);
+        if (mounted) {
+          setState(() => _userInboxHideBeforeTs = null);
+          _userInboxFetchGeneration++;
+          unawaited(_loadUserInbox());
+        }
+        if (mounted) {
+          final hasPeer = del.containsKey('peer_cleared');
+          final peerOk = del['peer_cleared'];
+          final peerErr = del['peer_error']?.toString() ?? '';
+          if (hasPeer && peerOk == false) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  peerErr.isNotEmpty
+                      ? 'Cleared on this HomeClaw. Remote peer could not clear: $peerErr'
+                      : 'Cleared on this HomeClaw. The other instance may still show old messages — check peer URL and federation_trusted_instances.',
+                ),
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  hasPeer
+                      ? 'Chat history cleared on this Core and the remote HomeClaw.'
+                      : 'Chat history cleared',
+                ),
+              ),
+            );
+          }
+        }
       } catch (e) {
         // Server still has rows: use hide cutoff only as fallback (skew can hide new mail briefly).
         _userInboxHideBeforeTs = nowTs;
@@ -850,8 +880,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           );
         }
       }
-    }
-    if (mounted) {
+    } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Chat history cleared')),
       );

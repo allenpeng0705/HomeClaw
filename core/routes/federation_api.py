@@ -20,7 +20,7 @@ from core.federated_friendships_store import create_or_refresh_pending, upsert_r
 from core.federation_e2e import validate_e2e_envelope
 from core.federation_gating import inbound_federated_delivery_allowed
 from core.routes import auth
-from core.user_inbox import append_message as inbox_append
+from core.user_inbox import append_message as inbox_append, clear_thread as inbox_clear_thread
 
 
 def _get_user_by_id(user_id: str) -> Optional[User]:
@@ -265,3 +265,42 @@ def get_federation_friend_relationship_reciprocal_post_handler(core):  # noqa: A
             return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
     return post_reciprocal
+
+
+class FederatedClearThreadRequest(BaseModel):
+    """Peer Core asks this Core to clear the same user-to-user thread (both inbox files)."""
+
+    user_id: str = Field(..., description="Local user id (must match Companion account on this Core)")
+    other_user_id: str = Field(..., description="The other party's local user id on this Core")
+    from_instance_id: str = Field(..., description="Calling Core instance_id (for federation_trusted_instances)")
+
+
+def get_federation_clear_thread_post_handler(core):  # noqa: ARG001
+    """POST /api/federation/clear-thread — peer asks to clear mirrored thread after user cleared chat."""
+
+    async def post_federation_clear_thread(
+        body: FederatedClearThreadRequest,
+        _: None = Depends(auth.verify_inbound_auth),
+    ):
+        try:
+            meta = Util().get_core_metadata()
+            if not bool(getattr(meta, "federation_enabled", False)):
+                return JSONResponse(status_code=403, content={"error": "federation_disabled"})
+            trusted: List[Any] = list(getattr(meta, "federation_trusted_instances", None) or [])
+            caller = (body.from_instance_id or "").strip()
+            if not federation_sender_instance_allowed(trusted, caller):
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": "sender_instance_not_trusted", "hint": "Add caller instance_id to federation_trusted_instances or leave the list empty."},
+                )
+            uid = (body.user_id or "").strip()
+            oid = (body.other_user_id or "").strip()
+            if not uid or not oid or uid == oid:
+                return JSONResponse(status_code=400, content={"error": "user_id and other_user_id required"})
+            removed = inbox_clear_thread(user_id=uid, other_user_id=oid)
+            return JSONResponse(status_code=200, content={"ok": True, "removed": removed})
+        except Exception as e:
+            logger.warning("federation clear-thread POST failed: {}", e)
+            return JSONResponse(status_code=500, content={"error": "Internal server error"})
+
+    return post_federation_clear_thread

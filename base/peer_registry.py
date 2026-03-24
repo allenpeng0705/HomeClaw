@@ -504,6 +504,16 @@ def post_federation_user_message_sync(
     return post_federation_json_sync(base_url, "/api/federation/user-message", body, api_key=api_key, timeout=timeout)
 
 
+def post_federation_clear_thread_sync(
+    base_url: str,
+    body: Dict[str, Any],
+    api_key: Optional[str] = None,
+    timeout: float = 60.0,
+) -> Dict[str, Any]:
+    """POST /api/federation/clear-thread on another Core (mirror clear after local DELETE)."""
+    return post_federation_json_sync(base_url, "/api/federation/clear-thread", body, api_key=api_key, timeout=timeout)
+
+
 # --- Pairing invite store (persisted under database/peer_invites.json) ---
 
 _invite_lock = threading.Lock()

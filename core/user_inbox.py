@@ -256,6 +256,64 @@ def get_thread(
         return []
 
 
+def _is_under_upload_roots(full: Path) -> bool:
+    """True if path is under project or homeclaw_root database/uploads (deletable Companion uploads)."""
+    try:
+        full = full.resolve()
+        root = Path(Util().root_path()).expanduser().resolve()
+        u1 = (root / "database" / "uploads").resolve()
+        try:
+            full.relative_to(u1)
+            return True
+        except ValueError:
+            pass
+        meta = Util().get_core_metadata()
+        hc = str(getattr(meta, "homeclaw_root", None) or "").strip()
+        if not hc:
+            try:
+                hc = str(meta.get_homeclaw_root() or "").strip()
+            except Exception:
+                hc = ""
+        if hc:
+            u2 = (Path(hc).expanduser().resolve() / "database" / "uploads").resolve()
+            try:
+                full.relative_to(u2)
+                return True
+            except ValueError:
+                pass
+    except Exception:
+        return False
+    return False
+
+
+def _unlink_local_paths_from_message_dict(m: Dict[str, Any]) -> None:
+    """Best-effort delete files for absolute paths in images/audios/videos/file_links (not http(s) or data:)."""
+    for key in ("images", "audios", "videos", "file_links"):
+        raw = m.get(key)
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            if not isinstance(item, str):
+                continue
+            s = item.strip()
+            if not s or s.lower().startswith("data:") or s.lower().startswith("http://") or s.lower().startswith("https://"):
+                continue
+            if s.startswith("/files/") or s.startswith("/files/out"):
+                continue
+            try:
+                p = Path(s)
+                if not p.is_absolute():
+                    continue
+                if not p.is_file():
+                    continue
+                if not _is_under_upload_roots(p):
+                    continue
+                p.unlink()
+                logger.debug("user_inbox: removed upload file {}", p)
+            except Exception as e:
+                logger.debug("user_inbox: unlink skip {}: {}", s, e)
+
+
 def clear_thread(
     user_id: str,
     other_user_id: str,
@@ -288,12 +346,19 @@ def clear_thread(
                 except Exception as e:
                     logger.debug("user_inbox clear_thread read failed {}: {}", path, e)
                     return 0
+                removed_rows = [
+                    m
+                    for m in messages
+                    if (m.get("from_user_id") or "").strip() == from_user_id_to_remove
+                ]
                 kept = [
                     m
                     for m in messages
                     if (m.get("from_user_id") or "").strip() != from_user_id_to_remove
                 ]
-                removed = len(messages) - len(kept)
+                for m in removed_rows:
+                    _unlink_local_paths_from_message_dict(m)
+                removed = len(removed_rows)
                 if removed > 0:
                     _write_inbox_atomic(path, kept[-500:])
                 return removed

@@ -19,7 +19,13 @@ from pydantic import BaseModel, Field
 
 from base.base import Friend, User
 from base.federation import format_fid, parse_fid
-from base.peer_registry import find_peer_by_instance_id, load_instance_identity, post_federation_user_message_sync, resolve_peer_api_key
+from base.peer_registry import (
+    find_peer_by_instance_id,
+    load_instance_identity,
+    post_federation_clear_thread_sync,
+    post_federation_user_message_sync,
+    resolve_peer_api_key,
+)
 from base.util import Util
 
 from core.federated_friendships_store import list_accepted_for_recipient
@@ -312,6 +318,13 @@ def get_user_message_post_handler(core):
                 err = (remote.get("error") or "federation_failed") if isinstance(remote, dict) else "federation_failed"
                 if sc <= 0:
                     sc = 502
+                logger.warning(
+                    "user-message: federated POST to {} failed status={} error={} (peer response: {})",
+                    base_url,
+                    sc,
+                    err,
+                    remote if isinstance(remote, dict) else str(remote)[:800],
+                )
                 return JSONResponse(status_code=sc, content={"error": err, "detail": remote if isinstance(remote, dict) else {}})
             to_user = _get_user_by_id(to_user_id)
             if not to_user:
@@ -431,15 +444,57 @@ def delete_user_inbox_thread_handler(core):  # noqa: ARG001
             if not user_id or not other_user_id:
                 return JSONResponse(status_code=400, content={"error": "user_id and other_user_id required"})
             removed = inbox_clear_thread(user_id=user_id, other_user_id=other_user_id)
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "ok": True,
-                    "user_id": user_id,
-                    "other_user_id": other_user_id,
-                    "removed": removed,
-                },
-            )
+            out: dict = {
+                "ok": True,
+                "user_id": user_id,
+                "other_user_id": other_user_id,
+                "removed": removed,
+            }
+            # Remote friend: ask peer Core to clear the same thread so both instances stay in sync.
+            peer_cleared: Optional[bool] = None
+            peer_error: Optional[str] = None
+            try:
+                from_user = _get_user_by_id(user_id)
+                friend_match = _friend_match_for_recipient(from_user, other_user_id) if from_user else None
+                peer_inst = (getattr(friend_match, "peer_instance_id", None) or "").strip() if friend_match else ""
+                meta = Util().get_core_metadata()
+                if peer_inst and bool(getattr(meta, "federation_enabled", False)):
+                    peer = find_peer_by_instance_id(peer_inst)
+                    if peer:
+                        base_url = (peer.get("base_url") or "").strip().rstrip("/")
+                        api_key = resolve_peer_api_key(peer)
+                        ident = load_instance_identity()
+                        my_iid = (ident.get("instance_id") or "").strip()
+                        if base_url and my_iid:
+                            remote = post_federation_clear_thread_sync(
+                                base_url,
+                                {
+                                    "user_id": user_id,
+                                    "other_user_id": other_user_id,
+                                    "from_instance_id": my_iid,
+                                },
+                                api_key=api_key,
+                            )
+                            sc = int(remote.get("status_code") or 0)
+                            if remote.get("ok") and sc == 200:
+                                peer_cleared = True
+                            else:
+                                peer_cleared = False
+                                peer_error = str(remote.get("error") or "peer_clear_failed")
+                                logger.warning(
+                                    "user-inbox DELETE: peer clear-thread failed status={} remote={}",
+                                    sc,
+                                    remote,
+                                )
+            except Exception as e:
+                peer_cleared = False
+                peer_error = str(e)
+                logger.warning("user-inbox DELETE: peer clear-thread exception: {}", e)
+            if peer_cleared is not None:
+                out["peer_cleared"] = peer_cleared
+            if peer_error:
+                out["peer_error"] = peer_error
+            return JSONResponse(status_code=200, content=out)
         except Exception as e:
             logger.warning("user-inbox thread DELETE failed: {}", e)
             return JSONResponse(status_code=500, content={"error": "Internal server error"})

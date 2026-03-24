@@ -417,6 +417,12 @@ def register_all_routes(core: Any) -> None:
         dependencies=[Depends(auth.verify_inbound_auth)],
     )
     app.add_api_route(
+        "/api/federation/clear-thread",
+        federation_api.get_federation_clear_thread_post_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
         "/api/federation/friend-request",
         federation_api.get_federation_friend_request_post_handler(core),
         methods=["POST"],

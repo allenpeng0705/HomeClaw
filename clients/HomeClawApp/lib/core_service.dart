@@ -914,7 +914,8 @@ class CoreService {
   }
 
   /// DELETE /api/user-inbox/thread — clear full conversation between [userId] and [otherUserId] on Core.
-  Future<void> clearUserInboxThread({
+  /// For remote friends, Core may also clear the peer instance; see `peer_cleared` / `peer_error` in the map.
+  Future<Map<String, dynamic>> clearUserInboxThread({
     required String userId,
     required String otherUserId,
   }) async {
@@ -925,9 +926,14 @@ class CoreService {
     final url = Uri.parse('$_baseUrl/api/user-inbox/thread').replace(queryParameters: query);
     final response = await http
         .delete(url, headers: _authHeaders())
-        .timeout(const Duration(seconds: 20));
+        .timeout(const Duration(seconds: 30));
     if (response.statusCode != 200) {
       throw Exception('DELETE thread failed ${response.statusCode}: ${response.body}');
+    }
+    try {
+      return jsonDecode(response.body) as Map<String, dynamic>? ?? <String, dynamic>{'ok': true};
+    } catch (_) {
+      return <String, dynamic>{'ok': true};
     }
   }
 
