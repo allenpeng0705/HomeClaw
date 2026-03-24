@@ -48,6 +48,7 @@ nav:
     - Run Core: run.md
     - Portal Guide: portal.md
     - Models: models.md
+    - Examples: examples.md
   - Use HomeClaw:
     - Companion App: companion-app.md
     - Channels (Telegram, Discord, WebChat): channels.md

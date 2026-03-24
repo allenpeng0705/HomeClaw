@@ -1,81 +1,104 @@
 # HomeClaw Installation Guide
 
-Short guide to installing HomeClaw and checking your environment.
+This guide focuses on installation and recovery.
+
+If you want the fastest path, use `QuickStart.md`.
 
 ---
 
-## Quick start: install scripts
+## 1) Install (recommended)
 
-| OS | Command |
-|----|--------|
-| **Mac / Linux** | From project root: `./install.sh` — or from a parent directory: the script will clone into `./HomeClaw` and continue. |
-| **Windows** | `.\install.ps1` or **`install.bat`** (from project root). If you see "not digitally signed", use `install.bat` or run: `powershell -ExecutionPolicy Bypass -File .\install.ps1`. |
+| Platform | Command |
+|---|---|
+| macOS / Linux | `bash install.sh` |
+| Windows | `install.bat` (or `.\install.ps1`) |
 
-The script will:
+What installer does:
 
-1. **Python** — Check for 3.9+ (skip if OK); try to install if missing.
-2. **Node.js** — Check for Node (skip if OK); try to install if missing.
-3. **Source** — Use existing clone or clone from GitHub (if clone fails, the script reports what went wrong).
-4. **Dependencies** — Run `pip install -r requirements.txt`.
-5. **llama.cpp** — Try package manager (e.g. `brew install llama.cpp`, `winget install llama.cpp`); if that fails, the script prints how to download the binary and put it in `llama.cpp-master/<platform>/`.
-6. **GGUF / Ollama** — Prints where to get GGUF models (Hugging Face; in China: ModelScope, HF Mirror) and how to use Ollama.
-7. **Portal** — When everything passes, starts the Portal and opens http://127.0.0.1:18472 in your browser.
-
-**Already in the repo?** Run the script from the project root; it will skip cloning and only run the steps that are still needed (Python/Node are skipped if already OK).
-
-**pip 403 Forbidden (e.g. Tsinghua mirror)?** The install script will retry with official PyPI. Or run manually: `pip install -r requirements.txt -i https://pypi.org/simple`.
-
-**Dependency conflicts about semantic-kernel?** Pip may warn that `semantic-kernel` expects older versions of aiofiles, numpy, openai, pydantic, etc. HomeClaw does not use semantic-kernel (it is a transitive dependency of Cognee). You can ignore these warnings; Core and Cognee memory work with the installed versions. If you hit a real runtime error, try a fresh venv or report the issue.
-
-**Conda + pip:** If you use Anaconda, `pip install` may target your active env (e.g. `pytorch`). Pip can print “conflict” lines for packages already in that env (e.g. `cognee`, `instructor` vs `openai` 2.x). HomeClaw pins `openai` 2.x in `requirements-constraints.txt`. For a clean tree, use a **dedicated conda env** for HomeClaw or the repo **`.venv`** (see `install.sh` messages).
-
-**Document stack (`requirements-document.txt`):** Must use `unstructured-inference` **≥ 1.0.5** with `unstructured[all-docs]==0.18.2` (older inference pins conflict). The repo pins a compatible pair; install with the same constraints as the script: `pip install -r requirements-document.txt -c requirements-constraints.txt`.
+- dependency setup (Python + Node)
+- optional helper CLIs
+- VMPrint install/build
+- opens Portal (`http://127.0.0.1:18472`)
 
 ---
 
-## Manual install (summary)
-
-1. **Clone:** `git clone https://github.com/allenpeng0705/HomeClaw.git && cd HomeClaw`
-2. **Python:** 3.9+ (3.10–3.12 recommended). Install from python.org or your package manager.
-3. **Dependencies:** `pip install -r requirements.txt` then `pip install -r requirements-cognee-deps.txt`. Cognee (default memory backend) is part of this repo; only its dependencies are installed, not the cognee package itself. In China you can use a mirror (e.g. `-i https://pypi.tuna.tsinghua.edu.cn/simple`). If you get **403 Forbidden** from a mirror, use official PyPI: `pip install -r requirements.txt -i https://pypi.org/simple`.
-4. **Node.js** (optional, for some plugins): Install from [nodejs.org](https://nodejs.org).
-5. **llama.cpp** (for local GGUF): Install via [llama.cpp install guide](https://github.com/ggml-org/llama.cpp/blob/master/docs/install.md) (e.g. `brew install llama.cpp`, `winget install llama.cpp`), or download a binary from [releases](https://github.com/ggml-org/llama.cpp/releases) and put `llama-server` (or `llama-server.exe`) in `llama.cpp-master/<platform>/`.
-6. **GGUF models:** Put `.gguf` files in the `models/` folder and add entries in `config/llm.yml` under `local_models`. Or use **Ollama**: install from [ollama.com](https://ollama.com), then `python -m main ollama pull <model>` and set as main in config.
-
----
-
-## Check your environment: doctor
-
-After installing, run:
+## 2) Verify
 
 ```bash
 python -m main doctor
 ```
 
-This checks config, workspace, skills dir, llama-server (if using local LLM), and main/embedding LLM connectivity. Fix any reported issues before starting Core.
+If doctor reports issues, fix them before production use.
 
 ---
 
-## Configure and run: Portal
+## 3) Common problems
 
-The **Portal** is the local web UI for config, onboarding, and starting Core and channels.
+### Script permission denied (macOS/Linux)
 
-- **Start:** `python -m main portal` — by default it opens http://127.0.0.1:18472 in your browser.
-- **First time:** Create an admin account (username/password); then use Dashboard, **Guide to install**, **Manage settings**, and **Start channel** as needed.
+Use:
 
-For using the Portal from a **web browser** (same machine) or from the **Companion app** (remote via Core), see **[docs_design/PortalUsage.md](docs_design/PortalUsage.md)**.
+```bash
+bash install.sh
+```
+
+### PowerShell execution policy (Windows)
+
+Use `install.bat`, or:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+### pip 403 / mirror issues
+
+Use official index:
+
+```bash
+pip install -r requirements.txt -i https://pypi.org/simple
+```
+
+### VMPrint build errors
+
+Run from VMPrint root:
+
+```bash
+cd tools/vmprint
+npm install
+npm run build
+```
 
 ---
 
-## Summary
+## 4) Manual install (fallback)
 
-| What | Where |
-|------|--------|
-| **Install script (Mac/Linux)** | `./install.sh` (project root) |
-| **Install script (Windows)** | `.\install.ps1` or **`install.bat`** (project root) |
-| **Manual install** | Clone → pip install → optional Node, llama.cpp, GGUF/Ollama (see above) |
-| **Environment check** | `python -m main doctor` |
-| **Portal (config & onboarding)** | `python -m main portal` → http://127.0.0.1:18472 |
-| **Portal usage (web & Companion)** | [docs_design/PortalUsage.md](docs_design/PortalUsage.md) |
-| **Install design (scripts, doctor)** | [docs_design/InstallScriptAndDoctorDesign.md](docs_design/InstallScriptAndDoctorDesign.md) |
-| **Mac/Linux Homebrew (tap + formula)** | [docs_design/DistributionMacLinuxChecklist.md](docs_design/DistributionMacLinuxChecklist.md) |
+```bash
+git clone https://github.com/allenpeng0705/HomeClaw.git
+cd HomeClaw
+pip install -r requirements.txt
+```
+
+Then:
+
+- configure models in `config/llm.yml`
+- start Portal `python -m main portal`
+- start Core `python -m main start`
+
+---
+
+## 5) Install outputs (important)
+
+After successful install:
+
+- Portal available at `http://127.0.0.1:18472`
+- Core can be started with `python -m main start`
+- docs and config are ready
+- VMPrint path should exist at `tools/vmprint`
+
+---
+
+More:
+
+- `QuickStart.md`
+- `HOW_TO_USE.md`
+- `docs/install.md`

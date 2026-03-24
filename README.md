@@ -8,7 +8,11 @@
 
 # HomeClaw
 
-HomeClaw is a self-hosted AI assistant platform:
+HomeClaw is a self-hosted AI assistant platform.
+
+It gives you one `Core` backend that can serve many clients (Companion app + channels), use local/cloud/mix models, and extend behavior with tools, skills, and plugins. You can run it for personal use, family/team workflows, or multi-instance federation.
+
+At a glance:
 
 - one `Core` backend (FastAPI)
 - local/cloud/mix LLM routing
@@ -18,36 +22,7 @@ HomeClaw is a self-hosted AI assistant platform:
 
 ## Quick Start
 
-### 1) Install
-
-| Platform | Command |
-|---|---|
-| macOS / Linux | `bash install.sh` |
-| Windows | `install.bat` (or `.\install.ps1`) |
-
-The installer sets dependencies and opens Portal at `http://127.0.0.1:18472`.
-
-### 2) Configure in Portal
-
-In Portal:
-
-1. Create admin account
-2. Set model(s) in **LLM settings**
-3. Add users
-4. Start Core
-
-### 3) Run and chat
-
-```bash
-python -m main start
-```
-
-- Core URL: `http://127.0.0.1:9000`
-- Quick check:
-
-```bash
-python -m main doctor
-```
+[Open `QuickStart.md`](QuickStart.md) for the full install and first-chat flow.
 
 ---
 
@@ -82,12 +57,9 @@ In `config/llm.yml`, set:
 
 Then ask normal questions; router chooses model per request.
 
-### Example C: Better PDF output (VMPrint)
+### Example C: Generate document output
 
-Use tool `markdown_to_pdf` or `vmprint_render` with:
-
-- `vmprint_profile`: `academic | manuscript | screenplay | literature`
-- optional `vmprint_style`
+Use HomeClaw document tools to produce downloadable report files under `output/`.
 
 ---
 
@@ -98,14 +70,6 @@ Use tool `markdown_to_pdf` or `vmprint_render` with:
 - Install details: `InstallationGuide.md`
 - Full usage: `HOW_TO_USE.md`
 - Design notes: `docs_design/`
-
----
-
-## Language Versions
-
-- [简体中文](README_zh.md)
-- [日本語](README_jp.md)
-- [한국어](README_kr.md)
 
 ---
 
