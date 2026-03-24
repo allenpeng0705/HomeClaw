@@ -4,7 +4,7 @@
 
 HomeClaw is a self-hosted AI assistant that runs on your own hardware — your Mac, Windows PC, or Linux server. Use cloud models (OpenAI, Gemini, DeepSeek), local models (llama.cpp), or both. Memory, plugins, multi-user, and full privacy — all under your roof.
 
-[GitHub](https://github.com/allenpeng0705/HomeClaw){ .md-button .md-button--primary } [Get Started](getting-started.md){ .md-button } [Documentation](https://allenpeng0705.github.io/HomeClaw/){ .md-button }
+[Website](https://www.homeclaw.cn){ .md-button .md-button--primary } [GitHub](https://github.com/allenpeng0705/HomeClaw){ .md-button } [Get Started](getting-started.md){ .md-button } [Documentation](https://allenpeng0705.github.io/HomeClaw/){ .md-button }
 
 ## Features
 

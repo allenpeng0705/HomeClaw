@@ -2,6 +2,10 @@
   <img src="HomeClaw_Banner.jpg" alt="HomeClaw Banner">
 </p>
 
+<p align="center">
+  <a href="https://www.homeclaw.cn"><strong>www.homeclaw.cn</strong></a>
+</p>
+
 # HomeClaw
 
 **HomeClaw** is an **AI assistant** that runs on your own hardware. Each installation is an autonomous agent: it talks to you over the channels you already use, keeps **memory** (RAG + agent memory), and extends its abilities through **skills** and **plugins**. Use **local models** to save cost and keep data at home, **cloud models** for scale, or **both** with a smart router. A **companion app** on every platform and **multi-agent** by running multiple instances let you build your own AI-powered social network—decentralized, private when you want it, and fully under your control.
@@ -143,7 +147,7 @@ Design and security: [UserToUserMessagingViaCompanion.md](docs_design/UserToUser
 
 **Other languages / 其他语言 / 他の言語 / 다른 언어:** [简体中文](README_zh.md) | [日本語](README_jp.md) | [한국어](README_kr.md)
 
-**Documentation:** [https://allenpeng0705.github.io/HomeClaw/](https://allenpeng0705.github.io/HomeClaw/) — Full docs (install, run, mix mode, reports, tools, plugins) are built with MkDocs and published there. You can also browse the source in the **`docs/`** folder on GitHub.
+**Website:** [https://www.homeclaw.cn](https://www.homeclaw.cn) · **Documentation (GitHub Pages):** [https://allenpeng0705.github.io/HomeClaw/](https://allenpeng0705.github.io/HomeClaw/) — Full docs (install, run, mix mode, reports, tools, plugins). You can also browse the source in the **`docs/`** folder on GitHub.
 
 ---
 

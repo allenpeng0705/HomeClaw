@@ -1,5 +1,7 @@
 # HomeClaw documentation (`docs/`)
 
+**Website:** [https://www.homeclaw.cn](https://www.homeclaw.cn)
+
 This folder is the **source for the public doc site** (MkDocs / Material), published at **[GitHub Pages](https://allenpeng0705.github.io/HomeClaw/)**. Start with **[index.md](index.md)** on the site, or use the sections below.
 
 **Design and internal notes** live in **`docs_design/`** at the repo root (not part of the MkDocs build).
