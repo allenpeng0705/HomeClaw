@@ -348,6 +348,63 @@ def _infer_remind_me_calendar_at_time(q: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _infer_remind_me_relative_day_at_time(q: str) -> Optional[Dict[str, Any]]:
+    """Parse one-shot like '明天1点半提醒我' / '后天下午3点提醒'. Never raises."""
+    try:
+        if not q or not isinstance(q, str):
+            return None
+        m_day = re.search(r"(明天|后天)", q)
+        if not m_day:
+            return None
+        day_word = m_day.group(1)
+        day_offset = 1 if day_word == "明天" else 2
+        # Prefer the clock phrase that is directly tied to "提醒" (e.g. "能1点半提醒我吗"),
+        # not the event time that may appear earlier (e.g. "明天下午4点的飞机").
+        m_time = re.search(
+            r"(?:能|请|在)?\s*(上午|下午|晚上|中午)?\s*(\d{1,2})\s*点(?:\s*(半|(\d{1,2})\s*分))?\s*提醒",
+            q,
+        )
+        if not m_time:
+            m_time = re.search(
+                r"提醒(?:我|一下|下)?(?:在)?\s*(上午|下午|晚上|中午)?\s*(\d{1,2})\s*点(?:\s*(半|(\d{1,2})\s*分))?",
+                q,
+            )
+        if not m_time:
+            m_time = re.search(r"(上午|下午|晚上|中午)?\s*(\d{1,2})\s*点(?:\s*(半|(\d{1,2})\s*分))?", q)
+        if not m_time:
+            return None
+        period = (m_time.group(1) or "").strip()
+        hour = int(m_time.group(2))
+        minute = 30 if (m_time.group(3) == "半") else int(m_time.group(4) or 0)
+        # If reminder time itself has no period marker, borrow likely context from text before it.
+        if not period:
+            try:
+                _prefix = q[: m_time.start()]
+            except Exception:
+                _prefix = q
+            if re.search(r"(下午|晚上|中午)\s*\d{1,2}\s*点", _prefix):
+                period = "下午"
+            elif re.search(r"上午\s*\d{1,2}\s*点", _prefix):
+                period = "上午"
+        if period in ("下午", "晚上") and 1 <= hour < 12:
+            hour += 12
+        if period == "中午" and 1 <= hour < 12:
+            hour += 12
+        if period == "上午" and hour == 12:
+            hour = 0
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            return None
+        run_dt = datetime.now() + timedelta(days=day_offset)
+        run_dt = run_dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        msg = (q[:80].strip() if len(q) > 80 else q.strip()) or "Reminder"
+        return {
+            "tool": "remind_me",
+            "arguments": {"at_time": run_dt.strftime("%Y-%m-%d %H:%M:%S"), "message": msg[:120] or "Reminder"},
+        }
+    except Exception:
+        return None
+
+
 def infer_remind_me_fallback(query: str) -> Optional[Dict[str, Any]]:
     """
     Infer remind_me(minutes, message) from natural-language reminder phrases (many styles/languages).
@@ -396,6 +453,9 @@ def infer_remind_me_fallback(query: str) -> Optional[Dict[str, Any]]:
         # Birthday/date + "提前N天" should be handled by annual/cron fallback, not "on the date" one-shot.
         if re.search(r"\d{1,2}\s*月\s*\d{1,2}\s*(?:日|号)", q) and re.search(r"提前\s*(?:\d+\s*天|两天|一天|三天|四天|五天|六天|七天|八天|九天|十天)", q):
             return None
+        rel = _infer_remind_me_relative_day_at_time(q)
+        if rel:
+            return rel
         cal = _infer_remind_me_calendar_at_time(q)
         if cal:
             return cal
