@@ -22,6 +22,7 @@ from loguru import logger
 
 # Re-use single robust implementation for reminder/cron inference (many NL styles/languages).
 from core.tool_helpers_fallback import (
+    infer_annual_birthday_advance_reminder_fallback,
     infer_cron_schedule_fallback,
     infer_remind_me_fallback,
     remind_me_clarification_question,

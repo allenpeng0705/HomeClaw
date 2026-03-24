@@ -76,6 +76,26 @@ content: |
   Thought: Recurring every N hours; cron_expr for every 2 hours = 0 */2 * * *
   Call: cron_schedule(cron_expr="0 */2 * * *", message="stretch")
 
+  User: "Every Tuesday at 2pm remind me about the team meeting."
+  Thought: Recurring weekly on one weekday; hour 14, weekday Tue = 2 in cron (0=Sun).
+  Call: cron_schedule(cron_expr="0 14 * * 2", message="team meeting")
+
+  User: "每月15号上午10点提醒我交房租."
+  Thought: Recurring monthly on day 15 at 10:00; cron day-of-month field = 15.
+  Call: cron_schedule(cron_expr="0 10 15 * *", message="交房租")
+
+  User: "Remind me every quarter on the 1st at 9am to review OKRs."
+  Thought: Quarterly on 1st of Jan, Apr, Jul, Oct.
+  Call: cron_schedule(cron_expr="0 9 1 1,4,7,10 *", message="review OKRs")
+
+  User: "Every year on August 19 at 9am remind me it's my kid's birthday."
+  Thought: Yearly same month/day; month=8, day=19.
+  Call: cron_schedule(cron_expr="0 9 19 8 *", message="kid birthday")
+
+  User: "每两周提醒我开周会，就按每月1号和15号吧."
+  Thought: User chose twice-monthly approximation (not exact 14-day cadence).
+  Call: cron_schedule(cron_expr="0 9 1,15 * *", message="开周会")
+
   User: "Every day at 7am search the web for 'latest news' and send me the results."
   Thought: Recurring task that runs a tool; use cron_schedule with task_type=run_tool, tool_name=web_search, tool_arguments.
   Call: cron_schedule(cron_expr="0 7 * * *", task_type="run_tool", tool_name="web_search", tool_arguments={"query": "latest news", "count": 10}, message="morning news")
@@ -83,6 +103,10 @@ content: |
   User: "My girlfriend's birthday is March 15."
   Thought: Recording a date/event; use record_date. Optional: add reminder with event_date and remind_on.
   Call: record_date(event_name="Girlfriend birthday", when="March 15")
+
+  User: "我女朋友的生日是3月28日，能提前两天提醒我买蛋糕吗？"
+  Thought: Annual birthday + N days before → record_date with remind_days_before=2, repeat_yearly=true, event_date=next Mar 28 from system time, remind_message about cake; TAM schedules yearly cron (Mar 26 9:00) when expression is stable.
+  Call: record_date(event_name="女友生日", when="3月28日", event_date="<YYYY-MM-DD next Mar 28>", remind_days_before=2, repeat_yearly=true, remind_message="买蛋糕（女友生日还有两天）")
 
   User: "Remember that the project deadline is next Friday and remind me the day before."
   Thought: Record event + remind day before; use record_date with when, event_date (compute from "next Friday"), remind_on="day_before".

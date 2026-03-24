@@ -235,12 +235,16 @@ def _item_to_line(x) -> str:
 
 
 class _SuppressConfigCoreAccessFilter(logging.Filter):
-    """Filter out uvicorn access log lines for GET /api/config/core (Companion connection checks)."""
+    """Filter out noisy uvicorn access logs for high-frequency polling endpoints."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             msg = record.getMessage() if hasattr(record, "getMessage") else (getattr(record, "msg", "") or "")
-            if "/api/config/core" in str(msg) and " 200 " in str(msg):
+            smsg = str(msg)
+            if "/api/config/core" in smsg and " 200 " in smsg:
+                return False
+            # Companion async polling can emit a lot of 202 Accepted lines.
+            if "/inbound/result" in smsg and " 202 " in smsg:
                 return False
         except Exception:
             pass

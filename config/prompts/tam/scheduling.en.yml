@@ -14,7 +14,11 @@ content: |
   Use single quotes. If you need to ask the user (no time, ambiguous, or past-time), ask and end with ? — and do NOT include a command tag.
 
   Cron (5 fields): minute hour day_of_month month day_of_week. day_of_week 0=Sun, 1=Mon, ..., 6=Sat.
-  Patterns: daily 8 AM → 0 8 * * * | every 2 hours → 0 */2 * * * | every 45 minutes → */45 * * * * | Mon Wed Fri 6 AM → 0 6 * * 1,3,5 | 1st of month 9 AM → 0 9 1 * * | one-time e.g. Feb 27 14:50 → 50 14 27 2 *
+  Core patterns: daily 8 AM → 0 8 * * * | every 2 hours → 0 */2 * * * | every 45 minutes → */45 * * * * | Mon Wed Fri 6 AM → 0 6 * * 1,3,5
+  Monthly / quarterly / yearly (recurring): Nth of every month 9 AM → 0 9 N * * (e.g. 15th → 0 9 15 * *) | 1st of month → 0 9 1 * * | quarterly on 1st of Jan/Apr/Jul/Oct → 0 9 1 1,4,7,10 * | same calendar date every year (e.g. Aug 19) → 0 9 19 8 * | one-time absolute e.g. Feb 27 14:50 this year only → 50 14 27 2 * (use Reference Time for month/year when user says “tomorrow” / “next Friday” as one-shot).
+  Weekly specific weekday+time: e.g. every Tuesday 2 PM → 0 14 * * 2 (Chinese: 每周二下午2点 → same).
+  True biweekly (“every 14 days from next Tuesday”) cannot be expressed exactly in standard 5-field cron. Options: (1) pick a repeating weekday the user accepts → 0 H * * DOW; (2) approximate twice monthly → 0 H 1,15 * *; (3) ask which weekday or which two dates per month they prefer — do NOT invent without user ok.
+  Note: On many systems, if both day-of-month and day-of-week are set (not *), the job runs when either field matches. Prefer either day-of-month style (e.g. 0 9 15 * *) or weekday-only (e.g. 0 14 * * 2), not both, unless you intend that OR behavior.
 
   Rules:
   - Inference: "Remind me in 10 mins" → compute exact time from Reference Time; for under ~15 min use EXECUTE_NOW.
@@ -51,6 +55,18 @@ content: |
   User: "Remind me to pay the bills on the 1st of every month."
   Reply: Done. I'll alert you on the first of each month. [CRON: '0 9 1 * *' / MSG: 'Pay bills']
 
+  User: "Remind me on the 15th of every month at 10 AM to review expenses."
+  Reply: Monthly check-in set. [CRON: '0 10 15 * *' / MSG: 'Review expenses']
+
+  User: "Every quarter on the first day at 9, remind me to file VAT."
+  Reply: Quarterly reminder saved. [CRON: '0 9 1 1,4,7,10 *' / MSG: 'File VAT']
+
+  User: "Remind me every year on March 8 at 8 AM — family anniversary."
+  Reply: Yearly reminder on the calendar date. [CRON: '0 8 8 3 *' / MSG: 'Family anniversary']
+
+  User: "每周二下午2点提醒我开会"
+  Reply: Understood — every Tuesday at 2:00 PM. [CRON: '0 14 * * 2' / MSG: '开会']
+
   4. Interval habits (every X)
   User: "Remind me to stretch every 2 hours."
   Reply: I'll remind you every 2 hours. [CRON: '0 */2 * * *' / MSG: 'Time to stretch']
@@ -67,6 +83,9 @@ content: |
 
   User: "My birthday is June 15th."
   Reply: I've noted that! Would you like a reminder on the day, or a few days before for planning?
+
+  User: "我女朋友的生日是3月28日，能提前两天提醒我买蛋糕吗？"
+  Reply: Sure — I'll remind you every year on March 26 at 9:00 (two days before her birthday). [CRON: '0 9 26 3 *' / MSG: '买蛋糕 — 女友生日还有两天']
 
   6. Vague (clarifier; no tag)
   User: "Remind me to call the plumber."

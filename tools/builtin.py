@@ -817,8 +817,18 @@ async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContex
     if job_id is None:
         return "Error: Failed to schedule (invalid cron expression or croniter not installed)."
     msg = params.get("message", "Scheduled reminder")
+    next_run_text = ""
+    try:
+        with tam._cron_lock:  # best-effort for user-facing confirmation
+            _job = next((j for j in (tam.cron_jobs or []) if j.get("job_id") == job_id), None)
+        if isinstance(_job, dict) and _job.get("next_run") is not None:
+            next_run_text = str(_job.get("next_run"))
+    except Exception:
+        next_run_text = ""
     # Return a user-friendly string so the reply is never raw JSON (better UX when used as final or when model paraphrases).
     friendly = f"Recurring reminder scheduled. I'll remind you: {msg}. (To cancel: say 'list my recurring reminders' and remove it.)"
+    if next_run_text:
+        friendly += f" Next run: {next_run_text}."
     if task_type == "run_skill":
         friendly += f" [Task: run_skill {params.get('skill_name', '')} {params.get('script', '')}]"
     elif task_type == "run_plugin":
@@ -987,7 +997,9 @@ async def _remind_me_executor(arguments: Dict[str, Any], context: ToolContext) -
         channel_key = "companion"
     friend_id = getattr(context, "friend_id", None) or getattr(context, "app_id", None)
     try:
-        tam.schedule_one_shot(message, run_time_str, user_id=user_id, channel_key=channel_key, friend_id=friend_id)
+        ok = tam.schedule_one_shot(message, run_time_str, user_id=user_id, channel_key=channel_key, friend_id=friend_id)
+        if not ok:
+            return f"Error: at_time is in the past or invalid for scheduling (got: {run_time_str}). Please provide a future time."
         # User-friendly response (Core may use as final reply); avoid raw JSON. Include current date so the follow-up LLM uses it (e.g. "当前是26号" not "19号").
         time_part = run_time_str.split()[-1] if " " in run_time_str else run_time_str
         today = datetime.now()
@@ -1056,7 +1068,7 @@ async def _schedule_delayed_action_executor(arguments: Dict[str, Any], context: 
 
 
 async def _record_date_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Record a date/event for future reference. Optional: event_date (YYYY-MM-DD) if you can compute it from 'when'; remind_on ('day_before' or 'on_day') to schedule a reminder; remind_message for the reminder text. E.g. girlfriend's birthday in two weeks -> event_date=computed, remind_on=day_before."""
+    """Record a date/event for future reference. Optional: event_date (YYYY-MM-DD) if you can compute it from 'when'; remind_on ('day_before' or 'on_day') or remind_days_before (0–120) to schedule a reminder; repeat_yearly for annual birthdays (uses yearly cron when possible). remind_message for the reminder text."""
     core = context.core
     orchestrator = getattr(core, "orchestratorInst", None)
     if orchestrator is None:
@@ -1070,12 +1082,23 @@ async def _record_date_executor(arguments: Dict[str, Any], context: ToolContext)
     event_date = (arguments.get("event_date") or "").strip()
     remind_on = (arguments.get("remind_on") or "").strip().lower()
     remind_message = (arguments.get("remind_message") or "").strip()
+    remind_days_before_raw = arguments.get("remind_days_before")
+    repeat_yearly = bool(arguments.get("repeat_yearly", False))
     if not when:
         return "Error: when is required (e.g. 'tomorrow', 'in two weeks', '2025-03-15')"
     if remind_on and remind_on not in ("day_before", "on_day"):
         return "Error: remind_on must be 'day_before' or 'on_day' if set"
-    if remind_on and not event_date:
-        return "Error: event_date (YYYY-MM-DD) is required when remind_on is set (compute from 'when')"
+    remind_days_before: Optional[int] = None
+    if remind_days_before_raw is not None and str(remind_days_before_raw).strip() != "":
+        try:
+            remind_days_before = int(remind_days_before_raw)
+        except (TypeError, ValueError):
+            return "Error: remind_days_before must be an integer (e.g. 2 for 'two days before')"
+        if remind_days_before < 0 or remind_days_before > 120:
+            return "Error: remind_days_before must be between 0 and 120"
+    wants_reminder = bool(remind_on) or (remind_days_before is not None)
+    if wants_reminder and not event_date:
+        return "Error: event_date (YYYY-MM-DD) is required when scheduling a reminder (compute from 'when', e.g. next March 28 for an annual birthday)"
     try:
         system_user_id = getattr(context, "system_user_id", None) or getattr(context, "user_id", None)
         friend_id = getattr(context, "friend_id", None) or getattr(context, "app_id", None)
@@ -1088,6 +1111,8 @@ async def _record_date_executor(arguments: Dict[str, Any], context: ToolContext)
             remind_message=remind_message or None,
             system_user_id=system_user_id,
             friend_id=friend_id,
+            remind_days_before=remind_days_before,
+            repeat_yearly=repeat_yearly,
         )
         # Return a user-friendly string so the reply is never raw JSON. Never raise.
         if isinstance(result, dict) and result.get("recorded"):
@@ -6500,15 +6525,18 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
         ToolDefinition(
             name="cron_schedule",
             description=(
-                "RECURRING only: 'every N hours', 'daily at 9am', '每天早上', 'every 10 minutes'. "
-                "For ONE-SHOT ('in 5 minutes', 'remind me at 9am once') use remind_me instead. "
-                "Schedule a reminder, skill, plugin, or tool at cron times. cron_expr: 5 fields (minute hour day month weekday), e.g. '0 7 * * *' = daily at 7:00. "
-                "task_type 'message' (default): send a fixed message. 'run_tool'/'run_skill'/'run_plugin' for periodic tasks. Optional: tz, delivery_target."
+                "RECURRING only. For ONE-SHOT use remind_me instead. "
+                "cron_expr: 5 fields minute hour day-of-month month day-of-week (0=Sun..6=Sat). "
+                "Examples: daily 7am → 0 7 * * * | every 2h → 0 */2 * * * | Tue 2pm → 0 14 * * 2 | "
+                "15th monthly 10am → 0 10 15 * * | quarterly 1st Jan/Apr/Jul/Oct → 0 9 1 1,4,7,10 * | "
+                "yearly Aug 19 9am → 0 9 19 8 * | Mon/Wed/Fri 6am → 0 6 * * 1,3,5. "
+                "True 'every 14 days from date X' is not exact in standard cron—use weekday repeat, twice-monthly (1,15), or ask the user. "
+                "Schedule message/skill/plugin/tool. Optional: tz, delivery_target."
             ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "cron_expr": {"type": "string", "description": "Cron expression (e.g. '0 9 * * *' for daily at 9:00)."},
+                    "cron_expr": {"type": "string", "description": "5-field cron (e.g. daily 9:00 '0 9 * * *', monthly 15th 10:00 '0 10 15 * *')."},
                     "task_type": {"type": "string", "description": "One of: 'message' (fixed message), 'run_tool' (run tool e.g. web_search for 'search news every 7 am'), 'run_skill' (run skill script), 'run_plugin' (run plugin e.g. headlines for 'top headlines every 8 am'). Default 'message'.", "default": "message"},
                     "message": {"type": "string", "description": "For message: text to send. For run_skill/run_plugin: optional label.", "default": "Scheduled reminder"},
                     "skill_name": {"type": "string", "description": "Required when task_type is run_skill. Skill folder name (e.g. weather-1.0.0)."},
@@ -6526,7 +6554,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["cron_expr"],
             },
             execute_async=_cron_schedule_executor,
-            short_description="Use when: recurring reminder — 'every day at 9am', 'every N hours', '每天早上'. Not one-shot → use remind_me. cron_expr required.",
+            short_description="Use when: recurring — daily/weekly/monthly/quarterly/yearly, 'every N hours', weekdays. Not one-shot → use remind_me. cron_expr required.",
         )
     )
     registry.register(
@@ -6634,21 +6662,28 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="record_date",
-            description="Record a date/event for future reference. Use for: 'Tomorrow is national holiday', 'Girlfriend birthday in two weeks'. Optional inference: if user may want a reminder, pass event_date (YYYY-MM-DD, compute from 'when') and remind_on ('day_before' or 'on_day') to schedule a reminder; remind_message overrides default text.",
+            description=(
+                "Record a date/event for future reference. Use for holidays, deadlines, birthdays. "
+                "To schedule a reminder: set event_date (YYYY-MM-DD) plus either remind_on ('day_before' | 'on_day') or remind_days_before (integer, e.g. 2 = two days before). "
+                "For annual birthdays (same month/day every year) with advance notice: set repeat_yearly=true so a yearly recurring reminder is used when possible (else next one-shot). "
+                "Example: girlfriend birthday Mar 28, remind 2 days early to buy cake → event_date=next Mar 28, remind_days_before=2, repeat_yearly=true, remind_message='买蛋糕（女友生日还有两天）'."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
                     "event_name": {"type": "string", "description": "Name of the event (e.g. 'Spring Festival', 'Girlfriend birthday')."},
-                    "when": {"type": "string", "description": "When: 'tomorrow', 'in two weeks', 'in two months', or a date string."},
+                    "when": {"type": "string", "description": "When: 'tomorrow', 'in two weeks', '3月28日', or a date string."},
                     "note": {"type": "string", "description": "Optional note.", "default": ""},
-                    "event_date": {"type": "string", "description": "Optional. Resolved date YYYY-MM-DD (compute from 'when' for reminders). Required if remind_on is set."},
-                    "remind_on": {"type": "string", "description": "Optional. 'day_before' = remind day before event; 'on_day' = remind on event day at 9am. Requires event_date."},
-                    "remind_message": {"type": "string", "description": "Optional. Custom reminder message (e.g. 'Don't forget: girlfriend birthday tomorrow!').", "default": ""},
+                    "event_date": {"type": "string", "description": "Resolved date YYYY-MM-DD (compute from 'when'). Required when scheduling a reminder."},
+                    "remind_on": {"type": "string", "description": "Optional legacy: 'day_before' or 'on_day'. Prefer remind_days_before for N days ahead. Requires event_date if set."},
+                    "remind_days_before": {"type": "integer", "description": "Optional. Remind N calendar days before event_date at 9:00 (e.g. 2 for 'two days before' / 提前两天). 0 = on the event day morning. Requires event_date."},
+                    "repeat_yearly": {"type": "boolean", "description": "Optional. True for annual repeating dates (birthdays): schedule yearly recurring reminder when cron allows; otherwise next one-shot.", "default": False},
+                    "remind_message": {"type": "string", "description": "Optional. Custom reminder text (e.g. '买蛋糕').", "default": ""},
                 },
                 "required": ["event_name", "when"],
             },
             execute_async=_record_date_executor,
-            short_description="Use when: user wants to record a date/event (e.g. 'girlfriend birthday in two weeks', 'tomorrow is holiday'). Optional: remind_on for reminder.",
+            short_description="Use when: record an event; optional remind_days_before / repeat_yearly for birthdays and advance reminders.",
         )
     )
     registry.register(

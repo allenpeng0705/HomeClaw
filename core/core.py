@@ -1936,10 +1936,13 @@ class Core(CoreInterface):
             _loop.call_later(_wakeup_interval, _wakeup)
             core_metadata: CoreMetadata = Util().get_core_metadata()
             logger.debug(f"Running core on {core_metadata.host}:{core_metadata.port}")
-            # Suppress access log for GET /api/config/core (Companion connection checks every 30s)
+            # Suppress uvicorn access logs (Companion polling can be very noisy).
+            # Keep application logs (loguru/logger) unaffected.
             _uvicorn_access = logging.getLogger("uvicorn.access")
             if not any(isinstance(f, _SuppressConfigCoreAccessFilter) for f in _uvicorn_access.filters):
                 _uvicorn_access.addFilter(_SuppressConfigCoreAccessFilter())
+            _uvicorn_access.setLevel(logging.WARNING)
+            _uvicorn_access.propagate = False
             config = uvicorn.Config(self.app, host=core_metadata.host, port=core_metadata.port, log_level="critical", access_log=False)
             self.server = Server(config=config)
             # Start embedding (and main LLM) server before initializing Cognee.

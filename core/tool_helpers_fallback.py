@@ -7,7 +7,8 @@ Never raises; never imports from core.core.
 import json
 import re
 import uuid
-from typing import Any, Dict, Optional
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, Optional, Tuple
 
 from loguru import logger
 
@@ -219,6 +220,134 @@ def _is_event_without_advance(q: str) -> bool:
     return False
 
 
+def _cn_weekday_to_cron_dow(ch: str) -> Optional[int]:
+    """Map 一二三四五六日天 to vixie weekday (0=Sunday .. 6=Saturday). Never raises."""
+    try:
+        m = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "日": 0, "天": 0}
+        return m.get((ch or "").strip())
+    except Exception:
+        return None
+
+
+_EN_WEEKDAY_TO_CRON = {
+    "monday": 1, "mon": 1,
+    "tuesday": 2, "tue": 2, "tues": 2,
+    "wednesday": 3, "wed": 3,
+    "thursday": 4, "thu": 4, "thur": 4, "thurs": 4,
+    "friday": 5, "fri": 5,
+    "saturday": 6, "sat": 6,
+    "sunday": 0, "sun": 0,
+}
+
+
+def _extract_hour_from_schedule_query(q: str, default: int = 9) -> int:
+    """Parse 下午2点 / 上午9 / at 3:30 pm from query; clamp 0–23. Never raises."""
+    try:
+        if not q:
+            return max(0, min(23, int(default)))
+        qn = q
+        m = re.search(r"(?:下午|晚上)\s*(\d{1,2})\s*点(?:\s*(\d{1,2})\s*分)?", qn)
+        if m:
+            h = int(m.group(1))
+            if 1 <= h < 12:
+                h += 12
+            return max(0, min(23, h))
+        m = re.search(r"(?:上午|早上|早晨)\s*(\d{1,2})\s*点(?:\s*(\d{1,2})\s*分)?", qn)
+        if m:
+            h = int(m.group(1))
+            if h == 12:
+                h = 0
+            return max(0, min(23, h))
+        m = re.search(r"中午\s*(\d{1,2})\s*点", qn)
+        if m:
+            h = int(m.group(1))
+            if 1 <= h <= 11:
+                h += 12
+            return max(0, min(23, h))
+        m = re.search(r"at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", qn, re.IGNORECASE)
+        if m:
+            h = int(m.group(1))
+            ap = (m.group(3) or "").lower()
+            if ap == "pm" and h < 12:
+                h += 12
+            if ap == "am" and h == 12:
+                h = 0
+            return max(0, min(23, h))
+        m = re.search(r"\b(\d{1,2})\s*点", qn)
+        if m:
+            h = int(m.group(1))
+            if 0 <= h <= 23:
+                return h
+    except Exception:
+        pass
+    try:
+        d = int(default)
+        return max(0, min(23, d))
+    except (TypeError, ValueError):
+        return 9
+
+
+def _infer_remind_me_calendar_at_time(q: str) -> Optional[Dict[str, Any]]:
+    """Calendar one-shot: '8月19号之前提醒我…' / '8月19号提醒我…' → remind_me(at_time=...). Never raises."""
+    try:
+        if not q or not isinstance(q, str):
+            return None
+        m = re.search(r"(\d{1,2})\s*月\s*(\d{1,2})\s*(?:日|号)(\s*之前)?", q)
+        if not m:
+            return None
+        month, day = int(m.group(1)), int(m.group(2))
+        if not (1 <= month <= 12 and 1 <= day <= 31):
+            return None
+        before = bool((m.group(3) or "").strip())
+
+        def _anchor_day(year: int) -> Optional[date]:
+            try:
+                d0 = date(year, month, day)
+                return d0 - timedelta(days=1) if before else d0
+            except ValueError:
+                return None
+
+        hour = 9
+        minute = 0
+        mt = re.search(r"(?:下午|晚上)\s*(\d{1,2})\s*点(?:\s*(\d{1,2})\s*分)?", q)
+        if mt:
+            hour = int(mt.group(1))
+            if 1 <= hour < 12:
+                hour += 12
+            if mt.group(2):
+                minute = int(mt.group(2))
+        else:
+            mt = re.search(r"(?:上午|早上|早晨)\s*(\d{1,2})\s*点(?:\s*(\d{1,2})\s*分)?", q)
+            if mt:
+                hour = int(mt.group(1))
+                if hour == 12:
+                    hour = 0
+                if mt.group(2):
+                    minute = int(mt.group(2))
+        hour = max(0, min(23, hour))
+        minute = max(0, min(59, minute))
+
+        now = datetime.now()
+        chosen: Optional[datetime] = None
+        for y in range(now.year, now.year + 4):
+            ad = _anchor_day(y)
+            if ad is None:
+                continue
+            at_dt = datetime(ad.year, ad.month, ad.day, hour, minute, 0)
+            if at_dt > now:
+                chosen = at_dt
+                break
+        if chosen is None:
+            return None
+        msg = (q[:80].strip() if len(q) > 80 else q.strip()) or "Reminder"
+        return {
+            "tool": "remind_me",
+            "arguments": {"at_time": chosen.strftime("%Y-%m-%d %H:%M:%S"), "message": msg[:120] or "Reminder"},
+        }
+    except Exception:
+        return None
+
+
 def infer_remind_me_fallback(query: str) -> Optional[Dict[str, Any]]:
     """
     Infer remind_me(minutes, message) from natural-language reminder phrases (many styles/languages).
@@ -257,14 +386,20 @@ def infer_remind_me_fallback(query: str) -> Optional[Dict[str, Any]]:
                             break
                     except (ValueError, IndexError, TypeError):
                         continue
-        if minutes is None or minutes <= 0 or minutes > 43200:
+        if minutes is not None and 0 < minutes <= 43200:
+            # Short message without date/time (tool will show time; we avoid inventing)
+            msg = (q[:80].strip() if len(q) > 80 else q.strip()) or "Reminder"
+            # If message is only a clock/time fragment (e.g. "下午5:19"), use generic label so we don't duplicate time in UI
+            if len(msg) <= 25 and re.search(r"\d{1,2}\s*[点:]\s*\d{1,2}|下午\d|上午\d|^\d{1,2}:\d{2}", msg):
+                msg = "Reminder"
+            return {"tool": "remind_me", "arguments": {"minutes": minutes, "message": msg[:120] or "Reminder"}}
+        # Birthday/date + "提前N天" should be handled by annual/cron fallback, not "on the date" one-shot.
+        if re.search(r"\d{1,2}\s*月\s*\d{1,2}\s*(?:日|号)", q) and re.search(r"提前\s*(?:\d+\s*天|两天|一天|三天|四天|五天|六天|七天|八天|九天|十天)", q):
             return None
-        # Short message without date/time (tool will show time; we avoid inventing)
-        msg = (q[:80].strip() if len(q) > 80 else q.strip()) or "Reminder"
-        # If message is only a clock/time fragment (e.g. "下午5:19"), use generic label so we don't duplicate time in UI
-        if len(msg) <= 25 and re.search(r"\d{1,2}\s*[点:]\s*\d{1,2}|下午\d|上午\d|^\d{1,2}:\d{2}", msg):
-            msg = "Reminder"
-        return {"tool": "remind_me", "arguments": {"minutes": minutes, "message": msg[:120] or "Reminder"}}
+        cal = _infer_remind_me_calendar_at_time(q)
+        if cal:
+            return cal
+        return None
     except Exception:
         pass
     return None
@@ -286,7 +421,14 @@ def remind_me_clarification_question(query: str) -> Optional[str]:
     q = query.strip()
     if ("有个会" in q or "开会" in q or "meeting" in q) and re.search(r"\d+\s*分钟", q) and not re.search(r"提前\s*\d+\s*分钟", q):
         return "提前几分钟提醒你啊？ How many minutes before should I remind you?"
+    if re.search(
+        r"提前\s*(?:\d+\s*天|两天|一天|三天|四天|五天|六天|七天|八天|九天|十天)",
+        q,
+    ):
+        return None
     if ("生日" in q or "月" in q) and ("提前" in q or "提醒" in q) and not re.search(r"提前\s*(?:一周|几天|\d+\s*天)", q):
+        if re.search(r"\d{1,2}\s*月\s*\d{1,2}\s*(?:日|号)", q):
+            return None
         return "提前一周提醒你可以吗？或者提前几天？ Remind you one week before, or how many days before?"
     return None
 
@@ -303,10 +445,13 @@ def infer_cron_schedule_fallback(query: str) -> Optional[Dict[str, Any]]:
         if not q or len(q) < 5:
             return None
         q_lower = q.lower()
-        # Recurring keywords (multilingual)
+        # Recurring keywords (multilingual). "星期/礼拜" supports 每周二… without relying only on bare "每".
         if not any(
             kw in q_lower or kw in q
-            for kw in ("every", "每天", "每小时", "hours", "daily", "recurring", "cron", "每隔", "每", "小时", "点")
+            for kw in (
+                "every", "每天", "每小时", "hours", "daily", "recurring", "cron", "每隔", "每", "小时", "点",
+                "每周", "每星期", "每礼拜", "礼拜", "星期", "双周",
+            )
         ):
             return None
         cron_expr = None
@@ -325,6 +470,38 @@ def infer_cron_schedule_fallback(query: str) -> Optional[Dict[str, Any]]:
                 n = int(m.group(1))
                 if 1 <= n <= 24:
                     cron_expr = f"0 */{n} * * *"
+
+        # Biweekly: vixie cron has no "every 14 days from anchor" — approximate as 1st & 15th at H (user can edit via LLM/TAM if needed).
+        if cron_expr is None:
+            if (
+                re.search(r"每\s*两\s*周|每两\s*周|每隔\s*一\s*周|隔周|隔\s*一\s*周|双周", q)
+                or "biweekly" in q_lower
+                or "every other week" in q_lower
+                or re.search(r"every\s+2\s*weeks?\b", q_lower)
+            ):
+                h = _extract_hour_from_schedule_query(q, 9)
+                cron_expr = f"0 {h} 1,15 * *"
+
+        # Weekly: 每周二下午2点 / every Tuesday at 2pm -> minute hour * * weekday
+        if cron_expr is None:
+            dow = None
+            m_wd = (
+                re.search(r"每\s*(?:个)?\s*星期\s*([一二三四五六日天])", q)
+                or re.search(r"每\s*周\s*([一二三四五六日天])", q)
+                or re.search(r"每\s*礼拜\s*([一二三四五六日天])", q)
+            )
+            if m_wd:
+                dow = _cn_weekday_to_cron_dow(m_wd.group(1))
+            if dow is None:
+                m_en = re.search(
+                    r"every\s+(?:week\s+on\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)\b",
+                    q_lower,
+                )
+                if m_en:
+                    dow = _EN_WEEKDAY_TO_CRON.get(m_en.group(1).lower())
+            if dow is not None:
+                h = _extract_hour_from_schedule_query(q, 9)
+                cron_expr = f"0 {h} * * {dow}"
 
         # "every day at H" / "每天H点" / "daily at H" / "每天早上H点" -> 0 H * * *
         if cron_expr is None:
@@ -354,6 +531,76 @@ def infer_cron_schedule_fallback(query: str) -> Optional[Dict[str, Any]]:
 
         if cron_expr:
             return {"tool": "cron_schedule", "arguments": {"cron_expr": cron_expr, "message": message}}
+        return None
+    except Exception:
+        return None
+
+
+_CN_ADV_DAYS = {"一天": 1, "两天": 2, "三天": 3, "四天": 4, "五天": 5, "六天": 6, "七天": 7, "八天": 8, "九天": 9, "十天": 10}
+
+
+def _stable_yearly_reminder_md(month: int, day: int, days_before: int) -> Optional[Tuple[int, int]]:
+    """Same rule as TAM: if anniversary minus days_before is same (m,d) every year, return it for cron. Never raises."""
+    try:
+        if not (1 <= int(month) <= 12 and 1 <= int(day) <= 31 and 0 <= int(days_before) <= 120):
+            return None
+        pairs = set()
+        for y in range(2000, 2040):
+            try:
+                ev = date(y, month, day)
+            except ValueError:
+                continue
+            r = ev - timedelta(days=int(days_before))
+            pairs.add((r.month, r.day))
+            if len(pairs) > 1:
+                return None
+        return next(iter(pairs)) if len(pairs) == 1 else None
+    except Exception:
+        return None
+
+
+def infer_annual_birthday_advance_reminder_fallback(query: str) -> Optional[Dict[str, Any]]:
+    """
+    Annual (or dated) birthday + 提前 N 天 / 两天 → yearly cron when stable, else remind_me one-shot.
+    Example: 女朋友生日3月28日提前两天提醒买蛋糕 → cron 0 9 26 3 * . Never raises.
+    """
+    if not query or not isinstance(query, str):
+        return None
+    try:
+        q = query.strip()
+        if "生日" not in q:
+            return None
+        m_date = re.search(r"(\d{1,2})\s*月\s*(\d{1,2})\s*(?:日|号)", q)
+        m_adv = re.search(r"提前\s*(?:(\d{1,2})\s*天|(两天|一天|三天|四天|五天|六天|七天|八天|九天|十天))", q)
+        if not m_date or not m_adv:
+            return None
+        month, day = int(m_date.group(1)), int(m_date.group(2))
+        if m_adv.group(1):
+            days_before = int(m_adv.group(1))
+        else:
+            days_before = _CN_ADV_DAYS.get(m_adv.group(2) or "", 0)
+        if days_before <= 0 or not (1 <= month <= 12 and 1 <= day <= 31):
+            return None
+        h = _extract_hour_from_schedule_query(q, 9)
+        msg = (q[:100].strip() if len(q) > 100 else q.strip()) or "生日提醒"
+        msg = msg[:120]
+        mdg = _stable_yearly_reminder_md(month, day, days_before)
+        if mdg:
+            rm, rd = mdg
+            return {"tool": "cron_schedule", "arguments": {"cron_expr": f"0 {h} {rd} {rm} *", "message": msg}}
+        now = datetime.now()
+        for add_y in range(0, 8):
+            try:
+                ev = date(now.year + add_y, month, day)
+            except ValueError:
+                continue
+            rem = ev - timedelta(days=days_before)
+            dt = datetime(rem.year, rem.month, rem.day, h, 0, 0)
+            if dt > now:
+                return {
+                    "tool": "remind_me",
+                    "arguments": {"at_time": dt.strftime("%Y-%m-%d %H:%M:%S"), "message": msg},
+                }
         return None
     except Exception:
         return None

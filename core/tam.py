@@ -14,7 +14,7 @@ TAM can be used in two ways:
    the request is too complex for the structured tools.
 """
 import asyncio
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 import json
 import random
 import re
@@ -22,7 +22,7 @@ import signal
 import sys
 import threading
 import time
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 from loguru import logger
 from pathlib import Path
 from schedule import Scheduler
@@ -44,6 +44,57 @@ from base.prompt_manager import get_prompt_manager
 from base.util import Util
 from core.coreInterface import CoreInterface
 from memory import tam_storage
+
+
+def _stable_yearly_reminder_month_day(month: int, day: int, days_before: int) -> Optional[Tuple[int, int]]:
+    """
+    If (month/day) anniversary minus days_before falls on the same calendar month/day every year,
+    return (reminder_month, reminder_day) for a yearly cron. Else None (e.g. Feb 29 / variable Feb).
+    Never raises.
+    """
+    try:
+        if not (1 <= int(month) <= 12 and 1 <= int(day) <= 31 and 0 <= int(days_before) <= 120):
+            return None
+        pairs: set = set()
+        for y in range(2000, 2040):
+            try:
+                ev = date(y, month, day)
+            except ValueError:
+                continue
+            r = ev - timedelta(days=int(days_before))
+            pairs.add((r.month, r.day))
+            if len(pairs) > 1:
+                return None
+        return next(iter(pairs)) if len(pairs) == 1 else None
+    except Exception:
+        return None
+
+
+def _first_future_reminder_dt(
+    month: int,
+    day: int,
+    days_before: int,
+    hour: int = 9,
+    minute: int = 0,
+) -> Optional[datetime]:
+    """Next reminder datetime: event on month/day (next occurrence) minus days_before at hour:minute. Never raises."""
+    try:
+        now = datetime.now()
+        hb = max(0, min(23, int(hour)))
+        mb = max(0, min(59, int(minute)))
+        db = int(days_before)
+        for y in range(now.year, now.year + 8):
+            try:
+                ev = date(y, month, day)
+            except ValueError:
+                continue
+            rem = ev - timedelta(days=db)
+            dt = datetime.combine(rem, time(hb, mb, 0))
+            if dt > now:
+                return dt
+        return None
+    except Exception:
+        return None
 
 
 def _safe_user_id_for_recorded_events(system_user_id: Optional[str]) -> str:
@@ -470,7 +521,8 @@ class TAM:
         return (
             "You are a Python Time-Parsing Agent. Convert user intent into a friendly reply plus one of: [CRON: 'min hour day month dow' / MSG: 'message'] or [EXECUTE_NOW: 'message']. Use only the current datetime below.\n\n"
             f"Reference Time: {current_datetime}\n\n"
-            "Cron: minute hour day month dow (0=Sun..6=Sat). Examples: daily 8am = 0 8 * * *; every 2h = 0 */2 * * *; every 45 min = */45 * * * *; Mon Wed Fri 6am = 0 6 * * 1,3,5.\n\n"
+            "Cron: minute hour day month dow (0=Sun..6=Sat). Examples: daily 8am = 0 8 * * *; every 2h = 0 */2 * * *; Tue 2pm = 0 14 * * 2; 15th monthly 10am = 0 10 15 * *; "
+            "quarterly 1st Jan/Apr/Jul/Oct = 0 9 1 1,4,7,10 *; yearly Aug 19 = 0 9 19 8 *. True biweekly-from-date needs approximation or user choice.\n\n"
             "Rules: (1) Under ~15 min → EXECUTE_NOW. (2) Meeting/appointment → reminder 5–15 min before. (3) No time given → ask, end with ?, no tag. (4) If requested time is already past → ask e.g. 'It\'s already X. Set for tomorrow instead?' and do NOT output a tag.\n\n"
             "Examples: \"Meeting in 15 min, remind me\" → ... [EXECUTE_NOW: 'Meeting in 15 mins']. \"Every morning at 8\" → ... [CRON: '0 8 * * *' / MSG: '...']. \"Remind me to call X\" → When would you like me to remind you?\n\n"
             f"Chat History:\n{chat_history}\n\nUser Input:\n{text}\n\nReply:"
@@ -1398,8 +1450,10 @@ class TAM:
         remind_message: Optional[str] = None,
         system_user_id: Optional[str] = None,
         friend_id: Optional[str] = None,
+        remind_days_before: Optional[int] = None,
+        repeat_yearly: bool = False,
     ) -> Dict[str, Any]:
-        """Record a date/event for future reference (no LLM; from record_date tool). Per-user. Step 10: friend_id used as from_friend when reminder fires. Never raises."""
+        """Record a date/event for future reference (no LLM; from record_date tool). Per-user. remind_days_before N + repeat_yearly schedules yearly cron when stable; else one-shot. Never raises."""
         try:
             entry = {
                 "event_name": (event_name or "").strip() or "event",
@@ -1409,7 +1463,15 @@ class TAM:
                 "event_date": (event_date or "").strip() if event_date else "",
                 "remind_on": (remind_on or "").strip().lower() or "",
                 "remind_message": (remind_message or "").strip() or "",
+                "repeat_yearly": bool(repeat_yearly),
             }
+            if remind_days_before is not None:
+                try:
+                    entry["remind_days_before"] = int(remind_days_before)
+                except (TypeError, ValueError):
+                    entry["remind_days_before"] = ""
+            else:
+                entry["remind_days_before"] = ""
             events = self._load_recorded_events_for_user(system_user_id)
             if not isinstance(events, list):
                 events = []
@@ -1420,24 +1482,69 @@ class TAM:
             result: Dict[str, Any] = {"recorded": True, "event_name": entry["event_name"], "when": entry["when"]}
             reminders_scheduled: List[str] = []
 
-            if entry["event_date"] and entry["remind_on"]:
+            rdb: Optional[int] = None
+            try:
+                if remind_days_before is not None and str(remind_days_before).strip() != "":
+                    rdb = int(remind_days_before)
+            except (TypeError, ValueError):
+                rdb = None
+            if rdb is None and entry["remind_on"] == "day_before":
+                rdb = 1
+            elif rdb is None and entry["remind_on"] == "on_day":
+                rdb = 0
+
+            if entry["event_date"] and rdb is not None:
                 try:
-                    ev_date = datetime.strptime(entry["event_date"], "%Y-%m-%d")
+                    ev_date = datetime.strptime(entry["event_date"][:10], "%Y-%m-%d")
                 except ValueError:
                     logger.warning("TAM: Invalid event_date {}; skipping reminder", entry["event_date"])
                 else:
-                    msg = entry["remind_message"] or f"Reminder: {entry['event_name']} is today!"
-                    uid = system_user_id or "companion"
-                    if entry["remind_on"] == "day_before":
-                        run_date = ev_date - timedelta(days=1)
-                        run_time_str = run_date.strftime("%Y-%m-%d 09:00:00")
-                        day_before_msg = entry["remind_message"] or f"Reminder: {entry['event_name']} is tomorrow!"
-                        self.schedule_one_shot(day_before_msg, run_time_str, user_id=uid, friend_id=friend_id)
-                        reminders_scheduled.append(f"day before ({run_time_str})")
-                    elif entry["remind_on"] == "on_day":
-                        run_time_str = ev_date.strftime("%Y-%m-%d 09:00:00")
-                        self.schedule_one_shot(msg, run_time_str, user_id=uid, friend_id=friend_id)
-                        reminders_scheduled.append(f"on day ({run_time_str})")
+                    em, ed = ev_date.month, ev_date.day
+                    uid = (system_user_id or "companion").strip() or "companion"
+                    _msg_today = f"Reminder: {entry['event_name']} is today!"
+                    lead_msg = entry["remind_message"] or (
+                        _msg_today if rdb == 0 else f"Reminder: {entry['event_name']} is in {rdb} day(s)."
+                    )
+                    ry = bool(repeat_yearly)
+                    md_stable = _stable_yearly_reminder_month_day(em, ed, rdb) if ry and CRONITER_AVAILABLE else None
+                    params: Dict[str, Any] = {
+                        "message": lead_msg,
+                        "_cron": True,
+                        "user_id": uid,
+                        "enabled": True,
+                        "task_type": "message",
+                    }
+                    if friend_id is not None and str(friend_id).strip():
+                        params["friend_id"] = str(friend_id).strip()
+                    if uid.lower() in ("companion", "system"):
+                        params["channel_key"] = "companion"
+
+                    if ry and md_stable:
+                        rm, rd = md_stable
+                        cron_expr = f"0 9 {rd} {rm} *"
+                        hint = self._RECURRING_CANCEL_HINT
+
+                        def make_task(msg: str, prms: Dict[str, Any]):
+                            async def _task():
+                                await self._send_reminder_to_channel_safe(msg + hint, prms)
+                            return _task
+
+                        task = make_task(lead_msg, params)
+                        jid = self.schedule_cron_task(task, cron_expr, params=params)
+                        if jid:
+                            reminders_scheduled.append(f"yearly cron {cron_expr} ({jid})")
+                    else:
+                        if ry:
+                            fdt = _first_future_reminder_dt(em, ed, rdb, 9, 0)
+                        else:
+                            run_date = ev_date.date() - timedelta(days=rdb)
+                            fdt = datetime.combine(run_date, time(9, 0, 0))
+                            if fdt <= datetime.now():
+                                fdt = None
+                        if fdt:
+                            run_time_str = fdt.strftime("%Y-%m-%d %H:%M:%S")
+                            self.schedule_one_shot(lead_msg, run_time_str, user_id=uid, friend_id=friend_id)
+                            reminders_scheduled.append(f"one-shot ({run_time_str})")
                     if reminders_scheduled:
                         result["reminders_scheduled"] = reminders_scheduled
             return result

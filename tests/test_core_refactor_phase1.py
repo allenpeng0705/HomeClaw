@@ -66,6 +66,7 @@ def test_tool_helpers_fallback_import():
     from core.tool_helpers_fallback import (
         tool_result_looks_like_error,
         tool_result_usable_as_final_response,
+        infer_annual_birthday_advance_reminder_fallback,
         infer_remind_me_fallback,
         remind_me_needs_clarification,
         remind_me_clarification_question,
@@ -74,6 +75,7 @@ def test_tool_helpers_fallback_import():
     )
     assert callable(tool_result_looks_like_error)
     assert callable(tool_result_usable_as_final_response)
+    assert callable(infer_annual_birthday_advance_reminder_fallback)
     assert callable(infer_remind_me_fallback)
     assert callable(remind_me_needs_clarification)
     assert callable(remind_me_clarification_question)
@@ -99,14 +101,56 @@ def test_tool_result_looks_like_error():
 
 def test_infer_remind_me_fallback():
     """infer_remind_me_fallback extracts remind_me args from Chinese/English phrases."""
+    from datetime import datetime
+
     from core.tool_helpers_fallback import infer_remind_me_fallback
     r = infer_remind_me_fallback("30分钟后提醒我")
     assert r is not None
     assert r.get("tool") == "remind_me"
     assert r.get("arguments", {}).get("minutes") == 30
+    # Calendar (月/号) → at_time one-shot
+    r_cal = infer_remind_me_fallback("8月19号之前提醒我孩子的生日")
+    assert r_cal is not None
+    assert r_cal.get("tool") == "remind_me"
+    _at = (r_cal.get("arguments") or {}).get("at_time") or ""
+    assert len(_at) >= 10
+    dt = datetime.strptime(_at[:19], "%Y-%m-%d %H:%M:%S")
+    assert (dt.month, dt.day) == (8, 18)
+    r_on = infer_remind_me_fallback("8月19号早上9点提醒我孩子生日")
+    assert r_on is not None
+    _at2 = (r_on.get("arguments") or {}).get("at_time") or ""
+    dt2 = datetime.strptime(_at2[:19], "%Y-%m-%d %H:%M:%S")
+    assert (dt2.month, dt2.day) == (8, 19)
+    assert dt2.hour == 9
     assert infer_remind_me_fallback("hello world") is None
     assert infer_remind_me_fallback("") is None
     assert infer_remind_me_fallback(None) is None
+
+
+def test_infer_annual_birthday_advance_reminder_fallback():
+    """Birthday month/day + 提前 N 天 → yearly cron (stable) or one-shot."""
+    from core.tool_helpers_fallback import infer_annual_birthday_advance_reminder_fallback
+
+    q = "我女朋友的生日是3月28日，能提前两天提醒我买蛋糕吗？"
+    r = infer_annual_birthday_advance_reminder_fallback(q)
+    assert r is not None
+    assert r.get("tool") == "cron_schedule"
+    assert r.get("arguments", {}).get("cron_expr") == "0 9 26 3 *"
+    r2 = infer_annual_birthday_advance_reminder_fallback("女朋友生日3月28号提前2天提醒我")
+    assert r2 is not None
+    assert r2.get("arguments", {}).get("cron_expr") == "0 9 26 3 *"
+    assert infer_annual_birthday_advance_reminder_fallback("明天提醒我") is None
+
+
+def test_infer_cron_schedule_fallback_weekly_and_biweekly():
+    """infer_cron_schedule_fallback: weekly weekday+time and biweekly approximation."""
+    from core.tool_helpers_fallback import infer_cron_schedule_fallback
+    w = infer_cron_schedule_fallback("每周二下午2点提醒我开会")
+    assert w is not None
+    assert w.get("arguments", {}).get("cron_expr") == "0 14 * * 2"
+    b = infer_cron_schedule_fallback("每两周提醒我开周会")
+    assert b is not None
+    assert b.get("arguments", {}).get("cron_expr") == "0 9 1,15 * *"
 
 
 def test_remind_me_needs_clarification():

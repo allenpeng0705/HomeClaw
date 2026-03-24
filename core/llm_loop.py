@@ -142,6 +142,7 @@ def _messages_sanitized_for_tool_role(messages: List[dict]) -> List[dict]:
 _SCHEDULING_INTENT_TOKENS = (
     # Chinese
     "提醒", "每隔", "每小时", "个小时", "小时", "早上", "点", "每天", "定时", "预约", "问候",
+    "每周", "每两", "星期", "礼拜", "之前", "周会", "生日", "提前", "买蛋糕",
     "喝水", "吃药", "能提醒", "帮我提醒", "到时提醒", "分钟后", "分钟",
     # English
     "remind", "every", "hour", "schedule", "recurring", "cron", "wake", "greet", "check in",
@@ -185,6 +186,11 @@ def _query_looks_like_scheduling(q: Optional[str]) -> bool:
         return True
     if re.search(r"(?:every|每|매)\s*\d+", s, re.IGNORECASE):
         return True
+    # Calendar phrases (often without "提醒" in subject): "8月19号之前…"
+    if re.search(r"\d{1,2}\s*月\s*\d{1,2}\s*(?:日|号)", s):
+        return True
+    if "生日" in s and "提前" in s:
+        return True
     return False
 
 
@@ -193,6 +199,7 @@ try:
         tool_result_usable_as_final_response as _tool_result_usable_as_final_response,
         parse_raw_tool_calls_from_content as _parse_raw_tool_calls_from_content,
         infer_route_to_plugin_fallback as _infer_route_to_plugin_fallback,
+        infer_annual_birthday_advance_reminder_fallback as _infer_annual_birthday_advance_reminder_fallback,
         infer_remind_me_fallback as _infer_remind_me_fallback,
         infer_cron_schedule_fallback as _infer_cron_schedule_fallback,
         remind_me_needs_clarification as _remind_me_needs_clarification,
@@ -203,6 +210,7 @@ except (ImportError, ModuleNotFoundError):
         tool_result_usable_as_final_response as _tool_result_usable_as_final_response,
         parse_raw_tool_calls_from_content as _parse_raw_tool_calls_from_content,
         infer_route_to_plugin_fallback as _infer_route_to_plugin_fallback,
+        infer_annual_birthday_advance_reminder_fallback as _infer_annual_birthday_advance_reminder_fallback,
         infer_remind_me_fallback as _infer_remind_me_fallback,
         infer_cron_schedule_fallback as _infer_cron_schedule_fallback,
         remind_me_needs_clarification as _remind_me_needs_clarification,
@@ -2203,6 +2211,62 @@ async def answer_from_memory(
         use_tools = getattr(Util().get_core_metadata(), "use_tools", True)
         registry = get_tool_registry()
         tools_cfg_for_desc = getattr(Util().get_core_metadata(), "tools_config", None) or {}
+        # Companion reminder fast-path: for clear scheduling intents, avoid waiting on a long
+        # planner/tool-selection LLM round and run the scheduling tool directly.
+        try:
+            _is_companion = (
+                (str(getattr(request, "channel_name", "") or "").strip().lower() == "companion")
+                or (str(getattr(request, "app_id", "") or "").strip().lower() == "homeclaw")
+            )
+            if use_tools and _is_companion and isinstance(query, str) and _query_looks_like_scheduling(query):
+                _raw_direct = (
+                    _infer_annual_birthday_advance_reminder_fallback(query)
+                    or _infer_remind_me_fallback(query)
+                    or _infer_cron_schedule_fallback(query)
+                )
+                _direct_tool = None
+                _direct_args = None
+                # normalize fallback shape:
+                # - remind fallback returns args directly: {"minutes": 5, "message": "..."}
+                # - cron fallback returns {"tool": "cron_schedule", "arguments": {...}}
+                if isinstance(_raw_direct, dict):
+                    if isinstance(_raw_direct.get("tool"), str) and isinstance(_raw_direct.get("arguments"), dict):
+                        _direct_tool = _raw_direct.get("tool")
+                        _direct_args = _raw_direct.get("arguments")
+                    else:
+                        _direct_args = _raw_direct
+                        if ("minutes" in _direct_args) or ("at_time" in _direct_args):
+                            _direct_tool = "remind_me"
+                        elif "cron_expr" in _direct_args:
+                            _direct_tool = "cron_schedule"
+                if _direct_tool and isinstance(_direct_args, dict):
+                    _component_log("tools", f"companion scheduling fast-path: direct {_direct_tool}")
+                    _ctx_fast = ToolContext(
+                        core=core,
+                        app_id=app_id or "homeclaw",
+                        user_name=user_name,
+                        user_id=user_id,
+                        system_user_id=getattr(request, "system_user_id", None) or user_id,
+                        friend_id=(str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw"),
+                        session_id=session_id,
+                        run_id=run_id,
+                        request=request,
+                    )
+                    _res_fast = await registry.execute_async(_direct_tool, _direct_args, _ctx_fast)
+                    if isinstance(_res_fast, str) and _res_fast.strip():
+                        if _res_fast.strip().lower().startswith("error: provide either minutes"):
+                            _q_fast = _remind_me_clarification_question(query) or ""
+                            if _q_fast.strip():
+                                return _q_fast.strip(), "text"
+                        return _res_fast.strip(), "text"
+                    return "Reminder request received.", "text"
+                # If it is clearly reminder intent but time is ambiguous, ask directly instead of hanging.
+                if _remind_me_needs_clarification(query):
+                    _q_fast = _remind_me_clarification_question(query) or ""
+                    if _q_fast.strip():
+                        return _q_fast.strip(), "text"
+        except Exception as _e:
+            logger.debug("Companion scheduling fast-path skipped: {}", _e)
         description_max_chars = max(0, int(tools_cfg_for_desc.get("description_max_chars") or 0))
         # OpenClaw-style: when tools.profile or tools.profiles is set, only tools in that profile are sent to the LLM.
         _tool_defs = (registry.list_tools() or []) if use_tools else []
@@ -3470,10 +3534,20 @@ async def answer_from_memory(
                                     except Exception as e:
                                         logger.debug("Fallback folder_list failed: {}", e)
                                         response = content_str or "Could not list directory. Please try again."
+                                # Birthday + 提前N天 → yearly cron or remind_me (same infer as Companion fast-path).
+                                _annual_sched = None
+                                try:
+                                    if query:
+                                        _annual_sched = _infer_annual_birthday_advance_reminder_fallback(query)
+                                except Exception:
+                                    _annual_sched = None
                                 # Check remind_me (e.g. "15分钟后有个会能提醒一下吗") so we set the reminder and return a clean response instead of messy 2:49 text.
+                                remind_fallback = None
                                 if response is None or (response == content_str and not _list_dir_match):
                                     try:
                                         remind_fallback = _infer_remind_me_fallback(query) if query else None
+                                        if not remind_fallback and _annual_sched and _annual_sched.get("tool") == "remind_me":
+                                            remind_fallback = _annual_sched
                                     except Exception:
                                         remind_fallback = None
                                 _remind_me_ask_generic = "您希望什么时候提醒？例如：「15分钟后」或「下午3点」。 When would you like to be reminded? E.g. in 15 minutes or at 3:00 PM."
@@ -3540,6 +3614,8 @@ async def answer_from_memory(
                                 if (response is None or response == content_str) and isinstance(query, str) and query.strip() and _query_looks_like_scheduling(query.strip()):
                                     try:
                                         cron_fallback = _infer_cron_schedule_fallback(query)
+                                        if not cron_fallback and _annual_sched and _annual_sched.get("tool") == "cron_schedule":
+                                            cron_fallback = _annual_sched
                                         _tools_list = (registry.list_tools() or []) if registry else []
                                         _has_cron = any(getattr(t, "name", None) == "cron_schedule" for t in _tools_list)
                                         if cron_fallback and isinstance(cron_fallback.get("arguments"), dict) and registry and _has_cron and last_tool_name != "cron_schedule":
@@ -3684,10 +3760,6 @@ async def answer_from_memory(
                     break
                 routing_sent = False
                 routing_response_text = None  # when route_to_plugin/route_to_tam return text (sync inbound/ws), use as final response
-                last_file_link_result = None  # when save_result_page/get_file_view_link return a link, use as final response so model cannot corrupt it
-                last_tool_name = None  # for remind_me and fallback when 2nd LLM returns empty
-                last_tool_result_raw = None
-                last_tool_args = None  # for run_skill: skills_results_need_llm per-skill override
                 meta = Util().get_core_metadata()
                 tool_timeout_sec = max(0, int(getattr(meta, "tool_timeout_seconds", 120) or 0))
                 # Track whether we execute any tool this batch; if we only skip duplicate run_skill(s), return to user after appending results.
