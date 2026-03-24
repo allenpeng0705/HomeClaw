@@ -16,6 +16,13 @@ This page summarizes two related but different multi-instance features:
 | Transport | Core A -> Core B `POST /inbound` | Core A -> Core B federation user-message APIs |
 | Depends on | `instance_identity.yml`, `peers.yml`, tool access | `instance_identity.yml`, `peers.yml`, `federation_*` flags, user friend links |
 | Same as sub-agent? | No (`sessions_spawn` is local one-off in same Core) | No |
+| Security note | The LLM chooses text sent to the remote Core’s `/inbound` — risk of prompt injection and data exfiltration if peers are untrusted | Narrower path: structured user-message API, no remote LLM loop unless you attach media URLs |
+
+---
+
+## Defaults: remote friends vs agent `peer_call`
+
+**`peer_call_enabled` defaults to false** — the LLM does not get the `peer_call` tool unless you set **`peer_call_enabled: true`**. Core also adds a short **system prompt** telling the model to rely on **this instance’s tools only** and not to claim it will delegate to another HomeClaw agent. **Companion federation** is controlled only by **`federation_enabled`** and related flags; user-to-user traffic uses **`POST /api/federation/user-message`**, not `peer_call`.
 
 ---
 
@@ -25,7 +32,7 @@ This page summarizes two related but different multi-instance features:
 |------|---|---|
 | `config/instance_identity.yml` | This Core only | Who this instance is (`instance_id`, `display_name`, optional `public_base_url`, optional `pairing_inbound_user_id`) |
 | `config/peers.yml` | This Core's roster | Which remote Cores this instance can call (`instance_id`, `base_url`, `inbound_user_id`, optional `api_key_env`) |
-| `config/core.yml` | This Core behavior | Feature flags such as `peer_pairing_enabled`, `federation_enabled`, and federation security policy |
+| `config/core.yml` | This Core behavior | Feature flags: `peer_pairing_enabled`, `federation_enabled`, `peer_call_enabled`, federation security policy |
 | `config/user.yml` | Per user/friend graph | Local and remote user friends (`type: user`, optional `peer_instance_id`) for Companion messaging |
 
 ---
@@ -40,6 +47,7 @@ This page summarizes two related but different multi-instance features:
 | `federation_require_accepted_relationship` | Remote friends | Stronger trust policy | Requires accepted relationship state, not just YAML links |
 | `federation_e2e_enabled` | Remote friends | Optional privacy layer | Enables `hc-e2e-v1` envelope support and Companion key registration flow |
 | `federation_e2e_require_encrypted` | Remote friends | Strict privacy mode | Federated user messages must be encrypted (plaintext rejected) |
+| `peer_call_enabled` | `peer_call` tool (LLM → remote `/inbound`) | Off by default | When **true**, the LLM may call remote Cores via `peer_call`; federation messaging does **not** use this flag |
 
 ---
 

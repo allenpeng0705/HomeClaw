@@ -53,6 +53,7 @@ else
       echo "Clone complete. Continuing with setup..."
       ROOT="$PWD/$CLONE_DIR"
       cd "$ROOT"
+      IN_REPO=1
     fi
   fi
 fi
@@ -337,8 +338,18 @@ fi
 echo ""
 echo "=== Step 5: Python dependencies ==="
 cd "$ROOT"
+# Prefer a project .venv (avoids PEP 668 "externally managed environment" on Homebrew / Debian 12+).
+if [ ! -d ".venv" ]; then
+  echo "Creating .venv with $PYTHON (recommended for isolated installs)..."
+  if "$PYTHON" -m venv .venv 2>/dev/null; then
+    echo "OK: created .venv"
+  else
+    echo "Could not create .venv. On Debian/Ubuntu install: sudo apt install python3-venv"
+    echo "Continuing with system Python: $PYTHON (if pip fails with 'externally-managed-environment', create a venv manually.)"
+  fi
+fi
 if [ -d ".venv" ]; then
-  echo "Using existing .venv"
+  echo "Using .venv"
   # shellcheck source=/dev/null
   if . .venv/bin/activate 2>/dev/null; then
     if [ -x "$ROOT/.venv/bin/python" ]; then

@@ -2011,6 +2011,25 @@ async def answer_from_memory(
             except Exception as e:
                 logger.debug("Friend preset system_prompt failed: {}", e)
 
+        # peer_call off: steer the model to this instance's tools only (no delegating to another Core / remote agent).
+        try:
+            _meta_pc = Util().get_core_metadata()
+            if not getattr(_meta_pc, "peer_call_enabled", False):
+                if getattr(_meta_pc, "use_tools", True):
+                    system_parts.append(
+                        "\n\n## Multi-instance policy\n\n"
+                        "The **peer_call** tool (having another HomeClaw Core run a full agent turn on your behalf) is **not available** on this installation. "
+                        "Focus on the tools and skills exposed **for this Core** only. Do **not** tell the user you will delegate to another agent, peer instance, or remote HomeClaw; "
+                        "if they ask for that, say remote agent calls are disabled here and continue with local capabilities.\n\n"
+                    )
+                else:
+                    system_parts.append(
+                        "\n\n## Multi-instance policy\n\n"
+                        "Remote HomeClaw **peer_call** is disabled on this Core. Do not claim you can invoke another HomeClaw instance or remote agent.\n\n"
+                    )
+        except Exception:
+            pass
+
         # Append date/time block last so system prefix is static for KV cache (cache_prompt: true)
         if _system_context_block:
             system_parts.append(_system_context_block)
@@ -2047,6 +2066,8 @@ async def answer_from_memory(
                         all_tools_flush = registry_flush.get_openai_tools(_max_desc if _max_desc > 0 else None) if registry_flush.list_tools() else None
                         if not unified and all_tools_flush:
                             all_tools_flush = [t for t in all_tools_flush if (t.get("function") or {}).get("name") not in ("route_to_tam", "route_to_plugin")]
+                        if all_tools_flush and not getattr(Util().get_core_metadata(), "peer_call_enabled", False):
+                            all_tools_flush = [t for t in all_tools_flush if (t.get("function") or {}).get("name") != "peer_call"]
                         if not all_tools_flush:
                             _component_log("compaction", "memory flush skipped: no tools available")
                         else:
@@ -2259,6 +2280,11 @@ async def answer_from_memory(
             _component_log("tool_profile", f"filtered to profile: {len(_tool_defs_filtered)} tools (from {len(_tool_defs)})")
         _max_desc = description_max_chars if description_max_chars > 0 else None
         all_tools = [t.to_openai_function(_max_desc) for t in _tool_defs_filtered] if use_tools and _tool_defs_filtered else None
+        if all_tools and not getattr(Util().get_core_metadata(), "peer_call_enabled", False):
+            _n = len(all_tools)
+            all_tools = [t for t in all_tools if (t.get("function") or {}).get("name") != "peer_call"]
+            if len(all_tools) < _n:
+                _component_log("peer_call", "peer_call tool omitted (peer_call_enabled false or unset; set true in core.yml to enable)")
         _filtered_by_preset = False
         # Friend preset: when current friend has a preset, restrict tools to that preset's list (Step 2).
         # tools_preset in config can be a string (single preset) or array of preset names (union of tool sets).

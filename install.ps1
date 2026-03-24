@@ -53,6 +53,7 @@ if ((Test-Path "$PSScriptRoot\main.py") -and (Test-Path "$PSScriptRoot\requireme
       exit 1
     }
     $Root = (Join-Path (Get-Location).Path $CloneDir)
+    $InRepo = $true
   }
 }
 
@@ -173,7 +174,7 @@ if (-not $ClawhubOk) {
       if ($LASTEXITCODE -eq 0) { Write-Host "OK: clawhub installed (for skill search/install from Portal and Companion)"; $ClawhubOk = $true }
     } catch {}
     if (-not $ClawhubOk) {
-      Write-Host "ClawHub CLI install failed. To install later: npm i -g clawhub"
+      Write-Host "ClawHub CLI install failed or needs admin/elevated npm. To install later: npm i -g clawhub"
     }
   } else {
     Write-Host "npm not available; skipping. For skill search/install from Companion/Portal, install Node.js then: npm i -g clawhub"
@@ -374,23 +375,48 @@ if ($VmprintOk) {
 Write-Host ""
 Write-Host "=== Step 5: Python dependencies ==="
 Set-Location $Root
-if (Test-Path (Join-Path $Root ".venv\Scripts\Activate.ps1")) {
-  Write-Host "Using existing .venv"
-  try { . (Join-Path $Root ".venv\Scripts\Activate.ps1") } catch {}
-  if (Test-Path (Join-Path $Root ".venv\Scripts\python.exe")) {
-    $PythonExe = (Join-Path $Root ".venv\Scripts\python.exe")
+# Prefer a project .venv (isolated packages; aligns with install.sh and avoids user/site install surprises).
+$VenvPython = Join-Path $Root ".venv\Scripts\python.exe"
+$VenvActivate = Join-Path $Root ".venv\Scripts\Activate.ps1"
+if (-not (Test-Path -LiteralPath (Join-Path $Root ".venv") -PathType Container)) {
+  Write-Host "Creating .venv with $PythonExe (recommended for isolated installs)..."
+  $venvOk = $false
+  try {
+    if ($PythonExe -eq "py") {
+      & py -3 -m venv .venv 2>$null
+      if ($LASTEXITCODE -eq 0) { $venvOk = $true }
+    } else {
+      & $PythonExe -m venv .venv 2>$null
+      if ($LASTEXITCODE -eq 0) { $venvOk = $true }
+    }
+  } catch {}
+  if ($venvOk -and (Test-Path -LiteralPath $VenvPython)) {
+    Write-Host "OK: created .venv"
+  } else {
+    Write-Host "Could not create .venv. Ensure the Python install includes venv (Python installer: optional features)."
+    Write-Host "Continuing with: $PythonExe (if pip fails, run manually: py -3 -m venv .venv  then  .\install.ps1)"
   }
-  if (($env:VIRTUAL_ENV -replace '[\\/]+$','') -eq ((Join-Path $Root ".venv") -replace '[\\/]+$','')) {
+}
+if (Test-Path -LiteralPath $VenvActivate) {
+  Write-Host "Using .venv"
+  try { . $VenvActivate } catch {}
+  if (Test-Path -LiteralPath $VenvPython) {
+    $PythonExe = $VenvPython
+  }
+  $venvRootNorm = ((Join-Path $Root ".venv") -replace '[\\/]+$','')
+  $virtNorm = if ($env:VIRTUAL_ENV) { ($env:VIRTUAL_ENV -replace '[\\/]+$','') } else { "" }
+  if ($virtNorm -eq $venvRootNorm) {
     Write-Host "OK: using venv Python: $PythonExe"
     $venvMm = & $PythonExe -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')" 2>$null
     if ($venvMm) { Write-Host "  (.venv is Python $venvMm — pip uses this, not necessarily your system default.)" }
     & $PythonExe -c "import sys; exit(0 if sys.version_info >= (3, 10) else 1)" 2>$null
     if ($LASTEXITCODE -ne 0) {
-      Write-Host "Warning: .venv is Python $venvMm (< 3.10). Optional package 'mcp' is skipped."
+      Write-Host "Warning: .venv is Python $venvMm (< 3.10). Optional package 'mcp' is skipped; some wheels differ from 3.12."
       Write-Host "  Recreate with Python 3.12:  cd $Root; Remove-Item -Recurse -Force .venv; py -3.12 -m venv .venv; .\install.ps1"
     }
   } else {
     Write-Host "Warning: .venv exists but activation did not switch interpreter. Current Python: $PythonExe"
+    Write-Host "If you want strict isolation, run: .\.venv\Scripts\Activate.ps1  (then re-run install.ps1)"
   }
 }
 # Shared pip constraints for deterministic dependency resolution.

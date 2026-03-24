@@ -1073,6 +1073,8 @@ class CoreMetadata:
     peer_pairing_enabled: bool = True
     # When True, cross-instance user-to-user messaging (Companion) may use peers.yml; see docs_design/FederatedCompanionUserMessaging.md.
     federation_enabled: bool = False
+    # When False (default), the peer_call tool is disabled: the LLM cannot POST /inbound to remote Cores (reduces accidental data leak via multi-agent). Companion federation (federation_enabled) is unchanged. Set true only if you intentionally want the LLM to call remote Cores.
+    peer_call_enabled: bool = False
     # When non-empty, this Core only accepts inbound federated user messages from these remote instance_ids (mutual friend link still required).
     federation_trusted_instances: List[str] = field(default_factory=list)
     # When True, inbound federated user messages require an accepted row in federated_friendships.sqlite (YAML friend alone is not enough).
@@ -1596,6 +1598,7 @@ class CoreMetadata:
             auth_api_key=(decrypt_auth_api_key(data.get('auth_api_key')) or '').strip(),
             peer_pairing_enabled=bool(data.get('peer_pairing_enabled', True)),
             federation_enabled=bool(data.get('federation_enabled', False)),
+            peer_call_enabled=bool(data.get('peer_call_enabled', False)),
             federation_trusted_instances=CoreMetadata._norm_federation_trusted_instances(
                 data.get('federation_trusted_instances')
             ),
@@ -1740,6 +1743,7 @@ class CoreMetadata:
                 'auth_api_key': encrypt_auth_api_key(getattr(core, 'auth_api_key', '') or '') or '',
                 'peer_pairing_enabled': getattr(core, 'peer_pairing_enabled', True),
                 'federation_enabled': getattr(core, 'federation_enabled', False),
+                'peer_call_enabled': getattr(core, 'peer_call_enabled', False),
                 'federation_trusted_instances': list(getattr(core, 'federation_trusted_instances', None) or []),
                 'federation_require_accepted_relationship': getattr(core, 'federation_require_accepted_relationship', False),
                 'federation_e2e_enabled': getattr(core, 'federation_e2e_enabled', False),

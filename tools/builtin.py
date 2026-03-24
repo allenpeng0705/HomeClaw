@@ -2374,6 +2374,19 @@ async def _sessions_spawn_executor(arguments: Dict[str, Any], context: ToolConte
 async def _peer_call_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """POST /inbound on another HomeClaw Core listed in config/peers.yml (or override base_url)."""
     try:
+        from base.util import Util
+
+        if not bool(getattr(Util().get_core_metadata(), "peer_call_enabled", False)):
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "peer_call_disabled",
+                    "hint": "peer_call is off by default. Set peer_call_enabled: true in config/core.yml to allow the LLM to POST /inbound to remote Cores. "
+                    "Companion remote friends use federation_enabled, not peer_call.",
+                },
+                ensure_ascii=False,
+            )
+
         from base.peer_registry import (
             find_peer_by_instance_id,
             post_inbound_sync,
