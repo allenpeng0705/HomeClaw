@@ -669,6 +669,14 @@ async def answer_from_memory(
                     route = "cloud"
                     route_layer = "vision_fallback"
                     logger.info("Mix mode: request has images; local does not support vision, using cloud for this request.")
+            # Scheduling/reminder parsing is sensitive (relative time, lead-time, recurring rules).
+            # In mix mode, prefer cloud-first for scheduling-like user queries.
+            if route is None and isinstance(query, str) and _query_looks_like_scheduling(query):
+                _cloud_ref = (getattr(Util().core_metadata, "main_llm_cloud", None) or "").strip()
+                if _cloud_ref:
+                    route = "cloud"
+                    route_layer = "scheduling_prefer_cloud"
+                    logger.info("Mix mode: scheduling intent detected; preferring cloud route first.")
             route_score = 0.0
             # Layer 1: heuristic (keywords, long-input); no threshold—first match wins when enabled (skip if already chose cloud for vision)
             heuristic_cfg = hr.get("heuristic") if isinstance(hr.get("heuristic"), dict) else {}
@@ -3806,6 +3814,19 @@ async def answer_from_memory(
                             except Exception as _e:
                                 logger.debug("remind_me infer from query failed: {}", _e)
                     # Avoid infinite loop: if remind_me still lacks minutes/at_time and last result was the "provide either minutes" error, skip re-execution and return clarification.
+                    _same_remind_args_repeat = False
+                    try:
+                        _same_remind_args_repeat = (
+                            name == "remind_me"
+                            and last_tool_name == "remind_me"
+                            and isinstance(last_tool_args, dict)
+                            and isinstance(args, dict)
+                            and json.dumps(last_tool_args, ensure_ascii=False, sort_keys=True) == json.dumps(args, ensure_ascii=False, sort_keys=True)
+                            and isinstance(last_tool_result_raw, str)
+                            and last_tool_result_raw.strip().lower().startswith("error:")
+                        )
+                    except Exception:
+                        _same_remind_args_repeat = False
                     _remind_me_skip_repeat = (
                         name == "remind_me"
                         and isinstance(args, dict)
@@ -3815,6 +3836,8 @@ async def answer_from_memory(
                         and isinstance(last_tool_result_raw, str)
                         and "provide either minutes" in last_tool_result_raw
                     )
+                    if _same_remind_args_repeat:
+                        _remind_me_skip_repeat = True
                     if name == "run_skill":
                         _component_log("tools", "executing run_skill (in_process from run_skill_py_in_process_skills if listed)")
                     # When response was truncated (finish_reason=length), tool_call arguments (e.g. save_result_page content) may be cut off; executor will reject bad HTML.
@@ -3901,8 +3924,22 @@ async def answer_from_memory(
                         logger.info("Skipping duplicate run_skill({}); already executed this request", _skill_key)
                     elif _remind_me_skip_repeat:
                         try:
-                            _ask = _remind_me_clarification_question((query or "").strip()) if (query or "").strip() else None
-                            result = (str(_ask).strip() if _ask else "您希望什么时候提醒？例如：「15分钟后」或「下午3点」。 When would you like to be reminded? E.g. in 15 minutes or at 3:00 PM.")
+                            _qtxt = (query or "").strip()
+                            _try_infer = _infer_remind_me_fallback(_qtxt) if _qtxt else None
+                            _ia = _try_infer.get("arguments") if isinstance(_try_infer, dict) and isinstance(_try_infer.get("arguments"), dict) else None
+                            if _ia and (_ia.get("minutes") is not None or (_ia.get("at_time") or "").strip()):
+                                _iargs = dict(args)
+                                if _ia.get("minutes") is not None:
+                                    _iargs["minutes"] = _ia.get("minutes")
+                                if (_ia.get("at_time") or "").strip():
+                                    _iargs["at_time"] = (_ia.get("at_time") or "").strip()
+                                if not (_iargs.get("message") or "").strip() and (_ia.get("message") or "").strip():
+                                    _iargs["message"] = (_ia.get("message") or "Reminder").strip()
+                                result = await registry.execute_async("remind_me", _iargs, context)
+                                args = _iargs
+                            else:
+                                _ask = _remind_me_clarification_question(_qtxt) if _qtxt else None
+                                result = (str(_ask).strip() if _ask else "您希望什么时候提醒？例如：「15分钟后」或「下午3点」。 When would you like to be reminded? E.g. in 15 minutes or at 3:00 PM.")
                         except Exception:
                             result = "您希望什么时候提醒？例如：「15分钟后」或「下午3点」。 When would you like to be reminded? E.g. in 15 minutes or at 3:00 PM."
                         logger.info("Skipping repeated remind_me without minutes/at_time (avoid loop); returning clarification")

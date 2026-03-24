@@ -1111,12 +1111,11 @@ async def _remind_me_executor(arguments: Dict[str, Any], context: ToolContext) -
     try:
         ok = tam.schedule_one_shot(message, run_time_str, user_id=user_id, channel_key=channel_key, friend_id=friend_id)
         if not ok:
-            return f"Error: at_time is in the past or invalid for scheduling (got: {run_time_str}). Please provide a future time."
-        # User-friendly response (Core may use as final reply); avoid raw JSON. Include current date so the follow-up LLM uses it (e.g. "当前是26号" not "19号").
-        time_part = run_time_str.split()[-1] if " " in run_time_str else run_time_str
-        today = datetime.now()
-        day_num = today.strftime("%d").lstrip("0") or today.strftime("%d")
-        return f"Reminder set for {time_part}. I'll remind you: {message}. (Current date: {today.strftime('%Y-%m-%d')}, {day_num}号. Use this when referring to today.)"
+            return f"Error: cannot schedule this reminder at {run_time_str} (time is in the past or invalid). Please provide a future time."
+        # Keep confirmation concise and explicit to avoid LLM paraphrase drift.
+        if minutes is not None:
+            return f"Reminder scheduled in {minutes} minute(s) at {run_time_str}. Message: {message}."
+        return f"Reminder scheduled for {run_time_str}. Message: {message}."
     except Exception as e:
         return f"Error: {e!s}"
 

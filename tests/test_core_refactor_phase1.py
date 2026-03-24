@@ -142,6 +142,23 @@ def test_infer_annual_birthday_advance_reminder_fallback():
     assert infer_annual_birthday_advance_reminder_fallback("明天提醒我") is None
 
 
+def test_infer_remind_me_fallback_relative_day_half_hour():
+    """Relative day with half-hour like '明天1点半提醒我' should produce at_time."""
+    from core.tool_helpers_fallback import infer_remind_me_fallback
+
+    r = infer_remind_me_fallback("明天下午1点半提醒我去机场")
+    assert r is not None
+    assert r.get("tool") == "remind_me"
+    at_time = (r.get("arguments") or {}).get("at_time") or ""
+    assert len(at_time) >= 19
+    assert at_time.endswith(":00")
+    # If sentence has two times, prefer the one tied to "提醒" (1:30), not event time (4:00).
+    r2 = infer_remind_me_fallback("明天下午4点的飞机,能1点半提醒我吗")
+    assert r2 is not None
+    at2 = (r2.get("arguments") or {}).get("at_time") or ""
+    assert " 13:30:00" in at2
+
+
 def test_infer_cron_schedule_fallback_weekly_and_biweekly():
     """infer_cron_schedule_fallback: weekly weekday+time and biweekly approximation."""
     from core.tool_helpers_fallback import infer_cron_schedule_fallback
