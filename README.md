@@ -32,7 +32,7 @@ What HomeClaw gives you:
 
 ## Quick Start
 
-[Open `QuickStart.md`](QuickStart.md) for the full install and first-chat flow.
+[Open QuickStart](https://www.homeclaw.cn/en/quickstart) for the full install and first-chat flow.
 
 ---
 
