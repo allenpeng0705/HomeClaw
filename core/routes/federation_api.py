@@ -5,7 +5,7 @@ POST /api/federation/user-message — called by a trusted peer Core; delivers to
 See docs_design/FederatedCompanionUserMessaging.md.
 """
 
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import Depends
 from fastapi.responses import JSONResponse
@@ -21,6 +21,14 @@ from core.federation_e2e import validate_e2e_envelope
 from core.federation_gating import inbound_federated_delivery_allowed
 from core.routes import auth
 from core.user_inbox import append_message as inbox_append, clear_thread as inbox_clear_thread
+
+
+def _fed_json(status: int, error_code: str, **fields: Any) -> JSONResponse:
+    """Stable error_code for Companion; keeps ``error`` string for backward compatibility."""
+    body: Dict[str, Any] = {"error_code": error_code, **fields}
+    if "error" not in body:
+        body["error"] = error_code
+    return JSONResponse(status_code=status, content=body)
 
 
 def _get_user_by_id(user_id: str) -> Optional[User]:
@@ -62,24 +70,33 @@ def get_federation_user_message_post_handler(core):
         try:
             parsed = parse_fid(body.from_fid or "")
             if not parsed:
-                return JSONResponse(status_code=400, content={"error": "Invalid from_fid (expected user_id@instance_id)"})
+                return _fed_json(
+                    400,
+                    "invalid_from_fid",
+                    error="Invalid from_fid (expected user_id@instance_id)",
+                )
             sender_local_id, sender_instance_id = parsed
             to_uid = (body.to_local_user_id or "").strip()
             text = (body.text or "").strip()
             if not to_uid:
-                return JSONResponse(status_code=400, content={"error": "to_local_user_id required"})
+                return _fed_json(400, "missing_to_local_user_id", error="to_local_user_id required")
             meta = Util().get_core_metadata()
             if not bool(getattr(meta, "federation_enabled", False)):
-                return JSONResponse(status_code=403, content={"error": "federation_disabled", "hint": "Set federation_enabled: true in config/core.yml"})
+                return _fed_json(
+                    403,
+                    "federation_disabled",
+                    hint="Set federation_enabled: true in config/core.yml",
+                )
             trusted: List[Any] = list(getattr(meta, "federation_trusted_instances", None) or [])
             if not federation_sender_instance_allowed(trusted, sender_instance_id):
-                return JSONResponse(
-                    status_code=403,
-                    content={"error": "sender_instance_not_trusted", "hint": "Add instance_id to federation_trusted_instances or clear the list to allow any mutual friend."},
+                return _fed_json(
+                    403,
+                    "sender_instance_not_trusted",
+                    hint="Add instance_id to federation_trusted_instances or clear the list to allow any mutual friend.",
                 )
             to_user = _get_user_by_id(to_uid)
             if not to_user:
-                return JSONResponse(status_code=404, content={"error": "to_local_user_id not found"})
+                return _fed_json(404, "recipient_not_found", error="to_local_user_id not found")
             require_acc = bool(getattr(meta, "federation_require_accepted_relationship", False))
             ok_deliver, deny_reason = inbound_federated_delivery_allowed(
                 require_acc,
@@ -90,33 +107,35 @@ def get_federation_user_message_post_handler(core):
                 to_user,
             )
             if not ok_deliver:
-                return JSONResponse(
-                    status_code=403,
-                    content={
-                        "error": deny_reason,
-                        "hint": "Accept a federated friend request, configure user.yml friend with peer_instance_id, or set federation_require_accepted_relationship: false.",
-                    },
+                dr = (deny_reason or "delivery_denied").strip() or "delivery_denied"
+                return _fed_json(
+                    403,
+                    dr,
+                    error=deny_reason,
+                    hint="Accept a federated friend request, configure user.yml friend with peer_instance_id, or set federation_require_accepted_relationship: false.",
                 )
             e2e_on = bool(getattr(meta, "federation_e2e_enabled", False))
             e2e_req = bool(getattr(meta, "federation_e2e_require_encrypted", False))
             has_e2e = body.e2e is not None
             if e2e_req and not has_e2e:
-                return JSONResponse(
-                    status_code=400,
-                    content={"error": "e2e_required", "hint": "Set federation_e2e_require_encrypted: false or send hc-e2e-v1 envelope."},
+                return _fed_json(
+                    400,
+                    "e2e_required",
+                    hint="Set federation_e2e_require_encrypted: false or send hc-e2e-v1 envelope.",
                 )
             if has_e2e and not e2e_on:
-                return JSONResponse(status_code=403, content={"error": "federation_e2e_disabled"})
+                return _fed_json(403, "federation_e2e_disabled")
             e2e_dict = None
             if has_e2e:
                 e2e_dict = body.e2e.model_dump() if body.e2e else None
                 ok_e, err_e = validate_e2e_envelope(e2e_dict)
                 if not ok_e:
-                    return JSONResponse(status_code=400, content={"error": "invalid_e2e_envelope", "detail": err_e})
+                    return _fed_json(400, "invalid_e2e_envelope", detail=err_e)
                 if body.images or body.audios or body.videos or body.file_links:
-                    return JSONResponse(
-                        status_code=400,
-                        content={"error": "e2e_media_not_supported", "hint": "Encrypted federated messages support text only in this version."},
+                    return _fed_json(
+                        400,
+                        "e2e_media_not_supported",
+                        hint="Encrypted federated messages support text only in this version.",
                     )
             from_name = (body.from_display_name or "").strip() or sender_local_id
             extra_meta: dict = {
@@ -140,7 +159,7 @@ def get_federation_user_message_post_handler(core):
                 e2e=e2e_dict,
             )
             if not msg_id:
-                return JSONResponse(status_code=500, content={"error": "Failed to store message"})
+                return _fed_json(500, "inbox_store_failed", error="Failed to store message")
             try:
                 if hasattr(core, "deliver_to_user"):
                     await core.deliver_to_user(
@@ -159,7 +178,7 @@ def get_federation_user_message_post_handler(core):
             return JSONResponse(status_code=200, content={"ok": True, "message_id": msg_id})
         except Exception as e:
             logger.warning("federation user-message POST failed: {}", e)
-            return JSONResponse(status_code=500, content={"error": "Internal server error"})
+            return _fed_json(500, "internal_error", error="Internal server error")
 
     return post_federation_user_message
 
@@ -285,22 +304,23 @@ def get_federation_clear_thread_post_handler(core):  # noqa: ARG001
         try:
             meta = Util().get_core_metadata()
             if not bool(getattr(meta, "federation_enabled", False)):
-                return JSONResponse(status_code=403, content={"error": "federation_disabled"})
+                return _fed_json(403, "federation_disabled")
             trusted: List[Any] = list(getattr(meta, "federation_trusted_instances", None) or [])
             caller = (body.from_instance_id or "").strip()
             if not federation_sender_instance_allowed(trusted, caller):
-                return JSONResponse(
-                    status_code=403,
-                    content={"error": "sender_instance_not_trusted", "hint": "Add caller instance_id to federation_trusted_instances or leave the list empty."},
+                return _fed_json(
+                    403,
+                    "sender_instance_not_trusted",
+                    hint="Add caller instance_id to federation_trusted_instances or leave the list empty.",
                 )
             uid = (body.user_id or "").strip()
             oid = (body.other_user_id or "").strip()
             if not uid or not oid or uid == oid:
-                return JSONResponse(status_code=400, content={"error": "user_id and other_user_id required"})
+                return _fed_json(400, "invalid_clear_thread_params", error="user_id and other_user_id required")
             removed = inbox_clear_thread(user_id=uid, other_user_id=oid)
             return JSONResponse(status_code=200, content={"ok": True, "removed": removed})
         except Exception as e:
             logger.warning("federation clear-thread POST failed: {}", e)
-            return JSONResponse(status_code=500, content={"error": "Internal server error"})
+            return _fed_json(500, "internal_error", error="Internal server error")
 
     return post_federation_clear_thread

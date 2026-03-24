@@ -10,7 +10,7 @@ Design: docs_design/UserToUserMessagingViaCompanion.md, SocialNetworkDesign.md.
 
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import Depends
 from fastapi.responses import JSONResponse
@@ -41,6 +41,14 @@ from core.user_inbox import (
     sanitize_message_dict_for_client,
     sanitize_messages_list_for_client,
 )
+
+
+def _um_json(status: int, error_code: str, **fields: Any) -> JSONResponse:
+    """Stable error_code for Companion; ``error`` defaults to error_code."""
+    body: dict = {"error_code": error_code, **fields}
+    if "error" not in body:
+        body["error"] = error_code
+    return JSONResponse(status_code=status, content=body)
 
 
 def _get_user_by_id(user_id: str) -> Optional[User]:
@@ -165,51 +173,55 @@ def get_user_message_post_handler(core):
             to_user_id = (body.to_user_id or "").strip()
             text = (body.text or "").strip()
             if not from_user_id or not to_user_id:
-                return JSONResponse(status_code=400, content={"error": "from_user_id and to_user_id required"})
+                return _um_json(400, "missing_user_ids", error="from_user_id and to_user_id required")
             from_user = _get_user_by_id(from_user_id)
             if not from_user:
-                return JSONResponse(status_code=403, content={"error": "from_user_id not found"})
+                return _um_json(403, "sender_not_found", error="from_user_id not found")
             friend_match = _friend_match_for_recipient(from_user, to_user_id)
             if not friend_match:
-                return JSONResponse(
-                    status_code=403,
-                    content={
-                        "error": "Recipient is not a user-type friend of the sender.",
-                        "hint": "Add them in the friends list (users.json / user.yml: type user, user_id) or complete an accepted federated friend link on both instances.",
-                    },
+                return _um_json(
+                    403,
+                    "not_friends",
+                    error="Recipient is not a user-type friend of the sender.",
+                    hint="Add them in the friends list (users.json / user.yml: type user, user_id) or complete an accepted federated friend link on both instances.",
                 )
             if body.e2e is not None:
                 peer_chk = (getattr(friend_match, "peer_instance_id", None) or "").strip()
                 if not peer_chk:
-                    return JSONResponse(
-                        status_code=400,
-                        content={"error": "e2e_only_for_federated_friends", "hint": "E2E envelopes are only for friends with peer_instance_id."},
+                    return _um_json(
+                        400,
+                        "e2e_only_for_federated_friends",
+                        hint="E2E envelopes are only for friends with peer_instance_id.",
                     )
             peer_inst = (getattr(friend_match, "peer_instance_id", None) or "").strip()
             if peer_inst:
                 meta = Util().get_core_metadata()
                 if not bool(getattr(meta, "federation_enabled", False)):
-                    return JSONResponse(
-                        status_code=403,
-                        content={"error": "federation_disabled", "hint": "Set federation_enabled: true in config/core.yml to message friends on another instance."},
+                    return _um_json(
+                        403,
+                        "federation_disabled",
+                        hint="Set federation_enabled: true in config/core.yml to message friends on another instance.",
                     )
                 ident = load_instance_identity()
                 my_iid = (ident.get("instance_id") or "").strip()
                 if not my_iid:
-                    return JSONResponse(
-                        status_code=503,
-                        content={"error": "Local instance_id missing", "hint": "Set instance_id in config/instance_identity.yml for federated messaging."},
+                    return _um_json(
+                        503,
+                        "local_instance_id_missing",
+                        error="Local instance_id missing",
+                        hint="Set instance_id in config/instance_identity.yml for federated messaging.",
                     )
                 peer = find_peer_by_instance_id(peer_inst)
                 if not peer:
-                    return JSONResponse(
-                        status_code=502,
-                        content={"error": "peer_not_configured", "hint": f"No peers.yml entry for instance_id {peer_inst}."},
+                    return _um_json(
+                        502,
+                        "peer_not_configured",
+                        hint=f"No peers.yml entry for instance_id {peer_inst}.",
                     )
                 api_key = resolve_peer_api_key(peer)
                 base_url = (peer.get("base_url") or "").strip().rstrip("/")
                 if not base_url:
-                    return JSONResponse(status_code=502, content={"error": "peer base_url missing"})
+                    return _um_json(502, "peer_base_url_missing", error="peer base_url missing")
                 if not api_key:
                     # Normal when both Cores run without inbound auth; only noisy as WARNING.
                     logger.debug(
@@ -222,22 +234,20 @@ def get_user_message_post_handler(core):
                 e2e_req = bool(getattr(meta, "federation_e2e_require_encrypted", False))
                 has_e2e = body.e2e is not None
                 if e2e_req and not has_e2e:
-                    return JSONResponse(
-                        status_code=400,
-                        content={"error": "e2e_required", "hint": "This Core requires hc-e2e-v1 for federated user messages."},
+                    return _um_json(
+                        400,
+                        "e2e_required",
+                        hint="This Core requires hc-e2e-v1 for federated user messages.",
                     )
                 if has_e2e and not e2e_on:
-                    return JSONResponse(status_code=403, content={"error": "federation_e2e_disabled"})
+                    return _um_json(403, "federation_e2e_disabled")
                 if has_e2e:
                     ed = body.e2e.model_dump() if body.e2e else {}
                     ok_e, err_e = validate_e2e_envelope(ed)
                     if not ok_e:
-                        return JSONResponse(status_code=400, content={"error": "invalid_e2e_envelope", "detail": err_e})
+                        return _um_json(400, "invalid_e2e_envelope", detail=err_e)
                     if body.images or body.audios or body.videos or body.file_links:
-                        return JSONResponse(
-                            status_code=400,
-                            content={"error": "e2e_media_not_supported"},
-                        )
+                        return _um_json(400, "e2e_media_not_supported")
                 from_name = (getattr(from_user, "name", None) or from_user_id or "").strip()
                 from_fid = format_fid(from_user_id, my_iid)
                 if has_e2e:
@@ -251,16 +261,14 @@ def get_user_message_post_handler(core):
                     videos_payload, videos_ok = _normalize_refs_for_federation(body.videos)
                     file_links_payload, file_links_ok = _normalize_refs_for_federation(body.file_links)
                 if not (images_ok and audios_ok and videos_ok and file_links_ok):
-                    return JSONResponse(
-                        status_code=400,
-                        content={
-                            "error": "federation_media_not_shareable",
-                            "hint": "Attachments must resolve to GET /files/... on the sender: use absolute paths under "
-                                    "homeclaw_root (Companion uploads go to homeclaw_root/database/uploads/), or full "
-                                    "http(s) file URLs. Do not send data: base64. If core_public_url is set on both "
-                                    "sides but this still fails, re-upload the file after restarting Core (old uploads "
-                                    "may live only under the repo, outside homeclaw_root).",
-                        },
+                    return _um_json(
+                        400,
+                        "federation_media_not_shareable",
+                        hint="Attachments must resolve to GET /files/... on the sender: use absolute paths under "
+                        "homeclaw_root (Companion uploads go to homeclaw_root/database/uploads/), or full "
+                        "http(s) file URLs. Do not send data: base64. If core_public_url is set on both "
+                        "sides but this still fails, re-upload the file after restarting Core (old uploads "
+                        "may live only under the repo, outside homeclaw_root).",
                     )
                 payload = {
                     "from_fid": from_fid,
@@ -318,6 +326,12 @@ def get_user_message_post_handler(core):
                 err = (remote.get("error") or "federation_failed") if isinstance(remote, dict) else "federation_failed"
                 if sc <= 0:
                     sc = 502
+                hint_out = None
+                if isinstance(remote, dict):
+                    hint_out = remote.get("hint")
+                    det = remote.get("detail")
+                    if not hint_out and isinstance(det, dict):
+                        hint_out = det.get("hint")
                 logger.warning(
                     "user-message: federated POST to {} failed status={} error={} (peer response: {})",
                     base_url,
@@ -325,12 +339,22 @@ def get_user_message_post_handler(core):
                     err,
                     remote if isinstance(remote, dict) else str(remote)[:800],
                 )
-                return JSONResponse(status_code=sc, content={"error": err, "detail": remote if isinstance(remote, dict) else {}})
+                content_out: dict = {"error": err, "detail": remote if isinstance(remote, dict) else {}}
+                if hint_out:
+                    content_out["hint"] = hint_out
+                ec_peer = None
+                if isinstance(remote, dict):
+                    ec_peer = remote.get("error_code") or remote.get("error")
+                if not ec_peer:
+                    st = int(remote.get("status_code") or 0) if isinstance(remote, dict) else 0
+                    ec_peer = "peer_transport_failed" if st == 0 else "federation_failed"
+                content_out["error_code"] = str(ec_peer)[:200]
+                return JSONResponse(status_code=sc, content=content_out)
             to_user = _get_user_by_id(to_user_id)
             if not to_user:
-                return JSONResponse(status_code=404, content={"error": "to_user_id not found"})
+                return _um_json(404, "recipient_not_found", error="to_user_id not found")
             if body.e2e is not None:
-                return JSONResponse(status_code=400, content={"error": "e2e_only_for_federated_friends"})
+                return _um_json(400, "e2e_only_for_federated_friends")
             from_name = (getattr(from_user, "name", None) or from_user_id or "").strip()
             msg_id = inbox_append(
                 to_user_id=to_user_id,
@@ -343,7 +367,7 @@ def get_user_message_post_handler(core):
                 file_links=body.file_links,
             )
             if not msg_id:
-                return JSONResponse(status_code=500, content={"error": "Failed to store message"})
+                return _um_json(500, "inbox_store_failed", error="Failed to store message")
             try:
                 if hasattr(core, "deliver_to_user"):
                     await core.deliver_to_user(
@@ -361,7 +385,7 @@ def get_user_message_post_handler(core):
             return JSONResponse(status_code=200, content={"ok": True, "message_id": msg_id})
         except Exception as e:
             logger.warning("user-message POST failed: {}", e)
-            return JSONResponse(status_code=500, content={"error": "Internal server error"})
+            return _um_json(500, "internal_error", error="Internal server error")
 
     return post_user_message
 

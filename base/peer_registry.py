@@ -376,7 +376,7 @@ def post_inbound_sync(
             return data
         return {"ok": False, "error": str(e), "text": "", "status_code": e.code}
     except Exception as e:
-        return {"ok": False, "error": str(e), "text": ""}
+        return {"ok": False, "error": str(e), "text": "", "status_code": 0}
 
     try:
         data = json.loads(body) if body.strip() else {}
@@ -390,14 +390,14 @@ def post_inbound_sync(
     return data
 
 
-def post_federation_json_sync(
+def _post_federation_json_sync_once(
     base_url: str,
     path: str,
     body: Dict[str, Any],
-    api_key: Optional[str] = None,
-    timeout: float = 120.0,
+    api_key: Optional[str],
+    timeout: float,
 ) -> Dict[str, Any]:
-    """POST JSON to base_url + path (path must start with /). Returns parsed JSON plus ok/status_code when possible. Never raises."""
+    """Single HTTP attempt. See post_federation_json_sync."""
     import urllib.error
     import urllib.request
 
@@ -422,25 +422,69 @@ def post_federation_json_sync(
         try:
             data = json.loads(body_text) if body_text.strip() else {}
         except json.JSONDecodeError:
-            data = {"error": body_text[:2000] or str(e.reason), "text": ""}
+            data = {
+                "error": body_text[:2000] or str(e.reason),
+                "text": "",
+                "error_code": "http_error",
+            }
         if isinstance(data, dict):
             data["ok"] = False
             data["status_code"] = e.code
+            if "error_code" not in data and data.get("error"):
+                data["error_code"] = data.get("error")
             return data
-        return {"ok": False, "error": str(e), "text": "", "status_code": e.code}
+        return {"ok": False, "error": str(e), "text": "", "status_code": e.code, "error_code": "http_error"}
     except Exception as e:
-        return {"ok": False, "error": str(e), "text": ""}
+        return {"ok": False, "error": str(e), "text": "", "status_code": 0, "error_code": "transport_error"}
 
     try:
         data = json.loads(body_text) if body_text.strip() else {}
     except json.JSONDecodeError:
-        return {"ok": False, "error": "non_json_response", "text": "", "raw": body_text[:2000], "status_code": code}
+        return {
+            "ok": False,
+            "error": "non_json_response",
+            "error_code": "non_json_response",
+            "text": "",
+            "raw": body_text[:2000],
+            "status_code": code,
+        }
     if not isinstance(data, dict):
-        return {"ok": False, "error": "invalid_response", "text": "", "status_code": code}
+        return {"ok": False, "error": "invalid_response", "error_code": "invalid_response", "text": "", "status_code": code}
     data["status_code"] = code
     err = data.get("error")
     data["ok"] = code == 200 and bool(data.get("ok", True)) and not (err and str(err).strip())
+    if "error_code" not in data and data.get("error"):
+        data["error_code"] = data.get("error")
     return data
+
+
+def post_federation_json_sync(
+    base_url: str,
+    path: str,
+    body: Dict[str, Any],
+    api_key: Optional[str] = None,
+    timeout: float = 120.0,
+    transport_retries: int = 1,
+) -> Dict[str, Any]:
+    """POST JSON to base_url + path (path must start with /). Returns parsed JSON plus ok/status_code when possible. Never raises.
+
+    transport_retries: number of *extra* attempts when the peer returns no HTTP response (status_code 0), e.g. timeout or connection reset.
+    """
+    attempts = max(1, 1 + max(0, int(transport_retries)))
+    last: Dict[str, Any] = {}
+    for attempt in range(attempts):
+        last = _post_federation_json_sync_once(base_url, path, body, api_key, timeout)
+        sc = int(last.get("status_code") or 0)
+        if sc != 0 or attempt == attempts - 1:
+            break
+        logger.info(
+            "post_federation_json_sync: transport failure (status_code=0), retry {}/{} in 0.5s — {}",
+            attempt + 1,
+            attempts - 1,
+            (last.get("error") or "")[:200],
+        )
+        time.sleep(0.5)
+    return last
 
 
 def get_federation_json_sync(
@@ -480,7 +524,7 @@ def get_federation_json_sync(
             return data
         return {"ok": False, "error": str(e), "text": "", "status_code": e.code}
     except Exception as e:
-        return {"ok": False, "error": str(e), "text": ""}
+        return {"ok": False, "error": str(e), "text": "", "status_code": 0}
 
     try:
         data = json.loads(body_text) if body_text.strip() else {}
@@ -499,9 +543,17 @@ def post_federation_user_message_sync(
     body: Dict[str, Any],
     api_key: Optional[str] = None,
     timeout: float = 120.0,
+    transport_retries: int = 1,
 ) -> Dict[str, Any]:
     """POST /api/federation/user-message on another Core."""
-    return post_federation_json_sync(base_url, "/api/federation/user-message", body, api_key=api_key, timeout=timeout)
+    return post_federation_json_sync(
+        base_url,
+        "/api/federation/user-message",
+        body,
+        api_key=api_key,
+        timeout=timeout,
+        transport_retries=transport_retries,
+    )
 
 
 def post_federation_clear_thread_sync(
@@ -509,9 +561,17 @@ def post_federation_clear_thread_sync(
     body: Dict[str, Any],
     api_key: Optional[str] = None,
     timeout: float = 60.0,
+    transport_retries: int = 1,
 ) -> Dict[str, Any]:
     """POST /api/federation/clear-thread on another Core (mirror clear after local DELETE)."""
-    return post_federation_json_sync(base_url, "/api/federation/clear-thread", body, api_key=api_key, timeout=timeout)
+    return post_federation_json_sync(
+        base_url,
+        "/api/federation/clear-thread",
+        body,
+        api_key=api_key,
+        timeout=timeout,
+        transport_retries=transport_retries,
+    )
 
 
 # --- Pairing invite store (persisted under database/peer_invites.json) ---

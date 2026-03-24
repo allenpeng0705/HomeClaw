@@ -18,6 +18,41 @@ import 'chat_history_store.dart';
 import 'federation_e2e_crypto.dart';
 import 'node_service.dart';
 
+/// Parse JSON error bodies from Core (and nested peer `detail`) for user-visible messages.
+String _formatCoreApiError(String body, int statusCode) {
+  if (body.isEmpty) return 'HTTP $statusCode';
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is Map) {
+      final code = decoded['error_code'];
+      final err = decoded['error'];
+      final hint = decoded['hint'];
+      if (hint != null && hint.toString().isNotEmpty) {
+        if (err != null && err.toString().isNotEmpty) {
+          final prefix = (code != null && code.toString().isNotEmpty) ? '[$code] ' : '';
+          return '$prefix$err. $hint';
+        }
+        return '${code != null && code.toString().isNotEmpty ? '[$code] ' : ''}${hint.toString()}';
+      }
+      if (err != null && err.toString().isNotEmpty) {
+        return (code != null && code.toString().isNotEmpty) ? '[$code] ${err.toString()}' : err.toString();
+      }
+      final detail = decoded['detail'];
+      if (detail is Map) {
+        final dh = detail['hint'];
+        final de = detail['error'];
+        if (dh != null && dh.toString().isNotEmpty) {
+          final prefix = (de != null && de.toString().isNotEmpty) ? '$de: ' : '';
+          return '$prefix$dh';
+        }
+      } else if (detail is String && detail.isNotEmpty) {
+        return detail;
+      }
+    }
+  } catch (_) {}
+  return body.length > 2000 ? '${body.substring(0, 2000)}…' : body;
+}
+
 /// HomeClaw Core API client.
 /// Sends messages via POST /inbound and returns the reply text.
 class CoreService {
@@ -691,16 +726,29 @@ class CoreService {
     final hasHeavyMedia = (images != null && images.isNotEmpty) ||
         (videos != null && videos.isNotEmpty) ||
         (audios != null && audios.isNotEmpty);
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders()},
-          body: jsonEncode(body),
-        )
-        .timeout(Duration(seconds: hasHeavyMedia ? 120 : 30));
+    final timeoutSec = hasHeavyMedia ? 120 : 30;
+    late http.Response response;
+    try {
+      response = await http
+          .post(
+            url,
+            headers: {'Content-Type': 'application/json', ..._authHeaders()},
+            body: jsonEncode(body),
+          )
+          .timeout(Duration(seconds: timeoutSec));
+    } on TimeoutException {
+      throw Exception(
+        'User message timed out after ${timeoutSec}s. Try again, shorten the message, or reduce attachment size.',
+      );
+    }
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired; please log in again');
+    }
     if (response.statusCode != 200) {
-      final err = response.body;
-      throw Exception('User message failed ${response.statusCode}: $err');
+      throw Exception(
+        'User message failed ${response.statusCode}: ${_formatCoreApiError(response.body, response.statusCode)}',
+      );
     }
     try {
       return jsonDecode(response.body) as Map<String, dynamic>? ?? {};
