@@ -19,6 +19,17 @@ What installer does:
 
 ## 2) Configure in Portal
 
+If you want to use **local GGUF models** (local mode or mix mode), prepare these files first:
+
+1. **Download GGUF model files** (for example from Hugging Face).
+2. Put them into the local model folder:
+   - default: `models/` (because `config/core.yml` has `model_path: models`)
+   - optional: if you changed `model_path`, use that folder instead
+3. If you install `llama.cpp` manually, download the **llama.cpp binary distribution** and place it into:
+   - `llama.cpp-master/<platform>/`
+   - common platform folders: `mac/`, `win_cpu/`, `win_cuda/`, `linux_cpu/`, `linux_cuda/`
+4. In `config/llm.yml`, make sure each `local_models` entry `path` matches the GGUF filename you put in `models/`.
+
 In Portal:
 
 1. Create admin account
@@ -26,6 +37,20 @@ In Portal:
 3. Choose your main model
 4. Add user(s)
 5. Start Core
+
+### Optional: enable mobile coding (Cursor + Claude Code bridge)
+
+If you want to code from your phone through HomeClaw Companion:
+
+1. Open `config/skills_and_plugins.yml`
+2. Confirm:
+   - `cursor_bridge_auto_start: true`
+3. (Optional but recommended) set full paths if your CLI is not found:
+   - `cursor_bridge_agent_path` (Cursor `agent` CLI)
+   - `claude_code_path` (Claude Code CLI)
+4. Restart Core after changing this file.
+
+Then, in Companion/WebChat, use coding requests and route to Cursor/Claude bridge tools.
 
 ## 3) Run Core
 

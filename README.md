@@ -18,6 +18,7 @@ What HomeClaw gives you:
 - **local/cloud/mix** model routing
 - tools, skills, and plugins (external plugins can be any language)
 - companion app + channels (Mac/Windows/Linux/iPhone/Android + messaging platforms)
+- Cursor + Claude Code bridge (start/continue coding tasks from mobile)
 - multi-user, user sandbox, and optional multi-instance federation
 
 ---
@@ -52,7 +53,12 @@ Simple/private tasks stay local; harder tasks go cloud when needed.
 Use WebChat, Telegram/Discord/etc., and Companion app together.  
 They share one Core and one memory.
 
-### 4) Family/team and federation ready
+### 4) Code from your phone (Cursor + Claude Code bridge)
+
+HomeClaw can connect your coding workflow to mobile chat.  
+You can start or continue coding tasks from your phone, then sync back to desktop coding tools.
+
+### 5) Family/team and federation ready
 
 Multi-user support in one Core, with optional multi-instance federation for remote friends/agents.
 

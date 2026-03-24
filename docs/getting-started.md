@@ -16,7 +16,14 @@ The shortest path:
 
 Portal opens at `http://127.0.0.1:18472`.
 
-## 2) Configure
+## 2) Prepare local model files (if using local/mix)
+
+- Download GGUF model files and put them in `models/` (default from `config/core.yml` -> `model_path: models`).
+- If you changed `model_path`, put GGUF files in that folder instead.
+- If you install `llama.cpp` manually, put the binary distribution into `llama.cpp-master/<platform>/` (for example `mac/`, `win_cuda/`, `linux_cpu/`).
+- Make sure each `local_models[].path` in `config/llm.yml` matches your GGUF filename.
+
+## 3) Configure
 
 In Portal:
 
@@ -25,7 +32,7 @@ In Portal:
 - add user
 - start Core
 
-## 3) Start Core
+## 4) Start Core
 
 ```bash
 python -m main start
@@ -39,7 +46,7 @@ Check:
 python -m main doctor
 ```
 
-## 4) Chat
+## 5) Chat
 
 ### Companion app
 
@@ -53,7 +60,7 @@ python -m main doctor
 python -m channels.run webchat
 ```
 
-## 5) Useful next pages
+## 6) Useful next pages
 
 - [install.md](install.md)
 - [run.md](run.md)
