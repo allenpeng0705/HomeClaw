@@ -6,6 +6,9 @@ trigger:
   patterns:
     - "生成.*PPT|做个PPT|做.*PPT|生成.*演示|create.*ppt|make.*presentation|powerpoint|幻灯片.*生成|\\.pptx|做.*幻灯片|从.*做.*PPT"
   instruction: "The user asked to create a PPT or PowerPoint. Use run_skill(skill_name='ppt-generation-1.0.0', script='create_pptx.py', args=['--capability', '<outline|source|presentation|documents>', ...]). Choose capability by content: outline (markdown ## / -), source (raw text or JSON), presentation (main_title + slides JSON), documents (paths or document_contents). Include the link Core returns in your reply."
+  auto_invoke:
+    script: create_pptx.py
+    args: ["--capability", "source", "--source", "{{query}}"]
 ---
 
 # PPT Generation (PowerPoint .pptx)

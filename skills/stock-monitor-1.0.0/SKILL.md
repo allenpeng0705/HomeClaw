@@ -11,6 +11,9 @@ trigger:
     Summary of holdings/watchlist: args=["portfolio"]. Evaluate alert rules from config: args=["check"]. Quick news for a symbol: args=["news", "SYMBOL"] or args=["context", "SYMBOL"] for price + headlines.
     Edit config/watchlist.yml for watchlist, optional holdings, and alerts. For recurring push alerts use cron_schedule with task_type run_skill and script stock_monitor.py args ["check"].
     Data is delayed/unofficial Yahoo via yfinance—not financial advice. For deeper "why" use web_search after context.
+  auto_invoke:
+    script: stock_monitor.py
+    args: ["portfolio"]
 ---
 
 # Stock monitor (yfinance)

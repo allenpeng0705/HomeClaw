@@ -3584,6 +3584,29 @@ async def answer_from_memory(
                                         response = _res.strip()
                                 except Exception as e_w:
                                     logger.debug("Fallback weather run_skill failed: {}", e_w)
+                        # When strict_fallback is True, run daily-brief skill fallback for clear news-digest requests
+                        # when model returned no tool_calls (common local-model behavior: returns instructions only).
+                        if (
+                            _strict_fallback
+                            and isinstance(query, str)
+                            and registry
+                            and last_tool_name != "run_skill"
+                            and any(t.name == "run_skill" for t in (registry.list_tools() or []))
+                        ):
+                            _q_lo_db = (query or "").strip().lower()
+                            _q_raw_db = (query or "").strip()
+                            _daily_brief_phrases = (
+                                "daily brief", "morning report", "rss", "headline digest", "news digest",
+                                "今日新闻", "新闻订阅", "头条", "新闻摘要",
+                            )
+                            if any((p in _q_lo_db if p.isascii() else p in _q_raw_db) for p in _daily_brief_phrases):
+                                try:
+                                    _component_log("tools", "fallback run_skill(daily-brief-1.0.0) (strict_fallback=True; model did not call tool)")
+                                    _res = await registry.execute_async("run_skill", {"skill_name": "daily-brief-1.0.0"}, context)
+                                    if isinstance(_res, str) and _res.strip():
+                                        response = _res.strip()
+                                except Exception as e_db:
+                                    logger.debug("Fallback daily-brief run_skill failed: {}", e_db)
                         # Log when user clearly asked for scheduling but model didn't call any tool (informational only; no auto-invoke when strict_fallback).
                         # Do not log if we already ran remind_me/cron_schedule/route_to_tam this request (e.g. model replied with text after a successful reminder).
                         if isinstance(query, str) and _query_looks_like_scheduling(query) and registry and last_tool_name not in ("remind_me", "cron_schedule", "route_to_tam"):

@@ -4,6 +4,9 @@ description: macOS-only desktop UI automation (screens, windows, menubar, click,
 trigger:
   patterns: ["desktop\\s+ui|peekaboo|list\\s+windows?|click\\s+(on\\s+)?(element|screen)|screen\\s+capture|桌面|自动化"]
   instruction: "The user asked about desktop UI automation (macOS). Use run_skill(skill_name='desktop-ui', script='run.py', args=[list|image|see|click|type, ...]). macOS only; peekaboo required."
+  auto_invoke:
+    script: run.py
+    args: ["list", "windows"]
 ---
 
 # Desktop UI (macOS only)

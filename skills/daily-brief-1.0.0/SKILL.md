@@ -15,6 +15,9 @@ trigger:
        run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
                 args=["render-md", "--title", "Daily Brief", "--md", "<MARKDOWN>", "--out", "daily_brief.pdf"])
     4) Reply with 3–6 highlight bullets + the returned PDF link.
+  auto_invoke:
+    script: fetch_rss.py
+    args: ["fetch", "--max", "20", "--lang", "all"]
 ---
 
 # Daily Brief (RSS news digest)

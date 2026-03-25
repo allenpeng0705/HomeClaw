@@ -4,6 +4,9 @@ description: Capture frames or clips from RTSP/ONVIF IP cameras. Uses camsnap CL
 trigger:
   patterns: ["ip\\s+camera|camera\\s+snapshot|rtsp|camsnap|摄像头|监控|snapshot\\s+camera"]
   instruction: "The user asked about IP cameras (snapshot, clip, RTSP). Use run_skill(skill_name='ip-cameras', script='run.py', args=[discover|snap|clip|doctor, ...]). camsnap and ffmpeg required."
+  auto_invoke:
+    script: run.py
+    args: ["doctor", "--probe"]
 ---
 
 # IP Cameras (RTSP/ONVIF)
