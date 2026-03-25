@@ -104,3 +104,4 @@ site/assets/HomeClaw-Introduction.pptx
 site/assets/ppt-background.png
 site/create_ppt.py
 site/create_ppt_zh.py
+/external_plugins/__pycache__
