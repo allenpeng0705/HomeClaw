@@ -206,6 +206,93 @@ def _run_py_script_in_process(
     return out_io.getvalue(), err_io.getvalue()
 
 
+async def _normalize_run_skill_args_with_cloud(
+    skill_name: str,
+    user_text: str,
+    current_args: List[str],
+) -> Optional[List[str]]:
+    """
+    Use cloud model to normalize run_skill args for known skills when local tool-call args are weak.
+    Returns normalized args list or None (fallback to local deterministic rules).
+    Never raises.
+    """
+    try:
+        meta = Util().get_core_metadata()
+        if meta is None:
+            return None
+        mode = (getattr(meta, "main_llm_mode", None) or "").strip().lower()
+        cloud_ref = (getattr(meta, "main_llm_cloud", None) or "").strip()
+        if mode not in ("mix", "cloud") or not cloud_ref:
+            return None
+        tools_cfg = getattr(meta, "tools_config", None) or {}
+        normalizer_mode = str(tools_cfg.get("run_skill_arg_normalizer", "auto") or "auto").strip().lower()
+        if normalizer_mode in ("off", "false", "none", "local"):
+            return None
+        schema_hint = ""
+        if skill_name == "daily-brief-1.0.0":
+            schema_hint = (
+                "Allowed args: ['list'] OR ['fetch','--max','<1..100>','--lang','cn|en|all'] "
+                "optionally append ['--filter','<keyword>']."
+            )
+        elif skill_name == "weather-1.0.0":
+            schema_hint = "Allowed args: ['<full user message>'] OR ['--full','<location or message>']."
+        elif skill_name == "stock-monitor-1.0.0":
+            schema_hint = "Allowed args: ['portfolio'] OR ['check'] OR ['news','SYMBOL'] OR ['context','SYMBOL']."
+        else:
+            schema_hint = (
+                "Return best-effort executable args list for this skill script. "
+                "Do not invent unsupported shell syntax; keep args as plain argv tokens."
+            )
+
+        sys_msg = (
+            "You normalize tool arguments. Reply ONLY JSON: "
+            '{"args":["..."]}. No explanation, no markdown.'
+        )
+        usr_msg = (
+            f"skill_name={skill_name}\n"
+            f"user_text={user_text}\n"
+            f"current_args={current_args}\n"
+            f"{schema_hint}\n"
+            "Return safe executable args. Keep arguments concise."
+        )
+        raw = await Util().openai_chat_completion(
+            messages=[
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": usr_msg},
+            ],
+            llm_name=cloud_ref,
+        )
+        if not raw or not isinstance(raw, str):
+            return None
+        s = raw.strip()
+        if s.startswith("```"):
+            m = re.search(r"```(?:json)?\s*([\s\S]*?)```", s, re.I)
+            if m:
+                s = m.group(1).strip()
+        obj = None
+        try:
+            obj = json.loads(s)
+        except Exception:
+            m = re.search(r"\{[\s\S]*\}", s)
+            if m:
+                try:
+                    obj = json.loads(m.group(0))
+                except Exception:
+                    obj = None
+        if not isinstance(obj, dict):
+            return None
+        arr = obj.get("args")
+        if not isinstance(arr, list):
+            return None
+        out = [str(x) for x in arr if x is not None]
+        if not out:
+            return None
+        return out
+    except Exception as e:
+        logger.debug("run_skill cloud arg normalizer failed: {}", e)
+        return None
+
+
 async def _maybe_pip_install_skill_requirements(
     skill_folder: Path,
     skill_env: Dict[str, str],
@@ -3171,6 +3258,30 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                 args_input = [q]
         except Exception:
             pass
+    # Daily brief: if args missing, synthesize a safe fetch command from user query.
+    # Prevents local models from calling run_skill(skill_name='daily-brief-1.0.0') with empty args,
+    # which otherwise causes argparse "cmd required" and tool-loop drift.
+    if args_input is None and skill_name == "daily-brief-1.0.0":
+        try:
+            q = (getattr(getattr(context, "request", None), "text", None) or "").strip()
+            q_lo = q.lower()
+            max_items = 20
+            m_cn = re.search(r"(\d{1,3})\s*条", q)
+            m_en = re.search(r"\b(\d{1,3})\s*(items?|headlines?)\b", q_lo)
+            m = m_cn or m_en
+            if m:
+                try:
+                    max_items = max(1, min(100, int(m.group(1))))
+                except Exception:
+                    max_items = 20
+            lang = "all"
+            if any(k in q for k in ("中文", "汉语", "国内")) or any(k in q_lo for k in (" chinese", "lang cn", "cn ")):
+                lang = "cn"
+            elif any(k in q for k in ("英文", "英语")) or any(k in q_lo for k in (" english", "lang en", "en ")):
+                lang = "en"
+            args_input = ["fetch", "--max", str(max_items), "--lang", lang]
+        except Exception:
+            args_input = ["fetch", "--max", "20", "--lang", "all"]
     config = _get_tools_config() or {}
     allowlist = config.get("run_skill_allowlist")
     if allowlist and script_path.name not in allowlist:
@@ -3282,6 +3393,8 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
     except Exception:
         pass
     args_list: List[str] = []
+    req = getattr(context, "request", None)
+    user_text_for_args = ((getattr(req, "text", None) or "").strip() if req is not None else "")
     if args_input is not None:
         if isinstance(args_input, list):
             try:
@@ -3315,12 +3428,67 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                     args_list = [p for p in parts if p]
         elif isinstance(args_input, str):
             args_list = [x.strip() for x in args_input.split() if x.strip()]
+    # Cloud arg normalizer (default in mix/cloud via run_skill_arg_normalizer=auto):
+    # use cloud to repair weak local tool-call args before deterministic local rewrite.
+    try:
+        _normalized = await _normalize_run_skill_args_with_cloud(
+            skill_name=skill_name,
+            user_text=user_text_for_args,
+            current_args=args_list,
+        )
+        if isinstance(_normalized, list) and _normalized:
+            args_list = _normalized
+    except Exception:
+        pass
+    # Skill-specific deterministic normalization for weak/malformed local-model args.
+    # Goal: convert natural-language blobs into valid argv so scripts don't fail/loop.
+    try:
+        if skill_name == "daily-brief-1.0.0":
+            # Expected commands: list | fetch --max N --lang cn|en|all [--filter KEYWORD]
+            cmd_ok = bool(args_list) and (args_list[0] in ("list", "fetch"))
+            if not cmd_ok:
+                q = user_text_for_args or "daily brief"
+                q_lo = q.lower()
+                # "list feeds" style request
+                if (
+                    "list" in q_lo and "feed" in q_lo
+                    or "列出" in q and "源" in q
+                    or "有哪些订阅" in q
+                ):
+                    args_list = ["list"]
+                else:
+                    max_items = 20
+                    m_cn = re.search(r"(\d{1,3})\s*条", q)
+                    m_en = re.search(r"\b(\d{1,3})\s*(items?|headlines?)\b", q_lo)
+                    m = m_cn or m_en
+                    if m:
+                        try:
+                            max_items = max(1, min(100, int(m.group(1))))
+                        except Exception:
+                            max_items = 20
+                    lang = "all"
+                    if any(k in q for k in ("中文", "汉语", "国内")) or any(k in q_lo for k in (" chinese", " lang cn", " cn ")):
+                        lang = "cn"
+                    elif any(k in q for k in ("英文", "英语")) or any(k in q_lo for k in (" english", " lang en", " en ")):
+                        lang = "en"
+                    args_list = ["fetch", "--max", str(max_items), "--lang", lang]
+                    # Optional lightweight keyword extraction
+                    km = re.search(r"(?:关于|关键词|filter|主题)\s*[:：]?\s*([^\s,，。]{2,30})", q, re.I)
+                    if km:
+                        kw = (km.group(1) or "").strip()
+                        if kw:
+                            args_list += ["--filter", kw]
+        elif skill_name == "weather-1.0.0":
+            if not args_list and user_text_for_args:
+                args_list = [user_text_for_args]
+    except Exception:
+        pass
+
     # When the model omits args, pass the current user message so scripts can use it (e.g. smtp.js send-from-message).
     if not args_list:
         try:
-            req = getattr(context, "request", None)
             if req is not None:
-                user_text = (getattr(req, "text", None) or "").strip()
+                user_text = user_text_for_args
                 if user_text:
                     skill_env["HOMECLAW_USER_MESSAGE"] = user_text
         except Exception:

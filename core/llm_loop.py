@@ -99,6 +99,120 @@ from core.log_helpers import (
 )
 
 
+async def _normalize_tool_arguments_if_needed(
+    registry: Any,
+    tool_name: str,
+    args: Dict[str, Any],
+    user_query: str,
+    effective_llm_name: Optional[str],
+) -> Dict[str, Any]:
+    """
+    Best-effort tool argument normalization using an LLM.
+    - local mode: use local model
+    - mix/cloud mode: prefer cloud model
+    Runs only when arguments look incomplete/invalid for the tool schema. Never raises.
+    """
+    try:
+        if not registry or not tool_name or not isinstance(args, dict):
+            return args
+        meta = Util().get_core_metadata()
+        tools_cfg = getattr(meta, "tools_config", None) or {}
+        mode_cfg = str(tools_cfg.get("tool_arg_normalizer", "auto") or "auto").strip().lower()
+        if mode_cfg in ("off", "false", "none", "disable", "disabled"):
+            return args
+        # Keep run_skill normalization in tools/builtin.py only (single source of truth).
+        if tool_name == "run_skill":
+            return args
+        # Safety scope: only normalize allowlisted tools by default.
+        allowlist = tools_cfg.get("tool_arg_normalizer_tools")
+        if not isinstance(allowlist, list) or not allowlist:
+            allowlist = ["remind_me", "cron_schedule", "route_to_plugin"]
+        allowset = {str(x).strip() for x in allowlist if x is not None and str(x).strip()}
+        if tool_name not in allowset:
+            return args
+
+        td = registry.get(tool_name) if hasattr(registry, "get") else None
+        schema = (getattr(td, "parameters", None) or {}) if td is not None else {}
+        props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+        required = schema.get("required") if isinstance(schema.get("required"), list) else []
+
+        # Decide if normalization is needed.
+        need = False
+        if required and any(k not in args or args.get(k) in (None, "", []) for k in required):
+            need = True
+        if props and any(k not in props for k in args.keys()):
+            need = True
+        for v in args.values():
+            if isinstance(v, str) and not v.strip():
+                need = True
+                break
+        if not need:
+            return args
+
+        mode = (getattr(meta, "main_llm_mode", None) or "").strip().lower() if meta else ""
+        cloud_ref = (getattr(meta, "main_llm_cloud", None) or "").strip() if meta else ""
+        local_ref = (getattr(meta, "main_llm_local", None) or "").strip() if meta else ""
+
+        if mode == "local":
+            llm_ref = local_ref or effective_llm_name or None
+        else:
+            llm_ref = cloud_ref or effective_llm_name or local_ref or None
+        if not llm_ref:
+            return args
+
+        sys_msg = (
+            "You normalize tool call arguments. Reply only valid JSON object for arguments, no markdown."
+        )
+        usr_msg = (
+            f"tool_name={tool_name}\n"
+            f"user_query={user_query}\n"
+            f"current_args={json.dumps(args, ensure_ascii=False)}\n"
+            f"schema={json.dumps(schema, ensure_ascii=False)}\n"
+            "Return corrected arguments JSON object."
+        )
+        try:
+            norm_timeout = float(tools_cfg.get("tool_arg_normalizer_timeout_seconds", 4) or 4)
+            norm_timeout = max(1.0, min(10.0, norm_timeout))
+        except Exception:
+            norm_timeout = 4.0
+        raw = await asyncio.wait_for(
+            Util().openai_chat_completion(
+                messages=[
+                    {"role": "system", "content": sys_msg},
+                    {"role": "user", "content": usr_msg},
+                ],
+                llm_name=llm_ref,
+            ),
+            timeout=norm_timeout,
+        )
+        if not raw or not isinstance(raw, str):
+            return args
+        s = raw.strip()
+        if s.startswith("```"):
+            m = re.search(r"```(?:json)?\s*([\s\S]*?)```", s, re.I)
+            if m:
+                s = m.group(1).strip()
+        parsed = None
+        try:
+            parsed = json.loads(s)
+        except Exception:
+            m = re.search(r"\{[\s\S]*\}", s)
+            if m:
+                try:
+                    parsed = json.loads(m.group(0))
+                except Exception:
+                    parsed = None
+        if isinstance(parsed, dict):
+            # Keep only schema-known keys when possible.
+            if props:
+                parsed = {k: v for k, v in parsed.items() if k in props}
+            if isinstance(parsed, dict) and parsed:
+                return parsed
+        return args
+    except Exception:
+        return args
+
+
 def _messages_sanitized_for_tool_role(messages: List[dict]) -> List[dict]:
     """
     Ensure every message with role 'tool' is preceded by an assistant message with 'tool_calls'.
@@ -3915,6 +4029,19 @@ async def answer_from_memory(
                                             _component_log("tools", "save_result_page: using full HTML from message content (tool call was truncated)")
                                 except Exception as _e:
                                     logger.debug("save_result_page recover HTML from content failed: {}", _e)
+                    # Generic tool-argument normalization: repair malformed/incomplete args before execution.
+                    try:
+                        _norm_args = await _normalize_tool_arguments_if_needed(
+                            registry=registry,
+                            tool_name=name,
+                            args=args,
+                            user_query=(query or "").strip(),
+                            effective_llm_name=effective_llm_name,
+                        )
+                        if isinstance(_norm_args, dict):
+                            args = _norm_args
+                    except Exception:
+                        pass
                     # Phase 3.3: optional verification — ask LLM if tool matches user intent before executing (e.g. exec, file_write).
                     _tool_verified_skip = False
                     try:
