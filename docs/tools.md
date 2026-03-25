@@ -61,6 +61,17 @@ The **markdown_to_pdf** tool converts Markdown text to a PDF file and saves it u
 
 ---
 
+## Magazine-style PDFs (skill)
+
+If the user asks for a more **beautiful / readable / magazine-like** report layout, use the skill **`magazine-render-1.0.0`**:
+
+- **Markdown mode:** `run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py", args=["render-md", "--title", "...", "--md", "<MARKDOWN>", "--out", "report.pdf"])`
+- **JSON template mode:** `render-json --template daily_brief|weather|stock --json "{...}" --out report.pdf`
+
+The skill uses **VMPrint** (draft2final) under the hood and writes to the user's `output/` folder; the returned result includes a view link when file serving is configured.
+
+---
+
 ## Plugins
 
 **Plugins** add single-feature capabilities (weather, news, email). The LLM routes to them via **`route_to_plugin(plugin_id)`**.

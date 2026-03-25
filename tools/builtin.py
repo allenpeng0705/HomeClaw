@@ -2885,22 +2885,39 @@ def _append_file_link_to_run_skill_output(script_output: str, context: Optional[
     if not script_output or not context:
         return script_output
     try:
-        # Script may print a single JSON line or JSON followed by other text; try first line or full strip
+        # Script output may include extra lines (e.g. HOMECLAW_IMAGE_PATH=...) plus a JSON payload.
+        # Scan all lines to find the first valid success dict, then attach a view link.
         raw = script_output.strip()
-        for candidate in (raw, raw.split("\n")[0].strip() if "\n" in raw else raw):
-            if not candidate or not isinstance(candidate, str) or not candidate.strip().startswith("{"):
+        if not raw:
+            return script_output
+        candidates = []
+        # Whole output (legacy: single-line JSON).
+        candidates.append(raw)
+        # Each non-empty line (robust: JSON can appear after logs/paths).
+        for line in raw.splitlines():
+            s = (line or "").strip()
+            if s:
+                candidates.append(s)
+        parsed = None
+        for candidate in candidates:
+            if not candidate.startswith("{"):
                 continue
-            parsed = json.loads(candidate) if candidate else None
-            if isinstance(parsed, dict) and parsed.get("success") and parsed.get("output_rel_path"):
-                from core.result_viewer import build_file_view_link
-                scope = _get_file_workspace_subdir(context)
-                path_rel = (parsed.get("output_rel_path") or "").strip()
-                if path_rel and scope:
-                    link, _ = build_file_view_link(scope, path_rel)
-                    if link:
-                        msg = (parsed.get("message") or "File saved.").strip()
-                        return f"{msg}\n\nCRITICAL: Use ONLY the URL on the next line. Copy it exactly—do not modify, truncate, or append anything.\n{link}"
+            try:
+                obj = json.loads(candidate)
+            except Exception:
+                continue
+            if isinstance(obj, dict) and obj.get("success") and obj.get("output_rel_path"):
+                parsed = obj
                 break
+        if isinstance(parsed, dict) and parsed.get("success") and parsed.get("output_rel_path"):
+            from core.result_viewer import build_file_view_link
+            scope = _get_file_workspace_subdir(context)
+            path_rel = (parsed.get("output_rel_path") or "").strip()
+            if path_rel and scope:
+                link, _ = build_file_view_link(scope, path_rel)
+                if link:
+                    msg = (parsed.get("message") or "File saved.").strip()
+                    return f"{msg}\n\nCRITICAL: Use ONLY the URL on the next line. Copy it exactly—do not modify, truncate, or append anything.\n{link}"
     except (json.JSONDecodeError, TypeError, Exception):
         pass
     return script_output

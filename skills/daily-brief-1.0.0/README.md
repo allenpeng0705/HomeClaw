@@ -4,6 +4,23 @@ RSS-based **Daily Brief** for HomeClaw: aggregate public feeds (English + Chines
 
 Full agent-oriented instructions are in **`SKILL.md`**. This README is for humans: setup, commands, scheduling, and real-life usage.
 
+## Natural language (what you can say)
+
+### English
+
+- “Daily brief, 25 items, all sources.”
+- “Morning report for Chinese tech news.”
+- “RSS digest filtered to AI.”
+- “List the configured daily brief feeds.”
+- “Daily brief, and make it a **magazine-style PDF**.”
+
+### Chinese
+
+- “今日新闻 / 每日简报（25条，中文）”
+- “RSS 新闻订阅，筛选 AI 相关”
+- “列出 daily brief 的 RSS 源”
+- “把今日新闻做成 **杂志风格 PDF**（排版更好看）”
+
 ## Requirements
 
 - **Python 3.10+** (recommended; script uses `from __future__ import annotations` and stdlib `datetime.timezone` patterns).
