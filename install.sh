@@ -3,7 +3,7 @@
 # Run from project root (existing clone) or from a parent directory (script will clone).
 # Do NOT use sudo. Run as your normal user:   bash install.sh   (or   chmod +x install.sh   then   ./install.sh).
 # If you see "Permission denied", use   bash install.sh   — it does not require the file to be executable.
-# Steps: Python (3.9+) -> Node.js -> tsx -> ClawHub -> [clone if needed] -> VMPrint -> pip install -> Cognee deps (cognee in vendor/) -> document stack -> MemOS (vendor/memos) -> llama.cpp -> GGUF/Ollama -> open Portal.
+# Steps: Python (3.9+) -> Node.js -> tsx -> ClawHub -> [clone if needed] -> optional Dev CLIs + bundled memex npm ci -> VMPrint -> pip install -> Cognee deps (cognee in vendor/) -> document stack -> MemOS (vendor/memos) -> llama.cpp -> GGUF/Ollama -> open Portal.
 
 set -e
 REPO_URL="${HOMECLAW_REPO_URL:-https://github.com/allenpeng0705/HomeClaw.git}"
@@ -181,6 +181,8 @@ fi
 #   HOMECLAW_INSTALL_CURSOR_CLI=1 bash install.sh
 #   HOMECLAW_INSTALL_CLAUDE_CODE=1 bash install.sh
 #   HOMECLAW_INSTALL_TRAE_AGENT=1 bash install.sh
+# Bundled memex (npm ci in external_plugins/cursor_bridge/bundled_memex) runs when Cursor or Claude CLI install is enabled,
+# or set HOMECLAW_INSTALL_BUNDLED_MEMEX=1 alone. Skip with HOMECLAW_SKIP_BUNDLED_MEMEX=1.
 echo ""
 echo "=== Step 2d: Dev CLIs (optional) ==="
 INSTALL_CURSOR_CLI="${HOMECLAW_INSTALL_CURSOR_CLI:-0}"
@@ -286,6 +288,35 @@ if [ "$INSTALL_TRAE_AGENT" = "1" ]; then
   fi
 else
   echo "Skipping Trae Agent install (set HOMECLAW_INSTALL_TRAE_AGENT=1 to enable)"
+fi
+
+# ----- Step 2e: Bundled memex for Cursor/Claude MCP (optional npm ci) -----
+echo ""
+echo "=== Step 2e: Bundled memex (Cursor/Claude MCP, optional) ==="
+BUNDLED_MEMEX_DIR="$ROOT/external_plugins/cursor_bridge/bundled_memex"
+DO_BUNDLED_MEMEX=0
+if [ "${HOMECLAW_SKIP_BUNDLED_MEMEX:-0}" = "1" ]; then
+  echo "Skipping bundled memex (HOMECLAW_SKIP_BUNDLED_MEMEX=1)"
+elif [ "${HOMECLAW_INSTALL_BUNDLED_MEMEX:-0}" = "1" ]; then
+  DO_BUNDLED_MEMEX=1
+elif [ "$INSTALL_CURSOR_CLI" = "1" ] || [ "$INSTALL_CLAUDE_CODE" = "1" ]; then
+  DO_BUNDLED_MEMEX=1
+fi
+if [ "$DO_BUNDLED_MEMEX" = "1" ]; then
+  if [ ! -f "$BUNDLED_MEMEX_DIR/package.json" ]; then
+    echo "Warning: bundled memex missing ($BUNDLED_MEMEX_DIR/package.json). Skipping."
+  elif ! command -v npm >/dev/null 2>&1; then
+    echo "npm not found; skipping bundled memex. Install Node.js then: cd $BUNDLED_MEMEX_DIR && npm ci"
+  else
+    echo "Running npm ci in external_plugins/cursor_bridge/bundled_memex ..."
+    if (cd "$BUNDLED_MEMEX_DIR" && npm ci --silent 2>/dev/null); then
+      echo "OK: bundled memex ready (docs/memex-with-cursor-and-claude.md)"
+    else
+      echo "Warning: npm ci in bundled_memex failed. Retry: cd $BUNDLED_MEMEX_DIR && npm ci"
+    fi
+  fi
+else
+  echo "Skipping bundled memex (use HOMECLAW_INSTALL_CURSOR_CLI=1 or HOMECLAW_INSTALL_CLAUDE_CODE=1, or HOMECLAW_INSTALL_BUNDLED_MEMEX=1)"
 fi
 
 # ----- Step 3: already done if IN_REPO -----
@@ -591,6 +622,7 @@ echo "  - Cursor CLI (agent/cursor): HOMECLAW_INSTALL_CURSOR_CLI=1 bash install.
 echo "  - Claude Code CLI (claude):  HOMECLAW_INSTALL_CLAUDE_CODE=1 bash install.sh"
 echo "  - Trae Agent (trae-cli):     HOMECLAW_INSTALL_TRAE_AGENT=1 bash install.sh"
 echo "  - All three: HOMECLAW_INSTALL_CURSOR_CLI=1 HOMECLAW_INSTALL_CLAUDE_CODE=1 HOMECLAW_INSTALL_TRAE_AGENT=1 bash install.sh"
+echo "  - Bundled memex MCP (npm ci): runs automatically with Cursor or Claude install above; or HOMECLAW_INSTALL_BUNDLED_MEMEX=1 alone. Skip: HOMECLAW_SKIP_BUNDLED_MEMEX=1"
 echo ""
 echo "Trae Agent: install clones to tools/trae-agent and creates trae_config.yaml from example. Edit trae_config.yaml with your API key (see https://github.com/bytedance/trae-agent). Then set cursor_bridge_trae_agent_path (path to trae-cli, e.g. tools/trae-agent/.venv/bin/trae-cli) and cursor_bridge_trae_agent_config (path to trae_config.yaml) in config/skills_and_plugins.yml."
 echo ""

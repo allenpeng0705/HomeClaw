@@ -1,6 +1,6 @@
 # HomeClaw install script for Windows.
 # Run from project root (existing clone) or from a parent directory (script will clone).
-# Steps (same as install.sh): Python (3.9+) -> Node.js -> tsx -> ClawHub -> [clone if needed] -> VMPrint -> pip install -> Cognee deps (cognee in vendor/) -> document stack -> MemOS (vendor/memos) -> llama.cpp -> GGUF/Ollama -> open Portal.
+# Steps (same as install.sh): Python (3.9+) -> Node.js -> tsx -> ClawHub -> [clone if needed] -> optional Dev CLIs + bundled memex npm ci -> VMPrint -> pip install -> Cognee deps (cognee in vendor/) -> document stack -> MemOS (vendor/memos) -> llama.cpp -> GGUF/Ollama -> open Portal.
 #
 # If you see "cannot be loaded... not digitally signed" (execution policy):
 #   Easiest: run install.bat instead (it uses Bypass automatically).
@@ -186,6 +186,7 @@ if (-not $ClawhubOk) {
 #   $env:HOMECLAW_INSTALL_CURSOR_CLI="1"; .\install.ps1
 #   $env:HOMECLAW_INSTALL_CLAUDE_CODE="1"; .\install.ps1
 #   $env:HOMECLAW_INSTALL_TRAE_AGENT="1"; .\install.ps1
+# Bundled memex: runs when Cursor or Claude install is enabled, or $env:HOMECLAW_INSTALL_BUNDLED_MEMEX="1". Skip: HOMECLAW_SKIP_BUNDLED_MEMEX=1
 Write-Host ""
 Write-Host "=== Step 2d: Dev CLIs (optional) ==="
 $InstallCursorCli = ($env:HOMECLAW_INSTALL_CURSOR_CLI -eq "1")
@@ -314,6 +315,42 @@ if ($InstallTraeAgent) {
   }
 } else {
   Write-Host "Skipping Trae Agent install (set HOMECLAW_INSTALL_TRAE_AGENT=1 to enable)"
+}
+
+# ----- Step 2e: Bundled memex for Cursor/Claude MCP (optional npm ci) -----
+Write-Host ""
+Write-Host "=== Step 2e: Bundled memex (Cursor/Claude MCP, optional) ==="
+$BundledMemexDir = Join-Path $Root "external_plugins\cursor_bridge\bundled_memex"
+$DoBundledMemex = $false
+if ($env:HOMECLAW_SKIP_BUNDLED_MEMEX -eq "1") {
+  Write-Host "Skipping bundled memex (HOMECLAW_SKIP_BUNDLED_MEMEX=1)"
+} elseif ($env:HOMECLAW_INSTALL_BUNDLED_MEMEX -eq "1") {
+  $DoBundledMemex = $true
+} elseif ($InstallCursorCli -or $InstallClaudeCode) {
+  $DoBundledMemex = $true
+}
+if ($DoBundledMemex) {
+  $pkgJson = Join-Path $BundledMemexDir "package.json"
+  if (-not (Test-Path $pkgJson)) {
+    Write-Host "Warning: bundled memex missing ($pkgJson). Skipping."
+  } elseif (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+    Write-Host "npm not found; skipping bundled memex. Install Node.js then: cd $BundledMemexDir; npm ci"
+  } else {
+    Write-Host "Running npm ci in external_plugins\cursor_bridge\bundled_memex ..."
+    Push-Location $BundledMemexDir
+    try {
+      & npm ci --silent 2>$null
+      if ($LASTEXITCODE -eq 0) {
+        Write-Host "OK: bundled memex ready (docs\memex-with-cursor-and-claude.md)"
+      } else {
+        Write-Host "Warning: npm ci in bundled_memex failed. Retry: cd $BundledMemexDir; npm ci"
+      }
+    } finally {
+      Pop-Location -ErrorAction SilentlyContinue
+    }
+  }
+} else {
+  Write-Host "Skipping bundled memex (use Cursor/Claude install flags, or HOMECLAW_INSTALL_BUNDLED_MEMEX=1)"
 }
 
 # ----- Step 4b: VMPrint (Markdown to PDF tool) -----
@@ -606,7 +643,8 @@ Write-Host "If you want to use the Cursor / ClaudeCode / Trae friends (run tools
 Write-Host "  - Cursor CLI (agent/cursor): `$env:HOMECLAW_INSTALL_CURSOR_CLI=`"1`"; .\\install.ps1"
 Write-Host "  - Claude Code CLI (claude):  `$env:HOMECLAW_INSTALL_CLAUDE_CODE=`"1`"; .\\install.ps1"
 Write-Host "  - Trae Agent (trae-cli):     `$env:HOMECLAW_INSTALL_TRAE_AGENT=`"1`"; .\\install.ps1"
-Write-Host "  - Or using install.bat flags: install.bat cursor   |  install.bat claude   |  install.bat trae   |  install.bat cursor claude trae"
+Write-Host "  - Or using install.bat flags: install.bat cursor   |  install.bat claude   |  install.bat trae   |  install.bat memex   |  combined, e.g. install.bat cursor claude memex"
+Write-Host "  - Bundled memex MCP (npm ci): runs with Cursor or Claude install; or `$env:HOMECLAW_INSTALL_BUNDLED_MEMEX=`"1`"; .\install.ps1  |  install.bat memex. Skip: HOMECLAW_SKIP_BUNDLED_MEMEX=1"
 Write-Host ""
 Write-Host "Trae Agent: install clones to tools\trae-agent and creates trae_config.yaml from example. Edit trae_config.yaml with your API key (see https://github.com/bytedance/trae-agent). Then set cursor_bridge_trae_agent_path (path to trae-cli, e.g. tools\trae-agent\.venv\Scripts\trae-cli.exe) and cursor_bridge_trae_agent_config (path to trae_config.yaml) in config\skills_and_plugins.yml."
 Write-Host ""

@@ -83,6 +83,8 @@ HOMECLAW_INSTALL_CURSOR_CLI=1 HOMECLAW_INSTALL_CLAUDE_CODE=1 bash install.sh
 $env:HOMECLAW_INSTALL_CURSOR_CLI="1"; $env:HOMECLAW_INSTALL_CLAUDE_CODE="1"; .\install.ps1
 ```
 
+When Cursor or Claude Code install is enabled, the installer also runs **`npm ci`** in **`external_plugins/cursor_bridge/bundled_memex`** (bundled **memex** for MCP). To install only that step: `HOMECLAW_INSTALL_BUNDLED_MEMEX=1 bash install.sh`, or **`install.bat memex`**. Skip with **`HOMECLAW_SKIP_BUNDLED_MEMEX=1`**. See [memex with Cursor and Claude](memex-with-cursor-and-claude.md).
+
 ---
 
 ## Manual Installation

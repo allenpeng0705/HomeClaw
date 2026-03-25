@@ -34,6 +34,8 @@ npm ci
 
 (`node_modules/` is gitignored; `package-lock.json` is tracked.)
 
+**Installer:** If you use `install.sh` / `install.ps1` / `install.bat` with **Cursor** or **Claude Code** CLI install flags, **`npm ci` runs automatically** in `bundled_memex` (Step 2e). You can also set **`HOMECLAW_INSTALL_BUNDLED_MEMEX=1`** alone, or on Windows run **`install.bat memex`**. Set **`HOMECLAW_SKIP_BUNDLED_MEMEX=1`** to skip.
+
 ### 2. Cursor: MCP server → HomeClaw launcher
 
 **Prefer a real Python 3** (Homebrew, pyenv, or your venv)—**not** Apple’s Xcode stub at `/Applications/Xcode.app/.../python3`, which often breaks tooling. On Apple Silicon Homebrew, that is usually `/opt/homebrew/bin/python3` (`which python3` in the same environment you use to run the bridge).

@@ -15,7 +15,8 @@ echo   If you want to use the Cursor / ClaudeCode / Trae friends (run tools on y
 echo     - Cursor CLI (agent/cursor):  install.bat cursor
 echo     - Claude Code CLI (claude):   install.bat claude
 echo     - Trae Agent (trae-cli):      install.bat trae
-echo     - All three:                  install.bat cursor claude trae
+echo     - Bundled memex (npm ci):     install.bat memex   (or runs with cursor / claude flags)
+echo     - All three CLIs:             install.bat cursor claude trae
 echo.
 echo   Trae Agent: install clones to tools\trae-agent and creates trae_config.yaml from example.
 echo   Edit trae_config.yaml with your API key (see https://github.com/bytedance/trae-agent).
@@ -26,13 +27,16 @@ REM   install.bat cursor        -> installs Cursor CLI (agent/cursor) if missing
 REM   install.bat claude        -> installs Claude Code CLI (claude) if missing
 REM   install.bat trae         -> installs Trae Agent (clone + uv sync + config example)
 REM   install.bat cursor claude trae -> installs all three
+REM   install.bat memex -> npm ci in bundled memex only (Cursor/Claude MCP); also auto with cursor or claude flag
 set HOMECLAW_INSTALL_CURSOR_CLI=
 set HOMECLAW_INSTALL_CLAUDE_CODE=
 set HOMECLAW_INSTALL_TRAE_AGENT=
+set HOMECLAW_INSTALL_BUNDLED_MEMEX=
 for %%A in (%*) do (
   if /I "%%~A"=="cursor" set HOMECLAW_INSTALL_CURSOR_CLI=1
   if /I "%%~A"=="claude" set HOMECLAW_INSTALL_CLAUDE_CODE=1
   if /I "%%~A"=="trae" set HOMECLAW_INSTALL_TRAE_AGENT=1
+  if /I "%%~A"=="memex" set HOMECLAW_INSTALL_BUNDLED_MEMEX=1
 )
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
 set EXITCODE=%ERRORLEVEL%
