@@ -17,11 +17,21 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from datetime import datetime, timedelta
 from typing import List
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+# Force UTF-8 stdio for Windows subprocess capture (avoids mojibake in Core logs/results).
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 try:
     import ssl
@@ -43,7 +53,8 @@ def fetch_weather(location: str, compact: bool = True) -> str:
         return "Error: location is required (e.g. London, New York, Beijing)."
     loc_encoded = urllib.parse.quote(loc_str)
     if compact:
-        url = f"https://wttr.in/{loc_encoded}?format=%l:+%c+%t+%h+%w"
+        # Keep one-line output but include condition text for better downstream advice.
+        url = f"https://wttr.in/{loc_encoded}?format=%l:+%C,+%t,+Hum:%h,+Wind:%w"
     else:
         url = f"https://wttr.in/{loc_encoded}?T"
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
@@ -97,19 +108,98 @@ def _sanitize_extracted_location(loc: str) -> str:
         s.strip(),
     ):
         return ""
+    # Remove trailing temporal words accidentally captured with city names:
+    # "北京明天" -> "北京", "shanghai tomorrow" -> "shanghai"
+    s = re.sub(r"(明天|今天|今晚|下周|这周|现在)$", "", s).strip()
+    s = re.sub(
+        r"\b(today|tomorrow|tonight|now|this week|next week)\b$",
+        "",
+        s,
+        flags=re.I,
+    ).strip()
     return s
 
 
 def _wants_extended_forecast(text: str) -> bool:
-    """True when the user asks for a day or multi-day outlook (full wttr output)."""
+    """True only when user explicitly asks for full/detailed forecast output."""
     t = (text or "").lower()
     return bool(
         re.search(
-            r"\b(tomorrow|tonight|next week|next few days|weekend|forecast)\b",
+            r"\b(full|detailed|multi-?day|7[- ]?day|weekly|next week)\b",
             t,
         )
-        or re.search(r"(明天|今晚|下周|预报|周末)", text or "")
+        or re.search(r"(详细|完整|多日|一周|下周|7天)", text or "")
     )
+
+
+def _strip_ansi(s: str) -> str:
+    """Remove ANSI escape sequences for mobile readability."""
+    return re.sub(r"\x1B\[[0-?]*[ -/]*[@-~]", "", s or "")
+
+
+def _extract_temp_c(text: str) -> int | None:
+    m = re.search(r"([+-]?\d+)\s*°?C", text or "", re.I)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def _extract_humidity_pct(text: str) -> int | None:
+    m = re.search(r"([0-9]{1,3})\s*%", text or "")
+    if not m:
+        return None
+    try:
+        v = int(m.group(1))
+        return v if 0 <= v <= 100 else None
+    except Exception:
+        return None
+
+
+def _build_life_tips(one_line_weather: str) -> list[str]:
+    """Build concise practical tips (dress / umbrella / wash-car)."""
+    t = one_line_weather or ""
+    tl = t.lower()
+    tips: list[str] = []
+    temp_c = _extract_temp_c(t)
+    hum = _extract_humidity_pct(t)
+    rainy = any(k in tl for k in ("rain", "drizzle", "shower", "thunder", "storm", "snow", "sleet"))
+    windy = ("wind:" in tl and any(k in tl for k in ("km/h", "mph"))) and any(k in tl for k in ("15 km/h", "20 km/h", "25 km/h", "30 km/h"))
+
+    # Dress tip
+    if temp_c is not None:
+        if temp_c <= 5:
+            tips.append("穿衣建议：偏冷，建议厚外套/羽绒服，注意保暖。")
+        elif temp_c <= 14:
+            tips.append("穿衣建议：微凉，建议外套或薄毛衣。")
+        elif temp_c <= 24:
+            tips.append("穿衣建议：体感舒适，长袖或薄外套即可。")
+        elif temp_c <= 30:
+            tips.append("穿衣建议：偏暖，短袖为主，注意补水。")
+        else:
+            tips.append("穿衣建议：较热，轻薄透气衣物，注意防晒和补水。")
+
+    # Umbrella/rain tip
+    if rainy:
+        tips.append("出行建议：有降水信号，建议带伞。")
+    elif hum is not None and hum >= 85:
+        tips.append("出行建议：湿度较高，体感可能闷；可备伞以防阵雨。")
+    else:
+        tips.append("出行建议：降水风险看起来不高。")
+
+    # Car wash tip
+    if rainy:
+        tips.append("洗车建议：不太适合，近期可能很快又变脏。")
+    elif hum is not None and hum >= 90:
+        tips.append("洗车建议：一般，湿度高且可能有水汽/雾。")
+    else:
+        tips.append("洗车建议：相对适合。")
+
+    if windy:
+        tips.append("额外提示：风力偏大，体感会更凉，出行注意防风。")
+    return tips
 
 
 def _extract_cn_location_before_weather(t: str) -> str:
@@ -389,6 +479,50 @@ def get_server_time_line_from_env() -> str:
         return ""
 
 
+def _parse_server_datetime_from_env() -> datetime | None:
+    """Best-effort parse Core-injected server datetime for weekday inference."""
+    import os
+
+    for key in ("HOMECLAW_SERVER_DATETIME_ISO", "HOMECLAW_SERVER_DATETIME"):
+        raw = os.environ.get(key)
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        s = raw.strip()
+        try:
+            if key.endswith("_ISO"):
+                return datetime.fromisoformat(s.replace("Z", "+00:00")).replace(tzinfo=None)
+            # e.g. 2026-03-25 18:27
+            return datetime.strptime(s[:16], "%Y-%m-%d %H:%M")
+        except Exception:
+            continue
+    try:
+        return datetime.now()
+    except Exception:
+        return None
+
+
+def _target_day_line(raw_query: str) -> str:
+    """Return markdown bullet for today/tomorrow/day-after with weekday, when query asks it."""
+    q = (raw_query or "").strip().lower()
+    q_raw = raw_query or ""
+    delta = 0
+    if "后天" in q_raw:
+        delta = 2
+    elif "明天" in q_raw or "tomorrow" in q:
+        delta = 1
+    elif "今天" in q_raw or "today" in q:
+        delta = 0
+    else:
+        return ""
+    base = _parse_server_datetime_from_env()
+    if base is None:
+        return ""
+    target = base + timedelta(days=delta)
+    wk = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][target.weekday()]
+    label = "后天" if delta == 2 else ("明天" if delta == 1 else "今天")
+    return f"- 目标日期：{label}（{wk}）"
+
+
 def main() -> None:
     """Entry point. Never raises; exits with 0 on success, 1 on usage/error."""
     try:
@@ -435,11 +569,27 @@ def main() -> None:
 
         full_forecast = bool(getattr(args, "full", False)) or _wants_extended_forecast(raw_query)
         result = fetch_weather(location, compact=not full_forecast)
+        result = _strip_ansi(result)
         if result:
             time_line = get_server_time_line_from_env()
-            if time_line and not str(result).lstrip().lower().startswith("error:"):
-                print(time_line)
-            print(result)
+            is_error = str(result).lstrip().lower().startswith("error:")
+            if not is_error:
+                print("## Weather")
+                if time_line:
+                    print(f"- {time_line}")
+                day_line = _target_day_line(raw_query)
+                if day_line:
+                    print(day_line)
+                print(f"- {result}")
+            else:
+                print(result)
+            # Add concise practical tips for compact mode.
+            if not full_forecast and not is_error:
+                tips = _build_life_tips(result)
+                if tips:
+                    print("\n### Practical Tips")
+                    for tip in tips:
+                        print(f"- {tip}")
             sys.stdout.flush()
     except SystemExit:
         raise

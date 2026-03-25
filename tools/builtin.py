@@ -3181,6 +3181,10 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
         timeout = 60
     # Resolve request output dir (user/companion output folder) when sandbox is active; pass to script via env so skills can save files there.
     skill_env = dict(os.environ)
+    # Force UTF-8 stdio for Python subprocess skills (especially on Windows) so
+    # non-ASCII output (e.g. Chinese city names) is decoded correctly in Core.
+    skill_env["PYTHONIOENCODING"] = "utf-8"
+    skill_env["PYTHONUTF8"] = "1"
     r_out = _resolve_file_path(FILE_OUTPUT_SUBDIR, context, for_write=True)
     if r_out:
         full_out, base_for_validation = r_out
