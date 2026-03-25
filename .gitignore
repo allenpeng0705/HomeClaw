@@ -76,6 +76,7 @@ external_plugins/quote-java/target/classes/QuotePlugin.class
 /clients/cli/__pycache__
 /core/utils/config/__pycache__
 /external_plugins/cursor_bridge/__pycache__
+/external_plugins/cursor_bridge/bundled_memex/node_modules
 /external_plugins/time/__pycache__
 /external_skills/ai-ppt-generator/scripts/__pycache__
 /scripts/__pycache__

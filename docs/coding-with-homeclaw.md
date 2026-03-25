@@ -222,6 +222,12 @@ You can use both: the ClaudeCode friend for interactive CLI tasks, and MCP for p
 
 ---
 
+## Optional: memex memory in Cursor and Claude Code (local)
+
+To add **[memex](https://github.com/iamtouchskyer/memex)**—markdown “cards” and recall for coding agents—configure **Cursor** (MCP) and **Claude Code** (plugin) on your dev machine. It is **packaged with the bridge tree**: run `npm ci` in `external_plugins/cursor_bridge/bundled_memex`, then point Cursor at `python3 -m external_plugins.cursor_bridge.memex_mcp` (see **[memex with Cursor and Claude](memex-with-cursor-and-claude.md)** for the full MCP snippet and `cwd` notes). No global `npm install -g memex` is required for that path.
+
+---
+
 ## Install Cursor CLI and Claude Code with HomeClaw
 
 The install script can set up both:

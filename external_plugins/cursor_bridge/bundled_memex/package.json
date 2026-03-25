@@ -1,0 +1,8 @@
+{
+  "name": "homeclaw-cursor-bridge-bundled-memex",
+  "private": true,
+  "description": "Pinned @touchskyer/memex for HomeClaw Cursor bridge MCP launcher (npm ci in this directory).",
+  "dependencies": {
+    "@touchskyer/memex": "0.1.22"
+  }
+}

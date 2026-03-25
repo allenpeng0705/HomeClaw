@@ -75,6 +75,7 @@ HomeClaw routes to the Cursor Bridge; the bridge opens the project in Cursor, ru
 
 ## More details
 
+- **Optional memex memory in Cursor (and Claude Code) next to the bridge:** [memex-with-cursor-and-claude.md](memex-with-cursor-and-claude.md)
 - **Bridge code and options:** `external_plugins/cursor_bridge/README.md`
 - **Design (contract, security):** `docs_design/HomeClaw_Uses_Cursor_And_Traefik_Design.md` (Cursor section)
 - **Cursor and Claude Code together, and using Claude Code’s MCP server from HomeClaw:** `docs/cursor-claude-code-bridge.md`

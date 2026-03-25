@@ -55,6 +55,7 @@ nav:
     - Friends & Family: friends-and-family.md
     - Federated Companion messaging: federated-companion-messaging.md
     - Coding with HomeClaw (Cursor, Claude Code): coding-with-homeclaw.md
+    - memex memory (Cursor & Claude Code): memex-with-cursor-and-claude.md
   - Connect Remotely:
     - Remote Access (tunnels): remote-access.md
     - Companion on iPhone (Cloudflare Tunnel): companion-iphone-cloudflare-tunnel.md
