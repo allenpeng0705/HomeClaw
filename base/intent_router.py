@@ -214,6 +214,26 @@ async def route(
     except Exception as e:
         logger.debug("Intent router get_file_link pre-check failed (non-fatal): {}", e)
 
+    # Weather queries should not be forced into search_web DAG.
+    # Route to general_chat so the main tool loop can pick weather skill (run_skill weather-1.0.0)
+    # and use Companion/profile location fallback when city is omitted.
+    try:
+        if "general_chat" in categories and query is not None and isinstance(query, str) and query.strip():
+            q = query.strip().lower()
+            if (
+                "weather" in q
+                or "forecast" in q
+                or "temperature" in q
+                or "wttr" in q
+                or "天气" in query
+                or "气温" in query
+                or "天气预报" in query
+            ):
+                logger.debug("Intent router: query matches weather -> category general_chat")
+                return "general_chat"
+    except Exception as e:
+        logger.debug("Intent router weather pre-check failed (non-fatal): {}", e)
+
     # When user explicitly asks to convert Markdown to PDF (e.g. "convert X.md to PDF", "把X.md转成PDF"),
     # route directly to generate_pdf so the fixed DAG (document_read -> markdown_to_pdf) runs and uses
     # VMPrint/pandoc/weasyprint instead of generic file_write. This makes Markdown→PDF behavior consistent

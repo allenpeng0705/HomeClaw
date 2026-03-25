@@ -12,8 +12,8 @@ watchlist:
   - NVDA
   - AAPL
   # - "000001.SS"    # 上证综指
-  # - "399001.SZ"    # 深证成指
-  # - "600519.SS"    # example A-share
+  - "300418.SZ"    # 深证成指
+  - "688049.SS"    # example A-share
   # - "0700.HK"      # example HK
   # - BTC-USD
 
@@ -23,11 +23,17 @@ watchlist:
 #   - symbol: NVDA
 #     shares: 10
 #     avg_cost: 120.0
-holdings: []
+holdings: 
+  - symbol: 300418.SZ
+    shares: 30000
+    avg_cost: 53.0
+  - symbol: 688049.SS
+    shares: 50000
+    avg_cost: 50.0
 
 # Alert rules (evaluated by: stock_monitor.py check).
 # Cooldown prevents the same alert from firing every cron tick (default 24h).
-alert_cooldown_hours: 24
+alert_cooldown_hours: 12
 
 # Example alerts (one trigger type per rule). Use cron_schedule + run_skill check to get notified.
 # alerts:
@@ -43,4 +49,10 @@ alert_cooldown_hours: 24
 #   - id: btc-100k
 #     symbol: BTC-USD
 #     price_at_or_above: 100000
-alerts: []
+alerts:
+  - id: 300418-below-50
+    symbol: 300418.SZ
+    price_at_or_below: 50.0
+  - id: 688049-below-50
+    symbol: 688049.SS
+    price_at_or_below: 45.0

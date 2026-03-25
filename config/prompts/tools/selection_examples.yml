@@ -142,6 +142,10 @@ content: |
   Thought: User wants to send email; use email skill (e.g. imap-smtp-email or run_skill with skill that sends email).
   Call: run_skill(skill_name="imap-smtp-email", script="send_email.py", args=["--to", "john@example.com", "--body", "hello"])
 
+  User: "北京明天天气怎么样？"
+  Thought: Weather query; use weather skill with the full sentence so location/time words are parsed.
+  Call: run_skill(skill_name="weather-1.0.0", script="get_weather.py", args=["北京明天天气怎么样？"])
+
   User: "Make HTML slides from my presentation.docx."
   Thought: Instruction-only skill: confirm run_skill then document_read, generate a multi-slide deck (8–20 slides, one idea per slide), save_result_page(format='html').
   Call: run_skill(skill_name="html-slides")

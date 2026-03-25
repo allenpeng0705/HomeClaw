@@ -27,8 +27,9 @@ try:
     import feedparser
 except ImportError:
     print(
-        "Error: feedparser is not installed. Install with: pip install feedparser\n"
-        "(HomeClaw adds feedparser to requirements.txt for this skill.)",
+        "Error: feedparser is not installed.\n"
+        "  pip install -r skills/daily-brief-1.0.0/requirements.txt\n"
+        "  (or: pip install feedparser)",
         file=sys.stderr,
     )
     sys.exit(1)

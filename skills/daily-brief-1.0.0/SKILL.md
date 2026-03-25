@@ -64,6 +64,6 @@ Delivery uses **`deliver_to_user`** (Companion WebSocket + push + last channel) 
 - **Paywalls** — following links for full text may require **`fetch_url`** separately.
 - **Network** — each feed fetch uses a timeout and a max response size; only `http`/`https` URLs are allowed. See **`README.md`** for robustness details.
 
-## Dependency
+## Dependencies
 
-Python package **`feedparser`** (listed in project `requirements.txt`).
+**`feedparser`** and **`PyYAML`** — install with `pip install -r requirements.txt` in this skill directory, or use the repo root `requirements.txt` for a full HomeClaw install.

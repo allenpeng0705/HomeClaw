@@ -3062,6 +3062,51 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                 "The content parameter must be the actual generated HTML/text—never empty. You MUST call save_result_page or file_write and return the view link to the user before replying; do not reply with only a summary or claim the file exists without calling the tool."
             )
         return f"Error: skill has no scripts/ folder: {skill_name}. Use the skill's instructions in your response instead of run_skill."
+    # If model omitted script, try to auto-fill from SKILL.md frontmatter auto_invoke or from scripts/ when unambiguous.
+    if not script_arg:
+        try:
+            auto_script = ""
+            auto_args: Optional[List[str]] = None
+            skill_md = skill_folder / "SKILL.md"
+            if skill_md.is_file():
+                raw = skill_md.read_text(encoding="utf-8", errors="replace")
+                if raw.startswith("---"):
+                    end = raw.find("\n---", 3)
+                    if end != -1:
+                        fm_text = raw[3:end].strip()
+                        if yaml is not None:
+                            try:
+                                fm = yaml.safe_load(fm_text) or {}
+                            except Exception:
+                                fm = {}
+                            if isinstance(fm, dict):
+                                ai = fm.get("trigger", {}).get("auto_invoke") if isinstance(fm.get("trigger"), dict) else fm.get("auto_invoke")
+                                if isinstance(ai, dict):
+                                    auto_script = str(ai.get("script") or "").strip()
+                                    aargs = ai.get("args")
+                                    if isinstance(aargs, list):
+                                        auto_args = [str(x) for x in aargs if x is not None]
+            if auto_script:
+                script_arg = auto_script
+                if args_input is None and auto_args is not None:
+                    # Replace {{query}} with the original user message when available.
+                    q = (getattr(getattr(context, "request", None), "text", None) or "").strip()
+                    args_input = [a.replace("{{query}}", q) for a in auto_args]
+            else:
+                # Fallback: if there is exactly one runnable script in scripts/, use it.
+                try:
+                    runnable_exts = {".py", ".js", ".mjs", ".cjs", ".ts", ".sh", ".ps1", ".bat", ".cmd"}
+                    files = [
+                        p.name
+                        for p in scripts_dir.iterdir()
+                        if p.is_file() and p.suffix.lower() in runnable_exts
+                    ]
+                except Exception:
+                    files = []
+                if len(files) == 1:
+                    script_arg = files[0]
+        except Exception:
+            pass
     if not script_arg:
         return (
             "Error: script (or script_name) is required for this skill; it has a scripts/ folder. "
@@ -3101,6 +3146,14 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
     if not script_path_resolved.is_file():
         return f"Error: script not found or not a file: {script_arg_normalized} (under {skill_name}/scripts/)"
     script_path = script_path_resolved
+    # If args were omitted entirely, only default for skills that explicitly support args=["<full user message>"].
+    if args_input is None and skill_name == "weather-1.0.0":
+        try:
+            q = (getattr(getattr(context, "request", None), "text", None) or "").strip()
+            if q:
+                args_input = [q]
+        except Exception:
+            pass
     config = _get_tools_config() or {}
     allowlist = config.get("run_skill_allowlist")
     if allowlist and script_path.name not in allowlist:

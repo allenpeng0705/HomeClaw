@@ -1,0 +1,6 @@
+# Daily Brief skill — minimal deps to run scripts/ locally or on a slim Core install.
+# Install from this directory: pip install -r requirements.txt
+# HomeClaw’s repo root requirements.txt already includes these for a full install.
+
+feedparser>=6.0.0
+PyYAML>=6.0

@@ -54,7 +54,7 @@ Use the code block below for defaults; put secrets in `.env` (gitignored) or use
 IMAP_HOST=imap.gmail.com          # Server hostname
 IMAP_PORT=993                     # Server port
 IMAP_USER=shileipeng@email.com
-IMAP_PASS=
+IMAP_PASS=imcugopfstgvffzv
 IMAP_TLS=true                     # Use TLS/SSL connection
 IMAP_REJECT_UNAUTHORIZED=true     # Set to false for self-signed certs
 IMAP_MAILBOX=INBOX                # Default mailbox

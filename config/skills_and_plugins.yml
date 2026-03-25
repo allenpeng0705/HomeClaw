@@ -385,6 +385,17 @@ skills_force_include_rules:
     folders: [summarize-1.0.0]
     instruction: "User asked to summarize. Use run_skill(skill_name='summarize-1.0.0', ...) or the summarize CLI / web_search as needed. Do not say you have no skill."
   - patterns:
+    - "weather|forecast|temperature|wttr|what'?s\\s+the\\s+weather|how'?s\\s+the\\s+weather|weather\\s+in|tomorrow\\s+weather"
+    - "天气|气温|天气预报|明天.*天气|北京.*天气|上海.*天气|广州.*天气|深圳.*天气"
+    folders: [weather-1.0.0]
+    instruction: "User asked about weather/forecast. Prefer run_skill(skill_name='weather-1.0.0', script='get_weather.py', args=['<full user message>']) so location and time words are parsed. Do not default to web_search unless the weather skill fails."
+    auto_invoke:
+      tool: run_skill
+      arguments:
+        skill_name: weather-1.0.0
+        script: get_weather.py
+        args: ["{{query}}"]
+  - patterns:
     - "发封?邮件|发送邮件|发邮件|send\\s+email|write\\s+email|mail\\s+to"
     folders: [imap-smtp-email]
     instruction: "User asked to send or write an email. Use run_skill(skill_name='imap-smtp-email', script='smtp.js', args=['send', '--to', '<email>', '--subject', '<subject>', '--body', '<body>']). Do not claim the email was sent without calling the skill."
@@ -551,7 +562,7 @@ tools:
         api_key: ""
         engine: google   # google | bing | baidu
       tavily:
-        api_key: ""   # set your Tavily API key here or use TAVILY_API_KEY env var
+        api_key: "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"   # set your Tavily API key here or use TAVILY_API_KEY env var
         search_depth: basic   # basic | fast | advanced | ultra-fast
         topic: general        # general | news | finance
         time_range: ""        # day | week | month | year (empty = no filter). When user asks for "recent/latest" (e.g. 最近), code auto-uses month if empty; set week for current week.

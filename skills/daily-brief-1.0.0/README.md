@@ -6,12 +6,22 @@ Full agent-oriented instructions are in **`SKILL.md`**. This README is for human
 
 ## Requirements
 
-- Python 3 with **`feedparser`** (listed in the project root `requirements.txt`).
-- Network access from the machine running Core (to fetch feeds).
+- **Python 3.10+** (recommended; script uses `from __future__ import annotations` and stdlib `datetime.timezone` patterns).
+- **`feedparser`** — parse RSS/Atom feeds.
+- **`PyYAML`** — read `config/feeds.yaml`.
+- Network access from the machine running Core (or wherever you run the script) to fetch feeds.
+
+Install **only this skill’s dependencies** (from the skill folder):
 
 ```bash
-pip install feedparser
-# or from repo root:
+cd skills/daily-brief-1.0.0
+pip install -r requirements.txt
+```
+
+If you already installed **HomeClaw from the repo root**, root `requirements.txt` already pulls in `feedparser` and `PyYAML`, so no extra step is needed.
+
+```bash
+# from repo root (full project)
 pip install -r requirements.txt
 ```
 
