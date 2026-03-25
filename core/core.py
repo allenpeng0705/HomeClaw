@@ -1939,11 +1939,10 @@ class Core(CoreInterface):
             # Suppress uvicorn access logs (Companion polling can be very noisy).
             # Keep application logs (loguru/logger) unaffected.
             _uvicorn_access = logging.getLogger("uvicorn.access")
-            if not any(isinstance(f, _SuppressConfigCoreAccessFilter) for f in _uvicorn_access.filters):
-                _uvicorn_access.addFilter(_SuppressConfigCoreAccessFilter())
-            _uvicorn_access.setLevel(logging.WARNING)
-            _uvicorn_access.propagate = False
-            config = uvicorn.Config(self.app, host=core_metadata.host, port=core_metadata.port, log_level="critical", access_log=False)
+            _exclude_paths = list(getattr(core_metadata, "access_log_exclude_paths", []) or [])
+            if _exclude_paths and not any(isinstance(f, _SuppressConfigCoreAccessFilter) for f in _uvicorn_access.filters):
+                _uvicorn_access.addFilter(_SuppressConfigCoreAccessFilter(_exclude_paths))
+            config = uvicorn.Config(self.app, host=core_metadata.host, port=core_metadata.port, log_level="critical", access_log=True)
             self.server = Server(config=config)
             # Start embedding (and main LLM) server before initializing Cognee.
             logger.debug("Starting LLM manager (embedding + main LLM)...")

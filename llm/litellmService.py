@@ -21,6 +21,20 @@ from contextlib import asynccontextmanager
 litellm.drop_params = True
 
 
+def _cap_max_tokens_for_provider(model: Any, max_tokens: Any) -> int:
+    """Normalize/cap max_tokens for provider limits (e.g. DeepSeek <= 8192)."""
+    try:
+        mt = int(max_tokens) if max_tokens is not None else 2048
+    except (TypeError, ValueError):
+        mt = 2048
+    mt = max(1, mt)
+    m = str(model or "").strip().lower()
+    # DeepSeek rejects max_tokens > 8192 with 400 invalid_request_error.
+    if "deepseek" in m and mt > 8192:
+        return 8192
+    return mt
+
+
 def _response_to_dict(obj: Any) -> dict:
     """Serialize LiteLLM response (Pydantic v2 model_dump or to_json)."""
     if hasattr(obj, "model_dump"):
@@ -85,7 +99,7 @@ class LiteLLMService:
                     "model": model,
                     "messages": messages,
                     "num_retries": self.num_retries,
-                    "max_tokens": request.max_tokens or self.max_tokens,
+                    "max_tokens": _cap_max_tokens_for_provider(model, request.max_tokens or self.max_tokens),
                     "stream": stream,
                 }
                 # Optional params (LiteLLM drops unsupported via drop_params=True)

@@ -3428,16 +3428,26 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                     args_list = [p for p in parts if p]
         elif isinstance(args_input, str):
             args_list = [x.strip() for x in args_input.split() if x.strip()]
+    # For magazine-render, when args already form a concrete executable command (render-md/render-json),
+    # do not let cloud arg normalizer rewrite them (it may invent unsupported values like theme=magazine).
+    _skip_cloud_arg_normalizer = False
+    try:
+        if skill_name == "magazine-render-1.0.0" and isinstance(args_list, list) and len(args_list) >= 1:
+            if (args_list[0] or "").strip().lower() in ("render-md", "render-json"):
+                _skip_cloud_arg_normalizer = True
+    except Exception:
+        _skip_cloud_arg_normalizer = False
     # Cloud arg normalizer (default in mix/cloud via run_skill_arg_normalizer=auto):
     # use cloud to repair weak local tool-call args before deterministic local rewrite.
     try:
-        _normalized = await _normalize_run_skill_args_with_cloud(
-            skill_name=skill_name,
-            user_text=user_text_for_args,
-            current_args=args_list,
-        )
-        if isinstance(_normalized, list) and _normalized:
-            args_list = _normalized
+        if not _skip_cloud_arg_normalizer:
+            _normalized = await _normalize_run_skill_args_with_cloud(
+                skill_name=skill_name,
+                user_text=user_text_for_args,
+                current_args=args_list,
+            )
+            if isinstance(_normalized, list) and _normalized:
+                args_list = _normalized
     except Exception:
         pass
     # Skill-specific deterministic normalization for weak/malformed local-model args.

@@ -75,7 +75,7 @@ def get_files_out_handler(core):  # noqa: ARG001
             payload = verify_file_access_token(token) if (token or "").strip() else None
             if payload:
                 scope_fs, rel_path = payload
-                path_arg = (path or "").replace("\\", "/").strip()
+                path_arg = unquote((path or "")).replace("\\", "/").strip()
                 if not path_arg:
                     path_arg = rel_path
                 if path_arg != rel_path:

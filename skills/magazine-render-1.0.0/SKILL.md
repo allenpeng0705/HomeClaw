@@ -35,7 +35,7 @@ trigger:
     - Always include a short 3–6 bullet “Top highlights” in chat.
     - Always keep links in the PDF (do not strip URLs).
     - If VMPrint/Node is missing, explain the actionable fix: install VMPrint via install.sh/install.ps1, ensure Node is on PATH, and build draft2final.
-- If preview image is requested but unavailable, still return the PDF (preview is best-effort).
+    - If preview image is requested but unavailable, still return the PDF (preview is best-effort).
 ---
 
 # magazine-render-1.0.0

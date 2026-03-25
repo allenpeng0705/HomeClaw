@@ -164,6 +164,38 @@ async def route(
     if not categories:
         return "general_chat"
 
+    # Stocks / watchlist / quotes: always general_chat (run_skill), never "memory".
+    # Small local router models often output "memory" for 自选股/昨天怎么样-style questions; that applies the
+    # memory tool allowlist and removes run_skill, so the main model cannot call stock-monitor and hallucinates timeouts.
+    try:
+        if query is not None and isinstance(query, str) and query.strip():
+            q_lo = query.strip().lower()
+            q_raw = query.strip()
+            if (
+                any(p in q_lo for p in ("portfolio", "watchlist", "ticker", "stock", "stocks"))
+                or any(
+                    p in q_raw
+                    for p in (
+                        "股票",
+                        "持仓",
+                        "行情",
+                        "股价",
+                        "自选股",
+                        "大盘",
+                        "涨停",
+                        "跌停",
+                        "个股",
+                        "A股",
+                        "港股",
+                        "美股",
+                    )
+                )
+            ):
+                logger.debug("Intent router: stock/watchlist query -> category general_chat (preempt LLM)")
+                return "general_chat"
+    except Exception as e:
+        logger.debug("Intent router stock preempt failed (non-fatal): {}", e)
+
     # When user explicitly asks for HTML slides, route to create_html_slides so the html-slides skill runs (not summarize_to_page → markdown).
     try:
         if "create_html_slides" in categories and query is not None and isinstance(query, str) and query.strip():
@@ -232,7 +264,9 @@ async def route(
                 return "general_chat"
 
             # Stocks / portfolio skill
-            if any(p in q_lo for p in ("portfolio", "watchlist", "ticker", "stock")) or any(p in q_raw for p in ("股票", "持仓", "行情", "股价")):
+            if any(p in q_lo for p in ("portfolio", "watchlist", "ticker", "stock")) or any(
+                p in q_raw for p in ("股票", "持仓", "行情", "股价", "自选股", "大盘", "涨停", "跌停", "个股", "A股", "港股", "美股")
+            ):
                 logger.debug("Intent router: query matches stock-monitor skill -> category general_chat")
                 return "general_chat"
 

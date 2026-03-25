@@ -101,7 +101,10 @@ def tool_result_usable_as_final_response(
                     if skill_name in need_llm_set:
                         return False
         if tool_name in ("save_result_page", "get_file_view_link"):
-            return ("/files/out" in result and "token=" in result) or ("http" in result and "/files/" in result)
+            return (
+                ("/files/out" in result and ("token=" in result or "dev_unsigned=1" in result))
+                or ("http" in result and "/files/" in result)
+            )
         # session_status excluded: its JSON is internal; use second LLM so model can answer identity queries (e.g. "你是谁？") in natural language.
         # folder_list / file_find excluded (match primary): second LLM round so user gets natural language, not raw JSON.
         _self_raw = cfg.get("self_contained_tools")

@@ -11,6 +11,7 @@ trigger:
     Summary of holdings/watchlist: args=["portfolio"]. Evaluate alert rules from config: args=["check"]. Quick news for a symbol: args=["news", "SYMBOL"] or args=["context", "SYMBOL"] for price + headlines.
     Edit config/watchlist.yml for watchlist, optional holdings, and alerts. For recurring push alerts use cron_schedule with task_type run_skill and script stock_monitor.py args ["check"].
     Data is delayed/unofficial Yahoo via yfinance—not financial advice. For deeper "why" use web_search after context.
+    **After `run_skill` returns:** Copy the tool’s Markdown (especially the `## Portfolio / watchlist` table) **verbatim** into your reply, optionally with one short sentence in the user’s language above it. Do **not** redraw tables with tree/box characters (├── ┌ ▼), do **not** invent tickers, prices, or totals—the script output is the only source of numbers.
   auto_invoke:
     script: stock_monitor.py
     args: ["portfolio"]
@@ -32,6 +33,15 @@ Near–real-time quotes and alerts using **Yahoo Finance** through **yfinance** 
 ```text
 run_skill(skill_name="stock-monitor-1.0.0", script="stock_monitor.py", args=["portfolio"])
 ```
+
+## Assistant reply format (important)
+
+The script prints **ready-to-send Markdown** (pipe tables, optional holdings bullets). When you answer the user:
+
+1. **Prefer pasting the tool output unchanged** (full table + footer line about Yahoo/yfinance). A one-line intro in the user’s language is fine (e.g. 以下为您的自选股行情).
+2. **Do not** “improve” the table with ASCII/box-drawing trees (`├──`, `┌`, `▼`), merged cells, or made-up symbols (e.g. AAPLE). Small local models often garble tables; copying the tool text avoids that.
+3. **Do not** invent portfolio totals or currencies; if the tool shows a total, repeat it exactly; if it does not, do not guess.
+4. If the user asked “yesterday” and `portfolio` only shows **today’s** day change, say that clearly—the script does not fetch historical OHLC in `portfolio` mode.
 
 ## Configure
 
