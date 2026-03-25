@@ -146,6 +146,14 @@ content: |
   Thought: Weather query; use weather skill with the full sentence so location/time words are parsed.
   Call: run_skill(skill_name="weather-1.0.0", script="get_weather.py", args=["北京明天天气怎么样？"])
 
+  User: "帮我生成一张图片：一只在雨中撑伞的柴犬，赛博朋克风"
+  Thought: Image generation request; use image-generation skill with a clear prompt.
+  Call: run_skill(skill_name="image-generation-1.0.0", script="generate_image.py", args=["--prompt", "一只在雨中撑伞的柴犬，赛博朋克风"])
+
+  User: "RSS 今日新闻，中文 20 条"
+  Thought: RSS daily brief; use daily-brief skill with fetch args.
+  Call: run_skill(skill_name="daily-brief-1.0.0", script="fetch_rss.py", args=["fetch", "--max", "20", "--lang", "cn"])
+
   User: "Make HTML slides from my presentation.docx."
   Thought: Instruction-only skill: confirm run_skill then document_read, generate a multi-slide deck (8–20 slides, one idea per slide), save_result_page(format='html').
   Call: run_skill(skill_name="html-slides")

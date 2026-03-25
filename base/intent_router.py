@@ -214,6 +214,31 @@ async def route(
     except Exception as e:
         logger.debug("Intent router get_file_link pre-check failed (non-fatal): {}", e)
 
+    # Skill-like intents: route away from search_web so skill/tool selection can happen.
+    # These are high-precision phrase checks (short, stable keywords) to avoid false positives.
+    try:
+        if "general_chat" in categories and query is not None and isinstance(query, str) and query.strip():
+            q_lo = query.strip().lower()
+            q_raw = query.strip()
+
+            # Baidu search skill (explicitly asked for Baidu/百度/智能搜索)
+            if any(p in q_raw for p in ("百度搜索", "用百度搜", "智能搜索")) or "baidu search" in q_lo:
+                logger.debug("Intent router: query matches Baidu search skill -> category general_chat")
+                return "general_chat"
+
+            # RSS / Daily brief skill (explicit RSS/news digest phrasing)
+            if any(p in q_lo for p in ("daily brief", "morning report", "rss")) or any(p in q_raw for p in ("新闻订阅", "今日新闻")):
+                logger.debug("Intent router: query matches daily-brief skill -> category general_chat")
+                return "general_chat"
+
+            # Stocks / portfolio skill
+            if any(p in q_lo for p in ("portfolio", "watchlist", "ticker", "stock")) or any(p in q_raw for p in ("股票", "持仓", "行情", "股价")):
+                logger.debug("Intent router: query matches stock-monitor skill -> category general_chat")
+                return "general_chat"
+
+    except Exception as e:
+        logger.debug("Intent router skill-intent pre-check failed (non-fatal): {}", e)
+
     # Weather queries should not be forced into search_web DAG.
     # Route to general_chat so the main tool loop can pick weather skill (run_skill weather-1.0.0)
     # and use Companion/profile location fallback when city is omitted.
@@ -233,6 +258,43 @@ async def route(
                 return "general_chat"
     except Exception as e:
         logger.debug("Intent router weather pre-check failed (non-fatal): {}", e)
+
+    # Image generation requests: route to image category so only image-related tools/skills are available.
+    try:
+        if "image" in categories and query is not None and isinstance(query, str) and query.strip():
+            q = query.strip().lower()
+            if (
+                "generate image" in q
+                or "create image" in q
+                or "make an image" in q
+                or "draw" in q and "image" in q
+                or "生成图片" in query
+                or "创建图片" in query
+                or "生成" in query and "图" in query
+                or "画" in query and "图" in query
+            ):
+                logger.debug("Intent router: query matches image generation -> category image")
+                return "image"
+    except Exception as e:
+        logger.debug("Intent router image pre-check failed (non-fatal): {}", e)
+
+    # PPT / slides: route to create_slides when available.
+    try:
+        if "create_slides" in categories and query is not None and isinstance(query, str) and query.strip():
+            q = query.strip().lower()
+            if (
+                ".pptx" in q
+                or "powerpoint" in q
+                or "ppt" in q
+                or "幻灯片" in query
+                or "做个ppt" in query
+                or "生成ppt" in query
+                or ("生成" in query and "PPT" in query)
+            ):
+                logger.debug("Intent router: query matches PPT/slides -> category create_slides")
+                return "create_slides"
+    except Exception as e:
+        logger.debug("Intent router create_slides pre-check failed (non-fatal): {}", e)
 
     # When user explicitly asks to convert Markdown to PDF (e.g. "convert X.md to PDF", "把X.md转成PDF"),
     # route directly to generate_pdf so the fixed DAG (document_read -> markdown_to_pdf) runs and uses

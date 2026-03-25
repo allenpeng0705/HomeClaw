@@ -3447,6 +3447,29 @@ async def answer_from_memory(
                                         response = _res.strip()
                                 except Exception as e_sw:
                                     logger.debug("Fallback web_search failed: {}", e_sw)
+                        # When strict_fallback is True, run weather skill fallback for clear weather queries when model returned no tool_calls.
+                        # Local models often "talk about using weather skill" but forget to emit a tool_call; this keeps UX consistent.
+                        if (
+                            _strict_fallback
+                            and isinstance(query, str)
+                            and registry
+                            and last_tool_name != "run_skill"
+                            and any(t.name == "run_skill" for t in (registry.list_tools() or []))
+                        ):
+                            _weather_phrases = (
+                                "weather", "forecast", "temperature", "wttr",
+                                "天气", "气温", "天气预报",
+                            )
+                            _q_lo_w = (query or "").strip().lower()
+                            _q_raw_w = (query or "").strip()
+                            if any((p in _q_lo_w if p.isascii() else p in _q_raw_w) for p in _weather_phrases):
+                                try:
+                                    _component_log("tools", "fallback run_skill(weather-1.0.0) (strict_fallback=True; model did not call tool)")
+                                    _res = await registry.execute_async("run_skill", {"skill_name": "weather-1.0.0"}, context)
+                                    if isinstance(_res, str) and _res.strip():
+                                        response = _res.strip()
+                                except Exception as e_w:
+                                    logger.debug("Fallback weather run_skill failed: {}", e_w)
                         # Log when user clearly asked for scheduling but model didn't call any tool (informational only; no auto-invoke when strict_fallback).
                         # Do not log if we already ran remind_me/cron_schedule/route_to_tam this request (e.g. model replied with text after a successful reminder).
                         if isinstance(query, str) and _query_looks_like_scheduling(query) and registry and last_tool_name not in ("remind_me", "cron_schedule", "route_to_tam"):
