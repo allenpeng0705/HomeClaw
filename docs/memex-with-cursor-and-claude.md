@@ -66,7 +66,7 @@ Python executes a **`.py` file** by path; no package import is needed. Use eithe
   "mcpServers": {
     "homeclaw-memex": {
       "command": "/opt/anaconda3/envs/pytorch/bin/python",
-      "args": ["/absolute/path/to/HomeClaw/homeclaw_memex_mcp.py"]
+      "args": ["/absolute/path/to/HomeClaw/memex_mcp.py"]
     }
   }
 }
@@ -93,7 +93,7 @@ If this matches your layout, you can paste (then reload MCP):
   "mcpServers": {
     "homeclaw-memex": {
       "command": "/opt/anaconda3/envs/pytorch/bin/python",
-      "args": ["/Users/shileipeng/Documents/mygithub/HomeClaw/homeclaw_memex_mcp.py"]
+      "args": ["/Users/shileipeng/Documents/mygithub/HomeClaw/memex_mcp.py"]
     }
   }
 }
@@ -285,6 +285,10 @@ Use the **repo-root launcher** so you do not need `cwd` / `PYTHONPATH` for `exte
 
 ```bash
 claude mcp add --transport stdio homeclaw-memex -- /opt/homebrew/bin/python3 /absolute/path/to/HomeClaw/homeclaw_memex_mcp.py
+```
+###For Winodws
+```bash
+claude mcp add --transport stdio homeclaw-memex -- C:/Users/PS/anaconda3/envs/pytorch/python.exe D:\\mygithub\\HomeClaw\\external_plugins\\cursor_bridge\\memex_mcp.py
 ```
 
 **Conda example:**
