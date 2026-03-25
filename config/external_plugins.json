@@ -913,7 +913,7 @@
       "webchat": "http://127.0.0.1:3020/",
       "control": "http://127.0.0.1:3020/",
       "dashboard": "http://127.0.0.1:3020/",
-      "tui": "node /Users/shileipeng/Documents/mygithub/HomeClaw/system_plugins/homeclaw-browser/tui.js",
+      "tui": "node D:\\mygithub\\HomeClaw\\system_plugins\\homeclaw-browser/tui.js",
       "custom": [
         {
           "id": "webchat",

@@ -4,6 +4,7 @@ under database/push_tokens.json so Core can send remote push when deliver_to_use
 When the same user_id and device_id register again, the token is updated (not added); one device = one token per user.
 """
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -98,8 +99,10 @@ def register_push_token(
         if platform not in ("android", "ios", "macos"):
             platform = "android"
         device_id = (str(device_id or "").strip() or "") or "_default"
-        from datetime import datetime
-        entry = {"token": token, "platform": platform, "updated_at": datetime.utcnow().isoformat() + "Z"}
+        updated_at = (
+            datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        )
+        entry = {"token": token, "platform": platform, "updated_at": updated_at}
         data = load_push_tokens()
         if not isinstance(data, dict):
             data = {}

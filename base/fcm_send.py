@@ -17,7 +17,8 @@ def _chat_deep_link(from_friend: Optional[str] = None) -> str:
 
 from loguru import logger
 
-_fcm_initialized = False
+_fcm_init_attempted = False
+_fcm_ready = False
 
 
 def _get_credentials_path() -> Optional[Path]:
@@ -48,20 +49,21 @@ def _get_credentials_path() -> Optional[Path]:
 
 def _ensure_fcm_initialized() -> bool:
     """Initialize Firebase Admin SDK once. Returns True if FCM is available and initialized."""
-    global _fcm_initialized
-    if _fcm_initialized:
-        return True
+    global _fcm_init_attempted, _fcm_ready
+    if _fcm_init_attempted:
+        return _fcm_ready
+    _fcm_init_attempted = True
     try:
         import firebase_admin
         from firebase_admin import credentials
     except ImportError:
         logger.debug("firebase_admin not installed; push notifications disabled")
-        _fcm_initialized = True  # avoid retry
+        _fcm_ready = False
         return False
     cred_path = _get_credentials_path()
     if not cred_path:
         logger.debug("FCM credentials path not set; push notifications disabled")
-        _fcm_initialized = True
+        _fcm_ready = False
         return False
     try:
         firebase_admin.get_app()
@@ -70,9 +72,9 @@ def _ensure_fcm_initialized() -> bool:
             firebase_admin.initialize_app(credentials.Certificate(str(cred_path)))
         except Exception as e:
             logger.warning("FCM initialize failed: {}", e)
-            _fcm_initialized = True
+            _fcm_ready = False
             return False
-    _fcm_initialized = True
+    _fcm_ready = True
     return True
 
 

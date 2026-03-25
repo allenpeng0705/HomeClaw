@@ -1069,8 +1069,6 @@ class TAM:
             kept.append(entry)
         return (kept, before - len(kept))
 
-    _RECURRING_CANCEL_HINT = "\n(To cancel this recurring reminder, say 'list my recurring reminders' and ask to remove it.)"
-
     def _run_missed_cron_jobs_after_load(self, loaded_jobs: List[Dict[str, Any]]) -> None:
         """After loading cron jobs from DB, run once any job that would have been due while Core was down (restart catch-up). At most one run per job. Never raises."""
         if not loaded_jobs:
@@ -1163,7 +1161,7 @@ class TAM:
                         task = make_run_skill_task(params)
                     else:
                         task = (
-                            lambda m, p: lambda: self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
+                            lambda m, p: lambda: self._send_reminder_to_channel_safe(m, p)
                         )(params.get("message", ""), params)
                 elif params.get("task_type") == "run_plugin":
                     plugin_id = params.get("plugin_id") or ""
@@ -1236,7 +1234,7 @@ class TAM:
                         task = make_run_plugin_task(params)
                     else:
                         task = (
-                            lambda m, p: lambda: self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
+                            lambda m, p: lambda: self._send_reminder_to_channel_safe(m, p)
                         )(params.get("message", ""), params)
                 elif params.get("task_type") == "run_tool":
                     tool_name = params.get("tool_name") or ""
@@ -1276,12 +1274,12 @@ class TAM:
                         task = make_run_tool_task(params)
                     else:
                         task = (
-                            lambda m, p: lambda: self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
+                            lambda m, p: lambda: self._send_reminder_to_channel_safe(m, p)
                         )(params.get("message", ""), params)
                 else:
                     msg = params.get("message", "")
                     task = (
-                        lambda m, p: lambda: self._send_reminder_to_channel_safe(m + self._RECURRING_CANCEL_HINT, p)
+                        lambda m, p: lambda: self._send_reminder_to_channel_safe(m, p)
                     )(msg, params)
                 jid = self.schedule_cron_task(
                     task,
@@ -1522,11 +1520,10 @@ class TAM:
                     if ry and md_stable:
                         rm, rd = md_stable
                         cron_expr = f"0 9 {rd} {rm} *"
-                        hint = self._RECURRING_CANCEL_HINT
 
                         def make_task(msg: str, prms: Dict[str, Any]):
                             async def _task():
-                                await self._send_reminder_to_channel_safe(msg + hint, prms)
+                                await self._send_reminder_to_channel_safe(msg, prms)
                             return _task
 
                         task = make_task(lead_msg, params)
