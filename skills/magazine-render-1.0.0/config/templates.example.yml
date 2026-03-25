@@ -1,0 +1,30 @@
+# Optional template overrides for magazine-render-1.0.0.
+#
+# This file is an example; copy to templates.yml and edit if you want.
+# If templates.yml is missing, the script uses built-in templates.
+#
+# Template format (very lightweight):
+# - title: default title for the report
+# - sections: ordered list of sections; each section has a header and a list path in the input JSON
+#
+# NOTE: This is intentionally simple for the MVP. If you need more control, keep using Markdown input.
+
+templates:
+  daily_brief:
+    title: "Daily Brief"
+    sections:
+      - header: "Top stories"
+        list_path: "items"
+
+  weather:
+    title: "Weather"
+    sections:
+      - header: "Now"
+        list_path: "now"
+
+  stock:
+    title: "Stocks"
+    sections:
+      - header: "Watchlist"
+        list_path: "watchlist"
+

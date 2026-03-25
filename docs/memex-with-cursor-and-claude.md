@@ -378,3 +378,14 @@ See [Using MCP](mcp.md). Skip this if you only want **Cursor/Claude** to use mem
 - **Alternative:** `npm install -g @touchskyer/memex` and MCP `memex` / `mcp` as upstream documents.
 - **Claude Code:** memex **plugin** from upstream (`/plugin install memex@memex`), or **MCP** via `claude mcp add --transport stdio …` (see **Claude Code: memex via MCP** above); bundled npm tree feeds the same launcher as Cursor.
 - **No duplicate memory system:** memex is for **coding-agent** notes; HomeClaw’s own memory (RAG, agent memory, etc.) stays for **assistant** chat.
+
+---
+
+## Related: making outputs “magazine-style” (VMPrint PDF)
+
+Separately from memex, HomeClaw can generate **beautiful, magazine-style PDFs** for long outputs (daily brief, weather, stock reports, etc.) using **VMPrint** ([`cosmiciron/vmprint`](https://github.com/cosmiciron/vmprint)).
+
+- Use the skill **`magazine-render-1.0.0`** to render **Markdown → PDF** (or **JSON → template → PDF**) and return an `output/*.pdf` link.
+- See [`docs/examples.md`](examples.md) “Example 4b: Magazine-style PDF for any content (skill)” for copy-paste usage.
+
+This is useful when you want the final response to be more readable than a long chat message.

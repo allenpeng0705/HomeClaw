@@ -4,6 +4,23 @@ A **watchlist + portfolio + alerts** skill for HomeClaw, inspired by the same pa
 
 **Consolidated doc (same topics + Core pip/npm install):** [documentation/README.md](../../documentation/README.md)
 
+## Natural language (what you can say)
+
+### English
+
+- “Show my stock watchlist / portfolio.”
+- “Check my stock alerts now.”
+- “Alert me if NVDA drops 3% today.” (then set a cron if you want it scheduled)
+- “What happened to 0700.HK today? Give me context.”
+- “Make this stock report a **magazine-style PDF**.”
+
+### Chinese
+
+- “看看我的自选股 / 组合今天怎么样？”
+- “检查一下股票提醒规则有没有触发”
+- “NVDA 跌 3% 就提醒我”
+- “把自选股结果做成 **杂志风格 PDF**（排版更好看）”
+
 ## How it works (brief)
 
 1. `config/watchlist.yml` lists **symbols** (Yahoo format: `NVDA`, `600519.SS`, `0700.HK`, …).

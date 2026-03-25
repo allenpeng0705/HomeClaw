@@ -62,6 +62,64 @@ Optional:
 }
 ```
 
+## Example 4b: Magazine-style PDF for any content (skill)
+
+If you want a more **beautiful / readable** output (magazine-style PDF) for any report-like content, use the `magazine-render-1.0.0` skill.
+
+Render **Markdown** directly:
+
+```json
+{
+  "tool": "run_skill",
+  "arguments": {
+    "skill_name": "magazine-render-1.0.0",
+    "script": "render_magazine.py",
+    "args": [
+      "render-md",
+      "--title",
+      "Morning Brief",
+      "--theme",
+      "dispatch",
+      "--profile",
+      "literature",
+      "--md",
+      "# Morning Brief\n\n## Highlights\n\n- Item 1\n- Item 2\n\n## Links\n\n- [Example](https://example.com)\n",
+      "--preview",
+      "auto",
+      "--out",
+      "morning_brief.pdf"
+    ]
+  }
+}
+```
+
+Or render a **structured JSON** payload via a built-in template (`daily_brief`, `weather`, `stock`):
+
+```json
+{
+  "tool": "run_skill",
+  "arguments": {
+    "skill_name": "magazine-render-1.0.0",
+    "script": "render_magazine.py",
+    "args": [
+      "render-json",
+      "--template",
+      "daily_brief",
+      "--theme",
+      "dispatch",
+      "--profile",
+      "literature",
+      "--json",
+      "{\"as_of\":\"2026-03-25\",\"items\":[{\"title\":\"Headline\",\"link\":\"https://example.com\",\"source\":\"RSS\"}]}",
+      "--preview",
+      "auto",
+      "--out",
+      "daily_brief.pdf"
+    ]
+  }
+}
+```
+
 ## Example 5: Federation basics
 
 1. Set identity in `config/instance_identity.yml`
