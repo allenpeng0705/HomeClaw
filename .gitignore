@@ -105,3 +105,4 @@ site/assets/ppt-background.png
 site/create_ppt.py
 site/create_ppt_zh.py
 /external_plugins/__pycache__
+/skills/stock-monitor-1.0.0/scripts/__pycache__

@@ -52,6 +52,32 @@ class ChatHistory:
         finally:
             self.db.close_session()
 
+    def reset(self, user_id: Optional[str] = None, friend_id: Optional[str] = None) -> None:
+        """
+        Delete persisted chat rows. If user_id is set, only that user's rows (optionally narrowed by friend_id).
+        If user_id is None, delete all chat history and session rows (full reset).
+        """
+        session = self.db.get_session()
+        try:
+            if user_id:
+                hq = session.query(ChatHistoryModel).filter(ChatHistoryModel.user_id == user_id)
+                sq = session.query(ChatSessionModel).filter(ChatSessionModel.user_id == user_id)
+                if friend_id is not None:
+                    fid = friend_id or ""
+                    hq = hq.filter(ChatHistoryModel.friend_id == fid)
+                    sq = sq.filter(ChatSessionModel.friend_id == fid)
+                hq.delete(synchronize_session=False)
+                sq.delete(synchronize_session=False)
+            else:
+                session.query(ChatHistoryModel).delete(synchronize_session=False)
+                session.query(ChatSessionModel).delete(synchronize_session=False)
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.warning("ChatHistory.reset error: {}", e)
+        finally:
+            self.db.close_session()
+
     def get(
         self,
         app_id: str = "",

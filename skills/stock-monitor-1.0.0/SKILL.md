@@ -1,16 +1,16 @@
 ---
 name: stock-monitor
 description: |
-  Watchlist quotes, portfolio Markdown table (holdings optional), YAML volatility/price alerts, and Yahoo headlines via yfinance (no API key). Supports US, HK, and China A-shares via Yahoo symbols (.SS Shanghai, .SZ Shenzhen, .HK Hong Kong). See skill README for 沪深港股 examples. Use for portfolio, stock checks, cron_schedule alerts.
+  Watchlist quotes, portfolio Markdown table (holdings optional), YAML volatility/price alerts. Quotes: AKShare (default, no token), optional TuShare (token), Yahoo/yfinance fallback or primary; headlines via Yahoo. Same Yahoo-style symbols (.SS .SZ .HK). Use for portfolio, stock checks, cron_schedule alerts.
 homepage: https://github.com/allenpeng0705/HomeClaw
-keywords: "stock portfolio NVDA AAPL ticker yfinance Yahoo Finance 股票 行情 持仓 alert cron BTC"
+keywords: "stock portfolio NVDA AAPL ticker yfinance Yahoo Finance akshare tushare 股票 行情 持仓 alert cron BTC"
 trigger:
   patterns: ["portfolio|watchlist|stock|ticker|NVDA|AAPL|shares|行情|股票|持仓|股价|涨跌|alert.*stock"]
   instruction: |
     The user asked about stocks, portfolio, or price alerts. Use run_skill(skill_name='stock-monitor-1.0.0', script='stock_monitor.py', args=[...]).
     Summary of holdings/watchlist: args=["portfolio"]. Evaluate alert rules from config: args=["check"]. Quick news for a symbol: args=["news", "SYMBOL"] or args=["context", "SYMBOL"] for price + headlines.
     Edit config/watchlist.yml for watchlist, optional holdings, and alerts. For recurring push alerts use cron_schedule with task_type run_skill and script stock_monitor.py args ["check"].
-    Data is delayed/unofficial Yahoo via yfinance—not financial advice. For deeper "why" use web_search after context.
+    Quotes use `quote_provider` in watchlist YAML: default **akshare** (no token), optional **tushare** (token), or **yfinance**; `quote_fallback_yfinance: true` retries Yahoo if primary fails. Headlines stay Yahoo. Not financial advice. For deeper "why" use web_search after context.
     If the user asks for prettier/magazine-style output:
     1) Run stock-monitor as usual to get output.
     2) Build structured stock JSON from the result (watchlist/items).
@@ -18,15 +18,14 @@ trigger:
        run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
                 args=["render-template-ast", "--template", "stock", "--title", "Stock Brief", "--theme", "dispatch", "--json", "<STOCK_JSON>", "--output_format", "browser_preview_html", "--out", "stock_brief.preview.html"])
     4) Create PDF only when user explicitly asks for print/download/export (same call with --output_format pdf and .pdf out file).
-
   auto_invoke:
     script: stock_monitor.py
     args: ["portfolio"]
 ---
 
-# Stock monitor (yfinance)
+# Stock monitor (multi-source quotes)
 
-Near–real-time quotes and alerts using **Yahoo Finance** through **yfinance** (unofficial; no API key).
+Quotes from **AKShare** (default, no token), optional **TuShare** (`tushare_token` or `TUSHARE_TOKEN`), and **Yahoo** via **yfinance** (fallback or `quote_provider: yfinance`). Headlines/news still use Yahoo. All sources are unofficial / delayed—not financial advice.
 
 ## run_skill
 
@@ -50,12 +49,20 @@ The script prints **ready-to-send Markdown** (pipe tables, optional holdings bul
 3. **Do not** invent portfolio totals or currencies; if the tool shows a total, repeat it exactly; if it does not, do not guess.
 4. If the user asked “yesterday” and `portfolio` only shows **today’s** day change, say that clearly—the script does not fetch historical OHLC in `portfolio` mode.
 
+## FAQ (why tickers look “wrong”)
+
+- **US names (e.g. AAPL) in the chat but not in my YAML:** The script only prints symbols from **`watchlist` + `holdings`**. If the assistant message lists Apple/NVDA but the **tool result** footer says only `300418.SZ, 688049.SS`, the extras were **hallucinated** by the model—compare the **Tool (run_skill)** block and use the verbatim-copy rule above.
+- **I edited YAML but the table didn’t change:** Confirm Core runs the skill under `skills/stock-monitor-1.0.0/` and you are not overriding the path with env **`HOMECLAW_STOCK_MONITOR_CONFIG`** / **`STOCK_MONITOR_CONFIG`** pointing at another file. The `portfolio` output ends with a line showing which file and tickers were used.
+- **`watchlist` must be a YAML list** (`- "300418.SZ"`). A single string or bad indentation can yield an empty list so only `holdings` appear.
+
 ## Configure
 
 Edit **`config/watchlist.yml`** (see **`watchlist.example.yml`**):
 
+- **`quote_provider`** — `akshare` (default), `tushare`, or `yfinance`. **`quote_fallback_yfinance`** (default true) tries Yahoo when the primary source fails (e.g. US ticker). **`tushare_token`** or env **`TUSHARE_TOKEN`** / **`TSPRO_TOKEN`** for TuShare. Per-symbol: `{ symbol: "NVDA", quote_provider: yfinance }` on watchlist / holdings / alerts.
 - **watchlist** — Yahoo tickers: US (`NVDA`), China SSE (`.SS`), Shenzhen (`.SZ`), HK (`.HK`), indices (`000001.SS`, `^HSI`), crypto (`BTC-USD`). Details in **README.md**.
 - **holdings** — optional `symbol`, `shares`, optional `avg_cost` for P&L lines.
+- **Portfolio table** rows = **union of `watchlist` and `holdings` symbols only**. A symbol that appears **only** under **`alerts:`** is **not** shown in `portfolio` output (add it to `watchlist` or `holdings` if you want a quote).
 - **alerts** — rules with `id`, `symbol`, and one of:
   - `day_change_pct_at_or_below` / `day_change_pct_at_or_above`
   - `price_at_or_above` / `price_at_or_below`
@@ -68,7 +75,7 @@ Use **`cron_schedule`** with `task_type="run_skill"`, `skill_name="stock-monitor
 ## Limits
 
 - **Not** real-time Level 2; suitable for casual monitoring.
-- **Yahoo** rate limits / outages may apply.
+- **Yahoo** rate limits / outages may apply; **AKShare**/**TuShare** depend on upstream sites and your token tier.
 - **Not financial advice.**
 
 Dependencies: **`requirements.txt`** in this folder (`pip install -r skills/stock-monitor-1.0.0/requirements.txt` if needed). Human-oriented setup: **`README.md`**.

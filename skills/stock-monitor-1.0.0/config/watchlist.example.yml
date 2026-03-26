@@ -1,4 +1,11 @@
-# Copy to watchlist.yml in this folder and edit. Yahoo Finance symbols (yfinance).
+# Copy to watchlist.yml in this folder and edit. Symbols use Yahoo-style codes for all providers.
+#
+# Quote sources (optional):
+#   quote_provider: akshare   # default — no token; East Money–backed daily bars
+#   quote_provider: tushare   # set tushare_token below or env TUSHARE_TOKEN / TSPRO_TOKEN
+#   quote_provider: yfinance  # Yahoo only
+#   quote_fallback_yfinance: true   # default — if primary fails, try Yahoo (good for US/crypto)
+# Per row: - { symbol: "NVDA", quote_provider: yfinance }
 #
 # Chinese markets (same Yahoo codes as finance.yahoo.com):
 #   - Shanghai SSE:   6-digit + .SS  e.g. 600519.SS (贵州茅台), 601318.SS
@@ -7,6 +14,10 @@
 #   - Indices:       000001.SS (上证综指), 399001.SZ (深证成指), ^HSI (恒生)
 #
 # Examples: US (NVDA), China index, crypto (BTC-USD).
+
+quote_provider: akshare
+quote_fallback_yfinance: true
+# tushare_token: "your-token"   # only if quote_provider is tushare
 
 watchlist:
   - NVDA
