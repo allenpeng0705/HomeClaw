@@ -118,10 +118,12 @@ def _output_dirs() -> Tuple[Path, str]:
 
 
 def _ensure_vmprint_static_assets(out_dir: Path, root: Path) -> None:
-    """Ensure versioned VMPrint browser assets exist under output/_vmprint_assets/<version>."""
+    """Ensure VMPrint runtime + preview shell assets exist under output/."""
     try:
         assets_dir = (out_dir / "_vmprint_assets" / _VMPRINT_ASSET_VERSION).resolve()
         assets_dir.mkdir(parents=True, exist_ok=True)
+        preview_assets_dir = (out_dir / "assets").resolve()
+        preview_assets_dir.mkdir(parents=True, exist_ok=True)
         vmroot = (root / "tools" / "vmprint").resolve()
         copies = [
             (vmroot / "engine" / "dist" / "index.js", assets_dir / "vmprint-engine.js"),
@@ -135,6 +137,41 @@ def _ensure_vmprint_static_assets(out_dir: Path, root: Path) -> None:
         if not fontkit_stub.exists() or fontkit_stub.stat().st_size == 0:
             fontkit_stub.write_text(
                 "window.process = window.process || { env: {} }; window.VMPrintFontkit = window.VMPrintFontkit || {};",
+                encoding="utf-8",
+            )
+        styles_css = (out_dir / "styles.css").resolve()
+        if not styles_css.exists() or styles_css.stat().st_size == 0:
+            styles_css.write_text(
+                "body{font-family:system-ui;margin:0;background:#111;color:#eee}"
+                ".top{padding:10px 12px;background:#1b1b1b;position:sticky;top:0}"
+                ".toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}"
+                ".pages{padding:12px;display:grid;gap:16px}"
+                ".page{background:#fff;color:#111;box-shadow:0 2px 12px rgba(0,0,0,.35);overflow:auto}"
+                ".meta{font-size:12px;color:#bbb}",
+                encoding="utf-8",
+            )
+        pipeline_js = preview_assets_dir / "pipeline.js"
+        if not pipeline_js.exists() or pipeline_js.stat().st_size == 0:
+            pipeline_js.write_text(
+                "(function(){"
+                "function parseJson(id,f){try{return JSON.parse((document.getElementById(id)||{}).textContent||'');}catch(_){return f;}}"
+                "function hasRuntime(){return !!(window.VMPrint||window.vmprint||window.CanvasContext);}"
+                "function renderFallback(root,pages){if(!root)return;root.innerHTML='';for(const s of (pages||[])){const d=document.createElement('div');d.className='page';d.innerHTML=String(s||'');root.appendChild(d);}}"
+                "window.HomeClawVmprintPipeline={parseJson:parseJson,hasRuntime:hasRuntime,renderFallback:renderFallback};"
+                "})();",
+                encoding="utf-8",
+            )
+        ui_js = preview_assets_dir / "ui.js"
+        if not ui_js.exists() or ui_js.stat().st_size == 0:
+            ui_js.write_text(
+                "(function(){"
+                "function boot(){const p=window.HomeClawVmprintPipeline;if(!p)return;"
+                "const root=document.getElementById('root');const status=document.getElementById('status');"
+                "const pages=p.parseJson('fallback-svg-pages-data',[]);"
+                "if(!p.hasRuntime()){p.renderFallback(root,pages);if(status)status.textContent='Fallback active (server-rendered pages).';return;}"
+                "p.renderFallback(root,pages);if(status)status.textContent='Runtime assets detected; fallback kept until browser pipeline is wired.';}"
+                "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot);}else{boot();}"
+                "})();",
                 encoding="utf-8",
             )
     except Exception:
@@ -616,10 +653,7 @@ def _build_hybrid_runtime_preview_html(ast_json_text: str, fallback_svg_pages: l
         f"<meta name='homeclaw-vmprint-ui-hint' content='{ui_hint}'>"
         f"<meta name='homeclaw-vmprint-ast-chars' content='{ast_chars}'>"
         f"<meta name='homeclaw-vmprint-pages' content='{page_count}'>"
-        "<title>VMPrint Browser Preview</title><style>body{font-family:system-ui;margin:0;background:#111;color:#eee}"
-        ".top{padding:10px 12px;background:#1b1b1b;position:sticky;top:0}.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}"
-        ".pages{padding:12px;display:grid;gap:16px}.page{background:#fff;color:#111;box-shadow:0 2px 12px rgba(0,0,0,.35);overflow:auto}"
-        ".meta{font-size:12px;color:#bbb}</style></head><body>"
+        "<title>VMPrint Browser Preview</title><link rel='stylesheet' href='./styles.css'></head><body>"
         "<div class='top'><strong>VMPrint Hybrid Preview</strong>"
         "<div class='meta'>Primary: browser VMPrint runtime (AST->canvas). Fallback: server-rendered pages.</div>"
         "<div class='toolbar'><label>Scale <select id='scale'><option value='0.75'>75%</option><option selected value='1'>100%</option><option value='1.25'>125%</option><option value='1.5'>150%</option></select></label>"
@@ -630,12 +664,8 @@ def _build_hybrid_runtime_preview_html(ast_json_text: str, fallback_svg_pages: l
         f"<script id='ast-data' type='application/json'>{ast_esc}</script>"
         f"<script id='fallback-svg-pages-data' type='application/json'>{svg_esc}</script>"
         f"<script src='./_vmprint_assets/{_VMPRINT_ASSET_VERSION}/vmprint-fontkit.js'></script><script src='./_vmprint_assets/{_VMPRINT_ASSET_VERSION}/vmprint-engine.js'></script><script src='./_vmprint_assets/{_VMPRINT_ASSET_VERSION}/vmprint-web-fonts.js'></script><script src='./_vmprint_assets/{_VMPRINT_ASSET_VERSION}/vmprint-context-canvas.js'></script>"
-        "<script>const ast=JSON.parse(document.getElementById('ast-data').textContent||'{}');"
-        "const fallback=JSON.parse(document.getElementById('fallback-svg-pages-data').textContent||'[]');"
-        "const root=document.getElementById('root');const status=document.getElementById('status');"
-        "function renderFallback(){root.innerHTML='';for(const s of fallback){const d=document.createElement('div');d.className='page';d.innerHTML=String(s||'');root.appendChild(d);}status.textContent='Fallback active (server-rendered pages).';}"
-        "setTimeout(()=>{const ok=!!(window.VMPrint||window.vmprint||window.CanvasContext);if(!ok){renderFallback();return;}renderFallback();status.textContent='Runtime assets detected; fallback kept until browser pipeline is wired.';},120);"
-        "</script></body></html>"
+        "<script src='./assets/pipeline.js'></script><script src='./assets/ui.js'></script>"
+        "</body></html>"
     )
 
 

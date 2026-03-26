@@ -71,10 +71,13 @@ def _load_vmprint_preview_rewrite():
 def test_vmprint_preview_asset_links_rewrite_signed_urls(monkeypatch):
     fn = _load_vmprint_preview_rewrite()
     html_in = (
+        "<link rel='stylesheet' href='./styles.css'>"
         "<script src='./_vmprint_assets/v1/vmprint-fontkit.js'></script>"
         "<script src='./_vmprint_assets/v1/vmprint-engine.js'></script>"
         "<script src='./_vmprint_assets/v1/vmprint-web-fonts.js'></script>"
         "<script src='./_vmprint_assets/v1/vmprint-context-canvas.js'></script>"
+        "<script src='./assets/pipeline.js'></script>"
+        "<script src='./assets/ui.js'></script>"
     )
 
     core_mod = types.ModuleType("core")
@@ -90,16 +93,25 @@ def test_vmprint_preview_asset_links_rewrite_signed_urls(monkeypatch):
     html_out = fn(html_in, "companion")
     assert "token=signed123" in html_out
     assert "./_vmprint_assets/v1/" not in html_out
+    assert "./styles.css" not in html_out
+    assert "./assets/pipeline.js" not in html_out
+    assert "./assets/ui.js" not in html_out
     assert "output/_vmprint_assets/v1/vmprint-engine.js" in html_out
+    assert "output/styles.css" in html_out
+    assert "output/assets/pipeline.js" in html_out
+    assert "output/assets/ui.js" in html_out
 
 
 def test_vmprint_preview_asset_links_rewrite_dev_unsigned_urls(monkeypatch):
     fn = _load_vmprint_preview_rewrite()
     html_in = (
+        "<link rel='stylesheet' href='./styles.css'>"
         "<script src='./_vmprint_assets/v1/vmprint-fontkit.js'></script>"
         "<script src='./_vmprint_assets/v1/vmprint-engine.js'></script>"
         "<script src='./_vmprint_assets/v1/vmprint-web-fonts.js'></script>"
         "<script src='./_vmprint_assets/v1/vmprint-context-canvas.js'></script>"
+        "<script src='./assets/pipeline.js'></script>"
+        "<script src='./assets/ui.js'></script>"
     )
 
     core_mod = types.ModuleType("core")
@@ -115,6 +127,9 @@ def test_vmprint_preview_asset_links_rewrite_dev_unsigned_urls(monkeypatch):
     html_out = fn(html_in, "companion")
     assert "dev_unsigned=1" in html_out
     assert "./_vmprint_assets/v1/" not in html_out
+    assert "./styles.css" not in html_out
+    assert "./assets/pipeline.js" not in html_out
+    assert "./assets/ui.js" not in html_out
     assert "scope=companion" in html_out
 
 
