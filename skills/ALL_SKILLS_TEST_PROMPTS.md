@@ -7,6 +7,8 @@ Use this file as a one-stop checklist to test all current bundled skill READMEs:
 - `weather-1.0.0`
 - `linkedin-writer-1.0.0`
 - `magazine-render-1.0.0`
+- `cli-anything-bridge-1.0.0`
+- `self-improving-1.2.16`
 
 ---
 
@@ -134,6 +136,13 @@ run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py", args=
 run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py", args=["render-json", "--template", "daily_brief", "--theme", "dispatch", "--profile", "literature", "--json", "{\"as_of\":\"2026-03-25\",\"items\":[{\"title\":\"Headline\",\"link\":\"https://example.com\",\"source\":\"RSS\"}]}", "--preview", "auto", "--out", "daily_brief.pdf"])
 ```
 
+```text
+run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py", args=["render-daily-brief-ast", "--title", "Daily Brief", "--theme", "dispatch", "--json", "{\"as_of\":\"2026-03-26\",\"items\":[{\"title\":\"Headline\",\"source\":\"RSS\",\"link\":\"https://example.com\"}]}", "--output_format", "browser_preview_html", "--out", "daily_brief.preview.html"])
+run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py", args=["render-daily-brief-ast", "--title", "Daily Brief", "--theme", "dispatch", "--json", "{\"as_of\":\"2026-03-26\",\"items\":[{\"title\":\"Headline\",\"source\":\"RSS\",\"link\":\"https://example.com\"}]}", "--output_format", "layout_json", "--out", "daily_brief.layout.json"])
+run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py", args=["render-template-ast", "--template", "weather", "--title", "Weather Brief", "--theme", "dispatch", "--json", "{\"location\":\"Beijing\",\"now\":{\"condition\":\"Cloudy\",\"temp\":\"18C\"},\"forecast\":[{\"day\":\"Fri\",\"summary\":\"Cloudy\",\"high\":\"21C\",\"low\":\"14C\"}]}", "--output_format", "browser_preview_html", "--out", "weather_brief.preview.html"])
+run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py", args=["render-template-ast", "--template", "stock", "--title", "Stock Brief", "--theme", "dispatch", "--json", "{\"items\":[{\"symbol\":\"NVDA\",\"name\":\"NVIDIA\",\"price\":\"100\",\"change_pct\":\"+1.2%\"}]}", "--output_format", "browser_preview_html", "--out", "stock_brief.preview.html"])
+```
+
 ---
 
 ## Quick smoke-test order (recommended)
@@ -143,4 +152,51 @@ run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py", args=
 3. Stock portfolio
 4. Magazine render from simple markdown
 5. Daily brief + “magazine-style PDF” natural language
+
+---
+
+## 6) cli-anything-bridge-1.0.0 (pilot)
+
+### Natural language prompts
+
+- Use cli-anything-gimp and show available commands.
+- Run cli-anything-libreoffice --help.
+- Use cli-anything-drawio and show version.
+
+### run_skill calls
+
+```text
+run_skill(skill_name="cli-anything-bridge-1.0.0", script="run_cli_anything.py", args=["exec", "--bin", "cli-anything-gimp", "--args-json", "[\"--help\"]"])
+run_skill(skill_name="cli-anything-bridge-1.0.0", script="run_cli_anything.py", args=["exec", "--bin", "cli-anything-libreoffice", "--args-json", "[\"--version\"]"])
+run_skill(skill_name="cli-anything-bridge-1.0.0", script="run_cli_anything.py", args=["exec", "--bin", "cli-anything-drawio", "--args-json", "[\"--json\", \"--help\"]"])
+```
+
+JSON path (parsed `data.normalized` when stdout is JSON):
+
+```text
+run_skill(skill_name="cli-anything-bridge-1.0.0", script="run_cli_anything.py", args=["exec", "--bin", "cli-anything-drawio", "--args-json", "[\"--json\", \"--help\"]", "--parse-json", "strict"])
+```
+
+Copy-out path (move produced artifact into HomeClaw output scope):
+
+```text
+run_skill(skill_name="cli-anything-bridge-1.0.0", script="run_cli_anything.py", args=["copy-out", "--source", "/absolute/path/to/generated.pdf", "--out-name", "generated.pdf"])
+```
+
+---
+
+## 7) self-improving-1.2.16 (instruction-only; no run_skill)
+
+### Natural language prompts
+
+- Remember that I always want concise answers with bullet lists.
+- That was wrong; actually the config path is `config/core.yml`.
+- What have you learned about my preferences?
+- Show my patterns / memory stats.
+- After this task, reflect on what could go better next time.
+
+### Notes
+
+- State lives under `~/self-improving/` — create layout per `skills/self-improving-1.2.16/setup.md`.
+- The agent uses **file_read** / **file_write** (or your approved tools), not a bundled script.
 

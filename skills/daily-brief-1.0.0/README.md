@@ -12,14 +12,16 @@ Full agent-oriented instructions are in **`SKILL.md`**. This README is for human
 - “Morning report for Chinese tech news.”
 - “RSS digest filtered to AI.”
 - “List the configured daily brief feeds.”
-- “Daily brief, and make it a **magazine-style PDF**.”
+- “Daily brief, make it **magazine-style**, and give me a browser preview link.”
+- “Daily brief, and export a **PDF** for printing.”
 
 ### Chinese
 
 - “今日新闻 / 每日简报（25条，中文）”
 - “RSS 新闻订阅，筛选 AI 相关”
 - “列出 daily brief 的 RSS 源”
-- “把今日新闻做成 **杂志风格 PDF**（排版更好看）”
+- “把今日新闻做成 **杂志风格**，给我浏览器预览链接”
+- “把今日新闻导出成 **PDF**（用于下载/打印）”
 
 ## Requirements
 
@@ -73,6 +75,14 @@ run_skill(skill_name="daily-brief-1.0.0", script="fetch_rss.py", args=["fetch", 
 ```
 
 Output is Markdown plus a JSON block. Items are **interleaved across feeds** so one busy source does not dominate the list.
+
+## VMPrint output default for Daily Brief
+
+When users ask for a prettier formatted daily brief, default to:
+
+- **`browser_preview_html`** (best reading experience in channels/Companion)
+
+Generate **PDF** only when users explicitly ask for download/print/export.
 
 ## Scheduling (cron)
 

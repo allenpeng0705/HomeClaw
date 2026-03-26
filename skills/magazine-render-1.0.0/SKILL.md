@@ -1,9 +1,9 @@
 ---
 name: magazine-render
 description: |
-  Generic magazine-style PDF renderer (VMPrint draft2final) for HomeClaw. Use when the user asks for a more beautiful / readable / magazine-like report layout (PDF).
-  Accepts either Markdown (render-md) or structured JSON + template (render-json). Output is saved under the user's sandbox output folder and returned as a link.
-  Supports named themes (e.g. dispatch-style masthead) and optional PNG preview generation (best-effort).
+  Generic VMPrint renderer for HomeClaw document UI runtime. Use when the user asks for a more beautiful / readable / magazine-like report layout.
+  Supports AST-first rendering (render-template-ast / render-ast) plus Markdown fallback. Prefer browser preview HTML for long/formatted responses; use PDF when explicitly requested.
+  Output is saved under the user's sandbox output folder and returned as a link for Companion and all channels.
 homepage: https://github.com/allenpeng0705/HomeClaw
 trigger:
   patterns:
@@ -14,44 +14,59 @@ trigger:
     - "render\\s*(this|it)?\\s*as\\s*pdf"
     - "杂志\\s*风格|杂志\\s*排版|排版\\s*更\\s*好看|导出\\s*pdf|生成\\s*pdf"
   instruction: |
-    The user wants a prettier / more readable report output (PDF). Use the magazine-render skill to create a magazine-style PDF using VMPrint.
+    The user wants a prettier / more readable report output. Use AST-first VMPrint rendering for better UI control.
 
-    You have two modes:
+    You have four modes:
 
-    1) Markdown → PDF (recommended, most reliable):
-       - If you already have the report content in your context, convert it to a clean Markdown magazine layout (masthead, date, sections, short bullets, links).
+    1) Template JSON → AST → artifact (recommended):
+       - If you have structured data (daily_brief/weather/stock), use AST templates first.
        - Call:
          run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
-                 args=["render-md", "--title", "<TITLE>", "--theme", "dispatch|minimal", "--profile", "literature", "--md", "<MARKDOWN>", "--preview", "auto|none", "--out", "<FILENAME>.pdf"])
-       - The script saves to the user's output folder and returns a link automatically.
+                args=["render-template-ast", "--template", "daily_brief|weather|stock", "--title", "<TITLE>", "--theme", "dispatch|minimal", "--json", "<JSON_TEXT>", "--output_format", "browser_preview_html|pdf|layout_json", "--out", "<FILENAME>"])
 
-    2) Structured JSON → template → PDF:
-       - Use when you have structured data (e.g. RSS items list, weather JSON, stock portfolio JSON).
+    2) AST JSON 1.1 → artifact:
+       - Use when upstream already has VMPrint AST and you want deterministic layout runtime output.
        - Call:
          run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
-                 args=["render-json", "--template", "daily_brief|weather|stock", "--theme", "dispatch|minimal", "--profile", "literature", "--json", "<JSON_TEXT>", "--preview", "auto|none", "--out", "<FILENAME>.pdf"])
+                args=["render-ast", "--ast", "<AST_JSON>", "--output_format", "browser_preview_html|pdf|layout_json", "--out", "<FILENAME>"])
+
+    3) Daily brief data JSON -> dedicated AST template -> artifact:
+       - Use for channel-friendly browser preview + optional PDF from one layout model.
+       - Call:
+         run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
+                args=["render-daily-brief-ast", "--title", "<TITLE>", "--theme", "dispatch|minimal", "--json", "<DAILY_BRIEF_JSON>", "--output_format", "browser_preview_html|pdf|layout_json", "--out", "<FILENAME>"])
+
+    4) Markdown fallback:
+       - Use only when structured JSON/AST is unavailable.
+       - Call:
+         run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
+                args=["render-md", "--title", "<TITLE>", "--theme", "dispatch|minimal", "--profile", "literature", "--md", "<MARKDOWN>", "--preview", "auto|none", "--out", "<FILENAME>.pdf"])
 
     Output rules:
     - Always include a short 3–6 bullet “Top highlights” in chat.
-    - Always keep links in the PDF (do not strip URLs).
-    - If VMPrint/Node is missing, explain the actionable fix: install VMPrint via install.sh/install.ps1, ensure Node is on PATH, and build draft2final.
+    - For long/formatted responses, prefer `browser_preview_html` as primary link.
+    - Generate PDF only when user asks for print/download/export.
+    - If VMPrint/Node is missing, explain the actionable fix: install VMPrint via install.sh/install.ps1, ensure Node is on PATH, and build draft2final + vmprint cli.
     - If preview image is requested but unavailable, still return the PDF (preview is best-effort).
 ---
 
 # magazine-render-1.0.0
 
-This is a reusable formatting skill: it turns Markdown or structured JSON into a **magazine-style PDF** using **VMPrint**.
+This is a reusable formatting skill for **AST-first VMPrint UI output**. It can render browser previews, PDFs, and layout JSON from structured JSON or AST.
 
 ## Scripts (run_skill)
 
 | Action | Args |
 |--------|------|
-| Render Markdown to PDF | `["render-md", "--title", "My Report", "--theme", "dispatch", "--profile", "literature", "--md", "# ...", "--preview", "auto", "--out", "report.pdf"]` |
-| Render JSON template to PDF | `["render-json", "--template", "daily_brief", "--theme", "dispatch", "--profile", "literature", "--json", "{...}", "--preview", "auto", "--out", "daily_brief.pdf"]` |
+| Render template JSON -> AST artifact | `["render-template-ast", "--template", "daily_brief|weather|stock", "--title", "Report", "--theme", "dispatch", "--json", "{...}", "--output_format", "browser_preview_html|pdf|layout_json", "--out", "report.preview.html"]` |
+| Render AST JSON 1.1 | `["render-ast", "--ast", "{...}", "--output_format", "pdf|layout_json|browser_preview_html", "--out", "brief.preview.html"]` |
+| Daily brief JSON -> AST template | `["render-daily-brief-ast", "--title", "Daily Brief", "--theme", "dispatch", "--json", "{...}", "--output_format", "pdf|layout_json|browser_preview_html", "--out", "brief.layout.json"]` |
+| Markdown fallback to PDF | `["render-md", "--title", "My Report", "--theme", "dispatch", "--profile", "literature", "--md", "# ...", "--preview", "auto", "--out", "report.pdf"]` |
 
 Notes:
 - `--out` is a **filename**, saved under the user's output folder (sandbox). The tool returns a view link when configured.
-- Prefer **Markdown mode** unless you already have clean structured JSON.
+- Prefer **AST-first template mode** when structured JSON is available.
 - Named themes: `dispatch` (masthead like a newspaper) or `minimal`.
 - Preview image: `--preview auto` tries to generate a PNG thumbnail of the first page (macOS `qlmanage` or `pdftoppm` if installed). If it fails, you still get the PDF.
+- For channels + Companion, prefer `browser_preview_html` output and share the returned file link.
 

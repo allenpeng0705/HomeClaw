@@ -68,6 +68,7 @@ class CoreService {
   static const String _keyShowProgress = 'show_progress_during_long_tasks';
   static const String _keyCursorChatPlainText = 'cursor_chat_plain_text';
   static const String _keyBridgeAgentStreamPreview = 'bridge_agent_stream_preview';
+  static const String _keyVmprintNativePreview = 'vmprint_native_preview';
   static const String _keyCompanionToken = 'companion_session_token';
   static const String _keyCompanionUserId = 'companion_session_user_id';
   static const String _keyCompanionSavedUsername = 'companion_saved_username';
@@ -92,6 +93,7 @@ class CoreService {
   bool _showProgressDuringLongTasks = true;
   bool _cursorChatPlainText = true;
   bool _bridgeAgentStreamPreview = true;
+  bool _vmprintNativePreview = false;
   String? _portalAdminToken;
 
   String get baseUrl => _baseUrl;
@@ -99,6 +101,7 @@ class CoreService {
   bool get showProgressDuringLongTasks => _showProgressDuringLongTasks;
   bool get cursorChatPlainText => _cursorChatPlainText;
   bool get bridgeAgentStreamPreview => _bridgeAgentStreamPreview;
+  bool get vmprintNativePreview => _vmprintNativePreview;
   String? get apiKey => _apiKey;
   String? get sessionToken => _sessionToken;
   String? get sessionUserId => _sessionUserId;
@@ -238,6 +241,7 @@ class CoreService {
     _showProgressDuringLongTasks = prefs.getBool(_keyShowProgress) ?? true;
     _cursorChatPlainText = prefs.getBool(_keyCursorChatPlainText) ?? true;
     _bridgeAgentStreamPreview = prefs.getBool(_keyBridgeAgentStreamPreview) ?? true;
+    _vmprintNativePreview = prefs.getBool(_keyVmprintNativePreview) ?? false;
     _sessionToken = prefs.getString(_keyCompanionToken)?.trim();
     if (_sessionToken != null && _sessionToken!.isEmpty) _sessionToken = null;
     _sessionUserId = prefs.getString(_keyCompanionUserId)?.trim();
@@ -1087,6 +1091,12 @@ class CoreService {
     } else {
       await prefs.remove(_keyCanvasUrl);
     }
+  }
+
+  Future<void> saveVmprintNativePreview(bool enabled) async {
+    _vmprintNativePreview = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyVmprintNativePreview, enabled);
   }
 
   Future<void> saveNodesUrl(String? url) async {

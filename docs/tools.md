@@ -61,6 +61,95 @@ The **markdown_to_pdf** tool converts Markdown text to a PDF file and saves it u
 
 ---
 
+## VMPrint runtime outputs
+
+Use **`vmprint_render`** when you want VMPrint artifacts beyond plain PDF:
+
+- `output_format: "pdf"` — final printable file
+- `output_format: "ast_json"` — transmuted VMPrint AST JSON
+- `output_format: "layout_json"` — flat scene-graph style page/box layout stream (for advanced previews)
+- `output_format: "browser_preview_html"` — browser-openable preview artifact generated under `output/`
+
+For channel/Companion delivery, save under `output/` and share the returned `/files/out` link. The same link pattern works across WebChat, Companion, and other channels.
+
+See also: [VMPrint as UI runtime](vmprint-ui-runtime.md).
+
+---
+
+## VMPrint decision matrix (recommended)
+
+Use this quick policy for long/formatted responses.
+
+| Input you have | Preferred call | Default output | Notes |
+|---|---|---|---|
+| Structured JSON (`daily_brief`, `weather`, `stock`) | `run_skill` -> `magazine-render-1.0.0` `render-template-ast` | `browser_preview_html` | **AST-first** path for best UI control. |
+| Domain JSON (`daily-brief`) | `run_skill` -> `magazine-render-1.0.0` `render-daily-brief-ast` | `browser_preview_html` | Dedicated template path; stable table/header behavior. |
+| AST JSON 1.1 already available | `run_skill` -> `magazine-render-1.0.0` `render-ast` | `browser_preview_html` | Use `layout_json` for diagnostics; PDF optional. |
+| Only Markdown available | `vmprint_render` or `render-md` fallback | `browser_preview_html` | Markdown path is fallback when structured JSON/AST is unavailable. |
+| User explicitly asks print/download/export | any VMPrint path | `pdf` | PDF is explicit opt-in target. |
+
+Operational defaults:
+
+- Long/formatted responses: **preview link first** (`browser_preview_html`)
+- Printing/sharing file export: **PDF on request**
+- Debug/QA layout issues: emit **`layout_json`**
+
+Inline/link threshold tuning (no code edits):
+
+- Core tool path (`vmprint_render`) reads `tools.vmprint_preview_inline` from `config/core.yml`:
+
+```yaml
+tools:
+  vmprint_preview_inline:
+    max_ast_chars: 120000
+    max_pages: 2
+```
+
+- `magazine-render` skill path reads env vars:
+  - `HOMECLAW_VMPRINT_INLINE_MAX_AST_CHARS`
+  - `HOMECLAW_VMPRINT_INLINE_MAX_PAGES`
+
+### Quick examples
+
+```json
+{
+  "tool": "run_skill",
+  "arguments": {
+    "skill_name": "magazine-render-1.0.0",
+    "script": "render_magazine.py",
+    "args": [
+      "render-template-ast",
+      "--template",
+      "weather",
+      "--title",
+      "Weather Brief",
+      "--theme",
+      "dispatch",
+      "--json",
+      "{\"location\":\"Beijing\",\"now\":{\"condition\":\"Cloudy\",\"temp\":\"18C\"},\"forecast\":[{\"day\":\"Fri\",\"summary\":\"Cloudy\",\"high\":\"21C\",\"low\":\"14C\"}]}",
+      "--output_format",
+      "browser_preview_html",
+      "--out",
+      "weather_brief.preview.html"
+    ]
+  }
+}
+```
+
+```json
+{
+  "tool": "vmprint_render",
+  "arguments": {
+    "content": "# Long Summary\n\n## Highlights\n\n- ...",
+    "path": "output/summary.preview.html",
+    "output_format": "browser_preview_html",
+    "vmprint_profile": "literature"
+  }
+}
+```
+
+---
+
 ## Magazine-style PDFs (skill)
 
 If the user asks for a more **beautiful / readable / magazine-like** report layout, use the skill **`magazine-render-1.0.0`**:
@@ -69,6 +158,8 @@ If the user asks for a more **beautiful / readable / magazine-like** report layo
 - **JSON template mode:** `render-json --template daily_brief|weather|stock --json "{...}" --out report.pdf`
 
 The skill uses **VMPrint** (draft2final) under the hood and writes to the user's `output/` folder; the returned result includes a view link when file serving is configured.
+
+For **daily-brief** formatted output, default to `browser_preview_html` (channel/Companion reading), and generate PDF only when the user explicitly asks for download/print.
 
 ---
 

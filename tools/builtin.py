@@ -13,6 +13,7 @@ To add a new built-in tool:
 
 import asyncio
 import difflib
+import html
 import json
 import os
 import platform
@@ -4642,6 +4643,50 @@ def _resolve_vmprint_dir_from_config() -> Optional[str]:
     return vmprint_dir
 
 
+def _ensure_vmprint_static_assets(base_dir: Path) -> None:
+    """Ensure versioned VMPrint browser assets exist under output/_vmprint_assets/<version>."""
+    try:
+        asset_version = globals().get("_VMPRINT_ASSET_VERSION", "v1")
+        assets_dir = (base_dir / FILE_OUTPUT_SUBDIR / "_vmprint_assets" / asset_version).resolve()
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        project_root = Path(__file__).resolve().parent.parent
+        vmroot = (project_root / "tools" / "vmprint").resolve()
+        copies = [
+            (vmroot / "engine" / "dist" / "index.js", assets_dir / "vmprint-engine.js"),
+            (vmroot / "contexts" / "canvas" / "dist" / "index.js", assets_dir / "vmprint-context-canvas.js"),
+            (vmroot / "font-managers" / "standard" / "dist" / "index.js", assets_dir / "vmprint-web-fonts.js"),
+        ]
+        for src, dst in copies:
+            if src.is_file() and (not dst.exists() or dst.stat().st_size == 0):
+                shutil.copy2(src, dst)
+        fontkit_stub = assets_dir / "vmprint-fontkit.js"
+        if not fontkit_stub.exists() or fontkit_stub.stat().st_size == 0:
+            fontkit_stub.write_text(
+                "window.process = window.process || { env: {} }; window.VMPrintFontkit = window.VMPrintFontkit || {};",
+                encoding="utf-8",
+            )
+    except Exception:
+        # Non-fatal: fallback preview still works without browser runtime assets.
+        pass
+
+
+def _vmprint_inline_limits() -> tuple[int, int]:
+    """Return (max_ast_chars, max_pages) for inline hint policy."""
+    max_ast = 120_000
+    max_pages = 2
+    try:
+        cfg = _get_tools_config() or {}
+        vcfg = cfg.get("vmprint_preview_inline") if isinstance(cfg, dict) else None
+        if isinstance(vcfg, dict):
+            if vcfg.get("max_ast_chars") is not None:
+                max_ast = max(10_000, int(vcfg.get("max_ast_chars")))
+            if vcfg.get("max_pages") is not None:
+                max_pages = max(1, int(vcfg.get("max_pages")))
+    except Exception:
+        pass
+    return (max_ast, max_pages)
+
+
 def _vmprint_render_sync(
     md_content: str,
     output_format: str,
@@ -4652,13 +4697,13 @@ def _vmprint_render_sync(
     """
     Render Markdown with VMPrint draft2final.
     Returns (pdf_bytes, text_output, error). For output_format='pdf' returns pdf_bytes;
-    for 'ast_json' returns text_output (JSON string).
+    for text formats returns text_output.
     """
     md_content = (md_content or "").strip()
     if not md_content:
         return (None, None, "Content is empty.")
-    if output_format not in ("pdf", "ast_json"):
-        return (None, None, "output_format must be one of: pdf, ast_json.")
+    if output_format not in ("pdf", "ast_json", "layout_json", "browser_preview_html"):
+        return (None, None, "output_format must be one of: pdf, ast_json, layout_json, browser_preview_html.")
 
     # Resolve VMPrint dir with same vmprint/vm_print compatibility logic.
     def _vmprint_base() -> Optional[Path]:
@@ -4700,15 +4745,24 @@ def _vmprint_render_sync(
             f.write(md_content)
             md_path = f.name
         out_path = md_path + suffix
+        layout_out_path = md_path + ".layout.json"
         try:
             base_cmd = ["node", str(cli_js), md_path, "--as", (vmprint_profile or "academic")]
             if vmprint_style:
                 base_cmd.extend(["--style", vmprint_style])
-            # Prefer --out, keep --output fallback for compatibility.
-            cmd_variants = [
-                base_cmd + ["--out", out_path],
-                base_cmd + ["--output", out_path],
-            ]
+            # For layout_json/browser_preview_html, first produce VMPrint AST JSON then emit layout via vmprint CLI.
+            if output_format in ("layout_json", "browser_preview_html"):
+                ast_out = md_path + ".ast.json"
+                cmd_variants = [
+                    base_cmd + ["--out", ast_out],
+                    base_cmd + ["--output", ast_out],
+                ]
+            else:
+                # Prefer --out, keep --output fallback for compatibility.
+                cmd_variants = [
+                    base_cmd + ["--out", out_path],
+                    base_cmd + ["--output", out_path],
+                ]
             result = None
             for cmd in cmd_variants:
                 result = subprocess.run(
@@ -4718,8 +4772,138 @@ def _vmprint_render_sync(
                     timeout=120,
                     check=False,
                 )
-                if result.returncode == 0 and Path(out_path).is_file():
+                if output_format in ("layout_json", "browser_preview_html"):
+                    if result.returncode == 0 and Path(md_path + ".ast.json").is_file():
+                        break
+                elif result.returncode == 0 and Path(out_path).is_file():
                     break
+            if output_format in ("layout_json", "browser_preview_html"):
+                ast_path = Path(md_path + ".ast.json")
+                if result.returncode != 0 or not ast_path.is_file():
+                    err = (result.stderr or result.stdout or b"").decode("utf-8", errors="replace").strip() or "unknown"
+                    return (None, None, f"VMPrint render failed: {err[:500]}")
+                if output_format == "browser_preview_html":
+                    canvas_script = (
+                        "const fs=require('fs');"
+                        "const {LayoutEngine,Renderer,toLayoutConfig,createEngineRuntime}=require('./engine/dist/index.js');"
+                        "const {StandardFontManager}=require('./font-managers/standard/dist/index.js');"
+                        "const {CanvasContext}=require('./contexts/canvas/dist/index.js');"
+                        "const p=process.argv[1]; const doc=JSON.parse(fs.readFileSync(p,'utf8'));"
+                        "(async()=>{"
+                        "const runtime=createEngineRuntime({fontManager:new StandardFontManager()});"
+                        "const cfg=toLayoutConfig(doc);"
+                        "const engine=new LayoutEngine(cfg,runtime);"
+                        "await engine.waitForFonts();"
+                        "const pages=engine.simulate(doc.elements);"
+                        "const ctx=new CanvasContext({size:cfg.pageSize,margins:cfg.margins,autoFirstPage:false,bufferPages:false,textRenderMode:'text'});"
+                        "const renderer=new Renderer(cfg,false,runtime);"
+                        "await renderer.render(pages,ctx); ctx.end();"
+                        "process.stdout.write(JSON.stringify({svgs:ctx.toSvgPages()}));"
+                        "})().catch(e=>{console.error(String(e&&e.stack||e)); process.exit(2);});"
+                    )
+                    c = subprocess.run(
+                        ["node", "-e", canvas_script, str(ast_path)],
+                        cwd=str(vmp),
+                        capture_output=True,
+                        timeout=180,
+                        check=False,
+                    )
+                    if c.returncode != 0:
+                        err = (c.stderr or c.stdout or b"").decode("utf-8", errors="replace").strip() or "unknown"
+                        return (None, None, f"VMPrint canvas preview failed: {err[:500]}")
+                    try:
+                        payload = json.loads((c.stdout or b"{}").decode("utf-8", errors="replace"))
+                        svgs = payload.get("svgs") if isinstance(payload, dict) else None
+                        if not isinstance(svgs, list) or not svgs:
+                            return (None, None, "VMPrint canvas preview failed: no pages rendered.")
+                    except Exception as e:
+                        return (None, None, f"VMPrint canvas preview parse failed: {e!s}")
+                    esc_json = html.escape(json.dumps(svgs, ensure_ascii=False))
+                    ast_json_raw = Path(ast_path).read_text(encoding="utf-8", errors="replace")
+                    ast_json = html.escape(ast_json_raw)
+                    ast_chars = len(ast_json_raw or "")
+                    page_count = len(svgs or [])
+                    try:
+                        max_ast, max_pages = _vmprint_inline_limits()
+                    except Exception:
+                        max_ast, max_pages = (120_000, 2)
+                    ui_hint = "inline" if (ast_chars <= max_ast and page_count <= max_pages) else "link"
+                    asset_version = globals().get("_VMPRINT_ASSET_VERSION", "v1")
+                    viewer_html = (
+                        "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                        f"<meta name='homeclaw-vmprint-ui-hint' content='{ui_hint}'>"
+                        f"<meta name='homeclaw-vmprint-ast-chars' content='{ast_chars}'>"
+                        f"<meta name='homeclaw-vmprint-pages' content='{page_count}'>"
+                        "<title>VMPrint Canvas Preview</title><style>body{font-family:system-ui;margin:0;background:#111;color:#eee}"
+                        ".top{padding:10px 12px;background:#1b1b1b;position:sticky;top:0}.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}"
+                        ".pages{padding:12px;display:grid;gap:16px}"
+                        ".page{background:#fff;color:#111;box-shadow:0 2px 12px rgba(0,0,0,.35);overflow:auto}"
+                        ".meta{font-size:12px;color:#bbb}</style></head><body>"
+                        "<div class='top'><strong>VMPrint Hybrid Preview</strong><div class='meta'>Primary: browser VMPrint runtime (AST->canvas). Fallback: server-rendered pages.</div>"
+                        "<div class='toolbar'><label>Scale <select id='scale'><option value='0.75'>75%</option><option selected value='1'>100%</option><option value='1.25'>125%</option><option value='1.5'>150%</option></select></label>"
+                        "<label>DPI <select id='dpi'><option selected value='auto'>Auto</option><option value='72'>72</option><option value='96'>96</option><option value='144'>144</option><option value='192'>192</option><option value='300'>300</option></select></label>"
+                        "<label>Text <select id='text-mode'><option value='text'>Text</option><option selected value='glyph-path'>Glyph Path</option></select></label>"
+                        "<span id='status' class='meta'>Initializing...</span></div></div>"
+                        "<div id='root' class='pages'></div>"
+                        f"<script id='ast-data' type='application/json'>{ast_json}</script>"
+                        f"<script id='svg-pages-data' type='application/json'>{esc_json}</script>"
+                        f"<script src='./_vmprint_assets/{asset_version}/vmprint-fontkit.js'></script><script src='./_vmprint_assets/{asset_version}/vmprint-engine.js'></script><script src='./_vmprint_assets/{asset_version}/vmprint-web-fonts.js'></script><script src='./_vmprint_assets/{asset_version}/vmprint-context-canvas.js'></script>"
+                        "<script>const pages=JSON.parse(document.getElementById('svg-pages-data').textContent||'[]');"
+                        "const root=document.getElementById('root'); const status=document.getElementById('status');"
+                        "function renderFallback(){root.innerHTML='';for(const s of pages){const d=document.createElement('div');d.className='page';d.innerHTML=String(s||'');root.appendChild(d);}status.textContent='Fallback active (server-rendered pages).';}"
+                        "setTimeout(()=>{const ok=!!(window.VMPrint||window.vmprint||window.CanvasContext);if(!ok){renderFallback();return;}renderFallback();status.textContent='Runtime assets detected; fallback kept until browser pipeline is wired.';},120);</script>"
+                        "</body></html>"
+                    )
+                    if len(viewer_html) > 2_000_000:
+                        return (
+                            None,
+                            None,
+                            f"VMPrint preview too large ({len(viewer_html)} chars html). Use output_format=pdf for delivery.",
+                        )
+                    return (None, viewer_html, None)
+                vm_cli = vmp / "cli" / "dist" / "index.js"
+                if not vm_cli.is_file():
+                    return (None, None, f"VMPrint CLI not built at {vm_cli}. Run: cd {vmp} && npm install && npm run build")
+                tmp_pdf_out = md_path + ".layout.pdf"
+                lay = subprocess.run(
+                    ["node", str(vm_cli), "-i", str(ast_path), "-o", tmp_pdf_out, "--emit-layout", layout_out_path],
+                    cwd=str(vmp),
+                    capture_output=True,
+                    timeout=120,
+                    check=False,
+                )
+                if lay.returncode != 0 or not Path(layout_out_path).is_file():
+                    err = (lay.stderr or lay.stdout or b"").decode("utf-8", errors="replace").strip() or "unknown"
+                    return (None, None, f"VMPrint layout emission failed: {err[:500]}")
+                layout_text = Path(layout_out_path).read_text(encoding="utf-8", errors="replace")
+                if output_format == "layout_json":
+                    return (None, layout_text, None)
+                # browser_preview_html: return a lightweight page that visualizes boxes with canvas-like absolute layers.
+                if len(layout_text) > 2_000_000:
+                    return (
+                        None,
+                        None,
+                        f"VMPrint preview too large ({len(layout_text)} chars layout). Use output_format=layout_json for diagnostics or output_format=pdf for delivery.",
+                    )
+                esc = html.escape(layout_text)
+                viewer_html = (
+                    "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                    "<title>VMPrint Preview</title><style>body{font-family:system-ui;margin:0;background:#111;color:#eee}"
+                    ".top{padding:10px 12px;background:#1b1b1b;position:sticky;top:0}.pages{padding:12px;display:grid;gap:16px}"
+                    ".page{background:#fff;color:#111;position:relative;box-shadow:0 2px 12px rgba(0,0,0,.35);overflow:hidden}"
+                    ".box{position:absolute;border:1px dashed rgba(0,0,0,.12);font-size:10px;line-height:1.2;overflow:hidden;white-space:pre-wrap}"
+                    ".meta{font-size:12px;color:#bbb}</style></head><body>"
+                    "<div class='top'><strong>VMPrint Scene Preview</strong><div class='meta'>HomeClaw generated preview (layout boxes).</div></div>"
+                    "<div id='root' class='pages'></div>"
+                    f"<script id='layout-data' type='application/json'>{esc}</script>"
+                    "<script>const d=JSON.parse(document.getElementById('layout-data').textContent||'{}');"
+                    "const pages=d.pages||[];const root=document.getElementById('root');"
+                    "for(const p of pages){const w=p.width||595,h=p.height||842;const pg=document.createElement('div');pg.className='page';pg.style.width=w+'px';pg.style.height=h+'px';"
+                    "for(const b of (p.boxes||[])){const n=document.createElement('div');n.className='box';n.style.left=(b.x||0)+'px';n.style.top=(b.y||0)+'px';n.style.width=(b.w||0)+'px';n.style.height=(b.h||0)+'px';"
+                    "const t=(b.lines&&b.lines.length)?(b.lines.map(l=>(l.segments||[]).map(s=>s.text||'').join('')).join('\\n')):(b.type||'');n.textContent=t;pg.appendChild(n);}root.appendChild(pg);}"
+                    "</script></body></html>"
+                )
+                return (None, viewer_html, None)
             if result.returncode == 0 and Path(out_path).is_file():
                 if output_format == "pdf":
                     return (Path(out_path).read_bytes(), None, None)
@@ -4729,6 +4913,9 @@ def _vmprint_render_sync(
         finally:
             Path(md_path).unlink(missing_ok=True)
             Path(out_path).unlink(missing_ok=True)
+            Path(md_path + ".layout.pdf").unlink(missing_ok=True)
+            Path(md_path + ".ast.json").unlink(missing_ok=True)
+            Path(layout_out_path).unlink(missing_ok=True)
     except FileNotFoundError:
         return (None, None, "VMPrint render failed: Node.js is not available on PATH for the Core process.")
     except Exception as e:
@@ -4737,7 +4924,7 @@ def _vmprint_render_sync(
 
 
 async def _vmprint_render_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Render Markdown via VMPrint draft2final to PDF or AST JSON and save to path."""
+    """Render Markdown via VMPrint to PDF, AST JSON, layout JSON, or browser preview HTML and save to path."""
     path_arg = (arguments.get("path") or "").strip()
     content_str = str(arguments.get("content") or "").strip()
     output_format = str(arguments.get("output_format") or "").strip().lower() or "pdf"
@@ -4747,8 +4934,8 @@ async def _vmprint_render_executor(arguments: Dict[str, Any], context: ToolConte
         return "Path is required (e.g. output/report.pdf or output/report.ast.json)."
     if not content_str:
         return "Content is required (Markdown text to render)."
-    if output_format not in ("pdf", "ast_json"):
-        return "output_format must be one of: pdf, ast_json."
+    if output_format not in ("pdf", "ast_json", "layout_json", "browser_preview_html"):
+        return "output_format must be one of: pdf, ast_json, layout_json, browser_preview_html."
     if vmp_profile not in ("academic", "manuscript", "screenplay", "literature"):
         return "vmprint_profile must be one of: academic, manuscript, screenplay, literature."
 
@@ -4782,6 +4969,8 @@ async def _vmprint_render_executor(arguments: Dict[str, Any], context: ToolConte
             if text_out is None:
                 return "VMPrint render produced no AST output."
             full.write_text(text_out, encoding="utf-8")
+            if output_format == "browser_preview_html":
+                _ensure_vmprint_static_assets(base)
 
         out = json.dumps({"written": True, "path": path_arg, "output_format": output_format})
         if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
@@ -4803,6 +4992,7 @@ _FILE_VIEW_LINK_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bm
 
 # Default max image size (bytes) for sending inline; above this we send only the link. Overridden by tools.get_file_view_link.max_image_size_for_inline.
 _DEFAULT_MAX_IMAGE_SIZE_FOR_INLINE = 2 * 1024 * 1024  # 2 MiB
+_VMPRINT_ASSET_VERSION = "v1"
 
 
 def _get_max_image_size_for_inline() -> int:
@@ -7966,13 +8156,13 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="vmprint_render",
-            description="Render Markdown using VMPrint draft2final and save output to a file. Supports output_format='pdf' (default) or 'ast_json' to emit VMPrint transmuted AST JSON. Optional vmprint_profile: academic/manuscript/screenplay/literature, and vmprint_style. Use output/ paths so users can open links.",
+            description="Render Markdown using VMPrint and save output to a file. Supports output_format='pdf' (default), 'ast_json' (VMPrint transmuted AST), 'layout_json' (flat scene-graph boxes), or 'browser_preview_html' (self-contained browser viewer artifact). Optional vmprint_profile: academic/manuscript/screenplay/literature, and vmprint_style. Use output/ paths so users can open links in Companion/channels.",
             parameters={
                 "type": "object",
                 "properties": {
                     "content": {"type": "string", "description": "Markdown content to render with VMPrint draft2final."},
-                    "path": {"type": "string", "description": "Relative output path (e.g. output/report.pdf or output/report.ast.json)."},
-                    "output_format": {"type": "string", "description": "pdf (default) or ast_json."},
+                    "path": {"type": "string", "description": "Relative output path (e.g. output/report.pdf, output/report.ast.json, output/report.layout.json, output/report.preview.html)."},
+                    "output_format": {"type": "string", "description": "pdf (default), ast_json, layout_json, or browser_preview_html."},
                     "vmprint_profile": {"type": "string", "description": "Document profile: academic (default), manuscript, screenplay, literature."},
                     "vmprint_style": {"type": "string", "description": "Optional profile-specific style passed to draft2final --style."},
                 },

@@ -1,5 +1,7 @@
 # Skills (SKILL.md format)
 
+**VMPrint operator quick-reference:** See `docs/examples.md` section **"Operator quick reference (VMPrint AST-first)"** and `docs/tools.md` section **"VMPrint decision matrix (recommended)"** for fast copy-paste usage (preview-first, AST-first policy).
+
 **Full guide:** See **docs/SkillsGuide.md** (or **docs_design/SkillsGuide.md**) for a complete user and developer guide: introduction, how to use skills, how to implement them, how to test them, and config reference. For how **OpenClaw** runs skills and uses SKILL.md (source code in **`../clawdbot`**), see **docs_design/OpenClawSkillsInvestigationAndConverter.md** §6–7 (OpenClaw source reference).
 
 **Tools vs skills:** In HomeClaw, **tools** are the **static base**—callable actions (exec, browser, cron, sessions_*, memory, file, web, **route_to_plugin**, run_skill, etc.). **Skills** are the **application layer**: each skill is a task-oriented instruction package (SKILL.md) that tells the agent *how* to use tools (and plugins) to finish tasks. So: tools = capabilities; skills = know-how.
@@ -83,6 +85,7 @@ When `skills_use_vector_search` is false, Core loads every skill from `skills_di
 - **Social (official APIs, free):** **x-api-1.0.0** (X/Twitter — post tweet, read timeline via X API v2), **meta-social-1.0.0** (Facebook Page + Instagram via Meta Graph API). Use **run_skill** with script `request.py`; set `X_ACCESS_TOKEN` or `META_ACCESS_TOKEN` (or in skill config.yml).
 - **Social (optional, paid):** **hootsuite-1.0.0** — post/schedule to X, Facebook, LinkedIn, Instagram via Hootsuite. Requires Hootsuite subscription and **HOOTSUITE_ACCESS_TOKEN**. Use **run_skill** with script `request.py`: `list` (profiles), `post <profile_id> <text> [scheduledSendTime]`.
 - **daily-brief-1.0.0** — RSS headline digest (English + Chinese feeds in `config/feeds.yaml`; no API key). Use **run_skill**(skill_name=`daily-brief-1.0.0`, script=`fetch_rss.py`, args=[`fetch`, `--max`, `25`, `--lang`, `all`]). Optional `--filter KEYWORD`. Combine with **cron_schedule** + optional `post_process_prompt` for a scheduled “Morning Report”.
+- **self-improving-1.2.16** — Instruction-only local learning under `~/self-improving/` (corrections, HOT/WARM/COLD memory, reflection). HomeClaw-adapted from [ClawHub `ivangdavila/self-improving`](https://clawhub.ai/ivangdavila/self-improving) (MIT-0). Uses **file_read** / **file_write** (or user-approved edits), not **run_skill**. Optional **cron_schedule** for heartbeat maintenance; see `skills/self-improving-1.2.16/homeclaw-heartbeat.md`.
 
 You can add skill folders from other registries or create your own. HomeClaw has equivalent tools for exec, browser, cron, sessions_*, memory, file, web; most skills that use those tools are usable. See **Design.md §3.6**.
 

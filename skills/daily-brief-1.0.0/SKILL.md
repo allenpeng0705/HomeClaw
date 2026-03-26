@@ -8,13 +8,18 @@ trigger:
   instruction: |
     The user wants a news digest from RSS. Use run_skill(skill_name='daily-brief-1.0.0', script='fetch_rss.py', args=['fetch', '--max', '25', '--lang', 'all']). For Chinese-only sources use --lang cn; English-only --lang en. To narrow topics use --filter KEYWORD (matches title/summary). For a one-line list of configured feeds use args=['list']. After raw output, you may summarize top stories for the user. Full article text is not fetched here—only RSS fields; deep summaries can use fetch_url on selected links if the user asks.
 
-    If the user asks for a **beautiful / readable / magazine-style PDF** (e.g. “make it pretty”, “magazine PDF”, “排版更好看”, “杂志风格”, “导出PDF”), do this:
+    If the user asks for a **beautiful / readable / magazine-style output** (e.g. “make it pretty”, “magazine style”, “排版更好看”, “杂志风格”), prefer browser preview HTML by default:
     1) Run daily-brief fetch as usual to get the digest.
-    2) Create a clean Markdown report (masthead, date, “Today at a glance” table, sections, keep links).
-    3) Call the generic PDF renderer skill to produce a magazine-style PDF:
+    2) Convert the fetched digest into compact structured JSON (items: title/source/link; optional as_of).
+    3) Call the generic VMPrint renderer skill in AST mode to produce a browser preview artifact:
        run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
-                args=["render-md", "--title", "Daily Brief", "--md", "<MARKDOWN>", "--out", "daily_brief.pdf"])
-    4) Reply with 3–6 highlight bullets + the returned PDF link.
+                args=["render-daily-brief-ast", "--title", "Daily Brief", "--theme", "dispatch", "--json", "<DAILY_BRIEF_JSON>", "--output_format", "browser_preview_html", "--out", "daily_brief.preview.html"])
+    4) Reply with 3–6 highlight bullets + the returned preview link. Keep in-chat text concise; the link is the primary formatted view.
+
+    Generate PDF only when the user explicitly asks for download/print/PDF export:
+       run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
+                args=["render-daily-brief-ast", "--title", "Daily Brief", "--theme", "dispatch", "--json", "<DAILY_BRIEF_JSON>", "--output_format", "pdf", "--out", "daily_brief.pdf"])
+
   auto_invoke:
     script: fetch_rss.py
     args: ["fetch", "--max", "20", "--lang", "all"]
