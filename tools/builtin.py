@@ -3429,12 +3429,18 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                     args_list = [p for p in parts if p]
         elif isinstance(args_input, str):
             args_list = [x.strip() for x in args_input.split() if x.strip()]
-    # For magazine-render, when args already form a concrete executable command (render-md/render-json),
-    # do not let cloud arg normalizer rewrite them (it may invent unsupported values like theme=magazine).
+    # For magazine-render, when args already form a concrete executable command,
+    # do not let cloud arg normalizer rewrite them (it may truncate/mangle large inline JSON).
     _skip_cloud_arg_normalizer = False
     try:
         if skill_name == "magazine-render-1.0.0" and isinstance(args_list, list) and len(args_list) >= 1:
-            if (args_list[0] or "").strip().lower() in ("render-md", "render-json"):
+            if (args_list[0] or "").strip().lower() in (
+                "render-md",
+                "render-json",
+                "render-ast",
+                "render-template-ast",
+                "render-daily-brief-ast",
+            ):
                 _skip_cloud_arg_normalizer = True
     except Exception:
         _skip_cloud_arg_normalizer = False
@@ -3540,6 +3546,75 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                         sym = (sym_m.group(1) or sym_m.group(2) or "").strip()
                         if sym:
                             args_list = ["context", sym]
+        elif skill_name == "magazine-render-1.0.0":
+            # magazine-render requires a subcommand first. Weak models sometimes start with title text.
+            _valid_cmds = {
+                "render-md",
+                "render-json",
+                "render-ast",
+                "render-daily-brief-ast",
+                "render-template-ast",
+            }
+            _first = (args_list[0] or "").strip().lower() if args_list else ""
+            if _first not in _valid_cmds:
+                _has_json_flag = any((str(a).strip().lower() == "--json") for a in args_list)
+                _has_ast_flag = any((str(a).strip().lower() == "--ast") for a in args_list)
+                _has_template_flag = any((str(a).strip().lower() == "--template") for a in args_list)
+                if _has_json_flag:
+                    args_list = ["render-daily-brief-ast"] + list(args_list)
+                elif _has_template_flag:
+                    args_list = ["render-template-ast"] + list(args_list)
+                elif _has_ast_flag:
+                    args_list = ["render-ast"] + list(args_list)
+                else:
+                    # Hard fallback for natural-language first arg (e.g. "今日新闻").
+                    # Keep original tokens so downstream flags/content are preserved.
+                    args_list = ["render-daily-brief-ast"] + list(args_list)
+            # Ensure required/important args exist for render-daily-brief-ast so argparse won't fail.
+            _first_now = (args_list[0] or "").strip().lower() if args_list else ""
+            if _first_now == "render-daily-brief-ast":
+                _has_out = any((str(a).strip().lower() == "--out") for a in args_list)
+                _has_output_fmt = any((str(a).strip().lower() == "--output_format") for a in args_list)
+                if not _has_output_fmt:
+                    args_list += ["--output_format", "browser_preview_html"]
+                if not _has_out:
+                    _out = f"daily_brief_{datetime.now().strftime('%Y%m%d_%H%M%S')}.preview.html"
+                    args_list += ["--out", _out]
+            # Drop unknown positional tokens (e.g. "今日新闻 20 zh") that break argparse.
+            # Keep only known flags and their values for magazine-render commands.
+            _first_now = (args_list[0] or "").strip().lower() if args_list else ""
+            if _first_now in _valid_cmds:
+                _flag_takes_value = {
+                    "--title": True,
+                    "--json": True,
+                    "--input": True,
+                    "--theme": True,
+                    "--output_format": True,
+                    "--out": True,
+                    "--template": True,
+                    "--ast": True,
+                }
+                _cleaned: List[str] = [args_list[0]]
+                _i = 1
+                while _i < len(args_list):
+                    _tok = str(args_list[_i]).strip()
+                    if not _tok:
+                        _i += 1
+                        continue
+                    if _tok in _flag_takes_value:
+                        _cleaned.append(_tok)
+                        if _flag_takes_value.get(_tok):
+                            if _i + 1 < len(args_list):
+                                _val = str(args_list[_i + 1]).strip()
+                                if _val and not _val.startswith("--"):
+                                    _cleaned.append(_val)
+                                    _i += 2
+                                    continue
+                        _i += 1
+                        continue
+                    # Drop unknown flags/positionals to avoid argparse "unrecognized arguments".
+                    _i += 1
+                args_list = _cleaned
     except Exception:
         pass
 

@@ -3870,53 +3870,119 @@ async def answer_from_memory(
                             if any((p in _q_lo_db if p.isascii() else p in _q_raw_db) for p in _daily_brief_phrases):
                                 try:
                                     _component_log("tools", "fallback run_skill(daily-brief-1.0.0) (strict_fallback=True; model did not call tool)")
-                                    _res = await registry.execute_async("run_skill", {"skill_name": "daily-brief-1.0.0"}, context)
+                                    _lang = "all"
+                                    if any(k in _q_raw_db for k in ("中文", "汉语", "国内")) or any(k in _q_lo_db for k in (" chinese", "lang cn", " cn ")):
+                                        _lang = "cn"
+                                    elif any(k in _q_raw_db for k in ("英文", "英语")) or any(k in _q_lo_db for k in (" english", "lang en", " en ")):
+                                        _lang = "en"
+                                    _max_items = 20
+                                    _m_cn = re.search(r"(\d{1,3})\s*条", _q_raw_db)
+                                    _m_en = re.search(r"\b(\d{1,3})\s*(items?|headlines?)\b", _q_lo_db)
+                                    _m = _m_cn or _m_en
+                                    if _m:
+                                        try:
+                                            _max_items = max(1, min(100, int(_m.group(1))))
+                                        except Exception:
+                                            _max_items = 20
+                                    _res = await registry.execute_async(
+                                        "run_skill",
+                                        {
+                                            "skill_name": "daily-brief-1.0.0",
+                                            "script": "fetch_rss.py",
+                                            "args": ["fetch", "--max", str(_max_items), "--lang", _lang],
+                                        },
+                                        context,
+                                    )
                                     if isinstance(_res, str) and _res.strip():
                                         response = _res.strip()
-                                        # Option 1: for "magazine/PDF style" requests, chain daily-brief -> magazine-render
-                                        # so VMPrint runs even when the model forgot to emit tool_calls.
-                                        _magazine_phrases = (
-                                            "magazine", "magazine style", "pdf", "render pdf", "export pdf",
-                                            "杂志风格", "杂志排版", "排版更好看", "导出pdf", "生成pdf",
-                                        )
-                                        _wants_magazine = any((p in _q_lo_db if p.isascii() else p in _q_raw_db) for p in _magazine_phrases)
+                                        # Option 2: always chain daily-brief -> AST rendering so fallback returns VMPrint output.
+                                        # Prefer browser_preview_html as the primary artifact for channels.
                                         _looks_error = "error" in _res[:200].lower() or "failed" in _res[:200].lower()
-                                        if _wants_magazine and (not _looks_error) and any(
+                                        if (not _looks_error) and any(
                                             t.name == "run_skill" for t in (registry.list_tools() or [])
                                         ):
                                             try:
-                                                _md = _res.strip()
-                                                # daily-brief output may append machine-readable JSON; remove it for PDF content.
-                                                _md = re.sub(r"(?is)\n+json\s*\(machine-readable\)\s*:\s*```json[\s\S]*$", "", _md).strip()
-                                                _md = re.sub(r"(?is)\n+json\s*:\s*```json[\s\S]*$", "", _md).strip()
-                                                # Keep args bounded for Windows command line safety.
-                                                if len(_md) > 12000:
-                                                    _md = _md[:12000]
-                                                _out = f"daily_brief_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-                                                _component_log("tools", "fallback run_skill(magazine-render-1.0.0) after daily-brief (strict_fallback=True)")
-                                                _pdf_res = await registry.execute_async(
-                                                    "run_skill",
-                                                    {
-                                                        "skill_name": "magazine-render-1.0.0",
-                                                        "script": "render_magazine.py",
-                                                        "args": [
-                                                            "render-md",
-                                                            "--title", "Daily Brief",
-                                                            "--theme", "dispatch",
-                                                            "--profile", "literature",
-                                                            "--md", _md,
-                                                            "--preview", "auto",
-                                                            "--out", _out,
-                                                        ],
-                                                    },
-                                                    context,
+                                                _json_match = re.search(
+                                                    r"(?is)JSON\s*\(machine-readable\)\s*:\s*```json\s*([\s\S]*?)```",
+                                                    _res,
+                                                ) or re.search(
+                                                    r"(?is)```json\s*([\s\S]*?)```",
+                                                    _res,
                                                 )
-                                                if (
-                                                    isinstance(_pdf_res, str)
-                                                    and _pdf_res.strip()
-                                                    and ("/files/out" in _pdf_res or ("http" in _pdf_res and "/files/" in _pdf_res))
-                                                ):
-                                                    response = _pdf_res.strip()
+                                                if _json_match and _json_match.group(1):
+                                                    _daily_json = _json_match.group(1).strip()
+                                                else:
+                                                    _daily_json = ""
+                                                if _daily_json and len(_daily_json) > 24000:
+                                                    _daily_json = _daily_json[:24000]
+                                                _component_log("tools", "fallback run_skill(magazine-render render-daily-brief-ast) after daily-brief (strict_fallback=True)")
+                                                _pdf_res = ""
+                                                _html_ok = False
+                                                if _daily_json:
+                                                    for _fmt in ("browser_preview_html", "layout_json"):
+                                                        _out = f"daily_brief_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{('preview.html' if _fmt == 'browser_preview_html' else 'layout.json')}"
+                                                        _candidate = await registry.execute_async(
+                                                            "run_skill",
+                                                            {
+                                                                "skill_name": "magazine-render-1.0.0",
+                                                                "script": "render_magazine.py",
+                                                                "args": [
+                                                                    "render-daily-brief-ast",
+                                                                    "--title",
+                                                                    "Daily Brief",
+                                                                    "--theme",
+                                                                    "dispatch",
+                                                                    "--json",
+                                                                    _daily_json,
+                                                                    "--output_format",
+                                                                    _fmt,
+                                                                    "--out",
+                                                                    _out,
+                                                                ],
+                                                            },
+                                                            context,
+                                                        )
+                                                        if isinstance(_candidate, str) and _candidate.strip():
+                                                            _cand_txt = _candidate.strip()
+                                                            _vmprint_fail = (
+                                                                "vmprint canvas preview failed" in _cand_txt.lower()
+                                                                or "reading 'width'" in _cand_txt.lower()
+                                                            )
+                                                            if (not _tool_result_looks_like_error(_cand_txt)) and (not _vmprint_fail) and _fmt == "browser_preview_html":
+                                                                _pdf_res = _cand_txt
+                                                                _html_ok = True
+                                                                break
+                                                            if _fmt == "browser_preview_html":
+                                                                _pdf_res = _cand_txt
+                                                if isinstance(_pdf_res, str) and _pdf_res.strip():
+                                                    _pdf_txt = _pdf_res.strip()
+                                                    if _html_ok and not _tool_result_looks_like_error(_pdf_txt):
+                                                        # If run_skill returned JSON with output_rel_path (but no link), try resolving a file link.
+                                                        if "/files/out" not in _pdf_txt and "/files/" not in _pdf_txt:
+                                                            try:
+                                                                _m_path = re.search(
+                                                                    r'"output_rel_path"\s*:\s*"([^"]+)"',
+                                                                    _pdf_txt,
+                                                                    re.I,
+                                                                )
+                                                                _rel = (_m_path.group(1).strip() if _m_path else "")
+                                                                if _rel and any(
+                                                                    t.name == "get_file_view_link" for t in (registry.list_tools() or [])
+                                                                ):
+                                                                    _link_res = await registry.execute_async(
+                                                                        "get_file_view_link",
+                                                                        {"path": _rel},
+                                                                        context,
+                                                                    )
+                                                                    if isinstance(_link_res, str) and _link_res.strip():
+                                                                        _pdf_txt = _link_res.strip()
+                                                            except Exception:
+                                                                pass
+                                                        # Use AST renderer output whenever it is non-error.
+                                                        response = _pdf_txt
+                                                    else:
+                                                        # Do not surface raw AST/layout JSON to users; keep human-friendly markdown fallback.
+                                                        response = _res.strip()
                                                 else:
                                                     response = _res.strip()
                                             except Exception as e_pdf:
@@ -4554,8 +4620,83 @@ async def answer_from_memory(
                         ):
                             _run_skills_executed_this_request.add(_skill_key)
                         _executed_any_this_batch = True
-                    # Auto-chain magazine renderer after daily-brief when user clearly asked for magazine/PDF style.
-                    # This avoids an extra LLM round (which can block on local models) and ensures VMPrint runs.
+                    # Generic AST document auto-chain:
+                    # if any skill returns a document_ast envelope (JSON block), render it via magazine-render.
+                    if (
+                        name == "run_skill"
+                        and isinstance(args, dict)
+                        and isinstance(result, str)
+                        and result.strip()
+                    ):
+                        try:
+                            if not _tool_result_looks_like_error(result):
+                                _json_match_doc = re.search(
+                                    r"(?is)```json\s*([\s\S]*?)```",
+                                    result,
+                                )
+                                _doc_json = (_json_match_doc.group(1).strip() if _json_match_doc and _json_match_doc.group(1) else "")
+                                if _doc_json:
+                                    _obj = json.loads(_doc_json)
+                                    if isinstance(_obj, dict) and str(_obj.get("type") or "").strip().lower() == "document_ast":
+                                        _ast_obj = _obj.get("ast")
+                                        if isinstance(_ast_obj, dict):
+                                            _title = str(_obj.get("title") or "Document").strip() or "Document"
+                                            _meta = _obj.get("meta") if isinstance(_obj.get("meta"), dict) else {}
+                                            _render = _obj.get("render") if isinstance(_obj.get("render"), dict) else {}
+                                            _theme = str((_meta.get("theme") if isinstance(_meta, dict) else "") or "dispatch").strip() or "dispatch"
+                                            _fmt = str((_render.get("preferred_format") if isinstance(_render, dict) else "") or "browser_preview_html").strip() or "browser_preview_html"
+                                            _hint = str((_render.get("filename_hint") if isinstance(_render, dict) else "") or "document").strip() or "document"
+                                            _hint = re.sub(r"[^a-zA-Z0-9._-]+", "_", _hint)
+                                            _out = f"{_hint}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.preview.html"
+                                            _doc_ast_args = {
+                                                "skill_name": "magazine-render-1.0.0",
+                                                "script": "render_magazine.py",
+                                                "args": [
+                                                    "render-ast",
+                                                    "--title",
+                                                    _title,
+                                                    "--theme",
+                                                    _theme,
+                                                    "--ast",
+                                                    json.dumps(_ast_obj, ensure_ascii=False),
+                                                    "--output_format",
+                                                    _fmt,
+                                                    "--out",
+                                                    _out,
+                                                ],
+                                            }
+                                            _component_log("tools", "auto-chain run_skill(magazine-render render-ast) from document_ast")
+                                            _doc_ast_res = await registry.execute_async("run_skill", _doc_ast_args, context)
+                                            if isinstance(_doc_ast_res, str) and _doc_ast_res.strip():
+                                                _ast_txt = _doc_ast_res.strip()
+                                                if "/files/out" not in _ast_txt and "/files/" not in _ast_txt:
+                                                    try:
+                                                        _m_path = (
+                                                            re.search(r'"output_rel_path"\s*:\s*"([^"]+)"', _ast_txt, re.I)
+                                                            or re.search(r"'output_rel_path'\s*:\s*'([^']+)'", _ast_txt, re.I)
+                                                            or re.search(r"\boutput_rel_path\b\s*[:=]\s*['\"]?([^'\"\s]+)", _ast_txt, re.I)
+                                                        )
+                                                        _rel = (_m_path.group(1).strip() if _m_path else "")
+                                                        if _rel and any(t.name == "get_file_view_link" for t in (registry.list_tools() or [])):
+                                                            _link_res = await registry.execute_async(
+                                                                "get_file_view_link",
+                                                                {"path": _rel},
+                                                                context,
+                                                            )
+                                                            if isinstance(_link_res, str) and _link_res.strip():
+                                                                _ast_txt = _link_res.strip()
+                                                    except Exception:
+                                                        pass
+                                                result = _ast_txt
+                                                args = _doc_ast_args
+                                                _skill_key = "magazine-render-1.0.0"
+                                                _component_log("tools", "auto-chain document_ast rendered by magazine-render")
+                        except Exception as _e_doc:
+                            logger.debug("Generic document_ast auto-chain failed: {}", _e_doc)
+                            pass
+                    # Auto-chain AST renderer after daily-brief.
+                    # Do this unconditionally (when fetch succeeded) so daily-brief tool path returns VMPrint output,
+                    # not only markdown, even if the user didn't explicitly mention "magazine/pdf".
                     if (
                         name == "run_skill"
                         and isinstance(args, dict)
@@ -4564,44 +4705,85 @@ async def answer_from_memory(
                         and result.strip()
                     ):
                         try:
-                            _q_lo_m = (query or "").strip().lower() if isinstance(query, str) else ""
-                            _q_raw_m = (query or "").strip() if isinstance(query, str) else ""
-                            _magazine_phrases = (
-                                "magazine", "magazine style", "pdf", "render pdf", "export pdf",
-                                "杂志风格", "杂志排版", "排版更好看", "导出pdf", "生成pdf",
-                            )
-                            _wants_magazine = any((p in _q_lo_m if p.isascii() else p in _q_raw_m) for p in _magazine_phrases)
-                            if _wants_magazine and not _tool_result_looks_like_error(result):
-                                _md = result.strip()
-                                _md = re.sub(r"(?is)\n+json\s*\(machine-readable\)\s*:\s*```json[\s\S]*$", "", _md).strip()
-                                _md = re.sub(r"(?is)\n+json\s*:\s*```json[\s\S]*$", "", _md).strip()
-                                if len(_md) > 12000:
-                                    _md = _md[:12000]
-                                _out = f"daily_brief_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-                                _pdf_args = {
-                                    "skill_name": "magazine-render-1.0.0",
-                                    "script": "render_magazine.py",
-                                    "args": [
-                                        "render-md",
-                                        "--title", "Daily Brief",
-                                        "--theme", "dispatch",
-                                        "--profile", "literature",
-                                        "--md", _md,
-                                        "--preview", "auto",
-                                        "--out", _out,
-                                    ],
-                                }
-                                _component_log("tools", "auto-chain run_skill(magazine-render-1.0.0) after daily-brief")
-                                _pdf_res = await registry.execute_async("run_skill", _pdf_args, context)
-                                if (
-                                    isinstance(_pdf_res, str)
-                                    and _pdf_res.strip()
-                                    and ("/files/out" in _pdf_res or ("http" in _pdf_res and "/files/" in _pdf_res))
-                                ):
-                                    result = _pdf_res
-                                    args = _pdf_args
-                                else:
-                                    pass
+                            if not _tool_result_looks_like_error(result):
+                                _json_match = re.search(
+                                    r"(?is)JSON\s*\(machine-readable\)\s*:\s*```json\s*([\s\S]*?)```",
+                                    result,
+                                ) or re.search(
+                                    r"(?is)```json\s*([\s\S]*?)```",
+                                    result,
+                                )
+                                _daily_json = (_json_match.group(1).strip() if _json_match and _json_match.group(1) else "")
+                                if _daily_json:
+                                    if len(_daily_json) > 24000:
+                                        _daily_json = _daily_json[:24000]
+                                    _component_log("tools", "auto-chain run_skill(magazine-render render-daily-brief-ast) after daily-brief")
+                                    _ast_txt = ""
+                                    _ast_args = None
+                                    _ast_html_ok = False
+                                    for _fmt in ("browser_preview_html", "layout_json"):
+                                        _out = f"daily_brief_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{('preview.html' if _fmt == 'browser_preview_html' else 'layout.json')}"
+                                        _candidate_args = {
+                                            "skill_name": "magazine-render-1.0.0",
+                                            "script": "render_magazine.py",
+                                            "args": [
+                                                "render-daily-brief-ast",
+                                                "--title",
+                                                "Daily Brief",
+                                                "--theme",
+                                                "dispatch",
+                                                "--json",
+                                                _daily_json,
+                                                "--output_format",
+                                                _fmt,
+                                                "--out",
+                                                _out,
+                                            ],
+                                        }
+                                        _ast_res = await registry.execute_async("run_skill", _candidate_args, context)
+                                        if isinstance(_ast_res, str) and _ast_res.strip():
+                                            _cand_txt = _ast_res.strip()
+                                            _ast_txt = _cand_txt
+                                            _ast_args = _candidate_args
+                                            _vmprint_fail = (
+                                                "vmprint canvas preview failed" in _cand_txt.lower()
+                                                or "reading 'width'" in _cand_txt.lower()
+                                            )
+                                            if (not _tool_result_looks_like_error(_cand_txt)) and (not _vmprint_fail) and _fmt == "browser_preview_html":
+                                                _ast_html_ok = True
+                                                break
+                                    if _ast_txt and _ast_html_ok:
+                                        # Convert output_rel_path payloads (JSON/Python-style/loose text) to a file view link when possible.
+                                        if "/files/out" not in _ast_txt and "/files/" not in _ast_txt:
+                                            try:
+                                                _m_path = (
+                                                    re.search(r'"output_rel_path"\s*:\s*"([^"]+)"', _ast_txt, re.I)
+                                                    or re.search(r"'output_rel_path'\s*:\s*'([^']+)'", _ast_txt, re.I)
+                                                    or re.search(r"\boutput_rel_path\b\s*[:=]\s*['\"]?([^'\"\s]+)", _ast_txt, re.I)
+                                                )
+                                                _rel = (_m_path.group(1).strip() if _m_path else "")
+                                                if _rel and any(
+                                                    t.name == "get_file_view_link" for t in (registry.list_tools() or [])
+                                                ):
+                                                    _link_res = await registry.execute_async(
+                                                        "get_file_view_link",
+                                                        {"path": _rel},
+                                                        context,
+                                                    )
+                                                    if isinstance(_link_res, str) and _link_res.strip():
+                                                        _ast_txt = _link_res.strip()
+                                            except Exception:
+                                                pass
+                                        # Hard preference: once auto-chain returned non-empty, use magazine-render output.
+                                        result = _ast_txt
+                                        if isinstance(_ast_args, dict):
+                                            args = _ast_args
+                                        # Keep per-turn bookkeeping consistent so mix "direct-return run_skill result"
+                                        # does not still treat this as daily-brief and return markdown path.
+                                        _skill_key = "magazine-render-1.0.0"
+                                        _component_log("tools", "auto-chain magazine-render output forced as final result")
+                                    elif _ast_txt and not _ast_html_ok:
+                                        _component_log("tools", "auto-chain daily-brief render did not produce HTML preview; keeping markdown result")
                         except Exception as _e_m:
                             logger.debug("Auto-chain magazine-render after daily-brief failed: {}", _e_m)
                             pass
