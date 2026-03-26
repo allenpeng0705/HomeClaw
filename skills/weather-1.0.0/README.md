@@ -41,6 +41,11 @@ Prefer **one string** that is the user’s full question so `get_weather.py` can
 - One-line summary (default): pass the place or sentence only.
 - **Full terminal-style block** from wttr: `["--full", "Berlin"]` **or** ask using words like *tomorrow*, *forecast*, *下周* so the script switches to extended output.
 
+### Formatted output (VMPrint policy)
+
+- For pretty weather reports, prefer **browser preview link** first (`browser_preview_html`).
+- Generate **PDF** only when user explicitly asks for print/download/export.
+
 ---
 
 ## When location is “missing” from the message

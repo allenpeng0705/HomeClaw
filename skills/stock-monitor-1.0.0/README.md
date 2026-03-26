@@ -12,14 +12,16 @@ A **watchlist + portfolio + alerts** skill for HomeClaw, inspired by the same pa
 - “Check my stock alerts now.”
 - “Alert me if NVDA drops 3% today.” (then set a cron if you want it scheduled)
 - “What happened to 0700.HK today? Give me context.”
-- “Make this stock report a **magazine-style PDF**.”
+- “Make this stock report pretty and give me a browser preview link.”
+- “Export this stock report as PDF.”
 
 ### Chinese
 
 - “看看我的自选股 / 组合今天怎么样？”
 - “检查一下股票提醒规则有没有触发”
 - “NVDA 跌 3% 就提醒我”
-- “把自选股结果做成 **杂志风格 PDF**（排版更好看）”
+- “把自选股结果排版更好看，给我浏览器预览链接”
+- “把自选股结果导出成 PDF”
 
 ## How it works (brief)
 
@@ -39,6 +41,11 @@ A **watchlist + portfolio + alerts** skill for HomeClaw, inspired by the same pa
 | — | **Lightweight rules** (YAML) + **headline snippets** when a rule fires—enough context to ask the LLM or **web_search** for more. |
 
 **Honest takeaway:** treat this as **“assistant + scheduled glance + rule ping”**, not a trading terminal. The useful features to lean on are: **chat-native summary**, **push/cron when a rule hits**, **ties into your other skills** (search, email, etc.)—not millisecond charts.
+
+## Formatted output (VMPrint policy)
+
+- Prefer **browser preview HTML link** for formatted stock briefs.
+- Generate **PDF** only when users explicitly ask for print/download/export.
 
 ## What you get
 

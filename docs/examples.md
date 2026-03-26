@@ -62,7 +62,62 @@ Optional:
 }
 ```
 
-## Example 4b: Magazine-style PDF for any content (skill)
+## Example 4a: Export layout JSON scene graph
+
+```json
+{
+  "tool": "vmprint_render",
+  "arguments": {
+    "content": "# Daily Brief\n\n- Headline 1\n- Headline 2",
+    "path": "output/daily_brief.layout.json",
+    "output_format": "layout_json",
+    "vmprint_profile": "literature"
+  }
+}
+```
+
+## Example 4b: Browser preview artifact for channels/Companion
+
+```json
+{
+  "tool": "vmprint_render",
+  "arguments": {
+    "content": "# Daily Brief\n\n## Top stories\n\n- Story A\n- Story B",
+    "path": "output/daily_brief.preview.html",
+    "output_format": "browser_preview_html",
+    "vmprint_profile": "literature"
+  }
+}
+```
+
+Return the file link from `/files/out` so users can open it in browser from any channel or Companion.
+
+## Example 4c: Daily brief uses browser preview by default
+
+```json
+{
+  "tool": "run_skill",
+  "arguments": {
+    "skill_name": "magazine-render-1.0.0",
+    "script": "render_magazine.py",
+    "args": [
+      "render-daily-brief-ast",
+      "--title",
+      "Daily Brief",
+      "--theme",
+      "dispatch",
+      "--json",
+      "{\"as_of\":\"2026-03-26\",\"items\":[{\"title\":\"Headline\",\"source\":\"RSS\",\"link\":\"https://example.com\"}]}",
+      "--output_format",
+      "browser_preview_html",
+      "--out",
+      "daily_brief.preview.html"
+    ]
+  }
+}
+```
+
+## Example 4d: Magazine-style PDF for any content (skill)
 
 If you want a more **beautiful / readable** output (magazine-style PDF) for any report-like content, use the `magazine-render-1.0.0` skill.
 
@@ -141,3 +196,39 @@ python -m main portal
 ```
 
 In Portal Guide, run VMPrint smoke test for PDF pipeline checks.
+
+## Operator quick reference (VMPrint AST-first)
+
+Use this when deciding output mode quickly:
+
+- Structured JSON (`daily_brief|weather|stock`) -> `run_skill` `render-template-ast` -> `browser_preview_html` (default)
+- Daily brief JSON -> `run_skill` `render-daily-brief-ast` -> `browser_preview_html` (default)
+- Existing AST JSON 1.1 -> `run_skill` `render-ast` -> `browser_preview_html` (default)
+- Markdown only -> `vmprint_render` -> `browser_preview_html` (fallback)
+- User asks print/download/export -> use `pdf`
+- Layout debug/QA -> use `layout_json`
+
+Minimal copy-paste snippets:
+
+```json
+{
+  "tool": "run_skill",
+  "arguments": {
+    "skill_name": "magazine-render-1.0.0",
+    "script": "render_magazine.py",
+    "args": ["render-template-ast", "--template", "stock", "--title", "Stock Brief", "--theme", "dispatch", "--json", "{\"items\":[{\"symbol\":\"NVDA\",\"name\":\"NVIDIA\",\"price\":\"100\",\"change_pct\":\"+1.2%\"}]}", "--output_format", "browser_preview_html", "--out", "stock_brief.preview.html"]
+  }
+}
+```
+
+```json
+{
+  "tool": "vmprint_render",
+  "arguments": {
+    "content": "# Long summary\n\n- item 1\n- item 2",
+    "path": "output/summary.preview.html",
+    "output_format": "browser_preview_html",
+    "vmprint_profile": "literature"
+  }
+}
+```

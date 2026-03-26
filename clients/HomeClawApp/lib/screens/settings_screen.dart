@@ -272,6 +272,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 if (mounted) setState(() {});
               },
             ),
+            SwitchListTile(
+              title: const Text('VMPrint native preview (Companion)'),
+              subtitle: const Text(
+                'When on, VMPrint preview links open inside Companion WebView first. If unsupported, it falls back to system browser.',
+              ),
+              value: widget.coreService.vmprintNativePreview,
+              onChanged: (bool value) async {
+                await widget.coreService.saveVmprintNativePreview(value);
+                if (mounted) setState(() {});
+              },
+            ),
             const SizedBox(height: 24),
             const Text(
               'Users are listed on the chat screen (from Core user.yml). Select a user to chat; each message is sent with that user\'s id.',

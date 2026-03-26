@@ -28,6 +28,7 @@ import '../federation_e2e_crypto.dart';
 import '../widgets/homeclaw_snackbars.dart';
 import 'canvas_screen.dart';
 import 'settings_screen.dart';
+import 'vmprint_preview_screen.dart';
 
 double? _parseTranscriptTimestampSeconds(Map<String, dynamic> m) {
   final t = m['timestamp'];
@@ -3648,7 +3649,29 @@ class _ChatMessageText extends StatelessWidget {
     return false;
   }
 
-  Future<void> _onTapLink(String text, String? href, String title) async {
+  static bool _isVmprintPreviewLink(String href) {
+    final u = Uri.tryParse(href);
+    if (u == null) return false;
+    final p = (u.queryParameters['path'] ?? u.path).toLowerCase();
+    return p.contains('preview.html') || p.endsWith('.preview.html') || p.endsWith('.ast.json');
+  }
+
+  Future<String> _fetchVmprintUiHint(Uri uri) async {
+    try {
+      final resp = await http.get(uri).timeout(const Duration(seconds: 4));
+      if (resp.statusCode < 200 || resp.statusCode >= 300) return 'link';
+      final body = resp.body;
+      final m = RegExp(
+        r"<meta\\s+name=['\"]homeclaw-vmprint-ui-hint['\"]\\s+content=['\"](inline|link)['\"]",
+        caseSensitive: false,
+      ).firstMatch(body);
+      final hint = (m?.group(1) ?? '').toLowerCase();
+      if (hint == 'inline' || hint == 'link') return hint;
+    } catch (_) {}
+    return 'link';
+  }
+
+  Future<void> _onTapLink(BuildContext context, String text, String? href, String title) async {
     if (href == null || href.isEmpty) return;
     Uri? uri = Uri.tryParse(href);
     if (uri == null) return;
@@ -3657,6 +3680,22 @@ class _ChatMessageText extends StatelessWidget {
       if (isFile && uri.scheme == 'file') {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
         return;
+      }
+      if ((uri.scheme == 'http' || uri.scheme == 'https') && _isVmprintPreviewLink(href)) {
+        final prefs = await SharedPreferences.getInstance();
+        final enabled = prefs.getBool('vmprint_native_preview') ?? false;
+        if (enabled) {
+          final hint = await _fetchVmprintUiHint(uri);
+          if (hint != 'inline') {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+            return;
+          }
+          if (!context.mounted) return;
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => VmprintPreviewScreen(url: href)),
+          );
+          return;
+        }
       }
       if (isFile && (uri.scheme == 'http' || uri.scheme == 'https')) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -3723,7 +3762,7 @@ class _ChatMessageText extends StatelessWidget {
       data: effectiveText,
       selectable: true,
       styleSheet: styleSheet,
-      onTapLink: _onTapLink,
+      onTapLink: (text, href, title) => _onTapLink(context, text, href, title),
       softLineBreak: true,
       shrinkWrap: true,
       fitContent: true,

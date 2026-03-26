@@ -11,6 +11,13 @@ trigger:
     Prefer args=["<user message>"] or ["{{query}}"] so the script can extract the place from natural language. A city alone (e.g. ["London"]) is fine.
     If the message names no place (e.g. "weather tomorrow?"), Core still injects Companion/profile location—do not refuse; do not require a separate profile lookup unless the tool fails.
     Multi-line forecast: ["--full", "Tokyo"] or a message mentioning tomorrow/forecast/下周 so the script uses full output. See README.md in this skill folder for phrasing examples.
+    If user asks for prettier/magazine-style formatting:
+    1) Run weather skill as usual to get output.
+    2) Build structured weather JSON from the result (location, now, forecast).
+    3) Call AST-first renderer:
+       run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
+                args=["render-template-ast", "--template", "weather", "--title", "Weather Brief", "--theme", "dispatch", "--json", "<WEATHER_JSON>", "--output_format", "browser_preview_html", "--out", "weather_brief.preview.html"])
+    4) Generate PDF only when user explicitly asks for print/download/export (same call with --output_format pdf and .pdf out file).
   auto_invoke:
     script: get_weather.py
     args: ["{{query}}"]

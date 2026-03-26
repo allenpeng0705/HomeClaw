@@ -11,6 +11,13 @@ trigger:
     Summary of holdings/watchlist: args=["portfolio"]. Evaluate alert rules from config: args=["check"]. Quick news for a symbol: args=["news", "SYMBOL"] or args=["context", "SYMBOL"] for price + headlines.
     Edit config/watchlist.yml for watchlist, optional holdings, and alerts. For recurring push alerts use cron_schedule with task_type run_skill and script stock_monitor.py args ["check"].
     Data is delayed/unofficial Yahoo via yfinance—not financial advice. For deeper "why" use web_search after context.
+    If the user asks for prettier/magazine-style output:
+    1) Run stock-monitor as usual to get output.
+    2) Build structured stock JSON from the result (watchlist/items).
+    3) Call AST-first renderer:
+       run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
+                args=["render-template-ast", "--template", "stock", "--title", "Stock Brief", "--theme", "dispatch", "--json", "<STOCK_JSON>", "--output_format", "browser_preview_html", "--out", "stock_brief.preview.html"])
+    4) Create PDF only when user explicitly asks for print/download/export (same call with --output_format pdf and .pdf out file).
 ---
 
 # Stock monitor (yfinance)
