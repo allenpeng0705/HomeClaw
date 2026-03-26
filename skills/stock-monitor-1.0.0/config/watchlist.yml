@@ -9,8 +9,8 @@
 # Examples: US (NVDA), China index, crypto (BTC-USD).
 
 watchlist:
-  - NVDA
-  - AAPL
+  # - NVDA
+  # - AAPL
   # - "000001.SS"    # 上证综指
   - "300418.SZ"    # 深证成指
   - "688049.SS"    # example A-share

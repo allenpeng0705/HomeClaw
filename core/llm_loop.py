@@ -3047,10 +3047,15 @@ async def answer_from_memory(
             try:
                 _dr = _tc.get("run_skill_direct_return_skills_in_mix_cloud")
                 if not isinstance(_dr, (list, tuple)):
-                    _dr = ["daily-brief-1.0.0", "magazine-render-1.0.0", "weather-1.0.0"]
+                    _dr = ["daily-brief-1.0.0", "magazine-render-1.0.0", "weather-1.0.0", "stock-monitor-1.0.0"]
                 _direct_return_skills_mix_cloud = {str(x).strip() for x in _dr if str(x).strip()}
             except Exception:
-                _direct_return_skills_mix_cloud = {"daily-brief-1.0.0", "magazine-render-1.0.0", "weather-1.0.0"}
+                _direct_return_skills_mix_cloud = {
+                    "daily-brief-1.0.0",
+                    "magazine-render-1.0.0",
+                    "weather-1.0.0",
+                    "stock-monitor-1.0.0",
+                }
             try:
                 _pl = _tc.get("prefer_local_after_tools_in_mix_cloud")
                 if not isinstance(_pl, (list, tuple)):
@@ -3165,6 +3170,7 @@ async def answer_from_memory(
                                 "**When the user asked for generated output** (e.g. HTML slides, report, summary to file) and a tool already returned the source content (e.g. document_read): you MUST call the next tool in this turn (e.g. run_skill(html-slides), save_result_page with the generated content)—do not reply with only a plan or \"I will generate...\"; actually invoke the tool. If you have already generated full HTML in your reply: you MUST call save_result_page(title=..., content=<that HTML>, format='html') so the user gets a view link; do not send the raw HTML as the final message—the user must receive the link to open the slides in the output folder. For HTML slides, the content must be a **multi-slide deck** (multiple slides/sections, one idea per slide), not a single long page.\n"
                                 "**CRITICAL:** If a previous message in this conversation is a tool result that already contains document/content (e.g. from document_read), do NOT respond with a plan like \"我将现在生成\" or \"首先，我需要调用 document_read\" or \"I will call document_read then...\". You already have the content—either call the next tool (save_result_page, run_skill) with your generated output in this turn, or output the full generated content in your message. Never return only a plan or intention.\n"
                                 "**CRITICAL for HTML slides:** If the user asked for HTML slides (or \"生成html slides\", \"总结...生成幻灯片\") and the tool result above is document content: you MUST call run_skill(skill_name='html-slides') in this turn. Then generate a **multi-slide deck** (8–20 slides, one idea per slide) and call save_result_page with that HTML. Do not output a single long page—split the summary into distinct slides.\n"
+                                "**When a tool returned facts or tables** (e.g. run_skill stock/portfolio Markdown, web_search snippets, prices, lists): That message is the **only** source of truth. Copy it verbatim, or give a short faithful summary—**do not** add symbols, rows, prices, or totals that are not in the tool text. Do not substitute “typical” tickers (e.g. AAPL, NVDA) unless they appear in the result.\n"
                                 "**In general:** Only use or cite content that tools actually returned. Do not invent file contents, error messages, or tool outputs."
                             )
                             # When the last tool result is very long, instruct the model to summarize and/or save to file (context management; see docs_design/DeepAgentsComparisonAndLearnings.md).
@@ -3182,7 +3188,7 @@ async def answer_from_memory(
                         if mix_route_this_request and "continuing after tools ran" not in (current_messages[0].get("content") or ""):
                             _use2 = (
                                 "\n\n## Your role this turn\n"
-                                "You are continuing after tools ran. Use the tool result(s) above to decide: respond to the user, retry with different parameters, or call more tools. Do not invent outcomes.\n"
+                                "You are continuing after tools ran. Use the tool result(s) above to decide: respond to the user, retry with different parameters, or call more tools. Do not invent outcomes, numbers, or data rows—only what the tool message actually contains.\n"
                                 "If the user asked for generated output (e.g. HTML slides, report, summary to file) and a tool already returned the source content (e.g. document_read): you MUST call the next tool in this turn (e.g. run_skill(html-slides), save_result_page with generated content)—do not reply with only a plan or \"I will generate...\"; actually invoke the tool. If the conversation already has document content from a previous tool result, do NOT say \"首先我需要调用 document_read\" or \"I will call document_read\"—you have the content; produce the output or call save_result_page/run_skill now. CRITICAL: If the user asked for HTML slides and the tool result above is document content, call run_skill(skill_name='html-slides') now, then generate a **multi-slide deck** (multiple slides, one idea per slide) and save_result_page—do not output a single long page."
                             )
                             current_messages[0]["content"] = (current_messages[0].get("content") or "") + _use2
@@ -3793,6 +3799,59 @@ async def answer_from_memory(
                                         response = _res.strip()
                                 except Exception as e_w:
                                     logger.debug("Fallback weather run_skill failed: {}", e_w)
+                        # When strict_fallback is True, run stock-monitor portfolio for clear stock/watchlist queries
+                        # when the model returned no tool_calls (Qwen VL often answers with hallucinated tables instead of run_skill).
+                        if (
+                            _strict_fallback
+                            and isinstance(query, str)
+                            and registry
+                            and last_tool_name != "run_skill"
+                            and any(t.name == "run_skill" for t in (registry.list_tools() or []))
+                        ):
+                            _q_lo_st = (query or "").strip().lower()
+                            _q_raw_st = (query or "").strip()
+                            _stock_fallback = (
+                                any(
+                                    p in _q_lo_st
+                                    for p in ("portfolio", "watchlist", "ticker", "stock", "stocks")
+                                )
+                                or any(
+                                    p in _q_raw_st
+                                    for p in (
+                                        "股票",
+                                        "持仓",
+                                        "行情",
+                                        "股价",
+                                        "自选股",
+                                        "大盘",
+                                        "涨停",
+                                        "跌停",
+                                        "个股",
+                                        "A股",
+                                        "港股",
+                                        "美股",
+                                    )
+                                )
+                            )
+                            if _stock_fallback:
+                                try:
+                                    _component_log(
+                                        "tools",
+                                        "fallback run_skill(stock-monitor portfolio) (strict_fallback=True; model did not call tool)",
+                                    )
+                                    _res = await registry.execute_async(
+                                        "run_skill",
+                                        {
+                                            "skill_name": "stock-monitor-1.0.0",
+                                            "script": "stock_monitor.py",
+                                            "args": ["portfolio"],
+                                        },
+                                        context,
+                                    )
+                                    if isinstance(_res, str) and _res.strip():
+                                        response = _res.strip()
+                                except Exception as e_st:
+                                    logger.debug("Fallback stock-monitor run_skill failed: {}", e_st)
                         # When strict_fallback is True, run daily-brief skill fallback for clear news-digest requests
                         # when model returned no tool_calls (common local-model behavior: returns instructions only).
                         if (
@@ -4564,14 +4623,14 @@ async def answer_from_memory(
                         ("/files/out" in result and ("token=" in result or "dev_unsigned=1" in result)) or ("http" in result and "/files/" in result)
                     ):
                         last_file_link_result = result
-                    # In mix/cloud modes only: for selected skills, return run_skill result directly and skip
-                    # the expensive follow-up LLM round (local mode remains unchanged/local-only).
+                    # For selected skills, return run_skill result directly and skip the follow-up LLM round
+                    # (avoids small models paraphrasing/hallucinating tables, e.g. stock-monitor). Mix/cloud: list in
+                    # tools.run_skill_direct_return_skills_in_mix_cloud. Local-only: same for stock-monitor only.
                     if (
                         name == "run_skill"
                         and isinstance(args, dict)
                         and isinstance(result, str)
                         and result.strip()
-                        and main_llm_mode in ("mix", "cloud")
                     ):
                         try:
                             _skill_done = str(args.get("skill_name") or "").strip()
@@ -4582,15 +4641,20 @@ async def answer_from_memory(
                                 "杂志风格", "杂志排版", "排版更好看", "导出pdf", "生成pdf",
                             )
                             _wants_magazine_dr = any((p in _q_lo_dr if p.isascii() else p in _q_raw_dr) for p in _magazine_phrases_dr)
+                            _mode = (main_llm_mode or "").strip().lower()
+                            _use_direct = (
+                                (_mode in ("mix", "cloud") and _skill_done in _direct_return_skills_mix_cloud)
+                                or (_mode == "local" and _skill_done == "stock-monitor-1.0.0")
+                            )
                             if (
                                 _skill_done
-                                and _skill_done in _direct_return_skills_mix_cloud
+                                and _use_direct
                                 and not (_skill_done == "daily-brief-1.0.0" and _wants_magazine_dr)
                                 and not _tool_result_looks_like_error(result)
                             ):
                                 response = result.strip()
                                 _stop_tool_loop_with_response = True
-                                _component_log("tools", f"direct-return run_skill result for {_skill_done} (mode={main_llm_mode})")
+                                _component_log("tools", f"direct-return run_skill result for {_skill_done} (mode={_mode})")
                         except Exception:
                             pass
                     last_tool_name = name

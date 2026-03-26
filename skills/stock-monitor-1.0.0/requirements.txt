@@ -4,3 +4,5 @@
 # PyYAML is usually already satisfied by HomeClaw core requirements.txt.
 PyYAML>=6.0
 yfinance>=0.2.40
+akshare>=1.14.0
+tushare>=1.4.0

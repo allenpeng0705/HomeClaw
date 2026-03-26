@@ -3491,6 +3491,54 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
         elif skill_name == "weather-1.0.0":
             if not args_list and user_text_for_args:
                 args_list = [user_text_for_args]
+        elif skill_name == "stock-monitor-1.0.0":
+            # Local models often call run_skill with empty script/args; cloud normalizer fixes args but costs latency.
+            # Mirror daily-brief: map portfolio-style questions to argv so stock_monitor.py portfolio runs immediately.
+            _first = (args_list[0] or "").strip().lower() if args_list else ""
+            cmd_ok = _first in ("portfolio", "check", "news", "context")
+            if not cmd_ok:
+                q = user_text_for_args or ""
+                q_lo = q.lower()
+                portfolio_hit = (
+                    "自选股" in q
+                    or "自选股票" in q
+                    or "watchlist" in q_lo
+                    or "portfolio" in q_lo
+                    or ("持仓" in q and any(k in q for k in ("怎么样", "如何", "涨跌", "行情")))
+                    or (
+                        ("股票" in q or "stock" in q_lo)
+                        and any(k in q for k in ("怎么样", "如何", "涨跌", "行情"))
+                        and not any(k in q_lo for k in ("news", "headline", "消息", "新闻"))
+                    )
+                )
+                check_hit = any(
+                    k in q_lo for k in ("alert", "price alert", "提醒", "触发")
+                ) and "check" in q_lo
+                news_hit = any(k in q_lo for k in ("news", "headline")) or "新闻" in q
+                ctx_hit = "context" in q_lo or "快照" in q
+                if portfolio_hit:
+                    args_list = ["portfolio"]
+                elif check_hit:
+                    args_list = ["check"]
+                elif news_hit and not portfolio_hit:
+                    # Avoid stealing generic "新闻" from portfolio questions (handled above).
+                    sym_m = re.search(
+                        r"\b([A-Z]{1,5}(?:\.(?:SS|SZ|HK))?)\b|\b(\d{6}\.(?:SS|SZ))\b",
+                        q.upper().replace(" ", ""),
+                    )
+                    if sym_m:
+                        sym = (sym_m.group(1) or sym_m.group(2) or "").strip()
+                        if sym:
+                            args_list = ["news", sym]
+                elif ctx_hit:
+                    sym_m = re.search(
+                        r"\b([A-Z]{1,5}(?:\.(?:SS|SZ|HK))?)\b|\b(\d{6}\.(?:SS|SZ))\b",
+                        q.upper().replace(" ", ""),
+                    )
+                    if sym_m:
+                        sym = (sym_m.group(1) or sym_m.group(2) or "").strip()
+                        if sym:
+                            args_list = ["context", sym]
     except Exception:
         pass
 
@@ -6926,20 +6974,23 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "15th monthly 10am → 0 10 15 * * | quarterly 1st Jan/Apr/Jul/Oct → 0 9 1 1,4,7,10 * | "
                 "yearly Aug 19 9am → 0 9 19 8 * | Mon/Wed/Fri 6am → 0 6 * * 1,3,5. "
                 "True 'every 14 days from date X' is not exact in standard cron—use weekday repeat, twice-monthly (1,15), or ask the user. "
-                "Schedule message/skill/plugin/tool. Optional: tz, delivery_target."
+                "Schedule message/skill/plugin/tool. Optional: tz, delivery_target. "
+                "For scheduled RSS/feed digests (user-configured sources), prefer task_type run_skill with skill_name daily-brief-1.0.0 "
+                "and script/args from that skill's SKILL.md (e.g. fetch --max N --lang cn). "
+                "Use task_type run_tool + web_search only for ad-hoc live web search, not as a substitute for daily-brief when the user wants feed-style news."
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "cron_expr": {"type": "string", "description": "5-field cron (e.g. daily 9:00 '0 9 * * *', monthly 15th 10:00 '0 10 15 * *')."},
-                    "task_type": {"type": "string", "description": "One of: 'message' (fixed message), 'run_tool' (run tool e.g. web_search for 'search news every 7 am'), 'run_skill' (run skill script), 'run_plugin' (run plugin e.g. headlines for 'top headlines every 8 am'). Default 'message'.", "default": "message"},
+                    "task_type": {"type": "string", "description": "One of: 'message' (fixed text), 'run_skill' (e.g. daily-brief-1.0.0 for RSS digests; weather skill; see SKILL.md for script+args), 'run_plugin' (e.g. headlines plugin), 'run_tool' (e.g. web_search for one-off live search—not the same as daily-brief feeds). Default 'message'.", "default": "message"},
                     "message": {"type": "string", "description": "For message: text to send. For run_skill/run_plugin: optional label.", "default": "Scheduled reminder"},
                     "skill_name": {"type": "string", "description": "Required when task_type is run_skill. Skill folder name (e.g. weather-1.0.0)."},
                     "script": {"type": "string", "description": "Required when task_type is run_skill. Script name under skill (e.g. get_weather.py)."},
                     "args": {"type": "array", "items": {"type": "string"}, "description": "When task_type is run_skill: args for the script (e.g. ['Beijing'])."},
                     "tool_name": {"type": "string", "description": "Required when task_type is run_tool. Tool name (e.g. web_search). Use for 'search the latest sports news every 7 am' with tool_arguments={query: 'latest sports news', count: 10}."},
                     "tool_arguments": {"type": "object", "description": "When task_type is run_tool: arguments for the tool (e.g. for web_search: {query: 'latest sports news', count: 10})."},
-                    "plugin_id": {"type": "string", "description": "Required when task_type is run_plugin. Plugin id (e.g. headlines for top headlines from News API). Do NOT use for 'search news' — use run_tool web_search instead."},
+                    "plugin_id": {"type": "string", "description": "Required when task_type is run_plugin. Plugin id (e.g. headlines for top headlines from News API). For generic 'daily news from my feeds' use run_skill daily-brief-1.0.0; for live web search use run_tool web_search."},
                     "capability_id": {"type": "string", "description": "Optional when task_type is run_plugin. Capability to call (e.g. fetch_headlines for headlines)."},
                     "parameters": {"type": "object", "description": "When task_type is run_plugin: key-value parameters for the capability (e.g. for headlines: category, page_size, sources, language)."},
                     "post_process_prompt": {"type": "string", "description": "Optional. For run_skill or run_plugin: system prompt for LLM to refine output before sending (e.g. 'Summarize in 2 sentences.')."},

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Stock monitor: watchlist quotes, portfolio table, YAML-defined alerts, optional Yahoo headlines.
-Uses yfinance (unofficial Yahoo Finance API). No Alpha Vantage key required for basic use.
+Quotes: configurable AKShare / TuShare / Yahoo (yfinance); headlines remain Yahoo.
 
 Commands:
   portfolio          — Markdown table + optional holdings totals
@@ -19,6 +19,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from quote_providers import make_quote_fetcher, provider_summary_line
 
 # --- paths ---
 
@@ -56,6 +58,65 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
     if not isinstance(data, dict):
         return {}
     return data
+
+
+def _load_yaml_optional(path: Path) -> Dict[str, Any]:
+    try:
+        import yaml
+    except ImportError:
+        return {}
+    if not path.is_file():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _provider_overrides_from_cfg(cfg: Dict[str, Any]) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for item in cfg.get("watchlist") or []:
+        if isinstance(item, dict):
+            sym = str(item.get("symbol") or "").strip()
+            pr = str(item.get("quote_provider") or "").strip()
+            if sym and pr:
+                out[sym] = pr
+    for h in cfg.get("holdings") or []:
+        if isinstance(h, dict):
+            sym = str(h.get("symbol") or "").strip()
+            pr = str(h.get("quote_provider") or "").strip()
+            if sym and pr:
+                out[sym] = pr
+    for rule in cfg.get("alerts") or []:
+        if isinstance(rule, dict):
+            sym = str(rule.get("symbol") or "").strip()
+            pr = str(rule.get("quote_provider") or "").strip()
+            if sym and pr:
+                out[sym] = pr
+    return out
+
+
+def _symbols_from_config(cfg: Dict[str, Any]) -> List[str]:
+    sym_set: set = set()
+    wl = cfg.get("watchlist") or []
+    if not isinstance(wl, list):
+        wl = []
+    for item in wl:
+        if isinstance(item, dict):
+            sym = str(item.get("symbol") or "").strip()
+        else:
+            sym = str(item).strip()
+        if sym:
+            sym_set.add(sym)
+    holdings = cfg.get("holdings") or []
+    if not isinstance(holdings, list):
+        holdings = []
+    for h in holdings:
+        if isinstance(h, dict) and str(h.get("symbol") or "").strip():
+            sym_set.add(str(h.get("symbol")).strip())
+    return sorted(sym_set)
 
 
 def _load_state() -> Dict[str, Any]:
@@ -121,72 +182,6 @@ def _md_cell(s: str, max_len: int = 64) -> str:
     return t
 
 
-def fetch_quote(symbol: str) -> Optional[Dict[str, Any]]:
-    """Latest price, day change % vs previous close, name, currency."""
-    try:
-        yf = _yf()
-        t = yf.Ticker(symbol.strip())
-        hist = t.history(period="10d")
-        if hist.empty or "Close" not in hist.columns:
-            return None
-        last_row = hist.iloc[-1]
-        price = _finite_float(last_row.get("Close"))
-        if price is None or price <= 0:
-            return None
-        prev_row = hist.iloc[-2] if len(hist) > 1 else last_row
-        prev_close = _finite_float(prev_row.get("Close"))
-        if prev_close is None or prev_close <= 0:
-            prev_close = price
-
-        try:
-            fi = t.fast_info
-            if fi is not None:
-                lp = None
-                pc = None
-                if hasattr(fi, "get"):
-                    lp = fi.get("last_price") or fi.get("lastPrice")
-                    pc = fi.get("previous_close") or fi.get("previousClose")
-                if lp is None:
-                    lp = getattr(fi, "last_price", None) or getattr(fi, "lastPrice", None)
-                if pc is None:
-                    pc = getattr(fi, "previous_close", None) or getattr(fi, "previousClose", None)
-                lp_f = _finite_float(lp) if lp is not None else None
-                pc_f = _finite_float(pc) if pc is not None else None
-                if lp_f is not None and lp_f > 0:
-                    price = lp_f
-                if pc_f is not None and pc_f > 0:
-                    prev_close = pc_f
-        except Exception:
-            pass
-
-        chg_pct = ((price - prev_close) / prev_close * 100.0) if prev_close else 0.0
-        chg_f = _finite_float(chg_pct)
-        if chg_f is None:
-            chg_f = 0.0
-
-        info: Dict[str, Any] = {}
-        try:
-            info = t.info or {}
-            if not isinstance(info, dict):
-                info = {}
-        except Exception:
-            info = {}
-
-        name = str(info.get("shortName") or info.get("longName") or symbol)
-        cur = str(info.get("currency") or "USD")
-
-        return {
-            "symbol": symbol.strip(),
-            "name": name,
-            "price": price,
-            "previous_close": prev_close,
-            "day_change_pct": chg_f,
-            "currency": cur,
-        }
-    except Exception:
-        return None
-
-
 def fetch_news_headlines(symbol: str, limit: int = 5) -> List[Dict[str, str]]:
     yf = _yf()
     t = yf.Ticker(symbol)
@@ -216,19 +211,13 @@ def _fmt_money(x: float, cur: str) -> str:
     return f"{x:,.2f}"
 
 
-def cmd_portfolio(cfg: Dict[str, Any]) -> int:
-    wl = cfg.get("watchlist") or []
-    if not isinstance(wl, list):
-        wl = []
+def cmd_portfolio(cfg: Dict[str, Any], cfg_path: Path) -> int:
     holdings = cfg.get("holdings") or []
     if not isinstance(holdings, list):
         holdings = []
 
-    sym_set = {str(s).strip() for s in wl if str(s).strip()}
-    for h in holdings:
-        if isinstance(h, dict) and str(h.get("symbol") or "").strip():
-            sym_set.add(str(h.get("symbol")).strip())
-    symbols = sorted(sym_set)
+    symbols = _symbols_from_config(cfg)
+    fetch_quote = make_quote_fetcher(cfg, _provider_overrides_from_cfg(cfg))
 
     if not symbols:
         print(
@@ -308,7 +297,18 @@ def cmd_portfolio(cfg: Dict[str, Any]) -> int:
             print(f"**Total value (holdings above):** ≈ {_fmt_money(total_val, 'USD')} (mixed currencies not converted; verify manually.)")
         print()
 
-    print("*Data: Yahoo Finance via yfinance (delayed / unofficial). Not financial advice.*")
+    # Provenance: helps users tell script output apart from LLM-invented tickers (e.g. AAPL not in YAML).
+    try:
+        rel = cfg_path.resolve().relative_to(_skill_dir().resolve())
+        path_hint = str(rel).replace("\\", "/")
+    except ValueError:
+        path_hint = str(cfg_path.resolve()).replace("\\", "/")
+    sym_join = ", ".join(symbols)
+    print(
+        f"\n*Table = watchlist ∪ holdings from `{path_hint}` (not alert-only symbols). "
+        f"Tickers in this run: {sym_join}*\n"
+    )
+    print(provider_summary_line(cfg))
     return 0
 
 
@@ -374,6 +374,8 @@ def cmd_check(cfg: Dict[str, Any], json_out: bool) -> int:
         cool_h = float(cfg.get("alert_cooldown_hours") or 24)
     except (TypeError, ValueError):
         cool_h = 24.0
+
+    fetch_quote = make_quote_fetcher(cfg, _provider_overrides_from_cfg(cfg))
 
     state = _load_state()
     fired: List[Dict[str, Any]] = []
@@ -443,11 +445,13 @@ def cmd_check(cfg: Dict[str, Any], json_out: bool) -> int:
     return 1
 
 
-def cmd_news(symbol: str) -> int:
+def cmd_news(symbol: str, cfg: Optional[Dict[str, Any]] = None) -> int:
     sym = symbol.strip()
     if not sym:
         print("Error: missing symbol.", file=sys.stderr)
         return 2
+    cfg = cfg or {}
+    fetch_quote = make_quote_fetcher(cfg, _provider_overrides_from_cfg(cfg))
     headlines = fetch_news_headlines(sym, 8)
     q = fetch_quote(sym)
     print(f"## News: {sym}\n")
@@ -468,8 +472,10 @@ def cmd_news(symbol: str) -> int:
     return 0
 
 
-def cmd_context(symbol: str) -> int:
+def cmd_context(symbol: str, cfg: Optional[Dict[str, Any]] = None) -> int:
     sym = symbol.strip()
+    cfg = cfg or {}
+    fetch_quote = make_quote_fetcher(cfg, _provider_overrides_from_cfg(cfg))
     q = fetch_quote(sym)
     headlines = fetch_news_headlines(sym, 3)
     parts = [f"## {sym} snapshot\n"]
@@ -491,7 +497,7 @@ def cmd_context(symbol: str) -> int:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Stock monitor (yfinance)")
+    parser = argparse.ArgumentParser(description="Stock monitor (AKShare / TuShare / yfinance)")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("portfolio", help="Markdown table for watchlist + optional holdings")
@@ -509,13 +515,13 @@ def main() -> None:
     cfg_path = _default_config_path()
 
     if args.cmd == "news":
-        sys.exit(cmd_news(args.symbol))
+        sys.exit(cmd_news(args.symbol, _load_yaml_optional(cfg_path)))
     if args.cmd == "context":
-        sys.exit(cmd_context(args.symbol))
+        sys.exit(cmd_context(args.symbol, _load_yaml_optional(cfg_path)))
 
     cfg = _load_yaml(cfg_path)
     if args.cmd == "portfolio":
-        sys.exit(cmd_portfolio(cfg))
+        sys.exit(cmd_portfolio(cfg, cfg_path))
     if args.cmd == "check":
         sys.exit(cmd_check(cfg, args.json))
     sys.exit(2)
