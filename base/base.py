@@ -1063,6 +1063,7 @@ class CoreMetadata:
     orchestrator_unified_with_tools: bool = True  # when True (default), main LLM with tools routes TAM/plugin/chat; when False, separate orchestrator_handler runs first (one LLM for intent+plugin)
     inbound_request_timeout_seconds: int = 0  # recommended max seconds for clients/proxies waiting for Core; 0 = unlimited. Default when missing: 0. Not enforced by Core; set proxies read_timeout >= this when >0.
     llm_completion_timeout_seconds: int = 300  # HTTP timeout for each LLM chat completion call (local or cloud). Increase (e.g. 600, 900) if large local models often time out; 0 = no timeout (not recommended).
+    access_log_exclude_paths: List[str] = field(default_factory=lambda: ["/inbound/result", "/api/config/core"])  # paths to hide from uvicorn access logs (keep other access logs visible)
     use_prompt_manager: bool = True  # load prompts from config/prompts (language/model overrides); see docs/PromptManagement.md
     prompts_dir: str = "config/prompts"  # base dir for section/name.lang.model layout
     prompt_default_language: str = "en"  # fallback when lang not in request/metadata
@@ -1590,6 +1591,7 @@ class CoreMetadata:
             orchestrator_unified_with_tools=data.get('orchestrator_unified_with_tools', True),
             inbound_request_timeout_seconds=max(0, int(data.get('inbound_request_timeout_seconds', 0) or 0)),
             llm_completion_timeout_seconds=(lambda v: 0 if v == 0 else max(60, int(v or 300)))(data.get('llm_completion_timeout_seconds', 300)),
+            access_log_exclude_paths=[str(p).strip() for p in (((data.get('logging') or {}).get('access_log_exclude_paths')) or ["/inbound/result", "/api/config/core"]) if str(p).strip()],
             use_prompt_manager=data.get('use_prompt_manager', True),
             prompts_dir=(data.get('prompts_dir') or 'config/prompts').strip(),
             prompt_default_language=(data.get('prompt_default_language') or 'en').strip() or 'en',
@@ -1733,6 +1735,9 @@ class CoreMetadata:
                 'orchestrator_unified_with_tools': getattr(core, 'orchestrator_unified_with_tools', True),
                 'inbound_request_timeout_seconds': getattr(core, 'inbound_request_timeout_seconds', 0),
                 'llm_completion_timeout_seconds': getattr(core, 'llm_completion_timeout_seconds', 300),
+                'logging': {
+                    'access_log_exclude_paths': list(getattr(core, 'access_log_exclude_paths', ["/inbound/result", "/api/config/core"]) or []),
+                },
                 'notify_unknown_request': getattr(core, 'notify_unknown_request', False),
                 'outbound_markdown_format': getattr(core, 'outbound_markdown_format', 'whatsapp') or 'whatsapp',
                 'use_prompt_manager': getattr(core, 'use_prompt_manager', True),

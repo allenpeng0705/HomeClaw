@@ -19,6 +19,10 @@ trigger:
     Generate PDF only when the user explicitly asks for download/print/PDF export:
        run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
                 args=["render-daily-brief-ast", "--title", "Daily Brief", "--theme", "dispatch", "--json", "<DAILY_BRIEF_JSON>", "--output_format", "pdf", "--out", "daily_brief.pdf"])
+
+  auto_invoke:
+    script: fetch_rss.py
+    args: ["fetch", "--max", "20", "--lang", "all"]
 ---
 
 # Daily Brief (RSS news digest)

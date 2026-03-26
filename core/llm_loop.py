@@ -70,6 +70,28 @@ except ImportError:
     _tam_storage_module = None
 
 
+def _memory_looks_like_stale_timeout_echo(mem_text: str) -> bool:
+    """
+    True if a stored memory chunk is mostly a prior assistant parroting a bogus "fetch timeout" story.
+    Those retrieve strongly for stock queries and teach the model to skip run_skill. Real tool errors
+    usually differ in wording; this targets the recurring English boilerplate from small local models.
+    """
+    if not mem_text or not isinstance(mem_text, str):
+        return False
+    tl = mem_text.lower()
+    if "march 36" in tl or "march 36th" in tl:
+        return True
+    if ("timeout issue" in tl or "encountered a timeout issue" in tl) and (
+        "fetching data" in tl
+        or "fetching your portfolio" in tl
+        or "the data fetch" in tl
+        or "stock performance" in tl
+        or "stocks" in tl
+    ):
+        return True
+    return False
+
+
 def _is_confirmation_phrase(text: str) -> bool:
     """True if the user message is a short confirmation (send, confirm, 确认, etc.) for delayed actions."""
     if not text or not isinstance(text, str):
@@ -81,6 +103,51 @@ def _is_confirmation_phrase(text: str) -> bool:
         "send", "confirm", "ok", "okay", "yes", "y", "发", "发吧", "发送", "批准",
         "确认", "好", "行", "可以", "同意",
     )
+
+
+def _is_pending_user_action_confirm(text: str) -> bool:
+    """Short natural-language confirmations for DB-backed pending offers (e.g. magazine PDF).
+
+    Uses word-boundary checks for English so we do not match \"yes\" inside \"yesterday\" or \"ok\" inside \"token\".
+    """
+    if not text or not isinstance(text, str):
+        return False
+    raw = text.strip()
+    if not raw or len(raw) > 160:
+        return False
+    low = raw.lower()
+    if any(x in low for x in ("don't", "do not", "no thanks", "not really")):
+        return False
+    # Multi-word phrases (substring match is safe — not substrings of common words)
+    _multi = (
+        "yes please", "please do", "please create", "create for me", "go ahead",
+        "do it", "sounds good",
+    )
+    if any(p in low for p in _multi):
+        return True
+    # English: word boundaries (avoid \"yes\" in \"yesterday\", \"ok\" in \"token\")
+    if re.search(r"\b(?:yes|yep|yeah|sure|ok|okay|y|confirm|proceed)\b", low):
+        return True
+    # Chinese short confirmations (exact or very short line)
+    _cn = ("好的", "行", "可以", "是的", "请生成", "生成吧", "继续", "要啊", "好呀", "好", "嗯", "确认", "没问题")
+    if raw in _cn:
+        return True
+    _raw_stripped = raw.rstrip("。.!！…")
+    if _raw_stripped in _cn:
+        return True
+    return False
+
+
+def _is_pending_user_action_cancel(text: str) -> bool:
+    if not text or not isinstance(text, str):
+        return False
+    raw = text.strip()
+    if not raw or len(raw) > 120:
+        return False
+    low = raw.lower()
+    if low in ("no", "n", "nope", "cancel", "stop", "nah"):
+        return True
+    return any(p in raw for p in ("不要", "不用", "算了", "取消", "别生成"))
 
 
 from tools.builtin import close_browser_session
@@ -311,6 +378,7 @@ def _query_looks_like_scheduling(q: Optional[str]) -> bool:
 try:
     from core.services.tool_helpers import (
         tool_result_usable_as_final_response as _tool_result_usable_as_final_response,
+        tool_result_looks_like_error as _tool_result_looks_like_error,
         parse_raw_tool_calls_from_content as _parse_raw_tool_calls_from_content,
         infer_route_to_plugin_fallback as _infer_route_to_plugin_fallback,
         infer_annual_birthday_advance_reminder_fallback as _infer_annual_birthday_advance_reminder_fallback,
@@ -322,6 +390,7 @@ try:
 except (ImportError, ModuleNotFoundError):
     from core.tool_helpers_fallback import (
         tool_result_usable_as_final_response as _tool_result_usable_as_final_response,
+        tool_result_looks_like_error as _tool_result_looks_like_error,
         parse_raw_tool_calls_from_content as _parse_raw_tool_calls_from_content,
         infer_route_to_plugin_fallback as _infer_route_to_plugin_fallback,
         infer_annual_birthday_advance_reminder_fallback as _infer_annual_birthday_advance_reminder_fallback,
@@ -607,6 +676,71 @@ async def answer_from_memory(
     except (TypeError, AttributeError):
         _mem_scope = "HomeClaw"
     uid = (user_id or getattr(request, "user_id", None) or "").strip() or "companion"
+    # Pending user actions (DB): assistant offered something (e.g. magazine PDF); user confirms on a later turn.
+    try:
+        _tc_pa = getattr(Util().get_core_metadata(), "tools_config", None) or {}
+        if _tc_pa.get("enable_pending_user_actions", True) is not False and (query or "").strip():
+            from memory.pending_user_actions import (
+                get_active_pending as _get_pending_ua,
+                mark_cancelled as _mark_pending_cancelled,
+                mark_executed as _mark_pending_executed,
+            )
+
+            _pend = _get_pending_ua(uid, _mem_scope)
+            if _pend and isinstance(_pend, dict):
+                q = (query or "").strip()
+                if _is_pending_user_action_cancel(q):
+                    _mark_pending_cancelled(_pend["id"])
+                    return ("Okay — I cancelled that.  (已取消。)", None)
+                if _is_pending_user_action_confirm(q):
+                    _k = (_pend.get("kind") or "").strip()
+                    _reg = get_tool_registry()
+                    if _reg:
+                        _ctx = ToolContext(
+                            core=core,
+                            app_id=app_id or "homeclaw",
+                            user_name=user_name or "",
+                            user_id=user_id or "",
+                            system_user_id=getattr(request, "system_user_id", None) or user_id,
+                            friend_id=(str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw"),
+                            session_id=session_id or "",
+                            run_id=run_id,
+                            request=request,
+                        )
+                        _payload = _pend.get("payload") or {}
+                        if not isinstance(_payload, dict):
+                            _payload = {}
+                        try:
+                            from core.pending_user_action_dispatch import execute_pending_user_action
+
+                            _out, _pua_outcome = await execute_pending_user_action(
+                                _k,
+                                _payload,
+                                _reg,
+                                _ctx,
+                                _tc_pa,
+                            )
+                        except Exception as _exec_pua:
+                            logger.warning("pending_user_action execute failed: {}", _exec_pua)
+                            return (
+                                "Something went wrong while running that action. Please try again. （执行失败，请重试。）",
+                                None,
+                            )
+                        if _pua_outcome == "executed":
+                            if _mark_pending_executed(_pend["id"]):
+                                _component_log("tools", "pending_user_action executed: {}".format(_k or "?"))
+                            return (_out, None)
+                        if _pua_outcome == "cancelled_unsupported":
+                            _mark_pending_cancelled(_pend["id"])
+                            return (_out, None)
+                        # failed_keep: leave pending for retry
+                        return (_out, None)
+                    return (
+                        "Tools are not available right now. Please try again in a moment. （工具暂时不可用，请稍后再试。）",
+                        None,
+                    )
+    except Exception as _pua_e:
+        logger.debug("pending_user_action early handler failed (non-fatal): {}", _pua_e)
     # Delayed action confirm: if user says "confirm"/"发送"/"确认" and there is a pending scheduled action, schedule the one-shot and return.
     if _tam_storage_module and (query or "").strip() and _is_confirmation_phrase((query or "").strip()):
         try:
@@ -1719,6 +1853,23 @@ async def answer_from_memory(
                         relevant_memories = sorted(relevant_memories or [], key=_ts_key)
                 except Exception as _e:
                     logger.debug("memory_context_order sort failed (non-fatal): {}", _e)
+                # Omit toxic retrieval hits that tell the model to "timeout" without using tools (common loop with stock questions).
+                try:
+                    if relevant_memories:
+                        _before = len(relevant_memories)
+                        relevant_memories = [
+                            m
+                            for m in relevant_memories
+                            if isinstance(m, dict)
+                            and not _memory_looks_like_stale_timeout_echo(str(m.get("memory") or ""))
+                        ]
+                        if len(relevant_memories) < _before:
+                            logger.debug(
+                                "Filtered {} stale timeout-echo memory/memories from RAG context",
+                                _before - len(relevant_memories),
+                            )
+                except Exception as _e:
+                    logger.debug("memory stale-timeout filter failed (non-fatal): {}", _e)
                 memories_text = ""
                 if relevant_memories:
                     i = 1
@@ -2101,8 +2252,25 @@ async def answer_from_memory(
                 force_include_instructions.append(
                     "This message asks to search something on the web. You MUST call web_search(query=<topic>) in this turn — do not reply with only text or 'I will use web_search'. Do NOT use exec or tavily_crawl; use web_search only."
                 )
-
-        # Optional: surface recorded events (TAM) in context so model knows what's coming up (per-user)
+            _has_run_skill = _reg is not None and any(t.name == "run_skill" for t in (_reg.list_tools() or []))
+            if _has_run_skill:
+                _q_stock = (query or "").strip()
+                _q_stock_lo = _q_stock.lower()
+                _stock_intent = any(
+                    p in _q_stock_lo for p in ("portfolio", "watchlist", "ticker", "stock", "stocks")
+                ) or any(
+                    p in _q_stock
+                    for p in ("股票", "持仓", "行情", "股价", "自选股", "大盘", "涨停", "跌停", "个股", "A股", "港股", "美股")
+                )
+                if _stock_intent:
+                    force_include_instructions.append(
+                        "The user is asking about stocks, portfolio, or quotes (股票/持仓/行情). "
+                        "You MUST call run_skill this turn with skill_name=\"stock-monitor-1.0.0\", script=\"stock_monitor.py\", "
+                        "and args [\"portfolio\"] for holdings (use other argv only if the skill text describes them). "
+                        "Do not answer with only text about timeouts, system errors, or old chat—invoke the tool first. "
+                        "When the tool returns Markdown tables, paste that Markdown **verbatim** in your reply (optional one-line intro in the user’s language). "
+                        "Do not redraw tables with tree/box characters (├──, ┌, ▼) or invent tickers, prices, or totals."
+                    )
         if getattr(core, "orchestratorInst", None) and getattr(core.orchestratorInst, "tam", None):
             tam = core.orchestratorInst.tam
             if hasattr(tam, "get_recorded_events_summary"):
@@ -2635,6 +2803,10 @@ async def answer_from_memory(
                 logger.debug("Planner call failed: {}; using ReAct", _pe_e)
                 _component_log("planner_executor", "error; using ReAct")
 
+        last_tool_name = None
+        last_tool_args = None
+        last_tool_result_raw = None
+        last_file_link_result = None
         if openai_tools:
             logger.info("Tools available for this turn: {}", tool_names)
             # Inject file/sandbox rules and per-user paths for any chat that has file tools (all friends, not only Finder).
@@ -2872,9 +3044,24 @@ async def answer_from_memory(
                 max_tool_rounds = max(1, int(_n)) if (_n is not None and int(_n) >= 1) else 30
             except (TypeError, ValueError):
                 max_tool_rounds = 30
+            try:
+                _dr = _tc.get("run_skill_direct_return_skills_in_mix_cloud")
+                if not isinstance(_dr, (list, tuple)):
+                    _dr = ["daily-brief-1.0.0", "magazine-render-1.0.0", "weather-1.0.0"]
+                _direct_return_skills_mix_cloud = {str(x).strip() for x in _dr if str(x).strip()}
+            except Exception:
+                _direct_return_skills_mix_cloud = {"daily-brief-1.0.0", "magazine-render-1.0.0", "weather-1.0.0"}
+            try:
+                _pl = _tc.get("prefer_local_after_tools_in_mix_cloud")
+                if not isinstance(_pl, (list, tuple)):
+                    _pl = ["document_read"]
+                _prefer_local_after_tools_mix_cloud = {str(x).strip() for x in _pl if str(x).strip()}
+            except Exception:
+                _prefer_local_after_tools_mix_cloud = {"document_read"}
             # config: tools.max_tool_rounds (default 30); no hard cap so complex multi-step tasks can finish
             # Same model for whole chain; mix fallback only on failure (below).
             last_tool_name = None  # so "no tool_calls" branch can skip remind_me clarifier when we already ran remind_me this turn
+            last_tool_args = None
             last_file_link_result = None  # when save_result_page/get_file_view_link return a link; must be defined before loop so "no tool_calls" branch can read it
             last_tool_result_raw = None
             _run_skills_executed_this_request = set()  # skill_name already executed this request; do not run the same skill twice
@@ -2950,7 +3137,7 @@ async def answer_from_memory(
                 try:
                     if (
                         _last_role == "tool"
-                        and last_tool_name in ("document_read", "run_skill")
+                        and last_tool_name in _prefer_local_after_tools_mix_cloud
                         and mix_route_this_request == "cloud"
                     ):
                         _meta_lo = getattr(Util(), "get_core_metadata", None)
@@ -3067,11 +3254,33 @@ async def answer_from_memory(
                         _tools_req = _tools_save_only
                         _component_log("tools", "restricted to save_result_page, file_write, document_read, file_read this turn (last result was instruction-only or already run)")
                 _tool_choice_req = "none" if _greeting_only else "auto"
+                # Optional guard timeout for tool-decision turns to avoid local model stalls.
+                # Applies only when this turn asks the model to decide/use tools (not tool-result summarization turns).
+                _decision_timeout_sec = 0
                 try:
-                    msg = await Util().openai_chat_completion_message(
+                    _meta_to = Util().get_core_metadata()
+                    _tc_to = getattr(_meta_to, "tools_config", None) or {}
+                    if isinstance(_tc_to, dict) and _tools_req and _last_role != "tool":
+                        _decision_timeout_sec = max(0, int(_tc_to.get("tool_decision_timeout_seconds", 0) or 0))
+                except Exception:
+                    _decision_timeout_sec = 0
+                try:
+                    _llm_coro = Util().openai_chat_completion_message(
                         _msgs_for_llm, tools=_tools_req, tool_choice=_tool_choice_req, grammar=_use_grammar, llm_name=llm_name_this_turn,
                         max_tokens_override=_max_tokens_override, stop_extra=_stop_extra,
                     )
+                    if _decision_timeout_sec > 0:
+                        msg = await asyncio.wait_for(_llm_coro, timeout=float(_decision_timeout_sec))
+                    else:
+                        msg = await _llm_coro
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "LLM tool-decision turn timed out after {}s (route={}, model={}); will try fallback if available.",
+                        _decision_timeout_sec,
+                        mix_route_this_request or "default",
+                        llm_name_this_turn or "main_llm",
+                    )
+                    msg = None
                 except Exception as e:
                     logger.warning("LLM call failed (will try fallback if available): {}", e)
                     msg = None
@@ -3258,7 +3467,7 @@ async def answer_from_memory(
                                                     "/files/out" in _link_result or ("http" in _link_result and "/files/" in _link_result)
                                                 ):
                                                     for _line in _link_result.splitlines():
-                                                        if "token=" in _line or ("http" in _line and "/files/" in _line):
+                                                        if "token=" in _line or "dev_unsigned=1" in _line or ("http" in _line and "/files/" in _line):
                                                             _link_result = _line.strip()
                                                             break
                                                     response = _link_result
@@ -3390,7 +3599,7 @@ async def answer_from_memory(
                                                 "/files/out" in _link_result or ("http" in _link_result and "/files/" in _link_result)
                                             ):
                                                 for _line in _link_result.splitlines():
-                                                    if "token=" in _line or ("http" in _line and "/files/" in _line):
+                                                    if "token=" in _line or "dev_unsigned=1" in _line or ("http" in _line and "/files/" in _line):
                                                         _link_result = _line.strip()
                                                         break
                                                 response = _link_result
@@ -3423,7 +3632,7 @@ async def answer_from_memory(
                                         "/files/out" in _link_result or ("http" in _link_result and "/files/" in _link_result)
                                     ):
                                         for _line in _link_result.splitlines():
-                                            if "token=" in _line or ("http" in _line and "/files/" in _line):
+                                            if "token=" in _line or "dev_unsigned=1" in _line or ("http" in _line and "/files/" in _line):
                                                 _link_result = _line.strip()
                                                 break
                                         response = _link_result
@@ -3584,6 +3793,170 @@ async def answer_from_memory(
                                         response = _res.strip()
                                 except Exception as e_w:
                                     logger.debug("Fallback weather run_skill failed: {}", e_w)
+                        # When strict_fallback is True, run daily-brief skill fallback for clear news-digest requests
+                        # when model returned no tool_calls (common local-model behavior: returns instructions only).
+                        if (
+                            _strict_fallback
+                            and isinstance(query, str)
+                            and registry
+                            and last_tool_name != "run_skill"
+                            and any(t.name == "run_skill" for t in (registry.list_tools() or []))
+                        ):
+                            _q_lo_db = (query or "").strip().lower()
+                            _q_raw_db = (query or "").strip()
+                            _daily_brief_phrases = (
+                                "daily brief", "morning report", "rss", "headline digest", "news digest",
+                                "今日新闻", "新闻订阅", "头条", "新闻摘要",
+                            )
+                            if any((p in _q_lo_db if p.isascii() else p in _q_raw_db) for p in _daily_brief_phrases):
+                                try:
+                                    _component_log("tools", "fallback run_skill(daily-brief-1.0.0) (strict_fallback=True; model did not call tool)")
+                                    _res = await registry.execute_async("run_skill", {"skill_name": "daily-brief-1.0.0"}, context)
+                                    if isinstance(_res, str) and _res.strip():
+                                        response = _res.strip()
+                                        # Option 1: for "magazine/PDF style" requests, chain daily-brief -> magazine-render
+                                        # so VMPrint runs even when the model forgot to emit tool_calls.
+                                        _magazine_phrases = (
+                                            "magazine", "magazine style", "pdf", "render pdf", "export pdf",
+                                            "杂志风格", "杂志排版", "排版更好看", "导出pdf", "生成pdf",
+                                        )
+                                        _wants_magazine = any((p in _q_lo_db if p.isascii() else p in _q_raw_db) for p in _magazine_phrases)
+                                        _looks_error = "error" in _res[:200].lower() or "failed" in _res[:200].lower()
+                                        if _wants_magazine and (not _looks_error) and any(
+                                            t.name == "run_skill" for t in (registry.list_tools() or [])
+                                        ):
+                                            try:
+                                                _md = _res.strip()
+                                                # daily-brief output may append machine-readable JSON; remove it for PDF content.
+                                                _md = re.sub(r"(?is)\n+json\s*\(machine-readable\)\s*:\s*```json[\s\S]*$", "", _md).strip()
+                                                _md = re.sub(r"(?is)\n+json\s*:\s*```json[\s\S]*$", "", _md).strip()
+                                                # Keep args bounded for Windows command line safety.
+                                                if len(_md) > 12000:
+                                                    _md = _md[:12000]
+                                                _out = f"daily_brief_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                                                _component_log("tools", "fallback run_skill(magazine-render-1.0.0) after daily-brief (strict_fallback=True)")
+                                                _pdf_res = await registry.execute_async(
+                                                    "run_skill",
+                                                    {
+                                                        "skill_name": "magazine-render-1.0.0",
+                                                        "script": "render_magazine.py",
+                                                        "args": [
+                                                            "render-md",
+                                                            "--title", "Daily Brief",
+                                                            "--theme", "dispatch",
+                                                            "--profile", "literature",
+                                                            "--md", _md,
+                                                            "--preview", "auto",
+                                                            "--out", _out,
+                                                        ],
+                                                    },
+                                                    context,
+                                                )
+                                                if (
+                                                    isinstance(_pdf_res, str)
+                                                    and _pdf_res.strip()
+                                                    and ("/files/out" in _pdf_res or ("http" in _pdf_res and "/files/" in _pdf_res))
+                                                ):
+                                                    response = _pdf_res.strip()
+                                                else:
+                                                    response = _res.strip()
+                                            except Exception as e_pdf:
+                                                logger.debug("Fallback magazine-render run_skill failed: {}", e_pdf)
+                                                response = _res.strip()
+                                except Exception as e_db:
+                                    logger.debug("Fallback daily-brief run_skill failed: {}", e_db)
+                        # Confirmation fallback: user says "yes/create it" after a prior daily-brief + magazine/PDF request.
+                        # Local/cloud models may hallucinate a link without calling tools; run the real tool chain.
+                        if (
+                            _strict_fallback
+                            and isinstance(query, str)
+                            and registry
+                            and any(t.name == "run_skill" for t in (registry.list_tools() or []))
+                        ):
+                            try:
+                                _q_lo_cf = (query or "").strip().lower()
+                                _affirm_phrases = (
+                                    "yes", "yep", "yeah", "sure", "ok", "okay", "please create", "create for me",
+                                    "yes please", "go ahead", "do it", "是的", "好的", "请生成", "生成吧", "继续",
+                                )
+                                _is_affirm = any(p in _q_lo_cf if p.isascii() else p in (query or "").strip() for p in _affirm_phrases)
+                                _recent_text = ""
+                                if isinstance(current_messages, list):
+                                    _parts = []
+                                    for _m in current_messages[-10:]:
+                                        if isinstance(_m, dict):
+                                            _c = _m.get("content")
+                                            if isinstance(_c, str) and _c.strip():
+                                                _parts.append(_c.strip())
+                                    _recent_text = "\n".join(_parts)
+                                _ctx_all = ((_recent_text or "") + "\n" + (query or "")).strip()
+                                _ctx_lo = _ctx_all.lower()
+                                _daily_ctx = any(p in _ctx_lo for p in ("daily brief", "rss", "news digest")) or any(
+                                    p in _ctx_all for p in ("今日新闻", "新闻订阅", "头条", "新闻摘要")
+                                )
+                                _mag_ctx = any(p in _ctx_lo for p in ("magazine", "pdf", "render pdf", "export pdf")) or any(
+                                    p in _ctx_all for p in ("杂志风格", "杂志排版", "导出pdf", "生成pdf")
+                                )
+                                # Also trigger when model just "claimed success" with a PDF link text but did not call tools.
+                                _hallucinated_pdf_text = bool(
+                                    isinstance(content_str, str)
+                                    and ("Magazine PDF saved" in content_str or "/files/out" in content_str)
+                                )
+                                if _is_affirm and _daily_ctx and _mag_ctx and (not response or _hallucinated_pdf_text):
+                                    # Infer args from recent context (last concrete user request).
+                                    _seed = _ctx_all
+                                    _max_items = 20
+                                    _m_cn = re.search(r"(\d{1,3})\s*条", _seed)
+                                    _m_en = re.search(r"\b(\d{1,3})\s*(items?|headlines?)\b", _seed.lower())
+                                    _m = _m_cn or _m_en
+                                    if _m:
+                                        try:
+                                            _max_items = max(1, min(100, int(_m.group(1))))
+                                        except Exception:
+                                            _max_items = 20
+                                    _lang = "all"
+                                    if any(k in _seed for k in ("中文", "汉语", "国内")) or any(k in _seed.lower() for k in (" english", " lang cn", " cn ")):
+                                        _lang = "cn"
+                                    elif any(k in _seed for k in ("英文", "英语")) or any(k in _seed.lower() for k in (" english", " lang en", " en ")):
+                                        _lang = "en"
+                                    _component_log("tools", "fallback confirm-run daily-brief + magazine-render (strict_fallback=True)")
+                                    _daily_res = await registry.execute_async(
+                                        "run_skill",
+                                        {
+                                            "skill_name": "daily-brief-1.0.0",
+                                            "script": "fetch_rss.py",
+                                            "args": ["fetch", "--max", str(_max_items), "--lang", _lang],
+                                        },
+                                        context,
+                                    )
+                                    if isinstance(_daily_res, str) and _daily_res.strip() and not _tool_result_looks_like_error(_daily_res):
+                                        _md2 = _daily_res.strip()
+                                        _md2 = re.sub(r"(?is)\n+json\s*\(machine-readable\)\s*:\s*```json[\s\S]*$", "", _md2).strip()
+                                        _md2 = re.sub(r"(?is)\n+json\s*:\s*```json[\s\S]*$", "", _md2).strip()
+                                        if len(_md2) > 12000:
+                                            _md2 = _md2[:12000]
+                                        _out2 = f"daily_brief_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                                        _pdf_res2 = await registry.execute_async(
+                                            "run_skill",
+                                            {
+                                                "skill_name": "magazine-render-1.0.0",
+                                                "script": "render_magazine.py",
+                                                "args": [
+                                                    "render-md",
+                                                    "--title", "Daily Brief",
+                                                    "--theme", "dispatch",
+                                                    "--profile", "literature",
+                                                    "--md", _md2,
+                                                    "--preview", "auto",
+                                                    "--out", _out2,
+                                                ],
+                                            },
+                                            context,
+                                        )
+                                        if isinstance(_pdf_res2, str) and _pdf_res2.strip():
+                                            response = _pdf_res2.strip()
+                            except Exception as e_cf:
+                                logger.debug("Fallback confirm-run daily-brief+magazine failed: {}", e_cf)
                         # Log when user clearly asked for scheduling but model didn't call any tool (informational only; no auto-invoke when strict_fallback).
                         # Do not log if we already ran remind_me/cron_schedule/route_to_tam this request (e.g. model replied with text after a successful reminder).
                         if isinstance(query, str) and _query_looks_like_scheduling(query) and registry and last_tool_name not in ("remind_me", "cron_schedule", "route_to_tam"):
@@ -3909,6 +4282,7 @@ async def answer_from_memory(
                 tool_timeout_sec = max(0, int(getattr(meta, "tool_timeout_seconds", 120) or 0))
                 # Track whether we execute any tool this batch; if we only skip duplicate run_skill(s), return to user after appending results.
                 _executed_any_this_batch = False
+                _stop_tool_loop_with_response = False
                 for tc in tool_calls:
                     if not isinstance(tc, dict):
                         continue
@@ -4094,23 +4468,84 @@ async def answer_from_memory(
                             result = "您希望什么时候提醒？例如：「15分钟后」或「下午3点」。 When would you like to be reminded? E.g. in 15 minutes or at 3:00 PM."
                         logger.info("Skipping repeated remind_me without minutes/at_time (avoid loop); returning clarification")
                     else:
+                        _run_skill_executed = False
                         try:
                             if _tool_verified_skip:
                                 result = "Verification: tool selection did not match user intent; execution skipped."
                             elif tool_timeout_sec > 0:
+                                _run_skill_executed = True
                                 result = await asyncio.wait_for(
                                     registry.execute_async(name, args, context),
                                     timeout=tool_timeout_sec,
                                 )
                             else:
+                                _run_skill_executed = True
                                 result = await registry.execute_async(name, args, context)
                         except asyncio.TimeoutError:
                             result = f"Error: tool {name} timed out after {tool_timeout_sec}s. The system did not hang; you can retry or use a different approach."
                         except Exception as e:
                             result = f"Error: {e!s}"
-                        if name == "run_skill" and _skill_key:
+                        # Dedupe run_skill by skill_name only after a successful run (see base.tools.execute_async status heuristic).
+                        if (
+                            name == "run_skill"
+                            and _skill_key
+                            and _run_skill_executed
+                            and isinstance(result, str)
+                            and not result.strip().startswith("Error")
+                        ):
                             _run_skills_executed_this_request.add(_skill_key)
                         _executed_any_this_batch = True
+                    # Auto-chain magazine renderer after daily-brief when user clearly asked for magazine/PDF style.
+                    # This avoids an extra LLM round (which can block on local models) and ensures VMPrint runs.
+                    if (
+                        name == "run_skill"
+                        and isinstance(args, dict)
+                        and str(args.get("skill_name") or "").strip() == "daily-brief-1.0.0"
+                        and isinstance(result, str)
+                        and result.strip()
+                    ):
+                        try:
+                            _q_lo_m = (query or "").strip().lower() if isinstance(query, str) else ""
+                            _q_raw_m = (query or "").strip() if isinstance(query, str) else ""
+                            _magazine_phrases = (
+                                "magazine", "magazine style", "pdf", "render pdf", "export pdf",
+                                "杂志风格", "杂志排版", "排版更好看", "导出pdf", "生成pdf",
+                            )
+                            _wants_magazine = any((p in _q_lo_m if p.isascii() else p in _q_raw_m) for p in _magazine_phrases)
+                            if _wants_magazine and not _tool_result_looks_like_error(result):
+                                _md = result.strip()
+                                _md = re.sub(r"(?is)\n+json\s*\(machine-readable\)\s*:\s*```json[\s\S]*$", "", _md).strip()
+                                _md = re.sub(r"(?is)\n+json\s*:\s*```json[\s\S]*$", "", _md).strip()
+                                if len(_md) > 12000:
+                                    _md = _md[:12000]
+                                _out = f"daily_brief_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                                _pdf_args = {
+                                    "skill_name": "magazine-render-1.0.0",
+                                    "script": "render_magazine.py",
+                                    "args": [
+                                        "render-md",
+                                        "--title", "Daily Brief",
+                                        "--theme", "dispatch",
+                                        "--profile", "literature",
+                                        "--md", _md,
+                                        "--preview", "auto",
+                                        "--out", _out,
+                                    ],
+                                }
+                                _component_log("tools", "auto-chain run_skill(magazine-render-1.0.0) after daily-brief")
+                                _pdf_res = await registry.execute_async("run_skill", _pdf_args, context)
+                                if (
+                                    isinstance(_pdf_res, str)
+                                    and _pdf_res.strip()
+                                    and ("/files/out" in _pdf_res or ("http" in _pdf_res and "/files/" in _pdf_res))
+                                ):
+                                    result = _pdf_res
+                                    args = _pdf_args
+                                else:
+                                    pass
+                        except Exception as _e_m:
+                            logger.debug("Auto-chain magazine-render after daily-brief failed: {}", _e_m)
+                            pass
                     if name == "route_to_tam":
                         _component_log("TAM", "routed from model")
                     elif name == "route_to_plugin":
@@ -4125,10 +4560,39 @@ async def answer_from_memory(
                                 routing_sent = True
                                 routing_response_text = result
                             # route_to_tam: fallback string means TAM couldn't parse as scheduling; don't set routing_sent so the tool result is appended and the loop continues — model can then try route_to_plugin or other tools
-                    if name in ("save_result_page", "get_file_view_link") and isinstance(result, str) and (
-                        ("/files/out" in result and "token=" in result) or ("http" in result and "/files/" in result)
+                    if name in ("save_result_page", "get_file_view_link", "run_skill") and isinstance(result, str) and (
+                        ("/files/out" in result and ("token=" in result or "dev_unsigned=1" in result)) or ("http" in result and "/files/" in result)
                     ):
                         last_file_link_result = result
+                    # In mix/cloud modes only: for selected skills, return run_skill result directly and skip
+                    # the expensive follow-up LLM round (local mode remains unchanged/local-only).
+                    if (
+                        name == "run_skill"
+                        and isinstance(args, dict)
+                        and isinstance(result, str)
+                        and result.strip()
+                        and main_llm_mode in ("mix", "cloud")
+                    ):
+                        try:
+                            _skill_done = str(args.get("skill_name") or "").strip()
+                            _q_lo_dr = (query or "").strip().lower() if isinstance(query, str) else ""
+                            _q_raw_dr = (query or "").strip() if isinstance(query, str) else ""
+                            _magazine_phrases_dr = (
+                                "magazine", "magazine style", "pdf", "render pdf", "export pdf",
+                                "杂志风格", "杂志排版", "排版更好看", "导出pdf", "生成pdf",
+                            )
+                            _wants_magazine_dr = any((p in _q_lo_dr if p.isascii() else p in _q_raw_dr) for p in _magazine_phrases_dr)
+                            if (
+                                _skill_done
+                                and _skill_done in _direct_return_skills_mix_cloud
+                                and not (_skill_done == "daily-brief-1.0.0" and _wants_magazine_dr)
+                                and not _tool_result_looks_like_error(result)
+                            ):
+                                response = result.strip()
+                                _stop_tool_loop_with_response = True
+                                _component_log("tools", f"direct-return run_skill result for {_skill_done} (mode={main_llm_mode})")
+                        except Exception:
+                            pass
                     last_tool_name = name
                     last_tool_result_raw = result if isinstance(result, str) else None
                     last_tool_args = args if isinstance(args, dict) else None
@@ -4165,6 +4629,10 @@ async def answer_from_memory(
                         if len(tool_content) > limit:
                             tool_content = tool_content[:limit] + "\n[Output truncated for context.]"
                     current_messages.append({"role": "tool", "tool_call_id": tcid, "content": tool_content})
+                    if _stop_tool_loop_with_response:
+                        break
+                if _stop_tool_loop_with_response:
+                    break
                 # If the only tool call(s) this batch were duplicate run_skill (skipped), give the model one more turn to call save_result_page (or another tool); break only if we already did that once.
                 if not _executed_any_this_batch:
                     _consecutive_duplicate_run_skill_only += 1
@@ -4321,6 +4789,39 @@ async def answer_from_memory(
                     response = (route_label + formatted).strip() if route_label else formatted
             except Exception:
                 pass
+        # If the model appends a trailing JSON block after a normal answer, remove that JSON tail.
+        # Keep pure-JSON replies unchanged (handled by JSON formatter below).
+        if isinstance(response, str) and response.strip():
+            try:
+                _full = response.strip()
+                # Case 1: trailing fenced JSON block.
+                _m_fenced = re.match(r"(?is)^(.*?)(?:\n)?```(?:json)?\s*[\s\S]*?\s*```\s*$", _full)
+                if _m_fenced:
+                    _prefix = (_m_fenced.group(1) or "").strip()
+                    if _prefix:
+                        response = _prefix
+                        _full = response.strip()
+                # Case 2: trailing raw JSON object/array after normal text.
+                if _full and (not _full.startswith("{")) and (not _full.startswith("[")):
+                    _cut = None
+                    for _sep in ("\n\n{", "\n{", "\n\n[", "\n["):
+                        _idx = _full.rfind(_sep)
+                        if _idx <= 0:
+                            continue
+                        _tail = _full[_idx + len(_sep) - 1 :].strip()
+                        try:
+                            _parsed_tail = json.loads(_tail)
+                            if isinstance(_parsed_tail, (dict, list)):
+                                _cut = _idx
+                                break
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            continue
+                    if _cut is not None:
+                        _prefix2 = _full[:_cut].strip()
+                        if _prefix2:
+                            response = _prefix2
+            except Exception:
+                pass
         # If the model echoed raw JSON from a scheduling tool (cron_schedule, record_date), email send result, or session_status, show a short friendly line. Never crash.
         if isinstance(response, str) and response.strip().startswith("{"):
             try:
@@ -4372,6 +4873,26 @@ async def answer_from_memory(
         # Strip reasoning blocks (e.g. <think>...</think>) so they are not stored in chat history, memory, or embeddings
         if isinstance(response, str) and response.strip():
             response = strip_reasoning_from_assistant_text(response)
+        try:
+            _tc_store = getattr(Util().get_core_metadata(), "tools_config", None) or {}
+            if _tc_store.get("enable_pending_user_actions", True) is not False:
+                try:
+                    _ttl_s = int(_tc_store.get("pending_user_action_ttl_seconds", 1800) or 1800)
+                except (TypeError, ValueError):
+                    _ttl_s = 1800
+                _ttl_s = max(60, min(86400, _ttl_s))
+                from memory.pending_user_actions import maybe_store_daily_brief_magazine_offer as _mstore_offer
+
+                _mstore_offer(
+                    response=response,
+                    last_tool_name=last_tool_name,
+                    last_tool_args=last_tool_args,
+                    user_id=uid,
+                    friend_id=_mem_scope,
+                    ttl_seconds=_ttl_s,
+                )
+        except Exception as _e:
+            logger.debug("pending_user_action store failed (non-fatal): {}", _e)
         if isinstance(response, str) and response.strip() and (response.strip().startswith("[") or response.strip().startswith("{")):
             _fmt = format_json_for_user(response)
             if _fmt:

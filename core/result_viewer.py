@@ -243,12 +243,13 @@ def build_file_view_link(scope: str, path: str) -> Tuple[Optional[str], Optional
             token_safe = "".join(c for c in token if c in _TOKEN_ALPHABET)
             if len(token_safe) < 33:
                 return (None, "Could not generate file link (token invalid).")
-            url = f"{base_url.rstrip('/')}/files/out?token={token_safe}&path={quote(path_norm)}"
+            # Keep "/" readable in query path (e.g. output/report.pdf), avoid %2F confusion on some clients.
+            url = f"{base_url.rstrip('/')}/files/out?token={token_safe}&path={quote(path_norm, safe='/')}"
             return (url, None)
         if unsigned_dev:
             _maybe_warn_dev_unsigned_file_links()
             scope_q = quote(scope_s, safe="")
-            path_q = quote(path_norm, safe="")
+            path_q = quote(path_norm, safe="/")
             url = f"{base_url.rstrip('/')}/files/out?scope={scope_q}&path={path_q}&dev_unsigned=1"
             return (url, None)
         return (None, "Set auth_api_key in config for shareable file links.")

@@ -119,3 +119,18 @@ class ScheduledActionModel(Base):
     action_payload = Column(Text, nullable=False)  # JSON
     status = Column(String, nullable=False, index=True, default="awaiting_confirmation")  # awaiting_confirmation, scheduled, executed, cancelled
     created_at = Column(TIMESTAMP, default=func.current_timestamp(), index=True)
+
+
+class PendingUserActionModel(Base):
+    """Immediate offer/confirm: assistant proposes an action (e.g. magazine PDF); user confirms in a later message; Core executes stored payload."""
+    __tablename__ = "homeclaw_pending_user_actions"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, nullable=False, index=True)
+    friend_id = Column(String, nullable=True, index=True)
+    kind = Column(String, nullable=False, index=True)  # e.g. daily_brief_magazine_pdf
+    payload_json = Column(Text, nullable=False)  # JSON
+    summary = Column(Text, nullable=True)
+    status = Column(String, nullable=False, index=True, default="pending")  # pending, executed, cancelled, expired
+    created_at = Column(TIMESTAMP, default=func.current_timestamp(), index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)

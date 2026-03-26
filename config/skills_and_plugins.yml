@@ -84,8 +84,10 @@ intent_router:
   # Phase 3.3: when true, before executing exec or file_write (or verify_tools list), ask LLM "Does this match user intent? Yes/No"; skip if No.
   # verify_tool_selection: false
   # verify_tools: [exec, file_write]
-  # Fallback: add these tools to every category so narrow intents (e.g. search_web) can still save or list. See docs_design/IntentRouter_CategoriesCoverage.md § Fallbacks.
-  # tools_always_included: [save_result_page, file_write, folder_list]
+  # Fallback: add these tools to every category after the router narrows the list. Use when the router sometimes
+  # mislabels queries (e.g. stocks → memory): without run_skill, skills cannot run. See IntentRouter_CategoriesCoverage.md § Fallbacks.
+  tools_always_included: [run_skill]
+  # Optional extras if you often need save/list across categories: [save_result_page, file_write, folder_list]
 
 # --- Identity / capabilities shortcut (no LLM) ---
 # When the user asks "what can you do?" or "你能为我做什么?", reply directly from workspace IDENTITY.md + TOOLS.md. Chatting is detected accurately: when intent_router is enabled, shortcut runs only when the router returns general_chat (chatting intent); then greeting/capabilities phrase+length decide the reply. When intent_router is disabled, phrase+length are checked early (no LLM).
@@ -477,6 +479,20 @@ tools:
   # tool_selection_examples: true
   # When true (default): never auto-invoke tools when the model returned no tool_calls. Rely on the model to decide; no our own if-else to run tools. When false: allow legacy fallbacks (force_include, remind_me, route_to_plugin, folder_list, etc.) when model didn't call a tool.
   strict_fallback: true
+  # Optional timeout (seconds) for tool-decision LLM turns (first call that should emit tool_calls).
+  # 0 = disabled. Recommended 45-90 for local models that may stall with tools.
+  tool_decision_timeout_seconds: 60
+  # In mix/cloud modes only: if run_skill succeeds for these skills, return tool result directly
+  # and skip the expensive follow-up LLM round (reduces stalls). Local mode is unchanged.
+  run_skill_direct_return_skills_in_mix_cloud: [daily-brief-1.0.0, magazine-render-1.0.0, weather-1.0.0]
+  # In mix mode only: after a tool result, prefer local for these tool names. Keep this narrow.
+  # Default includes document_read only. Do not include run_skill unless needed.
+  prefer_local_after_tools_in_mix_cloud: [document_read]
+  # Persist assistant offers (e.g. "Want a magazine PDF?") so a later natural "yes" runs tools without relying on chat history alone.
+  enable_pending_user_actions: true
+  pending_user_action_ttl_seconds: 1800
+  # If kind has no registered handler: payload may use tool + arguments (object) for one-shot execute on confirm. Keep this list minimal.
+  pending_user_action_generic_tools: [run_skill]
   # When last result length exceeds this (chars), inject instruction to summarize and/or save_result_page. Default 6000; 0 = disabled.
   # large_result_summarize_threshold_chars: 6000
   # MCP (Model Context Protocol) client: call external MCP servers via mcp_call and mcp_list_tools. Optional: pip install mcp.

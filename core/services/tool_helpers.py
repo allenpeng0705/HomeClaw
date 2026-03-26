@@ -132,7 +132,10 @@ def tool_result_usable_as_final_response(
                         return False
         # save_result_page / get_file_view_link: use when result contains the link (token-style or static www_root-style)
         if tool_name in ("save_result_page", "get_file_view_link"):
-            return ("/files/out" in result and "token=" in result) or ("http" in result and "/files/" in result)
+            return (
+                ("/files/out" in result and ("token=" in result or "dev_unsigned=1" in result))
+                or ("http" in result and "/files/" in result)
+            )
         # folder_list / file_find: excluded from self_contained so we always do a second LLM round.
         # Otherwise "what does 1.pdf say?" → file_find returns JSON list → user gets raw JSON instead of document_read + summary.
         _self_raw = cfg.get("self_contained_tools")

@@ -18,6 +18,10 @@ trigger:
        run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
                 args=["render-template-ast", "--template", "stock", "--title", "Stock Brief", "--theme", "dispatch", "--json", "<STOCK_JSON>", "--output_format", "browser_preview_html", "--out", "stock_brief.preview.html"])
     4) Create PDF only when user explicitly asks for print/download/export (same call with --output_format pdf and .pdf out file).
+
+  auto_invoke:
+    script: stock_monitor.py
+    args: ["portfolio"]
 ---
 
 # Stock monitor (yfinance)
@@ -36,6 +40,15 @@ Near–real-time quotes and alerts using **Yahoo Finance** through **yfinance** 
 ```text
 run_skill(skill_name="stock-monitor-1.0.0", script="stock_monitor.py", args=["portfolio"])
 ```
+
+## Assistant reply format (important)
+
+The script prints **ready-to-send Markdown** (pipe tables, optional holdings bullets). When you answer the user:
+
+1. **Prefer pasting the tool output unchanged** (full table + footer line about Yahoo/yfinance). A one-line intro in the user’s language is fine (e.g. 以下为您的自选股行情).
+2. **Do not** “improve” the table with ASCII/box-drawing trees (`├──`, `┌`, `▼`), merged cells, or made-up symbols (e.g. AAPLE). Small local models often garble tables; copying the tool text avoids that.
+3. **Do not** invent portfolio totals or currencies; if the tool shows a total, repeat it exactly; if it does not, do not guess.
+4. If the user asked “yesterday” and `portfolio` only shows **today’s** day change, say that clearly—the script does not fetch historical OHLC in `portfolio` mode.
 
 ## Configure
 

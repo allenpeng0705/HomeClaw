@@ -746,6 +746,22 @@ def _md_link(title: str, url: str) -> str:
     return f"[{t}]({u})"
 
 
+def _contains_cjk(text: str) -> bool:
+    s = text or ""
+    for ch in s:
+        cp = ord(ch)
+        if (
+            0x4E00 <= cp <= 0x9FFF  # CJK Unified Ideographs
+            or 0x3400 <= cp <= 0x4DBF  # CJK Extension A
+            or 0x20000 <= cp <= 0x2A6DF  # CJK Extension B
+            or 0x2A700 <= cp <= 0x2B73F  # CJK Extension C
+            or 0x2B740 <= cp <= 0x2B81F  # CJK Extension D
+            or 0x2B820 <= cp <= 0x2CEAF  # CJK Extension E/F
+        ):
+            return True
+    return False
+
+
 def _apply_theme_to_markdown(md: str, theme: str, title: str, as_of: Optional[str] = None) -> str:
     """
     Wrap or normalize Markdown into a consistent magazine-like layout.
@@ -768,12 +784,31 @@ def _apply_theme_to_markdown(md: str, theme: str, title: str, as_of: Optional[st
             body,
             "",
         ]
-        return "\n".join([p for p in parts if p is not None]).strip() + "\n"
+        themed = "\n".join([p for p in parts if p is not None]).strip() + "\n"
+        if _contains_cjk(themed) and not themed.lstrip().startswith("---"):
+            # Force a CJK-capable primary family to avoid tofu squares in Chinese/Japanese/Korean text.
+            frontmatter = (
+                "---\n"
+                "layout:\n"
+                "  fontFamily: Noto Sans SC\n"
+                "---\n\n"
+            )
+            themed = frontmatter + themed
+        return themed
 
     if theme in ("minimal", "report"):
         mast = (title or "Report").strip()
         parts = [f"# {mast}", "", f"*As of {as_of}*", "", body, ""]
-        return "\n".join(parts).strip() + "\n"
+        themed = "\n".join(parts).strip() + "\n"
+        if _contains_cjk(themed) and not themed.lstrip().startswith("---"):
+            frontmatter = (
+                "---\n"
+                "layout:\n"
+                "  fontFamily: Noto Sans SC\n"
+                "---\n\n"
+            )
+            themed = frontmatter + themed
+        return themed
 
     raise ValueError("theme must be one of: dispatch, minimal")
 
