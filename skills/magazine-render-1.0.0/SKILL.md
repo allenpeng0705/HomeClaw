@@ -13,8 +13,18 @@ trigger:
     - "export\\s*(this|it)?\\s*as\\s*pdf"
     - "render\\s*(this|it)?\\s*as\\s*pdf"
     - "杂志\\s*风格|杂志\\s*排版|排版\\s*更\\s*好看|导出\\s*pdf|生成\\s*pdf"
+    - "今日新闻.*(漂亮|好看|美观|排版|杂志)|每日简报.*(漂亮|好看|美观|排版|杂志)"
+    - "(daily\\s*brief|morning\\s*report).*(pretty|beautiful|readable|magazine|well\\s*formatted)"
   instruction: |
     The user wants a prettier / more readable report output. Use AST-first VMPrint rendering for better UI control.
+
+    If the request is about daily brief/news digest with pretty-layout intent, run in two steps:
+    1) fetch digest:
+       run_skill(skill_name="daily-brief-1.0.0", script="fetch_rss.py", args=["fetch", "--max", "20", "--lang", "cn|all"])
+    2) convert digest JSON -> VMPrint AST and render:
+       run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
+                args=["render-daily-brief-ast", "--title", "Daily Brief", "--theme", "dispatch", "--json", "<DAILY_BRIEF_JSON>", "--output_format", "browser_preview_html", "--out", "daily_brief.preview.html"])
+    Return highlights + preview link; do not stop at raw Markdown.
 
     You have four modes:
 

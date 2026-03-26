@@ -1,20 +1,28 @@
 ---
 name: daily-brief
 description: |
-  RSS-based "Daily Brief" / news headline digest: aggregate free public feeds (English + Chinese), optional keyword filter, Markdown output for chat or cron. No API keys. Edit config/feeds.yaml to add or change sources.
+  RSS-based "Daily Brief" / news headline digest: aggregate free public feeds (English + Chinese), optional keyword filter. AST-first VMPrint output by default (browser preview link), Markdown only on explicit request. No API keys. Edit config/feeds.yaml to add or change sources.
 homepage: https://github.com/allenpeng0705/HomeClaw
 trigger:
-  patterns: ["daily\\s*brief|morning\\s*report|RSS|新闻订阅|rss\\s*feed|headline\\s*digest|今日新闻"]
+  patterns:
+    - "daily\\s*brief|morning\\s*report|RSS|新闻订阅|rss\\s*feed|headline\\s*digest|今日新闻|每日简报"
   instruction: |
-    The user wants a news digest from RSS. Use run_skill(skill_name='daily-brief-1.0.0', script='fetch_rss.py', args=['fetch', '--max', '25', '--lang', 'all']). For Chinese-only sources use --lang cn; English-only --lang en. To narrow topics use --filter KEYWORD (matches title/summary). For a one-line list of configured feeds use args=['list']. After raw output, you may summarize top stories for the user. Full article text is not fetched here—only RSS fields; deep summaries can use fetch_url on selected links if the user asks.
+    The user wants a news digest from RSS.
 
-    If the user asks for a **beautiful / readable / magazine-style output** (e.g. “make it pretty”, “magazine style”, “排版更好看”, “杂志风格”), prefer browser preview HTML by default:
-    1) Run daily-brief fetch as usual to get the digest.
-    2) Convert the fetched digest into compact structured JSON (items: title/source/link; optional as_of).
-    3) Call the generic VMPrint renderer skill in AST mode to produce a browser preview artifact:
+    Default behavior (AST-first):
+    1) Run daily-brief fetch to get digest data:
+       run_skill(skill_name='daily-brief-1.0.0', script='fetch_rss.py', args=['fetch', '--max', '25', '--lang', 'all'])
+       - For Chinese-only use --lang cn; English-only use --lang en.
+       - To narrow topics use --filter KEYWORD (matches title/summary).
+       - For a one-line feed list use args=['list'].
+    2) Convert fetched digest into compact structured JSON (items: title/source/link; optional as_of).
+    3) Render with VMPrint AST path by default:
        run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
                 args=["render-daily-brief-ast", "--title", "Daily Brief", "--theme", "dispatch", "--json", "<DAILY_BRIEF_JSON>", "--output_format", "browser_preview_html", "--out", "daily_brief.preview.html"])
     4) Reply with 3–6 highlight bullets + the returned preview link. Keep in-chat text concise; the link is the primary formatted view.
+
+    Markdown/text-only fallback:
+    - Use plain Markdown output only when the user explicitly asks for plain text/Markdown/no link/no HTML.
 
     Generate PDF only when the user explicitly asks for download/print/PDF export:
        run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",

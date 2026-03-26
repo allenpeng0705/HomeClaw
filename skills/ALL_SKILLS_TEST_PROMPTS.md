@@ -28,6 +28,7 @@ Use this file as a one-stop checklist to test all current bundled skill READMEs:
 - RSS 新闻订阅，筛选 AI 相关
 - 列出 daily brief 的 RSS 源
 - 把今日新闻做成杂志风格 PDF（排版更好看）
+- 今日新闻（20条，中文），请做漂亮的输出（给我 VMPrint 预览链接，不要纯 Markdown）
 
 ### run_skill calls
 

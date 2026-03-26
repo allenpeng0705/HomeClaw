@@ -1,6 +1,6 @@
 # daily-brief-1.0.0
 
-RSS-based **Daily Brief** for HomeClaw: aggregate public feeds (English + Chinese), optional keyword filter, Markdown output. **No API keys**—only HTTP requests to RSS URLs.
+RSS-based **Daily Brief** for HomeClaw: aggregate public feeds (English + Chinese), optional keyword filter. **AST-first VMPrint preview output by default** (Markdown only on explicit request). **No API keys**—only HTTP requests to RSS URLs.
 
 Full agent-oriented instructions are in **`SKILL.md`**. This README is for humans: setup, commands, scheduling, and real-life usage.
 
@@ -78,7 +78,7 @@ Output is Markdown plus a JSON block. Items are **interleaved across feeds** so 
 
 ## VMPrint output default for Daily Brief
 
-When users ask for a prettier formatted daily brief, default to:
+Daily brief uses VMPrint AST path by default and returns:
 
 - **`browser_preview_html`** (best reading experience in channels/Companion)
 
