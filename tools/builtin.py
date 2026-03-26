@@ -4639,6 +4639,42 @@ def _vmprint_inline_limits() -> tuple[int, int]:
     return (max_ast, max_pages)
 
 
+def _rewrite_vmprint_preview_asset_links(html_text: str, scope: str) -> str:
+    """
+    Rewrite VMPrint preview runtime asset script URLs to absolute file-view links.
+    Supports both signed token links (auth enabled) and dev-unsigned links (auth disabled).
+    Never raises; returns original html on failure.
+    """
+    if not isinstance(html_text, str) or not html_text:
+        return html_text
+    scope_s = (scope or "").strip()
+    if not scope_s:
+        return html_text
+    try:
+        from core.result_viewer import build_file_view_link
+    except Exception:
+        return html_text
+    try:
+        asset_version = globals().get("_VMPRINT_ASSET_VERSION", "v1")
+        asset_names = (
+            "vmprint-fontkit.js",
+            "vmprint-engine.js",
+            "vmprint-web-fonts.js",
+            "vmprint-context-canvas.js",
+        )
+        rewritten = html_text
+        for name in asset_names:
+            rel = f"{FILE_OUTPUT_SUBDIR}/_vmprint_assets/{asset_version}/{name}"
+            url, _ = build_file_view_link(scope_s, rel)
+            if not url:
+                continue
+            old = f"./_vmprint_assets/{asset_version}/{name}"
+            rewritten = rewritten.replace(old, url)
+        return rewritten
+    except Exception:
+        return html_text
+
+
 def _vmprint_render_sync(
     md_content: str,
     output_format: str,
@@ -4923,6 +4959,12 @@ async def _vmprint_render_executor(arguments: Dict[str, Any], context: ToolConte
             full.write_text(text_out, encoding="utf-8")
             if output_format == "browser_preview_html":
                 _ensure_vmprint_static_assets(base)
+                if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
+                    scope = _get_file_workspace_subdir(context)
+                    if scope:
+                        rewritten = _rewrite_vmprint_preview_asset_links(text_out, scope)
+                        if rewritten != text_out:
+                            full.write_text(rewritten, encoding="utf-8")
 
         out = json.dumps({"written": True, "path": path_arg, "output_format": output_format})
         if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:

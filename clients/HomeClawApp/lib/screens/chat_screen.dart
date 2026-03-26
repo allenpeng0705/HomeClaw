@@ -3662,7 +3662,7 @@ class _ChatMessageText extends StatelessWidget {
       if (resp.statusCode < 200 || resp.statusCode >= 300) return 'link';
       final body = resp.body;
       final m = RegExp(
-        r"<meta\\s+name=['\"]homeclaw-vmprint-ui-hint['\"]\\s+content=['\"](inline|link)['\"]",
+        "<meta\\s+name=[\"']homeclaw-vmprint-ui-hint[\"']\\s+content=[\"'](inline|link)[\"']",
         caseSensitive: false,
       ).firstMatch(body);
       final hint = (m?.group(1) ?? '').toLowerCase();

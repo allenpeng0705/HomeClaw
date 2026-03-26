@@ -593,6 +593,10 @@ tools:
   get_file_view_link:
     max_image_size_for_inline: 2097152   # bytes (2 MiB). Images at or below this size are sent inline; larger images get link only. Set 0 to never send images inline (link only).
   # max_tool_rounds: max LLM rounds in the tool loop (default 30). Complex tasks (e.g. document_read → run_skill → save_result_page) may need many rounds; set higher if needed.
+  # VMPrint inline preview policy (Companion/chat): metadata hint switches to link when AST/pages exceed these limits.
+  vmprint_preview_inline:
+    max_ast_chars: 120000
+    max_pages: 2
   # Use tool result as final response and skip the second LLM call. These are the default lists (Core uses same if omitted).
   # Plugins (e.g. homeclaw-browser): invoked via route_to_plugin; result is always used as final response (no second LLM). PPT is now a skill (ppt-generation-1.0.0) invoked via run_skill.
   use_result_as_response:

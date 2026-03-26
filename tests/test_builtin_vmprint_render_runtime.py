@@ -4,7 +4,9 @@ import html
 import json
 import os
 import subprocess
+import sys
 import tempfile
+import types
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -49,6 +51,71 @@ def _make_fake_vmprint_tree(tmp_path: Path, with_vm_cli: bool = True) -> Path:
         (vmp / "cli" / "dist").mkdir(parents=True, exist_ok=True)
         (vmp / "cli" / "dist" / "index.js").write_text("// fake", encoding="utf-8")
     return vmp
+
+
+def _load_vmprint_preview_rewrite():
+    root = Path(__file__).resolve().parents[1]
+    src = (root / "tools" / "builtin.py").read_text(encoding="utf-8")
+    start = src.index("def _rewrite_vmprint_preview_asset_links(")
+    end = src.index("\n\ndef _vmprint_render_sync(", start)
+    fn_src = src[start:end]
+
+    ns = {
+        "FILE_OUTPUT_SUBDIR": "output",
+        "_VMPRINT_ASSET_VERSION": "v1",
+    }
+    exec(fn_src, ns)
+    return ns["_rewrite_vmprint_preview_asset_links"]
+
+
+def test_vmprint_preview_asset_links_rewrite_signed_urls(monkeypatch):
+    fn = _load_vmprint_preview_rewrite()
+    html_in = (
+        "<script src='./_vmprint_assets/v1/vmprint-fontkit.js'></script>"
+        "<script src='./_vmprint_assets/v1/vmprint-engine.js'></script>"
+        "<script src='./_vmprint_assets/v1/vmprint-web-fonts.js'></script>"
+        "<script src='./_vmprint_assets/v1/vmprint-context-canvas.js'></script>"
+    )
+
+    core_mod = types.ModuleType("core")
+    rv_mod = types.ModuleType("core.result_viewer")
+
+    def _fake_build_file_view_link(scope, path):  # noqa: ANN001
+        return (f"https://example.test/files/out?token=signed123&path={path}", None)
+
+    rv_mod.build_file_view_link = _fake_build_file_view_link
+    monkeypatch.setitem(sys.modules, "core", core_mod)
+    monkeypatch.setitem(sys.modules, "core.result_viewer", rv_mod)
+
+    html_out = fn(html_in, "companion")
+    assert "token=signed123" in html_out
+    assert "./_vmprint_assets/v1/" not in html_out
+    assert "output/_vmprint_assets/v1/vmprint-engine.js" in html_out
+
+
+def test_vmprint_preview_asset_links_rewrite_dev_unsigned_urls(monkeypatch):
+    fn = _load_vmprint_preview_rewrite()
+    html_in = (
+        "<script src='./_vmprint_assets/v1/vmprint-fontkit.js'></script>"
+        "<script src='./_vmprint_assets/v1/vmprint-engine.js'></script>"
+        "<script src='./_vmprint_assets/v1/vmprint-web-fonts.js'></script>"
+        "<script src='./_vmprint_assets/v1/vmprint-context-canvas.js'></script>"
+    )
+
+    core_mod = types.ModuleType("core")
+    rv_mod = types.ModuleType("core.result_viewer")
+
+    def _fake_build_file_view_link(scope, path):  # noqa: ANN001
+        return (f"https://example.test/files/out?scope={scope}&path={path}&dev_unsigned=1", None)
+
+    rv_mod.build_file_view_link = _fake_build_file_view_link
+    monkeypatch.setitem(sys.modules, "core", core_mod)
+    monkeypatch.setitem(sys.modules, "core.result_viewer", rv_mod)
+
+    html_out = fn(html_in, "companion")
+    assert "dev_unsigned=1" in html_out
+    assert "./_vmprint_assets/v1/" not in html_out
+    assert "scope=companion" in html_out
 
 
 def test_vmprint_render_sync_rejects_unknown_output_format(tmp_path: Path):
