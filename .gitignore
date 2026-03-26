@@ -106,3 +106,6 @@ site/create_ppt.py
 site/create_ppt_zh.py
 /external_plugins/__pycache__
 /skills/stock-monitor-1.0.0/scripts/__pycache__
+/skills/daily-brief-1.0.0/scripts/__pycache__
+/skills/daily-brief-1.0.0/scripts/__pycache__
+/skills/magazine-render-1.0.0/scripts/__pycache__

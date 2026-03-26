@@ -3128,6 +3128,7 @@ def _normalize_daily_brief_args(argv: List[str]) -> List[str]:
     max_items = 20
     lang = "all"
     keyword = ""
+    days_ago = 0
     theme = "dispatch"
     output_format = "browser_preview_html"
     i = 1
@@ -3162,6 +3163,13 @@ def _normalize_daily_brief_args(argv: List[str]) -> List[str]:
             keyword = val[:80]
             i += 2 if consumed_next else 1
             continue
+        if low == "--days-ago" and val:
+            try:
+                days_ago = max(0, min(7, int(val)))
+            except Exception:
+                pass
+            i += 2 if consumed_next else 1
+            continue
         if low == "--theme" and val:
             v = val.lower()
             if v in ("dispatch", "minimal"):
@@ -3178,6 +3186,8 @@ def _normalize_daily_brief_args(argv: List[str]) -> List[str]:
     out = [cmd, "--max", str(max_items), "--lang", lang]
     if keyword:
         out += ["--filter", keyword]
+    if days_ago > 0:
+        out += ["--days-ago", str(days_ago)]
     if cmd == "fetch-vmprint":
         out += ["--theme", theme, "--output_format", output_format]
     return out
@@ -3209,6 +3219,8 @@ def _derive_daily_brief_args_from_query(user_text: str, plain_markdown_requested
         lang = "en"
     cmd = "fetch" if plain_markdown_requested else "fetch-vmprint"
     args = [cmd, "--max", str(max_items), "--lang", lang]
+    if "昨天" in q or "昨日" in q or "yesterday" in q_lo:
+        args += ["--days-ago", "1"]
     km = re.search(r"(?:关于|关键词|filter|主题)\s*[:：]?\s*([^\s,，。]{2,30})", q, re.I)
     if km:
         kw = (km.group(1) or "").strip()
@@ -3586,6 +3598,22 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                 args_list[0] = "fetch-vmprint"
             if cmd_ok:
                 args_list = _normalize_daily_brief_args(args_list)
+                # Honor explicit language/day hints from the current user query
+                # even when cloud arg normalizer returned weaker defaults (e.g. --lang all).
+                if any(k in _q for k in ("中文", "汉语", "国内")):
+                    for _i, _a in enumerate(args_list):
+                        if str(_a).strip().lower() == "--lang" and _i + 1 < len(args_list):
+                            args_list[_i + 1] = "cn"
+                            break
+                elif any(k in _q for k in ("英文", "英语")):
+                    for _i, _a in enumerate(args_list):
+                        if str(_a).strip().lower() == "--lang" and _i + 1 < len(args_list):
+                            args_list[_i + 1] = "en"
+                            break
+                if "昨天" in _q or "昨日" in _q or "yesterday" in _q_lo:
+                    if not any(str(a).strip().lower() == "--days-ago" for a in args_list):
+                        args_list += ["--days-ago", "1"]
+                    args_list = _normalize_daily_brief_args(args_list)
             if not cmd_ok:
                 args_list = _derive_daily_brief_args_from_query(_q or "daily brief", _plain_markdown_requested)
         elif skill_name == "weather-1.0.0":
@@ -3668,11 +3696,16 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
             if _first_now == "render-daily-brief-ast":
                 _has_out = any((str(a).strip().lower() == "--out") for a in args_list)
                 _has_output_fmt = any((str(a).strip().lower() == "--output_format") for a in args_list)
+                _has_json = any((str(a).strip().lower() == "--json") for a in args_list)
+                _has_input = any((str(a).strip().lower() == "--input") for a in args_list)
                 if not _has_output_fmt:
                     args_list += ["--output_format", "browser_preview_html"]
                 if not _has_out:
                     _out = f"daily_brief_{datetime.now().strftime('%Y%m%d_%H%M%S')}.preview.html"
                     args_list += ["--out", _out]
+                # Avoid "JSON is required." after arg sanitation/repair.
+                if not _has_json and not _has_input:
+                    args_list += ["--json", "{\"items\": []}"]
             # Drop unknown positional tokens (e.g. "今日新闻 20 zh") that break argparse.
             # Keep only known flags and their values for magazine-render commands.
             _first_now = (args_list[0] or "").strip().lower() if args_list else ""
@@ -3708,6 +3741,20 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                     # Drop unknown flags/positionals to avoid argparse "unrecognized arguments".
                     _i += 1
                 args_list = _cleaned
+            # Final guard: ensure payload flags exist for payload-required commands.
+            _cmd = (args_list[0] or "").strip().lower() if args_list else ""
+            _has_json = any((str(a).strip().lower() == "--json") for a in args_list)
+            _has_ast = any((str(a).strip().lower() == "--ast") for a in args_list)
+            _has_input = any((str(a).strip().lower() == "--input") for a in args_list)
+            if _cmd in ("render-daily-brief-ast", "render-json", "render-template-ast"):
+                if (not _has_json) and (not _has_input):
+                    args_list += ["--json", "{\"items\": []}"]
+            elif _cmd == "render-ast":
+                if (not _has_ast) and (not _has_input):
+                    args_list += [
+                        "--ast",
+                        "{\"documentVersion\":\"1.1\",\"layout\":{\"pageSize\":\"LETTER\",\"margins\":{\"top\":72,\"right\":72,\"bottom\":72,\"left\":72},\"fontFamily\":\"Arimo\",\"fontSize\":12,\"lineHeight\":1.4},\"styles\":{},\"elements\":[]}",
+                    ]
     except Exception:
         pass
 
