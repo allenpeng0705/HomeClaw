@@ -18,6 +18,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -232,8 +233,10 @@ async def _normalize_run_skill_args_with_cloud(
         schema_hint = ""
         if skill_name == "daily-brief-1.0.0":
             schema_hint = (
-                "Allowed args: ['list'] OR ['fetch','--max','<1..100>','--lang','cn|en|all'] "
-                "optionally append ['--filter','<keyword>']."
+                "Allowed args: ['list'] OR "
+                "['fetch-vmprint','--max','<1..100>','--lang','cn|en|all'] "
+                "optionally append ['--filter','<keyword>'] and optional ['--theme','dispatch|minimal']; "
+                "markdown fallback: ['fetch','--max','<1..100>','--lang','cn|en|all'] optionally + ['--filter','<keyword>']."
             )
         elif skill_name == "weather-1.0.0":
             schema_hint = "Allowed args: ['<full user message>'] OR ['--full','<location or message>']."
@@ -3113,6 +3116,107 @@ def _get_skill_env_from_skill_md(skill_folder: Path) -> Dict[str, str]:
     return out
 
 
+def _normalize_daily_brief_args(argv: List[str]) -> List[str]:
+    """Normalize daily-brief argv into a deterministic safe form."""
+    if not argv:
+        return argv
+    cmd = (argv[0] or "").strip().lower()
+    if cmd not in ("list", "fetch", "fetch-vmprint"):
+        return argv
+    if cmd == "list":
+        return ["list"]
+    max_items = 20
+    lang = "all"
+    keyword = ""
+    theme = "dispatch"
+    output_format = "browser_preview_html"
+    i = 1
+    while i < len(argv):
+        tok = str(argv[i] or "").strip()
+        low = tok.lower()
+        val = ""
+        consumed_next = False
+        if "=" in tok and low.startswith("--"):
+            k, v = tok.split("=", 1)
+            low = k.lower()
+            val = v.strip()
+        elif i + 1 < len(argv):
+            nxt = str(argv[i + 1] or "").strip()
+            if nxt and not nxt.startswith("--"):
+                val = nxt
+                consumed_next = True
+        if low == "--max" and val:
+            try:
+                max_items = max(1, min(100, int(val)))
+            except Exception:
+                pass
+            i += 2 if consumed_next else 1
+            continue
+        if low == "--lang" and val:
+            v = val.lower()
+            if v in ("cn", "en", "all"):
+                lang = v
+            i += 2 if consumed_next else 1
+            continue
+        if low == "--filter" and val:
+            keyword = val[:80]
+            i += 2 if consumed_next else 1
+            continue
+        if low == "--theme" and val:
+            v = val.lower()
+            if v in ("dispatch", "minimal"):
+                theme = v
+            i += 2 if consumed_next else 1
+            continue
+        if low == "--output_format" and val:
+            v = val.lower()
+            if v in ("browser_preview_html", "pdf", "layout_json"):
+                output_format = v
+            i += 2 if consumed_next else 1
+            continue
+        i += 1
+    out = [cmd, "--max", str(max_items), "--lang", lang]
+    if keyword:
+        out += ["--filter", keyword]
+    if cmd == "fetch-vmprint":
+        out += ["--theme", theme, "--output_format", output_format]
+    return out
+
+
+def _derive_daily_brief_args_from_query(user_text: str, plain_markdown_requested: bool) -> List[str]:
+    """Derive a deterministic daily-brief argv from natural-language user text."""
+    q = (user_text or "").strip()
+    q_lo = q.lower()
+    if (
+        ("list" in q_lo and "feed" in q_lo)
+        or ("列出" in q and "源" in q)
+        or ("有哪些订阅" in q)
+    ):
+        return ["list"]
+    max_items = 20
+    m_cn = re.search(r"(\d{1,3})\s*条", q)
+    m_en = re.search(r"\b(\d{1,3})\s*(items?|headlines?)\b", q_lo)
+    m = m_cn or m_en
+    if m:
+        try:
+            max_items = max(1, min(100, int(m.group(1))))
+        except Exception:
+            max_items = 20
+    lang = "all"
+    if any(k in q for k in ("中文", "汉语", "国内")) or any(k in q_lo for k in (" chinese", " lang cn", " cn ")):
+        lang = "cn"
+    elif any(k in q for k in ("英文", "英语")) or any(k in q_lo for k in (" english", " lang en", " en ")):
+        lang = "en"
+    cmd = "fetch" if plain_markdown_requested else "fetch-vmprint"
+    args = [cmd, "--max", str(max_items), "--lang", lang]
+    km = re.search(r"(?:关于|关键词|filter|主题)\s*[:：]?\s*([^\s,，。]{2,30})", q, re.I)
+    if km:
+        kw = (km.group(1) or "").strip()
+        if kw:
+            args += ["--filter", kw]
+    return _normalize_daily_brief_args(args)
+
+
 async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Run a script from a loaded skill's scripts/ folder. All usage (script name, args) is defined in SKILL.md; the model must pass them. Never raises: returns an error string on failure."""
     if not isinstance(arguments, dict):
@@ -3280,9 +3384,9 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                 lang = "cn"
             elif any(k in q for k in ("英文", "英语")) or any(k in q_lo for k in (" english", "lang en", "en ")):
                 lang = "en"
-            args_input = ["fetch", "--max", str(max_items), "--lang", lang]
+            args_input = ["fetch-vmprint", "--max", str(max_items), "--lang", lang]
         except Exception:
-            args_input = ["fetch", "--max", "20", "--lang", "all"]
+            args_input = ["fetch-vmprint", "--max", "20", "--lang", "all"]
     config = _get_tools_config() or {}
     allowlist = config.get("run_skill_allowlist")
     if allowlist and script_path.name not in allowlist:
@@ -3428,7 +3532,10 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                     parts = [p.strip().strip('"').strip() for p in parts]
                     args_list = [p for p in parts if p]
         elif isinstance(args_input, str):
-            args_list = [x.strip() for x in args_input.split() if x.strip()]
+            try:
+                args_list = [x.strip() for x in shlex.split(args_input) if x.strip()]
+            except Exception:
+                args_list = [x.strip() for x in args_input.split() if x.strip()]
     # For magazine-render, when args already form a concrete executable command,
     # do not let cloud arg normalizer rewrite them (it may truncate/mangle large inline JSON).
     _skip_cloud_arg_normalizer = False
@@ -3461,40 +3568,26 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
     # Goal: convert natural-language blobs into valid argv so scripts don't fail/loop.
     try:
         if skill_name == "daily-brief-1.0.0":
-            # Expected commands: list | fetch --max N --lang cn|en|all [--filter KEYWORD]
-            cmd_ok = bool(args_list) and (args_list[0] in ("list", "fetch"))
+            # Expected commands: list | fetch (markdown) | fetch-vmprint (default AST preview path)
+            cmd_ok = bool(args_list) and (args_list[0] in ("list", "fetch", "fetch-vmprint"))
+            _q = user_text_for_args or ""
+            _q_lo = _q.lower()
+            _plain_markdown_requested = (
+                "markdown" in _q_lo
+                or "plain text" in _q_lo
+                or "text only" in _q_lo
+                or "纯文本" in _q
+                or "纯 markdown" in _q_lo
+                or "不要链接" in _q
+                or "不需要链接" in _q
+            )
+            # Stabilize default: convert legacy 'fetch' to AST-first unless user explicitly asks text/markdown.
+            if cmd_ok and args_list and args_list[0] == "fetch" and not _plain_markdown_requested:
+                args_list[0] = "fetch-vmprint"
+            if cmd_ok:
+                args_list = _normalize_daily_brief_args(args_list)
             if not cmd_ok:
-                q = user_text_for_args or "daily brief"
-                q_lo = q.lower()
-                # "list feeds" style request
-                if (
-                    "list" in q_lo and "feed" in q_lo
-                    or "列出" in q and "源" in q
-                    or "有哪些订阅" in q
-                ):
-                    args_list = ["list"]
-                else:
-                    max_items = 20
-                    m_cn = re.search(r"(\d{1,3})\s*条", q)
-                    m_en = re.search(r"\b(\d{1,3})\s*(items?|headlines?)\b", q_lo)
-                    m = m_cn or m_en
-                    if m:
-                        try:
-                            max_items = max(1, min(100, int(m.group(1))))
-                        except Exception:
-                            max_items = 20
-                    lang = "all"
-                    if any(k in q for k in ("中文", "汉语", "国内")) or any(k in q_lo for k in (" chinese", " lang cn", " cn ")):
-                        lang = "cn"
-                    elif any(k in q for k in ("英文", "英语")) or any(k in q_lo for k in (" english", " lang en", " en ")):
-                        lang = "en"
-                    args_list = ["fetch", "--max", str(max_items), "--lang", lang]
-                    # Optional lightweight keyword extraction
-                    km = re.search(r"(?:关于|关键词|filter|主题)\s*[:：]?\s*([^\s,，。]{2,30})", q, re.I)
-                    if km:
-                        kw = (km.group(1) or "").strip()
-                        if kw:
-                            args_list += ["--filter", kw]
+                args_list = _derive_daily_brief_args_from_query(_q or "daily brief", _plain_markdown_requested)
         elif skill_name == "weather-1.0.0":
             if not args_list and user_text_for_args:
                 args_list = [user_text_for_args]

@@ -34,8 +34,9 @@ Use this file as a one-stop checklist to test all current bundled skill READMEs:
 
 ```text
 run_skill(skill_name="daily-brief-1.0.0", script="fetch_rss.py", args=["list"])
-run_skill(skill_name="daily-brief-1.0.0", script="fetch_rss.py", args=["fetch", "--max", "25", "--lang", "all"])
-run_skill(skill_name="daily-brief-1.0.0", script="fetch_rss.py", args=["fetch", "--max", "20", "--lang", "cn"])
+run_skill(skill_name="daily-brief-1.0.0", script="fetch_rss.py", args=["fetch-vmprint", "--max", "25", "--lang", "all"])
+run_skill(skill_name="daily-brief-1.0.0", script="fetch_rss.py", args=["fetch-vmprint", "--max", "20", "--lang", "cn"])
+run_skill(skill_name="daily-brief-1.0.0", script="fetch_rss.py", args=["fetch", "--max", "20", "--lang", "cn"])  # markdown fallback
 run_skill(skill_name="daily-brief-1.0.0", script="fetch_rss.py", args=["fetch", "--max", "20", "--lang", "all", "--filter", "AI"])
 ```
 

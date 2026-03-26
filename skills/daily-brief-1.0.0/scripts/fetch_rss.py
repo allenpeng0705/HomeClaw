@@ -5,6 +5,7 @@ Daily Brief — fetch headlines from configured RSS feeds (no API key).
 Usage:
   python fetch_rss.py list
   python fetch_rss.py fetch [--max N] [--lang en|cn|all] [--filter KEYWORD]
+  python fetch_rss.py fetch-vmprint [--max N] [--lang en|cn|all] [--filter KEYWORD]
 
 Examples:
   python fetch_rss.py fetch --max 20 --lang cn
@@ -15,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -260,11 +262,11 @@ def cmd_list() -> int:
     return 0
 
 
-def cmd_fetch(args: argparse.Namespace) -> int:
+def _build_digest(args: argparse.Namespace) -> Optional[Tuple[List[Dict[str, Any]], List[str], str, int, str]]:
     feeds = _load_feeds()
     if not feeds:
         print("Error: no feeds in config/feeds.yaml (missing, empty, or invalid YAML).", file=sys.stderr)
-        return 1
+        return None
 
     lang_filter = (args.lang or "all").strip().lower()
     if lang_filter not in ("en", "cn", "all"):
@@ -282,7 +284,7 @@ def cmd_fetch(args: argparse.Namespace) -> int:
             f"Error: no feeds match --lang {lang_filter!r}. Check config/feeds.yaml or use --lang all.",
             file=sys.stderr,
         )
-        return 1
+        return None
 
     n_active = len(active_feeds)
     per_feed = max(5, min(40, max_total // max(1, n_active) + 5))
@@ -335,6 +337,15 @@ def cmd_fetch(args: argparse.Namespace) -> int:
             if i < len(arr):
                 deduped.append(arr[i])
                 idx_map[k] = i + 1
+
+    return (deduped, errors, lang_filter, n_active, kw)
+
+
+def cmd_fetch(args: argparse.Namespace) -> int:
+    digest = _build_digest(args)
+    if digest is None:
+        return 1
+    deduped, errors, lang_filter, n_active, kw = digest
 
     # Markdown output for chat / LLM post-processing
     lines: List[str] = []
@@ -393,6 +404,78 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fetch_vmprint(args: argparse.Namespace) -> int:
+    digest = _build_digest(args)
+    if digest is None:
+        return 1
+    deduped, errors, lang_filter, n_active, kw = digest
+
+    root = Path(__file__).resolve().parents[3]
+    renderer = root / "skills" / "magazine-render-1.0.0" / "scripts" / "render_magazine.py"
+    if not renderer.is_file():
+        print("Error: magazine-render script not found.", file=sys.stderr)
+        return 1
+
+    payload = {
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "items": [
+            {
+                "title": str(it.get("title") or "").strip(),
+                "source": str(it.get("feed") or "").strip(),
+                "link": str(it.get("link") or "").strip(),
+            }
+            for it in deduped
+        ],
+        "meta": {"lang": lang_filter, "feeds_used": n_active, "filter": kw or "", "warnings": errors[:20]},
+    }
+    out_name = f"daily_brief_{datetime.now().strftime('%Y%m%d_%H%M%S')}.preview.html"
+    cmd = [
+        sys.executable,
+        str(renderer),
+        "render-daily-brief-ast",
+        "--title",
+        "Daily Brief",
+        "--theme",
+        str(args.theme or "dispatch"),
+        "--json",
+        json.dumps(payload, ensure_ascii=False),
+        "--output_format",
+        str(args.output_format or "browser_preview_html"),
+        "--out",
+        out_name,
+    ]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except Exception as e:
+        print(f"Error: vmprint render launch failed: {e}", file=sys.stderr)
+        return 1
+    if r.returncode != 0:
+        msg = (r.stderr or r.stdout or "").strip() or "unknown error"
+        print(f"Error: vmprint render failed: {msg}", file=sys.stderr)
+        return 1
+
+    out = (r.stdout or "").strip()
+    if not out:
+        print("Error: vmprint render returned empty output.", file=sys.stderr)
+        return 1
+
+    # Keep run_skill link append stable: emit JSON with output_rel_path when available.
+    parsed: Optional[Dict[str, Any]] = None
+    for ln in reversed([ln for ln in out.splitlines() if ln.strip()]):
+        try:
+            obj = json.loads(ln)
+            if isinstance(obj, dict) and obj.get("success") and obj.get("output_rel_path"):
+                parsed = obj
+                break
+        except Exception:
+            continue
+    if parsed is None:
+        print(out)
+        return 0
+    print(json.dumps(parsed, ensure_ascii=False))
+    return 0
+
+
 def main() -> int:
     if yaml is None:
         print("Error: PyYAML is required (HomeClaw includes PyYAML in requirements.txt).", file=sys.stderr)
@@ -413,11 +496,31 @@ def main() -> int:
     pf.add_argument("--lang", type=str, default="all", help="en | cn | all")
     pf.add_argument("--filter", type=str, default="", help="Keyword filter (title/summary substring)")
 
+    pvp = sub.add_parser("fetch-vmprint", help="Fetch digest then render VMPrint preview artifact")
+    pvp.add_argument(
+        "--max",
+        type=int,
+        default=20,
+        help=f"Max items after merge (default 20, cap {_MAX_OUTPUT_ITEMS})",
+    )
+    pvp.add_argument("--lang", type=str, default="all", help="en | cn | all")
+    pvp.add_argument("--filter", type=str, default="", help="Keyword filter (title/summary substring)")
+    pvp.add_argument("--theme", type=str, default="dispatch", help="dispatch | minimal")
+    pvp.add_argument(
+        "--output_format",
+        type=str,
+        default="browser_preview_html",
+        choices=["browser_preview_html", "pdf", "layout_json"],
+        help="VMPrint output format (default browser_preview_html).",
+    )
+
     args = p.parse_args()
     if args.cmd == "list":
         return cmd_list()
     if args.cmd == "fetch":
         return cmd_fetch(args)
+    if args.cmd == "fetch-vmprint":
+        return cmd_fetch_vmprint(args)
     return 1
 
 

@@ -61,17 +61,20 @@ From the repo root (paths may vary):
 # List configured feeds
 python3 skills/daily-brief-1.0.0/scripts/fetch_rss.py list
 
-# Fetch merged headlines (examples)
+# Fetch merged headlines (Markdown examples)
 python3 skills/daily-brief-1.0.0/scripts/fetch_rss.py fetch --max 25 --lang all
 python3 skills/daily-brief-1.0.0/scripts/fetch_rss.py fetch --max 20 --lang cn
 python3 skills/daily-brief-1.0.0/scripts/fetch_rss.py fetch --max 20 --lang en
 python3 skills/daily-brief-1.0.0/scripts/fetch_rss.py fetch --max 20 --lang all --filter AI
+
+# Fetch + VMPrint preview artifact (AST-first default path)
+python3 skills/daily-brief-1.0.0/scripts/fetch_rss.py fetch-vmprint --max 20 --lang all
 ```
 
 Via **`run_skill`** (from chat or tools):
 
 ```text
-run_skill(skill_name="daily-brief-1.0.0", script="fetch_rss.py", args=["fetch", "--max", "25", "--lang", "cn"])
+run_skill(skill_name="daily-brief-1.0.0", script="fetch_rss.py", args=["fetch-vmprint", "--max", "20", "--lang", "cn"])
 ```
 
 Output is Markdown plus a JSON block. Items are **interleaved across feeds** so one busy source does not dominate the list.

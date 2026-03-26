@@ -10,16 +10,12 @@ trigger:
     The user wants a news digest from RSS.
 
     Default behavior (AST-first):
-    1) Run daily-brief fetch to get digest data:
-       run_skill(skill_name='daily-brief-1.0.0', script='fetch_rss.py', args=['fetch', '--max', '25', '--lang', 'all'])
+    1) Run daily-brief VMPrint path by default:
+       run_skill(skill_name='daily-brief-1.0.0', script='fetch_rss.py', args=['fetch-vmprint', '--max', '25', '--lang', 'all'])
        - For Chinese-only use --lang cn; English-only use --lang en.
        - To narrow topics use --filter KEYWORD (matches title/summary).
        - For a one-line feed list use args=['list'].
-    2) Convert fetched digest into compact structured JSON (items: title/source/link; optional as_of).
-    3) Render with VMPrint AST path by default:
-       run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
-                args=["render-daily-brief-ast", "--title", "Daily Brief", "--theme", "dispatch", "--json", "<DAILY_BRIEF_JSON>", "--output_format", "browser_preview_html", "--out", "daily_brief.preview.html"])
-    4) Reply with 3–6 highlight bullets + the returned preview link. Keep in-chat text concise; the link is the primary formatted view.
+    2) Reply with 3–6 highlight bullets + the returned preview link. Keep in-chat text concise; the link is the primary formatted view.
 
     Markdown/text-only fallback:
     - Use plain Markdown output only when the user explicitly asks for plain text/Markdown/no link/no HTML.
@@ -30,7 +26,7 @@ trigger:
 
   auto_invoke:
     script: fetch_rss.py
-    args: ["fetch", "--max", "20", "--lang", "all"]
+    args: ["fetch-vmprint", "--max", "20", "--lang", "all"]
 ---
 
 # Daily Brief (RSS news digest)
@@ -53,7 +49,8 @@ Default mix includes **English** (e.g. Hacker News, Ars Technica) and **Chinese*
 | Action | Args |
 |--------|------|
 | List configured feeds | `["list"]` |
-| Fetch merged headlines | `["fetch", "--max", "30", "--lang", "all"]` |
+| Fetch merged headlines (Markdown) | `["fetch", "--max", "30", "--lang", "all"]` |
+| Fetch + VMPrint preview artifact (default) | `["fetch-vmprint", "--max", "20", "--lang", "all"]` |
 | Chinese feeds only | `["fetch", "--max", "25", "--lang", "cn"]` |
 | English feeds only | `["fetch", "--max", "25", "--lang", "en"]` |
 | Keyword filter (title/summary) | `["fetch", "--max", "20", "--lang", "all", "--filter", "AI"]` |
