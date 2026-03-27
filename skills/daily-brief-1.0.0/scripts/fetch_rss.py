@@ -18,7 +18,7 @@ import json
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
@@ -277,6 +277,11 @@ def _build_digest(args: argparse.Namespace) -> Optional[Tuple[List[Dict[str, Any
     except (TypeError, ValueError):
         max_total = 30
     max_total = max(1, min(max_total, _MAX_OUTPUT_ITEMS))
+    try:
+        days_ago = int(getattr(args, "days_ago", 0) or 0)
+    except (TypeError, ValueError):
+        days_ago = 0
+    days_ago = max(0, min(7, days_ago))
 
     active_feeds = [f for f in feeds if lang_filter == "all" or f["lang"] == lang_filter]
     if not active_feeds:
@@ -304,6 +309,20 @@ def _build_digest(args: argparse.Namespace) -> Optional[Tuple[List[Dict[str, Any
             if kw in blob:
                 filtered.append(it)
         selected = filtered
+    if days_ago > 0:
+        target_day = (datetime.now(timezone.utc) - timedelta(days=days_ago)).date()
+        day_filtered: List[Dict[str, Any]] = []
+        for it in selected:
+            pub = str(it.get("published") or "").strip()
+            if not pub:
+                continue
+            try:
+                dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+                if dt.date() == target_day:
+                    day_filtered.append(it)
+            except Exception:
+                continue
+        selected = day_filtered
 
     # Sort by date (newest first) within the pool, then de-dupe by link
     seen = set()
@@ -495,6 +514,7 @@ def main() -> int:
     )
     pf.add_argument("--lang", type=str, default="all", help="en | cn | all")
     pf.add_argument("--filter", type=str, default="", help="Keyword filter (title/summary substring)")
+    pf.add_argument("--days-ago", type=int, default=0, help="0=today/latest (default), 1=yesterday, max 7")
 
     pvp = sub.add_parser("fetch-vmprint", help="Fetch digest then render VMPrint preview artifact")
     pvp.add_argument(
@@ -505,6 +525,7 @@ def main() -> int:
     )
     pvp.add_argument("--lang", type=str, default="all", help="en | cn | all")
     pvp.add_argument("--filter", type=str, default="", help="Keyword filter (title/summary substring)")
+    pvp.add_argument("--days-ago", type=int, default=0, help="0=today/latest (default), 1=yesterday, max 7")
     pvp.add_argument("--theme", type=str, default="dispatch", help="dispatch | minimal")
     pvp.add_argument(
         "--output_format",

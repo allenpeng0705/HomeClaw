@@ -1576,6 +1576,20 @@ async def answer_from_memory(
         _use_planner_executor = bool(_planner_executor_config.get("enabled")) and bool(_intent_router_categories) and not any(
             (c or "").strip().lower() in _skip_planner_cats for c in _intent_router_categories
         )
+        # News-brief + magazine requests are brittle under planner file-tool flows.
+        # Force normal tool loop so run_skill(daily-brief -> magazine-render) guardrails apply.
+        try:
+            _q_raw_pe = (query or "").strip()
+            _q_lo_pe = _q_raw_pe.lower()
+            _is_news_magazine_req = (
+                ("新闻" in _q_raw_pe or "头条" in _q_raw_pe or "rss" in _q_lo_pe or "headline" in _q_lo_pe or "daily brief" in _q_lo_pe)
+                and ("杂志" in _q_raw_pe or "magazine" in _q_lo_pe or "pdf" in _q_lo_pe or "preview" in _q_lo_pe)
+            )
+            if _is_news_magazine_req:
+                _use_planner_executor = False
+                _component_log("planner_executor", "disabled for news-magazine request; using normal tool loop")
+        except Exception:
+            pass
 
         # Skills (SKILL.md from skills_dir + skills_extra_dirs); skills_disabled excluded
         if getattr(Util().core_metadata, 'use_skills', True):
@@ -2803,6 +2817,31 @@ async def answer_from_memory(
                 if _preset == "cursor":
                     _dag_flow = None
                     _component_log("planner_executor", "skipped DAG for Cursor friend (use route_to_plugin)")
+            # Hard bypass: news+magazine requests must use run_skill chain (daily-brief -> magazine-render),
+            # not file-oriented DAGs like document_read/save_result_page.
+            try:
+                _q_raw_dag = (query or "").strip()
+                _q_lo_dag = _q_raw_dag.lower()
+                _is_news_magazine_dag = (
+                    ("新闻" in _q_raw_dag or "头条" in _q_raw_dag or "rss" in _q_lo_dag or "headline" in _q_lo_dag or "daily brief" in _q_lo_dag)
+                    and ("杂志" in _q_raw_dag or "magazine" in _q_lo_dag or "pdf" in _q_lo_dag or "preview" in _q_lo_dag or "格式" in _q_raw_dag)
+                )
+                if _dag_flow and _is_news_magazine_dag:
+                    _dag_flow = None
+                    _component_log("planner_executor", "skipped DAG for news-magazine request; using normal tool loop")
+                # Also bypass DAG for feed-style news digest requests (e.g. "新闻 10条 英文")
+                # so we do not drift into web_search/save_result_page planner flows.
+                _is_feed_digest_req = (
+                    ("新闻" in _q_raw_dag or "头条" in _q_raw_dag or "daily brief" in _q_lo_dag or "headlines" in _q_lo_dag)
+                    and ("条" in _q_raw_dag or re.search(r"\b\d{1,3}\s*(items?|headlines?)\b", _q_lo_dag))
+                    and not any(k in _q_lo_dag for k in ("web search", "search web", "google", "bing", "tavily", "live web", "latest on web"))
+                    and not any(k in _q_raw_dag for k in ("网页搜索", "上网搜", "实时搜索", "全网搜索"))
+                )
+                if _dag_flow and _is_feed_digest_req:
+                    _dag_flow = None
+                    _component_log("planner_executor", "skipped DAG for feed-digest request; using normal tool loop")
+            except Exception:
+                pass
         # Planner–Executor Phase 2: call planner only when no DAG flow (DAG first for category). Never crash; fall back to ReAct on any error.
         _planner_plan = None
         _pe_tool_names = []  # always defined so executor/DAG below never see NameError
@@ -4484,6 +4523,69 @@ async def answer_from_memory(
                         args = {}
                     args_redacted = redact_params_for_log(args) if isinstance(args, dict) else args
                     logger.info("Tool selected: name={} parameters={}", name, args_redacted)
+                    # Guardrail: for "news brief / magazine" intent, do not let model drift into file tools.
+                    # Force run_skill(daily-brief) so routing stays on the intended path.
+                    try:
+                        _q_raw_news = (query or "").strip()
+                        _q_lo_news = _q_raw_news.lower()
+                        _news_intent = (
+                            ("新闻" in _q_raw_news or "头条" in _q_raw_news or "rss" in _q_lo_news or "headline" in _q_lo_news or "daily brief" in _q_lo_news)
+                            and ("杂志" in _q_raw_news or "magazine" in _q_lo_news or "pdf" in _q_lo_news or "preview" in _q_lo_news)
+                        )
+                        _file_tool_drift = name in ("document_read", "file_read", "file_understand", "folder_list", "file_find")
+                        if _news_intent and _file_tool_drift and registry and any(t.name == "run_skill" for t in (registry.list_tools() or [])):
+                            _lang = "all"
+                            if any(k in _q_raw_news for k in ("中文", "汉语", "国内")) or any(k in _q_lo_news for k in (" chinese", "lang cn", " cn ")):
+                                _lang = "cn"
+                            elif any(k in _q_raw_news for k in ("英文", "英语")) or any(k in _q_lo_news for k in (" english", "lang en", " en ")):
+                                _lang = "en"
+                            _max_items = 20
+                            _m_cn = re.search(r"(\d{1,3})\s*条", _q_raw_news)
+                            _m_en = re.search(r"\b(\d{1,3})\s*(items?|headlines?)\b", _q_lo_news)
+                            _m = _m_cn or _m_en
+                            if _m:
+                                try:
+                                    _max_items = max(1, min(100, int(_m.group(1))))
+                                except Exception:
+                                    _max_items = 20
+                            name = "run_skill"
+                            args = {
+                                "skill_name": "daily-brief-1.0.0",
+                                "script": "fetch_rss.py",
+                                "args": ["fetch", "--max", str(_max_items), "--lang", _lang],
+                            }
+                            _component_log("tools", "guardrail: rerouted file-tool drift to run_skill(daily-brief) for news-magazine intent")
+                        # Guardrail: feed-digest queries should not drift to web_search.
+                        _feed_digest_intent = (
+                            ("新闻" in _q_raw_news or "头条" in _q_raw_news or "daily brief" in _q_lo_news or "headlines" in _q_lo_news)
+                            and ("条" in _q_raw_news or re.search(r"\b\d{1,3}\s*(items?|headlines?)\b", _q_lo_news))
+                            and not any(k in _q_lo_news for k in ("web search", "search web", "google", "bing", "tavily", "live web", "latest on web"))
+                            and not any(k in _q_raw_news for k in ("网页搜索", "上网搜", "实时搜索", "全网搜索"))
+                        )
+                        if _feed_digest_intent and name == "web_search" and registry and any(t.name == "run_skill" for t in (registry.list_tools() or [])):
+                            _lang = "all"
+                            if any(k in _q_raw_news for k in ("中文", "汉语", "国内")) or any(k in _q_lo_news for k in (" chinese", "lang cn", " cn ")):
+                                _lang = "cn"
+                            elif any(k in _q_raw_news for k in ("英文", "英语")) or any(k in _q_lo_news for k in (" english", "lang en", " en ")):
+                                _lang = "en"
+                            _max_items = 20
+                            _m_cn = re.search(r"(\d{1,3})\s*条", _q_raw_news)
+                            _m_en = re.search(r"\b(\d{1,3})\s*(items?|headlines?)\b", _q_lo_news)
+                            _m = _m_cn or _m_en
+                            if _m:
+                                try:
+                                    _max_items = max(1, min(100, int(_m.group(1))))
+                                except Exception:
+                                    _max_items = 20
+                            name = "run_skill"
+                            args = {
+                                "skill_name": "daily-brief-1.0.0",
+                                "script": "fetch_rss.py",
+                                "args": ["fetch-vmprint", "--max", str(_max_items), "--lang", _lang],
+                            }
+                            _component_log("tools", "guardrail: rerouted web_search drift to run_skill(daily-brief fetch-vmprint) for feed-digest intent")
+                    except Exception:
+                        pass
                     # Override document_read path when user specified an explicit path (e.g. documents/norm-v4.pdf) so we use it even if the model returned a wrong path (e.g. norm/v4/pdf).
                     if name == "document_read" and _document_read_forced_path and isinstance(args, dict):
                         args = dict(args)
@@ -4893,9 +4995,23 @@ async def answer_from_memory(
                                 _skill_done
                                 and _use_direct
                                 and not (_skill_done == "daily-brief-1.0.0" and _wants_magazine_dr)
+                                and not str(result).strip().lower().startswith("stderr:")
+                                and "already run in this conversation" not in str(result).strip().lower()
                                 and not _tool_result_looks_like_error(result)
                             ):
-                                response = result.strip()
+                                _resp_direct = result.strip()
+                                # Prefer returning the exact file URL line when present.
+                                # Some skills include helper text like "CRITICAL: use only the URL..."
+                                # and the user-facing output should be the link itself.
+                                try:
+                                    for _line in _resp_direct.splitlines():
+                                        _l = (_line or "").strip()
+                                        if _l and ("/files/out" in _l or "/files/" in _l) and ("http" in _l):
+                                            _resp_direct = _l
+                                            break
+                                except Exception:
+                                    pass
+                                response = _resp_direct
                                 _stop_tool_loop_with_response = True
                                 _component_log("tools", f"direct-return run_skill result for {_skill_done} (mode={_mode})")
                         except Exception:

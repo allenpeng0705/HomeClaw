@@ -111,3 +111,6 @@ site/create_ppt_zh.py
 /tests/workflow_framework/adapters/__pycache__
 /config/workspace/documents
 tests/.DS_Store
+/skills/daily-brief-1.0.0/scripts/__pycache__
+/skills/daily-brief-1.0.0/scripts/__pycache__
+/skills/magazine-render-1.0.0/scripts/__pycache__
