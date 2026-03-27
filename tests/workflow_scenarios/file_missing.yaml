@@ -1,0 +1,4 @@
+id: file_missing
+contract: file_missing
+prompt: "Open report-2028.pdf from my files."
+description: "Missing file path should route to find/list fallback."

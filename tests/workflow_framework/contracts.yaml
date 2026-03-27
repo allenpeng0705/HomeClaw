@@ -1,0 +1,135 @@
+contracts:
+  daily_brief_ast_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: daily-brief-1.0.0
+      - event_type: arg_normalization
+        summary: run_skill argv finalized
+        details_contains:
+          argv:
+            - fetch-vmprint
+            - --max
+            - "20"
+            - --lang
+            - cn
+            - --theme
+            - dispatch
+            - --output_format
+            - browser_preview_html
+  daily_brief_markdown_explicit:
+    must_have_events:
+      - event_type: arg_normalization
+        summary: run_skill argv finalized
+        details_contains:
+          argv:
+            - fetch
+            - --max
+            - "15"
+            - --lang
+            - cn
+  weather_pretty_path:
+    must_have_events:
+      - event_type: tool_call_started
+        details_contains:
+          tool_name: run_skill
+  stock_pretty_path:
+    must_have_events:
+      - event_type: tool_call_started
+        details_contains:
+          tool_name: run_skill
+  reminder_happy:
+    must_have_events:
+      - event_type: tool_call_started
+        details_contains:
+          tool_name: remind_me
+    forbidden_events:
+      - event_type: fallback_applied
+        summary: reminder clarification fallback
+  reminder_missing_time:
+    must_have_events:
+      - event_type: tool_call_started
+        details_contains:
+          tool_name: remind_me
+      - event_type: tool_call_finished
+        details_contains:
+          tool_name: remind_me
+          status: error
+  file_happy:
+    must_have_events:
+      - event_type: tool_call_started
+        details_contains:
+          tool_name: document_read
+  file_missing:
+    must_have_events:
+      - event_type: tool_call_started
+        details_contains:
+          tool_name: file_find
+  memory_store:
+    must_have_events:
+      - event_type: tool_call_started
+        details_contains:
+          tool_name: append_agent_memory
+  memory_recall:
+    must_have_events:
+      - event_type: tool_call_started
+        details_contains:
+          tool_name: agent_memory_search
+  kb_happy:
+    must_have_events:
+      - event_type: tool_call_started
+        details_contains:
+          tool_name: document_read
+    forbidden_events:
+      - event_type: fallback_applied
+        details_contains:
+          reason: kb_no_result
+  kb_miss_fallback:
+    must_have_events:
+      - event_type: tool_call_started
+        details_contains:
+          tool_name: knowledge_base_search
+      - event_type: tool_call_finished
+        details_contains:
+          tool_name: knowledge_base_search
+  web_search_happy:
+    must_have_events:
+      - event_type: tool_call_started
+        details_contains:
+          tool_name: web_search
+      - event_type: tool_call_finished
+        details_contains:
+          tool_name: web_search
+  web_search_no_results:
+    must_have_events:
+      - event_type: tool_call_finished
+        details_contains:
+          tool_name: web_search
+  stock_portfolio_default:
+    must_have_events:
+      - event_type: arg_normalization
+        summary: run_skill argv finalized
+        details_contains:
+          argv:
+            - portfolio
+  stock_missing_symbol:
+    must_have_events:
+      - event_type: arg_normalization
+        summary: run_skill argv finalized
+        details_contains:
+          argv:
+            - portfolio
+  email_send_happy:
+    must_have_events:
+      - event_type: tool_call_started
+        details_contains:
+          tool_name: file_read
+    forbidden_events:
+      - event_type: fallback_applied
+        details_contains:
+          reason: missing_recipient
+  email_missing_recipient:
+    must_have_events:
+      - event_type: tool_call_started
+        details_contains:
+          tool_name: file_read

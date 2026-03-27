@@ -687,7 +687,8 @@ class Util:
 
     def _resolve_llm(self, llm_name: Optional[str] = None):
         """Return (path, model_id, type, host, port) for llm_name, or for main_llm if llm_name is None/empty. Returns None if llm_name given but not found.
-        When the resolved model is the current main LLM, host/port are taken from main_llm_host/main_llm_port.
+        When the resolved model is the current main LLM, host/port are taken from main_llm_host/main_llm_port
+        for local/ollama, or cloud_llm_host/cloud_llm_port when the main model is cloud (litellm).
         When the resolved model is vision_llm, host/port are taken from vision_llm_host/vision_llm_port.
         When the resolved model is tool_selection_llm, host/port are taken from tool_selection_llm_host/tool_selection_llm_port."""
         if llm_name and str(llm_name).strip():
@@ -697,11 +698,19 @@ class Util:
                 main_ref = (self._effective_main_llm_ref() or "").strip()
                 use_main_port = main_ref and name.strip() == main_ref
                 if use_main_port:
-                    host = str(getattr(self.core_metadata, 'main_llm_host', None) or '127.0.0.1').strip() or '127.0.0.1'
-                    try:
-                        port = max(1, min(65535, int(getattr(self.core_metadata, 'main_llm_port', None) or 5088)))
-                    except (TypeError, ValueError):
-                        port = 5088
+                    # Cloud main must use LiteLLM proxy, not main_llm_port (local llama.cpp).
+                    if mtype == 'litellm':
+                        host = str(getattr(self.core_metadata, 'cloud_llm_host', None) or '127.0.0.1').strip() or '127.0.0.1'
+                        try:
+                            port = max(1, min(65535, int(getattr(self.core_metadata, 'cloud_llm_port', None) or 14005)))
+                        except (TypeError, ValueError):
+                            port = 14005
+                    else:
+                        host = str(getattr(self.core_metadata, 'main_llm_host', None) or '127.0.0.1').strip() or '127.0.0.1'
+                        try:
+                            port = max(1, min(65535, int(getattr(self.core_metadata, 'main_llm_port', None) or 5088)))
+                        except (TypeError, ValueError):
+                            port = 5088
                 else:
                     vision_ref = ""
                     try:

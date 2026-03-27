@@ -2,7 +2,7 @@
 
 A **watchlist + portfolio + alerts** skill for HomeClaw, inspired by the same patterns as OpenClaw-style skills that use **yfinance** (e.g. Yahoo Finance portfolio / finance skills on skill registries). **No API key** is required for the default path.
 
-**Consolidated doc (same topics + Core pip/npm install):** [documentation/README.md](../../documentation/README.md)
+**Also in this folder:** **`SKILL.md`** (agent instructions), **`config/watchlist.example.yml`** (commented YAML examples).
 
 ## Natural language (what you can say)
 
@@ -60,7 +60,7 @@ A **watchlist + portfolio + alerts** skill for HomeClaw, inspired by the same pa
 - **Python 3** + **`yfinance`** + **PyYAML**.
 - **Network** access from the Core host to Yahoo Finance.
 
-**Automatic install (default):** HomeClaw runs `pip install -r <skill>/requirements.txt` **once per Core process** before executing a Python skill script, when `tools.run_skill_requirements_txt` is `true` in `config/skills_and_plugins.yml` (default). Set it to `false` if you only want manual installs.
+**Automatic install (default):** In `config/skills_and_plugins.yml` under **`tools:`**, **`run_skill_requirements_txt`** (default **`true`**) runs **`pip install -r`** for **`<skill>/requirements.txt`** once per Core process before **`.py`** skill scripts; set **`false`** for manual-only installs. **`run_skill_npm_install`** (default **`true`**) does the same for **`<skill>/package.json`** before **`.js`/`.ts`** scripts (requires **`npm`** on `PATH`); set **`false`** to disable.
 
 Manual install (optional):
 
@@ -141,6 +141,7 @@ Set **`HOMECLAW_STOCK_MONITOR_CONFIG`** (or **`STOCK_MONITOR_CONFIG`**) to an ab
 ```text
 run_skill(skill_name="stock-monitor-1.0.0", script="stock_monitor.py", args=["portfolio"])
 run_skill(skill_name="stock-monitor-1.0.0", script="stock_monitor.py", args=["check"])
+run_skill(skill_name="stock-monitor-1.0.0", script="stock_monitor.py", args=["check", "--json"])
 run_skill(skill_name="stock-monitor-1.0.0", script="stock_monitor.py", args=["news", "NVDA"])
 run_skill(skill_name="stock-monitor-1.0.0", script="stock_monitor.py", args=["context", "AAPL"])
 ```

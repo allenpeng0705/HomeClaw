@@ -36,6 +36,11 @@ from base.user_sandbox_folders import FOLDER_NAMES_FOR_USER_MESSAGE, STANDARD_US
 from base.util import Util, redact_params_for_log
 from base.base import PluginResult, User
 from base.media_io import save_data_url_to_media_folder
+try:
+    from base.workflow_trace import emit_event as _trace_emit_event
+except ImportError:
+    def _trace_emit_event(**kwargs):  # type: ignore
+        return None
 from loguru import logger
 import time as _time
 
@@ -3221,12 +3226,39 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
     """Run a script from a loaded skill's scripts/ folder. All usage (script name, args) is defined in SKILL.md; the model must pass them. Never raises: returns an error string on failure."""
     if not isinstance(arguments, dict):
         return "Error: run_skill arguments must be a dict (skill_name, script, args)."
+    _trace_emit_event(
+        event_type="skill_call_started",
+        component="run_skill",
+        summary="run_skill started",
+        details={
+            "skill_name": (arguments.get("skill_name") or arguments.get("skill") or ""),
+            "script": (arguments.get("script") or arguments.get("script_name") or ""),
+            "args": arguments.get("args"),
+        },
+    )
     try:
-        return await _run_skill_executor_impl(arguments, context)
+        out = await _run_skill_executor_impl(arguments, context)
+        _trace_emit_event(
+            event_type="skill_call_finished",
+            component="run_skill",
+            summary="run_skill finished",
+            details={
+                "skill_name": (arguments.get("skill_name") or arguments.get("skill") or ""),
+                "status": ("error" if isinstance(out, str) and out.strip().startswith("Error") else "ok"),
+                "result_len": (len(out) if isinstance(out, str) else 0),
+            },
+        )
+        return out
     except (KeyboardInterrupt, SystemExit):
         raise
     except Exception as e:
         logger.debug("run_skill executor error: %s", e)
+        _trace_emit_event(
+            event_type="skill_call_finished",
+            component="run_skill",
+            summary="run_skill exception",
+            details={"skill_name": (arguments.get("skill_name") or arguments.get("skill") or ""), "status": "exception", "error": str(e)},
+        )
         return "Error: run_skill failed (internal error). Check Core logs."
 
 
@@ -3583,11 +3615,31 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
             )
             # Stabilize default: convert legacy 'fetch' to AST-first unless user explicitly asks text/markdown.
             if cmd_ok and args_list and args_list[0] == "fetch" and not _plain_markdown_requested:
+                _trace_emit_event(
+                    event_type="fallback_applied",
+                    component="run_skill",
+                    summary="daily-brief upgraded to vmprint path",
+                    details={"reason": "ast-first-default", "before": list(args_list), "after": ["fetch-vmprint"] + list(args_list[1:])},
+                )
                 args_list[0] = "fetch-vmprint"
             if cmd_ok:
+                _before = list(args_list)
                 args_list = _normalize_daily_brief_args(args_list)
+                if args_list != _before:
+                    _trace_emit_event(
+                        event_type="arg_normalization",
+                        component="run_skill",
+                        summary="daily-brief args normalized",
+                        details={"skill_name": skill_name, "before": _before, "after": args_list, "rule": "normalize_daily_brief_args"},
+                    )
             if not cmd_ok:
                 args_list = _derive_daily_brief_args_from_query(_q or "daily brief", _plain_markdown_requested)
+                _trace_emit_event(
+                    event_type="arg_normalization",
+                    component="run_skill",
+                    summary="daily-brief args derived from query",
+                    details={"skill_name": skill_name, "query": _q or "daily brief", "after": args_list, "rule": "derive_daily_brief_args_from_query"},
+                )
         elif skill_name == "weather-1.0.0":
             if not args_list and user_text_for_args:
                 args_list = [user_text_for_args]
@@ -3728,6 +3780,12 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
         args_list = [str(a)[:_max_len] for a in args_list]
     except Exception:
         args_list = []
+    _trace_emit_event(
+        event_type="arg_normalization",
+        component="run_skill",
+        summary="run_skill argv finalized",
+        details={"skill_name": skill_name, "script": script_path.name, "argv": args_list},
+    )
     try:
         if script_path.suffix.lower() in (".py", ".pyw"):
             await _maybe_pip_install_skill_requirements(skill_folder, skill_env, config)
@@ -6553,6 +6611,12 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
     plugin_id = str(arguments.get("plugin_id") or "").strip().lower().replace(" ", "_")
     if not plugin_id:
         return "Error: plugin_id is required."
+    _trace_emit_event(
+        event_type="plugin_call_started",
+        component="route_to_plugin",
+        summary="plugin routing started",
+        details={"plugin_id": plugin_id, "capability_id": arguments.get("capability_id"), "parameters": arguments.get("parameters")},
+    )
     capability_id = (arguments.get("capability_id") or "")
     capability_id = str(capability_id).strip().lower().replace(" ", "_") or None
     llm_params = arguments.get("parameters")
@@ -6629,6 +6693,12 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
                     "missing": missing,
                     "uncertain": uncertain,
                 })
+                _trace_emit_event(
+                    event_type="fallback_applied",
+                    component="route_to_plugin",
+                    summary="plugin parameter fallback: ask user",
+                    details={"plugin_id": plugin_id, "capability_id": capability_id, "missing": missing},
+                )
                 return question
             if uncertain:
                 question = "Can you confirm the values above so I can proceed?"
@@ -6639,6 +6709,12 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
                     "missing": [],
                     "uncertain": uncertain,
                 })
+                _trace_emit_event(
+                    event_type="fallback_applied",
+                    component="route_to_plugin",
+                    summary="plugin parameter fallback: confirm uncertain",
+                    details={"plugin_id": plugin_id, "capability_id": capability_id, "uncertain": uncertain},
+                )
                 return question
         if err:
             return err
@@ -6876,15 +6952,39 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
             await core.send_response_to_request_channel(result_text, request)
         # When cron_scheduled: caller (cron task) will send result_text via TAM. Sync inbound: return text.
         if cron_scheduled:
+            _trace_emit_event(
+                event_type="plugin_call_finished",
+                component="route_to_plugin",
+                summary="plugin routing finished",
+                details={"plugin_id": plugin_id, "status": "ok", "mode": "cron"},
+            )
             return result_text
         if _is_sync_inbound(request):
+            _trace_emit_event(
+                event_type="plugin_call_finished",
+                component="route_to_plugin",
+                summary="plugin routing finished",
+                details={"plugin_id": plugin_id, "status": "ok", "mode": "sync_inbound"},
+            )
             return result_text
+        _trace_emit_event(
+            event_type="plugin_call_finished",
+            component="route_to_plugin",
+            summary="plugin routing finished",
+            details={"plugin_id": plugin_id, "status": "ok", "mode": "async"},
+        )
         return ROUTING_RESPONSE_ALREADY_SENT
     except BaseException as e:
         # Never break Core: catch all. Re-raise so process can exit on Ctrl+C / sys.exit
         if isinstance(e, (KeyboardInterrupt, SystemExit)):
             raise
         logger.exception(e)
+        _trace_emit_event(
+            event_type="plugin_call_finished",
+            component="route_to_plugin",
+            summary="plugin routing exception",
+            details={"plugin_id": plugin_id, "status": "exception", "error": str(e)},
+        )
         return f"Error running plugin: {e!s}"
 
 

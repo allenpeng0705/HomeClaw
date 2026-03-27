@@ -1,0 +1,4 @@
+id: stock_missing_symbol
+contract: stock_missing_symbol
+prompt: "Give me stock context please."
+description: "Stock context request with missing symbol."

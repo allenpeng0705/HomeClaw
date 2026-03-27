@@ -1,0 +1,4 @@
+id: web_search_happy
+contract: web_search_happy
+prompt: "Search the web for latest Python 3.13 release notes."
+description: "Web search happy path."

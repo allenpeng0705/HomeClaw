@@ -1,0 +1,4 @@
+id: memory_recall
+contract: memory_recall
+prompt: "What do you remember about my answer style preference?"
+description: "Memory recall intent."

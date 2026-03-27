@@ -1,0 +1,4 @@
+id: memory_store
+contract: memory_store
+prompt: "Remember that I prefer concise bullet answers."
+description: "Memory store intent."

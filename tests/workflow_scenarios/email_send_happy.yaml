@@ -1,0 +1,4 @@
+id: email_send_happy
+contract: email_send_happy
+prompt: "Send an email to alice@example.com with subject Project Update and a short status body."
+description: "Email send happy path."

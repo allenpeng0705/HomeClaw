@@ -35,6 +35,22 @@ from base.friend_presets import (
 )
 from base.tool_profiles import get_tools_for_llm
 from base.tools_rag import search_tools_by_query as tools_rag_search
+try:
+    from base.workflow_trace import (
+        start_turn as _trace_start_turn,
+        end_turn as _trace_end_turn,
+        emit_event as _trace_emit_event,
+        current_trace_path as _trace_current_path,
+    )
+except ImportError:
+    def _trace_start_turn(**kwargs):  # type: ignore
+        return None
+    def _trace_end_turn(**kwargs):  # type: ignore
+        return None
+    def _trace_emit_event(**kwargs):  # type: ignore
+        return None
+    def _trace_current_path():  # type: ignore
+        return None
 from base.intent_router import (
     route as intent_router_route,
     get_tools_filter_for_category,
@@ -666,6 +682,7 @@ async def answer_from_memory(
     port: Optional[int] = None,
     request: Optional[PromptRequest] = None,
 ) -> Optional[tuple]:
+    _trace_started = False
     if messages is None:
         messages = []
     if not any([user_name, user_id, agent_id, run_id]):
@@ -676,6 +693,17 @@ async def answer_from_memory(
     except (TypeError, AttributeError):
         _mem_scope = "HomeClaw"
     uid = (user_id or getattr(request, "user_id", None) or "").strip() or "companion"
+    try:
+        _trace_start_turn(
+            run_id=run_id,
+            request_id=(getattr(request, "request_id", None) if request else None),
+            session_id=session_id,
+            user_id=uid,
+            query=query,
+        )
+        _trace_started = True
+    except Exception:
+        _trace_started = False
     # Pending user actions (DB): assistant offered something (e.g. magazine PDF); user confirms on a later turn.
     try:
         _tc_pa = getattr(Util().get_core_metadata(), "tools_config", None) or {}
@@ -1040,6 +1068,18 @@ async def answer_from_memory(
             if not effective_llm_name:
                 effective_llm_name = None
             logger.info("Mix mode: route=%s (layer=%s)", route, route_layer)
+            _trace_emit_event(
+                event_type="model_selected",
+                component="llm_loop",
+                summary="mix model selected",
+                details={
+                    "mode": "mix",
+                    "route": route,
+                    "layer": route_layer,
+                    "model": effective_llm_name or "",
+                    "score": route_score,
+                },
+            )
             # Per-request log and aggregated counts (mix mode only)
             try:
                 from hybrid_router.metrics import log_router_decision
@@ -3333,6 +3373,16 @@ async def answer_from_memory(
                     and not [tc for tc in (msg.get("tool_calls") or []) if isinstance(tc, dict) and isinstance((tc.get("function") or {}), dict) and ((tc.get("function") or {}).get("name") or "").strip()]
                 ) or (mix_route_this_request == "cloud" and _truncated)
                 if _should_fallback:
+                    _trace_emit_event(
+                        event_type="fallback_applied",
+                        component="llm_loop",
+                        summary="llm fallback considered",
+                        details={
+                            "current_route": mix_route_this_request,
+                            "reason": "msg_none_or_empty_or_truncated",
+                            "truncated": bool(_truncated),
+                        },
+                    )
                     _meta_fb = None
                     hr = {}
                     try:
@@ -3355,6 +3405,17 @@ async def answer_from_memory(
                             if other_llm:
                                 _reason = "first model failed" if msg is None else ("cloud truncated (finish_reason=length); retrying with local" if _truncated else "local returned empty or no usable tool_calls (e.g. truncated); retrying with cloud")
                                 _component_log("mix", "{} — retrying with {} ({})".format(_reason, other_route, other_llm))
+                                _trace_emit_event(
+                                    event_type="fallback_applied",
+                                    component="llm_loop",
+                                    summary="llm fallback retry",
+                                    details={
+                                        "from_route": _current_route,
+                                        "to_route": other_route,
+                                        "reason": _reason,
+                                        "to_model": other_llm,
+                                    },
+                                )
                                 # Sanitize so cloud API never sees orphaned 'tool' messages (DeepSeek etc. require tool to follow assistant with tool_calls)
                                 _msgs_for_cloud = _messages_sanitized_for_tool_role(current_messages)
                                 try:
@@ -5183,9 +5244,16 @@ async def answer_from_memory(
                 "assistant_message": _assistant,
                 "tool_messages": _tool_msgs,
             }
+        if _trace_started:
+            _trace_end_turn(
+                final_output=(response if isinstance(response, str) else ""),
+                artifact={"trace_path": _trace_current_path() or ""},
+            )
         return (response, memory_turn_data)
     except Exception as e:
         logger.exception(e)
+        if _trace_started:
+            _trace_end_turn(final_output="", artifact={"error": str(e), "trace_path": _trace_current_path() or ""})
         return (None, None)
 
 

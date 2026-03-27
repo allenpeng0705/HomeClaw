@@ -106,3 +106,8 @@ site/create_ppt.py
 site/create_ppt_zh.py
 /external_plugins/__pycache__
 /skills/stock-monitor-1.0.0/scripts/__pycache__
+/output
+/tests/workflow_framework/__pycache__
+/tests/workflow_framework/adapters/__pycache__
+/config/workspace/documents
+tests/.DS_Store

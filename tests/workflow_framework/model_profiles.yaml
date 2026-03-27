@@ -1,0 +1,9 @@
+profiles:
+  local_fast:
+    mode: in_process
+    env:
+      MAIN_LLM_MODE: local
+  cloud_primary:
+    mode: real_core
+    env:
+      MAIN_LLM_MODE: cloud

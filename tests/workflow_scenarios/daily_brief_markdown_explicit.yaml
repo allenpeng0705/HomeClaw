@@ -1,0 +1,4 @@
+id: daily_brief_markdown_explicit
+contract: daily_brief_markdown_explicit
+prompt: "今日新闻 15条 中文，纯Markdown输出"
+description: "Daily brief should allow explicit markdown fallback."

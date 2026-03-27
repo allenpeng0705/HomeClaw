@@ -1,0 +1,4 @@
+id: kb_miss_fallback
+contract: kb_miss_fallback
+prompt: "Find knowledgebase info about quantum banana protocol."
+description: "KB miss should trigger fallback path."
