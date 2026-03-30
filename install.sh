@@ -332,7 +332,8 @@ if [ -d "$VMPRINT_MAIN" ] && [ ! -d "$VMPRINT_DIR" ]; then
   echo "Renaming tools/vmprint-main to tools/vmprint ..."
   mv "$VMPRINT_MAIN" "$VMPRINT_DIR" 2>/dev/null || { echo "Warning: could not rename vmprint-main to vmprint (e.g. permission). You can rename manually."; true; }
 fi
-if [ -d "$VMPRINT_DIR/draft2final" ] && [ -f "$VMPRINT_DIR/package.json" ]; then
+# Monorepo (cli/ + package.json) or legacy tree with draft2final/; Markdown→PDF uses npm package draft2final.
+if [ -f "$VMPRINT_DIR/package.json" ] && { [ -d "$VMPRINT_DIR/draft2final" ] || [ -d "$VMPRINT_DIR/cli" ]; }; then
   echo "OK: VMPrint already at tools/vmprint"
 else
   if command -v git >/dev/null 2>&1; then
@@ -344,19 +345,18 @@ else
       echo "Cloning VMPrint from GitHub into tools/vmprint (optional Markdown-to-PDF tool)..."
       git clone --progress --depth 1 https://github.com/cosmiciron/vmprint.git "$VMPRINT_DIR" 2>&1 || true
     fi
-    if [ -d "$VMPRINT_DIR/draft2final" ] && command -v npm >/dev/null 2>&1; then
-      echo "Installing VMPrint dependencies (npm install) ..."
+    if [ -f "$VMPRINT_DIR/package.json" ] && command -v npm >/dev/null 2>&1; then
+      echo "Installing VMPrint dependencies (npm install; includes draft2final for Markdown→PDF) ..."
       (cd "$VMPRINT_DIR" && npm install --silent 2>/dev/null) || true
       if [ -d "$VMPRINT_DIR/node_modules" ]; then
         echo "Building VMPrint workspace (ordered dependency build) ..."
-        # Use VMPrint root build order (contracts/engine/markdown-core -> draft2final/transmuters).
         (cd "$VMPRINT_DIR" && npm run build 2>/dev/null) || true
         echo "OK: VMPrint installed at tools/vmprint"
       else
         echo "VMPrint clone present; run manually: cd $VMPRINT_DIR && npm install"
       fi
-    elif [ -d "$VMPRINT_DIR/draft2final" ]; then
-      echo "VMPrint cloned; Node/npm not found. Install Node from https://nodejs.org then run: cd $VMPRINT_DIR && npm install"
+    elif [ -f "$VMPRINT_DIR/package.json" ]; then
+      echo "VMPrint present; Node/npm not found. Install Node from https://nodejs.org then run: cd $VMPRINT_DIR && npm install"
     else
       echo "VMPrint clone skipped (git failed or no network). Markdown-to-PDF will use pandoc/weasyprint if available."
     fi

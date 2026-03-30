@@ -28,15 +28,17 @@
 llama_cpp:
   # 32768
   ctx_size: 262142 #128K
-  predict: 262142   # server default max tokens (--predict); overridden per request by completion.max_tokens when Core sends it
+  predict: 32768   # server default max tokens (--predict); overridden per request by completion.max_tokens when Core sends it
   temp: 0.2
   threads: 4
   n_gpu_layers: 99
   verbose: false
   repeat_penalty: 1.5
   chat_format: null
-  # true = enable tool/function calling (--jinja) for main_llm and any local model Core starts. Use true whether or not you use tool_selection_llm: main_llm still does tool turns (or continuation/direct reply). If you run tool_selection_llm yourself on its port, start that server with function calling too (e.g. --jinja or same llama_cpp config).
+  # true = enable tool/function calling for Core’s OpenAI-style tools API. When jinja is omitted, Core also passes llama-server --jinja (Jinja template from GGUF) whenever function_calling is true.
   function_calling: true
+  # Optional: override whether llama-server gets --jinja (Jinja chat template; helps server map Qwen output to tool_calls). Omit = follow function_calling. Set false to disable --jinja while keeping function_calling true (rare). Set true to force --jinja even if function_calling were false (unusual).
+  jinja: false
   cache_type_k: q4_0
   cache_type_v: q4_0
   # Model load / throughput (passed to llama-server at startup):
@@ -53,7 +55,7 @@ llama_cpp:
   # Self-extend (long context with less slowdown): grp_attn_n = expansion factor (e.g. 4 for 4k→16k), grp_attn_w = window (e.g. 1024).
   #grp_attn_n: 4
   #grp_attn_w: 1024
-  #qwen_mode: qwen35
+  qwen_mode: qwen35
   # stop: null   # optional; fallback when completion.stop not set. e.g. ["<|im_end|>", "</s>"]. For Qwen see completion.stop.
   # ——— Qwen / Qwen 3.5 (single entry point: all Qwen settings here only) ———
   # qwen_mode: "qwen3" | "qwen35" — applies to main_llm when set here. tool_selection_llm and vision_llm use root unless overridden in llama_cpp.tool_selection / llama_cpp.vision.
@@ -64,7 +66,7 @@ llama_cpp:
   # qwen35_grammar_path: "config/grammars/qwen35_tools.gbnf"
   # Optional when qwen_mode: qwen35: set to true to enable GBNF grammar. Default: false (we parse both JSON and XML <tool_call> from prompt + stop).
   # When true: we inject tool definitions into the system prompt and do not send the tools array, so grammar can be used with tools (llama-server would return 400 if both were sent).
-  #qwen35_use_grammar: true
+  qwen35_use_grammar: true
   # ——— Qwen 3.5 performance (reasoning models): optional server defaults. Restart server after changing.
   # min_p: 0.05        # min-p sampling; reasoning models need a little room (0.05); 0 = disabled. Passed as --min-p to llama-server.
   # temp: 0.6          # for Qwen 3.5: 0.6 recommended (temp 0 hurts reasoning; too high breaks tool calls). Override in completion.temperature per-request.
@@ -75,8 +77,9 @@ llama_cpp:
   # • reasoning_budget: -1 (recommended): Fewer truncation issues; we remove </think> from stop so the answer after <think> is not cut off. Downside: some servers put the full reply in reasoning_content and leave content empty — we use reasoning_content as the reply and strip <think>, so empty-content issues are reduced. If you still see empty replies, set qwen_always_use_fallback_for_empty: true under completion (or tools_config).
   # • reasoning_budget: 0: Thinking disabled; server is asked to put output in content. Downside: with 0 some setups produce more malformed tool output or truncation. Prefer -1 unless you must disable <think>.
   # • disable_thinking_when_tools: default false. When false we do NOT send enable_thinking: false on tool turns (server keeps thinking on). This restores the previous stable behavior with Qwen VL (tool_calls work, no truncation). Set to true in completion or llama_cpp only if you see empty content with reasoning_content full (e.g. 4B).
-  # reasoning_budget: -1   # -1 = allow thinking (recommended); 0 = disable <think> (may increase malformed tool calls or truncation)
-
+  reasoning_budget: 0   # -1 = allow thinking (recommended); 0 = disable <think> (may increase malformed tool calls or truncation)
+  enable_thinking: false
+  
   # ——— Embedding server: fully separate from main model. Only the keys below are used.
   # Uncomment and set any optional key as needed. Defaults when omitted: ctx_size 0, threads 4, n_gpu_layers 20, verbose false.
   embedding:
@@ -131,7 +134,7 @@ llama_cpp:
 # • Stop sequences: completion.stop (e.g. <|im_end|>) can cut replies if the model emits them early. For Qwen with reasoning_budget != 0, </think> is removed from stop automatically.
 # • Restart Core after changing llama_cpp.predict or ctx_size so the llama-server process is started with the new --predict and --ctx-size.
 completion:
-  max_tokens: 262142         # max tokens per response for all turns; 32768 helps avoid truncation on local. For cloud (DeepSeek, etc.) Core caps at cloud_max_tokens_cap (default 8192); set higher only if your provider allows (e.g. DeepSeek supports up to 32768).
+  max_tokens: 32768         # max tokens per response for all turns; 32768 helps avoid truncation on local. For cloud (DeepSeek, etc.) Core caps at cloud_max_tokens_cap (default 8192); set higher only if your provider allows (e.g. DeepSeek supports up to 32768).
   # cloud_max_tokens_cap: 8192   # optional; max_tokens sent to cloud = min(max_tokens, this). Default 8192. Set e.g. 32768 if your cloud provider allows and you want longer cloud replies (reduces truncation in mix mode).
   temperature: 0.2          # sampling temperature 0..2 (fallback: llama_cpp.temp)
   top_p: 1.0                # nucleus sampling 0..1
@@ -302,12 +305,12 @@ local_models:
   #   port: 5028
   #   capabilities: [Chat]
 
-  # - id: Qwen3.5-14B-A3B-Claud-4.6-Opus_q4_k_m
-  #   alias: Qwen3.5-14B-A3B-Claud-4.6-Opus_q4_k_m
-  #   path: Qwen3.5-14B-A3B-Claud-4.6-Opus_q4_k_m.gguf
-  #   host: 127.0.0.1
-  #   port: 5028
-  #   capabilities: [Chat]
+  - id: Qwen3.5-14B-A3B-Claud-4.6-Opus_q4_k_m
+    alias: Qwen3.5-14B-A3B-Claud-4.6-Opus_q4_k_m
+    path: Qwen3.5-14B-A3B-Claud-4.6-Opus_q4_k_m.gguf
+    host: 127.0.0.1
+    port: 5028
+    capabilities: [Chat]
 
   - id: Qwen3.5-9B-Q5_K_M
     alias: Qwen3.5-9B-Q5_K_M
@@ -316,6 +319,13 @@ local_models:
     port: 5029
     capabilities: [Chat]
   # Note: was 5024; use a different port so 27B and 9B can run at the same time (only one process per port).
+
+  - id: Qwen3.5-9B-Claude-4.6-HighIQ-INSTRUCT-HERETIC-UNCENSORED
+    alias: Qwen3.5-9B-Claude-4.6-HighIQ-INSTRUCT-HERETIC-UNCENSORED.Q8_0
+    path: Qwen3.5-9B-Claude-4.6-HighIQ-INSTRUCT-HERETIC-UNCENSORED.Q8_0.gguf
+    host: 127.0.0.1
+    port: 5029
+    capabilities: [Chat]
 
   - id: Qwen3-8B-Q5_K_M
     alias: Qwen3-8B-Q5_K_M
@@ -421,7 +431,7 @@ cloud_models:
 # If the local llama.cpp server is not running (e.g. connection refused to 127.0.0.1:5022), use main_llm_mode: cloud so only cloud is used, or start the local server.
 #main_llm: local_models/main_vl_model_4B
 main_llm_mode: mix
-main_llm_local: local_models/main_vl_model_4B
+main_llm_local: local_models/Qwen3.5-9B-Q5_K_M
 main_llm_cloud: cloud_models/DeepSeek-Chat
 # ——— Stability: if tool turns often fail (empty content, 500s, cloud errors), set use_tool_selection_llm: false so main_llm does every turn, or set tool_selection_llm to the same as main_llm_local (e.g. 8B) so one model handles both "which tool" and "after tool result".
 # tool_selection_llm: optional. When use_tool_selection_llm is true, every LLM call in the tool loop uses this model (tool selection + parameter extraction). Good for models fine-tuned on function calling (e.g. Qwen3-4B-toolcalling). When not used (default): main_llm handles everything — all tool selection, parameter extraction, and final replies.

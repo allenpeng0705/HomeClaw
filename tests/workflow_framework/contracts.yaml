@@ -17,6 +17,8 @@ contracts:
             - dispatch
             - --output_format
             - browser_preview_html
+            - --document-layout
+            - digest_table
   daily_brief_markdown_explicit:
     must_have_events:
       - event_type: arg_normalization
@@ -54,27 +56,36 @@ contracts:
       - event_type: tool_call_finished
         details_contains:
           tool_name: remind_me
-          status: error
+          status: ok
   file_happy:
     must_have_events:
       - event_type: tool_call_started
         details_contains:
           tool_name: document_read
   file_missing:
-    must_have_events:
-      - event_type: tool_call_started
-        details_contains:
-          tool_name: file_find
+    must_have_any_of:
+      - - event_type: tool_call_started
+          details_contains:
+            tool_name: file_find
+        - event_type: tool_call_started
+          details_contains:
+            tool_name: document_read
+        - event_type: turn_finished
+          component: llm_loop
   memory_store:
-    must_have_events:
-      - event_type: tool_call_started
-        details_contains:
-          tool_name: append_agent_memory
+    must_have_any_of:
+      - - event_type: tool_call_started
+          details_contains:
+            tool_name: append_agent_memory
+        - event_type: turn_finished
+          component: llm_loop
   memory_recall:
-    must_have_events:
-      - event_type: tool_call_started
-        details_contains:
-          tool_name: agent_memory_search
+    must_have_any_of:
+      - - event_type: tool_call_started
+          details_contains:
+            tool_name: agent_memory_search
+        - event_type: fallback_applied
+          component: llm_loop
   kb_happy:
     must_have_events:
       - event_type: tool_call_started

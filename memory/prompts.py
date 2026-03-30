@@ -94,11 +94,11 @@ Examples:
 # Step 2 memory upgrade: extract entities and relations for the graph store (Cognee-like).
 MEMORY_GRAPH_EXTRACT_PROMPT = """From the following short memory text, extract entities (people, places, things, concepts) and relationships between them.
 Output only valid JSON, no other text. Use this exact format:
-{"entities":[{"id":"short_slug","name":"Display Name","type":"person|place|thing|concept"}],"relations":[{"from":"entity_id","to":"entity_id","label":"relationship_type"}]}
+{{"entities":[{{"id":"short_slug","name":"Display Name","type":"person|place|thing|concept"}}],"relations":[{{"from":"entity_id","to":"entity_id","label":"relationship_type"}}]}}
 - Use "id" as a short unique slug (e.g. "alice", "bob", "paris"). Use lowercase, no spaces.
 - "name" is the display name; "type" is one of: person, place, thing, concept.
 - In "relations", "from" and "to" must match entity "id"s; "label" is the relationship (e.g. knows, works_at, located_in, likes).
-- Extract only what is clearly stated or strongly implied. If there are no entities or relations, return {"entities":[],"relations":[]}.
+- Extract only what is clearly stated or strongly implied. If there are no entities or relations, return {{"entities":[],"relations":[]}}.
 
 Memory text:
 {text}

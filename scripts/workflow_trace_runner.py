@@ -365,25 +365,38 @@ def _run_real_core(
                 raise RuntimeError("Core not ready within timeout (180s).")
         for s in scenarios:
             before = _snapshot_trace_lines(trace_dir)
-            data = runner.run_prompt(s.prompt, user_id=eff_user_id, timeout_sec=inbound_timeout_sec)
-            trace_path, appended_events = _extract_new_events_to_temp_file(trace_dir, before, s.id)
-            ev = evaluate_scenario_from_trace(
-                scenario_id=s.id,
-                contract_name=s.contract,
-                contracts=loaded["contracts"],
-                trace_path=trace_path,
-                response=str(data.get("text") or ""),
-            )
-            row = {
-                "scenario_id": s.id,
-                "ok": ev.ok,
-                "errors": ev.errors,
-                "trace_path": ev.trace_path,
-                "status": data.get("status"),
-                "events_appended": appended_events,
-            }
-            results.append(row)
-            if not ev.ok:
+            try:
+                data = runner.run_prompt(s.prompt, user_id=eff_user_id, timeout_sec=inbound_timeout_sec)
+                trace_path, appended_events = _extract_new_events_to_temp_file(trace_dir, before, s.id)
+                ev = evaluate_scenario_from_trace(
+                    scenario_id=s.id,
+                    contract_name=s.contract,
+                    contracts=loaded["contracts"],
+                    trace_path=trace_path,
+                    response=str(data.get("text") or ""),
+                )
+                row = {
+                    "scenario_id": s.id,
+                    "ok": ev.ok,
+                    "errors": ev.errors,
+                    "trace_path": ev.trace_path,
+                    "status": data.get("status"),
+                    "events_appended": appended_events,
+                }
+                results.append(row)
+                if not ev.ok:
+                    fail += 1
+            except Exception as e:
+                trace_path, appended_events = _extract_new_events_to_temp_file(trace_dir, before, s.id)
+                row = {
+                    "scenario_id": s.id,
+                    "ok": False,
+                    "errors": [f"scenario execution error: {str(e)}"],
+                    "trace_path": str(trace_path),
+                    "status": "error",
+                    "events_appended": appended_events,
+                }
+                results.append(row)
                 fail += 1
     finally:
         if start_core:

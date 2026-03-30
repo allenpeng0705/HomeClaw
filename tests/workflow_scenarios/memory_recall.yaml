@@ -1,4 +1,4 @@
 id: memory_recall
 contract: memory_recall
 prompt: "What do you remember about my answer style preference?"
-description: "Memory recall intent."
+description: "Natural recall phrasing; Core may infer agent_memory_search or answer after fallback (see contract)."

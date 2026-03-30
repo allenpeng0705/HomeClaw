@@ -144,6 +144,23 @@ class RealCoreRunner:
             h["X-API-Key"] = self.api_key
         return h
 
+    def _cancel_inbound(self, request_id: str) -> tuple[int, str]:
+        """Best-effort POST /inbound/cancel. Returns (status_code, body_snippet)."""
+        body = {"request_id": request_id}
+        try:
+            with self._client(15.0) as client:
+                r = client.post(
+                    f"{self.base_url}/inbound/cancel",
+                    json=body,
+                    headers=self._headers(),
+                )
+                if r.status_code == 401 and not self.api_key and self._auth_disabled():
+                    r = client.post(f"{self.base_url}/inbound/cancel", json=body)
+                snippet = (r.text or "")[:400]
+                return r.status_code, snippet
+        except Exception as e:
+            return -1, str(e)[:400]
+
     def run_prompt(self, prompt: str, user_id: str = "workflow-test-user", timeout_sec: int = 600) -> Dict[str, Any]:
         body = {
             "user_id": user_id,
@@ -162,7 +179,11 @@ class RealCoreRunner:
             raise RuntimeError(f"inbound did not return request_id: {payload}")
         t0 = time.time()
         last_hint: Optional[str] = None
+        poll_count = 0
+        last_http: int = -1
+        last_body_preview = ""
         while (time.time() - t0) < timeout_sec:
+            poll_count += 1
             with self._client(20.0) as client:
                 rr = client.get(
                     f"{self.base_url}/inbound/result",
@@ -174,26 +195,40 @@ class RealCoreRunner:
                         f"{self.base_url}/inbound/result",
                         params={"request_id": request_id},
                     )
+            last_http = rr.status_code
             if rr.status_code == 202:
                 try:
                     p = rr.json() if rr.headers.get("content-type", "").startswith("application/json") else {}
-                    if isinstance(p, dict) and (p.get("text_preview") or "").strip():
-                        last_hint = "pending_with_preview"
+                    if isinstance(p, dict):
+                        last_body_preview = str(p)[:300]
+                        if (p.get("text_preview") or "").strip():
+                            last_hint = "pending_with_preview"
                 except Exception:
                     pass
                 time.sleep(0.5)
                 continue
             rr.raise_for_status()
             data = rr.json() if rr.headers.get("content-type", "").startswith("application/json") else {}
+            last_body_preview = str(data)[:300]
             status = str((data or {}).get("status") or "").strip().lower()
             if status in ("done", "cancelled"):
                 return data
             last_hint = f"unexpected_status={status!r}"
             time.sleep(0.5)
+        cancel_note = ""
+        _env = (os.environ.get("HOMECLAW_WORKFLOW_INBOUND_CANCEL_ON_TIMEOUT") or "1").strip().lower()
+        if _env not in ("0", "false", "no", "off"):
+            ccode, csnip = self._cancel_inbound(request_id)
+            cancel_note = f" cancel_attempt: http={ccode} body={csnip!r}."
         raise TimeoutError(
             f"async inbound timed out after {timeout_sec}s for request_id={request_id} "
-            f"(still pending or never reached done/cancelled). last_hint={last_hint!r}. "
-            f"Increase timeout via --inbound-timeout or HOMECLAW_WORKFLOW_INBOUND_TIMEOUT_SEC."
+            f"(Core did not finish the async turn: still pending or stuck). "
+            f"polls={poll_count} last_http={last_http} last_body_preview={last_body_preview!r} "
+            f"last_hint={last_hint!r}.{cancel_note} "
+            f"Search Core logs for this request_id. For a single scenario: "
+            f"--scenario <name>. Increase timeout via --inbound-timeout or "
+            f"HOMECLAW_WORKFLOW_INBOUND_TIMEOUT_SEC; set HOMECLAW_WORKFLOW_INBOUND_CANCEL_ON_TIMEOUT=0 "
+            f"to skip POST /inbound/cancel on timeout."
         )
 
     def stop(self) -> None:

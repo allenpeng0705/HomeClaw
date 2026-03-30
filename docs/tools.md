@@ -72,7 +72,7 @@ Use **`vmprint_render`** when you want VMPrint artifacts beyond plain PDF:
 
 For channel/Companion delivery, save under `output/` and share the returned `/files/out` link. The same link pattern works across WebChat, Companion, and other channels.
 
-See also: [VMPrint as UI runtime](vmprint-ui-runtime.md).
+See also: [VMPrint as UI runtime](vmprint-ui-runtime.md) — includes **layout_json** sidecar + hybrid preview (**SVG / Boxes** toggle), `web_search` AST template in `magazine-render`, and how the upstream **simulation / actor** engine relates to **AI integration**.
 
 ---
 

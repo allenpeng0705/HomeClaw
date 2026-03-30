@@ -1064,6 +1064,9 @@ class CoreMetadata:
     inbound_request_timeout_seconds: int = 0  # recommended max seconds for clients/proxies waiting for Core; 0 = unlimited. Default when missing: 0. Not enforced by Core; set proxies read_timeout >= this when >0.
     llm_completion_timeout_seconds: int = 300  # HTTP timeout for each LLM chat completion call (local or cloud). Increase (e.g. 600, 900) if large local models often time out; 0 = no timeout (not recommended).
     access_log_exclude_paths: List[str] = field(default_factory=lambda: ["/inbound/result", "/api/config/core"])  # paths to hide from uvicorn access logs (keep other access logs visible)
+    # Workflow trace JSONL (docs/workflow-trace-testing.md). If workflow_trace_dir is set, Core sets HOMECLAW_WORKFLOW_TRACE_DIR when unset. If workflow_trace_enabled is true, sets HOMECLAW_WORKFLOW_TRACE=1 when unset. Env vars override.
+    workflow_trace_enabled: bool = False
+    workflow_trace_dir: str = ""
     use_prompt_manager: bool = True  # load prompts from config/prompts (language/model overrides); see docs/PromptManagement.md
     prompts_dir: str = "config/prompts"  # base dir for section/name.lang.model layout
     prompt_default_language: str = "en"  # fallback when lang not in request/metadata
@@ -1735,6 +1738,8 @@ class CoreMetadata:
                 'orchestrator_unified_with_tools': getattr(core, 'orchestrator_unified_with_tools', True),
                 'inbound_request_timeout_seconds': getattr(core, 'inbound_request_timeout_seconds', 0),
                 'llm_completion_timeout_seconds': getattr(core, 'llm_completion_timeout_seconds', 300),
+                'workflow_trace_enabled': getattr(core, 'workflow_trace_enabled', False),
+                'workflow_trace_dir': getattr(core, 'workflow_trace_dir', '') or '',
                 'logging': {
                     'access_log_exclude_paths': list(getattr(core, 'access_log_exclude_paths', ["/inbound/result", "/api/config/core"]) or []),
                 },

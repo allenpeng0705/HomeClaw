@@ -38,5 +38,23 @@ def assert_contract(events: List[Dict[str, Any]], contract: Dict[str, Any]) -> A
             continue
         if any(_event_matches(e, bad) for e in events):
             errs.append(f"forbidden event seen[{idx}]: {bad}")
+
+    # Optional flexible matcher: each group passes if any event spec in that group is found.
+    # Example:
+    # must_have_any_of:
+    #   - [ {event_type: tool_call_started, ...}, {event_type: model_selected, ...} ]
+    must_have_any_of = contract.get("must_have_any_of") or []
+    for gidx, group in enumerate(must_have_any_of):
+        if not isinstance(group, list) or not group:
+            continue
+        matched = False
+        for opt in group:
+            if not isinstance(opt, dict):
+                continue
+            if any(_event_matches(e, opt) for e in events):
+                matched = True
+                break
+        if not matched:
+            errs.append(f"missing required any_of group[{gidx}]: {group}")
     return AssertionResult(ok=(len(errs) == 0), errors=errs)
 

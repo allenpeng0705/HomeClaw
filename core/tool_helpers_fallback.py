@@ -18,9 +18,28 @@ def tool_result_looks_like_error(result: Any) -> bool:
     try:
         if result is None or not isinstance(result, str):
             return False
+        r = result.strip()
+        if not r:
+            return False
+        low = r.lower()
+        # VMPrint / Node failures are often multi-kB stack traces; do not skip them via the length guard below.
+        if "layout emit failed" in low or "err_invalid_arg_type" in low:
+            return True
+        if low.startswith("stderr:") and ("error" in low or "failed" in low or "traceback" in low):
+            return True
+        if "vmprint" in low and (
+            "failed" in low
+            or "typeerror" in low
+            or "traceback" in low
+            or "error:" in low
+            or " error " in low
+        ):
+            return True
+        if "draft2final" in low and ("not built" in low or "cli not built" in low or "missing" in low):
+            return True
         if len(result) > 2000:
             return False
-        r = result.strip().lower()
+        r = low
         if not r:
             return False
         if r == "[]":
@@ -746,6 +765,10 @@ def _parse_xml_style_tool_call(inner: str) -> Optional[Dict[str, Any]]:
             if not key or key in ("function", "tool_call"):
                 continue
             args[key] = raw_val
+        if name.strip().lower() == "run_skill":
+            sn = (args.get("skill_name") or args.get("skill") or "").strip()
+            if not sn:
+                return None
         return {
             "id": f"raw_tool_0_{uuid.uuid4().hex[:8]}",
             "type": "function",
@@ -799,14 +822,25 @@ def _extract_balanced_json_object(s: str):
 
 
 def parse_raw_tool_calls_from_content(content: str):
-    """Parse <tool_call>...</tool_call> from LLM content. Supports JSON and XML-style. Handles truncated (missing </tool_call>). Returns list of tool_call dicts or None. Never raises."""
+    """Parse <tool_call>...</tool_call> from LLM content. Prefer core.services.tool_helpers (full parsers); legacy JSON/XML-only if that import fails."""
+    try:
+        from core.services.tool_helpers import parse_raw_tool_calls_from_content as _primary
+
+        return _primary(content)
+    except Exception as e:
+        logger.debug("parse_raw_tool_calls_from_content: primary parser unavailable ({}); using legacy", e)
+        return _parse_raw_tool_calls_from_content_legacy(content)
+
+
+def _parse_raw_tool_calls_from_content_legacy(content: str):
+    """JSON + XML + truncated XML only (no call-style). Used when core.services.tool_helpers cannot load."""
     try:
         if not content or not isinstance(content, str):
             return None
         text = content.strip()
-        if "<tool_call>" not in text:
+        if "<tool_call>" not in text.lower():
             return None
-        block_re = re.compile(r"<tool_call>([\s\S]*?)</tool_call>", re.IGNORECASE)
+        block_re = re.compile(r"<\s*tool_call\s*>([\s\S]*?)<\s*/\s*tool_call\s*>", re.IGNORECASE)
         blocks = block_re.findall(text)
         tool_calls = []
         for i, inner in enumerate(blocks):
@@ -842,9 +876,9 @@ def parse_raw_tool_calls_from_content(content: str):
                 tool_calls.append(parsed)
         # Truncated: <tool_call> present but no </tool_call> — extract JSON object after <tool_call>
         if not tool_calls:
-            start = text.find("<tool_call>")
-            if start >= 0:
-                rest = text[start + len("<tool_call>"):].strip()
+            m_open = re.search(r"<\s*tool_call\s*>", text, re.IGNORECASE)
+            if m_open:
+                rest = text[m_open.end() :].strip()
                 # 1) Try JSON object (common truncated variant).
                 if rest.lstrip().startswith("{"):
                     inner = _extract_balanced_json_object(rest)
@@ -877,6 +911,29 @@ def parse_raw_tool_calls_from_content(content: str):
                         if "type" not in parsed:
                             parsed["type"] = "function"
                         tool_calls.append(parsed)
+
+        def _legacy_executable(tc):
+            try:
+                fn = tc.get("function") if isinstance(tc, dict) else None
+                fn = fn if isinstance(fn, dict) else {}
+                n = (fn.get("name") or "").strip().lower()
+                if n != "run_skill":
+                    return True
+                raw = fn.get("arguments")
+                if isinstance(raw, str):
+                    try:
+                        ad = json.loads(raw or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        return False
+                elif isinstance(raw, dict):
+                    ad = raw
+                else:
+                    return False
+                return bool((ad.get("skill_name") or ad.get("skill") or "").strip())
+            except Exception:
+                return True
+
+        tool_calls = [tc for tc in tool_calls if _legacy_executable(tc)]
         return tool_calls if tool_calls else None
     except Exception:
         return None

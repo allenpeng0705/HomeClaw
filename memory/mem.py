@@ -13,6 +13,7 @@ from pydantic import ValidationError
 # Ensure the project root is in the PYTHONPATH
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from memory.text_sanitize import strip_vmprint_file_link_block
 from memory.util import (
     ADD_MEMORY_TOOL,
     DELETE_MEMORY_TOOL,
@@ -28,6 +29,48 @@ from memory.storage import SQLiteManager
 from memory.configs import MemoryItem, MemoryConfig
 from loguru import logger
 from base.util import Util, strip_reasoning_from_assistant_text
+
+# Debug logs: avoid multi‑KB lines (e.g. assistant pasted web_search JSON).
+_MEMORY_LOG_PREVIEW_CHARS = 600
+
+
+def _preview_for_memory_log(text: str, max_len: int = _MEMORY_LOG_PREVIEW_CHARS) -> str:
+    s = text if isinstance(text, str) else str(text or "")
+    if len(s) <= max_len:
+        return s
+    return s[: max_len] + "… [log truncated]"
+
+
+def _strip_trailing_web_search_json(text: str) -> str:
+    """
+    Assistant replies often end with raw Tavily/web_search JSON after a short Markdown title.
+    That blob is useless for recall/embeddings and floods logs; keep the human-readable prefix only.
+    """
+    t = (text or "").strip()
+    if not t or '"results"' not in t:
+        return t
+    for marker in ('\n\n{"results"', "\n\n{'results'", '\n{"results"', "\n{'results'"):
+        idx = t.rfind(marker)
+        if idx >= 24:
+            return t[:idx].strip()
+    for sep in ("\n\n{", "\n{"):
+        pos = t.rfind(sep)
+        if pos < 24:
+            continue
+        prefix = t[:pos].strip()
+        tail = t[pos:].strip()
+        if not tail.startswith("{"):
+            continue
+        head = tail[:800]
+        if '"results"' not in head and "'results'" not in head:
+            continue
+        try:
+            obj = json.loads(tail)
+            if isinstance(obj, dict) and isinstance(obj.get("results"), list):
+                return prefix
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+    return t
 
 
 # Setup user config
@@ -91,6 +134,8 @@ class Memory(MemoryBase):
                     parts.append("User: " + content)
                 elif role == "assistant":
                     content = strip_reasoning_from_assistant_text(content)
+                    content = _strip_trailing_web_search_json(content)
+                    content = strip_vmprint_file_link_block(content)
                     if not content:
                         continue
                     _cap = 4000
@@ -104,7 +149,9 @@ class Memory(MemoryBase):
             data = "\n\n".join(parts) if parts else (str(data[0].get("content", "")) if data and isinstance(data[0], dict) else "")
         if not isinstance(data, str):
             data = str(data or "")
-        logger.debug(f"#########Data send to embedding: {data}#########")
+        else:
+            data = strip_vmprint_file_link_block(_strip_trailing_web_search_json(data))
+        logger.debug("Data send to embedding (preview): {}", _preview_for_memory_log(data))
 
         filters = filters or {}
         if user_name:
@@ -586,7 +633,11 @@ class Memory(MemoryBase):
         self.db.add_history(
             memory_id, None, data, "ADD", created_at=metadata["created_at"]
         )
-        logger.debug(f"#####Created memory with {memory_id}, old_memory=None, memory={data}####")
+        logger.debug(
+            "Created memory id={} (preview): {}",
+            memory_id,
+            _preview_for_memory_log(data),
+        )
         return memory_id
 
     async def _extract_and_store_graph(self, memory_id: str, data: str) -> None:

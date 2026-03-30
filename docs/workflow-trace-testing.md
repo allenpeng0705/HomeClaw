@@ -276,6 +276,7 @@ Current pattern:
 - ensure runner sets:
   - `HOMECLAW_WORKFLOW_TRACE=1`
   - `HOMECLAW_WORKFLOW_TRACE_DIR=...`
+- or **in `config/core.yml`**: `workflow_trace_enabled: true` and `workflow_trace_dir: output/workflow_traces` (Core applies these at startup when the env vars are not set; env still wins if set)
 - verify write permission for `output/workflow_traces/`
 
 ### Scenario fails but response looks okay
@@ -305,13 +306,15 @@ Fix options:
 python scripts/workflow_trace_runner.py --mode real_core --start-core --clean-all-traces
 ```
 
-2. If you keep a manually started Core, restart it with trace env:
+2. If you keep a manually started Core, either restart it with trace env:
 
 ```bash
 export HOMECLAW_WORKFLOW_TRACE=1
 export HOMECLAW_WORKFLOW_TRACE_DIR=output/workflow_traces
 python3 -m main start --no-open-browser
 ```
+
+or set **`workflow_trace_enabled`** / **`workflow_trace_dir`** in `config/core.yml` (see above) and restart Core.
 
 Then run runner with `--base-url ...`.
 

@@ -60,6 +60,10 @@ from base.intent_router import (
     verify_tool_selection as intent_verify_tool_selection,
     DEFAULT_VERIFY_TOOLS as INTENT_VERIFY_TOOLS_DEFAULT,
 )
+from core.daily_brief_intent import (
+    daily_brief_lang_from_query as _daily_brief_lang_from_query,
+    strict_fallback_daily_brief_intent as _strict_fallback_daily_brief_intent,
+)
 from base.planner_executor import (
     get_flow_for_categories,
     get_last_assistant_content,
@@ -166,7 +170,7 @@ def _is_pending_user_action_cancel(text: str) -> bool:
     return any(p in raw for p in ("不要", "不用", "算了", "取消", "别生成"))
 
 
-from tools.builtin import close_browser_session
+from tools.builtin import close_browser_session, _daily_brief_document_layout_from_user_query
 
 # System prompt: per-user standard dirs + global share.
 _PRIVATE_STANDARD_FOLDERS_PROMPT = ", ".join(sorted(STANDARD_USER_SANDBOX_SUBDIRS))
@@ -415,6 +419,307 @@ except (ImportError, ModuleNotFoundError):
         remind_me_needs_clarification as _remind_me_needs_clarification,
         remind_me_clarification_question as _remind_me_clarification_question,
     )
+
+
+async def _strict_fallback_run_daily_brief_magazine(registry: Any, context: Any, query: str) -> Optional[str]:
+    """
+    run_skill(daily-brief) then optional magazine-render AST/HTML; used from multiple no-tool_call paths.
+    Returns user-facing text or None if the chain produced nothing usable.
+    """
+    if not registry or not isinstance(query, str) or not query.strip():
+        return None
+    if not any(t.name == "run_skill" for t in (registry.list_tools() or [])):
+        return None
+    _lang = _daily_brief_lang_from_query(query)
+    _max_items = 20
+    _q_raw = query.strip()
+    _q_lo = _q_raw.lower()
+    _m_cn = re.search(r"(\d{1,3})\s*条", _q_raw)
+    _m_en = re.search(r"\b(\d{1,3})\s*(items?|headlines?)\b", _q_lo)
+    _m = _m_cn or _m_en
+    if _m:
+        try:
+            _max_items = max(1, min(100, int(_m.group(1))))
+        except Exception:
+            _max_items = 20
+    _res = await registry.execute_async(
+        "run_skill",
+        {
+            "skill_name": "daily-brief-1.0.0",
+            "script": "fetch_rss.py",
+            "args": ["fetch", "--max", str(_max_items), "--lang", _lang],
+        },
+        context,
+    )
+    if not isinstance(_res, str) or not _res.strip():
+        return None
+    _looks_error = "error" in _res[:200].lower() or "failed" in _res[:200].lower()
+    if _looks_error:
+        return _res.strip()
+    _daily_json = ""
+    try:
+        _json_match = re.search(
+            r"(?is)JSON\s*\(machine-readable\)\s*:\s*```json\s*([\s\S]*?)```",
+            _res,
+        ) or re.search(r"(?is)```json\s*([\s\S]*?)```", _res)
+        if _json_match and _json_match.group(1):
+            _daily_json = _json_match.group(1).strip()
+    except Exception:
+        _daily_json = ""
+    if _daily_json and len(_daily_json) > 24000:
+        _daily_json = _daily_json[:24000]
+    _pdf_res = ""
+    _html_ok = False
+    if _daily_json:
+        try:
+            _dba_layout = _daily_brief_document_layout_from_user_query(query) or "digest_table"
+            _component_log("tools", "fallback run_skill(magazine-render render-daily-brief-ast) after daily-brief (strict_fallback=True)")
+            for _fmt in ("browser_preview_html", "layout_json"):
+                _out = f"daily_brief_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{('preview.html' if _fmt == 'browser_preview_html' else 'layout.json')}"
+                _candidate = await registry.execute_async(
+                    "run_skill",
+                    {
+                        "skill_name": "magazine-render-1.0.0",
+                        "script": "render_magazine.py",
+                        "args": [
+                            "render-daily-brief-ast",
+                            "--title",
+                            "Daily Brief",
+                            "--theme",
+                            "dispatch",
+                            "--document-layout",
+                            _dba_layout,
+                            "--json",
+                            _daily_json,
+                            "--output_format",
+                            _fmt,
+                            "--out",
+                            _out,
+                        ],
+                    },
+                    context,
+                )
+                if isinstance(_candidate, str) and _candidate.strip():
+                    _cand_txt = _candidate.strip()
+                    _vmprint_fail = (
+                        "vmprint canvas preview failed" in _cand_txt.lower()
+                        or "reading 'width'" in _cand_txt.lower()
+                        or "vmprint layout emit failed" in _cand_txt.lower()
+                        or "layout emit failed" in _cand_txt.lower()
+                        or "err_invalid_arg_type" in _cand_txt.lower()
+                        or "vmprint render failed" in _cand_txt.lower()
+                    )
+                    if (not _tool_result_looks_like_error(_cand_txt)) and (not _vmprint_fail) and _fmt == "browser_preview_html":
+                        _pdf_res = _cand_txt
+                        _html_ok = True
+                        break
+                    if _fmt == "browser_preview_html":
+                        _pdf_res = _cand_txt
+        except Exception as _e:
+            logger.debug("strict_fallback magazine-render after daily-brief failed: {}", _e)
+    if isinstance(_pdf_res, str) and _pdf_res.strip():
+        _pdf_txt = _pdf_res.strip()
+        if _html_ok and not _tool_result_looks_like_error(_pdf_txt):
+            if "/files/out" not in _pdf_txt and "/files/" not in _pdf_txt:
+                try:
+                    _m_path = re.search(r'"output_rel_path"\s*:\s*"([^"]+)"', _pdf_txt, re.I)
+                    _rel = (_m_path.group(1).strip() if _m_path else "")
+                    if _rel and any(t.name == "get_file_view_link" for t in (registry.list_tools() or [])):
+                        _link_res = await registry.execute_async(
+                            "get_file_view_link",
+                            {"path": _rel},
+                            context,
+                        )
+                        if isinstance(_link_res, str) and _link_res.strip():
+                            _pdf_txt = _link_res.strip()
+                except Exception:
+                    pass
+            return _pdf_txt
+        return _res.strip()
+    return _res.strip()
+
+
+async def _magazine_preview_from_web_search_json(
+    registry: Any,
+    context: Any,
+    raw_json: str,
+    title: str,
+) -> Optional[str]:
+    """
+    Build VMPrint browser_preview_html from Tavily/web_search JSON via magazine-render.
+    Template is controlled by tools.web_search_magazine_ast_template (default: daily_brief).
+    """
+    if not registry or not raw_json or not isinstance(raw_json, str):
+        return None
+    if not any(t.name == "run_skill" for t in (registry.list_tools() or [])):
+        return None
+    try:
+        data = json.loads(raw_json.strip())
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("results"), list) or not data.get("results"):
+        return None
+    _tcfg = getattr(Util().get_core_metadata(), "tools_config", None) or {}
+    _tmpl = str(_tcfg.get("web_search_magazine_ast_template") or "daily_brief").strip().lower()
+    if _tmpl not in ("daily_brief", "web_search"):
+        _tmpl = "daily_brief"
+    _script_c = _tcfg.get("vmprint_web_search_scripted_colophon") is True
+
+    slim: Dict[str, Any] = {"results": [], "provider": data.get("provider") or "web_search"}
+    if _tmpl == "web_search":
+        q = data.get("query") or data.get("q") or (title or "")
+        slim["query"] = str(q).strip()[:500]
+    for it in data["results"][:15]:
+        if not isinstance(it, dict):
+            continue
+        if _tmpl == "web_search":
+            slim["results"].append(
+                {
+                    "title": it.get("title"),
+                    "url": it.get("url"),
+                    "content": (
+                        str(it.get("content") or it.get("snippet") or it.get("description") or "")[:1200]
+                    ),
+                }
+            )
+        else:
+            slim["results"].append(
+                {
+                    "title": it.get("title"),
+                    "url": it.get("url"),
+                    "description": (str(it.get("description") or "")[:1200]),
+                }
+            )
+    if not slim["results"]:
+        return None
+    # run_skill truncates each argv to 65536 chars (tools.builtin); keep JSON valid (never slice mid-string).
+    _max_mag_argv = 52000
+    _json_payload = json.dumps(slim, ensure_ascii=False)
+    while len(_json_payload) > _max_mag_argv and slim["results"]:
+        slim["results"].pop()
+        _json_payload = json.dumps(slim, ensure_ascii=False)
+    if len(_json_payload) > _max_mag_argv:
+        slim["results"] = []
+        _json_payload = json.dumps(slim, ensure_ascii=False)
+    _safe_title = (title or "Web search").strip()[:120] or "Web search"
+    _pdf_res = ""
+    _html_ok = False
+    try:
+        for _fmt in ("browser_preview_html", "layout_json"):
+            _out = f"web_search_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{('preview.html' if _fmt == 'browser_preview_html' else 'layout.json')}"
+            if _tmpl == "web_search":
+                _args = [
+                    "render-template-ast",
+                    "--template",
+                    "web_search",
+                    "--title",
+                    _safe_title,
+                    "--theme",
+                    "dispatch",
+                    "--json",
+                    _json_payload,
+                    "--output_format",
+                    _fmt,
+                    "--out",
+                    _out,
+                ]
+                if _script_c:
+                    _args.append("--scripted-colophon")
+                _component_log(
+                    "tools",
+                    "run_skill(magazine-render render-template-ast web_search) for web_search VMPrint layout",
+                )
+            else:
+                _args = [
+                    "render-daily-brief-ast",
+                    "--title",
+                    _safe_title,
+                    "--theme",
+                    "dispatch",
+                    "--json",
+                    _json_payload,
+                    "--output_format",
+                    _fmt,
+                    "--out",
+                    _out,
+                ]
+                _component_log(
+                    "tools",
+                    "run_skill(magazine-render render-daily-brief-ast) for web_search VMPrint layout",
+                )
+            _candidate = await registry.execute_async(
+                "run_skill",
+                {
+                    "skill_name": "magazine-render-1.0.0",
+                    "script": "render_magazine.py",
+                    "args": _args,
+                },
+                context,
+            )
+            if isinstance(_candidate, str) and _candidate.strip():
+                _cand_txt = _candidate.strip()
+                _vmprint_fail = (
+                    "vmprint canvas preview failed" in _cand_txt.lower()
+                    or "reading 'width'" in _cand_txt.lower()
+                    or "vmprint layout emit failed" in _cand_txt.lower()
+                    or "layout emit failed" in _cand_txt.lower()
+                    or "err_invalid_arg_type" in _cand_txt.lower()
+                    or "vmprint render failed" in _cand_txt.lower()
+                )
+                if (not _tool_result_looks_like_error(_cand_txt)) and (not _vmprint_fail) and _fmt == "browser_preview_html":
+                    _pdf_res = _cand_txt
+                    _html_ok = True
+                    break
+                if _fmt == "browser_preview_html":
+                    _pdf_res = _cand_txt
+    except Exception as _e:
+        logger.debug("magazine-render for web_search failed: {}", _e)
+        return None
+    if not isinstance(_pdf_res, str) or not _pdf_res.strip():
+        return None
+    _pdf_txt = _pdf_res.strip()
+    if not (_html_ok and not _tool_result_looks_like_error(_pdf_txt)):
+        return None
+    if "/files/out" not in _pdf_txt and "/files/" not in _pdf_txt:
+        try:
+            _m_path = re.search(r'"output_rel_path"\s*:\s*"([^"]+)"', _pdf_txt, re.I)
+            _rel = (_m_path.group(1).strip() if _m_path else "")
+            if _rel and any(t.name == "get_file_view_link" for t in (registry.list_tools() or [])):
+                _link_res = await registry.execute_async(
+                    "get_file_view_link",
+                    {"path": _rel},
+                    context,
+                )
+                if isinstance(_link_res, str) and _link_res.strip():
+                    _pdf_txt = _link_res.strip()
+        except Exception:
+            pass
+    return _pdf_txt
+
+
+def _try_extract_web_search_json_blob(text: str) -> Optional[str]:
+    """If text embeds Tavily/web_search JSON (top-level ``results`` list), return that JSON substring for VMPrint."""
+    if not text or not isinstance(text, str):
+        return None
+    s = _strip_leading_route_label(text).strip()
+    if '"results"' not in s:
+        return None
+    decoder = json.JSONDecoder()
+    idx = 0
+    while True:
+        ri = s.find('"results"', idx)
+        if ri < 0:
+            break
+        k = s.rfind("{", 0, ri)
+        if k >= 0:
+            try:
+                obj, end = decoder.raw_decode(s[k:])
+                if isinstance(obj, dict) and isinstance(obj.get("results"), list) and obj.get("results"):
+                    return s[k : k + end]
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+        idx = ri + 9
+    return None
 
 
 def _normalize_for_chat_match(text: str) -> str:
@@ -1096,6 +1401,39 @@ async def answer_from_memory(
                 )
             except Exception as e:
                 logger.debug("Router metrics log failed: {}", e)
+        else:
+            # Non-mix (local or cloud only): hybrid router block above is skipped. Without this, mix_route_this_request
+            # stays None — empty-first-LLM fallback treats current_route as unknown and will not retry the other model,
+            # and workflow traces omit model_selected. Align with main_llm_for_route / _effective_main_llm_ref.
+            try:
+                _meta_nm = getattr(Util(), "core_metadata", None)
+                if main_llm_mode == "cloud":
+                    _ref_nm = (getattr(_meta_nm, "main_llm_cloud", None) or "").strip() if _meta_nm is not None else ""
+                    mix_route_this_request = "cloud"
+                else:
+                    _ref_nm = (getattr(_meta_nm, "main_llm_local", None) or "").strip() if _meta_nm is not None else ""
+                    mix_route_this_request = "local"
+                if _ref_nm:
+                    effective_llm_name = _ref_nm
+                else:
+                    _eff = getattr(Util(), "_effective_main_llm_ref", None)
+                    effective_llm_name = (_eff() if callable(_eff) else None) or None
+                    if isinstance(effective_llm_name, str):
+                        effective_llm_name = effective_llm_name.strip() or None
+                _trace_emit_event(
+                    event_type="model_selected",
+                    component="llm_loop",
+                    summary="main model selected",
+                    details={
+                        "mode": main_llm_mode or "local",
+                        "route": mix_route_this_request,
+                        "layer": "main_llm_mode",
+                        "model": effective_llm_name or "",
+                        "score": 0.0,
+                    },
+                )
+            except Exception as _e_nm:
+                logger.debug("non-mix route/model init failed (non-fatal): {}", _e_nm)
 
         use_memory = Util().has_memory()
         llm_input = []
@@ -2886,6 +3224,7 @@ async def answer_from_memory(
         last_tool_args = None
         last_tool_result_raw = None
         last_file_link_result = None
+        planner_web_search_raw_for_magazine = None  # DAG/planner path clears last_tool_name; extract JSON for VMPrint hook below
         if openai_tools:
             logger.info("Tools available for this turn: {}", tool_names)
             # Inject file/sandbox rules and per-user paths for any chat that has file tools (all friends, not only Finder).
@@ -2954,6 +3293,32 @@ async def answer_from_memory(
                     "For get_file_view_link: use the EXACT path from folder_list/file_find, or the EXACT filename the user wrote (e.g. img1.png). Do NOT change the extension (.png/.jpg) or invent names (e.g. imge_4, img2)."
                 )
                 llm_input[0]["content"] = (llm_input[0].get("content") or "") + tool_rule
+            # Plaintext vs Markdown vs VMPrint: inject policy so long structured output becomes preview links, not raw JSON in chat.
+            try:
+                if tools_cfg_for_desc.get("response_output_policy_in_prompt", True) is not False and llm_input and llm_input[0].get("role") == "system":
+                    try:
+                        _thr_plain = max(80, min(4000, int(tools_cfg_for_desc.get("response_plaintext_max_chars", 400) or 400)))
+                    except (TypeError, ValueError):
+                        _thr_plain = 400
+                    try:
+                        _thr_md = max(200, min(50000, int(tools_cfg_for_desc.get("response_markdown_ok_max_chars", 2500) or 2500)))
+                    except (TypeError, ValueError):
+                        _thr_md = 2500
+                    _out_pol = (
+                        "\n\n## Response format policy (HomeClaw)\n"
+                        "Pick how you show results. For **long or structured** content, prefer **VMPrint / magazine preview links**, not huge paste in chat.\n\n"
+                        f"**Plain text** — only for very short replies (about ≤{_thr_plain} characters): greetings, one fact, one short paragraph, no long lists.\n\n"
+                        f"**Markdown in chat** — for medium replies (about ≤{_thr_md} characters): short bullets, small tables, brief summaries. "
+                        "Do **not** paste raw JSON, full tool payloads, RSS/HTML dumps, or multi-page reports into the message.\n\n"
+                        "**VMPrint / magazine layout** — for news digests, web-search roundups, reports, magazine-style layouts, or anything over the Markdown guideline: "
+                        "use **run_skill(magazine-render-1.0.0)** (e.g. `render-daily-brief-ast` for digest/search-shaped JSON with a `results` list, or `render-md` for Markdown) "
+                        "with **browser_preview_html**, or **save_result_page** with **format='html'** when appropriate. "
+                        "Reply with the **URL line from the tool** plus a **1–3 sentence** summary — not the full HTML/JSON body.\n\n"
+                        "**After web_search or daily-brief** — summarize in a few sentences; if you save anything, use structured rendering + link; never make the entire reply a JSON string."
+                    )
+                    llm_input[0]["content"] = (llm_input[0].get("content") or "") + _out_pol
+            except Exception:
+                pass
             # Tool loop: call LLM with tools; if it returns tool_calls, execute and append results, repeat
             context = ToolContext(
                 core=core,
@@ -3115,6 +3480,7 @@ async def answer_from_memory(
                     logger.debug("Planner executor failed: {}; falling back to ReAct", _ex)
             if _planner_executor_final_response is not None:
                 response = _planner_executor_final_response
+                planner_web_search_raw_for_magazine = _try_extract_web_search_json_blob(_planner_executor_final_response)
             else:
                 current_messages = list(llm_input)
             try:
@@ -3176,7 +3542,7 @@ async def answer_from_memory(
                 llm_name_this_turn = effective_llm_name
                 # Sync mix_route_this_request with effective_llm_name each iteration so override applies only for one turn and fallback knows the current route. Defensive: never crash on metadata/config access.
                 try:
-                    if main_llm_mode == "mix" and effective_llm_name and isinstance(effective_llm_name, str):
+                    if effective_llm_name and isinstance(effective_llm_name, str):
                         _meta = getattr(Util(), "get_core_metadata", None)
                         _meta = _meta() if callable(_meta) else None
                         if _meta is not None:
@@ -3250,6 +3616,7 @@ async def answer_from_memory(
                                 "**CRITICAL:** If a previous message in this conversation is a tool result that already contains document/content (e.g. from document_read), do NOT respond with a plan like \"我将现在生成\" or \"首先，我需要调用 document_read\" or \"I will call document_read then...\". You already have the content—either call the next tool (save_result_page, run_skill) with your generated output in this turn, or output the full generated content in your message. Never return only a plan or intention.\n"
                                 "**CRITICAL for HTML slides:** If the user asked for HTML slides (or \"生成html slides\", \"总结...生成幻灯片\") and the tool result above is document content: you MUST call run_skill(skill_name='html-slides') in this turn. Then generate a **multi-slide deck** (8–20 slides, one idea per slide) and call save_result_page with that HTML. Do not output a single long page—split the summary into distinct slides.\n"
                                 "**When a tool returned facts or tables** (e.g. run_skill stock/portfolio Markdown, web_search snippets, prices, lists): That message is the **only** source of truth. Copy it verbatim, or give a short faithful summary—**do not** add symbols, rows, prices, or totals that are not in the tool text. Do not substitute “typical” tickers (e.g. AAPL, NVDA) unless they appear in the result.\n"
+                                "**Daily Brief / RSS (`# Daily Brief`, `run_skill` daily-brief):** The `## Headlines` section lists the **only** real articles (titles and links from feeds). Summarize or list **only** those items—copy titles/links faithfully. **Never** invent `file://` URLs, GitHub Actions paths (e.g. `/Users/runner/work/...`), or headlines not in the tool text. If you see **Magazine (VMPrint) preview did not run**, say briefly that the magazine preview failed on the server (Node.js / VMPrint build; see Core host setup) and the Markdown list above is the RSS digest.\n"
                                 "**In general:** Only use or cite content that tools actually returned. Do not invent file contents, error messages, or tool outputs."
                             )
                             # When the last tool result is very long, instruct the model to summarize and/or save to file (context management; see docs_design/DeepAgentsComparisonAndLearnings.md).
@@ -3512,6 +3879,44 @@ async def answer_from_memory(
                         "LLM returned no tool_calls (content={})",
                         _truncate_for_log(content_str or "(empty)", 120),
                     )
+                    # After a successful daily-brief / fetch-vmprint run_skill, local models often emit a follow-up with
+                    # fractured <tool_call> or “[tool call]” prose + save_result_page fantasy. Parser drops invalid run_skill;
+                    # prefer the real digest / preview JSON instead of an apology or fake tool narrative.
+                    _tc_noise = False
+                    try:
+                        _cs = content_str or ""
+                        _tc_noise = (
+                            ("<tool_call>" in _cs)
+                            or ("[tool call]" in _cs.lower())
+                            or ("save_result_page" in _cs and "run_skill" in _cs.lower())
+                        )
+                    except Exception:
+                        _tc_noise = False
+                    _ltr_strip = last_tool_result_raw.strip() if isinstance(last_tool_result_raw, str) else ""
+                    _noise_len_ok = len(_ltr_strip) > 400
+                    _noise_has_out = isinstance(last_tool_result_raw, str) and (
+                        '"output_rel_path"' in last_tool_result_raw or "'output_rel_path'" in last_tool_result_raw
+                    )
+                    if (
+                        _tc_noise
+                        and last_tool_name == "run_skill"
+                        and isinstance(last_tool_result_raw, str)
+                        and _ltr_strip
+                        and not _ltr_strip.lower().startswith("error:")
+                        and (_noise_len_ok or _noise_has_out)
+                    ):
+                        _ltr = last_tool_result_raw.lower()
+                        if (
+                            "daily brief" in _ltr
+                            or "# daily brief" in _ltr
+                            or '"output_rel_path"' in last_tool_result_raw
+                            or "'output_rel_path'" in last_tool_result_raw
+                        ):
+                            response = format_json_for_user(last_tool_result_raw) or last_tool_result_raw.strip()
+                            logger.info(
+                                "Using prior run_skill digest/VMPrint output; model follow-up had no valid tool_calls (malformed tool noise)."
+                            )
+                            break
                     # Grammar returned literal NO_TOOL_REQUIRED: get the actual reply by retrying without tools so the user doesn't see that string.
                     if content_str and (content_str.strip() == "NO_TOOL_REQUIRED"):
                         try:
@@ -3535,7 +3940,9 @@ async def answer_from_memory(
                             response = "What can I help you with?"
                     # If content looks like raw tool_call but we didn't parse it, avoid sending raw tags to the user.
                     # Model may output valid text then a stray <tool_call> (e.g. reasoning or incomplete tag); use text before <tool_call> if substantial.
-                    if content_str and ("<tool_call>" in content_str or "</tool_call>" in content_str):
+                    # Require an opening "<tool_call>" here — a lone "</tool_call>" in prose would otherwise skip the entire strict_fallback chain
+                    # (folder_list / web_search / weather / stock / daily-brief) below in the else branch.
+                    if content_str and "<tool_call>" in content_str:
                         _before_tag = content_str.split("<tool_call>")[0].strip()
                         # Strip <think>...</think> so user never sees reasoning (model may still emit it even with reasoning_budget: 0)
                         if "<think>" in _before_tag or "</think>" in _before_tag:
@@ -3661,9 +4068,39 @@ async def answer_from_memory(
                                         response = _extracted
                                         logger.debug("Using extracted reply from malformed tool_call content (len=%s)", len(_extracted))
                                     else:
-                                        response = "The assistant tried to use a tool but the response format was not recognized. Please try again."
+                                        # Placeholder <tool_call>...</tool_call> then long prose (local models); don't lose the prose if digest fallback fails.
+                                        _after_long = None
+                                        if content_str and "</tool_call>" in content_str:
+                                            _parts_long = content_str.split("</tool_call>", 1)
+                                            if len(_parts_long) > 1:
+                                                _al = _parts_long[1].strip()
+                                                _al = re.sub(r"^\([^)]{0,500}\)\s*", "", _al, count=1).strip()
+                                                if len(_al) >= 60:
+                                                    _after_long = _al
+                                        if _after_long:
+                                            response = _after_long
+                                            logger.debug("Using content after placeholder </tool_call> as reply (len=%s)", len(_after_long))
+                                        else:
+                                            response = "The assistant tried to use a tool but the response format was not recognized. Please try again."
                                 except Exception:
                                     response = "The assistant tried to use a tool but the response format was not recognized. Please try again."
+                        # Digest strict_fallback: fake <tool_call>...</tool_call> never reached the no-tag branch where daily-brief runs.
+                        try:
+                            _meta_tc = Util().get_core_metadata()
+                            if (
+                                registry
+                                and isinstance(query, str)
+                                and last_tool_name != "run_skill"
+                                and any(t.name == "run_skill" for t in (registry.list_tools() or []))
+                                and bool((getattr(_meta_tc, "tools_config", None) or {}).get("strict_fallback", True))
+                                and _strict_fallback_daily_brief_intent(query)
+                            ):
+                                _component_log("tools", "fallback run_skill(daily-brief) after <tool_call> prefix (strict_fallback=True)")
+                                _chain = await _strict_fallback_run_daily_brief_magazine(registry, context, query)
+                                if isinstance(_chain, str) and _chain.strip():
+                                    response = _chain.strip()
+                        except Exception as _e_tc:
+                            logger.debug("daily-brief after <tool_call> prefix failed: {}", _e_tc)
                     else:
                         # Default: use LLM's reply so we never leave response unset (e.g. simple "你好" -> friendly reply)
                         # Do not surface content that came from reasoning_content on tool-selection rounds (it was used only for parsing <tool_call>).
@@ -3961,133 +4398,12 @@ async def answer_from_memory(
                             and last_tool_name != "run_skill"
                             and any(t.name == "run_skill" for t in (registry.list_tools() or []))
                         ):
-                            _q_lo_db = (query or "").strip().lower()
-                            _q_raw_db = (query or "").strip()
-                            _daily_brief_phrases = (
-                                "daily brief", "morning report", "rss", "headline digest", "news digest",
-                                "今日新闻", "新闻订阅", "头条", "新闻摘要",
-                            )
-                            if any((p in _q_lo_db if p.isascii() else p in _q_raw_db) for p in _daily_brief_phrases):
+                            if _strict_fallback_daily_brief_intent(query):
                                 try:
                                     _component_log("tools", "fallback run_skill(daily-brief-1.0.0) (strict_fallback=True; model did not call tool)")
-                                    _lang = "all"
-                                    if any(k in _q_raw_db for k in ("中文", "汉语", "国内")) or any(k in _q_lo_db for k in (" chinese", "lang cn", " cn ")):
-                                        _lang = "cn"
-                                    elif any(k in _q_raw_db for k in ("英文", "英语")) or any(k in _q_lo_db for k in (" english", "lang en", " en ")):
-                                        _lang = "en"
-                                    _max_items = 20
-                                    _m_cn = re.search(r"(\d{1,3})\s*条", _q_raw_db)
-                                    _m_en = re.search(r"\b(\d{1,3})\s*(items?|headlines?)\b", _q_lo_db)
-                                    _m = _m_cn or _m_en
-                                    if _m:
-                                        try:
-                                            _max_items = max(1, min(100, int(_m.group(1))))
-                                        except Exception:
-                                            _max_items = 20
-                                    _res = await registry.execute_async(
-                                        "run_skill",
-                                        {
-                                            "skill_name": "daily-brief-1.0.0",
-                                            "script": "fetch_rss.py",
-                                            "args": ["fetch", "--max", str(_max_items), "--lang", _lang],
-                                        },
-                                        context,
-                                    )
-                                    if isinstance(_res, str) and _res.strip():
-                                        response = _res.strip()
-                                        # Option 2: always chain daily-brief -> AST rendering so fallback returns VMPrint output.
-                                        # Prefer browser_preview_html as the primary artifact for channels.
-                                        _looks_error = "error" in _res[:200].lower() or "failed" in _res[:200].lower()
-                                        if (not _looks_error) and any(
-                                            t.name == "run_skill" for t in (registry.list_tools() or [])
-                                        ):
-                                            try:
-                                                _json_match = re.search(
-                                                    r"(?is)JSON\s*\(machine-readable\)\s*:\s*```json\s*([\s\S]*?)```",
-                                                    _res,
-                                                ) or re.search(
-                                                    r"(?is)```json\s*([\s\S]*?)```",
-                                                    _res,
-                                                )
-                                                if _json_match and _json_match.group(1):
-                                                    _daily_json = _json_match.group(1).strip()
-                                                else:
-                                                    _daily_json = ""
-                                                if _daily_json and len(_daily_json) > 24000:
-                                                    _daily_json = _daily_json[:24000]
-                                                _component_log("tools", "fallback run_skill(magazine-render render-daily-brief-ast) after daily-brief (strict_fallback=True)")
-                                                _pdf_res = ""
-                                                _html_ok = False
-                                                if _daily_json:
-                                                    for _fmt in ("browser_preview_html", "layout_json"):
-                                                        _out = f"daily_brief_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{('preview.html' if _fmt == 'browser_preview_html' else 'layout.json')}"
-                                                        _candidate = await registry.execute_async(
-                                                            "run_skill",
-                                                            {
-                                                                "skill_name": "magazine-render-1.0.0",
-                                                                "script": "render_magazine.py",
-                                                                "args": [
-                                                                    "render-daily-brief-ast",
-                                                                    "--title",
-                                                                    "Daily Brief",
-                                                                    "--theme",
-                                                                    "dispatch",
-                                                                    "--json",
-                                                                    _daily_json,
-                                                                    "--output_format",
-                                                                    _fmt,
-                                                                    "--out",
-                                                                    _out,
-                                                                ],
-                                                            },
-                                                            context,
-                                                        )
-                                                        if isinstance(_candidate, str) and _candidate.strip():
-                                                            _cand_txt = _candidate.strip()
-                                                            _vmprint_fail = (
-                                                                "vmprint canvas preview failed" in _cand_txt.lower()
-                                                                or "reading 'width'" in _cand_txt.lower()
-                                                            )
-                                                            if (not _tool_result_looks_like_error(_cand_txt)) and (not _vmprint_fail) and _fmt == "browser_preview_html":
-                                                                _pdf_res = _cand_txt
-                                                                _html_ok = True
-                                                                break
-                                                            if _fmt == "browser_preview_html":
-                                                                _pdf_res = _cand_txt
-                                                if isinstance(_pdf_res, str) and _pdf_res.strip():
-                                                    _pdf_txt = _pdf_res.strip()
-                                                    if _html_ok and not _tool_result_looks_like_error(_pdf_txt):
-                                                        # If run_skill returned JSON with output_rel_path (but no link), try resolving a file link.
-                                                        if "/files/out" not in _pdf_txt and "/files/" not in _pdf_txt:
-                                                            try:
-                                                                _m_path = re.search(
-                                                                    r'"output_rel_path"\s*:\s*"([^"]+)"',
-                                                                    _pdf_txt,
-                                                                    re.I,
-                                                                )
-                                                                _rel = (_m_path.group(1).strip() if _m_path else "")
-                                                                if _rel and any(
-                                                                    t.name == "get_file_view_link" for t in (registry.list_tools() or [])
-                                                                ):
-                                                                    _link_res = await registry.execute_async(
-                                                                        "get_file_view_link",
-                                                                        {"path": _rel},
-                                                                        context,
-                                                                    )
-                                                                    if isinstance(_link_res, str) and _link_res.strip():
-                                                                        _pdf_txt = _link_res.strip()
-                                                            except Exception:
-                                                                pass
-                                                        # Use AST renderer output whenever it is non-error.
-                                                        response = _pdf_txt
-                                                    else:
-                                                        # Do not surface raw AST/layout JSON to users; keep human-friendly markdown fallback.
-                                                        response = _res.strip()
-                                                else:
-                                                    response = _res.strip()
-                                            except Exception as e_pdf:
-                                                logger.debug("Fallback magazine-render run_skill failed: {}", e_pdf)
-                                                response = _res.strip()
+                                    _chain = await _strict_fallback_run_daily_brief_magazine(registry, context, query)
+                                    if isinstance(_chain, str) and _chain.strip():
+                                        response = _chain.strip()
                                 except Exception as e_db:
                                     logger.debug("Fallback daily-brief run_skill failed: {}", e_db)
                         # Confirmation fallback: user says "yes/create it" after a prior daily-brief + magazine/PDF request.
@@ -4120,7 +4436,7 @@ async def answer_from_memory(
                                     p in _ctx_all for p in ("今日新闻", "新闻订阅", "头条", "新闻摘要")
                                 )
                                 _mag_ctx = any(p in _ctx_lo for p in ("magazine", "pdf", "render pdf", "export pdf")) or any(
-                                    p in _ctx_all for p in ("杂志风格", "杂志排版", "导出pdf", "生成pdf")
+                                    p in _ctx_all for p in ("杂志风格", "杂志格式", "杂志排版", "导出pdf", "生成pdf")
                                 )
                                 # Also trigger when model just "claimed success" with a PDF link text but did not call tools.
                                 _hallucinated_pdf_text = bool(
@@ -4548,11 +4864,15 @@ async def answer_from_memory(
                                     _max_items = max(1, min(100, int(_m.group(1))))
                                 except Exception:
                                     _max_items = 20
+                            _dba = ["fetch", "--max", str(_max_items), "--lang", _lang]
+                            _lay = _daily_brief_document_layout_from_user_query(_q_raw_news)
+                            if _lay:
+                                _dba.extend(["--document-layout", _lay])
                             name = "run_skill"
                             args = {
                                 "skill_name": "daily-brief-1.0.0",
                                 "script": "fetch_rss.py",
-                                "args": ["fetch", "--max", str(_max_items), "--lang", _lang],
+                                "args": _dba,
                             }
                             _component_log("tools", "guardrail: rerouted file-tool drift to run_skill(daily-brief) for news-magazine intent")
                         # Guardrail: feed-digest queries should not drift to web_search.
@@ -4577,11 +4897,15 @@ async def answer_from_memory(
                                     _max_items = max(1, min(100, int(_m.group(1))))
                                 except Exception:
                                     _max_items = 20
+                            _fv_args = ["fetch-vmprint", "--max", str(_max_items), "--lang", _lang]
+                            _lay2 = _daily_brief_document_layout_from_user_query(_q_raw_news)
+                            if _lay2:
+                                _fv_args.extend(["--document-layout", _lay2])
                             name = "run_skill"
                             args = {
                                 "skill_name": "daily-brief-1.0.0",
                                 "script": "fetch_rss.py",
-                                "args": ["fetch-vmprint", "--max", str(_max_items), "--lang", _lang],
+                                "args": _fv_args,
                             }
                             _component_log("tools", "guardrail: rerouted web_search drift to run_skill(daily-brief fetch-vmprint) for feed-digest intent")
                     except Exception:
@@ -4760,15 +5084,26 @@ async def answer_from_memory(
                         try:
                             if _tool_verified_skip:
                                 result = "Verification: tool selection did not match user intent; execution skipped."
-                            elif tool_timeout_sec > 0:
-                                _run_skill_executed = True
-                                result = await asyncio.wait_for(
-                                    registry.execute_async(name, args, context),
-                                    timeout=tool_timeout_sec,
-                                )
                             else:
-                                _run_skill_executed = True
-                                result = await registry.execute_async(name, args, context)
+                                _exec_args = args
+                                if (
+                                    name == "run_skill"
+                                    and isinstance(args, dict)
+                                    and (query or "").strip()
+                                ):
+                                    _sn0 = str(args.get("skill_name") or args.get("skill") or "").strip().lower()
+                                    if "daily-brief" in _sn0:
+                                        _exec_args = dict(args)
+                                        _exec_args["_homeclaw_user_query"] = (query or "").strip()
+                                if tool_timeout_sec > 0:
+                                    _run_skill_executed = True
+                                    result = await asyncio.wait_for(
+                                        registry.execute_async(name, _exec_args, context),
+                                        timeout=tool_timeout_sec,
+                                    )
+                                else:
+                                    _run_skill_executed = True
+                                    result = await registry.execute_async(name, _exec_args, context)
                         except asyncio.TimeoutError:
                             result = f"Error: tool {name} timed out after {tool_timeout_sec}s. The system did not hang; you can retry or use a different approach."
                         except Exception as e:
@@ -4863,7 +5198,7 @@ async def answer_from_memory(
                     if (
                         name == "run_skill"
                         and isinstance(args, dict)
-                        and str(args.get("skill_name") or "").strip() == "daily-brief-1.0.0"
+                        and "daily-brief" in str(args.get("skill_name") or "").strip().lower()
                         and isinstance(result, str)
                         and result.strip()
                     ):
@@ -4884,6 +5219,7 @@ async def answer_from_memory(
                                     _ast_txt = ""
                                     _ast_args = None
                                     _ast_html_ok = False
+                                    _lay_ac = _daily_brief_document_layout_from_user_query((query or "").strip()) or "digest_table"
                                     for _fmt in ("browser_preview_html", "layout_json"):
                                         _out = f"daily_brief_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{('preview.html' if _fmt == 'browser_preview_html' else 'layout.json')}"
                                         _candidate_args = {
@@ -4895,6 +5231,8 @@ async def answer_from_memory(
                                                 "Daily Brief",
                                                 "--theme",
                                                 "dispatch",
+                                                "--document-layout",
+                                                _lay_ac,
                                                 "--json",
                                                 _daily_json,
                                                 "--output_format",
@@ -4911,6 +5249,10 @@ async def answer_from_memory(
                                             _vmprint_fail = (
                                                 "vmprint canvas preview failed" in _cand_txt.lower()
                                                 or "reading 'width'" in _cand_txt.lower()
+                                                or "vmprint layout emit failed" in _cand_txt.lower()
+                                                or "layout emit failed" in _cand_txt.lower()
+                                                or "err_invalid_arg_type" in _cand_txt.lower()
+                                                or "vmprint render failed" in _cand_txt.lower()
                                             )
                                             if (not _tool_result_looks_like_error(_cand_txt)) and (not _vmprint_fail) and _fmt == "browser_preview_html":
                                                 _ast_html_ok = True
@@ -4968,6 +5310,50 @@ async def answer_from_memory(
                         ("/files/out" in result and ("token=" in result or "dev_unsigned=1" in result)) or ("http" in result and "/files/" in result)
                     ):
                         last_file_link_result = result
+                    elif (
+                        name == "run_skill"
+                        and isinstance(result, str)
+                        and result.strip()
+                        and '"output_rel_path"' in result
+                        and "http" not in result.lower()
+                        and "/files/" not in result
+                        and registry
+                        and any(t.name == "get_file_view_link" for t in (registry.list_tools() or []))
+                    ):
+                        # magazine-render and similar skills print {"success":true,"output_rel_path":"output/..."} with no URL;
+                        # without this, last_file_link_result stays unset, the loop continues, and a blank follow-up LLM turn can yield an empty reply.
+                        try:
+                            _parsed_out = None
+                            for _ln in result.strip().splitlines():
+                                _s = (_ln or "").strip()
+                                if not _s.startswith("{"):
+                                    continue
+                                try:
+                                    _obj_try = json.loads(_s)
+                                    if (
+                                        isinstance(_obj_try, dict)
+                                        and _obj_try.get("success") is True
+                                        and str(_obj_try.get("output_rel_path") or "").strip()
+                                    ):
+                                        _parsed_out = _obj_try
+                                        break
+                                except (json.JSONDecodeError, TypeError, ValueError):
+                                    continue
+                            if _parsed_out is not None:
+                                _rel = str(_parsed_out.get("output_rel_path") or "").strip()
+                                _link_res = await registry.execute_async(
+                                    "get_file_view_link",
+                                    {"path": _rel},
+                                    context,
+                                )
+                                if isinstance(_link_res, str) and _link_res.strip():
+                                    last_file_link_result = _link_res.strip()
+                                    _component_log(
+                                        "tools",
+                                        "resolved run_skill JSON output_rel_path to view link (last_file_link_result)",
+                                    )
+                        except Exception as _e_rel:
+                            logger.debug("resolve run_skill output_rel_path to file link failed: {}", _e_rel)
                     # For selected skills, return run_skill result directly and skip the follow-up LLM round
                     # (avoids small models paraphrasing/hallucinating tables, e.g. stock-monitor). Mix/cloud: list in
                     # tools.run_skill_direct_return_skills_in_mix_cloud. Local-only: same for stock-monitor only.
@@ -4983,21 +5369,40 @@ async def answer_from_memory(
                             _q_raw_dr = (query or "").strip() if isinstance(query, str) else ""
                             _magazine_phrases_dr = (
                                 "magazine", "magazine style", "pdf", "render pdf", "export pdf",
-                                "杂志风格", "杂志排版", "排版更好看", "导出pdf", "生成pdf",
+                                "杂志风格", "杂志格式", "杂志排版", "排版更好看", "导出pdf", "生成pdf",
                             )
                             _wants_magazine_dr = any((p in _q_lo_dr if p.isascii() else p in _q_raw_dr) for p in _magazine_phrases_dr)
                             _mode = (main_llm_mode or "").strip().lower()
+                            _skill_done_lo = _skill_done.lower()
+                            _direct_hits_dbrief = any("daily-brief" in (x or "").lower() for x in _direct_return_skills_mix_cloud)
+                            _in_mix_direct = _skill_done in _direct_return_skills_mix_cloud or (
+                                _direct_hits_dbrief and "daily-brief" in _skill_done_lo
+                            )
                             _use_direct = (
-                                (_mode in ("mix", "cloud") and _skill_done in _direct_return_skills_mix_cloud)
+                                (_mode in ("mix", "cloud") and _in_mix_direct)
                                 or (_mode == "local" and _skill_done == "stock-monitor-1.0.0")
+                            )
+                            _daily_brief_fallback_result = (
+                                "daily-brief" in _skill_done_lo
+                                and (
+                                    "Magazine (VMPrint) preview did not run" in str(result)
+                                    or "# Daily Brief (RSS)" in str(result)
+                                    or "## Headlines" in str(result)
+                                )
                             )
                             if (
                                 _skill_done
-                                and _use_direct
-                                and not (_skill_done == "daily-brief-1.0.0" and _wants_magazine_dr)
+                                and (_use_direct or _daily_brief_fallback_result)
+                                and not (
+                                    ("daily-brief" in _skill_done_lo and _wants_magazine_dr)
+                                    and (not _daily_brief_fallback_result)
+                                )
                                 and not str(result).strip().lower().startswith("stderr:")
                                 and "already run in this conversation" not in str(result).strip().lower()
-                                and not _tool_result_looks_like_error(result)
+                                and (
+                                    _daily_brief_fallback_result
+                                    or (not _tool_result_looks_like_error(result))
+                                )
                             ):
                                 _resp_direct = result.strip()
                                 # Prefer returning the exact file URL line when present.
@@ -5047,8 +5452,12 @@ async def answer_from_memory(
                     except Exception:
                         pass
                     if compaction_cfg.get("compact_tool_results") and isinstance(tool_content, str):
-                        # document_read: keep more context so the model can generate HTML/summary from it; other tools: 4000
+                        # document_read + daily-brief run_skill: keep full digest/JSON so the model does not invent articles after a 4k cut.
                         limit = 28000 if name == "document_read" else 4000
+                        if name == "run_skill" and isinstance(args, dict):
+                            _sk = str(args.get("skill_name") or "").strip().lower()
+                            if "daily-brief" in _sk:
+                                limit = 28000
                         if len(tool_content) > limit:
                             tool_content = tool_content[:limit] + "\n[Output truncated for context.]"
                     current_messages.append({"role": "tool", "tool_call_id": tcid, "content": tool_content})
@@ -5195,14 +5604,20 @@ async def answer_from_memory(
                     content_only = full
                 formatted = format_folder_list_file_find_result(content_only, is_file_find=False)
                 if not formatted:
-                    # Preserve short header (e.g. DAG summary "# 最火爆的电影推荐~") before JSON when formatting web_search results
+                    # Preserve short header (e.g. DAG summary "# …") before JSON when formatting web_search results
                     content_for_search = content_only
                     search_header = ""
-                    if "\n\n{" in content_only and '"results"' in content_only:
-                        idx = content_only.index("\n\n{")
-                        if idx > 0 and idx < 300:
-                            search_header = (content_only[:idx].strip() + "\n\n") or ""
-                            content_for_search = content_only[idx:].strip()
+                    if '"results"' in content_only:
+                        for _marker in ("\n\n{", "\n{"):
+                            if _marker in content_only:
+                                try:
+                                    idx = content_only.index(_marker)
+                                    if idx > 0 and idx < 400:
+                                        search_header = (content_only[:idx].strip() + "\n\n") or ""
+                                        content_for_search = content_only[idx:].strip()
+                                        break
+                                except ValueError:
+                                    pass
                     formatted = format_web_search_result(content_for_search)
                     if formatted and search_header:
                         formatted = search_header + formatted
@@ -5212,6 +5627,49 @@ async def answer_from_memory(
                     response = (route_label + formatted).strip() if route_label else formatted
             except Exception:
                 pass
+        # Model may echo truncated JSON; replace with formatted bullets from the real tool payload. Optional VMPrint layout link.
+        # Planner/DAG path clears last_tool_name; still attach magazine when response embeds web_search JSON (planner_web_search_raw_for_magazine).
+        _ws_raw_for_mag = None
+        if (
+            last_tool_name == "web_search"
+            and isinstance(last_tool_result_raw, str)
+            and last_tool_result_raw.strip()
+        ):
+            _ws_raw_for_mag = last_tool_result_raw.strip()
+        elif planner_web_search_raw_for_magazine:
+            _ws_raw_for_mag = planner_web_search_raw_for_magazine
+        if _ws_raw_for_mag and openai_tools:
+            try:
+                _canon_ws = format_web_search_result(_ws_raw_for_mag)
+                if _canon_ws and isinstance(response, str) and response.strip():
+                    _r0 = response.strip()
+                    if (
+                        ('"results"' in _r0 or "'results'" in _r0)
+                        and len(_r0) > 500
+                        and (_r0.count("{") > 8 or _r0.strip().startswith("{"))
+                    ):
+                        response = _canon_ws
+                _tcfg_ws = (getattr(Util().get_core_metadata(), "tools_config", None) or {})
+                if _tcfg_ws.get("web_search_magazine_preview", True) is not False:
+                    _mag_link = await _magazine_preview_from_web_search_json(
+                        registry,
+                        context,
+                        _ws_raw_for_mag,
+                        (query or "").strip()[:100] or "Web search",
+                    )
+                    if _mag_link:
+                        _tail_body = _canon_ws or ""
+                        if not _tail_body:
+                            _tail_body = format_web_search_result(_ws_raw_for_mag) or ""
+                        if not _tail_body:
+                            _tail_body = "Open the preview link above for headlines, links, and magazine layout."
+                        response = (
+                            "**Magazine layout (VMPrint / AST):** open this preview in the browser.\n\n"
+                            + _mag_link.strip()
+                            + ("\n\n---\n\n" + _tail_body.strip()).rstrip()
+                        ).strip()
+            except Exception as _e_ws_mag:
+                logger.debug("web_search canonical / magazine preview failed: {}", _e_ws_mag)
         # If the model appends a trailing JSON block after a normal answer, remove that JSON tail.
         # Keep pure-JSON replies unchanged (handled by JSON formatter below).
         if isinstance(response, str) and response.strip():
@@ -5227,6 +5685,7 @@ async def answer_from_memory(
                 # Case 2: trailing raw JSON object/array after normal text.
                 if _full and (not _full.startswith("{")) and (not _full.startswith("[")):
                     _cut = None
+                    _web_merged = None
                     for _sep in ("\n\n{", "\n{", "\n\n[", "\n["):
                         _idx = _full.rfind(_sep)
                         if _idx <= 0:
@@ -5234,12 +5693,25 @@ async def answer_from_memory(
                         _tail = _full[_idx + len(_sep) - 1 :].strip()
                         try:
                             _parsed_tail = json.loads(_tail)
-                            if isinstance(_parsed_tail, (dict, list)):
-                                _cut = _idx
-                                break
+                            if not isinstance(_parsed_tail, (dict, list)):
+                                continue
+                            if (
+                                isinstance(_parsed_tail, dict)
+                                and isinstance(_parsed_tail.get("results"), list)
+                                and _parsed_tail.get("results")
+                            ):
+                                _fmt_tail = format_web_search_result(_tail)
+                                if _fmt_tail:
+                                    _pre2 = _full[:_idx].strip()
+                                    _web_merged = (_pre2 + "\n\n" + _fmt_tail).strip() if _pre2 else _fmt_tail
+                                    break
+                            _cut = _idx
+                            break
                         except (json.JSONDecodeError, TypeError, ValueError):
                             continue
-                    if _cut is not None:
+                    if _web_merged:
+                        response = _web_merged
+                    elif _cut is not None:
                         _prefix2 = _full[:_cut].strip()
                         if _prefix2:
                             response = _prefix2

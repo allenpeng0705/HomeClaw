@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from portal.config import ROOT_DIR
 
@@ -251,6 +251,17 @@ def run_doctor_report() -> Dict[str, Any]:
     return result
 
 
+def _draft2final_cli_path(vmprint_dir: Path) -> Optional[Path]:
+    """Legacy draft2final/ tree or npm package draft2final (Markdown→PDF)."""
+    legacy = vmprint_dir / "draft2final" / "dist" / "cli.js"
+    if legacy.is_file():
+        return legacy
+    npm = vmprint_dir / "node_modules" / "draft2final" / "dist" / "cli.js"
+    if npm.is_file():
+        return npm
+    return None
+
+
 def run_vmprint_status() -> Dict[str, Any]:
     """Check VMPrint install/build status. Returns {'ok': bool, 'message': str, ...}."""
     vmprint_dir = Path(ROOT_DIR) / "tools" / "vmprint"
@@ -259,15 +270,15 @@ def run_vmprint_status() -> Dict[str, Any]:
         vmprint_dir = alt_dir
     if not vmprint_dir.exists():
         return {"ok": False, "message": "Not installed (tools/vmprint not found)."}
-    if not (vmprint_dir / "draft2final").is_dir():
-        return {"ok": False, "message": "Invalid VMPrint folder (draft2final missing).", "path": str(vmprint_dir)}
+    if not (vmprint_dir / "package.json").is_file():
+        return {"ok": False, "message": "Invalid VMPrint folder (package.json missing).", "path": str(vmprint_dir)}
     if not (vmprint_dir / "node_modules").is_dir():
         return {"ok": False, "message": "Dependencies missing (node_modules not found).", "path": str(vmprint_dir)}
-    cli_js = vmprint_dir / "draft2final" / "dist" / "cli.js"
-    if not cli_js.is_file():
+    cli_js = _draft2final_cli_path(vmprint_dir)
+    if cli_js is None:
         return {
             "ok": False,
-            "message": "draft2final CLI not built (draft2final/dist/cli.js missing).",
+            "message": "draft2final CLI missing (run: cd tools/vmprint && npm install).",
             "path": str(vmprint_dir),
         }
     node_path = shutil.which("node")
@@ -282,7 +293,9 @@ def run_vmprint_smoke_test() -> Dict[str, Any]:
     if not status.get("ok"):
         return {"ok": False, "error": status.get("message", "VMPrint not ready"), "status": status}
     vmprint_dir = Path(status.get("path"))
-    cli_js = vmprint_dir / "draft2final" / "dist" / "cli.js"
+    cli_js = _draft2final_cli_path(vmprint_dir)
+    if cli_js is None:
+        return {"ok": False, "error": "draft2final CLI not found", "status": status}
     try:
         with tempfile.TemporaryDirectory() as td:
             inp = Path(td) / "smoke.md"

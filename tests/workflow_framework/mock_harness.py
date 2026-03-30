@@ -36,6 +36,37 @@ def _derive_daily_brief_args_from_query_local(user_text: str, plain_markdown_req
     out = [cmd, "--max", str(max_items), "--lang", lang]
     if cmd == "fetch-vmprint":
         out += ["--theme", "dispatch", "--output_format", "browser_preview_html"]
+        layout = "digest_table"
+        if any(
+            k in q
+            for k in (
+                "报纸排版",
+                "报纸版式",
+                "头版",
+                "新闻报纸",
+                "杂志排版",
+                "杂志版式",
+                "杂志布局",
+                "杂志格式",
+                "杂志样式",
+                "杂志风",
+            )
+        ) or any(
+            k in q_lo
+            for k in (
+                "newspaper layout",
+                "front page layout",
+                "broadsheet layout",
+                "broadsheet",
+                "magazine layout",
+                "folio layout",
+                "real magazine",
+                "editorial layout",
+                "magazine format",
+            )
+        ):
+            layout = "newspaper"
+        out += ["--document-layout", layout]
     return out
 
 

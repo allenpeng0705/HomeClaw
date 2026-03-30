@@ -11,6 +11,25 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 
+def apply_workflow_trace_env_from_config(meta: Any, *, project_root: str) -> None:
+    """Set ``HOMECLAW_WORKFLOW_TRACE`` / ``HOMECLAW_WORKFLOW_TRACE_DIR`` from ``core.yml`` when the
+    corresponding env var is not already set (environment always wins). Paths are relative to *project_root*."""
+    if meta is None or not (project_root or "").strip():
+        return
+    try:
+        root = os.path.normpath(str(project_root).strip())
+        d = (getattr(meta, "workflow_trace_dir", None) or "").strip()
+        if d:
+            abs_d = d if os.path.isabs(d) else os.path.normpath(os.path.join(root, d))
+            if not (os.environ.get("HOMECLAW_WORKFLOW_TRACE_DIR") or "").strip():
+                os.environ["HOMECLAW_WORKFLOW_TRACE_DIR"] = abs_d
+        if bool(getattr(meta, "workflow_trace_enabled", False)):
+            if not (os.environ.get("HOMECLAW_WORKFLOW_TRACE") or "").strip():
+                os.environ["HOMECLAW_WORKFLOW_TRACE"] = "1"
+    except Exception:
+        return
+
+
 _TRACE_STATE: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar(
     "homeclaw_trace_state", default={}
 )

@@ -327,6 +327,16 @@ class LLMServiceManager:
         if function_calling and opts.get("function_calling") is False:
             function_calling = False
 
+        # --jinja: use GGUF Jinja chat template (needed for server-side tool_calls parsing on Qwen, etc.).
+        # Omit jinja → same as function_calling (backward compatible). Set jinja: true/false to override.
+        _jinja_opt = opts.get("jinja")
+        if _jinja_opt is None:
+            use_jinja = bool(function_calling)
+        else:
+            use_jinja = _jinja_opt is True or (
+                isinstance(_jinja_opt, str) and str(_jinja_opt).strip().lower() in ("true", "1", "yes", "on")
+            )
+
         logger.debug("model path {}", model_path)
         thread_num = multiprocessing.cpu_count()
         models_base = Util().models_path()
@@ -418,9 +428,9 @@ class LLMServiceManager:
                         cmd_list.extend(["--min-p", str(mp)])
                 except (TypeError, ValueError):
                     pass
-        if function_calling:
+        if use_jinja:
             cmd_list.append("--jinja")
-            logger.debug("Function calling is enabled.")
+            logger.debug("llama-server --jinja enabled (jinja config or function_calling).")
         if pooling:
             cmd_list.extend(["--embedding", "--pooling", "cls", "-ub", "8192"])
             logger.debug("Pooling is enabled.")

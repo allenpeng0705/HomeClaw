@@ -95,6 +95,13 @@ def test_tool_result_looks_like_error():
     assert tool_result_looks_like_error("Instruction-only skill confirmed: html-slides-1.0.0. Do NOT reply with only this line. You MUST in this turn: (1) document ...") is False
     assert tool_result_looks_like_error("ok") is False
     assert tool_result_looks_like_error("Here is the result.") is False
+    _long_vmprint = (
+        "stderr:\nError: vmprint render failed: VMPrint layout emit failed: node\n"
+        + "TypeError [ERR_INVALID_ARG_TYPE]\n"
+        + ("stack\n" * 500)
+    )
+    assert len(_long_vmprint) > 2000
+    assert tool_result_looks_like_error(_long_vmprint) is True
     assert tool_result_looks_like_error(None) is False
     assert tool_result_looks_like_error(123) is False
 

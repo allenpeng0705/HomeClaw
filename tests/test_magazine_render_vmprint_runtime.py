@@ -57,6 +57,197 @@ def test_validate_ast_11_rejects_unknown_top_level_keys():
         assert "unsupported top-level keys" in str(e)
 
 
+def test_web_search_ast_uses_description_for_snippet_when_content_missing():
+    m = _load_magazine_render_module()
+    data = {
+        "query": "q",
+        "results": [
+            {
+                "title": "T",
+                "url": "https://example.com",
+                "description": "Body from Tavily lives here.",
+            }
+        ],
+    }
+    ast = m._web_search_ast(data, title="Search", theme="dispatch")
+    table = ast["elements"][-1]
+    assert table["type"] == "table"
+    row = table["children"][1]
+    assert "Body from Tavily" in row["children"][2]["content"]
+
+
+def test_web_search_ast_uses_arimo_for_layout_engine():
+    """VMPrint StandardFontManager registers bundled families (e.g. Arimo), not arbitrary names like Noto Sans SC."""
+    m = _load_magazine_render_module()
+    data = {"results": [{"title": "中文标题", "url": "https://x.test", "description": "摘要"}]}
+    ast = m._web_search_ast(data, title="S", theme="minimal")
+    assert ast["layout"]["fontFamily"] == "Arimo"
+
+
+def test_daily_brief_ast_includes_summary_snippet_column():
+    m = _load_magazine_render_module()
+    data = {
+        "items": [
+            {
+                "title": "T",
+                "feed": "IT之家",
+                "link": "https://x.test",
+                "summary": "摘要正文用于杂志表格 Snippet 列。",
+            }
+        ],
+    }
+    ast = m._daily_brief_ast(data, title="Brief", theme="dispatch")
+    table = ast["elements"][3]["zones"][0]["elements"][0]
+    row = table["children"][1]
+    assert row["children"][3]["content"] == "摘要正文用于杂志表格 Snippet 列。"
+    assert row["children"][2]["content"] == "IT之家"
+
+
+def test_daily_brief_magazine_ast_matches_specimen_without_headline_index_table():
+    m = _load_magazine_render_module()
+    data = {
+        "as_of": "2026-03-26",
+        "items": [
+            {
+                "title": "Lead story title",
+                "feed": "Example Feed",
+                "link": "https://example.com/a",
+                "summary": "First paragraph of the lead. " * 5 + "Second part of summary for columns.",
+            },
+            {"title": "Side two", "feed": "Other", "link": "https://b.test", "summary": "Snippet B."},
+        ],
+    }
+    ast = m._daily_brief_magazine_ast(data, title="Daily Brief", theme="dispatch")
+    m._validate_ast_1_1(ast)
+    assert ast["elements"][0]["type"] == "masthead"
+    assert ast["layout"]["fontFamily"] == "Tinos"
+    assert ast["layout"].get("hyphenation") == "auto"
+    zm = [n for n in ast["elements"] if n.get("type") == "zone-map"][0]
+    lead = next(z for z in zm["zones"] if z["id"] == "lead")
+    types = [e.get("type") for e in lead["elements"]]
+    assert "headline-lg" in types and "story" in types
+    story = next(e for e in lead["elements"] if e.get("type") == "story")
+    assert story.get("columns") == 2
+    kids = story.get("children") or []
+    assert any(c.get("type") == "body" for c in kids)
+    assert any(c.get("type") == "pull-quote" for c in kids)
+    assert not any(n.get("type") == "table" for n in ast["elements"])
+    hdr = ast["header"]["default"]["elements"][0]
+    assert hdr["slots"][0]["elements"][0]["type"] == "footer-text"
+    assert ast["footer"]["default"]["elements"][0]["slots"][-1]["elements"][0]["content"] == "Magazine"
+
+
+def test_ast_from_template_daily_brief_magazine_layout():
+    m = _load_magazine_render_module()
+    data = {"items": [{"title": "Only one", "feed": "F", "link": "https://x", "summary": "Short."}]}
+    ast = m._ast_from_template("daily_brief", data, title="B", theme="dispatch", document_layout="magazine")
+    m._validate_ast_1_1(ast)
+    zm = next(n for n in ast["elements"] if n.get("type") == "zone-map")
+    lead = next(z for z in zm["zones"] if z["id"] == "lead")
+    assert any(e.get("type") == "story" for e in lead["elements"])
+
+
+def test_daily_brief_newspaper_ast_validates_and_has_front_page_shape():
+    m = _load_magazine_render_module()
+    data = {
+        "as_of": "2026-03-24",
+        "items": [
+            {
+                "title": "Lead headline here",
+                "feed": "Tech",
+                "link": "https://a.test/x",
+                "summary": "First paragraph of the lead story. " * 4 + "More text follows for columns.",
+            },
+            {"title": "Second", "feed": "News", "link": "https://b", "summary": "Brief two."},
+        ],
+    }
+    ast = m._daily_brief_newspaper_ast(data, title="Dispatch", theme="dispatch")
+    m._validate_ast_1_1(ast)
+    assert ast["elements"][0]["type"] == "masthead"
+    assert any(e.get("type") == "table" for e in ast["elements"])
+    assert ast["layout"]["pageSize"]["width"] == 612
+    dig = m._ast_digest_html(ast)
+    assert "Lead headline" in dig
+    assert 'href="https://b"' in dig
+
+
+def test_ast_from_template_daily_brief_newspaper_layout():
+    m = _load_magazine_render_module()
+    data = {"items": [{"title": "A", "feed": "F", "link": "https://x", "summary": "S."}]}
+    ast = m._ast_from_template("daily_brief", data, title="Paper", theme="dispatch", document_layout="newspaper")
+    m._validate_ast_1_1(ast)
+    assert ast["elements"][0]["content"] == "PAPER"
+
+
+def test_ast_from_template_web_search_magazine_layout():
+    m = _load_magazine_render_module()
+    data = {
+        "query": "q1",
+        "results": [
+            {"title": "First hit", "url": "https://news.example.com/a", "description": "Lead snippet text here."},
+            {"title": "Second", "url": "https://b.test", "snippet": "Other."},
+        ],
+    }
+    ast = m._ast_from_template("web_search", data, title="Search", theme="dispatch", document_layout="magazine")
+    m._validate_ast_1_1(ast)
+    assert ast["elements"][0]["content"] == "WEB SEARCH"
+    zm = next(n for n in ast["elements"] if n.get("type") == "zone-map")
+    lead = next(z for z in zm["zones"] if z["id"] == "lead")
+    assert any(e.get("type") == "headline" and e.get("content") == "First hit" for e in lead["elements"])
+    dig = m._ast_digest_html(ast)
+    assert "First hit" in dig and "Second" in dig
+
+
+def test_ast_from_template_weather_magazine_layout():
+    m = _load_magazine_render_module()
+    data = {
+        "location": "Beijing",
+        "now": {"condition": "Cloudy", "temp": "18C", "humidity": "40%"},
+        "forecast": [{"day": "Fri", "summary": "Cloudy", "high": "21C", "low": "14C"}],
+    }
+    ast = m._ast_from_template("weather", data, title="Wx", theme="dispatch", document_layout="magazine")
+    m._validate_ast_1_1(ast)
+    assert ast["elements"][0]["content"] == "WEATHER"
+    zm = next(n for n in ast["elements"] if n.get("type") == "zone-map")
+    rail = next(z for z in zm["zones"] if z["id"] == "rail")
+    assert any("Fri" in str(e.get("content", "")) for e in rail["elements"])
+
+
+def test_ast_from_template_stock_magazine_layout():
+    m = _load_magazine_render_module()
+    data = {
+        "items": [
+            {"symbol": "AAA", "name": "Alpha Inc", "price": "10", "change_pct": "+1.2%"},
+            {"symbol": "BBB", "name": "Beta", "price": "9", "change_pct": "-0.5%"},
+        ]
+    }
+    ast = m._ast_from_template("stock", data, title="Stocks", theme="dispatch", document_layout="magazine")
+    m._validate_ast_1_1(ast)
+    assert ast["elements"][0]["content"] == "MARKETS"
+    zm = next(n for n in ast["elements"] if n.get("type") == "zone-map")
+    lead = next(z for z in zm["zones"] if z["id"] == "lead")
+    assert any(e.get("type") == "headline" and "AAA" in str(e.get("content")) for e in lead["elements"])
+
+
+def test_daily_brief_magazine_digest_html_includes_lead_and_rail():
+    m = _load_magazine_render_module()
+    ast = m._daily_brief_magazine_ast(
+        {
+            "items": [
+                {"title": "Alpha", "feed": "Feed A", "link": "https://a", "summary": "Lead body text here."},
+                {"title": "Beta", "feed": "Feed B", "link": "https://b", "summary": "Rail snippet."},
+            ]
+        },
+        title="Brief",
+        theme="dispatch",
+    )
+    dig = m._ast_digest_html(ast)
+    assert "Alpha" in dig
+    assert "Beta" in dig
+    assert "Rail snippet" in dig
+    assert 'href="https://b"' in dig
+
+
 def test_daily_brief_ast_contains_expected_constraints():
     m = _load_magazine_render_module()
     data = {"as_of": "2026-03-26", "items": [{"title": "Headline", "source": "RSS", "link": "https://example.com"}]}
@@ -107,6 +298,20 @@ def test_validate_ast_11_rejects_repeat_header_without_semantic_header():
         assert "semanticRole='header'" in str(e)
 
 
+def test_stock_ast_prefixes_change_with_arrow():
+    m = _load_magazine_render_module()
+    data = {
+        "items": [
+            {"symbol": "AAA", "name": "A", "price": "10", "change_pct": "+1.2%"},
+            {"symbol": "BBB", "name": "B", "price": "9", "change_pct": "-0.5%"},
+        ]
+    }
+    ast = m._ast_from_template("stock", data, title="S", theme="dispatch")
+    rows = ast["elements"][-1]["children"][1:]
+    assert rows[0]["children"][3]["content"].startswith("▲")
+    assert rows[1]["children"][3]["content"].startswith("▼")
+
+
 def test_weather_and_stock_ast_templates_are_valid_11():
     m = _load_magazine_render_module()
     w = m._ast_from_template(
@@ -129,6 +334,22 @@ def test_weather_and_stock_ast_templates_are_valid_11():
     m._validate_ast_1_1(s)
     assert w["documentVersion"] == "1.1"
     assert s["documentVersion"] == "1.1"
+
+
+def test_ast_digest_includes_cjk_table_cells():
+    m = _load_magazine_render_module()
+    ast = m._web_search_ast(
+        {"results": [{"title": "中文標題", "url": "https://x.test", "description": "摘要內文"}]},
+        title="搜尋",
+        theme="dispatch",
+    )
+    dig = m._ast_digest_html(ast)
+    assert "中文標題" in dig
+    assert "摘要內文" in dig
+    assert "homeclaw-ast-digest" in dig
+    assert "Magazine digest" in dig
+    assert 'href="https://x.test"' in dig
+    assert 'target="_blank"' in dig
 
 
 def test_browser_preview_html_embeds_layout_payload():

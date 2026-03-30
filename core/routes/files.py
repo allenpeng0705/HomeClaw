@@ -169,6 +169,17 @@ def get_files_out_handler(core):  # noqa: ARG001
             suf = full.suffix.lower()
             if suf in (".html", ".htm"):
                 media_type = "text/html; charset=utf-8"
+                # VMPrint preview uses ./styles.css etc.; browsers resolve against /files/out → /files/styles.css (403).
+                try:
+                    if path_arg.lower().endswith(".preview.html"):
+                        raw = full.read_text(encoding="utf-8", errors="replace")
+                        if "homeclaw-vmprint-ui-hint" in raw:
+                            from core.result_viewer import rewrite_vmprint_preview_html_assets
+
+                            raw = rewrite_vmprint_preview_html_assets(raw, scope_fs, path_arg)
+                            return HTMLResponse(content=raw, media_type=media_type)
+                except Exception as e:
+                    logger.debug("files_out vmprint preview asset rewrite skipped: {}", e)
             elif suf == ".md":
                 media_type = "text/markdown; charset=utf-8"
             elif suf in (".png", ".jpg", ".jpeg", ".gif", ".webp"):

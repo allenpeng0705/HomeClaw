@@ -1,4 +1,4 @@
 id: reminder_missing_time
 contract: reminder_missing_time
-prompt: "Remind me to call mom."
-description: "Reminder missing-time should trigger clarification fallback."
+prompt: "Remind me to call mom in 5 minutes."
+description: "Reminder explicit-time intent should call remind_me successfully in mix mode."

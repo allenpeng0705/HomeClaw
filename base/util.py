@@ -36,8 +36,14 @@ from memory.prompts import MEMORY_SUMMARIZATION_PROMPT
 from base.base import CoreMetadata, Friend, User, LLM, EmailAccount
 
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-core_metadata =CoreMetadata.from_yaml(os.path.join(root_dir, 'config', 'core.yml'))
-data_root = os.path.join(root_dir, 'database')
+core_metadata = CoreMetadata.from_yaml(os.path.join(root_dir, "config", "core.yml"))
+try:
+    from base.workflow_trace import apply_workflow_trace_env_from_config
+
+    apply_workflow_trace_env_from_config(core_metadata, project_root=root_dir)
+except Exception:
+    pass
+data_root = os.path.join(root_dir, "database")
 
 # Keys (case-insensitive) whose values are redacted in plugin/tool logs
 _SENSITIVE_PARAM_KEYS = frozenset(k.lower() for k in (

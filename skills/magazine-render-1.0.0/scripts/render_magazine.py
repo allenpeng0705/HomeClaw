@@ -22,9 +22,32 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 _VMPRINT_ASSET_VERSION = "v1"
+
+# VMPrint scripting YAML (methods only); paired with JSON body in one .json file. See tools/vmprint/documents/SKILL.md §17.
+_WEB_SEARCH_COLOPHON_SCRIPT_YAML = """methods:
+  onReady(): |
+    const pages = doc.getPageCount()
+    sendMessage("colophon", { subject: "ready-pages", payload: { pages } })
+  colophon_onMessage(from, msg): |
+    if (from.name !== "doc") return
+    if (msg.subject !== "ready-pages") return
+    const p = Number((msg.payload && msg.payload.pages) || 0)
+    setContent(self, "Settled across " + p + " page(s).")
+"""
+
+
+def _write_ast_input_file(path: Path, ast_doc: Dict[str, Any], script_yaml: Optional[str]) -> None:
+    if script_yaml and str(script_yaml).strip():
+        path.write_text(
+            "---\n" + str(script_yaml).strip() + "\n---\n" + json.dumps(ast_doc, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    else:
+        path.write_text(json.dumps(ast_doc, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _vmprint_inline_limits() -> tuple[int, int]:
@@ -58,14 +81,42 @@ def _repo_root() -> Path:
 def _default_vmprint_dir(root: Path) -> Optional[Path]:
     for name in ("vmprint", "vm_print"):
         p = (root / "tools" / name).resolve()
-        if p.is_dir() and (p / "draft2final").is_dir():
+        if not p.is_dir():
+            continue
+        if (p / "draft2final").is_dir():
+            return p
+        if (p / "package.json").is_file() and (p / "cli").is_dir():
             return p
     return None
 
 
+def _vmprint_root_for_ast(root: Path) -> Optional[Path]:
+    """Monorepo root with built @vmprint/cli (AST / layout / browser preview). Draft2Final is not required."""
+    for name in ("vmprint", "vm_print"):
+        p = (root / "tools" / name).resolve()
+        if p.is_dir() and (p / "cli" / "dist" / "index.js").is_file():
+            return p
+    return None
+
+
+def _vmprint_root_for_assets(root: Path, prefer: Optional[Path] = None) -> Path:
+    if prefer is not None and prefer.is_dir():
+        return prefer.resolve()
+    p = _vmprint_root_for_ast(root)
+    if p is not None:
+        return p
+    q = _default_vmprint_dir(root)
+    if q is not None:
+        return q
+    return (root / "tools" / "vmprint").resolve()
+
+
 def _find_vmprint_cli(vmprint_dir: Path) -> Optional[Path]:
-    cli = (vmprint_dir / "draft2final" / "dist" / "cli.js").resolve()
-    return cli if cli.is_file() else None
+    legacy = (vmprint_dir / "draft2final" / "dist" / "cli.js").resolve()
+    if legacy.is_file():
+        return legacy
+    npm_cli = (vmprint_dir / "node_modules" / "draft2final" / "dist" / "cli.js").resolve()
+    return npm_cli if npm_cli.is_file() else None
 
 
 def _sanitize_filename(name: str, default: str = "report.pdf") -> str:
@@ -117,14 +168,14 @@ def _output_dirs() -> Tuple[Path, str]:
     return ((root / "output").resolve(), "output/")
 
 
-def _ensure_vmprint_static_assets(out_dir: Path, root: Path) -> None:
+def _ensure_vmprint_static_assets(out_dir: Path, root: Path, vmroot: Optional[Path] = None) -> None:
     """Ensure VMPrint runtime + preview shell assets exist under output/."""
     try:
         assets_dir = (out_dir / "_vmprint_assets" / _VMPRINT_ASSET_VERSION).resolve()
         assets_dir.mkdir(parents=True, exist_ok=True)
         preview_assets_dir = (out_dir / "assets").resolve()
         preview_assets_dir.mkdir(parents=True, exist_ok=True)
-        vmroot = (root / "tools" / "vmprint").resolve()
+        vmroot = _vmprint_root_for_assets(root, prefer=vmroot)
         copies = [
             (vmroot / "engine" / "dist" / "index.js", assets_dir / "vmprint-engine.js"),
             (vmroot / "contexts" / "canvas" / "dist" / "index.js", assets_dir / "vmprint-context-canvas.js"),
@@ -140,40 +191,40 @@ def _ensure_vmprint_static_assets(out_dir: Path, root: Path) -> None:
                 encoding="utf-8",
             )
         styles_css = (out_dir / "styles.css").resolve()
-        if not styles_css.exists() or styles_css.stat().st_size == 0:
-            styles_css.write_text(
-                "body{font-family:system-ui;margin:0;background:#111;color:#eee}"
-                ".top{padding:10px 12px;background:#1b1b1b;position:sticky;top:0}"
-                ".toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}"
-                ".pages{padding:12px;display:grid;gap:16px}"
-                ".page{background:#fff;color:#111;box-shadow:0 2px 12px rgba(0,0,0,.35);overflow:auto}"
-                ".meta{font-size:12px;color:#bbb}",
-                encoding="utf-8",
-            )
+        styles_css.write_text(
+            "body{font-family:system-ui;margin:0;background:#111;color:#eee}"
+            ".pages{padding:12px;display:grid;gap:16px;justify-items:center}"
+            ".page{background:#fff;color:#111;box-shadow:0 2px 12px rgba(0,0,0,.35);overflow:auto}",
+            encoding="utf-8",
+        )
         pipeline_js = preview_assets_dir / "pipeline.js"
-        if not pipeline_js.exists() or pipeline_js.stat().st_size == 0:
-            pipeline_js.write_text(
-                "(function(){"
-                "function parseJson(id,f){try{return JSON.parse((document.getElementById(id)||{}).textContent||'');}catch(_){return f;}}"
-                "function hasRuntime(){return !!(window.VMPrint||window.vmprint||window.CanvasContext);}"
-                "function renderFallback(root,pages){if(!root)return;root.innerHTML='';for(const s of (pages||[])){const d=document.createElement('div');d.className='page';d.innerHTML=String(s||'');root.appendChild(d);}}"
-                "window.HomeClawVmprintPipeline={parseJson:parseJson,hasRuntime:hasRuntime,renderFallback:renderFallback};"
-                "})();",
-                encoding="utf-8",
-            )
+        pipeline_js.write_text(
+            "(function(){"
+            "function parseJson(id,f){try{return JSON.parse((document.getElementById(id)||{}).textContent||'');}catch(_){return f;}}"
+            "function hasRuntime(){return !!(window.VMPrint||window.vmprint||window.CanvasContext);}"
+            "function renderSvgPages(root,pages){if(!root)return;root.innerHTML='';for(const s of (pages||[])){const d=document.createElement('div');d.className='page';d.innerHTML=String(s||'');root.appendChild(d);}}"
+            "function renderLayoutBoxes(root,d){if(!root)return;root.innerHTML='';const pages=(d&&d.pages)||[];"
+            "for(const pg of pages){const w=pg.width||595,h=pg.height||842;const el=document.createElement('div');el.className='page';el.style.width=w+'px';el.style.height=h+'px';el.style.position='relative';el.style.background='#fff';el.style.color='#111';el.style.boxShadow='0 2px 12px rgba(0,0,0,.35)';el.style.overflow='hidden';"
+            "for(const b of (pg.boxes||[])){const n=document.createElement('div');n.className='box';n.style.position='absolute';n.style.left=(b.x||0)+'px';n.style.top=(b.y||0)+'px';n.style.width=(b.w||0)+'px';n.style.height=(b.h||0)+'px';n.style.border='1px dashed rgba(0,0,0,.12)';n.style.fontSize='10px';n.style.lineHeight='1.2';n.style.overflow='hidden';n.style.whiteSpace='pre-wrap';"
+            "const t=(b.lines&&b.lines.length)?(b.lines.map(l=>(l.segments||[]).map(s=>s.text||'').join('')).join('\\n')):(b.type||'');n.textContent=t;el.appendChild(n);}root.appendChild(el);}}"
+            "window.HomeClawVmprintPipeline={parseJson:parseJson,hasRuntime:hasRuntime,renderSvgPages:renderSvgPages,renderLayoutBoxes:renderLayoutBoxes};"
+            "})();",
+            encoding="utf-8",
+        )
         ui_js = preview_assets_dir / "ui.js"
-        if not ui_js.exists() or ui_js.stat().st_size == 0:
-            ui_js.write_text(
-                "(function(){"
-                "function boot(){const p=window.HomeClawVmprintPipeline;if(!p)return;"
-                "const root=document.getElementById('root');const status=document.getElementById('status');"
-                "const pages=p.parseJson('fallback-svg-pages-data',[]);"
-                "if(!p.hasRuntime()){p.renderFallback(root,pages);if(status)status.textContent='Fallback active (server-rendered pages).';return;}"
-                "p.renderFallback(root,pages);if(status)status.textContent='Runtime assets detected; fallback kept until browser pipeline is wired.';}"
-                "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot);}else{boot();}"
-                "})();",
-                encoding="utf-8",
-            )
+        ui_js.write_text(
+            "(function(){"
+            "function boot(){const p=window.HomeClawVmprintPipeline;if(!p)return;"
+            "const root=document.getElementById('root');if(!root)return;"
+            "const svgs=p.parseJson('svg-pages-data',[]);let layout=null;"
+            "try{const le=document.getElementById('layout-data');if(le)layout=JSON.parse(le.textContent||'{}');}catch(_){layout=null;}"
+            "if(svgs&&svgs.length){p.renderSvgPages(root,svgs);}"
+            "else if(layout&&layout.pages&&layout.pages.length){p.renderLayoutBoxes(root,layout);}"
+            "}"
+            "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot);}else{boot();}"
+            "})();",
+            encoding="utf-8",
+        )
     except Exception:
         pass
 
@@ -192,6 +243,26 @@ def _json_loads_strict(s: str) -> Dict[str, Any]:
     if not isinstance(obj, dict):
         raise ValueError("JSON root must be an object.")
     return obj
+
+
+def _stock_change_cell(raw: Any) -> str:
+    """Ticker-style change column: arrow prefix when sign is obvious."""
+    s = str(raw or "").strip()
+    if not s or s == "-":
+        return s if s else "-"
+    if s.startswith("-"):
+        return f"▼ {s}"
+    if s.startswith("+"):
+        return f"▲ {s}"
+    try:
+        v = float(s.rstrip("%").replace(",", ""))
+        if v < 0:
+            return f"▼ {s}"
+        if v > 0:
+            return f"▲ {s}"
+    except ValueError:
+        pass
+    return s
 
 
 def _validate_ast_1_1(doc: Dict[str, Any]) -> None:
@@ -294,17 +365,1045 @@ def _validate_ast_1_1(doc: Dict[str, Any]) -> None:
                 _walk(v["elements"], f"footer.{k}.elements")
 
 
+def _daily_brief_items_normalized(data: Dict[str, Any]) -> list[Dict[str, str]]:
+    """Shared item shape for table and magazine daily-brief layouts."""
+    raw = data.get("items") or data.get("results") or []
+    if not isinstance(raw, list):
+        return []
+    out: list[Dict[str, str]] = []
+    for it in raw:
+        if not isinstance(it, dict):
+            continue
+        h = str(it.get("title") or it.get("headline") or "").strip()
+        src = str(it.get("feed") or it.get("source") or it.get("site") or "").strip()
+        snip = str(
+            it.get("summary") or it.get("description") or it.get("content") or it.get("snippet") or ""
+        ).strip()
+        if len(snip) > 2000:
+            snip = snip[:1997] + "..."
+        link = str(it.get("link") or it.get("url") or "").strip()
+        if h or link:
+            out.append({"title": h or "(no title)", "feed": src, "summary": snip, "link": link})
+    return out
+
+
+def _split_summary_bodies(summary: str, max_first: int = 520, max_second: int = 560) -> list[str]:
+    """Split long RSS summary into 1–2 story paragraphs (deterministic)."""
+    t = (summary or "").strip()
+    if not t:
+        return []
+    if len(t) <= max_first:
+        return [t]
+    cut = t.rfind("\n\n", 0, max_first)
+    if cut >= 80:
+        a, b = t[:cut].strip(), t[cut:].strip()
+        if len(b) > max_second:
+            b = b[: max_second - 1] + "…"
+        return [a, b] if b else [a]
+    cut = t.rfind(". ", 100, max_first)
+    if cut < 0:
+        cut = t.rfind("。", 100, max_first)
+    if cut > 0:
+        a, b = t[: cut + 1].strip(), t[cut + 1 :].strip()
+        if len(b) > max_second:
+            b = b[: max_second - 1] + "…"
+        return [a, b] if b else [a]
+    a = t[:max_first].rstrip() + "…"
+    b = t[max_first : max_first + max_second].strip()
+    out = [a]
+    if b:
+        out.append(b + ("…" if len(t) > max_first + max_second else ""))
+    return out
+
+
+def _host_label_from_url(url: str) -> str:
+    u = (url or "").strip()
+    if not u:
+        return ""
+    try:
+        parsed = urlparse(u if "://" in u else f"https://{u}")
+        h = (parsed.netloc or "").lower()
+        if h.startswith("www."):
+            h = h[4:]
+        return h
+    except Exception:
+        return ""
+
+
+def _magazine_editorial_chrome(
+    mast: str, as_of: str, theme: str, folio_right: str, page_bg: str
+) -> Dict[str, Any]:
+    return {
+        "layout": {
+            "pageSize": {"width": 595, "height": 842},
+            "orientation": "portrait",
+            "margins": {"top": 38, "right": 42, "bottom": 38, "left": 42},
+            "fontFamily": "Arimo",
+            "fontSize": 10,
+            "lineHeight": 1.4,
+            "pageBackground": page_bg,
+            "hyphenation": "soft",
+            "justifyEngine": "advanced",
+            "justifyStrategy": "auto",
+        },
+        "styles": {
+            "kicker": {"fontSize": 7, "letterSpacing": 1.6, "marginBottom": 5, "keepWithNext": True, "color": "#78350f"},
+            "title": {"fontSize": 26, "fontWeight": "bold", "marginBottom": 8, "keepWithNext": True, "color": "#1c1917"},
+            "meta": {"fontSize": 9, "marginBottom": 10, "color": "#57534e", "fontStyle": "italic"},
+            "headline": {
+                "fontSize": 19,
+                "fontWeight": "bold",
+                "lineHeight": 1.2,
+                "marginBottom": 5,
+                "keepWithNext": True,
+                "hyphenation": "off",
+                "color": "#292524",
+            },
+            "deck": {
+                "fontSize": 9.5,
+                "fontStyle": "italic",
+                "lineHeight": 1.35,
+                "color": "#44403c",
+                "marginBottom": 6,
+                "keepWithNext": True,
+            },
+            "byline": {"fontSize": 7.5, "color": "#78716c", "marginBottom": 8, "keepWithNext": True},
+            "body": {
+                "fontSize": 9.5,
+                "lineHeight": 1.45,
+                "marginBottom": 8,
+                "textAlign": "justify",
+                "allowLineSplit": True,
+                "orphans": 2,
+                "widows": 2,
+            },
+            "sidebar_head": {
+                "fontSize": 8.5,
+                "fontWeight": "bold",
+                "letterSpacing": 0.8,
+                "color": "#1c1917",
+                "marginBottom": 4,
+                "keepWithNext": True,
+            },
+            "sidebar_rule": {
+                "fontSize": 0.1,
+                "marginBottom": 6,
+                "borderBottomWidth": 0.75,
+                "borderBottomColor": "#d6d3d1",
+            },
+            "sidebar_body": {
+                "fontSize": 8.2,
+                "lineHeight": 1.35,
+                "color": "#44403c",
+                "marginBottom": 7,
+                "textAlign": "left",
+            },
+            "rh-odd": {"fontSize": 8, "textAlign": "center", "color": "#666"},
+            "folio-left": {"fontSize": 8, "textAlign": "left", "color": "#666"},
+            "folio-page": {"fontSize": 8, "textAlign": "center", "color": "#666"},
+            "folio-right": {"fontSize": 8, "textAlign": "right", "color": "#666"},
+        },
+        "header": {
+            "default": {
+                "elements": [
+                    {
+                        "type": "strip",
+                        "content": "",
+                        "stripLayout": {"tracks": [{"mode": "flex", "fr": 1}, {"mode": "fixed", "value": 150}], "gap": 8},
+                        "slots": [
+                            {"id": "left", "elements": [{"type": "rh-odd", "content": mast}]},
+                            {"id": "right", "elements": [{"type": "rh-odd", "content": as_of}]},
+                        ],
+                    }
+                ]
+            }
+        },
+        "footer": {
+            "default": {
+                "elements": [
+                    {
+                        "type": "strip",
+                        "content": "",
+                        "stripLayout": {
+                            "tracks": [{"mode": "flex", "fr": 1}, {"mode": "fixed", "value": 86}, {"mode": "flex", "fr": 1}],
+                            "gap": 8,
+                        },
+                        "slots": [
+                            {"id": "left", "elements": [{"type": "folio-left", "content": "HomeClaw"}]},
+                            {"id": "center", "elements": [{"type": "folio-page", "content": "Page {pageNumber} / {totalPages}"}]},
+                            {"id": "right", "elements": [{"type": "folio-right", "content": folio_right}]},
+                        ],
+                    }
+                ]
+            }
+        },
+    }
+
+
+def _assemble_editorial_magazine_ast(
+    *,
+    page_kicker: str,
+    mast: str,
+    meta_line: str,
+    theme: str,
+    as_of: str,
+    folio_right: str,
+    page_bg: str,
+    lead_elements: List[Dict[str, Any]],
+    rail_elements: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if theme not in ("dispatch", "minimal"):
+        theme = "dispatch"
+    chrome = _magazine_editorial_chrome(mast, as_of, theme, folio_right, page_bg)
+    return {
+        "documentVersion": "1.1",
+        **chrome,
+        "elements": [
+            {"type": "kicker", "content": page_kicker},
+            {"type": "title", "content": mast},
+            {"type": "meta", "content": meta_line},
+            {
+                "type": "zone-map",
+                "content": "",
+                "zoneLayout": {"columns": [{"mode": "flex", "fr": 2}, {"mode": "flex", "fr": 1}], "gap": 16},
+                "zones": [
+                    {"id": "lead", "elements": lead_elements},
+                    {"id": "rail", "elements": rail_elements},
+                ],
+            },
+        ],
+    }
+
+
+def _editorial_items_to_lead_rail(
+    items: List[Dict[str, str]],
+    sidebar_head: str,
+    *,
+    empty_kicker: str,
+    empty_headline: str,
+    empty_body: str,
+    top_story_fallback: str = "TOP STORY",
+    no_snippet_line: str = "No excerpt — open the link for the full story.",
+    max_sidebar: int = 16,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    lead_elements: List[Dict[str, Any]]
+    if not items:
+        lead_elements = [
+            {"type": "kicker", "content": empty_kicker},
+            {"type": "headline", "content": empty_headline},
+            {"type": "body", "content": empty_body},
+        ]
+    else:
+        first = items[0]
+        sec_k = (first["feed"] or top_story_fallback).strip().upper()
+        if len(sec_k) > 36:
+            sec_k = sec_k[:33] + "…"
+        raw_deck = first["summary"].strip() or no_snippet_line
+        deck = raw_deck[:320] + ("…" if len(raw_deck) > 320 else "")
+        link = first["link"]
+        byline = (first["feed"] or "Source").strip()
+        if link:
+            byline = f"{byline}\n{link}"
+        story_children: List[Dict[str, Any]] = []
+        for para in _split_summary_bodies(first["summary"]):
+            story_children.append(
+                {
+                    "type": "body",
+                    "content": para,
+                    "properties": {"style": {"textAlign": "justify"}},
+                }
+            )
+        if not story_children:
+            story_children.append(
+                {
+                    "type": "body",
+                    "content": f"No summary text. Link: {link or '—'}",
+                    "properties": {"style": {"textAlign": "left"}},
+                }
+            )
+        lead_elements = [
+            {"type": "kicker", "content": sec_k},
+            {"type": "headline", "content": first["title"]},
+            {"type": "deck", "content": deck},
+            {"type": "byline", "content": byline},
+            {
+                "type": "story",
+                "content": "",
+                "columns": 2,
+                "gutter": 12,
+                "balance": False,
+                "children": story_children,
+            },
+        ]
+
+    side_elements: List[Dict[str, Any]] = [
+        {"type": "sidebar_head", "content": sidebar_head},
+        {"type": "sidebar_rule", "content": ""},
+    ]
+    if len(items) <= 1:
+        side_elements.append({"type": "sidebar_body", "content": "—"})
+    else:
+        for it in items[1 : 1 + max_sidebar]:
+            sn = it["summary"]
+            snippet = sn[:140] + ("…" if len(sn) > 140 else "")
+            lk = (it.get("link") or "").strip()
+            line = f"• {it['title']}"
+            if it["feed"]:
+                line += f"\n{it['feed']}"
+            if snippet:
+                line += f"\n{snippet}"
+            if lk:
+                line += f"\n{lk}"
+            side_elements.append({"type": "sidebar_body", "content": line})
+    return lead_elements, side_elements
+
+
+def _daily_brief_magazine_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") -> Dict[str, Any]:
+    """Specimen front page like newspaper, but no HEADLINE INDEX table (editorial / 杂志系)."""
+    return _daily_brief_newspaper_ast(
+        data, title, theme, folio_footer_right="Magazine", include_headline_index_table=False
+    )
+
+
+def _pull_quote_from_lead_summary(summary: str) -> Optional[str]:
+    """Short excerpt for a float pull-quote (specimen-style), or None."""
+    t = (summary or "").strip().replace("\n\n", " ")
+    if len(t) < 50:
+        return None
+    cut = -1
+    for sep in ("。", "！", "？", ". ", "! ", "? "):
+        idx = t.find(sep)
+        if 40 <= idx < 260:
+            cut = idx + len(sep)
+            break
+    frag = (t[:cut] if cut > 0 else t[:220]).strip()
+    if len(frag) < 40:
+        frag = t[:min(200, len(t))].strip()
+    if len(frag) < 40:
+        return None
+    if len(frag) > 240:
+        frag = frag[:237] + "…"
+    return f"“{frag}”"
+
+
+def _specimen_daily_brief_styles(page_bg: str, accent: str, ink: str) -> Dict[str, Any]:
+    """VMPrint practitioner specimen (newsletter front page): Tinos/Cousine/Arimo."""
+    return {
+        "masthead": {
+            "fontFamily": "Arimo",
+            "fontSize": 38,
+            "fontWeight": "bold",
+            "letterSpacing": 6,
+            "textAlign": "center",
+            "color": ink,
+            "marginBottom": 2,
+        },
+        "masthead-rule": {
+            "fontSize": 0.1,
+            "marginBottom": 4,
+            "borderBottomWidth": 3,
+            "borderBottomColor": ink,
+        },
+        "dateline": {
+            "fontFamily": "Cousine",
+            "fontSize": 6.5,
+            "letterSpacing": 1,
+            "textAlign": "center",
+            "color": "#555",
+            "marginBottom": 4,
+        },
+        "edition-rule": {
+            "fontSize": 0.1,
+            "marginBottom": 12,
+            "borderBottomWidth": 0.75,
+            "borderBottomColor": "#999",
+        },
+        "kicker": {
+            "fontFamily": "Cousine",
+            "fontSize": 6.2,
+            "letterSpacing": 1.4,
+            "color": accent,
+            "marginBottom": 5,
+            "keepWithNext": True,
+            "hyphenation": "off",
+        },
+        "headline": {
+            "fontFamily": "Tinos",
+            "fontSize": 20,
+            "fontWeight": "bold",
+            "lineHeight": 1.18,
+            "color": "#111",
+            "marginBottom": 5,
+            "keepWithNext": True,
+            "hyphenation": "off",
+        },
+        "headline-lg": {
+            "fontFamily": "Tinos",
+            "fontSize": 26,
+            "fontWeight": "bold",
+            "lineHeight": 1.15,
+            "color": "#111",
+            "marginBottom": 6,
+            "keepWithNext": True,
+            "hyphenation": "off",
+        },
+        "deck": {
+            "fontFamily": "Arimo",
+            "fontSize": 9,
+            "fontStyle": "italic",
+            "lineHeight": 1.35,
+            "color": "#333",
+            "marginBottom": 8,
+            "keepWithNext": True,
+        },
+        "byline": {
+            "fontFamily": "Cousine",
+            "fontSize": 6.5,
+            "letterSpacing": 0.8,
+            "color": "#555",
+            "marginBottom": 8,
+            "keepWithNext": True,
+        },
+        "body": {
+            "fontSize": 9.5,
+            "lineHeight": 1.42,
+            "textAlign": "justify",
+            "marginBottom": 7,
+            "allowLineSplit": True,
+            "orphans": 2,
+            "widows": 2,
+            "hyphenation": "auto",
+        },
+        "pull-quote": {
+            "fontFamily": "Tinos",
+            "fontSize": 12.5,
+            "fontStyle": "italic",
+            "fontWeight": "bold",
+            "lineHeight": 1.3,
+            "color": accent,
+            "textAlign": "center",
+            "paddingTop": 8,
+            "paddingBottom": 8,
+            "borderTopWidth": 1.5,
+            "borderTopColor": accent,
+            "borderBottomWidth": 1.5,
+            "borderBottomColor": accent,
+            "marginBottom": 0,
+        },
+        "col-rule": {
+            "fontSize": 0.1,
+            "borderBottomWidth": 0.5,
+            "borderBottomColor": "#ccc",
+            "marginBottom": 10,
+        },
+        "section-flag": {
+            "fontFamily": "Cousine",
+            "fontSize": 6.5,
+            "fontWeight": "bold",
+            "letterSpacing": 1.5,
+            "color": page_bg,
+            "backgroundColor": ink,
+            "paddingTop": 3,
+            "paddingBottom": 3,
+            "paddingLeft": 5,
+            "paddingRight": 5,
+            "marginBottom": 8,
+        },
+        "sidebar-head": {
+            "fontFamily": "Arimo",
+            "fontSize": 8,
+            "fontWeight": "bold",
+            "letterSpacing": 0.5,
+            "color": ink,
+            "marginBottom": 3,
+            "keepWithNext": True,
+        },
+        "sidebar-body": {
+            "fontFamily": "Arimo",
+            "fontSize": 8,
+            "lineHeight": 1.35,
+            "color": "#333",
+            "marginBottom": 6,
+            "textAlign": "left",
+        },
+        "table-header": {
+            "fontFamily": "Cousine",
+            "fontSize": 6.5,
+            "fontWeight": "bold",
+            "paddingTop": 4,
+            "paddingBottom": 4,
+            "paddingLeft": 5,
+            "paddingRight": 5,
+            "color": page_bg,
+            "backgroundColor": ink,
+        },
+        "table-cell": {
+            "fontFamily": "Cousine",
+            "fontSize": 7.5,
+            "paddingTop": 4,
+            "paddingBottom": 4,
+            "paddingLeft": 5,
+            "paddingRight": 5,
+            "color": "#222",
+        },
+        "table-cell-alt": {
+            "fontFamily": "Cousine",
+            "fontSize": 7.5,
+            "paddingTop": 4,
+            "paddingBottom": 4,
+            "paddingLeft": 5,
+            "paddingRight": 5,
+            "color": "#222",
+            "backgroundColor": "#f0ede4",
+        },
+        "caption": {
+            "fontFamily": "Arimo",
+            "fontSize": 7,
+            "fontStyle": "italic",
+            "color": "#666",
+            "textAlign": "center",
+            "marginBottom": 8,
+        },
+        "footer-text": {
+            "fontFamily": "Cousine",
+            "fontSize": 6.5,
+            "color": "#666",
+            "letterSpacing": 0.5,
+        },
+    }
+
+
+def _specimen_daily_brief_header_footer_strip(mast: str, folio_footer_right: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Running head + folio matching upstream specimen (`footer-text` in header strip)."""
+    head_mast = (mast or "DISPATCH").strip()[:80]
+    header = {
+        "default": {
+            "elements": [
+                {
+                    "type": "strip",
+                    "content": "",
+                    "stripLayout": {"tracks": [{"mode": "flex", "fr": 1}, {"mode": "flex", "fr": 1}], "gap": 0},
+                    "slots": [
+                        {"id": "run_left", "elements": [{"type": "footer-text", "content": head_mast}]},
+                        {
+                            "id": "run_right",
+                            "elements": [
+                                {
+                                    "type": "footer-text",
+                                    "content": "PAGE {pageNumber} OF {totalPages}",
+                                    "properties": {"style": {"textAlign": "right"}},
+                                }
+                            ],
+                        },
+                    ],
+                    "properties": {
+                        "style": {
+                            "borderBottomWidth": 0.5,
+                            "borderBottomColor": "#ccc",
+                            "paddingBottom": 4,
+                            "marginBottom": 10,
+                        }
+                    },
+                }
+            ]
+        }
+    }
+    footer = {
+        "default": {
+            "elements": [
+                {
+                    "type": "strip",
+                    "content": "",
+                    "stripLayout": {
+                        "tracks": [{"mode": "flex", "fr": 1}, {"mode": "fixed", "value": 86}, {"mode": "flex", "fr": 1}],
+                        "gap": 8,
+                    },
+                    "slots": [
+                        {"id": "fl", "elements": [{"type": "footer-text", "content": "HomeClaw"}]},
+                        {"id": "fc", "elements": [{"type": "footer-text", "content": "PAGE {pageNumber} OF {totalPages}"}]},
+                        {"id": "fr", "elements": [{"type": "footer-text", "content": folio_footer_right}]},
+                    ],
+                }
+            ]
+        }
+    }
+    return header, footer
+
+
+def _format_newspaper_dateline(as_of: str) -> str:
+    s = (as_of or "").strip() or _now_local_str()
+    date_part = s.replace("T", " ").split()[0] if s else ""
+    try:
+        d = datetime.strptime(date_part[:10], "%Y-%m-%d")
+        return d.strftime("%A, %B %d, %Y").upper()
+    except ValueError:
+        return s[:100].upper()
+
+
+def _daily_brief_newspaper_ast(
+    data: Dict[str, Any],
+    title: str,
+    theme: str = "dispatch",
+    *,
+    folio_footer_right: str = "Newspaper",
+    include_headline_index_table: bool = True,
+) -> Dict[str, Any]:
+    """
+    Front-page style from RSS: masthead + dateline, lead + sidebar (optional pull-quote),
+    multi-column secondary heads, optional headline index table. Typography matches VMPrint
+    practitioner specimen (Tinos/Cousine/Arimo, footer-text running head).
+    """
+    items = _daily_brief_items_normalized(data)[:22]
+    as_of = str(data.get("as_of") or data.get("generated_at") or _now_local_str())
+    if theme not in ("dispatch", "minimal"):
+        theme = "dispatch"
+    mast = title.upper() if theme == "dispatch" else title
+    page_bg = "#f7f7f7" if theme == "minimal" else "#faf8f3"
+    date_line = _format_newspaper_dateline(as_of)
+    dateline_content = f"HOMECLAW · {date_line}"
+
+    accent = "#8b2020" if theme == "dispatch" else "#334155"
+    ink = "#1a1a1a"
+    styles = _specimen_daily_brief_styles(page_bg, accent, ink)
+    hdr, ftr = _specimen_daily_brief_header_footer_strip(mast, folio_footer_right)
+
+    lead_elements: List[Dict[str, Any]]
+    if not items:
+        lead_elements = [
+            {"type": "kicker", "content": "DIGEST"},
+            {"type": "headline-lg", "content": "No articles in this run"},
+            {
+                "type": "body",
+                "content": "Feeds returned no usable items. Check config/feeds.yaml, network, and filters.",
+            },
+        ]
+    else:
+        first = items[0]
+        sec_k = (first["feed"] or "TOP STORY").strip().upper()
+        if len(sec_k) > 36:
+            sec_k = sec_k[:33] + "…"
+        raw_deck = first["summary"].strip() or "No excerpt — open the article link for the full story."
+        deck = raw_deck[:320] + ("…" if len(raw_deck) > 320 else "")
+        link = first["link"]
+        byline = (first["feed"] or "Source").strip()
+        if link:
+            byline = f"{byline}\n{link}"
+        pq = _pull_quote_from_lead_summary(first["summary"])
+        story_children: List[Dict[str, Any]] = []
+        for i, para in enumerate(_split_summary_bodies(first["summary"])):
+            cell: Dict[str, Any] = {
+                "type": "body",
+                "content": para,
+                "properties": {"style": {"textAlign": "justify"}},
+            }
+            if i == 0 and len(para) >= 120:
+                cell["dropCap"] = {
+                    "enabled": True,
+                    "lines": 3,
+                    "gap": 4,
+                    "characterStyle": {"fontFamily": "Tinos", "fontWeight": 700, "color": accent},
+                }
+            story_children.append(cell)
+            if i == 0 and pq:
+                story_children.append(
+                    {
+                        "type": "pull-quote",
+                        "content": pq,
+                        "placement": {"mode": "float", "align": "right", "wrap": "around", "gap": 10},
+                        "properties": {"style": {"width": 130, "height": 68}},
+                    }
+                )
+        if not story_children:
+            story_children.append(
+                {
+                    "type": "body",
+                    "content": f"No summary text. Link: {link or '—'}",
+                    "properties": {"style": {"textAlign": "left"}},
+                }
+            )
+        lead_elements = [
+            {"type": "kicker", "content": sec_k},
+            {"type": "headline-lg", "content": first["title"]},
+            {"type": "deck", "content": deck},
+            {"type": "byline", "content": byline},
+            {
+                "type": "story",
+                "content": "",
+                "columns": 2,
+                "gutter": 14,
+                "balance": False,
+                "children": story_children,
+            },
+        ]
+
+    sidebar_els: List[Dict[str, Any]] = [
+        {"type": "sidebar-head", "content": "IN BRIEF"},
+        {"type": "col-rule", "content": ""},
+    ]
+    if len(items) <= 1:
+        sidebar_els.append({"type": "sidebar-body", "content": "—"})
+    else:
+        for it in items[1:12]:
+            sn = it["summary"]
+            snippet = sn[:120] + ("…" if len(sn) > 120 else "")
+            lk = (it.get("link") or "").strip()
+            line = f"• {it['title']}"
+            if it["feed"]:
+                line += f"\n{it['feed']}"
+            if snippet:
+                line += f"\n{snippet}"
+            if lk:
+                line += f"\n{lk}"
+            sidebar_els.append({"type": "sidebar-body", "content": line})
+
+    multi_children: List[Dict[str, Any]] = []
+    if len(items) > 1:
+        for it in items[1:8]:
+            fk = (it["feed"] or "FEED").strip().upper()
+            if len(fk) > 34:
+                fk = fk[:31] + "…"
+            multi_children.append({"type": "kicker", "content": fk})
+            multi_children.append({"type": "headline", "content": it["title"][:220]})
+            by = (it["feed"] or "Source").strip()
+            lk = (it.get("link") or "").strip()
+            if lk:
+                by = f"{by}\n{lk}"
+            multi_children.append({"type": "byline", "content": by[:500]})
+            sn = it["summary"].strip() or "—"
+            multi_children.append(
+                {"type": "body", "content": sn[:480] + ("…" if len(sn) > 480 else "")}
+            )
+
+    table_block: Optional[Dict[str, Any]] = None
+    if include_headline_index_table:
+        index_rows: List[Dict[str, Any]] = []
+        for i, it in enumerate(items, start=1):
+            sn = it["summary"]
+            snip = sn[:200] + ("…" if len(sn) > 200 else "")
+            lk = it["link"]
+            link_show = lk if len(lk) <= 48 else lk[:45] + "…"
+            alt = i % 2 == 0
+            ct, st = ("table-cell-alt", "table-cell-alt") if alt else ("table-cell", "table-cell")
+            index_rows.append(
+                {
+                    "type": "table-row",
+                    "content": "",
+                    "children": [
+                        {"type": ct, "content": str(i)},
+                        {"type": st, "content": it["title"][:180] or "—"},
+                        {"type": ct, "content": it["feed"] or "—"},
+                        {"type": st, "content": snip or "—"},
+                        {"type": ct, "content": link_show or "—"},
+                    ],
+                }
+            )
+
+        table_block = {
+            "type": "table",
+            "content": "",
+            "table": {
+                "headerRows": 1,
+                "repeatHeader": True,
+                "columnGap": 3,
+                "columns": [
+                    {"mode": "fixed", "value": 22},
+                    {"mode": "flex", "fr": 1.4},
+                    {"mode": "fixed", "value": 56},
+                    {"mode": "flex", "fr": 1.6},
+                    {"mode": "flex", "fr": 1},
+                ],
+            },
+            "children": [
+                {
+                    "type": "table-row",
+                    "content": "",
+                    "properties": {"semanticRole": "header"},
+                    "children": [
+                        {"type": "table-header", "content": "#"},
+                        {"type": "table-header", "content": "Headline"},
+                        {"type": "table-header", "content": "Feed"},
+                        {"type": "table-header", "content": "Snippet"},
+                        {"type": "table-header", "content": "Link"},
+                    ],
+                },
+                *index_rows,
+            ],
+        }
+
+    body_elements: List[Dict[str, Any]] = [
+        {"type": "masthead", "content": mast},
+        {"type": "masthead-rule", "content": ""},
+        {"type": "dateline", "content": dateline_content},
+        {"type": "edition-rule", "content": ""},
+        {
+            "type": "zone-map",
+            "content": "",
+            "properties": {"style": {"marginBottom": 10}},
+            "zoneLayout": {"columns": [{"mode": "flex", "fr": 2}, {"mode": "flex", "fr": 1}], "gap": 18},
+            "zones": [
+                {"id": "lead", "elements": lead_elements},
+                {"id": "sidebar", "elements": sidebar_els},
+            ],
+        },
+    ]
+    if multi_children:
+        body_elements += [
+            {"type": "col-rule", "content": ""},
+            {"type": "section-flag", "content": "MORE HEADLINES"},
+            {
+                "type": "story",
+                "content": "",
+                "columns": 3,
+                "gutter": 14,
+                "balance": False,
+                "children": multi_children,
+            },
+        ]
+    if include_headline_index_table and table_block is not None:
+        body_elements += [
+            {"type": "col-rule", "content": ""},
+            {"type": "section-flag", "content": "HEADLINE INDEX"},
+            table_block,
+            {"type": "caption", "content": f"RSS digest · As of {as_of}"},
+        ]
+    else:
+        body_elements.append({"type": "caption", "content": f"RSS digest · As of {as_of}"})
+
+    return {
+        "documentVersion": "1.1",
+        "layout": {
+            "pageSize": {"width": 612, "height": 792},
+            "orientation": "portrait",
+            "margins": {"top": 36, "right": 40, "bottom": 40, "left": 40},
+            "fontFamily": "Tinos",
+            "fontSize": 9.5,
+            "lineHeight": 1.42,
+            "pageBackground": page_bg,
+            "hyphenation": "auto",
+            "justifyEngine": "advanced",
+            "justifyStrategy": "auto",
+        },
+        "styles": styles,
+        "header": hdr,
+        "footer": ftr,
+        "elements": body_elements,
+    }
+
+
+def _web_search_results_normalized(data: Dict[str, Any]) -> List[Dict[str, str]]:
+    raw = data.get("results") or data.get("items") or []
+    if not isinstance(raw, list):
+        return []
+    out: List[Dict[str, str]] = []
+    for it in raw:
+        if not isinstance(it, dict):
+            continue
+        h = str(it.get("title") or it.get("headline") or "").strip()
+        url = str(it.get("url") or it.get("link") or "").strip()
+        snip = str(
+            it.get("content") or it.get("snippet") or it.get("description") or it.get("summary") or ""
+        ).strip()
+        if len(snip) > 2000:
+            snip = snip[:1997] + "..."
+        host = _host_label_from_url(url)
+        feed = host.upper() if host else "RESULT"
+        if h or url:
+            out.append({"title": h or "(no title)", "feed": feed, "summary": snip, "link": url})
+    return out
+
+
+def _web_search_magazine_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") -> Dict[str, Any]:
+    items = _web_search_results_normalized(data)[:20]
+    query = str(data.get("query") or data.get("q") or "").strip()
+    as_of = str(data.get("as_of") or data.get("generated_at") or _now_local_str())
+    if theme not in ("dispatch", "minimal"):
+        theme = "dispatch"
+    mast = title.upper() if theme == "dispatch" else title
+    page_bg = "#f7f7f7" if theme == "minimal" else "#faf8f5"
+    meta_line = f"Query: {query}" if query else f"As of {as_of}"
+    lead, rail = _editorial_items_to_lead_rail(
+        items,
+        "MORE RESULTS",
+        empty_kicker="SEARCH",
+        empty_headline="No results for this query",
+        empty_body="Try different keywords or check your search provider configuration.",
+        top_story_fallback="TOP RESULT",
+        no_snippet_line="No snippet returned — open the URL for the page.",
+    )
+    return _assemble_editorial_magazine_ast(
+        page_kicker="WEB SEARCH",
+        mast=mast,
+        meta_line=meta_line,
+        theme=theme,
+        as_of=as_of,
+        folio_right="Results",
+        page_bg=page_bg,
+        lead_elements=lead,
+        rail_elements=rail,
+    )
+
+
+def _stock_items_editorial_normalized(data: Dict[str, Any]) -> List[Dict[str, str]]:
+    raw = data.get("watchlist") or data.get("items") or []
+    if not isinstance(raw, list):
+        return []
+    out: List[Dict[str, str]] = []
+    for it in raw:
+        if not isinstance(it, dict):
+            continue
+        sym = str(it.get("symbol") or it.get("ticker") or "").strip() or "-"
+        name = str(it.get("name") or "").strip()
+        title = f"{sym} — {name}" if name else sym
+        if not title.strip() or title.strip() == "-":
+            title = sym
+        price = str(it.get("price") or it.get("last") or "").strip()
+        ch_raw = it.get("change_pct") or it.get("pct") or it.get("change") or "-"
+        ch = str(_stock_change_cell(ch_raw))
+        note = str(it.get("note") or it.get("alert") or "").strip()
+        parts: List[str] = []
+        if price and price != "-":
+            parts.append(f"Last {price}")
+        parts.append(f"Change {ch}")
+        if note:
+            parts.append(note)
+        summary = " · ".join(parts) if parts else "—"
+        out.append({"title": title, "feed": sym, "summary": summary, "link": ""})
+    return out
+
+
+def _stock_magazine_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") -> Dict[str, Any]:
+    items = _stock_items_editorial_normalized(data)[:30]
+    as_of = str(data.get("as_of") or data.get("generated_at") or _now_local_str())
+    if theme not in ("dispatch", "minimal"):
+        theme = "dispatch"
+    mast = title.upper() if theme == "dispatch" else title
+    page_bg = "#f7f7f7" if theme == "minimal" else "#eef2f6"
+    lead, rail = _editorial_items_to_lead_rail(
+        items,
+        "MORE SYMBOLS",
+        empty_kicker="WATCHLIST",
+        empty_headline="No symbols in this snapshot",
+        empty_body="Add tickers to your watchlist or retry after the data feed loads.",
+        top_story_fallback="TOP SYMBOL",
+        no_snippet_line="No price detail — check your market data source.",
+    )
+    return _assemble_editorial_magazine_ast(
+        page_kicker="MARKETS",
+        mast=mast,
+        meta_line=f"Market snapshot · As of {as_of}",
+        theme=theme,
+        as_of=as_of,
+        folio_right="Watchlist",
+        page_bg=page_bg,
+        lead_elements=lead,
+        rail_elements=rail,
+    )
+
+
+def _weather_magazine_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") -> Dict[str, Any]:
+    now = data.get("now") or {}
+    if not isinstance(now, dict):
+        now = {}
+    days = data.get("forecast") or data.get("days") or []
+    if not isinstance(days, list):
+        days = []
+    as_of = str(data.get("as_of") or data.get("generated_at") or _now_local_str())
+    loc = str(data.get("location") or data.get("city") or "Unknown").strip()
+    if theme not in ("dispatch", "minimal"):
+        theme = "dispatch"
+    mast = title.upper() if theme == "dispatch" else title
+    loc_show = mast
+    if loc and loc.lower() != "unknown":
+        loc_show = loc
+    temp_s = str(now.get("temp") or "").strip()
+    cond = str(now.get("condition") or "").strip()
+    wx_bits = [x for x in (temp_s, cond) if x]
+    wx_line = " · ".join(wx_bits)
+    meta_line = f"{wx_line} · {as_of}" if wx_line else f"As of {as_of}"
+    page_bg = "#f7f7f7" if theme == "minimal" else "#dbeafe"
+
+    detail_lines = [
+        f"Feels like: {now.get('feels_like') or '—'}",
+        f"Humidity: {now.get('humidity') or '—'}",
+        f"Wind: {now.get('wind') or '—'}",
+    ]
+    story_children: List[Dict[str, Any]] = []
+    block = "\n\n".join(detail_lines)
+    for para in _split_summary_bodies(block, max_first=200, max_second=200):
+        story_children.append(
+            {"type": "body", "content": para, "properties": {"style": {"textAlign": "justify"}}}
+        )
+    if not story_children:
+        story_children.append(
+            {
+                "type": "body",
+                "content": wx_line or "—",
+                "properties": {"style": {"textAlign": "left"}},
+            }
+        )
+
+    lead_elements: List[Dict[str, Any]] = [
+        {"type": "kicker", "content": "RIGHT NOW"},
+        {"type": "headline", "content": loc_show},
+        {"type": "deck", "content": wx_line or "Conditions unavailable"},
+        {"type": "byline", "content": f"Updated {as_of}"},
+        {
+            "type": "story",
+            "content": "",
+            "columns": 2,
+            "gutter": 12,
+            "balance": False,
+            "children": story_children,
+        },
+    ]
+
+    side_elements: List[Dict[str, Any]] = [
+        {"type": "sidebar_head", "content": "OUTLOOK"},
+        {"type": "sidebar_rule", "content": ""},
+    ]
+    if not days:
+        side_elements.append({"type": "sidebar_body", "content": "—"})
+    else:
+        for d in days[:10]:
+            if not isinstance(d, dict):
+                continue
+            day = str(d.get("day") or d.get("date") or "—")
+            summ = str(d.get("summary") or d.get("condition") or "—")
+            hi = str(d.get("high") or d.get("max") or "—")
+            lo = str(d.get("low") or d.get("min") or "—")
+            side_elements.append(
+                {"type": "sidebar_body", "content": f"• {day}\n{summ}\nHigh {hi} · Low {lo}"}
+            )
+
+    return _assemble_editorial_magazine_ast(
+        page_kicker="WEATHER",
+        mast=mast,
+        meta_line=meta_line,
+        theme=theme,
+        as_of=as_of,
+        folio_right="Forecast",
+        page_bg=page_bg,
+        lead_elements=lead_elements,
+        rail_elements=side_elements,
+    )
+
+
 def _daily_brief_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") -> Dict[str, Any]:
     items = data.get("items") or data.get("results") or []
     if not isinstance(items, list):
         items = []
     as_of = str(data.get("as_of") or data.get("generated_at") or _now_local_str())
     headline_rows = []
-    for i, it in enumerate(items[:18], start=1):
+    for i, it in enumerate(items[:22], start=1):
         if not isinstance(it, dict):
             continue
         h = str(it.get("title") or it.get("headline") or "").strip()
         src = str(it.get("feed") or it.get("source") or it.get("site") or "").strip()
+        snip = str(
+            it.get("summary") or it.get("description") or it.get("content") or it.get("snippet") or ""
+        ).strip()
+        if len(snip) > 260:
+            snip = snip[:257] + "..."
         link = str(it.get("link") or it.get("url") or "").strip()
         headline_rows.append(
             {
@@ -314,6 +1413,7 @@ def _daily_brief_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") 
                     {"type": "table-cell", "content": str(i)},
                     {"type": "table-cell", "content": h or "Item"},
                     {"type": "table-cell", "content": src or "-"},
+                    {"type": "table-cell", "content": snip or "-"},
                     {"type": "table-cell", "content": link or "-"},
                 ],
             }
@@ -321,23 +1421,25 @@ def _daily_brief_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") 
     if theme not in ("dispatch", "minimal"):
         theme = "dispatch"
     mast = title.upper() if theme == "dispatch" else title
+    # Portrait magazine page: tall folio, warm stock, stronger type hierarchy.
+    page_bg = "#f7f7f7" if theme == "minimal" else "#f4ecdf"
     return {
         "documentVersion": "1.1",
         "layout": {
-            "pageSize": {"width": 720, "height": 405},
-            "orientation": "landscape",
-            "margins": {"top": 34, "right": 42, "bottom": 34, "left": 42},
+            "pageSize": {"width": 595, "height": 842},
+            "orientation": "portrait",
+            "margins": {"top": 40, "right": 44, "bottom": 40, "left": 44},
             "fontFamily": "Arimo",
             "fontSize": 10,
-            "lineHeight": 1.35,
-            "pageBackground": "#f7f7f7" if theme == "minimal" else "#fdf6e3",
+            "lineHeight": 1.38,
+            "pageBackground": page_bg,
         },
         "styles": {
-            "kicker": {"fontSize": 8, "letterSpacing": 1.2, "marginBottom": 4, "keepWithNext": True},
-            "title": {"fontSize": 24, "fontWeight": "bold", "marginBottom": 8, "keepWithNext": True},
-            "meta": {"fontSize": 9, "marginBottom": 10, "color": "#555"},
-            "body": {"fontSize": 10, "marginBottom": 8, "textAlign": "justify"},
-            "table-cell": {"fontSize": 8, "paddingTop": 3, "paddingBottom": 3, "paddingLeft": 4, "paddingRight": 4},
+            "kicker": {"fontSize": 7.5, "letterSpacing": 2.0, "marginBottom": 6, "keepWithNext": True, "color": "#6b5344"},
+            "title": {"fontSize": 28, "fontWeight": "bold", "marginBottom": 10, "keepWithNext": True, "color": "#1c1917"},
+            "meta": {"fontSize": 9.5, "marginBottom": 12, "color": "#57534e", "fontStyle": "italic"},
+            "body": {"fontSize": 9.5, "marginBottom": 7, "textAlign": "left", "lineHeight": 1.4, "color": "#44403c"},
+            "table-cell": {"fontSize": 8.5, "paddingTop": 4, "paddingBottom": 4, "paddingLeft": 4, "paddingRight": 4},
             "rh-odd": {"fontSize": 8, "textAlign": "center", "color": "#666"},
             "folio-left": {"fontSize": 8, "textAlign": "left", "color": "#666"},
             "folio-page": {"fontSize": 8, "textAlign": "center", "color": "#666"},
@@ -368,14 +1470,14 @@ def _daily_brief_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") 
                         "slots": [
                             {"id": "left", "elements": [{"type": "folio-left", "content": "HomeClaw"}]},
                             {"id": "center", "elements": [{"type": "folio-page", "content": "Page {pageNumber} / {totalPages}"}]},
-                            {"id": "right", "elements": [{"type": "folio-right", "content": "Daily Brief"}]},
+                            {"id": "right", "elements": [{"type": "folio-right", "content": "Magazine"}]},
                         ],
                     }
                 ]
             }
         },
         "elements": [
-            {"type": "kicker", "content": "DAILY BRIEF"},
+            {"type": "kicker", "content": "FEATURE DIGEST"},
             {"type": "title", "content": mast},
             {"type": "meta", "content": f"As of {as_of}"},
             {
@@ -394,9 +1496,10 @@ def _daily_brief_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") 
                                     "repeatHeader": True,
                                     "columnGap": 4,
                                     "columns": [
-                                        {"mode": "fixed", "value": 24},
-                                        {"mode": "flex", "fr": 2},
-                                        {"mode": "fixed", "value": 90},
+                                        {"mode": "fixed", "value": 22},
+                                        {"mode": "flex", "fr": 1.25},
+                                        {"mode": "fixed", "value": 56},
+                                        {"mode": "flex", "fr": 2.25},
                                         {"mode": "flex", "fr": 1},
                                     ],
                                 },
@@ -408,7 +1511,8 @@ def _daily_brief_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") 
                                         "children": [
                                             {"type": "table-cell", "content": "#"},
                                             {"type": "table-cell", "content": "Headline"},
-                                            {"type": "table-cell", "content": "Source"},
+                                            {"type": "table-cell", "content": "Feed"},
+                                            {"type": "table-cell", "content": "Snippet"},
                                             {"type": "table-cell", "content": "Link"},
                                         ],
                                     },
@@ -420,12 +1524,122 @@ def _daily_brief_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") 
                     {
                         "id": "side",
                         "elements": [
-                            {"type": "kicker", "content": "TOP HIGHLIGHTS"},
-                            {"type": "body", "content": "• Focused, readable dispatch layout"},
-                            {"type": "body", "content": "• Structured table with stable pagination"},
-                            {"type": "body", "content": "• Same AST can render to PDF or browser preview"},
+                            {"type": "kicker", "content": "IN THIS ISSUE"},
+                            {"type": "body", "content": "• Front-of-book scan: headlines, source, and pull quotes in one spread."},
+                            {"type": "body", "content": "• Built for print-style pagination — PDF and canvas share the same layout."},
+                            {"type": "body", "content": "• Open the preview link for the full folio; chat stays to bullet highlights."},
                         ],
                     },
+                ],
+            },
+        ],
+    }
+
+
+def _web_search_ast(
+    data: Dict[str, Any], title: str, theme: str = "dispatch", scripted_colophon: bool = False
+) -> Dict[str, Any]:
+    """Tavily / web_search shaped JSON: results[].title|url|content|snippet."""
+    items = data.get("results") or data.get("items") or []
+    if not isinstance(items, list):
+        items = []
+    query = str(data.get("query") or data.get("q") or "").strip()
+    as_of = str(data.get("as_of") or data.get("generated_at") or _now_local_str())
+    headline_rows = []
+    for i, it in enumerate(items[:20], start=1):
+        if not isinstance(it, dict):
+            continue
+        h = str(it.get("title") or it.get("headline") or "").strip()
+        url = str(it.get("url") or it.get("link") or "").strip()
+        snip = str(
+            it.get("content") or it.get("snippet") or it.get("description") or it.get("summary") or ""
+        ).strip()
+        if len(snip) > 220:
+            snip = snip[:217] + "..."
+        headline_rows.append(
+            {
+                "type": "table-row",
+                "content": "",
+                "children": [
+                    {"type": "table-cell", "content": str(i)},
+                    {"type": "table-cell", "content": h or "Result"},
+                    {"type": "table-cell", "content": snip or "-"},
+                    {"type": "table-cell", "content": url or "-"},
+                ],
+            }
+        )
+    if theme not in ("dispatch", "minimal"):
+        theme = "dispatch"
+    mast = title.upper() if theme == "dispatch" else title
+    sub = f"Query: {query}" if query else f"As of {as_of}"
+    head_elements: list = [
+        {"type": "kicker", "content": "BRIEFING NOTES"},
+        {"type": "title", "content": mast},
+        {"type": "meta", "content": sub},
+    ]
+    if scripted_colophon:
+        head_elements.append(
+            {"type": "meta", "name": "colophon", "content": "Resolving page count after layout…"}
+        )
+    ws_bg = "#f7f7f7" if theme == "minimal" else "#faf8f5"
+    return {
+        "documentVersion": "1.1",
+        "layout": {
+            "pageSize": {"width": 595, "height": 842},
+            "orientation": "portrait",
+            "margins": {"top": 48, "right": 52, "bottom": 48, "left": 52},
+            "fontFamily": "Arimo",
+            "fontSize": 10,
+            "lineHeight": 1.42,
+            "pageBackground": ws_bg,
+        },
+        "styles": {
+            "kicker": {
+                "fontSize": 8,
+                "letterSpacing": 1.5,
+                "marginBottom": 5,
+                "keepWithNext": True,
+                "color": "#64748b",
+            },
+            "title": {
+                "fontSize": 20,
+                "fontWeight": "bold",
+                "marginBottom": 6,
+                "keepWithNext": True,
+                "color": "#1e293b",
+            },
+            "meta": {"fontSize": 9.5, "marginBottom": 14, "color": "#64748b"},
+            "table-cell": {"fontSize": 8.5, "paddingTop": 4, "paddingBottom": 4, "paddingLeft": 5, "paddingRight": 5},
+        },
+        "elements": head_elements
+        + [
+            {
+                "type": "table",
+                "content": "",
+                "table": {
+                    "headerRows": 1,
+                    "repeatHeader": True,
+                    "columnGap": 4,
+                    "columns": [
+                        {"mode": "fixed", "value": 24},
+                        {"mode": "flex", "fr": 1},
+                        {"mode": "flex", "fr": 2},
+                        {"mode": "flex", "fr": 1},
+                    ],
+                },
+                "children": [
+                    {
+                        "type": "table-row",
+                        "content": "",
+                        "properties": {"semanticRole": "header"},
+                        "children": [
+                            {"type": "table-cell", "content": "#"},
+                            {"type": "table-cell", "content": "Title"},
+                            {"type": "table-cell", "content": "Snippet"},
+                            {"type": "table-cell", "content": "URL"},
+                        ],
+                    },
+                    *headline_rows,
                 ],
             },
         ],
@@ -458,50 +1672,82 @@ def _weather_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") -> D
             }
         )
     mast = title.upper() if theme == "dispatch" else title
+    loc_show = mast
+    if loc and loc.strip() and loc.strip().lower() != "unknown":
+        loc_show = loc.strip()
+    temp_s = str(now.get("temp") or "").strip()
+    cond = str(now.get("condition") or "").strip()
+    wx_bits = [x for x in (temp_s, cond) if x]
+    wx_line = " · ".join(wx_bits)
+    meta_line = f"{wx_line} · {as_of}" if wx_line else f"As of {as_of}"
+    wx_bg = "#f7f7f7" if theme == "minimal" else "#dbeafe"
     return {
         "documentVersion": "1.1",
         "layout": {
             "pageSize": {"width": 720, "height": 405},
             "orientation": "landscape",
-            "margins": {"top": 34, "right": 42, "bottom": 34, "left": 42},
+            "margins": {"top": 30, "right": 38, "bottom": 30, "left": 38},
             "fontFamily": "Arimo",
             "fontSize": 10,
-            "lineHeight": 1.35,
-            "pageBackground": "#f7f7f7" if theme == "minimal" else "#eef6ff",
+            "lineHeight": 1.38,
+            "pageBackground": wx_bg,
         },
         "styles": {
-            "kicker": {"fontSize": 8, "letterSpacing": 1.2, "marginBottom": 4, "keepWithNext": True},
-            "title": {"fontSize": 24, "fontWeight": "bold", "marginBottom": 8, "keepWithNext": True},
-            "meta": {"fontSize": 9, "marginBottom": 10, "color": "#555"},
-            "body": {"fontSize": 10, "marginBottom": 8},
-            "table-cell": {"fontSize": 8, "paddingTop": 3, "paddingBottom": 3, "paddingLeft": 4, "paddingRight": 4},
+            "kicker": {
+                "fontSize": 8,
+                "letterSpacing": 1.4,
+                "marginBottom": 4,
+                "keepWithNext": True,
+                "color": "#075985",
+            },
+            "title": {
+                "fontSize": 26,
+                "fontWeight": "bold",
+                "marginBottom": 6,
+                "keepWithNext": True,
+                "color": "#0c4a6e",
+            },
+            "meta": {"fontSize": 10, "marginBottom": 12, "color": "#164e63"},
+            "body": {"fontSize": 10.5, "marginBottom": 7, "lineHeight": 1.35, "color": "#134e4a"},
+            "table-cell": {"fontSize": 9, "paddingTop": 4, "paddingBottom": 4, "paddingLeft": 5, "paddingRight": 5},
         },
         "elements": [
-            {"type": "kicker", "content": "WEATHER"},
-            {"type": "title", "content": mast},
-            {"type": "meta", "content": f"{loc} · As of {as_of}"},
+            {"type": "kicker", "content": "LOCAL FORECAST"},
+            {"type": "title", "content": loc_show},
+            {"type": "meta", "content": meta_line},
             {
                 "type": "strip",
                 "content": "",
-                "stripLayout": {"tracks": [{"mode": "flex", "fr": 1}, {"mode": "flex", "fr": 1}], "gap": 14},
+                "stripLayout": {"tracks": [{"mode": "flex", "fr": 0.9}, {"mode": "flex", "fr": 1.1}], "gap": 16},
                 "slots": [
                     {
                         "id": "left",
                         "elements": [
-                            {"type": "body", "content": f"Condition: {now.get('condition') or '-'}"},
-                            {"type": "body", "content": f"Temp: {now.get('temp') or '-'}"},
-                            {"type": "body", "content": f"Feels Like: {now.get('feels_like') or '-'}"},
-                            {"type": "body", "content": f"Humidity: {now.get('humidity') or '-'}"},
-                            {"type": "body", "content": f"Wind: {now.get('wind') or '-'}"},
+                            {"type": "kicker", "content": "NOW"},
+                            {"type": "body", "content": wx_line or f"{cond or '—'} · {temp_s or '—'}"},
+                            {"type": "body", "content": f"Feels like: {now.get('feels_like') or '—'}"},
+                            {"type": "body", "content": f"Humidity: {now.get('humidity') or '—'}"},
+                            {"type": "body", "content": f"Wind: {now.get('wind') or '—'}"},
                         ],
                     },
                     {
                         "id": "right",
                         "elements": [
+                            {"type": "kicker", "content": "OUTLOOK"},
                             {
                                 "type": "table",
                                 "content": "",
-                                "table": {"headerRows": 1, "repeatHeader": True, "columnGap": 4},
+                                "table": {
+                                    "headerRows": 1,
+                                    "repeatHeader": True,
+                                    "columnGap": 5,
+                                    "columns": [
+                                        {"mode": "fixed", "value": 44},
+                                        {"mode": "flex", "fr": 1},
+                                        {"mode": "fixed", "value": 36},
+                                        {"mode": "fixed", "value": 36},
+                                    ],
+                                },
                                 "children": [
                                     {
                                         "type": "table-row",
@@ -542,37 +1788,54 @@ def _stock_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") -> Dic
                     {"type": "table-cell", "content": str(it.get("symbol") or it.get("ticker") or "-")},
                     {"type": "table-cell", "content": str(it.get("name") or "-")},
                     {"type": "table-cell", "content": str(it.get("price") or it.get("last") or "-")},
-                    {"type": "table-cell", "content": str(it.get("change_pct") or it.get("pct") or it.get("change") or "-")},
+                    {
+                        "type": "table-cell",
+                        "content": _stock_change_cell(
+                            it.get("change_pct") or it.get("pct") or it.get("change") or "-"
+                        ),
+                    },
                     {"type": "table-cell", "content": str(it.get("note") or it.get("alert") or "-")},
                 ],
             }
         )
     mast = title.upper() if theme == "dispatch" else title
+    stk_bg = "#f7f7f7" if theme == "minimal" else "#eef2f6"
     return {
         "documentVersion": "1.1",
         "layout": {
             "pageSize": {"width": 720, "height": 405},
             "orientation": "landscape",
-            "margins": {"top": 34, "right": 42, "bottom": 34, "left": 42},
+            "margins": {"top": 32, "right": 36, "bottom": 32, "left": 36},
             "fontFamily": "Arimo",
             "fontSize": 10,
             "lineHeight": 1.35,
-            "pageBackground": "#f7f7f7" if theme == "minimal" else "#f6f2e8",
+            "pageBackground": stk_bg,
         },
         "styles": {
-            "kicker": {"fontSize": 8, "letterSpacing": 1.2, "marginBottom": 4, "keepWithNext": True},
-            "title": {"fontSize": 24, "fontWeight": "bold", "marginBottom": 8, "keepWithNext": True},
-            "meta": {"fontSize": 9, "marginBottom": 10, "color": "#555"},
-            "table-cell": {"fontSize": 8, "paddingTop": 3, "paddingBottom": 3, "paddingLeft": 4, "paddingRight": 4},
+            "kicker": {"fontSize": 8, "letterSpacing": 1.4, "marginBottom": 4, "keepWithNext": True, "color": "#334155"},
+            "title": {"fontSize": 22, "fontWeight": "bold", "marginBottom": 6, "keepWithNext": True, "color": "#0f172a"},
+            "meta": {"fontSize": 9, "marginBottom": 12, "color": "#475569"},
+            "table-cell": {"fontSize": 9, "paddingTop": 4, "paddingBottom": 4, "paddingLeft": 5, "paddingRight": 5},
         },
         "elements": [
-            {"type": "kicker", "content": "MARKET BRIEF"},
+            {"type": "kicker", "content": "WATCHLIST"},
             {"type": "title", "content": mast},
-            {"type": "meta", "content": f"As of {as_of}"},
+            {"type": "meta", "content": f"Market snapshot · As of {as_of}"},
             {
                 "type": "table",
                 "content": "",
-                "table": {"headerRows": 1, "repeatHeader": True, "columnGap": 4},
+                "table": {
+                    "headerRows": 1,
+                    "repeatHeader": True,
+                    "columnGap": 5,
+                    "columns": [
+                        {"mode": "fixed", "value": 52},
+                        {"mode": "flex", "fr": 1.2},
+                        {"mode": "fixed", "value": 56},
+                        {"mode": "fixed", "value": 64},
+                        {"mode": "flex", "fr": 0.9},
+                    ],
+                },
                 "children": [
                     {
                         "type": "table-row",
@@ -593,16 +1856,262 @@ def _stock_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") -> Dic
     }
 
 
-def _ast_from_template(template: str, data: Dict[str, Any], title: str, theme: str) -> Dict[str, Any]:
+def _ast_from_template(
+    template: str,
+    data: Dict[str, Any],
+    title: str,
+    theme: str,
+    scripted_colophon: bool = False,
+    document_layout: str = "digest_table",
+) -> Dict[str, Any]:
     t = (template or "").strip().lower()
+    layout = (document_layout or "").strip().lower()
     if t == "daily_brief":
+        if layout == "magazine":
+            return _daily_brief_magazine_ast(data, title=title, theme=theme)
+        if layout == "newspaper":
+            return _daily_brief_newspaper_ast(data, title=title, theme=theme)
         return _daily_brief_ast(data, title=title, theme=theme)
     if t == "weather":
+        if layout == "magazine":
+            return _weather_magazine_ast(data, title=title, theme=theme)
         return _weather_ast(data, title=title, theme=theme)
     if t == "stock":
+        if layout == "magazine":
+            return _stock_magazine_ast(data, title=title, theme=theme)
         return _stock_ast(data, title=title, theme=theme)
-    raise ValueError("template must be one of: daily_brief, weather, stock")
-def _build_browser_preview_html(layout_json_text: str) -> str:
+    if t == "web_search":
+        if layout == "magazine":
+            return _web_search_magazine_ast(data, title=title, theme=theme)
+        return _web_search_ast(data, title=title, theme=theme, scripted_colophon=scripted_colophon)
+    raise ValueError("template must be one of: daily_brief, weather, stock, web_search")
+
+
+def _ast_collect_table_rows(ast_doc: Dict[str, Any], max_rows: int) -> list[list[str]]:
+    rows: list[list[str]] = []
+
+    def walk(node: Any) -> None:
+        if len(rows) >= max_rows:
+            return
+        if isinstance(node, dict):
+            if node.get("type") == "table-row":
+                ch = node.get("children") or []
+                if isinstance(ch, list):
+                    cs: list[str] = []
+                    for cell in ch:
+                        if not isinstance(cell, dict):
+                            continue
+                        ct = str(cell.get("type") or "")
+                        if ct in ("table-cell", "table-cell-alt", "table-header"):
+                            cs.append(str(cell.get("content") or "").strip())
+                    if cs:
+                        rows.append(cs)
+                return
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for x in node:
+                walk(x)
+
+    walk(ast_doc.get("elements") or [])
+    h = ast_doc.get("header") or {}
+    if isinstance(h, dict):
+        for v in h.values():
+            if isinstance(v, dict):
+                walk(v.get("elements") or [])
+    f = ast_doc.get("footer") or {}
+    if isinstance(f, dict):
+        for v in f.values():
+            if isinstance(v, dict):
+                walk(v.get("elements") or [])
+    return rows
+
+
+def _ast_collect_body_digest_rows(ast_doc: Dict[str, Any], max_rows: int = 28, max_cell: int = 1200) -> list[list[str]]:
+    """When no table rows exist (e.g. magazine layout), pull body/deck/headline text for the HTML digest."""
+    rows: list[list[str]] = []
+
+    def walk_el(el: Any) -> None:
+        if len(rows) >= max_rows:
+            return
+        if not isinstance(el, dict):
+            return
+        t = str(el.get("type") or "")
+        if t in (
+            "body",
+            "deck",
+            "headline",
+            "headline-lg",
+            "byline",
+            "sidebar_body",
+            "sidebar-body",
+            "masthead",
+            "dateline",
+            "caption",
+        ):
+            c = str(el.get("content") or "").strip()
+            if c and c != "—":
+                rows.append([c[:max_cell]])
+        ch = el.get("children")
+        if isinstance(ch, list):
+            for c in ch:
+                walk_el(c)
+        for key in ("zones", "slots"):
+            arr = el.get(key)
+            if isinstance(arr, list):
+                for n in arr:
+                    if isinstance(n, dict):
+                        for sub in n.get("elements") or []:
+                            walk_el(sub)
+
+    for top in ast_doc.get("elements") or []:
+        walk_el(top)
+    return rows
+
+
+_DIGEST_URL_ONLY = re.compile(r"^https?://[^\s<>'\"]+$", re.I)
+_DIGEST_URL_SUB = re.compile(r"https?://[^\s<>'\"]+", re.I)
+
+
+def _digest_mixed_text_html(text: str, max_cell: int) -> str:
+    """Escape plain text but turn http(s) URLs into <a> tags (multiline-safe)."""
+    s = (text or "")[:max_cell]
+    if not s.strip():
+        return ""
+    parts: list[str] = []
+    pos = 0
+    for m in _DIGEST_URL_SUB.finditer(s):
+        parts.append(html.escape(s[pos : m.start()]))
+        url = m.group(0)
+        while len(url) > 8 and url[-1] in ").,;:]":
+            url = url[:-1]
+        href_q = html.escape(url, quote=True)
+        parts.append(
+            f'<a href="{href_q}" target="_blank" rel="noopener noreferrer" '
+            'style="color:#0c4a6e;text-decoration:underline;font-weight:500;word-break:break-all">'
+            f"{html.escape(url)}</a>"
+        )
+        pos = m.end()
+    parts.append(html.escape(s[pos:]))
+    return "".join(parts).replace("\n", "<br>")
+
+
+def _digest_cell_inner_html(cell: str, max_cell: int) -> str:
+    """Table / digest cell: linkify URLs inside text; bare URL cell becomes one link."""
+    raw = (cell or "")[:max_cell]
+    s = raw.strip()
+    if not s:
+        return ""
+    if s == "-":
+        return html.escape(s)
+    if _DIGEST_URL_ONLY.match(s):
+        return _digest_mixed_text_html(s, max_cell)
+    return _digest_mixed_text_html(raw, max_cell)
+
+
+def _ast_digest_html(ast_doc: Dict[str, Any]) -> str:
+    """
+    Plain HTML with table text from the AST using browser system fonts so CJK stays readable when
+    VMPrint SVG / layout boxes omit Han glyphs (Arimo-only pipeline).
+    """
+    max_rows = 24
+    max_cell = 1500
+    max_total = 100_000
+    heads: list[str] = []
+    for el in ast_doc.get("elements") or []:
+        if not isinstance(el, dict):
+            continue
+        t = str(el.get("type") or "")
+        if t == "zone-map":
+            break
+        c = str(el.get("content") or "").strip()
+        if not c:
+            continue
+        c800 = c[:800]
+        if t == "kicker":
+            heads.append(
+                "<p style='margin:0 0 6px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;"
+                f"color:#78716c;font-weight:600'>{html.escape(c800)}</p>"
+            )
+        elif t == "title":
+            heads.append(
+                "<p style='margin:0 0 8px;font:600 24px/1.25 Georgia,\"Noto Serif SC\",\"Songti SC\",serif;"
+                f"color:#1c1917'>{html.escape(c800)}</p>"
+            )
+        elif t == "meta":
+            heads.append(
+                f"<p style='margin:0 0 12px;font-size:13px;color:#57534e;font-style:italic'>{html.escape(c800)}</p>"
+            )
+        elif t == "masthead":
+            heads.append(
+                f"<p style='margin:0 0 4px;font:700 22px/1.2 system-ui,serif;letter-spacing:.12em;text-align:center;"
+                f"color:#1a1a1a'>{html.escape(c800)}</p>"
+            )
+        elif t == "dateline":
+            heads.append(
+                f"<p style='margin:0 0 14px;font-size:11px;letter-spacing:.06em;text-align:center;color:#555'>"
+                f"{html.escape(c800)}</p>"
+            )
+        elif t == "headline-lg":
+            heads.append(
+                f"<p style='margin:0 0 10px;font:700 18px/1.2 Georgia,\"Noto Serif SC\",serif;color:#111'>"
+                f"{html.escape(c800)}</p>"
+            )
+    rows = _ast_collect_table_rows(ast_doc, max_rows=max_rows)
+    if not rows:
+        rows = _ast_collect_body_digest_rows(ast_doc, max_rows=max_rows, max_cell=max_cell)
+    if not rows and not heads:
+        return ""
+    parts: list[str] = [
+        "<div id='homeclaw-ast-digest' class='homeclaw-ast-digest' style='margin:12px;padding:18px 20px;"
+        "background:linear-gradient(180deg,#fffefb 0%,#f7f2e8 100%);color:#292524;"
+        "font:15px/1.55 system-ui,-apple-system,Segoe UI,Roboto,PingFang SC,Microsoft YaHei,Noto Sans SC,sans-serif;"
+        "border-radius:2px;border:1px solid #d6d3d1;box-shadow:0 4px 20px rgba(0,0,0,.08);max-width:1280px'>",
+        "<div style='font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#78716c;margin-bottom:8px'>"
+        "Magazine digest</div>",
+        "<div style='font-size:12px;color:#57534e;margin-bottom:12px;line-height:1.45'>"
+        "Same content as the layout above; <strong>links open in a new tab</strong>. "
+        "Use this block when the canvas preview omits CJK glyphs.</div>",
+    ]
+    parts.extend(heads)
+    if rows:
+
+        def _row_is_table_header(cells: list[str]) -> bool:
+            if not cells or str(cells[0]).strip() != "#":
+                return False
+            blob = " ".join(str(x) for x in cells).lower()
+            return (
+                "headline" in blob
+                or "title" in blob
+                or "link" in blob
+                or "snippet" in blob
+                or "url" in blob
+            )
+
+        parts.append(
+            "<table style='width:100%;border-collapse:collapse;margin-top:4px;font-size:13px;"
+            "border-top:2px solid #1c1917'>"
+        )
+        for i, r in enumerate(rows):
+            is_hdr = i == 0 and _row_is_table_header(r)
+            tag = "th" if is_hdr else "td"
+            bg = "#fafaf9" if is_hdr else ("#ffffff" if i % 2 == 1 else "#faf8f5")
+            fw = "font-weight:600;" if is_hdr else ""
+            parts.append("<tr>")
+            for cell in r:
+                inner = _digest_cell_inner_html(str(cell), max_cell)
+                parts.append(
+                    f"<{tag} style='border:1px solid #d6d3d1;padding:9px 11px;vertical-align:top;"
+                    f"background:{bg};{fw}text-align:left'>{inner}</{tag}>"
+                )
+            parts.append("</tr>")
+        parts.append("</table>")
+    parts.append("</div>")
+    out = "".join(parts)
+    return out if len(out) <= max_total else (out[: max_total - 40] + "…</div>")
+
+
+def _build_browser_preview_html(layout_json_text: str, digest_html: str = "") -> str:
     esc = html.escape(layout_json_text or "{}")
     return (
         "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -612,6 +2121,7 @@ def _build_browser_preview_html(layout_json_text: str) -> str:
         ".box{position:absolute;border:1px dashed rgba(0,0,0,.12);font-size:10px;line-height:1.2;overflow:hidden;white-space:pre-wrap}"
         ".meta{font-size:12px;color:#bbb}</style></head><body>"
         "<div class='top'><strong>VMPrint Scene Preview</strong><div class='meta'>HomeClaw generated preview (layout boxes).</div></div>"
+        f"{digest_html or ''}"
         "<div id='root' class='pages'></div>"
         f"<script id='layout-data' type='application/json'>{esc}</script>"
         "<script>const d=JSON.parse(document.getElementById('layout-data').textContent||'{}');"
@@ -641,47 +2151,84 @@ def _build_canvas_preview_html(svg_pages: list) -> str:
     )
 
 
-def _build_hybrid_runtime_preview_html(ast_json_text: str, fallback_svg_pages: list) -> str:
+def _magazine_layout_embed_max_chars() -> int:
+    try:
+        v = os.environ.get("HOMECLAW_VMPRINT_EMBED_LAYOUT_MAX_CHARS")
+        if v is not None and str(v).strip() != "":
+            return max(0, int(v))
+    except Exception:
+        pass
+    return 600_000
+
+
+def _magazine_layout_sidecar_path(preview_html: Path) -> Path:
+    name = preview_html.name
+    if name.lower().endswith(".preview.html"):
+        return preview_html.with_name(name[: -len(".preview.html")] + ".layout.json")
+    return preview_html.with_suffix(".layout.json")
+
+
+def _build_hybrid_runtime_preview_html(
+    ast_json_text: str,
+    fallback_svg_pages: list,
+    layout_json_text: Optional[str] = None,
+    digest_html: str = "",
+) -> str:
     ast_esc = html.escape(ast_json_text or "{}")
     svg_esc = html.escape(json.dumps(fallback_svg_pages or [], ensure_ascii=False))
     ast_chars = len(ast_json_text or "")
     page_count = len(fallback_svg_pages or [])
     max_ast, max_pages = _vmprint_inline_limits()
     ui_hint = "inline" if (ast_chars <= max_ast and page_count <= max_pages) else "link"
+    embed = ""
+    lim = _magazine_layout_embed_max_chars()
+    if layout_json_text and (lim <= 0 or len(layout_json_text) <= lim):
+        embed = f"<script id='layout-data' type='application/json'>{html.escape(layout_json_text)}</script>"
     return (
         "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<meta name='homeclaw-vmprint-ui-hint' content='{ui_hint}'>"
         f"<meta name='homeclaw-vmprint-ast-chars' content='{ast_chars}'>"
         f"<meta name='homeclaw-vmprint-pages' content='{page_count}'>"
         "<title>VMPrint Browser Preview</title><link rel='stylesheet' href='./styles.css'></head><body>"
-        "<div class='top'><strong>VMPrint Hybrid Preview</strong>"
-        "<div class='meta'>Primary: browser VMPrint runtime (AST->canvas). Fallback: server-rendered pages.</div>"
-        "<div class='toolbar'><label>Scale <select id='scale'><option value='0.75'>75%</option><option selected value='1'>100%</option><option value='1.25'>125%</option><option value='1.5'>150%</option></select></label>"
-        "<label>DPI <select id='dpi'><option selected value='auto'>Auto</option><option value='72'>72</option><option value='96'>96</option><option value='144'>144</option><option value='192'>192</option><option value='300'>300</option></select></label>"
-        "<label>Text <select id='text-mode'><option value='text'>Text</option><option selected value='glyph-path'>Glyph Path</option></select></label>"
-        "<span id='status' class='meta'>Initializing...</span></div></div>"
+        f"{digest_html or ''}"
         "<div id='root' class='pages'></div>"
         f"<script id='ast-data' type='application/json'>{ast_esc}</script>"
-        f"<script id='fallback-svg-pages-data' type='application/json'>{svg_esc}</script>"
+        f"{embed}"
+        f"<script id='svg-pages-data' type='application/json'>{svg_esc}</script>"
         f"<script src='./_vmprint_assets/{_VMPRINT_ASSET_VERSION}/vmprint-fontkit.js'></script><script src='./_vmprint_assets/{_VMPRINT_ASSET_VERSION}/vmprint-engine.js'></script><script src='./_vmprint_assets/{_VMPRINT_ASSET_VERSION}/vmprint-web-fonts.js'></script><script src='./_vmprint_assets/{_VMPRINT_ASSET_VERSION}/vmprint-context-canvas.js'></script>"
         "<script src='./assets/pipeline.js'></script><script src='./assets/ui.js'></script>"
         "</body></html>"
     )
 
 
-def _render_ast_with_vmprint(ast_doc: Dict[str, Any], out_abs: Path, output_format: str) -> Tuple[bool, str]:
+def _render_ast_with_vmprint(
+    ast_doc: Dict[str, Any],
+    out_abs: Path,
+    output_format: str,
+    also_layout_json: bool = False,
+    script_document_yaml: Optional[str] = None,
+) -> Tuple[bool, str]:
     root = _repo_root()
-    _ensure_vmprint_static_assets(out_abs.parent, root)
-    vmprint_dir = _default_vmprint_dir(root)
+    vmprint_dir = _vmprint_root_for_ast(root)
     if vmprint_dir is None:
-        return (False, "VMPrint not found (expected tools/vmprint).")
+        return (
+            False,
+            "VMPrint CLI missing under tools/vmprint or tools/vm_print: expected cli/dist/index.js after npm run build.",
+        )
+    _ensure_vmprint_static_assets(out_abs.parent, root, vmroot=vmprint_dir)
     vm_cli = (vmprint_dir / "cli" / "dist" / "index.js").resolve()
-    if not vm_cli.is_file():
-        return (False, f"VMPrint CLI not built at {vm_cli}. Run: cd {vmprint_dir} && npm install && npm run build")
     out_abs.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(suffix=".ast.json", delete=False, mode="w", encoding="utf-8") as f:
-        json.dump(ast_doc, f, ensure_ascii=False, indent=2)
-        ast_path = f.name
+    ast_tf = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+    ast_tf.close()
+    ast_path = ast_tf.name
+    try:
+        _write_ast_input_file(Path(ast_path), ast_doc, script_document_yaml)
+    except Exception as e:
+        try:
+            Path(ast_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        return (False, f"Failed to write AST input: {e!s}")
     layout_path = ast_path + ".layout.json"
     pdf_path = ast_path + ".pdf"
     try:
@@ -707,16 +2254,22 @@ def _render_ast_with_vmprint(ast_doc: Dict[str, Any], out_abs: Path, output_form
         if r.returncode != 0 or not Path(layout_path).is_file():
             err = (r.stderr or r.stdout or b"").decode("utf-8", errors="replace").strip()
             return (False, f"VMPrint layout emit failed: {err[:800] or 'unknown'}")
+        layout_raw = Path(layout_path).read_text(encoding="utf-8", errors="replace")
         if output_format == "layout_json":
-            out_abs.write_text(Path(layout_path).read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
+            out_abs.write_text(layout_raw, encoding="utf-8")
             return (True, "ok")
         if output_format == "browser_preview_html":
+            # npm workspace layout: font/canvas packages live under node_modules/@vmprint/* (not font-managers/ or contexts/).
             canvas_script = (
                 "const fs=require('fs');"
                 "const {LayoutEngine,Renderer,toLayoutConfig,createEngineRuntime}=require('./engine/dist/index.js');"
-                "const {StandardFontManager}=require('./font-managers/standard/dist/index.js');"
-                "const {CanvasContext}=require('./contexts/canvas/dist/index.js');"
-                "const p=process.argv[1]; const doc=JSON.parse(fs.readFileSync(p,'utf8'));"
+                "const {StandardFontManager}=require('./node_modules/@vmprint/standard-fonts/dist/index.cjs');"
+                "const {CanvasContext}=require('./node_modules/@vmprint/context-canvas/dist/index.js');"
+                "const p=process.argv[1];"
+                "const raw=fs.readFileSync(p,'utf8');"
+                "let doc;"
+                "if(String(raw||'').trimStart().startsWith('---')){const parts=String(raw).split(/\\n---\\n/);doc=JSON.parse(parts[parts.length-1]);}"
+                "else{doc=JSON.parse(raw);}"
                 "function _resolvePageSize(raw, orientation){"
                 "const named={LETTER:{width:612,height:792},A4:{width:595,height:842}};"
                 "let s=null;"
@@ -749,20 +2302,52 @@ def _render_ast_with_vmprint(ast_doc: Dict[str, Any], out_abs: Path, output_form
                 timeout=180,
                 check=False,
             )
+            canvas_err = ""
             if c.returncode != 0:
-                err = (c.stderr or c.stdout or b"").decode("utf-8", errors="replace").strip()
-                return (False, f"VMPrint canvas preview failed: {err[:800] or 'unknown'}")
-            try:
-                payload = json.loads((c.stdout or b"{}").decode("utf-8", errors="replace"))
-                svgs = payload.get("svgs") if isinstance(payload, dict) else None
-                if not isinstance(svgs, list) or not svgs:
-                    return (False, "VMPrint canvas preview failed: no pages rendered.")
-            except Exception as e:
-                return (False, f"VMPrint canvas preview parse failed: {e!s}")
-            html_out = _build_hybrid_runtime_preview_html(json.dumps(ast_doc, ensure_ascii=False), svgs)
-            if len(html_out) > 2_000_000:
-                return (False, f"Preview html too large ({len(html_out)} chars). Use output_format=layout_json or output_format=pdf.")
+                canvas_err = (c.stderr or c.stdout or b"").decode("utf-8", errors="replace").strip()
+            svgs: list = []
+            if c.returncode == 0:
+                try:
+                    payload = json.loads((c.stdout or b"{}").decode("utf-8", errors="replace"))
+                    raw_svgs = payload.get("svgs") if isinstance(payload, dict) else None
+                    if isinstance(raw_svgs, list) and raw_svgs:
+                        svgs = raw_svgs
+                    else:
+                        canvas_err = canvas_err or "no pages rendered"
+                except Exception as e:
+                    canvas_err = str(e)
+            digest = _ast_digest_html(ast_doc)
+            if canvas_err or not svgs:
+                # Layout emit already succeeded; canvas/SVG often fails on large CJK tables or font edge cases.
+                err_short = (canvas_err or "unknown")[:500]
+                html_fb = _build_browser_preview_html(layout_raw, digest_html=digest)
+                banner = (
+                    "<div style='background:#422;color:#fec;padding:10px 12px;font:13px system-ui;border-bottom:1px solid #000'>"
+                    "<b>Layout preview (fallback)</b> — Canvas SVG render did not complete; showing VMPrint layout boxes instead. "
+                    f"<span style='opacity:.9'>{html.escape(err_short)}</span></div>"
+                )
+                html_fb = html_fb.replace("<body>", "<body>" + banner, 1)
+                out_abs.write_text(html_fb, encoding="utf-8")
+                if also_layout_json:
+                    side = _magazine_layout_sidecar_path(out_abs)
+                    try:
+                        side.write_text(layout_raw, encoding="utf-8")
+                    except Exception:
+                        pass
+                return (True, "ok")
+            html_out = _build_hybrid_runtime_preview_html(
+                json.dumps(ast_doc, ensure_ascii=False),
+                svgs,
+                layout_json_text=layout_raw,
+                digest_html=digest,
+            )
             out_abs.write_text(html_out, encoding="utf-8")
+            if also_layout_json:
+                side = _magazine_layout_sidecar_path(out_abs)
+                try:
+                    side.write_text(layout_raw, encoding="utf-8")
+                except Exception:
+                    pass
             return (True, "ok")
         return (False, "Unknown output_format")
     finally:
@@ -1018,17 +2603,52 @@ def _template_stock(data: Dict[str, Any], title: str) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def _template_web_search(data: Dict[str, Any], title: str) -> str:
+    items = data.get("results") or data.get("items") or []
+    if not isinstance(items, list):
+        items = []
+    query = str(data.get("query") or data.get("q") or "").strip()
+    as_of = str(data.get("as_of") or data.get("generated_at") or "").strip() or _now_local_str()
+    lines = [f"# {title}", ""]
+    if query:
+        lines.append(f"**Query:** {query}")
+    lines.append(f"**As of:** {as_of}")
+    lines.append("")
+    lines.append("| # | Title | Snippet | URL |")
+    lines.append("|---:|---|---|---|")
+    for i, it in enumerate(items[:25], start=1):
+        if not isinstance(it, dict):
+            continue
+        h = str(it.get("title") or it.get("headline") or "").strip()
+        url = str(it.get("url") or it.get("link") or "").strip()
+        snip = str(it.get("content") or it.get("snippet") or it.get("summary") or "").strip()
+        if len(snip) > 160:
+            snip = snip[:157] + "..."
+        lines.append(
+            f"| {i} | {_md_link(h or 'Result', url)} | {_md_escape_inline(snip)} | {_md_escape_inline(url)} |"
+        )
+    lines.append("")
+    return "\n".join(lines).strip() + "\n"
+
+
 def _render_json_to_markdown(template: str, data: Dict[str, Any], title: Optional[str]) -> str:
     t = (template or "").strip().lower()
     if not title:
-        title = {"daily_brief": "Daily Brief", "weather": "Weather", "stock": "Stocks"}.get(t, "Report")
+        title = {
+            "daily_brief": "Daily Brief",
+            "weather": "Weather",
+            "stock": "Stocks",
+            "web_search": "Search digest",
+        }.get(t, "Report")
     if t == "daily_brief":
         return _template_daily_brief(data, title)
     if t == "weather":
         return _template_weather(data, title)
     if t == "stock":
         return _template_stock(data, title)
-    raise ValueError("template must be one of: daily_brief, weather, stock")
+    if t == "web_search":
+        return _template_web_search(data, title)
+    raise ValueError("template must be one of: daily_brief, weather, stock, web_search")
 
 
 def _render_with_vmprint(md_content: str, out_pdf: Path, vmprint_profile: str, vmprint_style: Optional[str]) -> Tuple[bool, str]:
@@ -1105,7 +2725,12 @@ def main() -> None:
     p_md.add_argument("--out", required=True, help="Output PDF filename (saved under output/).")
 
     p_js = sub.add_parser("render-json", help="Render structured JSON via a template to a magazine-style PDF.")
-    p_js.add_argument("--template", required=True, choices=["daily_brief", "weather", "stock"], help="Template name.")
+    p_js.add_argument(
+        "--template",
+        required=True,
+        choices=["daily_brief", "weather", "stock", "web_search"],
+        help="Template name.",
+    )
     p_js.add_argument("--title", default="", help="Override document title.")
     p_js.add_argument("--json", default="", help="JSON text (inline).")
     p_js.add_argument("--input", default="", help="Path to a JSON file to read.")
@@ -1126,6 +2751,12 @@ def main() -> None:
     p_ast.add_argument("--input", default="", help="Path to AST JSON file.")
     p_ast.add_argument("--output_format", default="pdf", choices=["pdf", "layout_json", "browser_preview_html"])
     p_ast.add_argument("--out", required=True, help="Output filename under output/ (pdf/json/html depending on output_format).")
+    p_ast.add_argument(
+        "--also-layout-json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="With browser_preview_html, write sibling .layout.json next to the preview (default: on).",
+    )
 
     p_dba = sub.add_parser("render-daily-brief-ast", help="Compile daily-brief JSON -> VMPrint AST -> artifact.")
     p_dba.add_argument("--title", default="Daily Brief", help="Document title.")
@@ -1134,15 +2765,45 @@ def main() -> None:
     p_dba.add_argument("--theme", default="dispatch", choices=["dispatch", "minimal"])
     p_dba.add_argument("--output_format", default="pdf", choices=["pdf", "layout_json", "browser_preview_html"])
     p_dba.add_argument("--out", required=True, help="Output filename under output/ (pdf/json/html depending on output_format).")
+    p_dba.add_argument(
+        "--also-layout-json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="With browser_preview_html, write sibling .layout.json next to the preview (default: on).",
+    )
+    p_dba.add_argument(
+        "--document-layout",
+        default="digest_table",
+        choices=["digest_table", "magazine", "newspaper"],
+        help="digest_table: headline table (default). magazine: lead+rail. newspaper: masthead + multi-column + index (daily brief only).",
+    )
 
     p_ta = sub.add_parser("render-template-ast", help="Compile template JSON -> VMPrint AST -> artifact.")
-    p_ta.add_argument("--template", required=True, choices=["daily_brief", "weather", "stock"])
+    p_ta.add_argument("--template", required=True, choices=["daily_brief", "weather", "stock", "web_search"])
     p_ta.add_argument("--title", default="Report", help="Document title.")
     p_ta.add_argument("--json", default="", help="Template JSON text (inline).")
     p_ta.add_argument("--input", default="", help="Path to template JSON file.")
     p_ta.add_argument("--theme", default="dispatch", choices=["dispatch", "minimal"])
     p_ta.add_argument("--output_format", default="browser_preview_html", choices=["pdf", "layout_json", "browser_preview_html"])
     p_ta.add_argument("--out", required=True, help="Output filename under output/ (pdf/json/html depending on output_format).")
+    p_ta.add_argument(
+        "--also-layout-json",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="With browser_preview_html, write sibling .layout.json next to the preview (default: on).",
+    )
+    p_ta.add_argument(
+        "--scripted-colophon",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="With --template web_search only: emit VMPrint YAML scripting + named colophon (settled page count).",
+    )
+    p_ta.add_argument(
+        "--document-layout",
+        default="digest_table",
+        choices=["digest_table", "magazine", "newspaper"],
+        help="digest_table: template default. magazine: portrait lead+rail. newspaper: daily_brief only (front-page style).",
+    )
 
     args = p.parse_args()
 
@@ -1198,7 +2859,12 @@ def main() -> None:
             ast_text = _ensure_text_arg(ast_text, max_chars=900_000, name="AST JSON")
             ast_doc = _json_loads_strict(ast_text)
             _validate_ast_1_1(ast_doc)
-            ok, err = _render_ast_with_vmprint(ast_doc, out_abs, str(args.output_format))
+            ok, err = _render_ast_with_vmprint(
+                ast_doc,
+                out_abs,
+                str(args.output_format),
+                also_layout_json=bool(getattr(args, "also_layout_json", True)),
+            )
             if not ok:
                 _fail(err)
             _ok(out_rel, f"VMPrint AST artifact saved: {out_rel}")
@@ -1210,12 +2876,27 @@ def main() -> None:
                 json_text = Path(str(args.input)).read_text(encoding="utf-8", errors="replace")
             json_text = _ensure_text_arg(json_text, max_chars=350_000, name="JSON")
             data = _json_loads_strict(json_text)
-            ast_doc = _daily_brief_ast(data, title=str(args.title or "Daily Brief"), theme=str(args.theme or "dispatch"))
+            dlayout = str(getattr(args, "document_layout", "digest_table") or "digest_table").strip().lower()
+            if dlayout == "magazine":
+                ast_doc = _daily_brief_magazine_ast(
+                    data, title=str(args.title or "Daily Brief"), theme=str(args.theme or "dispatch")
+                )
+            elif dlayout == "newspaper":
+                ast_doc = _daily_brief_newspaper_ast(
+                    data, title=str(args.title or "Daily Brief"), theme=str(args.theme or "dispatch")
+                )
+            else:
+                ast_doc = _daily_brief_ast(data, title=str(args.title or "Daily Brief"), theme=str(args.theme or "dispatch"))
             _validate_ast_1_1(ast_doc)
-            ok, err = _render_ast_with_vmprint(ast_doc, out_abs, str(args.output_format))
+            ok, err = _render_ast_with_vmprint(
+                ast_doc,
+                out_abs,
+                str(args.output_format),
+                also_layout_json=bool(getattr(args, "also_layout_json", True)),
+            )
             if not ok:
                 _fail(err)
-            _ok(out_rel, f"VMPrint daily-brief AST artifact saved: {out_rel}")
+            _ok(out_rel, f"VMPrint daily-brief AST artifact saved ({dlayout}): {out_rel}")
             return
 
         if args.cmd == "render-template-ast":
@@ -1224,14 +2905,32 @@ def main() -> None:
                 json_text = Path(str(args.input)).read_text(encoding="utf-8", errors="replace")
             json_text = _ensure_text_arg(json_text, max_chars=350_000, name="JSON")
             data = _json_loads_strict(json_text)
+            _tpl = str(args.template or "").strip().lower()
+            _dlayout = str(getattr(args, "document_layout", "digest_table") or "digest_table").strip().lower()
+            _sc = bool(getattr(args, "scripted_colophon", False))
+            if _sc and _tpl != "web_search":
+                _fail("--scripted-colophon is only supported with --template web_search")
+            if _sc and _tpl == "web_search" and _dlayout == "magazine":
+                _fail("--scripted-colophon is not supported with --document-layout magazine")
             ast_doc = _ast_from_template(
                 str(args.template or ""),
                 data,
                 title=str(args.title or "Report"),
                 theme=str(args.theme or "dispatch"),
+                scripted_colophon=_sc,
+                document_layout=_dlayout,
             )
             _validate_ast_1_1(ast_doc)
-            ok, err = _render_ast_with_vmprint(ast_doc, out_abs, str(args.output_format))
+            _sy = (
+                _WEB_SEARCH_COLOPHON_SCRIPT_YAML if (_sc and _tpl == "web_search" and _dlayout != "magazine") else None
+            )
+            ok, err = _render_ast_with_vmprint(
+                ast_doc,
+                out_abs,
+                str(args.output_format),
+                also_layout_json=bool(getattr(args, "also_layout_json", True)),
+                script_document_yaml=_sy,
+            )
             if not ok:
                 _fail(err)
             _ok(out_rel, f"VMPrint template AST artifact saved: {out_rel}")

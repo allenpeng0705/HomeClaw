@@ -59,6 +59,8 @@ def test_contract_evaluation_from_trace(tmp_path: Path):
                         "dispatch",
                         "--output_format",
                         "browser_preview_html",
+                        "--document-layout",
+                        "digest_table",
                     ]
                 },
             },

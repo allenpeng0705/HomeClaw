@@ -1761,7 +1761,7 @@ class Core(CoreInterface):
                     "Inbound request took {:.0f}s. To avoid client/proxy timeout: set inbound_request_timeout_seconds and proxy read_timeout >= {} s; or use POST /inbound with stream: true (SSE) or async: true for remote.",
                     elapsed, _suggest_sec,
                 )
-            if answer is None:
+            if answer is None or (isinstance(answer, str) and not answer.strip()):
                 answer = "I'm sorry, I don't have the answer to that question. Please try asking a different question or restart your system."
             return answer
         except Exception as e:
