@@ -159,7 +159,7 @@ completion:
 completion_vision:
   max_tokens: 2048           # vision replies often shorter; omit to use completion.max_tokens
   # cloud_max_tokens_cap: 8192
-  temperature: 0.3           # slightly lower for concise image answers
+  temperature: 0.2           # slightly lower for concise image answers
   top_p: 1.0
   presence_penalty: 0.4
   frequency_penalty: 0.3
@@ -421,7 +421,7 @@ cloud_models:
 # If the local llama.cpp server is not running (e.g. connection refused to 127.0.0.1:5022), use main_llm_mode: cloud so only cloud is used, or start the local server.
 #main_llm: local_models/main_vl_model_4B
 main_llm_mode: mix
-main_llm_local: local_models/main_vl_model_4B
+main_llm_local: local_models/main_vl_model_8B
 main_llm_cloud: cloud_models/DeepSeek-Chat
 # ——— Stability: if tool turns often fail (empty content, 500s, cloud errors), set use_tool_selection_llm: false so main_llm does every turn, or set tool_selection_llm to the same as main_llm_local (e.g. 8B) so one model handles both "which tool" and "after tool result".
 # tool_selection_llm: optional. When use_tool_selection_llm is true, every LLM call in the tool loop uses this model (tool selection + parameter extraction). Good for models fine-tuned on function calling (e.g. Qwen3-4B-toolcalling). When not used (default): main_llm handles everything — all tool selection, parameter extraction, and final replies.
