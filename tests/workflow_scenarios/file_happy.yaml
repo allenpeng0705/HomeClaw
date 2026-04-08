@@ -1,0 +1,4 @@
+id: file_happy
+contract: file_happy
+prompt: "Read document notes.md and summarize key points."
+description: "File read happy path."

@@ -4,7 +4,7 @@ Generic **VMPrint-powered document UI renderer** for HomeClaw outputs.
 
 This skill is designed to be reusable across domains (daily brief, weather, stock monitor, etc.). Prefer AST-first generation. You provide either:
 
-- **Structured JSON** (preferred, with built-in template such as `daily_brief`, `weather`, `stock`), or
+- **Structured JSON** (preferred, with built-in template such as `daily_brief`, `weather`, `stock`, `web_search` for Tavily-style `results`), or
 - **AST JSON 1.1** directly, or
 - **Markdown** (fallback path),
 
@@ -53,6 +53,8 @@ python3 skills/magazine-render-1.0.0/scripts/render_magazine.py render-md --titl
 python3 skills/magazine-render-1.0.0/scripts/render_magazine.py render-template-ast --template weather --title "Weather Brief" --json '{"location":"Beijing","now":{"condition":"Cloudy","temp":"18C"},"forecast":[{"day":"Fri","summary":"Cloudy","high":"21C","low":"14C"}]}' --output_format browser_preview_html --out "weather_brief.preview.html"
 python3 skills/magazine-render-1.0.0/scripts/render_magazine.py render-ast --ast '{"documentVersion":"1.1","layout":{"pageSize":"LETTER","margins":{"top":72,"right":72,"bottom":72,"left":72},"fontFamily":"Arimo","fontSize":12,"lineHeight":1.4},"styles":{"h1":{"fontSize":24,"fontWeight":"bold"}},"elements":[{"type":"h1","content":"Hello AST"}]}' --output_format browser_preview_html --out "daily_brief.preview.html"
 python3 skills/magazine-render-1.0.0/scripts/render_magazine.py render-daily-brief-ast --json '{"as_of":"2026-03-26","items":[{"title":"Headline","source":"RSS","link":"https://example.com"}]}' --output_format layout_json --out "daily_brief.layout.json"
+python3 skills/magazine-render-1.0.0/scripts/render_magazine.py render-template-ast --template web_search --title "Search" --json '{"query":"example","results":[{"title":"Hit","url":"https://a","content":"Snippet text"}]}' --output_format browser_preview_html --out "search.preview.html"
+# With browser preview, a sibling search.layout.json is written by default (--no-also-layout-json to skip).
 ```
 
 The HomeClaw `run_skill` path is described in `SKILL.md`.

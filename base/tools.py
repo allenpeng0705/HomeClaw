@@ -19,6 +19,11 @@ try:
 except ImportError:
     def redact_params_for_log(obj: Any) -> Any:
         return obj
+try:
+    from base.workflow_trace import emit_event as _trace_emit_event
+except ImportError:
+    def _trace_emit_event(**kwargs):  # type: ignore
+        return None
 
 # When a routing tool (route_to_tam, route_to_plugin) runs, it returns this; Core skips sending another response.
 ROUTING_RESPONSE_ALREADY_SENT = "__ROUTING_ALREADY_SENT__"
@@ -154,16 +159,34 @@ class ToolRegistry:
         # [TOOL_CALL] / [TOOL_RESULT]: grep these in logs to see only tool/skill invocations and outcomes.
         args_redacted = redact_params_for_log(arguments) if isinstance(arguments, dict) else arguments
         logger.info("[TOOL_CALL] name={} parameters={}", name, args_redacted)
+        _trace_emit_event(
+            event_type="tool_call_started",
+            component="tool_registry",
+            summary=f"tool call started: {name}",
+            details={"tool_name": name, "arguments": args_redacted},
+        )
         try:
             result = await tool.execute_async(arguments, context)
             result = result if result is not None else ""
             res_len = len(result) if isinstance(result, str) else 0
             status = "error" if isinstance(result, str) and result.strip().startswith("Error") else "ok"
             logger.debug("[TOOL_RESULT] name={} result_len={} status={}", name, res_len, status)
+            _trace_emit_event(
+                event_type="tool_call_finished",
+                component="tool_registry",
+                summary=f"tool call finished: {name}",
+                details={"tool_name": name, "status": status, "result_len": res_len},
+            )
             return result
         except Exception as e:
             logger.exception("Tool {} failed: {}", name, e)
             logger.debug("[TOOL_RESULT] name={} status=exception", name)
+            _trace_emit_event(
+                event_type="tool_call_finished",
+                component="tool_registry",
+                summary=f"tool call exception: {name}",
+                details={"tool_name": name, "status": "exception", "error": str(e)},
+            )
             return f"Error running tool {name}: {e!s}"
 
 

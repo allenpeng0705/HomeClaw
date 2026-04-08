@@ -1,0 +1,27 @@
+mode: real_core
+clean_all_traces: true
+
+scenarios:
+  # If empty, runs all scenarios.
+  include:
+    - daily_brief_ast_default
+    - daily_brief_markdown_explicit
+  # Optional exclusions after include/failed-only filtering.
+  exclude: []
+  # Optional: rerun only failures from previous JSON report.
+  # failed_only_from: output/workflow_traces/reports/latest.json
+
+real_core:
+  base_url: http://127.0.0.1:9000
+  start_core: false
+  # api_key: ""
+  # user_id: "matrix:@pengshilei:matrix.org"
+  inbound_timeout_sec: 1200
+
+outputs:
+  markdown:
+    enabled: true
+    path: output/workflow_traces/reports/latest.md
+  json:
+    enabled: true
+    path: output/workflow_traces/reports/latest.json

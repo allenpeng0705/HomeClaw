@@ -3,7 +3,10 @@ Stateless tool helpers used by Core (orchestrator / inbound flow).
 
 - tool_result_looks_like_error: detect error-like or instruction-only tool results.
 - tool_result_usable_as_final_response: whether to use tool result as final reply (skip second LLM).
-- parse_raw_tool_calls_from_content: parse <tool_call>...</tool_call> from LLM content.
+- parse_raw_tool_calls_from_content: recover tool calls from assistant **content** when the HTTP API
+  returns tool_calls=[] (any model/server: local GGUF, mis-tuned templates, grammar slips, etc.).
+  Resolution order is **model-agnostic**: (1) JSON inside <tool_call>, (2) XML-style tags,
+  (3) call-style pseudo-Python per tool (see _CALL_STYLE_TOOL_PARSERS — add entries for new drift patterns).
 - infer_route_to_plugin_fallback: infer route_to_plugin from user query when LLM returns no tool call.
 - infer_remind_me_fallback: infer remind_me(minutes, message) from "N分钟后提醒" / "remind me in N minutes" when LLM returns no tool call.
 - remind_me_needs_clarification: True when user wants a reminder but we couldn't extract when (so Core can ask).
@@ -16,9 +19,41 @@ See docs_design/CoreRefactoringModularCore.md and CoreRefactorPhaseSummary.md.
 import json
 import re
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
+
+# Call-style recovery: cap sizes so pathological model output cannot balloon memory or args.
+_MAX_CALL_STYLE_SKILL_NAME_LEN = 256
+_MAX_CALL_STYLE_QUERY_LEN = 4000
+
+_TOOL_CALL_OPEN_RE = re.compile(r"<\s*tool_call\s*>", re.IGNORECASE)
+
+
+def _raw_parsed_tool_call_executable(tc: Dict[str, Any]) -> bool:
+    """run_skill from XML/call-style drift must include skill_name or skill; otherwise drop the fake call."""
+    try:
+        fn = tc.get("function") if isinstance(tc, dict) else None
+        fn = fn if isinstance(fn, dict) else {}
+        name = (fn.get("name") or "").strip().lower()
+        if name != "run_skill":
+            return True
+        raw_args = fn.get("arguments")
+        if isinstance(raw_args, str):
+            try:
+                args = json.loads(raw_args or "{}")
+            except (json.JSONDecodeError, TypeError):
+                return False
+        elif isinstance(raw_args, dict):
+            args = raw_args
+        else:
+            return False
+        if not isinstance(args, dict):
+            return False
+        sn = (args.get("skill_name") or args.get("skill") or "").strip()
+        return bool(sn)
+    except Exception:
+        return False
 
 # Re-use single robust implementation for reminder/cron inference (many NL styles/languages).
 from core.tool_helpers_fallback import (
@@ -35,9 +70,28 @@ def tool_result_looks_like_error(result: Any) -> bool:
     try:
         if result is None or not isinstance(result, str):
             return False
+        r = result.strip()
+        if not r:
+            return False
+        low = r.lower()
+        # VMPrint / Node failures are often multi-kB stack traces; do not skip them via the length guard below.
+        if "layout emit failed" in low or "err_invalid_arg_type" in low:
+            return True
+        if low.startswith("stderr:") and ("error" in low or "failed" in low or "traceback" in low):
+            return True
+        if "vmprint" in low and (
+            "failed" in low
+            or "typeerror" in low
+            or "traceback" in low
+            or "error:" in low
+            or " error " in low
+        ):
+            return True
+        if "draft2final" in low and ("not built" in low or "cli not built" in low or "missing" in low):
+            return True
         if len(result) > 2000:
             return False
-        r = result.strip().lower()
+        r = low
         if not r:
             return False
         if r == "[]":
@@ -253,6 +307,10 @@ def _parse_xml_style_tool_call(inner: str) -> Optional[Dict[str, Any]]:
             if not key or key in ("function", "tool_call"):
                 continue
             args[key] = raw_val
+        if name.strip().lower() == "run_skill":
+            sn = (args.get("skill_name") or args.get("skill") or "").strip()
+            if not sn:
+                return None
         return {
             "id": f"raw_tool_0_{uuid.uuid4().hex[:8]}",
             "type": "function",
@@ -305,6 +363,119 @@ def _extract_balanced_json_object(s: str) -> Optional[str]:
         return None
 
 
+def _trim_call_style_hallucination_tail(s: str) -> str:
+    """Drop markdown-style junk often appended after a broken tool call (any model)."""
+    s = (s or "").strip()
+    cut = re.search(r"\n\n+\s*#", s)
+    if cut:
+        s = s[: cut.start()].strip()
+    return s
+
+
+def _parse_run_skill_function_call_style(inner: str) -> Optional[Dict[str, Any]]:
+    """
+    Pseudo-Python inside <tool_call>, e.g.:
+      run_skill(skill_name="daily-brief", script=None, args=["--language=zh","count
+    (truncated / no </tool_call> / not JSON.) Maps to OpenAI-style run_skill.
+    Omits script/args when unset so run_skill can auto-pick script and daily-brief argv from user query.
+    """
+    try:
+        s = _trim_call_style_hallucination_tail(inner or "")
+        if not s or not re.match(r"(?i)run_skill\s*\(", s):
+            return None
+        skill_m = re.search(r'(?i)skill_name\s*=\s*["\']([^"\']*)["\']', s)
+        if not skill_m:
+            return None
+        skill_name = (skill_m.group(1) or "").strip()
+        if not skill_name or len(skill_name) > _MAX_CALL_STYLE_SKILL_NAME_LEN:
+            return None
+        arg_dict: Dict[str, Any] = {"skill_name": skill_name}
+        if re.search(r"(?i)script\s*=\s*(?:None|null)\b", s):
+            pass
+        else:
+            scr_m = re.search(r'(?i)script\s*=\s*["\']([^"\']*)["\']', s)
+            if scr_m and (scr_m.group(1) or "").strip():
+                _scr = (scr_m.group(1) or "").strip()
+                if len(_scr) <= 256:
+                    arg_dict["script"] = _scr
+        args_m = re.search(r"(?i)args\s*=\s*\[", s)
+        args_list: List[str] = []
+        if args_m:
+            chunk = s[args_m.end() :]
+            for qm in re.finditer(r'"((?:[^"\\]|\\.)*)"', chunk):
+                args_list.append(qm.group(1).replace('\\"', '"'))
+            if not args_list:
+                for qm in re.finditer(r"'((?:[^'\\]|\\.)*)'", chunk):
+                    args_list.append(qm.group(1).replace("\\'", "'"))
+        if args_list:
+            dn = skill_name.lower()
+            if "daily-brief" in dn:
+                first = (args_list[0] if args_list else "").strip().lower()
+                ok_starts = ("fetch", "fetch-vmprint", "render", "list")
+                if not any(first == p or first.startswith(p + " ") for p in ok_starts) and not first.endswith(".py"):
+                    args_list = []
+            if args_list:
+                arg_dict["args"] = args_list
+        return {
+            "id": f"raw_tool_{uuid.uuid4().hex[:8]}",
+            "type": "function",
+            "function": {"name": "run_skill", "arguments": json.dumps(arg_dict)},
+        }
+    except Exception:
+        return None
+
+
+def _parse_web_search_function_call_style(inner: str) -> Optional[Dict[str, Any]]:
+    """e.g. web_search(query="...") or web_search("...") — common when models omit structured tool_calls."""
+    try:
+        s = _trim_call_style_hallucination_tail(inner or "")
+        if not s or not re.match(r"(?i)web_search\s*\(", s):
+            return None
+        qm = re.search(r'(?i)(?:query|q|search_query|keywords)\s*=\s*"((?:[^"\\]|\\.)*)"', s)
+        if not qm:
+            qm = re.search(r'(?i)web_search\s*\(\s*"((?:[^"\\]|\\.)*)"', s)
+        if not qm:
+            return None
+        query = (qm.group(1) or "").replace('\\"', '"').strip()
+        if not query:
+            return None
+        if len(query) > _MAX_CALL_STYLE_QUERY_LEN:
+            query = query[:_MAX_CALL_STYLE_QUERY_LEN]
+        arg_dict: Dict[str, Any] = {"query": query}
+        cm = re.search(r"(?i)\bcount\s*=\s*(\d{1,2})\b", s)
+        if cm:
+            try:
+                arg_dict["count"] = max(1, min(25, int(cm.group(1))))
+            except (TypeError, ValueError):
+                pass
+        return {
+            "id": f"raw_tool_{uuid.uuid4().hex[:8]}",
+            "type": "function",
+            "function": {"name": "web_search", "arguments": json.dumps(arg_dict)},
+        }
+    except Exception:
+        return None
+
+
+# Ordered: first match wins. Extend for new tools / model quirks without tying logic to a vendor name.
+_CALL_STYLE_TOOL_PARSERS = (
+    _parse_run_skill_function_call_style,
+    _parse_web_search_function_call_style,
+)
+
+
+def _parse_call_style_tool_invocation(inner: str) -> Optional[Dict[str, Any]]:
+    """Try pseudo-Python call-style patterns; works for any model that emits them inside <tool_call>."""
+    for parser in _CALL_STYLE_TOOL_PARSERS:
+        try:
+            out = parser(inner)
+            if out:
+                return out
+        except Exception:
+            continue
+    return None
+
+
 def _parse_one_tool_call_inner(inner: str, index: int) -> Optional[Dict[str, Any]]:
     """Parse one tool_call inner content (JSON or XML). Returns OpenAI-style tool_call dict or None. Never raises."""
     try:
@@ -323,11 +494,16 @@ def _parse_one_tool_call_inner(inner: str, index: int) -> Optional[Dict[str, Any
                     except json.JSONDecodeError:
                         args = {}
                 if name and isinstance(args, dict):
-                    parsed = {
-                        "id": f"raw_tool_{index}_{uuid.uuid4().hex[:8]}",
-                        "type": "function",
-                        "function": {"name": name, "arguments": json.dumps(args)},
-                    }
+                    if (name or "").strip().lower() == "run_skill" and not (
+                        (args.get("skill_name") or args.get("skill") or "").strip()
+                    ):
+                        parsed = None
+                    else:
+                        parsed = {
+                            "id": f"raw_tool_{index}_{uuid.uuid4().hex[:8]}",
+                            "type": "function",
+                            "function": {"name": name, "arguments": json.dumps(args)},
+                        }
             except (json.JSONDecodeError, TypeError):
                 pass
         if not parsed:
@@ -336,6 +512,10 @@ def _parse_one_tool_call_inner(inner: str, index: int) -> Optional[Dict[str, Any
                 parsed["id"] = f"raw_tool_{index}_{uuid.uuid4().hex[:8]}"
                 if "type" not in parsed:
                     parsed["type"] = "function"
+        if not parsed:
+            parsed = _parse_call_style_tool_invocation(inner)
+            if parsed:
+                parsed["id"] = f"raw_tool_{index}_{uuid.uuid4().hex[:8]}"
         if parsed and "type" not in parsed:
             parsed["type"] = "function"
         return parsed
@@ -346,19 +526,21 @@ def _parse_one_tool_call_inner(inner: str, index: int) -> Optional[Dict[str, Any
 def parse_raw_tool_calls_from_content(content: str):
     """
     If the LLM backend returned a raw tool_call in message content, parse it so we can execute and avoid sending that raw text to the user.
-    Supports both formats:
+    Supports:
     - JSON: <tool_call>{"name":"...","arguments":{...}}</tool_call>
-    - XML:  <tool_call><function>name</function><key>value</key>...</tool_call> or <function=name><key>value</key>...
-    Also handles truncated output. Returns list of OpenAI-style tool_call dicts or None if not detected / parse failed. Never raises.
+    - XML: <tool_call><function>name</function><key>value</key>...</tool_call> or <function=name><key>value</key>...
+    - Call-style pseudo-Python (any model when tool_calls are missing): run_skill(...), web_search(...), etc.
+      Add parsers to _CALL_STYLE_TOOL_PARSERS in tool_helpers.py for new patterns.
+    Also handles truncated output (no closing </tool_call>). Returns list of OpenAI-style tool_call dicts or None if not detected / parse failed. Never raises.
     """
     try:
         if not content or not isinstance(content, str):
             return None
         text = content.strip()
-        if "<tool_call>" not in text:
+        if not _TOOL_CALL_OPEN_RE.search(text):
             return None
-        # Find all <tool_call>...</tool_call> blocks (non-greedy)
-        block_re = re.compile(r"<tool_call>([\s\S]*?)</tool_call>", re.IGNORECASE)
+        # Find all <tool_call>...</tool_call> blocks (non-greedy; tags case-insensitive)
+        block_re = re.compile(r"<\s*tool_call\s*>([\s\S]*?)<\s*/\s*tool_call\s*>", re.IGNORECASE)
         blocks = block_re.findall(text)
         tool_calls = []
         for i, inner in enumerate(blocks):
@@ -370,15 +552,21 @@ def parse_raw_tool_calls_from_content(content: str):
                 tool_calls.append(parsed)
         # Fallback: <tool_call> present but no </tool_call> (truncated output) — try to extract JSON after <tool_call>
         if not tool_calls:
-            start = text.find("<tool_call>")
-            if start >= 0:
-                rest = text[start + len("<tool_call>"):].strip()
+            m_open = _TOOL_CALL_OPEN_RE.search(text)
+            if m_open:
+                rest = text[m_open.end() :].strip()
                 if rest.startswith("{"):
                     inner = _extract_balanced_json_object(rest)
                     if inner:
                         parsed = _parse_one_tool_call_inner(inner, 0)
                         if parsed:
                             tool_calls.append(parsed)
+                else:
+                    # Unclosed or call-style run_skill(...): no leading {, often no </tool_call>
+                    parsed = _parse_one_tool_call_inner(rest, 0)
+                    if parsed:
+                        tool_calls.append(parsed)
+        tool_calls = [tc for tc in tool_calls if _raw_parsed_tool_call_executable(tc)]
         return tool_calls if tool_calls else None
     except Exception:
         return None

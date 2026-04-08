@@ -1,0 +1,4 @@
+id: reminder_happy
+contract: reminder_happy
+prompt: "Remind me in 20 minutes to check the oven."
+description: "Reminder happy path."

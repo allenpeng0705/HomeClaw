@@ -20,6 +20,28 @@ python -m pytest tests/test_litellm_service.py -v
 
 Use `python3` instead of `python` if your environment uses `python3`.
 
+## Workflow trace framework
+
+Workflow trace tests validate end-to-end decision flow (model route, tool/skill/plugin calls, arg normalization, and fallbacks) and emit sequential JSONL traces.
+
+```bash
+# Run in-process mock scenario suite (fast, deterministic)
+python scripts/workflow_trace_runner.py --mode in_process_mock
+
+# Run real Core scenarios against running Core (api key optional: auto-discover from env or config/core.yml)
+python scripts/workflow_trace_runner.py --mode real_core --base-url http://127.0.0.1:9000
+python scripts/workflow_trace_runner.py --mode real_core --base-url http://127.0.0.1:9000 --api-key <YOUR_API_KEY>
+
+# Or start Core from runner (slower)
+python scripts/workflow_trace_runner.py --mode real_core --start-core --api-key <YOUR_API_KEY>
+
+# Compare two traces
+python scripts/workflow_trace_compare.py --baseline output/workflow_traces/<base>.jsonl --candidate output/workflow_traces/<cand>.jsonl
+
+# Real Core smoke mode (opt-in)
+HOMECLAW_RUN_REALCORE_WORKFLOW_TESTS=1 python -m pytest tests/test_workflow_runner_real_core.py -q
+```
+
 ## Core route smoke tests (test_core_routes.py)
 
 These tests verify that the refactored route modules in `core/routes/` can be imported and that every handler factory exists and returns a callable handler. They do **not** start Core or hit real HTTP endpoints.

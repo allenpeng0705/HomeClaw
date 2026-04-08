@@ -1,0 +1,4 @@
+id: kb_happy
+contract: kb_happy
+prompt: "From my knowledge base, summarize the deployment checklist."
+description: "Knowledgebase retrieval happy path."

@@ -36,6 +36,11 @@ from base.user_sandbox_folders import FOLDER_NAMES_FOR_USER_MESSAGE, STANDARD_US
 from base.util import Util, redact_params_for_log
 from base.base import PluginResult, User
 from base.media_io import save_data_url_to_media_folder
+try:
+    from base.workflow_trace import emit_event as _trace_emit_event
+except ImportError:
+    def _trace_emit_event(**kwargs):  # type: ignore
+        return None
 from loguru import logger
 import time as _time
 
@@ -1884,12 +1889,17 @@ def _web_search_error_user_message(provider: str, status_code: Optional[int], bo
     return fallback or (f"Web search failed: {detail}" if detail else "Web search failed. Check API key and try again.")
 
 
+def _web_search_json(payload: Dict[str, Any]) -> str:
+    """Serialize web_search tool payloads with UTF-8 text (not \\uXXXX escapes) so CJK titles/snippets stay readable."""
+    return json.dumps(payload, ensure_ascii=False)
+
+
 async def _web_search_tavily(query: str, count: int, api_key: str, search_config: Dict[str, Any]) -> str:
     """Search using Tavily API. POST /search with search_depth, topic, time_range. See https://docs.tavily.com/documentation/api-reference/endpoint/search"""
     try:
         import httpx
     except ImportError:
-        return json.dumps({"error": "httpx required for web_search. pip install httpx", "results": []})
+        return _web_search_json({"error": "httpx required for web_search. pip install httpx", "results": []})
     search_depth = (search_config.get("search_depth") or "basic").strip().lower()
     if search_depth not in ("basic", "advanced", "fast", "ultra-fast"):
         search_depth = "basic"
@@ -1922,12 +1932,12 @@ async def _web_search_tavily(query: str, count: int, api_key: str, search_config
             )
             if resp.status_code != 200:
                 msg = _web_search_error_user_message("tavily", resp.status_code, resp.text, resp.reason_phrase)
-                return json.dumps({"error": msg, "results": []})
+                return _web_search_json({"error": msg, "results": []})
             data = resp.json()
     except httpx.TimeoutException:
-        return json.dumps({"error": "Tavily search timed out. Try again later.", "results": []})
+        return _web_search_json({"error": "Tavily search timed out. Try again later.", "results": []})
     except Exception as e:
-        return json.dumps({"error": f"Tavily search failed: {e!s}. Check API key at https://tavily.com or set TAVILY_API_KEY for free tier.", "results": []})
+        return _web_search_json({"error": f"Tavily search failed: {e!s}. Check API key at https://tavily.com or set TAVILY_API_KEY for free tier.", "results": []})
     results = []
     for r in (data.get("results") or [])[:count]:
         results.append({
@@ -1935,7 +1945,7 @@ async def _web_search_tavily(query: str, count: int, api_key: str, search_config
             "url": r.get("url"),
             "description": r.get("content") or r.get("description"),
         })
-    return json.dumps({"results": results, "provider": "tavily"})
+    return _web_search_json({"results": results, "provider": "tavily"})
 
 
 def _brave_search_type_endpoint(st: str) -> str:
@@ -1979,7 +1989,7 @@ async def _web_search_brave(query: str, count: int, api_key: str, search_type: s
     try:
         import httpx
     except ImportError:
-        return json.dumps({"error": "httpx required for web_search. pip install httpx", "results": []})
+        return _web_search_json({"error": "httpx required for web_search. pip install httpx", "results": []})
     st = (search_type or "web").strip().lower()
     if st not in ("web", "news", "video", "image"):
         st = "web"
@@ -1996,14 +2006,14 @@ async def _web_search_brave(query: str, count: int, api_key: str, search_type: s
             )
             if resp.status_code != 200:
                 msg = _web_search_error_user_message("brave", resp.status_code, resp.text, resp.reason_phrase)
-                return json.dumps({"error": msg, "results": []})
+                return _web_search_json({"error": msg, "results": []})
             data = resp.json()
     except httpx.TimeoutException:
-        return json.dumps({"error": "Brave search timed out. Try again later.", "results": []})
+        return _web_search_json({"error": "Brave search timed out. Try again later.", "results": []})
     except Exception as e:
-        return json.dumps({"error": f"Brave search failed: {e!s}. Set BRAVE_API_KEY (free tier available) or use provider tavily with TAVILY_API_KEY.", "results": []})
+        return _web_search_json({"error": f"Brave search failed: {e!s}. Set BRAVE_API_KEY (free tier available) or use provider tavily with TAVILY_API_KEY.", "results": []})
     results = _brave_parse_results(data, st, count)
-    return json.dumps({"results": results, "provider": "brave", "search_type": st})
+    return _web_search_json({"results": results, "provider": "brave", "search_type": st})
 
 
 def _web_search_duckduckgo_sync(query: str, count: int) -> List[Dict[str, Any]]:
@@ -2041,16 +2051,16 @@ async def _web_search_duckduckgo(query: str, count: int) -> str:
             timeout=15.0,
         )
     except asyncio.TimeoutError:
-        return json.dumps({"error": "DuckDuckGo fallback timed out.", "results": [], "provider": "duckduckgo"})
+        return _web_search_json({"error": "DuckDuckGo fallback timed out.", "results": [], "provider": "duckduckgo"})
     except Exception as e:
-        return json.dumps({"error": f"DuckDuckGo fallback failed: {e!s}", "results": [], "provider": "duckduckgo"})
+        return _web_search_json({"error": f"DuckDuckGo fallback failed: {e!s}", "results": [], "provider": "duckduckgo"})
     if not results:
-        return json.dumps({
+        return _web_search_json({
             "error": "DuckDuckGo returned no results. Install fallback: pip install duckduckgo-search",
             "results": [],
             "provider": "duckduckgo",
         })
-    return json.dumps({"results": results, "provider": "duckduckgo"})
+    return _web_search_json({"results": results, "provider": "duckduckgo"})
 
 
 async def _web_search_google_cse(query: str, count: int, api_key: str, cx: str) -> str:
@@ -2058,9 +2068,9 @@ async def _web_search_google_cse(query: str, count: int, api_key: str, cx: str) 
     try:
         import httpx
     except ImportError:
-        return json.dumps({"error": "httpx required. pip install httpx", "results": []})
+        return _web_search_json({"error": "httpx required. pip install httpx", "results": []})
     if not cx or not cx.strip():
-        return json.dumps({"error": "Google CSE requires Search Engine ID (cx). Create one at https://programmablesearchengine.google.com/", "results": []})
+        return _web_search_json({"error": "Google CSE requires Search Engine ID (cx). Create one at https://programmablesearchengine.google.com/", "results": []})
     count = min(max(1, count), 10)  # API max 10 per request
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -2075,10 +2085,10 @@ async def _web_search_google_cse(query: str, count: int, api_key: str, cx: str) 
                     err = j.get("error", {}).get("message", err)
                 except Exception:
                     pass
-                return json.dumps({"error": f"Google CSE {resp.status_code}: {err}", "results": []})
+                return _web_search_json({"error": f"Google CSE {resp.status_code}: {err}", "results": []})
             data = resp.json()
     except Exception as e:
-        return json.dumps({"error": f"Google CSE failed: {e!s}", "results": []})
+        return _web_search_json({"error": f"Google CSE failed: {e!s}", "results": []})
     results = []
     for r in (data.get("items") or [])[:count]:
         if not isinstance(r, dict):
@@ -2088,7 +2098,7 @@ async def _web_search_google_cse(query: str, count: int, api_key: str, cx: str) 
             "url": r.get("link") or "",
             "description": r.get("snippet") or "",
         })
-    return json.dumps({"results": results, "provider": "google_cse"})
+    return _web_search_json({"results": results, "provider": "google_cse"})
 
 
 async def _web_search_bing(query: str, count: int, api_key: str) -> str:
@@ -2096,7 +2106,7 @@ async def _web_search_bing(query: str, count: int, api_key: str) -> str:
     try:
         import httpx
     except ImportError:
-        return json.dumps({"error": "httpx required. pip install httpx", "results": []})
+        return _web_search_json({"error": "httpx required. pip install httpx", "results": []})
     count = min(max(1, count), 50)
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -2112,10 +2122,10 @@ async def _web_search_bing(query: str, count: int, api_key: str) -> str:
                     err = j.get("error", {}).get("message", err)
                 except Exception:
                     pass
-                return json.dumps({"error": f"Bing Search {resp.status_code}: {err}", "results": []})
+                return _web_search_json({"error": f"Bing Search {resp.status_code}: {err}", "results": []})
             data = resp.json()
     except Exception as e:
-        return json.dumps({"error": f"Bing Search failed: {e!s}", "results": []})
+        return _web_search_json({"error": f"Bing Search failed: {e!s}", "results": []})
     results = []
     for r in (data.get("webPages") or {}).get("value") or []:
         if not isinstance(r, dict):
@@ -2125,7 +2135,7 @@ async def _web_search_bing(query: str, count: int, api_key: str) -> str:
             "url": r.get("url") or "",
             "description": r.get("snippet") or "",
         })
-    return json.dumps({"results": results[:count], "provider": "bing"})
+    return _web_search_json({"results": results[:count], "provider": "bing"})
 
 
 async def _web_search_serpapi(query: str, count: int, api_key: str, engine: str) -> str:
@@ -2133,7 +2143,7 @@ async def _web_search_serpapi(query: str, count: int, api_key: str, engine: str)
     try:
         import httpx
     except ImportError:
-        return json.dumps({"error": "httpx required for web_search. pip install httpx", "results": []})
+        return _web_search_json({"error": "httpx required for web_search. pip install httpx", "results": []})
     eng = (engine or "google").strip().lower()
     if eng not in ("google", "bing", "baidu"):
         eng = "google"
@@ -2145,10 +2155,10 @@ async def _web_search_serpapi(query: str, count: int, api_key: str, engine: str)
                 params={"q": query, "engine": eng, "api_key": api_key, "num": count},
             )
             if resp.status_code != 200:
-                return json.dumps({"error": f"SerpAPI {resp.status_code}: {resp.text[:200]}", "results": []})
+                return _web_search_json({"error": f"SerpAPI {resp.status_code}: {resp.text[:200]}", "results": []})
             data = resp.json()
     except Exception as e:
-        return json.dumps({"error": f"SerpAPI failed: {e!s}", "results": []})
+        return _web_search_json({"error": f"SerpAPI failed: {e!s}", "results": []})
     results = []
     # SerpAPI: organic_results (Google/Bing), or organic_results / results (Baidu)
     for r in (data.get("organic_results") or data.get("results") or [])[:count]:
@@ -2159,7 +2169,7 @@ async def _web_search_serpapi(query: str, count: int, api_key: str, engine: str)
             "url": r.get("link") or r.get("url") or "",
             "description": r.get("snippet") or r.get("description") or "",
         })
-    return json.dumps({"results": results, "provider": "serpapi", "engine": eng})
+    return _web_search_json({"results": results, "provider": "serpapi", "engine": eng})
 
 
 def _web_search_recent_intent(query: str) -> tuple:
@@ -2238,7 +2248,7 @@ async def _web_search_executor(arguments: Dict[str, Any], context: ToolContext) 
             out = await _try_fallback()
             if out:
                 return out
-            return json.dumps({
+            return _web_search_json({
                 "error": "Google CSE not configured. Set GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX (Search Engine ID from https://programmablesearchengine.google.com/). Free: 100 queries/day.",
                 "results": [],
             })
@@ -2261,7 +2271,7 @@ async def _web_search_executor(arguments: Dict[str, Any], context: ToolContext) 
             out = await _try_fallback()
             if out:
                 return out
-            return json.dumps({
+            return _web_search_json({
                 "error": "Bing Search not configured. Set BING_SEARCH_SUBSCRIPTION_KEY (Azure). Free tier: 1000 transactions/month. Note: Bing Search APIs retiring Aug 2025.",
                 "results": [],
             })
@@ -2284,7 +2294,7 @@ async def _web_search_executor(arguments: Dict[str, Any], context: ToolContext) 
             out = await _try_fallback()
             if out:
                 return out
-            return json.dumps({
+            return _web_search_json({
                 "error": (
                     "Web search (Tavily) is not configured: no API key. Tell the user exactly: "
                     "To enable web search, set TAVILY_API_KEY in the environment where Core runs, "
@@ -2317,7 +2327,7 @@ async def _web_search_executor(arguments: Dict[str, Any], context: ToolContext) 
             out = await _try_fallback()
             if out:
                 return out
-            return json.dumps({
+            return _web_search_json({
                 "error": "SerpAPI key not set. Set SERPAPI_API_KEY or tools.web.search.serpapi.api_key. Engine: google (default), bing, baidu. Free tier ~250/mo at https://serpapi.com.",
                 "results": [],
             })
@@ -2340,7 +2350,7 @@ async def _web_search_executor(arguments: Dict[str, Any], context: ToolContext) 
         out = await _try_fallback()
         if out:
             return out
-        return json.dumps({
+        return _web_search_json({
             "error": "Brave API key not set. Set BRAVE_API_KEY or tools.web.search.brave.api_key. search_type: web (default), news, video, image. Free tier: $5/mo at https://brave.com/search/api.",
             "results": [],
         })
@@ -3116,6 +3126,72 @@ def _get_skill_env_from_skill_md(skill_folder: Path) -> Dict[str, str]:
     return out
 
 
+def _daily_brief_document_layout_from_user_query(q: str) -> Optional[str]:
+    """Map natural phrasing to fetch-vmprint --document-layout (None = leave default)."""
+    q = (q or "").strip()
+    if not q:
+        return None
+    q_lo = q.lower()
+    # Newspaper/broadsheet terms pick newspaper template.
+    if any(
+        k in q
+        for k in (
+            "报纸排版",
+            "报纸版式",
+            "头版",
+            "新闻报纸",
+        )
+    ) or any(
+        k in q_lo
+        for k in (
+            "newspaper layout",
+            "front page layout",
+            "broadsheet layout",
+            "broadsheet",
+        )
+    ):
+        return "newspaper"
+    # Magazine/editorial terms pick magazine template (no headline index table block).
+    if any(
+        k in q
+        for k in (
+            "杂志排版",
+            "杂志版式",
+            "杂志布局",
+            "杂志格式",
+            "杂志样式",
+            "杂志风",
+        )
+    ) or any(
+        k in q_lo
+        for k in (
+            "magazine layout",
+            "folio layout",
+            "real magazine",
+            "editorial layout",
+            "magazine format",
+        )
+    ):
+        return "magazine"
+    return None
+
+
+def _merge_fetch_vmprint_document_layout(argv: List[str], layout: str) -> List[str]:
+    """Set or replace --document-layout for fetch-vmprint, then re-normalize."""
+    if not argv or (argv[0] or "").strip().lower() != "fetch-vmprint":
+        return argv
+    lo = [str(x) for x in argv]
+    for idx, a in enumerate(lo):
+        if a.strip().lower() == "--document-layout":
+            if idx + 1 < len(lo):
+                lo[idx + 1] = layout
+            else:
+                lo.append(layout)
+            return _normalize_daily_brief_args(lo)
+    lo.extend(["--document-layout", layout])
+    return _normalize_daily_brief_args(lo)
+
+
 def _normalize_daily_brief_args(argv: List[str]) -> List[str]:
     """Normalize daily-brief argv into a deterministic safe form."""
     if not argv:
@@ -3131,6 +3207,7 @@ def _normalize_daily_brief_args(argv: List[str]) -> List[str]:
     days_ago = 0
     theme = "dispatch"
     output_format = "browser_preview_html"
+    document_layout = "digest_table"
     i = 1
     while i < len(argv):
         tok = str(argv[i] or "").strip()
@@ -3182,6 +3259,16 @@ def _normalize_daily_brief_args(argv: List[str]) -> List[str]:
                 output_format = v
             i += 2 if consumed_next else 1
             continue
+        if low == "--document-layout" and val:
+            v = val.lower().replace("-", "_")
+            if v == "digest_table":
+                document_layout = "digest_table"
+            elif v == "magazine":
+                document_layout = "magazine"
+            elif v == "newspaper":
+                document_layout = "newspaper"
+            i += 2 if consumed_next else 1
+            continue
         i += 1
     out = [cmd, "--max", str(max_items), "--lang", lang]
     if keyword:
@@ -3189,7 +3276,7 @@ def _normalize_daily_brief_args(argv: List[str]) -> List[str]:
     if days_ago > 0:
         out += ["--days-ago", str(days_ago)]
     if cmd == "fetch-vmprint":
-        out += ["--theme", theme, "--output_format", output_format]
+        out += ["--theme", theme, "--output_format", output_format, "--document-layout", document_layout]
     return out
 
 
@@ -3226,6 +3313,9 @@ def _derive_daily_brief_args_from_query(user_text: str, plain_markdown_requested
         kw = (km.group(1) or "").strip()
         if kw:
             args += ["--filter", kw]
+    want = _daily_brief_document_layout_from_user_query(q)
+    if want:
+        args += ["--document-layout", want]
     return _normalize_daily_brief_args(args)
 
 
@@ -3233,12 +3323,39 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
     """Run a script from a loaded skill's scripts/ folder. All usage (script name, args) is defined in SKILL.md; the model must pass them. Never raises: returns an error string on failure."""
     if not isinstance(arguments, dict):
         return "Error: run_skill arguments must be a dict (skill_name, script, args)."
+    _trace_emit_event(
+        event_type="skill_call_started",
+        component="run_skill",
+        summary="run_skill started",
+        details={
+            "skill_name": (arguments.get("skill_name") or arguments.get("skill") or ""),
+            "script": (arguments.get("script") or arguments.get("script_name") or ""),
+            "args": arguments.get("args"),
+        },
+    )
     try:
-        return await _run_skill_executor_impl(arguments, context)
+        out = await _run_skill_executor_impl(arguments, context)
+        _trace_emit_event(
+            event_type="skill_call_finished",
+            component="run_skill",
+            summary="run_skill finished",
+            details={
+                "skill_name": (arguments.get("skill_name") or arguments.get("skill") or ""),
+                "status": ("error" if isinstance(out, str) and out.strip().startswith("Error") else "ok"),
+                "result_len": (len(out) if isinstance(out, str) else 0),
+            },
+        )
+        return out
     except (KeyboardInterrupt, SystemExit):
         raise
     except Exception as e:
         logger.debug("run_skill executor error: %s", e)
+        _trace_emit_event(
+            event_type="skill_call_finished",
+            component="run_skill",
+            summary="run_skill exception",
+            details={"skill_name": (arguments.get("skill_name") or arguments.get("skill") or ""), "status": "exception", "error": str(e)},
+        )
         return "Error: run_skill failed (internal error). Check Core logs."
 
 
@@ -3248,6 +3365,14 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
         from base.util import Util
     except ImportError:
         return "Error: Util not available"
+    # Injected by llm_loop when request.text is missing on ToolContext but session query is known.
+    _homeclaw_user_query = ""
+    try:
+        _hq = arguments.pop("_homeclaw_user_query", None)
+        if isinstance(_hq, str) and _hq.strip():
+            _homeclaw_user_query = _hq.strip()
+    except Exception:
+        _homeclaw_user_query = ""
     skill_name = (arguments.get("skill_name") or arguments.get("skill") or "").strip()
     script_arg = (arguments.get("script") or arguments.get("script_name") or "").strip()
     args_input = arguments.get("args")
@@ -3512,6 +3637,8 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
     args_list: List[str] = []
     req = getattr(context, "request", None)
     user_text_for_args = ((getattr(req, "text", None) or "").strip() if req is not None else "")
+    if _homeclaw_user_query:
+        user_text_for_args = user_text_for_args or _homeclaw_user_query
     if args_input is not None:
         if isinstance(args_input, list):
             try:
@@ -3595,9 +3722,25 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
             )
             # Stabilize default: convert legacy 'fetch' to AST-first unless user explicitly asks text/markdown.
             if cmd_ok and args_list and args_list[0] == "fetch" and not _plain_markdown_requested:
+                _trace_emit_event(
+                    event_type="fallback_applied",
+                    component="run_skill",
+                    summary="daily-brief upgraded to vmprint path",
+                    details={"reason": "ast-first-default", "before": list(args_list), "after": ["fetch-vmprint"] + list(args_list[1:])},
+                )
                 args_list[0] = "fetch-vmprint"
             if cmd_ok:
+                _before = list(args_list)
                 args_list = _normalize_daily_brief_args(args_list)
+
+                if args_list != _before:
+                    _trace_emit_event(
+                        event_type="arg_normalization",
+                        component="run_skill",
+                        summary="daily-brief args normalized",
+                        details={"skill_name": skill_name, "before": _before, "after": args_list, "rule": "normalize_daily_brief_args"},
+                    )
+                    
                 # Honor explicit language/day hints from the current user query
                 # even when cloud arg normalizer returned weaker defaults (e.g. --lang all).
                 if any(k in _q for k in ("中文", "汉语", "国内")):
@@ -3614,8 +3757,19 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                     if not any(str(a).strip().lower() == "--days-ago" for a in args_list):
                         args_list += ["--days-ago", "1"]
                     args_list = _normalize_daily_brief_args(args_list)
+
+                _layout_from_q = _daily_brief_document_layout_from_user_query(_q)
+                if _layout_from_q:
+                    args_list = _merge_fetch_vmprint_document_layout(args_list, _layout_from_q)
+
             if not cmd_ok:
                 args_list = _derive_daily_brief_args_from_query(_q or "daily brief", _plain_markdown_requested)
+                _trace_emit_event(
+                    event_type="arg_normalization",
+                    component="run_skill",
+                    summary="daily-brief args derived from query",
+                    details={"skill_name": skill_name, "query": _q or "daily brief", "after": args_list, "rule": "derive_daily_brief_args_from_query"},
+                )
         elif skill_name == "weather-1.0.0":
             if not args_list and user_text_for_args:
                 args_list = [user_text_for_args]
@@ -3719,6 +3873,7 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                     "--out": True,
                     "--template": True,
                     "--ast": True,
+                    "--document-layout": True,
                 }
                 _cleaned: List[str] = [args_list[0]]
                 _i = 1
@@ -3758,15 +3913,28 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
     except Exception:
         pass
 
-    # When the model omits args, pass the current user message so scripts can use it (e.g. smtp.js send-from-message).
-    if not args_list:
-        try:
-            if req is not None:
-                user_text = user_text_for_args
-                if user_text:
-                    skill_env["HOMECLAW_USER_MESSAGE"] = user_text
-        except Exception:
-            pass
+    # Expose current user text to scripts (daily-brief uses it to derive document layout fallback;
+    # smtp/js skills may also parse it). Do this regardless of whether args exist.
+    try:
+        user_text = (user_text_for_args or "").strip()
+        if user_text:
+            skill_env["HOMECLAW_USER_MESSAGE"] = user_text
+    except Exception:
+        pass
+    # Last-mile safety for daily-brief: preserve explicit layout intent from user query
+    # even when upstream cloud normalizer drops --document-layout.
+    try:
+        if (
+            skill_name == "daily-brief-1.0.0"
+            and isinstance(args_list, list)
+            and args_list
+            and str(args_list[0]).strip().lower() == "fetch-vmprint"
+        ):
+            _want_layout = _daily_brief_document_layout_from_user_query((user_text_for_args or "").strip())
+            if _want_layout:
+                args_list = _merge_fetch_vmprint_document_layout(args_list, _want_layout)
+    except Exception:
+        pass
     # Cap args count and length to avoid DoS (inspired by sandbox limits).
     try:
         _max_args, _max_len = 512, 65536
@@ -3775,6 +3943,12 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
         args_list = [str(a)[:_max_len] for a in args_list]
     except Exception:
         args_list = []
+    _trace_emit_event(
+        event_type="arg_normalization",
+        component="run_skill",
+        summary="run_skill argv finalized",
+        details={"skill_name": skill_name, "script": script_path.name, "argv": args_list},
+    )
     try:
         if script_path.suffix.lower() in (".py", ".pyw"):
             await _maybe_pip_install_skill_requirements(skill_folder, skill_env, config)
@@ -3807,6 +3981,8 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                 err = (err_str or "").strip()
                 if err:
                     out = out + "\nstderr:\n" + err if out else "stderr:\n" + err
+                if err and re.search(r"Script exited with code ([1-9]\d*)", err):
+                    out = f"Error: {err.strip()}\n" + (out if out.strip() else "")
                 # In-process failed with ModuleNotFoundError => Core's process does not have that package
                 if "ModuleNotFoundError" in err:
                     out = (out or "") + (
@@ -3908,6 +4084,9 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
         rc = getattr(proc, "returncode", None)
         if not out and rc is not None and rc != 0:
             out = f"Script exited with code {rc}. No output captured." + ("\nstderr:\n" + err if err else "")
+        # Non-zero exit must surface as Error: prefix so registry/llm_loop treat as failure (dedupe, retries).
+        if script_path.suffix.lower() in (".py", ".pyw") and rc is not None and rc != 0:
+            out = f"Error: script exited with code {rc}.\n" + (out if out.strip() else "")
         # If .py script failed with ModuleNotFoundError, optionally try auto-install and retry once
         if script_path.suffix.lower() in (".py", ".pyw") and "ModuleNotFoundError" in err:
             auto_install = config.get("run_skill_auto_install_missing") or {}
@@ -3937,6 +4116,9 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                         err2 = stderr2.decode("utf-8", errors="replace").strip()
                         if err2:
                             out = out + "\nstderr:\n" + err2 if out else "stderr:\n" + err2
+                        rc2 = getattr(proc2, "returncode", None)
+                        if rc2 is not None and rc2 != 0:
+                            out = f"Error: script exited with code {rc2}.\n" + (out if out.strip() else "")
                     except Exception as e:
                         out = (out or "") + f"\n\n[Auto-install retry failed: {e}]"
             if "ModuleNotFoundError" in (out or ""):
@@ -4675,14 +4857,22 @@ async def _markdown_to_pdf_executor(arguments: Dict[str, Any], context: ToolCont
         md2pdf_cfg = tools_cfg.get("markdown_to_pdf") if isinstance(tools_cfg, dict) else {}
         if not isinstance(md2pdf_cfg, dict):
             md2pdf_cfg = {}
-        vmprint_dir = (md2pdf_cfg.get("vmprint_dir") or "").strip() or None
+        vmprint_cfg_raw = (md2pdf_cfg.get("vmprint_dir") or "").strip() or None
         _project_root = Path(__file__).resolve().parent.parent
-        if vmprint_dir and not os.path.isabs(vmprint_dir):
-            vmprint_dir = str((_project_root / vmprint_dir).resolve())
-        elif not vmprint_dir:
-            # Fallback: try default tools/vmprint so VMPrint works even if tools_config wasn't merged (e.g. from skills_and_plugins)
-            _default_vmp = (_project_root / "tools" / "vmprint").resolve()
-            vmprint_dir = str(_default_vmp)
+        # Explicit vmprint_dir => must point at a valid clone (error if not). Omitted => use VMPrint only if
+        # tools/vmprint or tools/vm_print exists with draft2final; else fall through to pandoc/weasyprint.
+        if vmprint_cfg_raw:
+            if not os.path.isabs(vmprint_cfg_raw):
+                vmprint_dir = str((_project_root / vmprint_cfg_raw).resolve())
+            else:
+                vmprint_dir = str(Path(vmprint_cfg_raw).resolve())
+        else:
+            vmprint_dir = None
+            for _name in ("vmprint", "vm_print"):
+                _cand = (_project_root / "tools" / _name).resolve()
+                if _vmprint_layout_root_candidate(_cand):
+                    vmprint_dir = str(_cand)
+                    break
         loop = asyncio.get_event_loop()
         pdf_bytes, err = await loop.run_in_executor(
             None, lambda: _markdown_to_pdf_convert_sync(
@@ -4723,35 +4913,23 @@ def _markdown_to_pdf_convert_sync(
     if not md_content:
         return (None, "Content is empty.")
 
-    # Resolve VMPrint dir: support alternate name "vm_print" (underscore) if "vmprint" path does not exist
-    def _vmprint_base() -> Optional[Path]:
-        if not vmprint_dir:
-            return None
-        base = Path(vmprint_dir).resolve()
-        if base.is_dir() and (base / "draft2final").is_dir():
-            return base
-        # If configured as tools/vmprint but user installed as tools/vm_print, try that
-        alt = None
-        if vmprint_dir.rstrip("/\\").endswith("vmprint"):
-            alt = base.parent / "vm_print"
-        elif vmprint_dir.rstrip("/\\").endswith("vm_print"):
-            alt = base.parent / "vmprint"
-        if alt and alt.is_dir() and (alt / "draft2final").is_dir():
-            return alt
-        return None
+    vmp = _vmprint_repo_root_from_dir_str(vmprint_dir) if vmprint_dir else None
+    cli_js = _draft2final_cli_path(vmp) if vmp is not None else None
 
-    vmp = _vmprint_base() if vmprint_dir else None
-    if vmprint_dir and vmp is None:
-        expected = str(Path(vmprint_dir).resolve())
+    if vmprint_dir and vmp is not None and cli_js is None:
         return (
             None,
-            f"Markdown to PDF: VMPrint is configured but directory missing or invalid (expected: {expected} with a 'draft2final' subfolder). "
-            "Set tools.markdown_to_pdf.vmprint_dir in config to your VMPrint clone path (e.g. tools/vm_print or an absolute path), or run ./install.sh / install.ps1, or install pandoc, or: pip install markdown weasyprint.",
+            f"Markdown to PDF: VMPrint Markdown CLI (draft2final) is not installed under {vmp}. "
+            f"Run: cd {vmp} && npm install   (installs the draft2final package). "
+            "Or remove tools.markdown_to_pdf.vmprint_dir to fall back to pandoc / weasyprint.",
+        )
+    if vmprint_dir and vmp is None:
+        return (
+            None,
+            f"Markdown to PDF: tools.markdown_to_pdf.vmprint_dir is not a valid VMPrint root: {vmprint_dir}",
         )
 
-    # 1. VMPrint (draft2final): when tools.markdown_to_pdf.vmprint_dir is set to a clone of https://github.com/cosmiciron/vmprint
-    # Invoke draft2final via node dist/cli.js directly. We try both --out and --output for compatibility across VMPrint versions.
-    cli_js = (vmp / "draft2final" / "dist" / "cli.js") if vmp is not None else None
+    # 1. VMPrint draft2final: legacy subfolder draft2final/dist/cli.js or npm package at node_modules/draft2final/dist/cli.js
     if cli_js is not None and cli_js.is_file():
         try:
             with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w", encoding="utf-8") as f:
@@ -4858,7 +5036,54 @@ def _resolve_vmprint_dir_from_config() -> Optional[str]:
     return vmprint_dir
 
 
-def _ensure_vmprint_static_assets(base_dir: Path) -> None:
+def _vmprint_layout_root_candidate(base: Path) -> bool:
+    """True if [base] looks like a VMPrint repo root (legacy draft2final tree or current monorepo)."""
+    if not base.is_dir():
+        return False
+    if (base / "draft2final").is_dir():
+        return True
+    # Vendored cosmiciron/vmprint: cli/ + package.json (Markdown CLI is npm package draft2final)
+    if (base / "package.json").is_file() and (base / "cli").is_dir():
+        return True
+    return False
+
+
+def _draft2final_cli_path(vmp: Optional[Path]) -> Optional[Path]:
+    """Path to draft2final CLI: legacy draft2final/dist/cli.js or npm draft2final under node_modules."""
+    if vmp is None:
+        return None
+    legacy = vmp / "draft2final" / "dist" / "cli.js"
+    if legacy.is_file():
+        return legacy
+    npm_cli = vmp / "node_modules" / "draft2final" / "dist" / "cli.js"
+    if npm_cli.is_file():
+        return npm_cli
+    return None
+
+
+def _vmprint_repo_root_from_dir_str(vmprint_dir: Optional[str]) -> Optional[Path]:
+    """
+    Resolve VMPrint clone root for Markdown→PDF (draft2final) and static assets.
+    Accepts legacy layout (draft2final/) or current monorepo (cli/ + package.json).
+    If vmprint_dir points to tools/vmprint but the user installed tools/vm_print (or vice versa), try the sibling.
+    """
+    if not vmprint_dir:
+        return None
+    base = Path(vmprint_dir).resolve()
+    if _vmprint_layout_root_candidate(base):
+        return base
+    alt: Optional[Path] = None
+    s = str(vmprint_dir).rstrip("/\\")
+    if s.endswith("vmprint"):
+        alt = base.parent / "vm_print"
+    elif s.endswith("vm_print"):
+        alt = base.parent / "vmprint"
+    if alt is not None and _vmprint_layout_root_candidate(alt):
+        return alt
+    return None
+
+
+def _ensure_vmprint_static_assets(base_dir: Path, *, client_engine: bool = False) -> None:
     """Ensure VMPrint runtime + preview shell assets exist under output/."""
     try:
         asset_version = globals().get("_VMPRINT_ASSET_VERSION", "v1")
@@ -4867,7 +5092,15 @@ def _ensure_vmprint_static_assets(base_dir: Path) -> None:
         preview_assets_dir = (base_dir / FILE_OUTPUT_SUBDIR / "assets").resolve()
         preview_assets_dir.mkdir(parents=True, exist_ok=True)
         project_root = Path(__file__).resolve().parent.parent
-        vmroot = (project_root / "tools" / "vmprint").resolve()
+        vmroot = _vmprint_repo_root_from_dir_str(_resolve_vmprint_dir_from_config())
+        if vmroot is None:
+            for _name in ("vmprint", "vm_print"):
+                _cand = (project_root / "tools" / _name).resolve()
+                if (_cand / "engine" / "dist" / "index.js").is_file():
+                    vmroot = _cand
+                    break
+        if vmroot is None:
+            vmroot = (project_root / "tools" / "vmprint").resolve()
         copies = [
             (vmroot / "engine" / "dist" / "index.js", assets_dir / "vmprint-engine.js"),
             (vmroot / "contexts" / "canvas" / "dist" / "index.js", assets_dir / "vmprint-context-canvas.js"),
@@ -4876,6 +5109,11 @@ def _ensure_vmprint_static_assets(base_dir: Path) -> None:
         for src, dst in copies:
             if src.is_file() and (not dst.exists() or dst.stat().st_size == 0):
                 shutil.copy2(src, dst)
+        esm_engine = vmroot / "engine" / "dist" / "index.mjs"
+        if client_engine and esm_engine.is_file():
+            dst_mjs = assets_dir / "vmprint-engine.mjs"
+            if not dst_mjs.exists() or dst_mjs.stat().st_size != esm_engine.stat().st_size:
+                shutil.copy2(esm_engine, dst_mjs)
         fontkit_stub = assets_dir / "vmprint-fontkit.js"
         if not fontkit_stub.exists() or fontkit_stub.stat().st_size == 0:
             fontkit_stub.write_text(
@@ -4883,43 +5121,127 @@ def _ensure_vmprint_static_assets(base_dir: Path) -> None:
                 encoding="utf-8",
             )
         styles_css = (base_dir / FILE_OUTPUT_SUBDIR / "styles.css").resolve()
-        if not styles_css.exists() or styles_css.stat().st_size == 0:
-            styles_css.write_text(
-                "body{font-family:system-ui;margin:0;background:#111;color:#eee}"
-                ".top{padding:10px 12px;background:#1b1b1b;position:sticky;top:0}"
-                ".toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}"
-                ".pages{padding:12px;display:grid;gap:16px}"
-                ".page{background:#fff;color:#111;box-shadow:0 2px 12px rgba(0,0,0,.35);overflow:auto}"
-                ".meta{font-size:12px;color:#bbb}",
-                encoding="utf-8",
-            )
+        styles_css.write_text(
+            "body{font-family:system-ui;margin:0;background:#111;color:#eee}"
+            ".pages{padding:12px;display:grid;gap:16px;justify-items:center}"
+            ".page{background:#fff;color:#111;box-shadow:0 2px 12px rgba(0,0,0,.35);overflow:auto}",
+            encoding="utf-8",
+        )
         pipeline_js = preview_assets_dir / "pipeline.js"
-        if not pipeline_js.exists() or pipeline_js.stat().st_size == 0:
-            pipeline_js.write_text(
-                "(function(){"
-                "function parseJson(id,f){try{return JSON.parse((document.getElementById(id)||{}).textContent||'');}catch(_){return f;}}"
-                "function hasRuntime(){return !!(window.VMPrint||window.vmprint||window.CanvasContext);}"
-                "function renderFallback(root,pages){if(!root)return;root.innerHTML='';for(const s of (pages||[])){const d=document.createElement('div');d.className='page';d.innerHTML=String(s||'');root.appendChild(d);}}"
-                "window.HomeClawVmprintPipeline={parseJson:parseJson,hasRuntime:hasRuntime,renderFallback:renderFallback};"
-                "})();",
-                encoding="utf-8",
-            )
+        pipeline_js.write_text(
+            "(function(){"
+            "function parseJson(id,f){try{return JSON.parse((document.getElementById(id)||{}).textContent||'');}catch(_){return f;}}"
+            "function hasRuntime(){return !!(window.VMPrint||window.vmprint||window.CanvasContext);}"
+            "function renderSvgPages(root,pages){if(!root)return;root.innerHTML='';for(const s of (pages||[])){const d=document.createElement('div');d.className='page';d.innerHTML=String(s||'');root.appendChild(d);}}"
+            "function renderLayoutBoxes(root,d){if(!root)return;root.innerHTML='';const pages=(d&&d.pages)||[];"
+            "for(const pg of pages){const w=pg.width||595,h=pg.height||842;const el=document.createElement('div');el.className='page';el.style.width=w+'px';el.style.height=h+'px';el.style.position='relative';el.style.background='#fff';el.style.color='#111';el.style.boxShadow='0 2px 12px rgba(0,0,0,.35)';el.style.overflow='hidden';"
+            "for(const b of (pg.boxes||[])){const n=document.createElement('div');n.className='box';n.style.position='absolute';n.style.left=(b.x||0)+'px';n.style.top=(b.y||0)+'px';n.style.width=(b.w||0)+'px';n.style.height=(b.h||0)+'px';n.style.border='1px dashed rgba(0,0,0,.12)';n.style.fontSize='10px';n.style.lineHeight='1.2';n.style.overflow='hidden';n.style.whiteSpace='pre-wrap';"
+            "const t=(b.lines&&b.lines.length)?(b.lines.map(l=>(l.segments||[]).map(s=>s.text||'').join('')).join('\\n')):(b.type||'');n.textContent=t;el.appendChild(n);}root.appendChild(el);}}"
+            "window.HomeClawVmprintPipeline={parseJson:parseJson,hasRuntime:hasRuntime,renderSvgPages:renderSvgPages,renderLayoutBoxes:renderLayoutBoxes};"
+            "})();",
+            encoding="utf-8",
+        )
         ui_js = preview_assets_dir / "ui.js"
-        if not ui_js.exists() or ui_js.stat().st_size == 0:
-            ui_js.write_text(
-                "(function(){"
-                "function boot(){const p=window.HomeClawVmprintPipeline;if(!p)return;"
-                "const root=document.getElementById('root');const status=document.getElementById('status');"
-                "const pages=p.parseJson('svg-pages-data',[]);"
-                "if(!p.hasRuntime()){p.renderFallback(root,pages);if(status)status.textContent='Fallback active (server-rendered pages).';return;}"
-                "p.renderFallback(root,pages);if(status)status.textContent='Runtime assets detected; fallback kept until browser pipeline is wired.';}"
-                "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot);}else{boot();}"
-                "})();",
+        ui_js.write_text(
+            "(function(){"
+            "function boot(){const p=window.HomeClawVmprintPipeline;if(!p)return;"
+            "const root=document.getElementById('root');if(!root)return;"
+            "const svgs=p.parseJson('svg-pages-data',[]);let layout=null;"
+            "try{const le=document.getElementById('layout-data');if(le)layout=JSON.parse(le.textContent||'{}');}catch(_){layout=null;}"
+            "if(svgs&&svgs.length){p.renderSvgPages(root,svgs);}"
+            "else if(layout&&layout.pages&&layout.pages.length){p.renderLayoutBoxes(root,layout);}"
+            "}"
+            "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot);}else{boot();}"
+            "})();",
+            encoding="utf-8",
+        )
+        if client_engine:
+            _ce_loader = """(function(){
+var _ls=(document.currentScript&&document.currentScript.src)||"";
+function _u(r){if(_ls)return new URL(r,new URL(".",_ls).href).href;return new URL(r.replace(/^\\.\\.\\//,"./"),document.baseURI).href;}
+async function _go(){
+var st=document.getElementById("status");
+var root=document.getElementById("root");
+if(!root)return;
+try{
+var eng=await import(_u("../_vmprint_assets/AV_PLACEHOLDER/vmprint-engine.mjs"));
+var ctxM=await import(_u("../_vmprint_assets/AV_PLACEHOLDER/vmprint-context-canvas.js"));
+var fmM=await import(_u("../_vmprint_assets/AV_PLACEHOLDER/vmprint-web-fonts.js"));
+var LayoutEngine=eng.LayoutEngine,Renderer=eng.Renderer,toLayoutConfig=eng.toLayoutConfig,createEngineRuntime=eng.createEngineRuntime;
+var CanvasContext=ctxM.CanvasContext||ctxM.default;
+var StandardFontManager=fmM.StandardFontManager||fmM.default;
+var raw=(document.getElementById("ast-data")||{}).textContent||"{}";
+var doc=null;
+try{doc=JSON.parse(raw);}catch(_){
+var i=raw.lastIndexOf("\\n---\\n");
+if(i>=0)doc=JSON.parse(raw.slice(i+5));
+else throw new Error("bad ast");
+}
+function resolvePageSize(rawPs,orientation){
+var named={LETTER:{width:612,height:792},A4:{width:595,height:842}};
+var s=null;
+if(rawPs&&typeof rawPs==="object"&&Number(rawPs.width)>0&&Number(rawPs.height)>0){
+s={width:Number(rawPs.width),height:Number(rawPs.height)};
+}else if(typeof rawPs==="string"){
+var k=String(rawPs||"").toUpperCase().trim();
+if(named[k])s=Object.assign({},named[k]);
+}
+if(!s)s={width:612,height:792};
+var o=String(orientation||"").toLowerCase();
+if(o==="landscape"&&s.width<s.height)s={width:s.height,height:s.width};
+if(o==="portrait"&&s.width>s.height)s={width:s.height,height:s.width};
+return s;
+}
+var runtime=createEngineRuntime({fontManager:new StandardFontManager()});
+var cfg=toLayoutConfig(doc);
+var rawPageSize=(cfg&&cfg.pageSize)?cfg.pageSize:(doc&&doc.layout?doc.layout.pageSize:null);
+var orientation=(cfg&&cfg.orientation)?cfg.orientation:(doc&&doc.layout?doc.layout.orientation:null);
+var pageSize=resolvePageSize(rawPageSize,orientation);
+var engine=new LayoutEngine(cfg,runtime);
+await engine.waitForFonts();
+var pages=engine.simulate(doc.elements);
+var ctx=new CanvasContext({size:pageSize,margins:cfg.margins,autoFirstPage:false,bufferPages:false,textRenderMode:"text"});
+var renderer=new Renderer(cfg,false,runtime);
+await renderer.render(pages,ctx);
+ctx.end();
+var svgs=[];
+if(typeof ctx.toSvgPages==="function")svgs=ctx.toSvgPages()||[];
+if(!svgs.length)throw new Error("no client svg pages");
+root.innerHTML="";
+for(var j=0;j<svgs.length;j++){
+var d=document.createElement("div");
+d.className="page";
+d.innerHTML=String(svgs[j]||"");
+root.appendChild(d);
+}
+if(st)st.textContent="Client engine (in-browser layout).";
+}catch(e){if(st)st.textContent="Client engine unavailable (using server SVG).";}
+}
+if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",function(){_go();});
+else _go();
+})();
+"""
+            (preview_assets_dir / "vmprint-client-engine-loader.js").write_text(
+                _ce_loader.replace("AV_PLACEHOLDER", asset_version),
                 encoding="utf-8",
             )
     except Exception:
         # Non-fatal: fallback preview still works without browser runtime assets.
         pass
+
+
+def _vmprint_preview_client_engine_enabled() -> bool:
+    """Opt-in: try in-browser VMPrint layout (dynamic import); on failure keep server SVG."""
+    try:
+        cfg = _get_tools_config() or {}
+        if not isinstance(cfg, dict):
+            return False
+        v = cfg.get("vmprint_preview_client_engine")
+        if isinstance(v, bool):
+            return v
+        return str(v or "").strip().lower() in ("1", "true", "yes", "on")
+    except Exception:
+        return False
 
 
 def _vmprint_inline_limits() -> tuple[int, int]:
@@ -4937,6 +5259,39 @@ def _vmprint_inline_limits() -> tuple[int, int]:
     except Exception:
         pass
     return (max_ast, max_pages)
+
+
+def _vmprint_preview_layout_options() -> tuple[bool, int, bool]:
+    """embed_layout_in_html, max_embed_layout_chars (0 = no limit), write_sidecar_file."""
+    embed = True
+    max_embed = 600_000
+    sidecar = True
+    try:
+        cfg = _get_tools_config() or {}
+        vcfg = cfg.get("vmprint_preview_inline") if isinstance(cfg, dict) else None
+        if isinstance(vcfg, dict):
+            if vcfg.get("embed_layout_json_in_preview_html") is not None:
+                embed = bool(vcfg.get("embed_layout_json_in_preview_html"))
+            if vcfg.get("max_embed_layout_json_chars") is not None:
+                max_embed = max(0, int(vcfg.get("max_embed_layout_json_chars")))
+            if vcfg.get("write_layout_json_sidecar") is not None:
+                sidecar = bool(vcfg.get("write_layout_json_sidecar"))
+    except Exception:
+        pass
+    return (embed, max_embed, sidecar)
+
+
+def _vmprint_layout_sidecar_rel_path(html_path: str) -> Optional[str]:
+    """Derive output/foo.layout.json from output/foo.preview.html."""
+    p = (html_path or "").strip().replace("\\", "/")
+    if not p:
+        return None
+    low = p.lower()
+    if low.endswith(".preview.html"):
+        return p[: -len(".preview.html")] + ".layout.json"
+    if low.endswith(".html"):
+        return Path(p).with_suffix(".layout.json").as_posix()
+    return None
 
 
 def _rewrite_vmprint_preview_asset_links(html_text: str, scope: str) -> str:
@@ -4959,6 +5314,7 @@ def _rewrite_vmprint_preview_asset_links(html_text: str, scope: str) -> str:
         asset_names = (
             "vmprint-fontkit.js",
             "vmprint-engine.js",
+            "vmprint-engine.mjs",
             "vmprint-web-fonts.js",
             "vmprint-context-canvas.js",
         )
@@ -4974,6 +5330,11 @@ def _rewrite_vmprint_preview_asset_links(html_text: str, scope: str) -> str:
             ("styles.css", f"{FILE_OUTPUT_SUBDIR}/styles.css", "./styles.css"),
             ("pipeline.js", f"{FILE_OUTPUT_SUBDIR}/assets/pipeline.js", "./assets/pipeline.js"),
             ("ui.js", f"{FILE_OUTPUT_SUBDIR}/assets/ui.js", "./assets/ui.js"),
+            (
+                "vmprint-client-engine-loader.js",
+                f"{FILE_OUTPUT_SUBDIR}/assets/vmprint-client-engine-loader.js",
+                "./assets/vmprint-client-engine-loader.js",
+            ),
         )
         for _, rel, old in shell_assets:
             url, _ = build_file_view_link(scope_s, rel)
@@ -4991,50 +5352,36 @@ def _vmprint_render_sync(
     vmprint_dir: Optional[str],
     vmprint_profile: str,
     vmprint_style: Optional[str],
-) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
+) -> Tuple[Optional[bytes], Optional[str], Optional[str], Optional[str]]:
     """
     Render Markdown with VMPrint draft2final.
-    Returns (pdf_bytes, text_output, error). For output_format='pdf' returns pdf_bytes;
-    for text formats returns text_output.
+    Returns (pdf_bytes, text_output, error, layout_json_sidecar).
+    For browser_preview_html, layout_json_sidecar is set when --emit-layout succeeds (sibling file + optional HTML embed).
     """
     md_content = (md_content or "").strip()
     if not md_content:
-        return (None, None, "Content is empty.")
+        return (None, None, "Content is empty.", None)
     if output_format not in ("pdf", "ast_json", "layout_json", "browser_preview_html"):
-        return (None, None, "output_format must be one of: pdf, ast_json, layout_json, browser_preview_html.")
+        return (None, None, "output_format must be one of: pdf, ast_json, layout_json, browser_preview_html.", None)
 
-    # Resolve VMPrint dir with same vmprint/vm_print compatibility logic.
-    def _vmprint_base() -> Optional[Path]:
-        if not vmprint_dir:
-            return None
-        base = Path(vmprint_dir).resolve()
-        if base.is_dir() and (base / "draft2final").is_dir():
-            return base
-        alt = None
-        if str(vmprint_dir).rstrip("/\\").endswith("vmprint"):
-            alt = base.parent / "vm_print"
-        elif str(vmprint_dir).rstrip("/\\").endswith("vm_print"):
-            alt = base.parent / "vmprint"
-        if alt and alt.is_dir() and (alt / "draft2final").is_dir():
-            return alt
-        return None
-
-    vmp = _vmprint_base()
+    vmp = _vmprint_repo_root_from_dir_str(vmprint_dir)
     if vmp is None:
         expected = str(Path(vmprint_dir or "tools/vmprint").resolve())
         return (
             None,
             None,
-            f"VMPrint render: VMPrint directory missing or invalid (expected: {expected} with a 'draft2final' subfolder). "
-            "Run ./install.sh (or install.ps1/install.bat), then ensure tools.markdown_to_pdf.vmprint_dir points to your VMPrint path.",
+            f"VMPrint render: VMPrint directory missing or invalid (expected: {expected} — monorepo with cli/ or legacy draft2final/). "
+            f"Run ./install.sh (or install.ps1/install.bat), then: cd {expected} && npm install",
+            None,
         )
 
-    cli_js = vmp / "draft2final" / "dist" / "cli.js"
-    if not cli_js.is_file():
+    cli_js = _draft2final_cli_path(vmp)
+    if cli_js is None or not cli_js.is_file():
         return (
             None,
             None,
-            f"VMPrint render: draft2final CLI not built at {cli_js}. Run: cd {vmp} && npm install && npm run build",
+            f"VMPrint render: draft2final CLI not found under {vmp}. Run: cd {vmp} && npm install",
+            None,
         )
 
     suffix = ".pdf" if output_format == "pdf" else ".json"
@@ -5079,8 +5426,37 @@ def _vmprint_render_sync(
                 ast_path = Path(md_path + ".ast.json")
                 if result.returncode != 0 or not ast_path.is_file():
                     err = (result.stderr or result.stdout or b"").decode("utf-8", errors="replace").strip() or "unknown"
-                    return (None, None, f"VMPrint render failed: {err[:500]}")
+                    return (None, None, f"VMPrint render failed: {err[:500]}", None)
                 if output_format == "browser_preview_html":
+                    vm_cli_prev = vmp / "cli" / "dist" / "index.js"
+                    layout_text: Optional[str] = None
+                    if vm_cli_prev.is_file():
+                        tmp_pdf_prev = md_path + ".layout.pdf"
+                        lay_prev = subprocess.run(
+                            [
+                                "node",
+                                str(vm_cli_prev),
+                                "-i",
+                                str(ast_path),
+                                "-o",
+                                tmp_pdf_prev,
+                                "--emit-layout",
+                                layout_out_path,
+                            ],
+                            cwd=str(vmp),
+                            capture_output=True,
+                            timeout=120,
+                            check=False,
+                        )
+                        if lay_prev.returncode == 0 and Path(layout_out_path).is_file():
+                            layout_text = Path(layout_out_path).read_text(encoding="utf-8", errors="replace")
+                    layout_for_sidecar = layout_text
+                    embed_layout_script = ""
+                    do_embed, max_le, _ = _vmprint_preview_layout_options()
+                    if layout_text and do_embed and (max_le <= 0 or len(layout_text) <= max_le):
+                        embed_layout_script = (
+                            f"<script id='layout-data' type='application/json'>{html.escape(layout_text)}</script>"
+                        )
                     canvas_script = (
                         "const fs=require('fs');"
                         "const {LayoutEngine,Renderer,toLayoutConfig,createEngineRuntime}=require('./engine/dist/index.js');"
@@ -5108,14 +5484,14 @@ def _vmprint_render_sync(
                     )
                     if c.returncode != 0:
                         err = (c.stderr or c.stdout or b"").decode("utf-8", errors="replace").strip() or "unknown"
-                        return (None, None, f"VMPrint canvas preview failed: {err[:500]}")
+                        return (None, None, f"VMPrint canvas preview failed: {err[:500]}", None)
                     try:
                         payload = json.loads((c.stdout or b"{}").decode("utf-8", errors="replace"))
                         svgs = payload.get("svgs") if isinstance(payload, dict) else None
                         if not isinstance(svgs, list) or not svgs:
-                            return (None, None, "VMPrint canvas preview failed: no pages rendered.")
+                            return (None, None, "VMPrint canvas preview failed: no pages rendered.", None)
                     except Exception as e:
-                        return (None, None, f"VMPrint canvas preview parse failed: {e!s}")
+                        return (None, None, f"VMPrint canvas preview parse failed: {e!s}", None)
                     esc_json = html.escape(json.dumps(svgs, ensure_ascii=False))
                     ast_json_raw = Path(ast_path).read_text(encoding="utf-8", errors="replace")
                     ast_json = html.escape(ast_json_raw)
@@ -5127,34 +5503,39 @@ def _vmprint_render_sync(
                         max_ast, max_pages = (120_000, 2)
                     ui_hint = "inline" if (ast_chars <= max_ast and page_count <= max_pages) else "link"
                     asset_version = globals().get("_VMPRINT_ASSET_VERSION", "v1")
+                    try:
+                        _use_client_engine = _vmprint_preview_client_engine_enabled()
+                    except Exception:
+                        _use_client_engine = False
+                    _ce_meta = (
+                        "<meta name='homeclaw-vmprint-client-engine' content='1'>"
+                        if _use_client_engine
+                        else ""
+                    )
                     viewer_html = (
                         "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-                        f"<meta name='homeclaw-vmprint-ui-hint' content='{ui_hint}'>"
-                        f"<meta name='homeclaw-vmprint-ast-chars' content='{ast_chars}'>"
-                        f"<meta name='homeclaw-vmprint-pages' content='{page_count}'>"
-                        "<title>VMPrint Canvas Preview</title><link rel='stylesheet' href='./styles.css'></head><body>"
-                        "<div class='top'><strong>VMPrint Hybrid Preview</strong><div class='meta'>Primary: browser VMPrint runtime (AST->canvas). Fallback: server-rendered pages.</div>"
-                        "<div class='toolbar'><label>Scale <select id='scale'><option value='0.75'>75%</option><option selected value='1'>100%</option><option value='1.25'>125%</option><option value='1.5'>150%</option></select></label>"
-                        "<label>DPI <select id='dpi'><option selected value='auto'>Auto</option><option value='72'>72</option><option value='96'>96</option><option value='144'>144</option><option value='192'>192</option><option value='300'>300</option></select></label>"
-                        "<label>Text <select id='text-mode'><option value='text'>Text</option><option selected value='glyph-path'>Glyph Path</option></select></label>"
-                        "<span id='status' class='meta'>Initializing...</span></div></div>"
+                        f"<meta name='homeclaw-vmprint-ui-hint' content='{html.escape(ui_hint, quote=True)}'>"
+                        f"<meta name='homeclaw-vmprint-ast-chars' content='{html.escape(str(ast_chars), quote=True)}'>"
+                        f"<meta name='homeclaw-vmprint-pages' content='{html.escape(str(page_count), quote=True)}'>"
+                        f"{_ce_meta}"
+                        "<title>VMPrint preview</title><link rel='stylesheet' href='./styles.css'></head><body>"
                         "<div id='root' class='pages'></div>"
                         f"<script id='ast-data' type='application/json'>{ast_json}</script>"
+                        f"{embed_layout_script}"
                         f"<script id='svg-pages-data' type='application/json'>{esc_json}</script>"
                         f"<script src='./_vmprint_assets/{asset_version}/vmprint-fontkit.js'></script><script src='./_vmprint_assets/{asset_version}/vmprint-engine.js'></script><script src='./_vmprint_assets/{asset_version}/vmprint-web-fonts.js'></script><script src='./_vmprint_assets/{asset_version}/vmprint-context-canvas.js'></script>"
                         "<script src='./assets/pipeline.js'></script><script src='./assets/ui.js'></script>"
-                        "</body></html>"
-                    )
-                    if len(viewer_html) > 2_000_000:
-                        return (
-                            None,
-                            None,
-                            f"VMPrint preview too large ({len(viewer_html)} chars html). Use output_format=pdf for delivery.",
+                        + (
+                            "<script src='./assets/vmprint-client-engine-loader.js'></script>"
+                            if _use_client_engine
+                            else ""
                         )
-                    return (None, viewer_html, None)
+                        + "</body></html>"
+                    )
+                    return (None, viewer_html, None, layout_for_sidecar)
                 vm_cli = vmp / "cli" / "dist" / "index.js"
                 if not vm_cli.is_file():
-                    return (None, None, f"VMPrint CLI not built at {vm_cli}. Run: cd {vmp} && npm install && npm run build")
+                    return (None, None, f"VMPrint CLI not built at {vm_cli}. Run: cd {vmp} && npm install && npm run build", None)
                 tmp_pdf_out = md_path + ".layout.pdf"
                 lay = subprocess.run(
                     ["node", str(vm_cli), "-i", str(ast_path), "-o", tmp_pdf_out, "--emit-layout", layout_out_path],
@@ -5165,42 +5546,16 @@ def _vmprint_render_sync(
                 )
                 if lay.returncode != 0 or not Path(layout_out_path).is_file():
                     err = (lay.stderr or lay.stdout or b"").decode("utf-8", errors="replace").strip() or "unknown"
-                    return (None, None, f"VMPrint layout emission failed: {err[:500]}")
+                    return (None, None, f"VMPrint layout emission failed: {err[:500]}", None)
                 layout_text = Path(layout_out_path).read_text(encoding="utf-8", errors="replace")
                 if output_format == "layout_json":
-                    return (None, layout_text, None)
-                # browser_preview_html: return a lightweight page that visualizes boxes with canvas-like absolute layers.
-                if len(layout_text) > 2_000_000:
-                    return (
-                        None,
-                        None,
-                        f"VMPrint preview too large ({len(layout_text)} chars layout). Use output_format=layout_json for diagnostics or output_format=pdf for delivery.",
-                    )
-                esc = html.escape(layout_text)
-                viewer_html = (
-                    "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-                    "<title>VMPrint Preview</title><style>body{font-family:system-ui;margin:0;background:#111;color:#eee}"
-                    ".top{padding:10px 12px;background:#1b1b1b;position:sticky;top:0}.pages{padding:12px;display:grid;gap:16px}"
-                    ".page{background:#fff;color:#111;position:relative;box-shadow:0 2px 12px rgba(0,0,0,.35);overflow:hidden}"
-                    ".box{position:absolute;border:1px dashed rgba(0,0,0,.12);font-size:10px;line-height:1.2;overflow:hidden;white-space:pre-wrap}"
-                    ".meta{font-size:12px;color:#bbb}</style></head><body>"
-                    "<div class='top'><strong>VMPrint Scene Preview</strong><div class='meta'>HomeClaw generated preview (layout boxes).</div></div>"
-                    "<div id='root' class='pages'></div>"
-                    f"<script id='layout-data' type='application/json'>{esc}</script>"
-                    "<script>const d=JSON.parse(document.getElementById('layout-data').textContent||'{}');"
-                    "const pages=d.pages||[];const root=document.getElementById('root');"
-                    "for(const p of pages){const w=p.width||595,h=p.height||842;const pg=document.createElement('div');pg.className='page';pg.style.width=w+'px';pg.style.height=h+'px';"
-                    "for(const b of (p.boxes||[])){const n=document.createElement('div');n.className='box';n.style.left=(b.x||0)+'px';n.style.top=(b.y||0)+'px';n.style.width=(b.w||0)+'px';n.style.height=(b.h||0)+'px';"
-                    "const t=(b.lines&&b.lines.length)?(b.lines.map(l=>(l.segments||[]).map(s=>s.text||'').join('')).join('\\n')):(b.type||'');n.textContent=t;pg.appendChild(n);}root.appendChild(pg);}"
-                    "</script></body></html>"
-                )
-                return (None, viewer_html, None)
+                    return (None, layout_text, None, None)
             if result.returncode == 0 and Path(out_path).is_file():
                 if output_format == "pdf":
-                    return (Path(out_path).read_bytes(), None, None)
-                return (None, Path(out_path).read_text(encoding="utf-8", errors="replace"), None)
+                    return (Path(out_path).read_bytes(), None, None, None)
+                return (None, Path(out_path).read_text(encoding="utf-8", errors="replace"), None, None)
             err = (result.stderr or result.stdout or b"").decode("utf-8", errors="replace").strip() or "unknown"
-            return (None, None, f"VMPrint render failed: {err[:500]}")
+            return (None, None, f"VMPrint render failed: {err[:500]}", None)
         finally:
             Path(md_path).unlink(missing_ok=True)
             Path(out_path).unlink(missing_ok=True)
@@ -5208,10 +5563,10 @@ def _vmprint_render_sync(
             Path(md_path + ".ast.json").unlink(missing_ok=True)
             Path(layout_out_path).unlink(missing_ok=True)
     except FileNotFoundError:
-        return (None, None, "VMPrint render failed: Node.js is not available on PATH for the Core process.")
+        return (None, None, "VMPrint render failed: Node.js is not available on PATH for the Core process.", None)
     except Exception as e:
         logger.debug("vmprint_render failed: %s", e)
-        return (None, None, f"VMPrint render failed: {e!s}")
+        return (None, None, f"VMPrint render failed: {e!s}", None)
 
 
 async def _vmprint_render_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
@@ -5240,7 +5595,7 @@ async def _vmprint_render_executor(arguments: Dict[str, Any], context: ToolConte
         full.parent.mkdir(parents=True, exist_ok=True)
         vmprint_dir = _resolve_vmprint_dir_from_config()
         loop = asyncio.get_event_loop()
-        pdf_bytes, text_out, err = await loop.run_in_executor(
+        pdf_bytes, text_out, err, layout_sidecar = await loop.run_in_executor(
             None,
             lambda: _vmprint_render_sync(
                 content_str,
@@ -5261,15 +5616,36 @@ async def _vmprint_render_executor(arguments: Dict[str, Any], context: ToolConte
                 return "VMPrint render produced no AST output."
             full.write_text(text_out, encoding="utf-8")
             if output_format == "browser_preview_html":
-                _ensure_vmprint_static_assets(base)
+                _ensure_vmprint_static_assets(base, client_engine=_vmprint_preview_client_engine_enabled())
                 if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
                     scope = _get_file_workspace_subdir(context)
                     if scope:
                         rewritten = _rewrite_vmprint_preview_asset_links(text_out, scope)
                         if rewritten != text_out:
                             full.write_text(rewritten, encoding="utf-8")
+                _, _, write_layout_sidecar = _vmprint_preview_layout_options()
+                side_rel: Optional[str] = None
+                if write_layout_sidecar and layout_sidecar and (
+                    path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR
+                ):
+                    side_rel = _vmprint_layout_sidecar_rel_path(path_arg)
+                    if side_rel:
+                        try:
+                            r2 = _resolve_file_path(side_rel, context, for_write=True)
+                            if r2 is not None:
+                                full_side, base_side = r2
+                                if _path_under(full_side, base_side):
+                                    full_side.parent.mkdir(parents=True, exist_ok=True)
+                                    full_side.write_text(layout_sidecar, encoding="utf-8")
+                        except Exception:
+                            logger.debug("vmprint layout sidecar write failed", exc_info=True)
 
-        out = json.dumps({"written": True, "path": path_arg, "output_format": output_format})
+        out_obj: Dict[str, Any] = {"written": True, "path": path_arg, "output_format": output_format}
+        if output_format == "browser_preview_html" and layout_sidecar:
+            sr = _vmprint_layout_sidecar_rel_path(path_arg)
+            if sr:
+                out_obj["layout_json_path"] = sr
+        out = json.dumps(out_obj)
         if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
             scope = _get_file_workspace_subdir(context)
             if scope:
@@ -6469,9 +6845,9 @@ async def _web_search_browser_executor(arguments: Dict[str, Any], context: ToolC
         await asyncio.sleep(2.5)
         html = await page.content()
         results = _parse_search_results_from_html(html, engine, count)
-        return json.dumps({"results": results, "provider": "browser", "engine": engine})
+        return _web_search_json({"results": results, "provider": "browser", "engine": engine})
     except Exception as e:
-        return json.dumps({"error": f"Browser search failed: {e!s}. Try web_search with provider duckduckgo (no key) or configure google_cse/bing.", "results": [], "provider": "browser", "engine": engine})
+        return _web_search_json({"error": f"Browser search failed: {e!s}. Try web_search with provider duckduckgo (no key) or configure google_cse/bing.", "results": [], "provider": "browser", "engine": engine})
 
 
 # ---- HTTP request (generic API: GET/POST/PUT/PATCH/DELETE, headers) ----
@@ -6600,6 +6976,12 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
     plugin_id = str(arguments.get("plugin_id") or "").strip().lower().replace(" ", "_")
     if not plugin_id:
         return "Error: plugin_id is required."
+    _trace_emit_event(
+        event_type="plugin_call_started",
+        component="route_to_plugin",
+        summary="plugin routing started",
+        details={"plugin_id": plugin_id, "capability_id": arguments.get("capability_id"), "parameters": arguments.get("parameters")},
+    )
     capability_id = (arguments.get("capability_id") or "")
     capability_id = str(capability_id).strip().lower().replace(" ", "_") or None
     llm_params = arguments.get("parameters")
@@ -6676,6 +7058,12 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
                     "missing": missing,
                     "uncertain": uncertain,
                 })
+                _trace_emit_event(
+                    event_type="fallback_applied",
+                    component="route_to_plugin",
+                    summary="plugin parameter fallback: ask user",
+                    details={"plugin_id": plugin_id, "capability_id": capability_id, "missing": missing},
+                )
                 return question
             if uncertain:
                 question = "Can you confirm the values above so I can proceed?"
@@ -6686,6 +7074,12 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
                     "missing": [],
                     "uncertain": uncertain,
                 })
+                _trace_emit_event(
+                    event_type="fallback_applied",
+                    component="route_to_plugin",
+                    summary="plugin parameter fallback: confirm uncertain",
+                    details={"plugin_id": plugin_id, "capability_id": capability_id, "uncertain": uncertain},
+                )
                 return question
         if err:
             return err
@@ -6923,15 +7317,39 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
             await core.send_response_to_request_channel(result_text, request)
         # When cron_scheduled: caller (cron task) will send result_text via TAM. Sync inbound: return text.
         if cron_scheduled:
+            _trace_emit_event(
+                event_type="plugin_call_finished",
+                component="route_to_plugin",
+                summary="plugin routing finished",
+                details={"plugin_id": plugin_id, "status": "ok", "mode": "cron"},
+            )
             return result_text
         if _is_sync_inbound(request):
+            _trace_emit_event(
+                event_type="plugin_call_finished",
+                component="route_to_plugin",
+                summary="plugin routing finished",
+                details={"plugin_id": plugin_id, "status": "ok", "mode": "sync_inbound"},
+            )
             return result_text
+        _trace_emit_event(
+            event_type="plugin_call_finished",
+            component="route_to_plugin",
+            summary="plugin routing finished",
+            details={"plugin_id": plugin_id, "status": "ok", "mode": "async"},
+        )
         return ROUTING_RESPONSE_ALREADY_SENT
     except BaseException as e:
         # Never break Core: catch all. Re-raise so process can exit on Ctrl+C / sys.exit
         if isinstance(e, (KeyboardInterrupt, SystemExit)):
             raise
         logger.exception(e)
+        _trace_emit_event(
+            event_type="plugin_call_finished",
+            component="route_to_plugin",
+            summary="plugin routing exception",
+            details={"plugin_id": plugin_id, "status": "exception", "error": str(e)},
+        )
         return f"Error running plugin: {e!s}"
 
 
@@ -8453,7 +8871,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="vmprint_render",
-            description="Render Markdown using VMPrint and save output to a file. Supports output_format='pdf' (default), 'ast_json' (VMPrint transmuted AST), 'layout_json' (flat scene-graph boxes), or 'browser_preview_html' (self-contained browser viewer artifact). Optional vmprint_profile: academic/manuscript/screenplay/literature, and vmprint_style. Use output/ paths so users can open links in Companion/channels.",
+            description="Render Markdown using VMPrint and save output to a file. Supports output_format='pdf' (default), 'ast_json' (VMPrint transmuted AST), 'layout_json' (flat scene-graph boxes), or 'browser_preview_html' (hybrid viewer: server SVG + optional embedded layout JSON + SVG/Boxes toggle; also writes sibling output/*.layout.json when configured). Optional vmprint_profile: academic/manuscript/screenplay/literature, and vmprint_style. Use output/ paths so users can open links in Companion/channels.",
             parameters={
                 "type": "object",
                 "properties": {

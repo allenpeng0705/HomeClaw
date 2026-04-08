@@ -1,0 +1,4 @@
+id: stock_portfolio_default
+contract: stock_portfolio_default
+prompt: "我的自选股今天怎么样？"
+description: "Stock monitor default portfolio path."

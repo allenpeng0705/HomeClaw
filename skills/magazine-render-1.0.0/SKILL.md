@@ -29,10 +29,11 @@ trigger:
     You have four modes:
 
     1) Template JSON → AST → artifact (recommended):
-       - If you have structured data (daily_brief/weather/stock), use AST templates first.
+       - If you have structured data (daily_brief/weather/stock/web_search), use AST templates first. `web_search` expects Tavily-like JSON: `query` + `results[]` with `title`, `url`, `content` or `snippet`.
        - Call:
          run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
-                args=["render-template-ast", "--template", "daily_brief|weather|stock", "--title", "<TITLE>", "--theme", "dispatch|minimal", "--json", "<JSON_TEXT>", "--output_format", "browser_preview_html|pdf|layout_json", "--out", "<FILENAME>"])
+                args=["render-template-ast", "--template", "daily_brief|weather|stock|web_search", "--title", "<TITLE>", "--theme", "dispatch|minimal", "--json", "<JSON_TEXT>", "--output_format", "browser_preview_html|pdf|layout_json", "--out", "<FILENAME>"])
+       - Browser preview also writes sibling `<stem>.layout.json` by default (flat scene graph for CI/tools); add `--no-also-layout-json` in args to skip.
 
     2) AST JSON 1.1 → artifact:
        - Use when upstream already has VMPrint AST and you want deterministic layout runtime output.
@@ -68,7 +69,7 @@ This is a reusable formatting skill for **AST-first VMPrint UI output**. It can 
 
 | Action | Args |
 |--------|------|
-| Render template JSON -> AST artifact | `["render-template-ast", "--template", "daily_brief|weather|stock", "--title", "Report", "--theme", "dispatch", "--json", "{...}", "--output_format", "browser_preview_html|pdf|layout_json", "--out", "report.preview.html"]` |
+| Render template JSON -> AST artifact | `["render-template-ast", "--template", "daily_brief|weather|stock|web_search", "--title", "Report", "--theme", "dispatch", "--json", "{...}", "--output_format", "browser_preview_html|pdf|layout_json", "--out", "report.preview.html"]` |
 | Render AST JSON 1.1 | `["render-ast", "--ast", "{...}", "--output_format", "pdf|layout_json|browser_preview_html", "--out", "brief.preview.html"]` |
 | Daily brief JSON -> AST template | `["render-daily-brief-ast", "--title", "Daily Brief", "--theme", "dispatch", "--json", "{...}", "--output_format", "pdf|layout_json|browser_preview_html", "--out", "brief.layout.json"]` |
 | Markdown fallback to PDF | `["render-md", "--title", "My Report", "--theme", "dispatch", "--profile", "literature", "--md", "# ...", "--preview", "auto", "--out", "report.pdf"]` |

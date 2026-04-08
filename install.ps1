@@ -367,7 +367,7 @@ if ((Test-Path $VmprintMain) -and -not (Test-Path $VmprintDir)) {
     Write-Host "Warning: Could not rename vmprint-main to vmprint. You can rename manually or re-run install."
   }
 }
-$VmprintOk = (Test-Path (Join-Path $VmprintDir "draft2final")) -and (Test-Path (Join-Path $VmprintDir "package.json"))
+$VmprintOk = (Test-Path (Join-Path $VmprintDir "package.json")) -and ((Test-Path (Join-Path $VmprintDir "draft2final")) -or (Test-Path (Join-Path $VmprintDir "cli")))
 if ($VmprintOk) {
   Write-Host "OK: VMPrint already at tools\vmprint"
 } else {
@@ -382,19 +382,18 @@ if ($VmprintOk) {
         Write-Host "Cloning VMPrint from GitHub into tools\vmprint (optional Markdown-to-PDF tool)..."
         & git clone --progress --depth 1 https://github.com/cosmiciron/vmprint.git $VmprintDir
       }
-      if ((Test-Path (Join-Path $VmprintDir "draft2final")) -and (Get-Command node -ErrorAction SilentlyContinue)) {
-        Write-Host "Installing VMPrint dependencies (npm install) ..."
+      if ((Test-Path (Join-Path $VmprintDir "package.json")) -and (Get-Command node -ErrorAction SilentlyContinue)) {
+        Write-Host "Installing VMPrint dependencies (npm install; includes draft2final for Markdown to PDF) ..."
         Set-Location $VmprintDir; npm install --silent 2>$null
         if (Test-Path (Join-Path $VmprintDir "node_modules")) {
           Write-Host "Building VMPrint workspace (ordered dependency build) ..."
-          # Use VMPrint root build order (contracts/engine/markdown-core -> draft2final/transmuters).
           npm run build 2>$null
           Write-Host "OK: VMPrint installed at tools\vmprint"
         } else {
           Write-Host "VMPrint clone present; run manually: cd $VmprintDir; npm install"
         }
-      } elseif (Test-Path (Join-Path $VmprintDir "draft2final")) {
-        Write-Host "VMPrint cloned; Node not found. Install from https://nodejs.org then run: cd $VmprintDir; npm install"
+      } elseif (Test-Path (Join-Path $VmprintDir "package.json")) {
+        Write-Host "VMPrint present; Node not found. Install from https://nodejs.org then run: cd $VmprintDir; npm install"
       } else {
         Write-Host "VMPrint clone skipped. Markdown-to-PDF will use pandoc/weasyprint if available."
       }

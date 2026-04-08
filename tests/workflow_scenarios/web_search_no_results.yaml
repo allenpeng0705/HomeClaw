@@ -1,0 +1,4 @@
+id: web_search_no_results
+contract: web_search_no_results
+prompt: "Search web for qwertyuiop-nonexistent-protocol-99999 and summarize."
+description: "Web search with likely no useful results."

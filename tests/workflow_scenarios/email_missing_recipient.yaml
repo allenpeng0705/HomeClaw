@@ -1,0 +1,4 @@
+id: email_missing_recipient
+contract: email_missing_recipient
+prompt: "Send an email to shilei.peng@qq.com saying meeting moved to 4pm."
+description: "Email draft path with explicit recipient for stable real-core behavior."

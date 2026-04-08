@@ -1928,9 +1928,12 @@ class CoreService {
       'Content-Type': 'application/json',
       ..._authHeaders(),
     };
+    // Core returns 202 immediately after enqueue; do not use a short timeout here — remote TLS,
+    // slow proxies, or high RTT (e.g. cross-region) can exceed 30s before the first byte and caused
+    // TimeoutException("Future not completed", 0:00:30) while the server would have accepted.
     final response = await http
         .post(inboundUrl, headers: headers, body: jsonEncode(body))
-        .timeout(Duration(seconds: 30));
+        .timeout(Duration(seconds: sendMessageTimeoutSeconds));
     if (response.statusCode != 202) {
       final err = response.body;
       throw Exception('Core returned ${response.statusCode}: $err');

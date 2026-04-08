@@ -44,3 +44,6 @@ The `memory/chat/` directory is listed in `.gitignore` and was never committed. 
 - `skills/` — Built-in skills
 - `vendor/cognee/` — Vendored Cognee (memory/knowledge graph)
 - `tests/` — Pytest test suite
+- `docs/response-output-policy.md` — When to use plaintext vs Markdown vs VMPrint preview links for long responses; `tools.response_output_policy_in_prompt` in `skills_and_plugins.yml` injects a short version into the system prompt
+- **VMPrint AST reference:** `tools/vmprint/documents/SKILL.md` (upstream practitioner guide, ~1300 lines). Not in the default skills prompt body; skill **`vmprint-ast-layout-1.0.0`** points agents to read that file on demand via `document_read` / `file_read`
+- **VMPrint roadmap (templates vs AI-AST):** `docs/vmprint-ui-runtime.md` — ship and extend **Python → AST** templates for now; move toward **model-generated AST** via `render-ast` + the same validation pipeline (see section *Python templates now → AI-generated AST later*).

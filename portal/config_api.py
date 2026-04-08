@@ -23,6 +23,7 @@ WHITELIST_CORE = frozenset({
     "use_prompt_manager", "prompts_dir", "prompt_default_language", "prompt_cache_ttl_seconds",
     "auth_enabled", "auth_api_key", "core_public_url", "file_link_style", "file_static_prefix",
     "file_view_link_expiry_sec", "inbound_request_timeout_seconds", "llm_completion_timeout_seconds",
+    "workflow_trace_enabled", "workflow_trace_dir",
     "pinggy", "push_notifications", "file_understanding",
     "llm_config_file", "endpoints",
     "portal_url", "portal_secret",  # optional; Portal is in-process on Core or standalone (no proxy)

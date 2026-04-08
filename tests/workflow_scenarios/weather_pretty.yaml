@@ -1,0 +1,3 @@
+id: weather_pretty_path
+contract: weather_pretty_path
+prompt: "北京天气，做成漂亮预览"

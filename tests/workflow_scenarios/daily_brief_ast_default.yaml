@@ -1,0 +1,4 @@
+id: daily_brief_ast_default
+contract: daily_brief_ast_default
+prompt: "今日新闻（20条，中文）"
+description: "Daily brief should prefer vmprint path by default."

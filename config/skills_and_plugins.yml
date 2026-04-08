@@ -96,7 +96,7 @@ identity_capabilities_shortcut:
   # Max length (chars, after normalize) for greeting match. Only messages this short can trigger greeting_reply. 0 = no limit.
   greeting_max_length: 20
   # Max length (chars, after normalize) for capabilities match. Only messages this short can return identity+TOOLS.md. 0 = no limit.
-  capabilities_max_length: 60
+  capabilities_max_length: 600
   # Greeting: exact match after normalize (strip + trim trailing punctuation). If the user message equals one of these, reply with greeting_reply and skip the LLM.
   greeting_phrases:
     - "你好"
@@ -479,9 +479,14 @@ tools:
   # tool_selection_examples: true
   # When true (default): never auto-invoke tools when the model returned no tool_calls. Rely on the model to decide; no our own if-else to run tools. When false: allow legacy fallbacks (force_include, remind_me, route_to_plugin, folder_list, etc.) when model didn't call a tool.
   strict_fallback: true
+  # When true (default): inject "Response format policy" into system prompt (plaintext vs Markdown vs VMPrint link for long output). See docs/response-output-policy.md.
+  response_output_policy_in_prompt: true
+  # Guideline numbers cited in that injected prompt (not hard caps in code).
+  response_plaintext_max_chars: 400
+  response_markdown_ok_max_chars: 1000
   # Optional timeout (seconds) for tool-decision LLM turns (first call that should emit tool_calls).
   # 0 = disabled. Recommended 45-90 for local models that may stall with tools.
-  tool_decision_timeout_seconds: 60
+  tool_decision_timeout_seconds: 300
   # In mix/cloud modes only: if run_skill succeeds for these skills, return tool result directly
   # and skip the expensive follow-up LLM round (reduces stalls). Local mode is unchanged.
   run_skill_direct_return_skills_in_mix_cloud: [daily-brief-1.0.0, magazine-render-1.0.0, weather-1.0.0]
@@ -543,7 +548,7 @@ tools:
   # interactive_allowed_commands: []
   # markdown_to_pdf: VMPrint (github.com/cosmiciron/vmprint). install.sh/install.ps1 clone to tools/vmprint; if you installed manually as tools/vm_print, set vmprint_dir to "tools/vm_print" (or use absolute path).
   markdown_to_pdf:
-    vmprint_dir: "tools/vmprint"   # or "tools/vm_print"; must contain draft2final/ and have npm install run
+    vmprint_dir: "tools/vmprint"   # or "tools/vm_print"; run npm install (pulls draft2final for Markdown→PDF) + npm run build
   exec_timeout: 120   # seconds
   # Max characters returned by file_read when the tool does not pass max_chars. Increase for long PDFs/documents.
   file_read_max_chars: 5000000
@@ -597,6 +602,18 @@ tools:
   vmprint_preview_inline:
     max_ast_chars: 120000
     max_pages: 2
+    # browser_preview_html: embed flat layout JSON in the HTML (for Boxes toggle) when under this size; 0 = no limit
+    max_embed_layout_json_chars: 600000
+    embed_layout_json_in_preview_html: true
+    # When true, also write output/<stem>.layout.json next to *.preview.html (for CI/diff/tools).
+    write_layout_json_sidecar: true
+  # Web search → VMPrint magazine preview (llm_loop attachment). Default preserves legacy behavior.
+  # daily_brief = render-daily-brief-ast (Headline / Source / Link). web_search = render-template-ast --template web_search (Title / Snippet / URL).
+  web_search_magazine_ast_template: "daily_brief"
+  # Only when web_search_magazine_ast_template is web_search: pass --scripted-colophon (VMPrint YAML+JSON onReady page count → colophon). Experimental.
+  vmprint_web_search_scripted_colophon: false
+  # Experimental: vmprint_render browser_preview loads ESM engine in-tab when tools/vmprint has *.mjs dist; falls back to server SVG if imports fail.
+  vmprint_preview_client_engine: true
   # Use tool result as final response and skip the second LLM call. These are the default lists (Core uses same if omitted).
   # Plugins (e.g. homeclaw-browser): invoked via route_to_plugin; result is always used as final response (no second LLM). PPT is now a skill (ppt-generation-1.0.0) invoked via run_skill.
   use_result_as_response:

@@ -1,0 +1,4 @@
+id: memory_store
+contract: memory_store
+prompt: "Remember that I prefer concise bullet answers."
+description: "Natural store phrasing; Core may infer append_agent_memory or answer without tools (see contract)."

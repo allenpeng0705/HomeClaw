@@ -15,7 +15,7 @@ This folder is the source of the docs site (MkDocs).
 
 ## Core Topics
 
-- Stock monitor skill (watchlist, alerts, Chinese symbols, cron notifications): [../documentation/README.md](../documentation/README.md)
+- Stock monitor skill (watchlist, alerts, Chinese symbols, cron notifications): [../skills/stock-monitor-1.0.0/README.md](../skills/stock-monitor-1.0.0/README.md)
 - memex memory with Cursor / Claude Code (alongside the bridge): [memex-with-cursor-and-claude.md](memex-with-cursor-and-claude.md)
 - Channels: [channels.md](channels.md)
 - Companion app: [companion-app.md](companion-app.md)

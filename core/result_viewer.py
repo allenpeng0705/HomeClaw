@@ -15,6 +15,7 @@ See docs_design/FileSandboxDesign.md. auth_api_key and core_public_url are in co
 import base64
 import hmac
 import hashlib
+import html
 import os
 import re
 import time
@@ -256,6 +257,60 @@ def build_file_view_link(scope: str, path: str) -> Tuple[Optional[str], Optional
     except Exception as e:
         logger.debug("build_file_view_link failed: {}", e)
         return (None, "Could not generate file link; check core_public_url and auth_api_key in config.")
+
+
+def rewrite_vmprint_preview_html_assets(html: str, scope: str, path_arg: str) -> str:
+    """
+    VMPrint hybrid preview HTML uses href/src like ./styles.css. Browsers resolve those against the
+    request URL path (/files/out), yielding /files/styles.css — wrong and 403 on /files/{scope}/{path}
+    without a token. Rewrite ./... to the same view URLs as the preview file (output/styles.css, etc.).
+    """
+    try:
+        s_html = html if isinstance(html, str) else ""
+        if not s_html or "homeclaw-vmprint-ui-hint" not in s_html:
+            return s_html
+        from pathlib import PurePosixPath
+
+        scope_s = (scope or "").strip()
+        pnorm = (path_arg or "").replace("\\", "/").strip()
+        if not scope_s or not pnorm:
+            return s_html
+        parent = PurePosixPath(pnorm).parent
+        cache = {}
+
+        def sibling_url(rel_after_dot_slash: str) -> str:
+            rel_after_dot_slash = (rel_after_dot_slash or "").strip().lstrip("/")
+            full_rel = str(parent / rel_after_dot_slash) if str(parent) != "." else rel_after_dot_slash
+            if full_rel in cache:
+                return cache[full_rel]
+            url, _ = build_file_view_link(scope_s, full_rel)
+            out = url if url else f"./{rel_after_dot_slash}"
+            cache[full_rel] = out
+            return out
+
+        def esc_attr(u: str) -> str:
+            return u.replace("&", "&amp;").replace("'", "&#39;")
+
+        out = s_html
+        for attr in ("href", "src"):
+            pat1 = re.compile(re.escape(attr) + r"='\./([^']+)'")
+
+            def repl1(m, a=attr):
+                u = sibling_url(m.group(1))
+                return f"{a}='{esc_attr(u)}'"
+
+            out = pat1.sub(repl1, out)
+            pat2 = re.compile(re.escape(attr) + r'="\./([^"]+)"')
+
+            def repl2(m, a=attr):
+                u = sibling_url(m.group(1))
+                return f'{a}="{html.escape(u, quote=True)}"'
+
+            out = pat2.sub(repl2, out)
+        return out
+    except Exception as e:
+        logger.debug("rewrite_vmprint_preview_html_assets failed: {}", e)
+        return html if isinstance(html, str) else ""
 
 
 def file_absolute_path_to_view_url(path_str: str) -> Tuple[Optional[str], Optional[str]]:

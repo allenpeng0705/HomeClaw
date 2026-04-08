@@ -36,8 +36,14 @@ from memory.prompts import MEMORY_SUMMARIZATION_PROMPT
 from base.base import CoreMetadata, Friend, User, LLM, EmailAccount
 
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-core_metadata =CoreMetadata.from_yaml(os.path.join(root_dir, 'config', 'core.yml'))
-data_root = os.path.join(root_dir, 'database')
+core_metadata = CoreMetadata.from_yaml(os.path.join(root_dir, "config", "core.yml"))
+try:
+    from base.workflow_trace import apply_workflow_trace_env_from_config
+
+    apply_workflow_trace_env_from_config(core_metadata, project_root=root_dir)
+except Exception:
+    pass
+data_root = os.path.join(root_dir, "database")
 
 # Keys (case-insensitive) whose values are redacted in plugin/tool logs
 _SENSITIVE_PARAM_KEYS = frozenset(k.lower() for k in (
@@ -687,7 +693,8 @@ class Util:
 
     def _resolve_llm(self, llm_name: Optional[str] = None):
         """Return (path, model_id, type, host, port) for llm_name, or for main_llm if llm_name is None/empty. Returns None if llm_name given but not found.
-        When the resolved model is the current main LLM, host/port are taken from main_llm_host/main_llm_port.
+        When the resolved model is the current main LLM, host/port are taken from main_llm_host/main_llm_port
+        for local/ollama, or cloud_llm_host/cloud_llm_port when the main model is cloud (litellm).
         When the resolved model is vision_llm, host/port are taken from vision_llm_host/vision_llm_port.
         When the resolved model is tool_selection_llm, host/port are taken from tool_selection_llm_host/tool_selection_llm_port."""
         if llm_name and str(llm_name).strip():
@@ -697,11 +704,19 @@ class Util:
                 main_ref = (self._effective_main_llm_ref() or "").strip()
                 use_main_port = main_ref and name.strip() == main_ref
                 if use_main_port:
-                    host = str(getattr(self.core_metadata, 'main_llm_host', None) or '127.0.0.1').strip() or '127.0.0.1'
-                    try:
-                        port = max(1, min(65535, int(getattr(self.core_metadata, 'main_llm_port', None) or 5088)))
-                    except (TypeError, ValueError):
-                        port = 5088
+                    # Cloud main must use LiteLLM proxy, not main_llm_port (local llama.cpp).
+                    if mtype == 'litellm':
+                        host = str(getattr(self.core_metadata, 'cloud_llm_host', None) or '127.0.0.1').strip() or '127.0.0.1'
+                        try:
+                            port = max(1, min(65535, int(getattr(self.core_metadata, 'cloud_llm_port', None) or 14005)))
+                        except (TypeError, ValueError):
+                            port = 14005
+                    else:
+                        host = str(getattr(self.core_metadata, 'main_llm_host', None) or '127.0.0.1').strip() or '127.0.0.1'
+                        try:
+                            port = max(1, min(65535, int(getattr(self.core_metadata, 'main_llm_port', None) or 5088)))
+                        except (TypeError, ValueError):
+                            port = 5088
                 else:
                     vision_ref = ""
                     try:
