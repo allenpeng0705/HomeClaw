@@ -1898,11 +1898,16 @@ async def answer_from_memory(
         if _intent_router_config.get("enabled") and (query or "").strip():
             try:
                 _ir_timeout = max(0, int(_intent_router_config.get("timeout_seconds", 25) or 25))
+                _ir_llm_ref = _intent_router_config.get("router_llm")
+                if isinstance(_ir_llm_ref, str):
+                    _ir_llm_ref = _ir_llm_ref.strip() or None
+                else:
+                    _ir_llm_ref = None
                 _route_coro = intent_router_route(
                     query=(query or "").strip(),
                     config=_intent_router_config,
                     completion_fn=core,
-                    llm_name=None,
+                    llm_name=_ir_llm_ref,
                     recent_messages=messages if isinstance(messages, list) else None,
                 )
                 if _ir_timeout > 0:
@@ -3368,9 +3373,12 @@ async def answer_from_memory(
                     and not any(k in _q_lo_dag for k in ("web search", "search web", "google", "bing", "tavily", "live web", "latest on web"))
                     and not any(k in _q_raw_dag for k in ("网页搜索", "上网搜", "实时搜索", "全网搜索"))
                 )
+                # Only clear search_web DAG here; news_digest has its own run_skill DAG for feed-style asks.
                 if _dag_flow and _is_feed_digest_req:
-                    _dag_flow = None
-                    _component_log("planner_executor", "skipped DAG for feed-digest request; using normal tool loop")
+                    _dag_cat_fb = (_dag_flow.get("category") or "").strip().lower()
+                    if _dag_cat_fb == "search_web":
+                        _dag_flow = None
+                        _component_log("planner_executor", "skipped DAG for feed-digest request; using normal tool loop")
             except Exception:
                 pass
         # Planner–Executor Phase 2: call planner only when no DAG flow (DAG first for category). Never crash; fall back to ReAct on any error.

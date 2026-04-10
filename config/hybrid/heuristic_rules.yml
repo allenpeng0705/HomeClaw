@@ -130,7 +130,7 @@ rules:
   - set a reminder
   - 定时提醒
   - 到点提醒
-- route: local
+- route: cloud
   keywords:
   - cron
   - 定时任务
@@ -140,7 +140,7 @@ rules:
   - 周期
   - cron_schedule
   - cron_list
-- route: local
+- route: cloud
   keywords:
   - record date
   - record_date

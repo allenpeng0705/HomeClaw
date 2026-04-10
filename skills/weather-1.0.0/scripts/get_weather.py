@@ -38,8 +38,8 @@ try:
 except ImportError:
     ssl = None
 
-# Reasonable HTTP timeout (seconds)
-_TIMEOUT_SEC = 30
+# HTTP timeout (seconds); keep moderate so a dead wttr.in does not block the chat for a full minute.
+_TIMEOUT_SEC = 12
 _USER_AGENT = "HomeClaw-weather/1.0 (+https://github.com/allenpeng0705/HomeClaw)"
 
 
@@ -58,8 +58,8 @@ def fetch_weather(location: str, compact: bool = True) -> str:
     else:
         url = f"https://wttr.in/{loc_encoded}?T"
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    max_attempts = 3
-    retry_delay_sec = 2
+    max_attempts = 2
+    retry_delay_sec = 1
     for attempt in range(max_attempts):
         try:
             with urllib.request.urlopen(req, timeout=_TIMEOUT_SEC) as resp:

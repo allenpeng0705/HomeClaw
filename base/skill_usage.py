@@ -93,6 +93,36 @@ def record_skill_invocation(user_id: str, skill_folder: str) -> None:
         logger.debug("record_skill_invocation failed: {}", e)
 
 
+def top_skill_folders(user_id: str, *, limit: int = 12) -> List[Tuple[str, int]]:
+    """
+    Return (skill_folder, count) for the user (or _global) sorted by descending count.
+    Use to tune intent_router.frequent_fast_paths or skills_include_body_for from real usage (see database/skill_usage.json).
+    Never raises.
+    """
+    uid = _norm_user(user_id)
+    lim = max(1, min(50, int(limit) if limit else 12))
+    try:
+        store = _load_store()
+        users = store.get("users")
+        if not isinstance(users, dict):
+            return []
+        ent_u = users.get(uid) or users.get("_global") or {}
+        if not isinstance(ent_u, dict):
+            return []
+        rows: List[Tuple[str, int]] = []
+        for folder, cur in ent_u.items():
+            if not folder or not isinstance(cur, dict):
+                continue
+            c = max(0, int(cur.get("count") or 0))
+            if c > 0:
+                rows.append((str(folder), c))
+        rows.sort(key=lambda x: -x[1])
+        return rows[:lim]
+    except Exception as e:
+        logger.debug("top_skill_folders failed: {}", e)
+        return []
+
+
 def usage_boost_score(user_id: str, skill_folder: str) -> float:
     """
     Return a score in ~[0, 1] from frequency + recency for reranking.
