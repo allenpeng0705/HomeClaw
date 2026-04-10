@@ -16,6 +16,8 @@ python -m channels.run webchat
 
 Then open **http://127.0.0.1:8014/** in your browser. The page fetches `/config` (ws_url and user_id from channels/.env), connects to Core `/ws`, and sends/receives messages.
 
+**Claw-Code UI:** **http://127.0.0.1:8014/clawcode** — dark, IDE-style workspace for Claw-Code: create/list sessions, `POST /inbound` with `clawcode_session_id`, optional **SSE streaming** for tool progress (with a **Run activity** log), **inline images** when Core returns `images` / SSE `done` payloads, and in-page **approval** actions. The client sends `reply_accepts: ["text","image"]` so non-stream JSON can include image data URLs. Uses the same localStorage keys as WebChat for Core URL and API key. The channel proxies `/api/clawcode/*` and `POST /api/inbound` to Core (enable `clawcode.enabled` in core.yml).
+
 ## Config
 
 - **channels/.env**: Core URL (core_host, core_port or CORE_URL). Optional: `WEBCHAT_USER_ID` (default `webchat_user`), `WEBCHAT_HOST`, `WEBCHAT_PORT` (default 8014). If Core has **auth_enabled**, set **CORE_API_KEY** so the channel can proxy uploads to Core `/api/upload`.
@@ -30,3 +32,5 @@ The WebChat page has a **Settings** section (expand "Settings (Core URL, API key
 ## From anywhere
 
 Expose Core (or this WebChat server) via Tailscale or SSH tunnel, then open the WebChat URL in the browser.
+
+**Security:** See [docs/clawcode-ui-security.md](../../docs/clawcode-ui-security.md) (auth, CSRF notes, rate limiting) before exposing port **8014** or Core beyond a trusted network.

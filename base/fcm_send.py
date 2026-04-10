@@ -85,6 +85,7 @@ def send_fcm_one(
     user_id: Optional[str] = None,
     source: Optional[str] = None,
     from_friend: Optional[str] = None,
+    link: Optional[str] = None,
 ) -> bool:
     """
     Send one FCM notification to one device token (Android or other non-Apple).
@@ -106,7 +107,8 @@ def send_fcm_one(
             data["user_id"] = str(user_id).strip()[:256]
         if from_friend is not None and str(from_friend).strip():
             data["from_friend"] = str(from_friend).strip()[:128]
-        data["link"] = _chat_deep_link(from_friend)
+        link_s = (str(link).strip() if link is not None else "") or _chat_deep_link(from_friend)
+        data["link"] = link_s[:2048]
         msg = messaging.Message(
             notification=messaging.Notification(title=title_s, body=body_s),
             data=data,

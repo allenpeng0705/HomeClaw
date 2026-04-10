@@ -1,0 +1,4 @@
+id: weather_skill_default
+contract: weather_skill_default
+prompt: "Run weather skill forecast for Seattle this week."
+description: "Weather skill folder path (distinct from generic weather run_skill mock)."

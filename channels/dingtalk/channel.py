@@ -27,6 +27,7 @@ load_dotenv(_root / "channels" / ".env")
 # DingTalk credentials: channels/dingtalk/.env (overrides channels/.env)
 load_dotenv(Path(__file__).resolve().parent / ".env")
 from base.util import Util
+from channels.clawcode_binding import apply_clawcode_inbound_flow
 
 INBOUND_URL = f"{Util().get_channels_core_url()}/inbound"
 
@@ -153,6 +154,10 @@ class HomeClawDingTalkHandler(ChatbotHandler):
             payload["audios"] = audios
         if files:
             payload["files"] = files
+        _cc = apply_clawcode_inbound_flow(user_id, text or "", payload)
+        if _cc is not None:
+            self.reply_text(_cc, incoming_message)
+            return AckMessage.STATUS_OK, "ok"
         try:
             headers = Util().get_channels_core_api_headers()
             # trust_env=False so we connect directly to Core (no HTTP_PROXY); same as Slack

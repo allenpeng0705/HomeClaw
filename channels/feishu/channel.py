@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 load_dotenv(_root / "channels" / ".env")
 load_dotenv(Path(__file__).resolve().parent / ".env")  # feishu/.env overrides for port, credentials
 from base.util import Util
+from channels.clawcode_binding import apply_clawcode_inbound_flow
 
 app = FastAPI(title="HomeClaw Feishu Channel")
 INBOUND_URL = f"{Util().get_channels_core_url()}/inbound"
@@ -283,6 +284,16 @@ async def _handle_event_body(body: dict):
         payload["audios"] = message["audios"]
     if message.get("files"):
         payload["files"] = message["files"]
+    _cc = apply_clawcode_inbound_flow(user_id, text or "", payload)
+    if _cc is not None:
+        reply = _cc
+        reply_images = []
+        sent = bool(message_id and reply_to_feishu_message(message_id, reply))
+        if not sent:
+            sent = send_feishu_message(chat_id, reply)
+        if not sent:
+            print("[Feishu] Reply was not sent to Feishu (check logs above for Feishu API errors).")
+        return JSONResponse(status_code=200, content={})
     try:
         headers = Util().get_channels_core_api_headers()
         async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:

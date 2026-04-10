@@ -28,6 +28,15 @@ import homeclaw_native
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
     let userInfo = response.notification.request.content.userInfo
+    // Stash payload so Flutter can persist the reply into chat history (WS is dead when app was killed).
+    let ud = UserDefaults.standard
+    if let t = userInfo["text"] as? String, !t.isEmpty {
+      ud.set(t, forKey: "homeclaw_pending_push_text")
+      if let u = userInfo["user_id"] as? String, !u.isEmpty { ud.set(u, forKey: "homeclaw_pending_push_user_id") }
+      else { ud.removeObject(forKey: "homeclaw_pending_push_user_id") }
+      if let f = userInfo["from_friend"] as? String, !f.isEmpty { ud.set(f, forKey: "homeclaw_pending_push_from_friend") }
+      else { ud.set("HomeClaw", forKey: "homeclaw_pending_push_from_friend") }
+    }
     if let link = userInfo["link"] as? String, !link.isEmpty, let url = URL(string: link) {
       UIApplication.shared.open(url)
     }

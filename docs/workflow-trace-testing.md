@@ -330,6 +330,11 @@ Then run runner with `--base-url ...`.
 - for a quick check, run one scenario:
   - `python scripts/workflow_trace_runner.py --mode real_core --scenario daily_brief_ast_default --user-id "matrix:@your_id:matrix.org"`
 
+### Portal / FastAPI tests: `TypeError: __init__() got an unexpected keyword argument 'app'`
+
+- **Cause:** `httpx` 0.28+ removed the `app=` argument that older Starlette `TestClient` passes through to `httpx.Client`.
+- **Fix:** Install dependencies from this repo’s `requirements.txt`, which pins **`httpx<0.28`**, or upgrade Starlette/FastAPI together to versions that only use `transport=` (no `app=`).
+
 ### `TimeoutError: async inbound timed out`
 
 - real Core often needs **more than 2 minutes** for one turn (LLM, tools, embedding warmup). Use `--inbound-timeout 1200` or set `HOMECLAW_WORKFLOW_INBOUND_TIMEOUT_SEC`.
@@ -338,7 +343,65 @@ Then run runner with `--base-url ...`.
 
 ---
 
-## 12) Suggested team workflow
+## 12) Agent limits, tool policy, and live trace (SSE)
+
+These options live in **`config/core.yml`** (see commented examples in `config/core.yml.reference`).
+
+### 12.1 `agent_limits`
+
+- **`max_tool_rounds`** — When set, overrides `tools.max_tool_rounds` for the main tool loop. Default behavior elsewhere is unchanged when omitted.
+- **`max_estimated_tokens_per_turn`** — When **\> 0**, Core estimates token budget from current messages before each tool-loop iteration. If the estimate meets or exceeds the limit, the turn stops with a user-visible message and a trace event **`agent_limit_reached`** (`reason: max_estimated_tokens_per_turn`). **`0`** disables this check.
+
+### 12.2 `tool_policy`
+
+- **`default_mode`**
+  - **`allow_all`** — No extra execution gate (default behavior).
+  - **`allow_read_restrict_write`** — Blocks tools whose **`risk_tier`** is `write`, `exec`, `network`, or `user_data` (see `base/tool_permissions.py`). Denied calls emit **`permission_denied`** in the workflow trace.
+- **`llm_tool_allowlist`** — When non-empty, only those tool names are passed to the model in the OpenAI-style tool list (execution registry is unchanged unless you add more policy). Use for “read-only agent” or staged rollouts.
+- **`always_include_discovery_tools`** — When true (default in code paths that honor it), **`list_available_tools`** and **`search_available_tools`** stay available alongside the allowlist so the model can discover names.
+
+### 12.3 Live SSE stream
+
+- Set **`workflow_trace_sse_enabled: true`** in `config/core.yml`.
+- **Endpoint:** `GET /dev/workflow-trace/stream` on Core (same host/port as Core, e.g. `9000`).
+- **Auth:** Same as **`/inbound`** (e.g. `Authorization: Bearer <auth_api_key>` when `auth_api_key` is set).
+- **Behavior:** Server-Sent Events; each **`data:`** line is one JSON trace event (same shape as JSONL workflow traces). If SSE is disabled in config, the stream returns an **`event: error`** payload explaining that.
+
+### 12.4 Extra trace event types (contracts)
+
+The in-process / schema allowlist includes harness-oriented events such as **`permission_denied`**, **`agent_limit_reached`**, **`context_compacted`**, **`memory_flush_started`**, **`memory_flush_finished`**, and **`tool_progress`**. See **`tests/workflow_framework/trace_schema.py`** for the canonical set.
+
+### 12.5 Example: curl SSE (Core on localhost)
+
+```bash
+curl -sN -H "Authorization: Bearer YOUR_INBOUND_KEY" \
+  "http://127.0.0.1:9000/dev/workflow-trace/stream"
+```
+
+### 12.6 Skills listing budget and invocation contract
+
+- **`skills_prompt_budget_chars`** — After RAG / force-include / optional body injection, cap total listing size (descriptions truncated per **`skills_prompt_entry_max_chars`**). **`0`** disables.
+- **`skills_invocation_contract_enabled`** — When true, injects the stronger “call `run_skill` when a listed skill matches” paragraph into the **Available skills** block.
+
+### 12.7 Deferred tools (`llm_tool_defer`)
+
+- Under **`tool_policy`**, **`llm_tool_defer`**: list of tool names **omitted** from the model’s tool schema. Execution is unchanged; use **`list_available_tools`** / **`search_available_tools`** to discover them.
+
+### 12.8 Skill subagent (inner turn)
+
+- **`tools.run_skill_subagent_skills`**: folder names for which **`run_skill`** delegates to an inner **`answer_from_memory`** turn (bounded by **`agent_limits.skill_subagent`** → **`max_tool_rounds`**, **`max_estimated_tokens_per_turn`** via request metadata). Nesting depth **1** avoids infinite recursion; deeper **`run_skill`** uses the normal subprocess path.
+
+### 12.9 Per-request `tool_profile`
+
+- **`POST /inbound`** may include **`tool_profile`**: **`minimal`**, **`messaging`**, **`coding`**, or **`full`**. Merged into **`tools.profile`** for **`get_tools_for_llm`** when the intent router does not impose a category profile.
+
+### 12.10 Usage-weighted skill RAG (design F)
+
+- **`skills_usage_rerank_enabled`**: when **`true`** and **`skills_use_vector_search`**, reorder vector hits by **effective score** = min(1, similarity + **`skills_usage_rerank_weight`** × usage boost). Usage is stored in **`database/skill_usage.json`** (per system user id) and updated after **successful** **`run_skill`** (non-**`Error:`** results).
+
+---
+
+## 13) Suggested team workflow
 
 1. During feature work:
    - run `in_process_mock` frequently.

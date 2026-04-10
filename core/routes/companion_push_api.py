@@ -2,6 +2,8 @@
 Companion push API: POST /api/companion/push-token (register), DELETE /api/companion/push-token (unregister).
 Same auth as /inbound (auth.verify_inbound_auth). Used so Core can send FCM push when app is killed/background.
 """
+from typing import Optional
+
 from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel
@@ -38,7 +40,9 @@ def get_api_companion_push_token_register_handler(core):  # noqa: ARG001
 
 def get_api_companion_push_token_unregister_handler(core):  # noqa: ARG001
     """Return handler for DELETE /api/companion/push-token. Query: user_id, token (optional), device_id (optional). Never raises."""
-    async def api_companion_push_token_unregister(user_id: str = "", token: str | None = None, device_id: str | None = None):
+    async def api_companion_push_token_unregister(
+        user_id: str = "", token: Optional[str] = None, device_id: Optional[str] = None
+    ):
         try:
             uid = (user_id or "companion").strip() if isinstance(user_id, str) else "companion"
             did = (device_id or "").strip() or None if device_id is not None else None

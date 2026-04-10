@@ -1,6 +1,6 @@
 # HomeClaw Companion (Flutter)
 
-Companion app for **HomeClaw Core**: chat from Mac, Windows, Linux, Android, and iOS. Connects to Core via HTTP (POST /inbound). **One codebase for all platforms;** native features use **homeclaw_native** (notifications, screen record, camera, etc.) and **homeclaw_voice** (voice input via [speech_to_text](https://pub.dev/packages/speech_to_text)). See `packages/homeclaw_native` and `packages/homeclaw_voice`. Feature parity with OpenClaw is planned in phases; see **docs_design/HomeClawFlutterFeatureParityWithOpenClaw.md** and **docs_design/FlutterCompanionNativePlugins.md**.
+Companion app for **HomeClaw Core**: chat from Mac, Windows, Linux, Android, and iOS. Connects to Core via HTTP (POST /inbound). **Claw-Code:** configured on Core like **Cursor / ClaudeCode** — add the **`clawcode`** preset friend in `user.yml` (`config/friend_presets.yml`). In the app, open the **Clawcode** friend, tap **terminal** (or **More → Claw-Code**) to bind a workspace session, then chat normally. Optional tools screen / browser (`http://<host>:9000/clawcode`). **One codebase for all platforms;** native features use **homeclaw_native** (notifications, screen record, camera, etc.) and **homeclaw_voice** (voice input via [speech_to_text](https://pub.dev/packages/speech_to_text)). See `packages/homeclaw_native` and `packages/homeclaw_voice`. Feature parity with OpenClaw is planned in phases; see **docs_design/HomeClawFlutterFeatureParityWithOpenClaw.md** and **docs_design/FlutterCompanionNativePlugins.md**.
 
 ## Prerequisites
 

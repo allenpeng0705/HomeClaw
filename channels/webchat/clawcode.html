@@ -1,0 +1,1131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claw-Code — HomeClaw</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #21262d;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --orange: #d29922;
+      --red: #f85149;
+      --mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    header.app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    header.app-header h1 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 0;
+      letter-spacing: -0.02em;
+    }
+    header.app-header .badge {
+      font-size: 0.7rem;
+      color: var(--muted);
+      font-weight: 400;
+      margin-left: 0.5rem;
+    }
+    .status-pill {
+      font-size: 0.75rem;
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      background: var(--surface2);
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .status-pill.ok { color: var(--green); border-color: #238636; }
+    .status-pill.err { color: var(--red); border-color: #da3633; }
+    .layout {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+    }
+    aside.sidebar {
+      width: 280px;
+      min-width: 240px;
+      border-right: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    aside.sidebar .side-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.75rem;
+    }
+    main.workspace {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+    }
+    .approval-banner {
+      display: none;
+      padding: 0.6rem 1rem;
+      background: #3d2f00;
+      border-bottom: 1px solid var(--orange);
+      font-size: 0.85rem;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .approval-banner.show { display: flex; }
+    .approval-banner button {
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    .approval-banner button.primary { background: #238636; border-color: #238636; color: #fff; }
+    .approval-banner button.danger { background: transparent; border-color: var(--red); color: var(--red); }
+    label { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 0.25rem; }
+    input[type="text"], input[type="password"], select, textarea {
+      width: 100%;
+      padding: 0.45rem 0.5rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.875rem;
+    }
+    textarea#composer {
+      font-family: var(--mono);
+      font-size: 0.8125rem;
+      line-height: 1.45;
+      resize: vertical;
+      min-height: 88px;
+      max-height: 40vh;
+    }
+    .field { margin-bottom: 0.65rem; }
+    .btn-row { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    button.btn {
+      padding: 0.45rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    button.btn:hover { background: #30363d; }
+    button.btn-accent {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #0d1117;
+      font-weight: 600;
+    }
+    button.btn-accent:hover { filter: brightness(1.08); }
+    button.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    details.settings { margin-bottom: 0.75rem; font-size: 0.85rem; }
+    details.settings summary { cursor: pointer; color: var(--accent); }
+    .session-meta {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--muted);
+      word-break: break-all;
+      margin-top: 0.35rem;
+      line-height: 1.4;
+    }
+    #transcript {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem;
+      scroll-behavior: smooth;
+    }
+    .msg {
+      margin-bottom: 1rem;
+      max-width: 900px;
+    }
+    .msg .role {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    .msg.user .role { color: var(--accent); }
+    .msg.assistant .role { color: var(--green); }
+    .msg .body {
+      padding: 0.65rem 0.85rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      font-size: 0.875rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg.assistant .body {
+      font-family: var(--mono);
+      font-size: 0.8125rem;
+    }
+    .msg.assistant .body.markdown-body {
+      font-family: var(--sans);
+      font-size: 0.875rem;
+      white-space: normal;
+    }
+    .msg.assistant .body.markdown-body pre {
+      margin: 0.5rem 0;
+      padding: 0.55rem 0.65rem;
+      border-radius: 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      overflow-x: auto;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+    }
+    .msg.assistant .body.markdown-body code {
+      font-family: var(--mono);
+      font-size: 0.85em;
+      background: var(--surface2);
+      padding: 0.12em 0.35em;
+      border-radius: 4px;
+    }
+    .msg.assistant .body.markdown-body pre code {
+      background: transparent;
+      padding: 0;
+      font-size: inherit;
+    }
+    .msg.assistant .body.markdown-body ul, .msg.assistant .body.markdown-body ol {
+      margin: 0.35rem 0 0.35rem 1.25rem;
+      padding: 0;
+    }
+    .msg.assistant .body.markdown-body a { color: var(--accent); }
+    .msg.assistant .body.markdown-body p { margin: 0.35rem 0; }
+    .msg.assistant .body.markdown-body p:first-child { margin-top: 0; }
+    .msg.assistant .body.markdown-body p:last-child { margin-bottom: 0; }
+    .msg.sys .body {
+      background: transparent;
+      border-style: dashed;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+    .msg.error .body { border-color: var(--red); color: #ffa198; }
+    .msg-images {
+      margin-top: 0.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .msg-images img.inline-img {
+      max-width: 100%;
+      max-height: min(40vh, 360px);
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      object-fit: contain;
+      background: var(--bg);
+    }
+    .tool-log-wrap {
+      flex-shrink: 0;
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .tool-log-wrap > summary {
+      cursor: pointer;
+      padding: 0.4rem 1rem;
+      font-size: 0.72rem;
+      color: var(--muted);
+      user-select: none;
+      list-style: none;
+    }
+    .tool-log-wrap > summary::-webkit-details-marker { display: none; }
+    .tool-log-wrap > summary::before {
+      content: '▸ ';
+      display: inline-block;
+      transition: transform 0.12s ease;
+    }
+    .tool-log-wrap[open] > summary::before { transform: rotate(90deg); }
+    .tool-log-inner {
+      max-height: 6.5rem;
+      overflow-y: auto;
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      padding: 0 1rem 0.55rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .tool-log-line {
+      border-left: 2px solid var(--surface2);
+      padding-left: 0.45rem;
+      margin-bottom: 0.3rem;
+    }
+    .tool-log-line .tool-name { color: var(--orange); }
+    .tool-log-empty { font-style: italic; opacity: 0.75; }
+    .progress-strip {
+      padding: 0.35rem 1rem;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--orange);
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      min-height: 1.5rem;
+    }
+    .composer-wrap {
+      padding: 0.75rem 1rem 1rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .composer-hint { font-size: 0.72rem; color: var(--muted); margin-top: 0.35rem; }
+    .checkbox-row { display: flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.5rem; }
+    .link-top { font-size: 0.8rem; color: var(--accent); text-decoration: none; }
+    .link-top:hover { text-decoration: underline; }
+    .hint { font-size: 0.72rem; color: var(--muted); margin: 0.35rem 0 0.5rem; line-height: 1.35; }
+    #task_plan_json, #resume_hint_field, #last_run_error_field { font-family: var(--mono); font-size: 0.75rem; }
+    #mcp_panel { white-space: pre-wrap; word-break: break-word; }
+    #workspace_list li {
+      padding: 0.25rem 0;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    #workspace_list li:hover { background: var(--surface2); }
+    #workspace_list li.dir { color: var(--accent); }
+    #workspace_panel { margin-top: 0.35rem; }
+    @media (max-width: 768px) {
+      .layout { flex-direction: column; }
+      aside.sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 45vh; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>Claw-Code <span class="badge">coding workspace</span></h1>
+    </div>
+    <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">
+      <label class="checkbox-row" style="margin:0;">
+        <input type="checkbox" id="opt_assistant_md" checked>
+        <span style="text-transform:none;letter-spacing:0;">Assistant Markdown</span>
+      </label>
+      <a class="link-top" href="/">WebChat</a>
+      <span id="run_pill" class="status-pill" title="Run / approval state">Idle</span>
+      <span id="conn_pill" class="status-pill">Ready</span>
+    </div>
+  </header>
+  <div id="approval_banner" class="approval-banner">
+    <span id="approval_text"></span>
+    <button type="button" class="primary" id="approval_yes">Approve</button>
+    <button type="button" class="danger" id="approval_no">Reject</button>
+  </div>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="side-scroll">
+        <details class="settings">
+          <summary>Connection</summary>
+          <div class="field" style="margin-top:0.5rem;">
+            <label>Core URL override</label>
+            <input type="text" id="core_url" placeholder="http://127.0.0.1:9000" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>API key</label>
+            <input type="password" id="api_key" placeholder="If Core auth enabled" autocomplete="off">
+          </div>
+          <button type="button" class="btn" id="save_settings">Save</button>
+          <span id="settings_saved" style="color:var(--green);font-size:0.8rem;margin-left:0.5rem;"></span>
+        </details>
+        <div class="field">
+          <label>User ID <span style="text-transform:none;color:var(--muted);">(must match user.yml & session owner)</span></label>
+          <input type="text" id="user_id" placeholder="webchat_user" autocomplete="username">
+        </div>
+        <div class="field">
+          <label>Session</label>
+          <select id="session_select"><option value="">— Create or refresh —</option></select>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn" id="btn_refresh_sessions">Refresh list</button>
+          <button type="button" class="btn btn-accent" id="btn_new_session">New session</button>
+        </div>
+        <div id="new_session_panel" style="display:none;margin-top:0.65rem;padding:0.65rem;border:1px dashed var(--border);border-radius:8px;">
+          <div class="field">
+            <label>Working directory (on Core host)</label>
+            <input type="text" id="new_cwd" placeholder="/path/to/repo" autocomplete="off">
+          </div>
+          <button type="button" class="btn btn-accent" id="btn_create_session">Create</button>
+        </div>
+        <div id="session_detail" class="session-meta"></div>
+        <details class="settings" style="margin-top:0.5rem;">
+          <summary>Run & recovery (A–B)</summary>
+          <p class="hint">Task plan, checkpoint, and resume hint are saved to the session and injected into the model system prompt. Clear last error after you fix the issue.</p>
+          <div class="field" style="margin-top:0.5rem;">
+            <label>Task plan (JSON)</label>
+            <textarea id="task_plan_json" rows="5" placeholder='[{"id":"1","title":"Implement X","status":"pending"}]' spellcheck="false"></textarea>
+          </div>
+          <div class="field">
+            <label>Checkpoint</label>
+            <input type="text" id="checkpoint_field" placeholder="Where we left off" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>Resume hint</label>
+            <textarea id="resume_hint_field" rows="2" placeholder="What to do next if the last run failed"></textarea>
+          </div>
+          <div class="field">
+            <label>Last run error (from session)</label>
+            <textarea id="last_run_error_field" rows="2" readonly placeholder="Cleared on successful run; edit via PATCH if needed"></textarea>
+          </div>
+          <div class="btn-row">
+            <button type="button" class="btn btn-accent" id="btn_save_session_plan">Save plan &amp; hints</button>
+            <button type="button" class="btn" id="btn_clear_run_error">Clear error</button>
+          </div>
+        </details>
+        <details class="settings">
+          <summary>MCP servers (C)</summary>
+          <p class="hint">Configured under tools.mcp.servers (e.g. skills_and_plugins.yml). Health spawns MCP clients — can be slow.</p>
+          <div class="btn-row">
+            <button type="button" class="btn" id="btn_mcp_servers">List</button>
+            <button type="button" class="btn" id="btn_mcp_health">Health check</button>
+          </div>
+          <pre id="mcp_panel" class="session-meta" style="margin-top:0.5rem;max-height:14rem;overflow:auto;"></pre>
+        </details>
+        <div class="field" style="margin-top:0.65rem;">
+          <label>Workspace (read-only)</label>
+          <button type="button" class="btn" id="btn_ws_toggle">Show files</button>
+          <div id="workspace_panel" style="display:none;">
+            <div class="btn-row" style="margin-top:0.4rem;">
+              <button type="button" class="btn" id="btn_ws_refresh">Reload</button>
+              <button type="button" class="btn" id="btn_ws_up">Up</button>
+            </div>
+            <div id="workspace_path" class="session-meta"></div>
+            <ul id="workspace_list"></ul>
+          </div>
+        </div>
+      </div>
+    </aside>
+    <main class="workspace">
+      <div id="transcript"></div>
+      <details class="tool-log-wrap" id="tool_log_wrap" open>
+        <summary>Run activity <span style="opacity:0.7">(tool / progress events)</span></summary>
+        <div class="tool-log-inner" id="tool_log"><div class="tool-log-empty">Progress lines appear here when streaming is on.</div></div>
+      </details>
+      <div id="progress_strip" class="progress-strip"></div>
+      <div class="composer-wrap">
+        <div class="checkbox-row">
+          <input type="checkbox" id="opt_stream" checked>
+          <label for="opt_stream" style="margin:0;text-transform:none;letter-spacing:0;color:var(--muted);">Stream tool progress (SSE)</label>
+        </div>
+        <textarea id="composer" placeholder="Describe what to build or fix… (⌘↵ / Ctrl+↵ to send)" spellcheck="false"></textarea>
+        <div class="btn-row" style="margin-top:0.5rem;">
+          <button type="button" class="btn btn-accent" id="btn_send">Send</button>
+          <button type="button" class="btn" id="btn_retry_send" title="Re-send last message">Retry last</button>
+        </div>
+        <p class="composer-hint">Uses Core <code style="background:var(--surface2);padding:0.1rem 0.25rem;border-radius:4px;">POST /inbound</code> with <code style="background:var(--surface2);padding:0.1rem 0.25rem;border-radius:4px;">clawcode_session_id</code>. Enable <code style="background:var(--surface2);">clawcode.enabled</code> in core.yml.</p>
+      </div>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" crossorigin="anonymous"></script>
+  <script>
+(function () {
+  const STORAGE_CORE = 'homeclaw_webchat_core_url';
+  const STORAGE_KEY = 'homeclaw_webchat_api_key';
+  const STORAGE_SESS = 'homeclaw_clawcode_session_id';
+  const STORAGE_MD = 'homeclaw_clawcode_assistant_md';
+  const STORAGE_LAST_SEND = 'homeclaw_clawcode_last_send';
+
+  const el = (id) => document.getElementById(id);
+  const transcript = el('transcript');
+  const progressStrip = el('progress_strip');
+  const toolLog = el('tool_log');
+  const toolLogWrap = el('tool_log_wrap');
+  const connPill = el('conn_pill');
+  const runPill = el('run_pill');
+  const sessionSelect = el('session_select');
+  const sessionDetail = el('session_detail');
+  const approvalBanner = el('approval_banner');
+  const approvalText = el('approval_text');
+  try {
+    const s = localStorage.getItem(STORAGE_MD);
+    if (s !== null && el('opt_assistant_md')) el('opt_assistant_md').checked = s === '1';
+  } catch (_) {}
+  if (el('opt_assistant_md')) {
+    el('opt_assistant_md').addEventListener('change', function () {
+      try { localStorage.setItem(STORAGE_MD, el('opt_assistant_md').checked ? '1' : '0'); } catch (_) {}
+    });
+  }
+  let pollTimer = null;
+  let pendingApproval = null;
+  let lastSentText = '';
+  const TOOL_LOG_MAX = 120;
+  let wsRel = '';
+  let workspaceOpen = false;
+
+  function storedCoreUrl() {
+    try { return (localStorage.getItem(STORAGE_CORE) || '').trim(); } catch (_) { return ''; }
+  }
+  function storedApiKey() {
+    try { return (localStorage.getItem(STORAGE_KEY) || '').trim(); } catch (_) { return ''; }
+  }
+  function authHeaders() {
+    const key = (el('api_key').value || storedApiKey()).trim();
+    if (!key) return {};
+    return { 'X-API-Key': key, 'Authorization': 'Bearer ' + key };
+  }
+
+  function normalizeImageUrls(data) {
+    if (!data || typeof data !== 'object') return [];
+    const out = [];
+    if (Array.isArray(data.images)) {
+      for (let i = 0; i < data.images.length; i++) {
+        const u = data.images[i];
+        if (typeof u === 'string' && u.indexOf('data:') === 0) out.push(u);
+      }
+    }
+    if (typeof data.image === 'string' && data.image.indexOf('data:') === 0) {
+      if (out.indexOf(data.image) < 0) out.push(data.image);
+    }
+    return out;
+  }
+
+  function addMsg(role, text, cls, imageUrls) {
+    const urls = imageUrls || [];
+    const wrap = document.createElement('div');
+    wrap.className = 'msg ' + role + (cls ? ' ' + cls : '');
+    const r = document.createElement('div');
+    r.className = 'role';
+    r.textContent = role === 'user' ? 'You' : (role === 'assistant' ? 'Assistant' : 'System');
+    const b = document.createElement('div');
+    b.className = 'body';
+    const mdOn = el('opt_assistant_md') && el('opt_assistant_md').checked;
+    const tryMd = role === 'assistant' && mdOn && !cls && typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined';
+    if (tryMd) {
+      try {
+        const rawHtml = marked.parse(String(text || ''), { breaks: true, gfm: true });
+        b.innerHTML = DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true } });
+        b.classList.add('markdown-body');
+      } catch (_) {
+        b.textContent = text;
+      }
+    } else {
+      b.textContent = text;
+    }
+    wrap.appendChild(r);
+    wrap.appendChild(b);
+    if (urls.length) {
+      const gallery = document.createElement('div');
+      gallery.className = 'msg-images';
+      for (let i = 0; i < urls.length; i++) {
+        const img = document.createElement('img');
+        img.className = 'inline-img';
+        img.src = urls[i];
+        img.alt = 'Attachment';
+        gallery.appendChild(img);
+      }
+      wrap.appendChild(gallery);
+    }
+    transcript.appendChild(wrap);
+    transcript.scrollTop = transcript.scrollHeight;
+  }
+
+  function clearToolLog() {
+    toolLog.innerHTML = '';
+    try { toolLogWrap.open = true; } catch (_) {}
+  }
+
+  function appendToolLog(ev) {
+    const empty = toolLog.querySelector('.tool-log-empty');
+    if (empty) empty.remove();
+    const line = document.createElement('div');
+    line.className = 'tool-log-line';
+    const tool = (ev && ev.tool) ? String(ev.tool) : '';
+    const msg = (ev && ev.message) ? String(ev.message) : '';
+    const extra = [];
+    if (ev && ev.event && ev.event !== 'progress') extra.push('event=' + ev.event);
+    const spanTool = document.createElement('span');
+    spanTool.className = 'tool-name';
+    spanTool.textContent = tool ? '[' + tool + '] ' : '';
+    line.appendChild(spanTool);
+    line.appendChild(document.createTextNode(msg + (extra.length ? '  {' + extra.join(', ') + '}' : '')));
+    if (msg.indexOf('Permission denied') >= 0) line.style.borderLeftColor = 'var(--red)';
+    toolLog.appendChild(line);
+    while (toolLog.children.length > TOOL_LOG_MAX) {
+      toolLog.removeChild(toolLog.firstChild);
+    }
+    toolLog.scrollTop = toolLog.scrollHeight;
+  }
+
+  function setConn(ok, msg) {
+    connPill.textContent = msg;
+    connPill.className = 'status-pill' + (ok ? ' ok' : ' err');
+  }
+
+  el('core_url').value = storedCoreUrl();
+  el('api_key').value = storedApiKey();
+
+  el('save_settings').addEventListener('click', function () {
+    try {
+      localStorage.setItem(STORAGE_CORE, (el('core_url').value || '').trim());
+      localStorage.setItem(STORAGE_KEY, (el('api_key').value || '').trim());
+      el('settings_saved').textContent = 'Saved';
+      setTimeout(function () { el('settings_saved').textContent = ''; }, 2000);
+    } catch (_) {}
+  });
+
+  function applyDefaultUserId(cfg) {
+    if (!el('user_id').value) el('user_id').value = (cfg && cfg.user_id) || 'webchat_user';
+  }
+  fetch('/clawcode/config')
+    .then(function (r) {
+      if (!r.ok) throw new Error('no /clawcode/config');
+      return r.json();
+    })
+    .then(applyDefaultUserId)
+    .catch(function () {
+      fetch('/config')
+        .then(function (r) {
+          if (!r.ok) throw new Error('no /config');
+          return r.json();
+        })
+        .then(applyDefaultUserId)
+        .catch(function () {});
+    });
+
+  function ownerId() {
+    return (el('user_id').value || '').trim() || 'webchat_user';
+  }
+
+  async function apiGet(path) {
+    const r = await fetch(path, { headers: authHeaders() });
+    const ct = r.headers.get('content-type') || '';
+    const data = ct.includes('application/json') ? await r.json().catch(function () { return {}; }) : {};
+    return { ok: r.ok, status: r.status, data: data };
+  }
+
+  async function apiPost(path, body) {
+    const r = await fetch(path, {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify(body),
+    });
+    const ct = r.headers.get('content-type') || '';
+    const data = ct.includes('application/json') ? await r.json().catch(function () { return {}; }) : {};
+    return { ok: r.ok, status: r.status, data: data };
+  }
+
+  async function apiPatch(path, body) {
+    const r = await fetch(path, {
+      method: 'PATCH',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify(body),
+    });
+    const ct = r.headers.get('content-type') || '';
+    const data = ct.includes('application/json') ? await r.json().catch(function () { return {}; }) : {};
+    return { ok: r.ok, status: r.status, data: data };
+  }
+
+  function setRunState(t, ok) {
+    if (!runPill) return;
+    runPill.textContent = t;
+    runPill.className = 'status-pill' + (ok === false ? ' err' : ok === true ? ' ok' : '');
+  }
+
+  try {
+    lastSentText = (localStorage.getItem(STORAGE_LAST_SEND) || '').trim();
+  } catch (_) {}
+
+  async function refreshSessions() {
+    const oid = ownerId();
+    const { ok, data, status } = await apiGet('/api/clawcode/sessions?owner_user_id=' + encodeURIComponent(oid));
+    if (!ok) {
+      setConn(false, 'API ' + status);
+      if (status === 404) addMsg('sys', 'Claw-Code API disabled on Core (set clawcode.enabled: true).', 'error');
+      else addMsg('sys', 'Sessions: ' + (data.error || data.detail || status), 'error');
+      return;
+    }
+    setConn(true, 'Connected');
+    const sessions = data.sessions || [];
+    const cur = (sessionSelect.value || localStorage.getItem(STORAGE_SESS) || '').trim();
+    sessionSelect.innerHTML = '<option value="">— Select session —</option>';
+    sessions.forEach(function (s) {
+      const id = s.clawcode_session_id || '';
+      if (!id) return;
+      const opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = id.slice(0, 8) + '…  ' + (s.cwd || '').split('/').slice(-2).join('/');
+      sessionSelect.appendChild(opt);
+    });
+    if (cur && Array.prototype.some.call(sessionSelect.options, function (o) { return o.value === cur; })) {
+      sessionSelect.value = cur;
+    }
+    await loadSessionDetail();
+  }
+
+  function formatClawcodeLastUsage(raw) {
+    if (raw == null || typeof raw !== 'object') return '—';
+    var parts = [];
+    if (raw.total_tokens != null) parts.push('total=' + raw.total_tokens);
+    if (raw.prompt_tokens != null) parts.push('prompt=' + raw.prompt_tokens);
+    if (raw.completion_tokens != null) parts.push('completion=' + raw.completion_tokens);
+    if (raw.rounds != null) parts.push('rounds=' + raw.rounds);
+    if (raw.estimated === true) parts.push('estimated');
+    return parts.length ? parts.join(', ') : '—';
+  }
+
+  function clipLine(s, maxLen) {
+    var t = String(s || '').trim();
+    if (!t) return '';
+    if (t.length <= maxLen) return t;
+    return t.slice(0, maxLen - 1) + '…';
+  }
+
+  async function loadSessionDetail() {
+    const sid = (sessionSelect.value || '').trim();
+    sessionDetail.textContent = '';
+    if (!sid) return;
+    const oid = ownerId();
+    const { ok, data } = await apiGet('/api/clawcode/sessions/' + encodeURIComponent(sid) + '?owner_user_id=' + encodeURIComponent(oid));
+    if (ok && data) {
+      const lu = formatClawcodeLastUsage(data.last_usage);
+      const lines = [];
+      lines.push('cwd: ' + (data.cwd || ''));
+      lines.push('mode: ' + (data.mode || 'agent'));
+      lines.push('last_run: ' + (data.last_run_id || '—'));
+      lines.push('status: ' + (data.status || ''));
+      lines.push('last_usage: ' + lu);
+      if (data.git_remote_hint) lines.push('git_remote_hint: ' + clipLine(data.git_remote_hint, 200));
+      if (data.main_llm_ref) lines.push('main_llm_ref: ' + data.main_llm_ref);
+      if (data.tool_llm_ref) lines.push('tool_llm_ref: ' + data.tool_llm_ref);
+      if (data.worktree_hint) lines.push('worktree: ' + clipLine(data.worktree_hint, 220));
+      if (data.usage_hint) lines.push('usage_hint: ' + clipLine(data.usage_hint, 260));
+      sessionDetail.textContent = lines.join('\n');
+      try {
+        var tp = el('task_plan_json');
+        if (tp) {
+          var arr = data.task_plan;
+          tp.value = (arr && Array.isArray(arr)) ? JSON.stringify(arr, null, 2) : '[]';
+        }
+        if (el('checkpoint_field')) el('checkpoint_field').value = data.checkpoint || '';
+        if (el('resume_hint_field')) el('resume_hint_field').value = data.resume_hint || '';
+        if (el('last_run_error_field')) el('last_run_error_field').value = data.last_run_error || '';
+      } catch (_) {}
+    }
+  }
+
+  sessionSelect.addEventListener('change', function () {
+    const v = sessionSelect.value;
+    try { if (v) localStorage.setItem(STORAGE_SESS, v); } catch (_) {}
+    loadSessionDetail();
+    wsRel = '';
+    if (workspaceOpen) loadWorkspaceFiles();
+  });
+
+  function renderWorkspaceList(entries) {
+    const ul = el('workspace_list');
+    ul.innerHTML = '';
+    const wp = el('workspace_path');
+    wp.textContent = wsRel ? 'path: ' + wsRel : 'path: (session root)';
+    (entries || []).forEach(function (row) {
+      const name = row.name;
+      const t = row.type;
+      if (!name) return;
+      const li = document.createElement('li');
+      li.textContent = (t === 'directory' ? '📁 ' : '📄 ') + name;
+      li.className = t === 'directory' ? 'dir' : '';
+      if (t === 'directory') {
+        li.addEventListener('click', function () {
+          wsRel = wsRel ? wsRel + '/' + name : name;
+          loadWorkspaceFiles();
+        });
+      }
+      ul.appendChild(li);
+    });
+  }
+
+  function loadWorkspaceFiles() {
+    const sid = (sessionSelect.value || '').trim();
+    const oid = ownerId();
+    if (!sid) return;
+    fetch(
+      '/api/clawcode/sessions/' + encodeURIComponent(sid) + '/files?owner_user_id=' + encodeURIComponent(oid) + '&path=' + encodeURIComponent(wsRel),
+      { headers: authHeaders() }
+    )
+      .then(function (r) { return r.json().then(function (j) { return { r: r, j: j }; }); })
+      .then(function (o) {
+        if (!o.r.ok) {
+          renderWorkspaceList([]);
+          el('workspace_path').textContent = (o.j && o.j.error) ? String(o.j.error) : 'Error ' + o.r.status;
+          return;
+        }
+        renderWorkspaceList(o.j.entries || []);
+      })
+      .catch(function () {
+        el('workspace_path').textContent = 'Request failed';
+      });
+  }
+
+  el('btn_ws_toggle').addEventListener('click', function () {
+    workspaceOpen = !workspaceOpen;
+    el('workspace_panel').style.display = workspaceOpen ? 'block' : 'none';
+    el('btn_ws_toggle').textContent = workspaceOpen ? 'Hide files' : 'Show files';
+    if (workspaceOpen) loadWorkspaceFiles();
+  });
+  el('btn_ws_refresh').addEventListener('click', loadWorkspaceFiles);
+  el('btn_ws_up').addEventListener('click', function () {
+    if (!wsRel) return;
+    const parts = wsRel.split('/').filter(Boolean);
+    parts.pop();
+    wsRel = parts.join('/');
+    loadWorkspaceFiles();
+  });
+
+  el('btn_save_session_plan').addEventListener('click', async function () {
+    const sid = (sessionSelect.value || '').trim();
+    if (!sid) {
+      addMsg('sys', 'Select a session first.', 'error');
+      return;
+    }
+    var raw = (el('task_plan_json') && el('task_plan_json').value) ? el('task_plan_json').value.trim() : '[]';
+    var taskPlan = [];
+    try {
+      var parsed = JSON.parse(raw || '[]');
+      taskPlan = Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      addMsg('sys', 'Task plan: invalid JSON — ' + e, 'error');
+      return;
+    }
+    var body = {
+      task_plan: taskPlan,
+      checkpoint: (el('checkpoint_field') && el('checkpoint_field').value) ? el('checkpoint_field').value.trim() : '',
+      resume_hint: (el('resume_hint_field') && el('resume_hint_field').value) ? el('resume_hint_field').value.trim() : '',
+    };
+    var url = '/api/clawcode/sessions/' + encodeURIComponent(sid) + '?owner_user_id=' + encodeURIComponent(ownerId());
+    var res = await apiPatch(url, body);
+    if (!res.ok) {
+      addMsg('sys', 'Save failed: ' + (res.data.error || res.status), 'error');
+      return;
+    }
+    addMsg('sys', 'Plan & hints saved.', '');
+    await loadSessionDetail();
+  });
+
+  el('btn_clear_run_error').addEventListener('click', async function () {
+    const sid = (sessionSelect.value || '').trim();
+    if (!sid) return;
+    var url = '/api/clawcode/sessions/' + encodeURIComponent(sid) + '?owner_user_id=' + encodeURIComponent(ownerId());
+    var res = await apiPatch(url, { last_run_error: '' });
+    if (res.ok && el('last_run_error_field')) el('last_run_error_field').value = '';
+    if (!res.ok) addMsg('sys', 'Clear error failed: ' + (res.data.error || res.status), 'error');
+  });
+
+  el('btn_mcp_servers').addEventListener('click', async function () {
+    var out = el('mcp_panel');
+    if (out) out.textContent = 'Loading…';
+    var res = await apiGet('/api/clawcode/mcp/servers');
+    if (out) out.textContent = res.ok ? JSON.stringify(res.data, null, 2) : JSON.stringify(res.data || { status: res.status }, null, 2);
+  });
+
+  el('btn_mcp_health').addEventListener('click', async function () {
+    var out = el('mcp_panel');
+    if (out) out.textContent = 'Probing (may take a while)…';
+    var res = await apiPost('/api/clawcode/mcp/health', {});
+    if (out) out.textContent = res.ok ? JSON.stringify(res.data, null, 2) : JSON.stringify(res.data || { status: res.status }, null, 2);
+  });
+
+  el('btn_retry_send').addEventListener('click', function () {
+    var t = lastSentText || (function () { try { return localStorage.getItem(STORAGE_LAST_SEND) || ''; } catch (_) { return ''; } })();
+    if (!t) {
+      addMsg('sys', 'No previous message to retry.', 'error');
+      return;
+    }
+    el('composer').value = t;
+    sendMessage();
+  });
+
+  el('btn_refresh_sessions').addEventListener('click', refreshSessions);
+  el('btn_new_session').addEventListener('click', function () {
+    const p = el('new_session_panel');
+    p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  });
+
+  el('btn_create_session').addEventListener('click', async function () {
+    const cwd = (el('new_cwd').value || '').trim();
+    if (!cwd) {
+      addMsg('sys', 'Enter working directory (path on the machine running Core).', 'error');
+      return;
+    }
+    const { ok, data, status } = await apiPost('/api/clawcode/sessions', {
+      owner_user_id: ownerId(),
+      cwd: cwd,
+    });
+    if (!ok) {
+      addMsg('sys', 'Create session failed: ' + (data.error || status), 'error');
+      return;
+    }
+    const sid = data.clawcode_session_id;
+    if (sid) {
+      try { localStorage.setItem(STORAGE_SESS, sid); } catch (_) {}
+      addMsg('sys', 'Session created: ' + sid, '');
+      el('new_session_panel').style.display = 'none';
+      el('new_cwd').value = '';
+      await refreshSessions();
+      sessionSelect.value = sid;
+      await loadSessionDetail();
+    }
+  });
+
+  function consumeSseBuffer(buffer) {
+    const events = [];
+    const parts = buffer.split('\n\n');
+    const rest = parts.pop();
+    for (let i = 0; i < parts.length; i++) {
+      const lines = parts[i].split('\n');
+      for (let j = 0; j < lines.length; j++) {
+        const line = lines[j];
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        try {
+          events.push(JSON.parse(payload));
+        } catch (_) {}
+      }
+    }
+    return { events: events, rest: rest == null ? '' : rest };
+  }
+
+  async function sendMessage() {
+    const sid = (sessionSelect.value || localStorage.getItem(STORAGE_SESS) || '').trim();
+    const text = (el('composer').value || '').trim();
+    if (!sid) {
+      addMsg('sys', 'Select or create a Claw-Code session first.', 'error');
+      return;
+    }
+    if (!text) return;
+
+    el('btn_send').disabled = true;
+    progressStrip.textContent = '';
+    clearToolLog();
+    const useStream = !!el('opt_stream').checked;
+    if (!useStream) {
+      toolLog.innerHTML = '<div class="tool-log-empty">Enable &quot;Stream tool progress&quot; to see per-step activity here.</div>';
+    }
+    addMsg('user', text);
+    el('composer').value = '';
+    lastSentText = text;
+    try { localStorage.setItem(STORAGE_LAST_SEND, text); } catch (_) {}
+    setRunState('Running', null);
+
+    const body = {
+      user_id: ownerId(),
+      user_name: ownerId(),
+      text: text,
+      channel_name: 'clawcode-web',
+      clawcode_session_id: sid,
+      stream: useStream,
+      reply_accepts: ['text', 'image'],
+    };
+
+    try {
+      if (!body.stream) {
+        const { ok, data } = await apiPost('/api/inbound', body);
+        if (!ok || data.error) {
+          addMsg('assistant', (data.error || data.text || 'Request failed') + '', 'error');
+          setRunState('Error', false);
+          try {
+            var sidE = (sessionSelect.value || '').trim();
+            if (sidE) {
+              var errTxt = String(data.error || data.detail || data.text || 'Request failed').slice(0, 4000);
+              await apiPatch('/api/clawcode/sessions/' + encodeURIComponent(sidE) + '?owner_user_id=' + encodeURIComponent(ownerId()), { last_run_error: errTxt });
+              await loadSessionDetail();
+            }
+          } catch (_) {}
+        } else {
+          addMsg('assistant', (data.text || '') + '', '', normalizeImageUrls(data));
+          setRunState('Idle', true);
+        }
+        el('btn_send').disabled = false;
+        await loadSessionDetail();
+        pollApprovals();
+        return;
+      }
+
+      const r = await fetch('/api/inbound', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const errJ = await r.json().catch(function () { return {}; });
+        addMsg('assistant', (errJ.error || errJ.detail || r.status) + '', 'error');
+        setRunState('Error', false);
+        try {
+          var sidH = (sessionSelect.value || '').trim();
+          if (sidH) {
+            await apiPatch('/api/clawcode/sessions/' + encodeURIComponent(sidH) + '?owner_user_id=' + encodeURIComponent(ownerId()), {
+              last_run_error: String(errJ.error || errJ.detail || r.status).slice(0, 4000),
+            });
+            await loadSessionDetail();
+          }
+        } catch (_) {}
+        el('btn_send').disabled = false;
+        return;
+      }
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      let finalText = '';
+      let finalOk = true;
+      let errMsg = '';
+      let finalImages = [];
+      function applyEvents(events) {
+        for (let i = 0; i < events.length; i++) {
+          const ev = events[i];
+          if (!ev || typeof ev !== 'object') continue;
+          if (ev.event === 'progress') {
+            const t = (ev.tool ? '[' + ev.tool + '] ' : '') + (ev.message || '');
+            progressStrip.textContent = t.trim() || '…';
+            appendToolLog(ev);
+          } else if (ev.event === 'done') {
+            finalOk = !!ev.ok;
+            finalText = String(ev.text || '');
+            errMsg = String(ev.error || '');
+            finalImages = normalizeImageUrls(ev);
+          } else {
+            appendToolLog(ev);
+          }
+        }
+      }
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const parsed = consumeSseBuffer(buf);
+        buf = parsed.rest;
+        applyEvents(parsed.events);
+      }
+      const tail = consumeSseBuffer(buf + '\n\n');
+      applyEvents(tail.events);
+      progressStrip.textContent = '';
+      if (!finalOk) {
+        addMsg('assistant', errMsg || 'Request failed', 'error');
+        setRunState('Error', false);
+        try {
+          var sidF = (sessionSelect.value || '').trim();
+          if (sidF) {
+            await apiPatch('/api/clawcode/sessions/' + encodeURIComponent(sidF) + '?owner_user_id=' + encodeURIComponent(ownerId()), {
+              last_run_error: String(errMsg || 'Request failed').slice(0, 4000),
+            });
+            await loadSessionDetail();
+          }
+        } catch (_) {}
+      } else {
+        addMsg('assistant', finalText || '(empty)', '', finalImages);
+        setRunState('Idle', true);
+      }
+    } catch (e) {
+      addMsg('assistant', String(e.message || e), 'error');
+      progressStrip.textContent = '';
+      setRunState('Error', false);
+    }
+    el('btn_send').disabled = false;
+    await loadSessionDetail();
+    pollApprovals();
+  }
+
+  el('btn_send').addEventListener('click', sendMessage);
+  el('composer').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  async function pollApprovals() {
+    const oid = ownerId();
+    const { ok, data } = await apiGet('/api/clawcode/approvals?owner_user_id=' + encodeURIComponent(oid));
+    if (!ok || !(data.approvals && data.approvals.length)) {
+      pendingApproval = null;
+      approvalBanner.classList.remove('show');
+      if (!el('btn_send').disabled && runPill && runPill.textContent !== 'Running') {
+        setRunState('Idle', true);
+      }
+      return;
+    }
+    pendingApproval = data.approvals[0];
+    approvalText.textContent = 'Approval: ' + (pendingApproval.tool_name || 'tool') + ' — ' + (pendingApproval.summary || pendingApproval.approval_id || '');
+    approvalBanner.classList.add('show');
+    setRunState('Approval needed', false);
+  }
+
+  el('approval_yes').addEventListener('click', async function () {
+    if (!pendingApproval) return;
+    const oid = ownerId();
+    const aid = pendingApproval.approval_id;
+    const r = await fetch('/api/clawcode/approvals/' + encodeURIComponent(aid) + '/resolve?owner_user_id=' + encodeURIComponent(oid), {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify({ decision: 'approve' }),
+    });
+    const data = await r.json().catch(function () { return {}; });
+    if (r.ok) addMsg('sys', 'Approved.', '');
+    else addMsg('sys', 'Approve failed: ' + (data.error || r.status), 'error');
+    pollApprovals();
+  });
+  el('approval_no').addEventListener('click', async function () {
+    if (!pendingApproval) return;
+    const oid = ownerId();
+    const aid = pendingApproval.approval_id;
+    const r = await fetch('/api/clawcode/approvals/' + encodeURIComponent(aid) + '/resolve?owner_user_id=' + encodeURIComponent(oid), {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify({ decision: 'reject' }),
+    });
+    const data = await r.json().catch(function () { return {}; });
+    if (r.ok) addMsg('sys', 'Rejected.', '');
+    else addMsg('sys', 'Reject failed: ' + (data.error || r.status), 'error');
+    pollApprovals();
+  });
+
+  function startPoll() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(function () {
+      if (document.hidden) return;
+      pollApprovals();
+    }, 12000);
+  }
+
+  addMsg('sys', 'Claw-Code UI — select a session or create one. Same auth keys as WebChat (localStorage).', '');
+  refreshSessions().then(function () {
+    const saved = (function () { try { return localStorage.getItem(STORAGE_SESS) || ''; } catch (_) { return ''; } })();
+    if (saved && sessionSelect && Array.prototype.some.call(sessionSelect.options, function (o) { return o.value === saved; })) {
+      sessionSelect.value = saved;
+      loadSessionDetail();
+    }
+  });
+  pollApprovals();
+  startPoll();
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) pollApprovals();
+  });
+})();
+  </script>
+</body>
+</html>

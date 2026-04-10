@@ -16,6 +16,7 @@ WHITELIST_LLM = frozenset({
     "local_models", "cloud_models", "main_llm", "embedding_llm",
     "main_llm_mode", "main_llm_local", "main_llm_cloud", "main_llm_language",
     "embedding_host", "embedding_port", "main_llm_host", "main_llm_port",
+    "cloud_llm_host", "cloud_llm_port", "main_llm_chat_path", "cloud_llm_chat_path",
     "hybrid_router",
     "vision_llm", "vision_llm_host", "vision_llm_port", "vision_image_max_dimension", "llama_cpp", "completion",
 })

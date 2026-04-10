@@ -47,6 +47,7 @@
         <li><a href="#config">配置</a></li>
         <li><a href="#add-friend">添加 Cursor/ClaudeCode 好友</a></li>
         <li><a href="#companion">从伴侣应用使用</a></li>
+        <li><a href="#clawcode-web">Claw-Code 网页（HomeClaw）</a></li>
         <li><a href="#mcp">Claude Code MCP 服务器</a></li>
         <li><a href="#tips">提示</a></li>
       </ul>
@@ -347,6 +348,25 @@ claude_code_path: "/usr/local/bin/claude"</code></pre>
           <li><strong>"新 cursor 会话"</strong></li>
           <li><strong>"清除 claude 会话"</strong></li>
         </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="clawcode-web">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Claw-Code 网页界面（HomeClaw 原生）</h2>
+        <p>与上文 Cursor/Claude <strong>桥接</strong>好友不同，HomeClaw 另有 <strong>Claw-Code</strong>：会话保存在 Core（在 <code>config/core.yml</code> 中设置 <code>clawcode.enabled: true</code>）。同一 <code>clawcode_session_id</code> 可在 CLI、即时通讯频道、WebSocket 与浏览器中使用。</p>
+        <h3>浏览器 IDE 风格界面</h3>
+        <ol>
+          <li>在 Core 配置中启用 Claw-Code（见 <code>config/core.yml.reference</code>）。</li>
+          <li>运行 WebChat 通道：<code>python3 -m channels.run webchat</code></li>
+          <li>打开 <strong><code>http://&lt;主机&gt;:8014/clawcode</code></strong> — 会话侧栏、流式工具进度、图片回复、待审批列表，以及会话 <code>cwd</code> 下只读文件列表。</li>
+        </ol>
+        <p>页面与基础 WebChat 使用相同的 Core URL / API 密钥存储方式。若要在非信任网络暴露端口，请先阅读仓库内 <code>docs/clawcode-ui-security.md</code>。</p>
+        <h3>命令行</h3>
+        <p><code>python3 -m main clawcode login</code>、<code>session new</code> / <code>list</code> / <code>show</code> / <code>worktree</code>、<code>run</code>、<code>attach</code> 与频道绑定 — 详见 <code>clients/clawcode/cli.py --help</code>。</p>
+        <h3>伴侣应用</h3>
+        <p>在好友列表打开 <strong>更多 (⋮) → Claw-Code</strong>：查看会话（工作目录、上次运行）、处理高风险工具审批、可选浏览 Core 返回的文件列表，并在系统浏览器中打开 Claw-Code 网页（默认 Core 主机上的 <strong>8014</strong> 端口）。</p>
       </div>
     </section>
 

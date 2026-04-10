@@ -7,8 +7,10 @@ import 'friend_list_screen.dart';
 /// On success navigates to FriendListScreen.
 class LoginScreen extends StatefulWidget {
   final CoreService coreService;
+  /// Preserved from a cold-start deep link (e.g. Claw-Code approval) so [FriendListScreen] can open Claw-Code after login.
+  final String? initialClawcodeApprovalId;
 
-  const LoginScreen({super.key, required this.coreService});
+  const LoginScreen({super.key, required this.coreService, this.initialClawcodeApprovalId});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -62,7 +64,10 @@ class _LoginScreenState extends State<LoginScreen> {
           if (!mounted) return;
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (context) => FriendListScreen(coreService: widget.coreService),
+              builder: (context) => FriendListScreen(
+                coreService: widget.coreService,
+                initialClawcodeApprovalId: widget.initialClawcodeApprovalId,
+              ),
             ),
           );
           return;
@@ -178,7 +183,10 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (context) => FriendListScreen(coreService: widget.coreService),
+          builder: (context) => FriendListScreen(
+            coreService: widget.coreService,
+            initialClawcodeApprovalId: widget.initialClawcodeApprovalId,
+          ),
         ),
       );
     } catch (e) {

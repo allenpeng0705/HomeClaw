@@ -20,6 +20,11 @@ import httpx
 # Core connection: channels/.env only
 load_dotenv(_root / "channels" / ".env")
 from base.util import Util
+from channels.clawcode_binding import (
+    merge_clawcode_binding_into_inbound_payload,
+    try_clawcode_command_reply,
+)
+
 CORE_URL = Util().get_channels_core_url()
 INBOUND_URL = f"{CORE_URL}/inbound"
 
@@ -127,6 +132,10 @@ async def handle_message(
     file_file_ids: Optional[List[str]] = None,
 ):
     user_id = f"telegram_{chat_id}"
+    _cc_reply = try_clawcode_command_reply(user_id, text)
+    if _cc_reply is not None:
+        await send_message(chat_id, _cc_reply[:4096])
+        return
     images, videos, audios, files = [], [], [], []
     if image_file_ids:
         for fid in image_file_ids[:5]:
@@ -157,6 +166,7 @@ async def handle_message(
         "user_name": user_name or user_id,
         "reply_accepts": ["text", "image"],
     }
+    merge_clawcode_binding_into_inbound_payload(payload, user_id)
     if images:
         payload["images"] = images
     if videos:

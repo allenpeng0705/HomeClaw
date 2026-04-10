@@ -42,7 +42,20 @@ async def run_slm_layer_async(
         return (0.0, None)
     port = int(port)
     prompt = (judge_prompt or DEFAULT_JUDGE_PROMPT).strip() + "\n" + (query.strip() or "")
-    url = f"http://{host}:{port}/v1/chat/completions"
+    _u = None
+    _panda = None
+    try:
+        from base.util import Util as _Util
+        _u = _Util()
+        _panda = _u.panda_openai_chat_url("local")
+    except Exception:
+        pass
+    if _panda:
+        url = _panda
+    elif _u is not None:
+        url = f"http://{host}:{port}{_u.openai_chat_completions_path('local')}"
+    else:
+        url = f"http://{host}:{port}/v1/chat/completions"
     body = {
         "model": model or "classifier",
         "messages": [{"role": "user", "content": prompt}],

@@ -20,6 +20,17 @@ ALLOWED_EVENT_TYPES = {
     "fallback_applied",
     "llm_response_received",
     "turn_finished",
+    "permission_denied",
+    "agent_limit_reached",
+    "context_compacted",
+    "memory_flush_started",
+    "memory_flush_finished",
+    "tool_progress",
+    "clawcode_session_started",
+    "clawcode_session_patched",
+    "clawcode_turn_started",
+    "clawcode_approval_requested",
+    "clawcode_approval_resolved",
 }
 
 REQUIRED_EVENT_FIELDS = {

@@ -3,7 +3,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from tests.workflow_framework.mock_harness import run_mock_turn
 from tests.workflow_framework.runner import evaluate_scenario_from_trace, load_framework_inputs
+
+_TESTS_DIR = Path(__file__).resolve().parent
+_WORKFLOW_LOADED = load_framework_inputs(
+    _TESTS_DIR / "workflow_scenarios",
+    _TESTS_DIR / "workflow_framework" / "contracts.yaml",
+)
+_WORKFLOW_SCENARIOS = _WORKFLOW_LOADED["scenarios"]
 
 
 def _write_trace(path: Path, events: list[dict]) -> None:
@@ -78,4 +88,20 @@ def test_contract_evaluation_from_trace(tmp_path: Path):
         trace_path=trace_path,
     )
     assert res.ok is True
+
+
+@pytest.mark.parametrize("scenario", _WORKFLOW_SCENARIOS, ids=lambda s: s.id)
+def test_workflow_scenario_in_process_mock(scenario, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the same mock turn + contract checks as scripts/workflow_trace_runner.py --mode in_process_mock."""
+    monkeypatch.setenv("HOMECLAW_WORKFLOW_TRACE", "1")
+    monkeypatch.setenv("HOMECLAW_WORKFLOW_TRACE_DIR", str(tmp_path))
+    run = run_mock_turn(scenario.prompt, trace_dir=tmp_path)
+    ev = evaluate_scenario_from_trace(
+        scenario_id=scenario.id,
+        contract_name=scenario.contract,
+        contracts=_WORKFLOW_LOADED["contracts"],
+        trace_path=Path(run["trace_path"]),
+        response=str(run.get("response") or ""),
+    )
+    assert ev.ok, f"{scenario.id}: {ev.errors}"
 

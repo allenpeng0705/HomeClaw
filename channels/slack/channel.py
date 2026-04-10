@@ -23,6 +23,7 @@ from loguru import logger
 _channel_env = _root / "channels" / ".env"
 load_dotenv(_channel_env)
 from base.util import Util
+from channels.clawcode_binding import merge_clawcode_binding_into_inbound_payload, try_clawcode_command_reply
 # Build Core URL from this .env so we don't depend on Util().root_path() resolution
 if os.environ.get("CORE_URL"):
     CORE_URL = (os.environ.get("CORE_URL") or "").rstrip("/")
@@ -90,6 +91,7 @@ def post_to_core_sync(
         payload["audios"] = audios
     if files:
         payload["files"] = files
+    merge_clawcode_binding_into_inbound_payload(payload, user_id)
     _preview = (text or "(no text)")[:80]
     if len(text or "") > 80:
         _preview += "..."
@@ -232,6 +234,15 @@ def main():
         inbound_id = f"slack_{user_id}"
         _msg_preview = (text or "(media only)")[:80] + ("..." if len(text or "") > 80 else "")
         logger.info("slack received: user_id={} ({}) text={!r}", inbound_id, user_name, _msg_preview)
+        _cc_slack = try_clawcode_command_reply(inbound_id, text or "")
+        if _cc_slack is not None:
+            try:
+                web_client.chat_postMessage(
+                    channel=channel_id, thread_ts=ts, text=_cc_slack[:4000] if len(_cc_slack) > 4000 else _cc_slack
+                )
+            except Exception as e:
+                logger.warning("slack clawcode command reply failed: {}", e)
+            return
         result = post_to_core_sync(
             inbound_id,
             user_name,

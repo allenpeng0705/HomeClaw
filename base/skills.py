@@ -537,10 +537,56 @@ def filter_skills_by_query(skills: List[Dict[str, Any]], query: str) -> List[Dic
     return result
 
 
+def trim_skills_list_for_char_budget(
+    skills: List[Dict[str, Any]],
+    budget_chars: int,
+    entry_max_chars: int = 250,
+) -> List[Dict[str, Any]]:
+    """
+    Keep a prefix of skills so the formatted listing stays under ~budget_chars (name + description + keywords + optional body).
+    When budget_chars <= 0, returns skills unchanged. Never raises.
+    """
+    if not isinstance(skills, (list, tuple)) or not skills or budget_chars <= 0:
+        return list(skills) if isinstance(skills, (list, tuple)) else []
+    em = max(20, int(entry_max_chars) if entry_max_chars else 250)
+    out: List[Dict[str, Any]] = []
+    used = 0
+    for s in skills:
+        if not isinstance(s, dict):
+            continue
+        sc = dict(s)
+        desc = str(sc.get("description") or "").strip()
+        if len(desc) > em:
+            sc["description"] = desc[: em - 1] + "\u2026"
+            desc = sc["description"]
+        name = str(sc.get("name") or "(unnamed)").strip() or "(unnamed)"
+        folder = str(sc.get("folder") or "").strip()
+        if folder and folder != name:
+            main = (
+                f"- **{name}** (run_skill skill_name: `{folder}` or `{name}`): {desc}"
+                if desc
+                else f"- **{name}** (run_skill skill_name: `{folder}` or `{name}`)"
+            )
+        else:
+            main = f"- **{name}**: {desc}" if desc else f"- **{name}**"
+        kw_line = _skill_keywords_line(sc)
+        extra = (len(kw_line) + 1) if kw_line else 0
+        body_extra = 0
+        if sc.get("body"):
+            body_extra = min(len(str(sc.get("body") or "")), 120_000)
+        chunk = len(main) + extra + body_extra + 2
+        if out and used + chunk > budget_chars:
+            break
+        used += chunk
+        out.append(sc)
+    return out if out else [skills[0]] if skills and isinstance(skills[0], dict) else []
+
+
 def build_skills_system_block(
     skills: List[Dict[str, Any]],
     include_body: bool = False,
     use_location_only: bool = False,
+    include_invocation_contract: bool = True,
 ) -> str:
     """
     Build a system-prompt block listing available skills.
@@ -554,13 +600,24 @@ def build_skills_system_block(
     """
     if not isinstance(skills, (list, tuple)) or not skills:
         return ""
+    _contract = (
+        "**Skill invocation contract:** If the user's task clearly matches any skill below, call `run_skill` "
+        "(correct `skill_name` and `script` per SKILL.md) before giving a final answer that depends on that skill. "
+        "Do not only mention a skill in prose—invoke the tool when the task requires it. "
+        "If this turn already includes full instructions for that skill from a prior `run_skill` or `file_read`/`document_read` on that skill, you may continue without calling `run_skill` again for the same step."
+    )
     if use_location_only:
-        lines = [
-            "## Available skills",
-            "Before using a skill: scan the list below by <description>. If exactly one skill clearly applies, read its SKILL.md with file_read(path='<location>'), then follow the instructions in that file (including calling run_skill(skill_name, script, args) when the skill has scripts). If multiple could apply, choose the most specific one. If none apply, do not read any SKILL.md.",
-            "Locations use the form skill:<folder>; pass that string as path to file_read (e.g. file_read(path='skill:imap-smtp-email')).",
-            "",
-        ]
+        lines = ["## Available skills"]
+        if include_invocation_contract:
+            lines.append(_contract)
+            lines.append("")
+        lines.extend(
+            [
+                "Before using a skill: scan the list below by <description>. If exactly one skill clearly applies, read its SKILL.md with file_read(path='<location>'), then follow the instructions in that file (including calling run_skill(skill_name, script, args) when the skill has scripts). If multiple could apply, choose the most specific one. If none apply, do not read any SKILL.md.",
+                "Locations use the form skill:<folder>; pass that string as path to file_read (e.g. file_read(path='skill:imap-smtp-email')).",
+                "",
+            ]
+        )
         for s in skills:
             try:
                 if not isinstance(s, dict):
@@ -580,12 +637,17 @@ def build_skills_system_block(
             lines.append("")
         return "\n".join(lines).strip() + "\n\n" if lines else ""
 
-    lines = [
-        "## Available skills",
-        "You decide when to use a skill based on the user's intent. Do not call run_skill for greetings (e.g. 你好, hello, hi), thanks, goodbye, or general chat — reply with a short friendly text only. Call run_skill only when the user clearly asks for something a skill provides (e.g. send email / 发邮件, create slides, search the web, reminder/scheduling). Match the request to the skill's description and keywords below.",
-        "All information about how to use each skill is in SKILL.md (shown below). Infer the script name and arguments from the skill description and body. When a skill has a scripts/ folder, call run_skill(skill_name=<folder>, script=<filename from SKILL.md>, args=[...] as shown in usage). Short names (e.g. html-slides) resolve to the folder name.",
-        "",
-    ]
+    lines = ["## Available skills"]
+    if include_invocation_contract:
+        lines.append(_contract)
+        lines.append("")
+    lines.extend(
+        [
+            "You decide when to use a skill based on the user's intent. Do not call run_skill for greetings (e.g. 你好, hello, hi), thanks, goodbye, or general chat — reply with a short friendly text only. Call run_skill only when the user clearly asks for something a skill provides (e.g. send email / 发邮件, create slides, search the web, reminder/scheduling). Match the request to the skill's description and keywords below.",
+            "All information about how to use each skill is in SKILL.md (shown below). Infer the script name and arguments from the skill description and body. When a skill has a scripts/ folder, call run_skill(skill_name=<folder>, script=<filename from SKILL.md>, args=[...] as shown in usage). Short names (e.g. html-slides) resolve to the folder name.",
+            "",
+        ]
+    )
     for s in skills:
         try:
             if not isinstance(s, dict):

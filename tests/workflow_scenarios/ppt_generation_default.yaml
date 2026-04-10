@@ -1,0 +1,4 @@
+id: ppt_generation_default
+contract: ppt_generation_default
+prompt: "Powerpoint ppt generation deck outline with eight slides."
+description: "ppt-generation skill trace."

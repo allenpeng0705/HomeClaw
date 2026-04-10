@@ -148,6 +148,10 @@ def _name_to_preset_key(name: str) -> Optional[str]:
         return "finder"
     if n == "cursor" or "cursor" in n:
         return "cursor"
+    if n == "claudecode" or "claudecode" in n:
+        return "claudecode"
+    if n == "clawcode" or "clawcode" in n:
+        return "clawcode"
     return None
 
 

@@ -1,0 +1,4 @@
+id: answeroverflow_default
+contract: answeroverflow_default
+prompt: "Answeroverflow discord thread search help for Home Assistant."
+description: "answeroverflow skill trace."

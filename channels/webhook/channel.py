@@ -21,6 +21,7 @@ from loguru import logger
 env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(env_path)
 from base.util import Util
+from channels.clawcode_binding import apply_clawcode_inbound_flow
 
 app = FastAPI(title="HomeClaw Webhook Channel")
 
@@ -61,6 +62,11 @@ async def message(body: WebhookMessage):
     """
     url = f"{core_url()}/inbound"
     payload = body.model_dump(exclude_none=True)
+    _uid = (payload.get("user_id") or "").strip()
+    _txt = (payload.get("text") or "").strip()
+    _cc = apply_clawcode_inbound_flow(_uid, _txt, payload)
+    if _cc is not None:
+        return {"text": _cc}
     headers = Util().get_channels_core_api_headers()
     try:
         async with httpx.AsyncClient(trust_env=False) as client:

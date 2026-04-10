@@ -61,6 +61,8 @@ class PromptRequest(BaseModel):
     friend_id: Optional[str] = None  # Which friend this conversation is with (e.g. "HomeClaw", "Sabrina"). Channels use "HomeClaw"; Companion sends from client. Default "HomeClaw" when not set.
     text: str
     action: str
+    # Optional: OpenClaw-style tool profile for this turn (minimal | messaging | coding | clawcode | full). clawcode aliases coding. Overrides tools.profile from core.yml when intent router does not set a category profile.
+    tool_profile: Optional[str] = None
     host: str
     port: int  
     images: List[str] # only for TEXTWITHIMAGE and IMAGE, the value is path with name of the images
@@ -108,6 +110,10 @@ class InboundRequest(BaseModel):
     claude_skip_permissions: Optional[bool] = None
     # When true with async: true, Core may stream Cursor CLI stream-json chunks into GET /inbound/result text_preview (Cursor bridge only; Claude falls back to final result).
     bridge_agent_stream_preview: Optional[bool] = None
+    # Optional: tool profile for this request (minimal | messaging | coding | clawcode | full). Merged into tools.profile when set.
+    tool_profile: Optional[str] = None
+    # Claw-Code: bind inbound turn to a session created via POST /api/clawcode/sessions (requires clawcode.enabled).
+    clawcode_session_id: Optional[str] = None
 
     @field_validator("cursor_agent_yolo", "claude_skip_permissions", "bridge_agent_stream_preview", mode="before")
     @classmethod
@@ -822,17 +828,17 @@ class Neo4jConfig:
 class GraphDB:
     """Graph DB: kuzu (default, file-based) or neo4j."""
     backend: str = "kuzu"
-    Kuzu: Kuzu = field(default_factory=lambda: Kuzu())
+    Kuzu: "Kuzu" = field(default_factory=lambda: Kuzu())
     Neo4j: Neo4jConfig = field(default_factory=lambda: Neo4jConfig())
 
 @dataclass
 class VectorDB:
     backend: str = "chroma"
-    Chroma: Chroma = field(default_factory=lambda: Chroma())
-    Qdrant: Qdrant = field(default_factory=lambda: Qdrant())
-    Milvus: Milvus = field(default_factory=lambda: Milvus())
-    Pinecone: Pinecone = field(default_factory=lambda: Pinecone())
-    Weaviate: Weaviate = field(default_factory=lambda: Weaviate())
+    Chroma: "Chroma" = field(default_factory=lambda: Chroma())
+    Qdrant: "Qdrant" = field(default_factory=lambda: Qdrant())
+    Milvus: "Milvus" = field(default_factory=lambda: Milvus())
+    Pinecone: "Pinecone" = field(default_factory=lambda: Pinecone())
+    Weaviate: "Weaviate" = field(default_factory=lambda: Weaviate())
 
 @dataclass
 class Endpoint:
@@ -936,6 +942,14 @@ def _normalize_main_llm_language(raw: Union[str, List[str], None]) -> List[str]:
     return [s]
 
 
+def _normalize_llm_chat_path(raw: Any, default: str = "/v1/chat/completions") -> str:
+    """HTTP path for OpenAI-style chat completions (leading slash). Empty or missing → default."""
+    s = (str(raw).strip() if raw is not None and raw != "" else "") or default
+    if not s.startswith("/"):
+        s = "/" + s
+    return s
+
+
 def _tools_config_with_auto_mcp(tools: Any) -> Dict[str, Any]:
     """Build tools_config dict; when tools.mcp.auto_register_claude_code is true, enable MCP and add claude-code server if missing."""
     if not isinstance(tools, dict):
@@ -1037,6 +1051,16 @@ class CoreMetadata:
     skills_include_body_max_chars: int = 0
     # When True (OpenClaw-style): inject only name, description, and location (skill:<folder>) into the prompt; model reads SKILL.md via file_read(path='skill:<folder>'). Reduces context tokens.
     skills_use_location_only: bool = False
+    # When > 0: cap total characters for the "Available skills" listing (after RAG/force-include/body injection). 0 = no extra cap beyond skills_max_in_prompt.
+    skills_prompt_budget_chars: int = 0
+    # Max characters per skill description in the listing when skills_prompt_budget_chars > 0 (truncation with ellipsis).
+    skills_prompt_entry_max_chars: int = 250
+    # When True (default): inject the stronger "Skill invocation contract" paragraph into the skills block.
+    skills_invocation_contract_enabled: bool = True
+    # When True with skills_use_vector_search: rerank RAG hits using per-user skill usage (database/skill_usage.json).
+    skills_usage_rerank_enabled: bool = False
+    # Additive boost to similarity: effective = min(1, sim + weight * usage_boost), usage_boost in [0,1].
+    skills_usage_rerank_weight: float = 0.12
     # Optional: when user query matches a regex, ensure these skill folders are in the prompt and optionally append an instruction. List of { pattern: str, folders: [str], instruction?: str }.
     skills_force_include_rules: List[Dict[str, Any]] = field(default_factory=list)
     # OpenClaw-style skill filter: when non-empty, only these skill folder names are included in the prompt. Empty = all skills (or RAG result).
@@ -1067,6 +1091,14 @@ class CoreMetadata:
     # Workflow trace JSONL (docs/workflow-trace-testing.md). If workflow_trace_dir is set, Core sets HOMECLAW_WORKFLOW_TRACE_DIR when unset. If workflow_trace_enabled is true, sets HOMECLAW_WORKFLOW_TRACE=1 when unset. Env vars override.
     workflow_trace_enabled: bool = False
     workflow_trace_dir: str = ""
+    # When true, GET /dev/workflow-trace/stream (SSE) fans out JSON lines to subscribers (also requires trace events; see workflow_trace_*).
+    workflow_trace_sse_enabled: bool = False
+    # Agent harness limits (see docs_design/AgentHarness_ClaudeCode_Backlog.md). max_tool_rounds can override tools.max_tool_rounds when set.
+    agent_limits: Dict[str, Any] = field(default_factory=dict)
+    # tool_policy.default_mode: allow_all | allow_read_restrict_write; llm_tool_allowlist optional list of tool names for the LLM tool list only.
+    tool_policy: Dict[str, Any] = field(default_factory=dict)
+    # Claw-Code (terminal coding agent): enabled, allowed_roots, default_tool_profile, default_main_llm, etc. See docs_design/ClawCode_Design.md.
+    clawcode: Dict[str, Any] = field(default_factory=dict)
     use_prompt_manager: bool = True  # load prompts from config/prompts (language/model overrides); see docs/PromptManagement.md
     prompts_dir: str = "config/prompts"  # base dir for section/name.lang.model layout
     prompt_default_language: str = "en"  # fallback when lang not in request/metadata
@@ -1153,6 +1185,11 @@ class CoreMetadata:
     vision_llm_idle_stop_seconds: int = 300
     cloud_llm_host: str = "127.0.0.1"    # host for cloud (LiteLLM) proxy; used in cloud-only and mix when route=cloud
     cloud_llm_port: int = 14005          # port for cloud (LiteLLM) proxy; set in llm.yml
+    # POST path for chat completions on main_llm_host:port (local/ollama) and cloud_llm_host:port (litellm); default OpenAI-compatible.
+    main_llm_chat_path: str = "/v1/chat/completions"
+    cloud_llm_chat_path: str = "/v1/chat/completions"
+    # Optional: Panda Gateway (llm.yml panda:). When enabled, Util routes HTTP LLM calls via host:port + paths.
+    panda: Dict[str, Any] = field(default_factory=dict)
     vision_image_max_dimension: int = 0   # when > 0, resize images to max(w,h) <= this before sending to vision_llm sidecar; 0 = use completion.image_max_dimension only
     hybrid_router: Dict[str, Any] = field(default_factory=dict)  # default_route, heuristic, semantic, slm (enabled, threshold, paths/model)
     # Companion: config kept for backward compat; Core no longer routes to Friends plugin. All users (normal + companion type) use the same main flow. See docs_design/CompanionFeatureDesign.md.
@@ -1342,9 +1379,11 @@ class CoreMetadata:
             'local_models', 'cloud_models', 'main_llm', 'main_llm_mode', 'main_llm_local', 'main_llm_cloud', 'tool_selection_llm', 'use_tool_selection_llm', 'use_main_llm_for_direct_reply', 'vision_llm',
             'hybrid_router', 'main_llm_language', 'embedding_llm',
             'embedding_host', 'embedding_port', 'main_llm_host', 'main_llm_port', 'tool_selection_llm_host', 'tool_selection_llm_port', 'cloud_llm_host', 'cloud_llm_port',
+            'main_llm_chat_path', 'cloud_llm_chat_path',
             'embedding_health_check_timeout_sec',
             'vision_llm_host', 'vision_llm_port', 'vision_llm_start_on_demand', 'vision_llm_idle_stop_seconds', 'vision_image_max_dimension',
             'llama_cpp', 'completion', 'completion_vision', 'completion_tool_selection',
+            'panda',
         })
         if _llm_file:
             _config_dir = os.path.dirname(os.path.abspath(yaml_file))
@@ -1362,6 +1401,9 @@ class CoreMetadata:
                                 continue
                             if _k == 'hybrid_router' and not isinstance(_v, dict):
                                 logging.warning("llm config %s: hybrid_router must be a dict, got %s; skipping", _llm_path, type(_v).__name__)
+                                continue
+                            if _k == 'panda' and not isinstance(_v, dict):
+                                logging.warning("llm config %s: panda must be a dict, got %s; skipping", _llm_path, type(_v).__name__)
                                 continue
                             if _k in ('llama_cpp', 'completion', 'completion_vision', 'completion_tool_selection') and not isinstance(_v, dict):
                                 logging.warning("llm config %s: %s must be a dict, got %s; skipping", _llm_path, _k, type(_v).__name__)
@@ -1578,6 +1620,11 @@ class CoreMetadata:
             skills_include_body_for=[str(f).strip() for f in (data.get('skills_include_body_for') or []) if f],
             skills_include_body_max_chars=max(0, int(data.get('skills_include_body_max_chars', 0) or 0)),
             skills_use_location_only=bool(data.get('skills_use_location_only', False)),
+            skills_prompt_budget_chars=max(0, int(data.get('skills_prompt_budget_chars', 0) or 0)),
+            skills_prompt_entry_max_chars=max(20, int(data.get('skills_prompt_entry_max_chars', 250) or 250)),
+            skills_invocation_contract_enabled=bool(data.get('skills_invocation_contract_enabled', True)),
+            skills_usage_rerank_enabled=bool(data.get('skills_usage_rerank_enabled', False)),
+            skills_usage_rerank_weight=float(data.get('skills_usage_rerank_weight', 0.12) or 0.12),
             skills_force_include_rules=[r for r in (data.get('skills_force_include_rules') or []) if isinstance(r, dict) and (r.get('pattern') or r.get('patterns')) and (r.get('folders') is not None or r.get('auto_invoke'))],
             skills_filter=[str(f).strip() for f in (data.get('skills_filter') or []) if str(f).strip()],
             plugins_force_include_rules=[r for r in (data.get('plugins_force_include_rules') or []) if isinstance(r, dict) and r.get('pattern') and r.get('plugins')],
@@ -1662,11 +1709,20 @@ class CoreMetadata:
             vision_image_max_dimension=max(0, int(data.get('vision_image_max_dimension') or 0)),
             cloud_llm_host=(str(data.get('cloud_llm_host') or '127.0.0.1').strip()) or '127.0.0.1',
             cloud_llm_port=max(1, min(65535, int(data.get('cloud_llm_port') or 14005))),
+            main_llm_chat_path=_normalize_llm_chat_path(data.get('main_llm_chat_path')),
+            cloud_llm_chat_path=_normalize_llm_chat_path(data.get('cloud_llm_chat_path')),
+            panda=data.get('panda') if isinstance(data.get('panda'), dict) else {},
             hybrid_router=hybrid_router_val,
             companion=data.get('companion') if isinstance(data.get('companion'), dict) else {},
             memory_summarization=data.get('memory_summarization') if isinstance(data.get('memory_summarization'), dict) else {},
             portal_url=(data.get('portal_url') or os.environ.get('PORTAL_URL') or '').strip(),
             portal_secret=(data.get('portal_secret') or os.environ.get('PORTAL_SECRET') or '').strip(),
+            workflow_trace_enabled=bool(data.get('workflow_trace_enabled', False)),
+            workflow_trace_dir=(str(data.get('workflow_trace_dir') or '')).strip(),
+            workflow_trace_sse_enabled=bool(data.get('workflow_trace_sse_enabled', False)),
+            agent_limits=data.get('agent_limits') if isinstance(data.get('agent_limits'), dict) else {},
+            tool_policy=data.get('tool_policy') if isinstance(data.get('tool_policy'), dict) else {},
+            clawcode=data.get('clawcode') if isinstance(data.get('clawcode'), dict) else {},
         )
         except (KeyError, TypeError, ValueError) as e:
             raise RuntimeError(f"config/core.yml has invalid or missing content: {e}. Fix the file before starting Core.") from e
@@ -1693,6 +1749,8 @@ class CoreMetadata:
                 'main_llm_port': core.main_llm_port,
                 'cloud_llm_host': getattr(core, 'cloud_llm_host', '127.0.0.1'),
                 'cloud_llm_port': getattr(core, 'cloud_llm_port', 14005),
+                'main_llm_chat_path': getattr(core, 'main_llm_chat_path', '/v1/chat/completions') or '/v1/chat/completions',
+                'cloud_llm_chat_path': getattr(core, 'cloud_llm_chat_path', '/v1/chat/completions') or '/v1/chat/completions',
                 'main_llm_language': core.main_llm_language,
                 'main_llm': core.main_llm,
                 'silent': core.silent,
@@ -1740,6 +1798,10 @@ class CoreMetadata:
                 'llm_completion_timeout_seconds': getattr(core, 'llm_completion_timeout_seconds', 300),
                 'workflow_trace_enabled': getattr(core, 'workflow_trace_enabled', False),
                 'workflow_trace_dir': getattr(core, 'workflow_trace_dir', '') or '',
+                'workflow_trace_sse_enabled': getattr(core, 'workflow_trace_sse_enabled', False),
+                'agent_limits': getattr(core, 'agent_limits', None) or {},
+                'tool_policy': getattr(core, 'tool_policy', None) or {},
+                'clawcode': getattr(core, 'clawcode', None) or {},
                 'logging': {
                     'access_log_exclude_paths': list(getattr(core, 'access_log_exclude_paths', ["/inbound/result", "/api/config/core"]) or []),
                 },
@@ -1820,7 +1882,9 @@ class CoreMetadata:
             'local_models', 'cloud_models', 'main_llm', 'main_llm_mode', 'main_llm_local', 'main_llm_cloud', 'tool_selection_llm', 'use_tool_selection_llm', 'use_main_llm_for_direct_reply',
             'hybrid_router', 'main_llm_language', 'embedding_llm', 'vision_llm',
             'embedding_host', 'embedding_port', 'main_llm_host', 'main_llm_port', 'tool_selection_llm_host', 'tool_selection_llm_port', 'cloud_llm_host', 'cloud_llm_port', 'embedding_health_check_timeout_sec',
+            'main_llm_chat_path', 'cloud_llm_chat_path',
             'vision_llm_host', 'vision_llm_port', 'vision_llm_start_on_demand', 'vision_llm_idle_stop_seconds', 'vision_image_max_dimension',
+            'panda',
         })
         if _llm_ext:
             for _k in list(core_dict.keys()):

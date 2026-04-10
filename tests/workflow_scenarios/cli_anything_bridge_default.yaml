@@ -1,0 +1,4 @@
+id: cli_anything_bridge_default
+contract: cli_anything_bridge_default
+prompt: "Cli anything bridge run wrapped command safely."
+description: "cli-anything-bridge skill trace."

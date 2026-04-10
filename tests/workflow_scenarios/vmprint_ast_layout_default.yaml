@@ -1,0 +1,4 @@
+id: vmprint_ast_layout_default
+contract: vmprint_ast_layout_default
+prompt: "Open vmprint ast layout digest reference for agents."
+description: "vmprint-ast-layout skill trace."

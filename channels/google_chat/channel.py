@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 
 load_dotenv(_root / "channels" / ".env")
 from base.util import Util
+from channels.clawcode_binding import apply_clawcode_inbound_flow
 
 app = FastAPI(title="HomeClaw Google Chat Channel")
 INBOUND_URL = f"{Util().get_channels_core_url()}/inbound"
@@ -85,6 +86,9 @@ async def handle_event(request: Request):
         payload["audios"] = msg["audios"]
     if msg.get("files"):
         payload["files"] = msg["files"]
+    _cc = apply_clawcode_inbound_flow(user_id, text, payload)
+    if _cc is not None:
+        return {"text": _cc}
     try:
         headers = Util().get_channels_core_api_headers()
         async with httpx.AsyncClient(trust_env=False) as client:

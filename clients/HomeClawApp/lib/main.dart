@@ -9,6 +9,7 @@ import 'package:home_claw_app/l10n/app_localizations.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
 import 'chat_history_store.dart';
 import 'core_service.dart';
+import 'screens/clawcode_screen.dart';
 import 'screens/friend_list_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/open_chat_from_push_screen.dart';
@@ -34,7 +35,7 @@ void main() async {
   coreService.onSessionExpired = () {
     navigatorKey.currentState?.pushAndRemoveUntil(
       MaterialPageRoute(
-        builder: (context) => LoginScreen(coreService: coreService),
+        builder: (context) => LoginScreen(coreService: coreService, initialClawcodeApprovalId: null),
       ),
       (route) => false,
     );
@@ -50,6 +51,7 @@ void main() async {
   }
   String? initialMessage;
   String? initialPushFromFriend;
+  String? initialClawcodeApprovalId;
   try {
     final appLinks = AppLinks();
     final uri = await appLinks.getInitialLink();
@@ -64,14 +66,39 @@ void main() async {
           initialPushFromFriend = fromFriend;
         }
       }
+      if (uri.path == 'clawcode' || uri.path == '/clawcode') {
+        final aid = uri.queryParameters['approval_id']?.trim();
+        if (aid != null && aid.isNotEmpty) {
+          initialClawcodeApprovalId = aid;
+        }
+      }
     }
     // Listen for deep links when app is already running (e.g. iOS notification tap opens link).
     appLinks.uriLinkStream.listen((Uri uri) {
       try {
-        if (uri.path == 'chat' || uri.path == '/chat') {
+        if (uri.path == 'clawcode' || uri.path == '/clawcode') {
+          final aid = uri.queryParameters['approval_id']?.trim();
+          if (aid != null && aid.isNotEmpty) {
+            coreService.addPushNotificationTap({
+              'link': 'homeclaw://clawcode?approval_id=$aid',
+            });
+          }
+        } else if (uri.path == 'chat' || uri.path == '/chat') {
           final fromFriend = uri.queryParameters['from_friend']?.trim();
           if (fromFriend != null && fromFriend.isNotEmpty) {
-            coreService.addPushNotificationTap({'from_friend': fromFriend});
+            unawaited(() async {
+              if (Platform.isIOS || Platform.isMacOS) {
+                try {
+                  final payload = await HomeclawNative().consumePendingNotificationChatPayload();
+                  if (payload != null && coreService.isLoggedIn) {
+                    await coreService.persistChatMessageFromPushNotificationData(
+                      Map<String, dynamic>.from(payload),
+                    );
+                  }
+                } catch (_) {}
+              }
+              coreService.addPushNotificationTap({'from_friend': fromFriend});
+            }());
           }
         }
       } catch (_) {}
@@ -81,17 +108,36 @@ void main() async {
   if (Platform.isAndroid) {
     try {
       final msg = await FirebaseMessaging.instance.getInitialMessage();
-      if (msg != null && msg.data != null) {
-        initialPushFromFriend = (msg.data!['from_friend'] ?? 'HomeClaw').toString().trim();
-        if (initialPushFromFriend!.isEmpty) initialPushFromFriend = 'HomeClaw';
+      if (msg != null) {
+        final d = msg.data;
+        await coreService.persistChatMessageFromPushNotificationData(
+          Map<String, dynamic>.from(d),
+        );
+        final link = (d['link'] ?? '').toString().trim();
+        if (link.contains('clawcode')) {
+          final u = Uri.tryParse(link);
+          final aid = u?.queryParameters['approval_id']?.trim();
+          if (aid != null && aid.isNotEmpty) {
+            initialClawcodeApprovalId = aid;
+          }
+        } else {
+          var ff = (d['from_friend'] ?? 'HomeClaw').toString().trim();
+          if (ff.isEmpty) ff = 'HomeClaw';
+          initialPushFromFriend = ff;
+        }
       }
     } catch (_) {}
     try {
       FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
         try {
           final data = message.data;
-          if (data != null && data.isNotEmpty) {
-            coreService.addPushNotificationTap(Map<String, dynamic>.from(data));
+          if (data.isNotEmpty) {
+            unawaited(() async {
+              await coreService.persistChatMessageFromPushNotificationData(
+                Map<String, dynamic>.from(data),
+              );
+              coreService.addPushNotificationTap(Map<String, dynamic>.from(data));
+            }());
           }
         } catch (_) {}
       });
@@ -102,6 +148,7 @@ void main() async {
     navigatorKey: navigatorKey,
     initialMessage: initialMessage,
     initialPushFromFriend: initialPushFromFriend,
+    initialClawcodeApprovalId: initialClawcodeApprovalId,
   ));
 }
 
@@ -110,6 +157,7 @@ class HomeClawCompanionApp extends StatelessWidget {
   final GlobalKey<NavigatorState> navigatorKey;
   final String? initialMessage;
   final String? initialPushFromFriend;
+  final String? initialClawcodeApprovalId;
 
   const HomeClawCompanionApp({
     super.key,
@@ -117,6 +165,7 @@ class HomeClawCompanionApp extends StatelessWidget {
     required this.navigatorKey,
     this.initialMessage,
     this.initialPushFromFriend,
+    this.initialClawcodeApprovalId,
   });
 
   @override
@@ -135,6 +184,7 @@ class HomeClawCompanionApp extends StatelessWidget {
         coreService: coreService,
         initialMessage: initialMessage,
         initialPushFromFriend: initialPushFromFriend,
+        initialClawcodeApprovalId: initialClawcodeApprovalId,
       ),
     );
   }
@@ -145,11 +195,13 @@ class _InitialScreen extends StatefulWidget {
   final CoreService coreService;
   final String? initialMessage;
   final String? initialPushFromFriend;
+  final String? initialClawcodeApprovalId;
 
   const _InitialScreen({
     required this.coreService,
     this.initialMessage,
     this.initialPushFromFriend,
+    this.initialClawcodeApprovalId,
   });
 
   @override
@@ -165,9 +217,29 @@ class _InitialScreenState extends State<_InitialScreen> {
   void initState() {
     super.initState();
     _homeFuture = _resolveHome();
-    _pushTapSubscription = widget.coreService.pushNotificationTapStream.listen((data) {
+    _pushTapSubscription = widget.coreService.pushNotificationTapStream.listen((data) async {
       if (!mounted) return;
       try {
+        await widget.coreService.persistChatMessageFromPushNotificationData(
+          Map<String, dynamic>.from(data),
+        );
+        if (!mounted) return;
+        final link = (data['link'] ?? '').toString().trim();
+        if (link.contains('clawcode')) {
+          final u = Uri.tryParse(link);
+          final aid = u?.queryParameters['approval_id']?.trim();
+          if (aid != null && aid.isNotEmpty) {
+            Navigator.maybeOf(context)?.push(
+              MaterialPageRoute<void>(
+                builder: (context) => ClawcodeScreen(
+                  coreService: widget.coreService,
+                  initialApprovalId: aid,
+                ),
+              ),
+            );
+            return;
+          }
+        }
         final fromFriend = (data['from_friend'] ?? 'HomeClaw').toString().trim();
         if (fromFriend.isEmpty) return;
         Navigator.maybeOf(context)?.push(
@@ -179,6 +251,20 @@ class _InitialScreenState extends State<_InitialScreen> {
           ),
         );
       } catch (_) {}
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      if (Platform.isIOS || Platform.isMacOS) {
+        try {
+          if (!widget.coreService.isLoggedIn) return;
+          final payload = await HomeclawNative().consumePendingNotificationChatPayload();
+          if (payload != null) {
+            await widget.coreService.persistChatMessageFromPushNotificationData(
+              Map<String, dynamic>.from(payload),
+            );
+          }
+        } catch (_) {}
+      }
     });
     _pushSubscription = widget.coreService.pushMessageStream.listen((push) {
       try {
@@ -220,15 +306,20 @@ class _InitialScreenState extends State<_InitialScreen> {
       return PermissionsScreen(
         coreService: widget.coreService,
         initialMessage: widget.initialMessage,
+        initialClawcodeApprovalId: widget.initialClawcodeApprovalId,
       );
     }
     if (!widget.coreService.isLoggedIn) {
-      return LoginScreen(coreService: widget.coreService);
+      return LoginScreen(
+        coreService: widget.coreService,
+        initialClawcodeApprovalId: widget.initialClawcodeApprovalId,
+      );
     }
     return FriendListScreen(
       coreService: widget.coreService,
       initialMessage: widget.initialMessage,
       initialPushFromFriend: widget.initialPushFromFriend,
+      initialClawcodeApprovalId: widget.initialClawcodeApprovalId,
     );
   }
 

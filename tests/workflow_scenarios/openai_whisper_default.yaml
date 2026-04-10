@@ -1,0 +1,4 @@
+id: openai_whisper_default
+contract: openai_whisper_default
+prompt: "Transcribe meeting audio openai whisper file on disk."
+description: "openai-whisper skill trace."

@@ -430,6 +430,14 @@ class Memory(MemoryBase):
             embedding_result = await self.embedding_model.embed(query)
         '''
         embedding_result = await self.embedding_model.embed(query.lower())
+        if embedding_result is None or (
+            isinstance(embedding_result, list) and len(embedding_result) == 0
+        ):
+            logger.warning(
+                "Memory.search: embedding unavailable; skipping vector search (query preview: {})",
+                _preview_for_memory_log(query),
+            )
+            return []
         memories = self.vector_store.search(
             query=embedding_result, limit=limit, filters=filters
         )

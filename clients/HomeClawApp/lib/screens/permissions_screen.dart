@@ -42,6 +42,7 @@ class _PermissionItem {
 class PermissionsScreen extends StatefulWidget {
   final CoreService coreService;
   final String? initialMessage;
+  final String? initialClawcodeApprovalId;
   /// When true, opened from Settings; bottom button is "Done" and pops back (no replace).
   final bool fromSettings;
 
@@ -49,6 +50,7 @@ class PermissionsScreen extends StatefulWidget {
     super.key,
     required this.coreService,
     this.initialMessage,
+    this.initialClawcodeApprovalId,
     this.fromSettings = false,
   });
 
@@ -135,8 +137,15 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
       Navigator.of(context).pop();
     } else {
       final next = widget.coreService.isLoggedIn
-          ? FriendListScreen(coreService: widget.coreService, initialMessage: widget.initialMessage)
-          : LoginScreen(coreService: widget.coreService);
+          ? FriendListScreen(
+              coreService: widget.coreService,
+              initialMessage: widget.initialMessage,
+              initialClawcodeApprovalId: widget.initialClawcodeApprovalId,
+            )
+          : LoginScreen(
+              coreService: widget.coreService,
+              initialClawcodeApprovalId: widget.initialClawcodeApprovalId,
+            );
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(builder: (context) => next),
       );

@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:home_claw_app/l10n/app_localizations.dart';
 import '../core_service.dart';
 import '../widgets/homeclaw_snackbars.dart';
@@ -11,6 +13,7 @@ import 'add_friend_screen.dart';
 import 'chat_screen.dart';
 import 'friend_requests_screen.dart';
 import 'login_screen.dart';
+import 'clawcode_screen.dart';
 import 'settings_screen.dart';
 
 /// Bundled preset thumbnail assets (used when Core does not serve one). No download; shipped with app.
@@ -52,22 +55,26 @@ String? _presetKeyFromFriendName(String name) {
   if (nLower == 'finder' || nLower == 'files' || nLower.contains('finder') || nLower.contains('file')) return 'finder';
   if (nLower == 'note' || nLower == 'notes' || nLower.contains('note')) return 'note';
   if (nLower == 'cursor' || nLower.contains('cursor')) return 'cursor';
+  if (nLower == 'clawcode' || nLower.contains('clawcode')) return 'clawcode';
   return null;
 }
 
 /// Friends list for the logged-in user (from GET /api/me/friends).
 /// If not logged in, shows LoginScreen. Tap a friend to open chat with friendId.
 /// When [initialPushFromFriend] is set (app opened by tapping FCM notification), open that chat after friends load.
+/// When [initialClawcodeApprovalId] is set (e.g. Claw-Code approval push), open [ClawcodeScreen] after friends load. Day-to-day Claw-Code: **`preset: clawcode`** friend in user.yml — open that chat (terminal / More → Claw-Code).
 class FriendListScreen extends StatefulWidget {
   final CoreService coreService;
   final String? initialMessage;
   final String? initialPushFromFriend;
+  final String? initialClawcodeApprovalId;
 
   const FriendListScreen({
     super.key,
     required this.coreService,
     this.initialMessage,
     this.initialPushFromFriend,
+    this.initialClawcodeApprovalId,
   });
 
   @override
@@ -79,6 +86,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
   bool _loading = true;
   String? _error;
   String? _initialPushFromFriend;
+  String? _initialClawcodeApprovalId;
   Uint8List? _myAvatarBytes;
   /// User ids (of user friends) that have at least one unread message in inbox.
   Set<String> _unreadUserIds = {};
@@ -88,12 +96,27 @@ class _FriendListScreenState extends State<FriendListScreen> {
   void initState() {
     super.initState();
     _initialPushFromFriend = widget.initialPushFromFriend;
+    _initialClawcodeApprovalId = widget.initialClawcodeApprovalId;
     _loadFriends();
     _loadMyAvatar();
     _pushSubscription = widget.coreService.pushMessageStream.listen((push) {
       final source = (push['source'] as String?)?.trim();
       if (source == 'user_message' && mounted) _loadUnreadState();
       if (source == 'federated_friend_request' && mounted) _loadFriends();
+    });
+    // After login, consume APNs stash that was skipped while _InitialScreen showed Login (cold start from notification).
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      if (Platform.isIOS || Platform.isMacOS) {
+        try {
+          final payload = await HomeclawNative().consumePendingNotificationChatPayload();
+          if (payload != null) {
+            await widget.coreService.persistChatMessageFromPushNotificationData(
+              Map<String, dynamic>.from(payload),
+            );
+          }
+        } catch (_) {}
+      }
     });
   }
 
@@ -154,6 +177,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
           _loading = false;
         });
         _loadUnreadState();
+        _openInitialClawcodeIfNeeded();
         _openInitialPushChatIfNeeded();
       }
     } catch (e) {
@@ -165,6 +189,23 @@ class _FriendListScreenState extends State<FriendListScreen> {
         });
       }
     }
+  }
+
+  void _openInitialClawcodeIfNeeded() {
+    final aid = _initialClawcodeApprovalId?.trim();
+    if (aid == null || aid.isEmpty) return;
+    _initialClawcodeApprovalId = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.maybeOf(context)?.push(
+        MaterialPageRoute<void>(
+          builder: (context) => ClawcodeScreen(
+            coreService: widget.coreService,
+            initialApprovalId: aid,
+          ),
+        ),
+      );
+    });
   }
 
   void _openInitialPushChatIfNeeded() {
@@ -195,6 +236,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
     final friendId = (m['name'] as String?)?.trim() ?? 'HomeClaw';
     final isUserFriend = _isPersonFriendType(m['type'] as String?);
     final toUserId = (m['user_id'] as String?)?.trim();
+    final presetFromApi = (m['preset'] as String?)?.trim();
     final locale = Localizations.localeOf(context);
     final displayName = localizedFriendDisplayName(friend: m, locale: locale);
     final remotePeer = _peerInstanceIdFromFriend(m);
@@ -207,11 +249,12 @@ class _FriendListScreenState extends State<FriendListScreen> {
             userId: userId,
             userName: displayName,
             friendId: friendId,
-            initialMessage: widget.initialMessage,
-            isUserFriend: isUserFriend,
-            toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
-            remotePeerInstanceId: remotePeer,
-          ),
+            friendPreset: (presetFromApi != null && presetFromApi.isNotEmpty) ? presetFromApi : null,
+                initialMessage: widget.initialMessage,
+                isUserFriend: isUserFriend,
+                toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
+                remotePeerInstanceId: remotePeer,
+              ),
         ),
       );
     });
@@ -357,12 +400,14 @@ class _FriendListScreenState extends State<FriendListScreen> {
                         final presetForAvatar = preset?.isNotEmpty == true
                             ? preset
                             : _presetKeyFromFriendName(friendId);
+                        final friendPresetForChat = preset?.isNotEmpty == true ? preset : null;
                         return _FriendTile(
                           userId: widget.coreService.sessionUserId!,
                           friendId: friendId,
                           displayName: displayName,
                           coreService: widget.coreService,
                           preset: presetForAvatar,
+                          friendPreset: friendPresetForChat,
                           initialMessage: index == 0 ? widget.initialMessage : null,
                           isUserFriend: isUserFriend,
                           toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
@@ -384,6 +429,8 @@ class _FriendTile extends StatefulWidget {
   final CoreService coreService;
   /// Preset key (e.g. reminder, note, finder) when this friend is a preset; used to request preset thumbnail from Core.
   final String? preset;
+  /// Raw preset from API for [ChatScreen] (e.g. clawcode).
+  final String? friendPreset;
   final String? initialMessage;
   /// True when this friend is a real person (type: user); chat uses user-message API and push-to-talk.
   final bool isUserFriend;
@@ -403,6 +450,7 @@ class _FriendTile extends StatefulWidget {
     required this.displayName,
     required this.coreService,
     this.preset,
+    this.friendPreset,
     this.initialMessage,
     this.isUserFriend = false,
     this.toUserId,
@@ -574,6 +622,7 @@ class _FriendTileState extends State<_FriendTile> {
                 userId: widget.userId,
                 userName: widget.displayName,
                 friendId: widget.friendId,
+                friendPreset: widget.friendPreset,
                 initialMessage: widget.initialMessage,
                 isUserFriend: widget.isUserFriend,
                 toUserId: widget.toUserId,

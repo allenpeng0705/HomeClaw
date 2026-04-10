@@ -70,6 +70,21 @@ def _derive_daily_brief_args_from_query_local(user_text: str, plain_markdown_req
     return out
 
 
+def _emit_mock_skill_trace(skill_name: str, script: str, argv: List[str]) -> None:
+    emit_event(
+        event_type="skill_call_started",
+        component="run_skill",
+        summary="run_skill started",
+        details={"skill_name": skill_name, "script": script},
+    )
+    emit_event(
+        event_type="arg_normalization",
+        component="run_skill",
+        summary="run_skill argv finalized",
+        details={"argv": argv},
+    )
+
+
 def run_mock_turn(prompt: str, trace_dir: Path) -> Dict[str, Any]:
     trace_dir.mkdir(parents=True, exist_ok=True)
     run_id = uuid.uuid4().hex
@@ -92,6 +107,79 @@ def run_mock_turn(prompt: str, trace_dir: Path) -> Dict[str, Any]:
             details={"argv": argv},
         )
         response = "mock daily brief done"
+    elif "stock monitor" in p_lo or "stock-monitor" in p_lo:
+        _emit_mock_skill_trace("stock-monitor-1.0.0", "mock.py", ["alerts", "--dry-run"])
+        response = "mock stock monitor skill done"
+    elif "weather skill" in p_lo or "天气技能" in p:
+        _emit_mock_skill_trace("weather-1.0.0", "mock.py", ["forecast", "--city", "Seattle"])
+        response = "mock weather skill done"
+    elif "magazine render" in p_lo or "杂志排版渲染" in p:
+        _emit_mock_skill_trace("magazine-render-1.0.0", "render.py", ["--preview", "newsletter"])
+        response = "mock magazine render done"
+    elif "vmprint ast" in p_lo:
+        _emit_mock_skill_trace("vmprint-ast-layout-1.0.0", "mock.py", ["--layout", "digest"])
+        response = "mock vmprint ast layout done"
+    elif "ppt generation" in p_lo:
+        _emit_mock_skill_trace("ppt-generation-1.0.0", "mock.py", ["outline", "--slides", "8"])
+        response = "mock ppt generation done"
+    elif "ip camera" in p_lo:
+        _emit_mock_skill_trace("ip-cameras", "mock.py", ["snapshot", "--rtsp", "mock://cam"])
+        response = "mock ip cameras done"
+    elif "desktop ui" in p_lo:
+        _emit_mock_skill_trace("desktop-ui", "mock.py", ["focus", "--window", "Terminal"])
+        response = "mock desktop ui done"
+    elif "summarize this article url" in p_lo:
+        _emit_mock_skill_trace(
+            "summarize-1.0.0",
+            "mock.py",
+            ["https://example.com/page", "--length", "short"],
+        )
+        response = "mock summarize skill done"
+    elif "self improving" in p_lo:
+        _emit_mock_skill_trace("self-improving-1.2.16", "mock.py", ["feedback", "--capture"])
+        response = "mock self improving done"
+    elif "cli anything bridge" in p_lo:
+        _emit_mock_skill_trace("cli-anything-bridge-1.0.0", "mock.py", ["exec", "--wrapped", "true"])
+        response = "mock cli anything bridge done"
+    elif "html slides" in p_lo:
+        _emit_mock_skill_trace("html-slides-1.0.0", "mock.py", ["build", "--engine", "reveal"])
+        response = "mock html slides done"
+    elif "x api twitter" in p_lo:
+        _emit_mock_skill_trace("x-api-1.0.0", "mock.py", ["post", "--dry-run"])
+        response = "mock x api done"
+    elif "social media agent" in p_lo:
+        _emit_mock_skill_trace("social-media-agent-1.0.0", "mock.py", ["schedule", "--cross-post"])
+        response = "mock social media agent done"
+    elif "openai whisper" in p_lo:
+        _emit_mock_skill_trace("openai-whisper-1.0.0", "mock.py", ["transcribe", "meeting.m4a"])
+        response = "mock openai whisper done"
+    elif "meta social" in p_lo:
+        _emit_mock_skill_trace("meta-social-1.0.0", "mock.py", ["insights", "--page", "demo"])
+        response = "mock meta social done"
+    elif "maton api" in p_lo:
+        _emit_mock_skill_trace("maton-api-gateway-1.0.0", "mock.py", ["webhook", "--test"])
+        response = "mock maton api gateway done"
+    elif "linkedin writer" in p_lo:
+        _emit_mock_skill_trace("linkedin-writer-1.0.0", "mock.py", ["draft", "--tone", "professional"])
+        response = "mock linkedin writer done"
+    elif "image generation" in p_lo:
+        _emit_mock_skill_trace("image-generation-1.0.0", "mock.py", ["prompt", "sunset over mountains"])
+        response = "mock image generation done"
+    elif "hootsuite" in p_lo:
+        _emit_mock_skill_trace("hootsuite-1.0.0", "mock.py", ["schedule", "--calendar", "main"])
+        response = "mock hootsuite done"
+    elif "gog gmail" in p_lo:
+        _emit_mock_skill_trace("gog-1.0.0", "mock.py", ["gmail", "search", "in:inbox"])
+        response = "mock gog done"
+    elif "baidu search" in p_lo:
+        _emit_mock_skill_trace("baidu-search-1.1.0", "mock.py", ["query", "北京 新闻"])
+        response = "mock baidu search done"
+    elif "apple notes" in p_lo:
+        _emit_mock_skill_trace("apple-notes-1.0.0", "mock.py", ["list", "--folder", "Notes"])
+        response = "mock apple notes done"
+    elif "answeroverflow" in p_lo:
+        _emit_mock_skill_trace("answeroverflow-1.0.2", "mock.py", ["search", "discord topic"])
+        response = "mock answeroverflow done"
     elif ("天气" in p) or ("weather" in p_lo):
         emit_event(
             event_type="tool_call_started",

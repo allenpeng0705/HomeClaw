@@ -1,0 +1,4 @@
+id: linkedin_writer_default
+contract: linkedin_writer_default
+prompt: "Linkedin writer skill draft professional post about launch."
+description: "linkedin-writer skill trace."

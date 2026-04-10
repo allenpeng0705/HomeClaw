@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from base.util import Util
 from base.BaseChannel import ChannelMetadata, BaseChannel
 from base.base import PromptRequest, AsyncResponse, ChannelType, ContentType
-
+from channels.clawcode_binding import merge_clawcode_binding_into_prompt_request, try_clawcode_command_reply
 
 
 channel_app: FastAPI = FastAPI()  
@@ -190,6 +190,14 @@ class Channel(BaseChannel):
                 else:
                     contentType = ContentType.TEXT.value
 
+                _cc_m = try_clawcode_command_reply(sender, text)
+                if _cc_m is not None:
+                    try:
+                        await self.bot.api.send_text_message(room.room_id, _cc_m)
+                    except Exception as _cc_e:
+                        logger.debug("Matrix clawcode command reply failed: {}", _cc_e)
+                    return
+
                 request = PromptRequest(
                     request_id=msg_id,
                     channel_name=self.metadata.name,
@@ -210,6 +218,7 @@ class Channel(BaseChannel):
                     timestamp=datetime.now().timestamp(),
                     reply_accepts=["text", "image"],
                 )
+                merge_clawcode_binding_into_prompt_request(request)
 
                 await self.transferTocore(request=request)
 

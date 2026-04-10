@@ -32,7 +32,20 @@ async def run_perplexity_probe_async(
     if not host or port is None:
         return (0.0, None)
     port = int(port)
-    url = f"http://{host}:{port}/v1/chat/completions"
+    _u = None
+    _panda = None
+    try:
+        from base.util import Util as _Util
+        _u = _Util()
+        _panda = _u.panda_openai_chat_url("local")
+    except Exception:
+        pass
+    if _panda:
+        url = _panda
+    elif _u is not None:
+        url = f"http://{host}:{port}{_u.openai_chat_completions_path('local')}"
+    else:
+        url = f"http://{host}:{port}/v1/chat/completions"
     body = {
         "model": model or "default",
         "messages": [{"role": "user", "content": (query or "").strip()}],

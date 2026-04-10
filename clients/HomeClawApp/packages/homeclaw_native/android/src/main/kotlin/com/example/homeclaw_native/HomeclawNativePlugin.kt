@@ -38,6 +38,7 @@ class HomeclawNativePlugin :
             }
             "startScreenRecord" -> result.success(null)
             "getApnsToken" -> result.success(null)  // APNs is iOS/macOS only; Android uses FCM
+            "consumePendingNotificationChatPayload" -> result.success(null)  // FCM uses Dart getInitialMessage / tap stream
             else -> result.notImplemented()
         }
     }

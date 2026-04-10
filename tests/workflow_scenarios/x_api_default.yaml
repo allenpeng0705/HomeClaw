@@ -1,0 +1,4 @@
+id: x_api_default
+contract: x_api_default
+prompt: "Post to x api twitter timeline update draft."
+description: "x-api skill trace."

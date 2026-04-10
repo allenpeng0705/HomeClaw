@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
-from base.tools import ToolContext, ToolDefinition, ToolRegistry, ROUTING_RESPONSE_ALREADY_SENT
+from base.tools import ToolContext, ToolDefinition, ToolRegistry, ROUTING_RESPONSE_ALREADY_SENT, get_tool_registry
 from base.skills import get_all_skills_dirs, resolve_skill_to_path
 from base.workspace import get_workspace_dir, get_agent_memory_file_path, append_daily_memory
 from base.user_sandbox_folders import FOLDER_NAMES_FOR_USER_MESSAGE, STANDARD_USER_SANDBOX_SUBDIRS
@@ -2902,6 +2902,14 @@ async def _exec_executor(arguments: Dict[str, Any], context: ToolContext) -> str
     background = arguments.get("background") is True
     if not command:
         return "Error: command is required"
+    try:
+        from core.clawcode_store import clawcode_exec_git_block_message
+
+        _cc_git = clawcode_exec_git_block_message(command, context)
+        if _cc_git:
+            return _cc_git
+    except Exception:
+        pass
     parts = command.split()
     if not parts:
         return "Error: command is required"
@@ -3335,6 +3343,21 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
     )
     try:
         out = await _run_skill_executor_impl(arguments, context)
+        try:
+            if isinstance(out, str) and out.strip() and not out.strip().startswith("Error"):
+                _sf = getattr(context, "_last_run_skill_folder", None) or (
+                    (arguments.get("skill_name") or arguments.get("skill") or "").strip()
+                )
+                if _sf:
+                    from base.skill_usage import record_skill_invocation
+
+                    _uid = (
+                        (getattr(context, "system_user_id", None) or getattr(context, "user_id", None) or "").strip()
+                        or "_global"
+                    )
+                    record_skill_invocation(_uid, str(_sf))
+        except Exception:
+            pass
         _trace_emit_event(
             event_type="skill_call_finished",
             component="run_skill",
@@ -3392,11 +3415,36 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
         skill_folder = resolve_skill_to_path(skill_name, skills_dirs)
         if skill_folder is not None:
             skill_name = skill_folder.name
+            try:
+                setattr(context, "_last_run_skill_folder", skill_name)
+            except Exception:
+                pass
     except Exception as e:
         logger.debug("run_skill setup failed: %s", e)
         return f"Error: run_skill failed: {e!s}"
     if skill_folder is None or not skill_folder.is_dir():
         return f"Error: skill folder not found: {skill_name} (searched skills_dir, external_skills_dir, skills_extra_dirs). Try the exact folder name from Available skills (e.g. html-slides-1.0.0)."
+    try:
+        _tc_sub = getattr(meta, "tools_config", None) or {}
+        if not isinstance(_tc_sub, dict):
+            _tc_sub = {}
+        _sub_skills = _tc_sub.get("run_skill_subagent_skills") or []
+        _sub_set = {str(x).strip() for x in _sub_skills if x is not None and str(x).strip()}
+        if skill_name in _sub_set and context.request and getattr(context, "core", None):
+            _md0 = dict(getattr(context.request, "request_metadata", None) or {})
+            if int(_md0.get("skill_subagent_depth", 0) or 0) < 1:
+                from core.skill_subagent import delegate_run_skill_to_inner_agent
+
+                return await delegate_run_skill_to_inner_agent(
+                    context.core,
+                    skill_name,
+                    script_arg,
+                    args_input,
+                    context,
+                    user_query_tail=_homeclaw_user_query,
+                )
+    except Exception as _sub_e:
+        logger.debug("run_skill subagent branch skipped: {}", _sub_e)
     scripts_dir = (skill_folder / "scripts").resolve()
     if not scripts_dir.is_dir():
         if not script_arg:
@@ -7447,6 +7495,7 @@ def _register_browser_tools_if_available(registry: ToolRegistry) -> None:
                 "required": ["url"],
             },
             execute_async=_browser_navigate_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -7461,6 +7510,7 @@ def _register_browser_tools_if_available(registry: ToolRegistry) -> None:
                 "required": [],
             },
             execute_async=_browser_snapshot_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -7475,6 +7525,7 @@ def _register_browser_tools_if_available(registry: ToolRegistry) -> None:
                 "required": ["selector"],
             },
             execute_async=_browser_click_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -7490,6 +7541,7 @@ def _register_browser_tools_if_available(registry: ToolRegistry) -> None:
                 "required": ["selector", "text"],
             },
             execute_async=_browser_type_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -7506,6 +7558,7 @@ def _register_browser_tools_if_available(registry: ToolRegistry) -> None:
                 "required": ["query"],
             },
             execute_async=_web_search_browser_executor,
+            risk_tier="network",
         )
     )
 
@@ -7608,6 +7661,34 @@ async def _mcp_list_tools_executor(arguments: Dict[str, Any], context: ToolConte
 
     out = await _mcp_run_with_session(server_id, _list)
     if isinstance(out, str) and out.strip().startswith("{"):
+        try:
+            req = getattr(context, "request", None)
+            md = getattr(req, "request_metadata", None) if req is not None else None
+            if isinstance(md, dict) and str(md.get("clawcode_session_id") or "").strip():
+                from core.clawcode_store import clawcode_mcp_allowlist_entries
+
+                entries = clawcode_mcp_allowlist_entries()
+                if entries:
+                    obj = json.loads(out)
+                    tools = obj.get("tools")
+                    if isinstance(tools, list):
+                        sid_key = (server_id or "").strip().lower()
+                        allowed_names = set()
+                        for e in entries:
+                            if "/" not in (e or ""):
+                                continue
+                            a, b = e.split("/", 1)
+                            if a.strip().lower() == sid_key:
+                                allowed_names.add(b.strip().lower())
+                        obj["tools"] = [
+                            t
+                            for t in tools
+                            if isinstance(t, dict) and str(t.get("name") or "").strip().lower() in allowed_names
+                        ]
+                        obj["clawcode_mcp_allowlist_filtered"] = True
+                    return json.dumps(obj, ensure_ascii=False)
+        except Exception:
+            pass
         return out
     return json.dumps({"tools": [], "error": str(out)})
 
@@ -7620,6 +7701,23 @@ async def _mcp_call_executor(arguments: Dict[str, Any], context: ToolContext) ->
         return json.dumps({"error": "server_id is required.", "results": []})
     if not tool_name:
         return json.dumps({"error": "tool_name is required.", "results": []})
+    req = getattr(context, "request", None)
+    md = getattr(req, "request_metadata", None) if req is not None else None
+    if isinstance(md, dict) and str(md.get("clawcode_session_id") or "").strip():
+        from core.clawcode_store import clawcode_mcp_pair_allowed
+
+        if not clawcode_mcp_pair_allowed(server_id, tool_name):
+            return json.dumps(
+                {
+                    "error": (
+                        f"MCP tool not allowlisted for Claw-Code: {server_id}/{tool_name}. "
+                        "Add `server_id/tool_name` to clawcode.mcp_tool_allowlist in core.yml or clear the list to allow all."
+                    ),
+                    "server_id": server_id,
+                    "tool": tool_name,
+                },
+                ensure_ascii=False,
+            )
     args = arguments.get("arguments") or arguments.get("params") or {}
     if not isinstance(args, dict):
         args = {}
@@ -7640,8 +7738,89 @@ async def _mcp_call_executor(arguments: Dict[str, Any], context: ToolContext) ->
     return json.dumps({"content": "", "error": str(out)})
 
 
+async def _list_available_tools_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    reg = get_tool_registry()
+    limit = 80
+    try:
+        limit = max(1, min(200, int((arguments or {}).get("limit") or 80)))
+    except (TypeError, ValueError):
+        limit = 80
+    tools = reg.list_tools()[:limit]
+    rows = [
+        {
+            "name": t.name,
+            "risk_tier": getattr(t, "risk_tier", None),
+            "description": ((t.short_description or t.description or "")[:240]),
+        }
+        for t in tools
+    ]
+    return json.dumps(
+        {"tools": rows, "total_registered": len(reg.list_tools()), "returned": len(rows)},
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+async def _search_available_tools_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    reg = get_tool_registry()
+    q = str((arguments or {}).get("query") or (arguments or {}).get("q") or "").strip().lower()
+    limit = 30
+    try:
+        limit = max(1, min(100, int((arguments or {}).get("limit") or 30)))
+    except (TypeError, ValueError):
+        limit = 30
+    if not q:
+        return json.dumps({"error": "query (or q) is required"}, ensure_ascii=False)
+    matches = []
+    for t in reg.list_tools():
+        desc = ((t.short_description or "") + " " + (t.description or "")).lower()
+        nm = (t.name or "").lower()
+        if q in nm or q in desc:
+            matches.append({"name": t.name, "description": (t.short_description or t.description or "")[:200]})
+        if len(matches) >= limit:
+            break
+    return json.dumps({"query": q, "matches": matches}, ensure_ascii=False, indent=2)
+
+
 def register_builtin_tools(registry: ToolRegistry) -> None:
     """Register all built-in tools. Call once at startup (e.g. from Core)."""
+    registry.register(
+        ToolDefinition(
+            name="list_available_tools",
+            description=(
+                "List tools currently registered on this Core (name, short description, optional risk_tier). "
+                "Use when the injected tools list is trimmed or you need to discover what you can call next."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max tools to return (default 80, max 200)."},
+                },
+                "required": [],
+            },
+            execute_async=_list_available_tools_executor,
+            short_description="List registered tool names and descriptions (tool discovery).",
+            risk_tier="read",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="search_available_tools",
+            description="Search registered tools by substring in name or description. Use after list_available_tools when you need a narrower set.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Substring to match (case-insensitive)."},
+                    "q": {"type": "string", "description": "Alias for query."},
+                    "limit": {"type": "integer", "description": "Max matches (default 30)."},
+                },
+                "required": [],
+            },
+            execute_async=_search_available_tools_executor,
+            short_description="Search tools by keyword in name or description.",
+            risk_tier="read",
+        )
+    )
     # Session tools
     registry.register(
         ToolDefinition(
@@ -7857,6 +8036,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             },
             execute_async=_run_skill_executor,
             short_description="Use when: user asks for a skill (email, slides, HTML report, image, etc.). Pass skill_name and script (or skill_name only for instruction-only skills); then continue with document_read/save_result_page.",
+            risk_tier="exec",
         )
     )
 
@@ -8312,6 +8492,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["query"],
             },
             execute_async=_web_search_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8331,6 +8512,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["urls"],
             },
             execute_async=_tavily_extract_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8351,6 +8533,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["url"],
             },
             execute_async=_tavily_crawl_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8370,6 +8553,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["input"],
             },
             execute_async=_tavily_research_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8401,6 +8585,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["server_id"],
             },
             execute_async=_mcp_list_tools_executor,
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8420,6 +8605,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["server_id", "tool_name"],
             },
             execute_async=_mcp_call_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8437,6 +8623,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": [],
             },
             execute_async=_image_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8495,6 +8682,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["command"],
             },
             execute_async=_exec_executor,
+            risk_tier="exec",
         )
     )
     registry.register(
@@ -8503,6 +8691,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             description="List background exec jobs (job_id, command, started_at, status). Use after exec with background=true.",
             parameters={"type": "object", "properties": {}, "required": []},
             execute_async=_process_list_executor,
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8515,6 +8704,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["job_id"],
             },
             execute_async=_process_poll_executor,
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8527,6 +8717,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["job_id"],
             },
             execute_async=_process_kill_executor,
+            risk_tier="exec",
         )
     )
 
@@ -8544,6 +8735,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path"],
             },
             execute_async=_file_read_executor,
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8560,6 +8752,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             },
             execute_async=_document_read_executor,
             short_description="Use when: user wants to read/summarize a document (PDF, Word, etc.). Pass path from folder_list/file_find or a filename (e.g. 'resume') to search sandbox.",
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8575,6 +8768,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path"],
             },
             execute_async=_file_understand_executor,
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8590,6 +8784,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path", "content"],
             },
             execute_async=_file_write_executor,
+            risk_tier="write",
         )
     )
     registry.register(
@@ -8607,6 +8802,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path", "old_string", "new_string"],
             },
             execute_async=_file_edit_executor,
+            risk_tier="write",
         )
     )
     registry.register(
@@ -8622,6 +8818,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["patch"],
             },
             execute_async=_apply_patch_executor,
+            risk_tier="write",
         )
     )
 
@@ -8643,6 +8840,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             },
             execute_async=_folder_list_executor,
             short_description="List files in a folder. You MUST pass path: use the folder name from the user's message (e.g. images, documents) or '.' for root. Never call with empty path.",
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8661,6 +8859,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path"],
             },
             execute_async=_file_find_executor,
+            risk_tier="read",
         )
     )
 
@@ -8678,6 +8877,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["url"],
             },
             execute_async=_fetch_url_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8695,6 +8895,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": [],
             },
             execute_async=_web_extract_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8714,6 +8915,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["url"],
             },
             execute_async=_web_crawl_executor,
+            risk_tier="network",
         )
     )
     _register_browser_tools_if_available(registry)
@@ -8736,6 +8938,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["url"],
             },
             execute_async=_http_request_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8751,6 +8954,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["url"],
             },
             execute_async=_webhook_trigger_executor,
+            risk_tier="network",
         )
     )
 
@@ -8768,6 +8972,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["query"],
             },
             execute_async=_knowledge_base_search_executor,
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8785,6 +8990,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["content"],
             },
             execute_async=_knowledge_base_add_executor,
+            risk_tier="write",
         )
     )
     registry.register(
@@ -8799,6 +9005,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["source_id"],
             },
             execute_async=_knowledge_base_remove_executor,
+            risk_tier="write",
         )
     )
     registry.register(
@@ -8814,6 +9021,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": [],
             },
             execute_async=_knowledge_base_list_executor,
+            risk_tier="read",
         )
     )
 
@@ -8833,6 +9041,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["title", "content"],
             },
             execute_async=_save_result_page_executor,
+            risk_tier="write",
         )
     )
     registry.register(
@@ -8848,6 +9057,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path"],
             },
             execute_async=_get_file_view_link_executor,
+            risk_tier="read",
         )
     )
     # Markdown → PDF: save long Markdown as PDF and return link (used by summarize skill when result is long).

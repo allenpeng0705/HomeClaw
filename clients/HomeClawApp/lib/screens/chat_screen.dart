@@ -27,6 +27,7 @@ import '../core_service.dart';
 import '../federation_e2e_crypto.dart';
 import '../widgets/homeclaw_snackbars.dart';
 import 'canvas_screen.dart';
+import 'clawcode_screen.dart';
 import 'settings_screen.dart';
 import 'vmprint_preview_screen.dart';
 
@@ -69,6 +70,8 @@ class ChatScreen extends StatefulWidget {
   final String? toUserId;
   /// When set, user chat is with someone on another Core (show in app bar).
   final String? remotePeerInstanceId;
+  /// Core preset key for this AI friend (e.g. `cursor`, `claudecode`, `clawcode`) from GET /api/me/friends.
+  final String? friendPreset;
 
   const ChatScreen({
     super.key,
@@ -80,6 +83,7 @@ class ChatScreen extends StatefulWidget {
     this.isUserFriend = false,
     this.toUserId,
     this.remotePeerInstanceId,
+    this.friendPreset,
   });
 
   @override
@@ -218,6 +222,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// Claude Code friend only: when true, POST /inbound includes `claude_skip_permissions` → bridge adds --dangerously-skip-permissions for that run_agent.
   static const String _keyClaudeSkipPermissions = 'chat_claude_skip_permissions';
   bool _claudeSkipPermissions = false;
+
+  /// Claw-Code session UUID when chatting with the preset friend `clawcode` (same pattern as Cursor/ClaudeCode: dedicated friend on HomeClaw).
+  String? _clawcodeSessionId;
+
+  bool get _isClawcodePresetFriend =>
+      !widget.isUserFriend && (widget.friendPreset ?? '').trim().toLowerCase() == 'clawcode';
 
   bool get _isDevBridgeFriend {
     final fid = (widget.friendId ?? '').trim().toLowerCase();
@@ -437,6 +447,145 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (mounted) _inputController.text = widget.initialMessage!;
       });
     }
+    unawaited(_loadClawcodeChatBinding());
+  }
+
+  String _clawcodePresetSessionPrefKey() => 'companion_clawcode_session_v1_${widget.userId.trim()}';
+
+  Future<void> _loadClawcodeChatBinding() async {
+    if (!_isClawcodePresetFriend) return;
+    try {
+      final p = await SharedPreferences.getInstance();
+      final sid = p.getString(_clawcodePresetSessionPrefKey())?.trim();
+      if (!mounted) return;
+      setState(() => _clawcodeSessionId = (sid != null && sid.isNotEmpty) ? sid : null);
+    } catch (_) {}
+  }
+
+  Future<void> _setClawcodeChatBinding(String? sessionId) async {
+    if (!_isClawcodePresetFriend) return;
+    try {
+      final p = await SharedPreferences.getInstance();
+      final key = _clawcodePresetSessionPrefKey();
+      if (sessionId == null || sessionId.trim().isEmpty) {
+        await p.remove(key);
+        if (mounted) setState(() => _clawcodeSessionId = null);
+      } else {
+        final t = sessionId.trim();
+        await p.setString(key, t);
+        if (mounted) setState(() => _clawcodeSessionId = t);
+      }
+    } catch (_) {}
+  }
+
+  String _shortClawcodeId(String sid) {
+    final t = sid.trim();
+    if (t.length <= 10) return t;
+    return '${t.substring(0, 8)}…';
+  }
+
+  Future<void> _showClawcodeSessionPicker() async {
+    if (!_isClawcodePresetFriend) return;
+    final owner = (widget.coreService.sessionUserId?.trim().isNotEmpty ?? false)
+        ? widget.coreService.sessionUserId!.trim()
+        : widget.userId.trim();
+    List<Map<String, dynamic>> sessions = [];
+    String? loadErr;
+    try {
+      sessions = await widget.coreService.fetchClawcodeSessions(owner);
+    } catch (e) {
+      loadErr = e.toString().replaceFirst(RegExp(r'^Exception:?\s*'), '');
+    }
+    if (!mounted) return;
+    final bound = _clawcodeSessionId;
+    final sheetH = MediaQuery.sizeOf(context).height * 0.55;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: SizedBox(
+            height: sheetH,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text('Claw-Code', style: Theme.of(ctx).textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Clawcode friend: pick a workspace session for POST /inbound (clawcode_session_id). Core only.',
+                    style: Theme.of(ctx).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  if (loadErr != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(loadErr, style: TextStyle(color: Theme.of(ctx).colorScheme.error, fontSize: 13)),
+                    ),
+                  Expanded(
+                    child: ListView(
+                      children: [
+                        RadioListTile<String?>(
+                          title: const Text('Off — normal chat'),
+                          value: null,
+                          groupValue: bound,
+                          onChanged: (_) async {
+                            await _setClawcodeChatBinding(null);
+                            if (ctx.mounted) Navigator.pop(ctx);
+                          },
+                        ),
+                        if (sessions.isEmpty && loadErr == null)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            child: Text(
+                              'No sessions yet. Create one on the server (e.g. python3 -m main clawcode session new), then pick it here. For approvals, workspace files, or optional browser UI, use the button below.',
+                              style: TextStyle(fontSize: 13),
+                            ),
+                          ),
+                        ...sessions.map((s) {
+                          final sid = (s['clawcode_session_id'] ?? '').toString();
+                          if (sid.isEmpty) return const SizedBox.shrink();
+                          final cwd = (s['cwd'] ?? '').toString();
+                          return RadioListTile<String>(
+                            title: Text(_shortClawcodeId(sid)),
+                            subtitle: cwd.isNotEmpty
+                                ? Text(cwd, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12))
+                                : null,
+                            value: sid,
+                            groupValue: bound,
+                            onChanged: (_) async {
+                              await _setClawcodeChatBinding(sid);
+                              if (ctx.mounted) Navigator.pop(ctx);
+                            },
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      final fid = widget.friendId?.trim();
+                      Navigator.push<void>(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (c) => ClawcodeScreen(
+                            coreService: widget.coreService,
+                            chatFriendId: (fid != null && fid.isNotEmpty) ? fid : null,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.open_in_new, size: 18),
+                    label: const Text('Approvals, workspace, browser…'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _onScrollForPagination() {
@@ -966,6 +1115,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final text = push['text'] as String? ?? '';
     final source = (push['source'] as String?)?.trim() ?? 'push';
     final e2eEncrypted = push['e2e_encrypted'] == true;
+    // Async inbound finished (or Hive just wrote the reply): reload from store so the thread updates even if the user left and came back.
+    final ev = push['event'] as String?;
+    if (!widget.isUserFriend && (ev == 'chat_history_updated' || ev == 'inbound_result')) {
+      final uid = (push['user_id'] as String?)?.trim();
+      final fidRaw = (push['friend_id'] as String?)?.trim();
+      final fid = (fidRaw == null || fidRaw.isEmpty) ? 'HomeClaw' : fidRaw;
+      if (uid != null && uid.isNotEmpty && uid == widget.userId.trim()) {
+        final thisFriend = (widget.friendId?.trim().isEmpty != false) ? 'HomeClaw' : widget.friendId!.trim();
+        if (fid == thisFriend && mounted) {
+          _loadChatHistory();
+          setState(() {});
+        }
+      }
+      return;
+    }
     // User-to-user: refresh inbox so the new message appears; match by from_user_id or from_friend.
     if (widget.isUserFriend && widget.toUserId != null && source == 'user_message') {
       final fromUserId = (push['from_user_id'] as String?)?.trim();
@@ -983,7 +1147,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final pushFriend = (pushFriendId?.toString().trim() ?? '').isEmpty ? 'HomeClaw' : pushFriendId!.trim();
     final thisFriend = (widget.friendId?.trim() ?? '').isEmpty ? 'HomeClaw' : widget.friendId!.trim();
     if (pushFriend != thisFriend) return;
-    if (push['event'] == 'inbound_result') return;
     final imageList = push['images'] as List<dynamic>?;
     final images = imageList != null
         ? imageList.whereType<String>().toList()
@@ -1322,6 +1485,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       try {
         locationStr = await _getCurrentLocationString();
       } catch (_) {}
+      final ccSid = (_clawcodeSessionId ?? '').trim();
+      final clawOn = _isClawcodePresetFriend && ccSid.isNotEmpty;
       final result = await widget.coreService.sendMessage(
         text.isEmpty ? 'See attached.' : text,
         userId: widget.userId,
@@ -1333,6 +1498,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         cursorAgentYolo: (widget.friendId ?? '').trim().toLowerCase() == 'cursor' ? _cursorAgentYolo : null,
         claudeSkipPermissions:
             (widget.friendId ?? '').trim().toLowerCase() == 'claudecode' ? _claudeSkipPermissions : null,
+        clawcodeSessionId: clawOn ? ccSid : null,
+        useStream: clawOn ? true : null,
         onProgress: widget.coreService.showProgressDuringLongTasks
             ? (String message) {
                 if (mounted) setState(() => _loadingMessage = message);
@@ -2800,6 +2967,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           ),
                         ),
                       ),
+                    if (_isClawcodePresetFriend && (_clawcodeSessionId ?? '').trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: _showClawcodeSessionPicker,
+                              borderRadius: BorderRadius.circular(16),
+                              child: Chip(
+                                avatar: Icon(
+                                  Icons.terminal,
+                                  size: 16,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                                label: Text(
+                                  'Claw-Code · ${_shortClawcodeId(_clawcodeSessionId!)}',
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.symmetric(horizontal: 6),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -2828,6 +3023,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   : 'Claude Code: stricter headless (no skip-permissions for this chat)',
               color: _claudeSkipPermissions ? Theme.of(context).colorScheme.primary : null,
               onPressed: () => _setClaudeSkipPermissions(!_claudeSkipPermissions),
+            ),
+          if (_isClawcodePresetFriend)
+            IconButton(
+              icon: Icon(
+                (_clawcodeSessionId ?? '').trim().isNotEmpty ? Icons.terminal : Icons.terminal_outlined,
+              ),
+              tooltip: (_clawcodeSessionId ?? '').trim().isNotEmpty
+                  ? 'Claw-Code session on — tap to change'
+                  : 'Claw-Code — pick workspace session',
+              color: (_clawcodeSessionId ?? '').trim().isNotEmpty ? Theme.of(context).colorScheme.primary : null,
+              onPressed: _showClawcodeSessionPicker,
             ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
@@ -2914,6 +3120,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 case 'sync_kb':
                   await _syncKnowledgeBase();
                   break;
+                case 'clawcode_bind':
+                  await _showClawcodeSessionPicker();
+                  break;
                 default:
                   break;
               }
@@ -2926,6 +3135,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ...(Platform.isMacOS || Platform.isWindows || Platform.isLinux
                   ? [const PopupMenuItem(value: 'run', child: Text('Run command'))]
                   : []),
+              if (_isClawcodePresetFriend) ...[
+                const PopupMenuDivider(),
+                PopupMenuItem(
+                  value: 'clawcode_bind',
+                  child: Text(
+                    (_clawcodeSessionId ?? '').trim().isEmpty ? 'Claw-Code: bind session…' : 'Claw-Code: change session…',
+                  ),
+                ),
+              ],
               const PopupMenuItem(value: 'speak', child: Text('Speak last reply')),
               const PopupMenuItem(value: 'stop_tts', child: Text('Stop speaking')),
               const PopupMenuItem(value: 'sync_kb', child: Text('Sync knowledge base')),

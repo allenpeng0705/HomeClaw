@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from base.util import Util
 from base.base import PromptRequest, AsyncResponse, ChannelType, ContentType
 from base.BaseChannel import ChannelMetadata, BaseChannel
+from channels.clawcode_binding import merge_clawcode_binding_into_prompt_request, try_clawcode_command_reply
 
 
 
@@ -92,6 +93,15 @@ class Channel(BaseChannel):
 
         logger.debug(f"msg_id: {msg.id}, msg sender: {name}, roomid: {roomid}, action: {action}, text: {text[:64] if text else ''}")
         try:
+            wechat_owner = "wechat:" + str(name)
+            if action == "respond" and text:
+                _cc = try_clawcode_command_reply(wechat_owner, text)
+                if _cc is not None:
+                    try:
+                        self.wcf.send_text(_cc, name)
+                    except Exception as e:
+                        logger.error("WeChat clawcode command reply: {}", e)
+                    return
             request = PromptRequest(
                 request_id=str(msg.id),
                 channel_name=self.metadata.name,
@@ -99,7 +109,7 @@ class Channel(BaseChannel):
                 channelType=ChannelType.IM.value,
                 user_name=name,
                 app_id='wechat',
-                user_id='wechat:' + name,
+                user_id=wechat_owner,
                 contentType=ContentType.TEXTWITHIMAGE.value if images else ContentType.TEXT.value,
                 text=text,
                 action=action,
@@ -111,6 +121,8 @@ class Channel(BaseChannel):
                 files=None,
                 timestamp=datetime.now().timestamp()
             )
+            if action == "respond":
+                merge_clawcode_binding_into_prompt_request(request)
             self.syncTransferTocore(request=request)
         except Exception as e:
             logger.exception(e)

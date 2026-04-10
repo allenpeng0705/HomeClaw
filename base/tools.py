@@ -44,10 +44,59 @@ class ToolContext:
     request: Optional[Any] = None  # PromptRequest if available
     # Mutable session for browser tools: {"browser", "page"} so navigate/snapshot/click/type share one page per request
     browser_session: Dict[str, Any] = field(default_factory=dict)
+    # Optional: set by Core from core.yml tool_policy for execute_async gate (see base.tool_permissions).
+    permission_context: Optional[Any] = None
 
 
 # Executor: async (arguments: dict, context: ToolContext) -> str
 ToolExecutor = Callable[[Dict[str, Any], ToolContext], Awaitable[str]]
+
+
+def filter_openai_tools_for_llm(
+    openai_tools: Optional[List[Dict[str, Any]]],
+    allowlist: Optional[List[str]],
+    *,
+    always_include_discovery: bool = True,
+) -> Optional[List[Dict[str, Any]]]:
+    """
+    When allowlist is non-empty, keep only those tool names (OpenAI-style descriptors).
+    Optionally always include list_available_tools and search_available_tools for discovery.
+    """
+    if not openai_tools or not isinstance(openai_tools, list):
+        return openai_tools
+    if not allowlist:
+        return openai_tools
+    names = {str(x).strip() for x in allowlist if x is not None and str(x).strip()}
+    if not names:
+        return openai_tools
+    if always_include_discovery:
+        names.add("list_available_tools")
+        names.add("search_available_tools")
+    out = [t for t in openai_tools if isinstance(t, dict) and ((t.get("function") or {}).get("name") or "") in names]
+    return out if out else openai_tools
+
+
+def strip_deferred_tools_from_openai_list(
+    openai_tools: Optional[List[Dict[str, Any]]],
+    defer_names: Optional[List[str]],
+) -> Optional[List[Dict[str, Any]]]:
+    """
+    Remove tool names in defer_names from the LLM-facing OpenAI-style tool list.
+    Execution registry is unchanged; use list_available_tools / search_available_tools to surface deferred names.
+    """
+    if not openai_tools or not isinstance(openai_tools, list):
+        return openai_tools
+    if not defer_names or not isinstance(defer_names, (list, tuple)):
+        return openai_tools
+    d = {str(x).strip() for x in defer_names if x is not None and str(x).strip()}
+    if not d:
+        return openai_tools
+    out = [
+        t
+        for t in openai_tools
+        if isinstance(t, dict) and ((t.get("function") or {}).get("name") or "") not in d
+    ]
+    return out if out else openai_tools
 
 
 def _truncate_description(desc: str, max_chars: int) -> str:
@@ -81,6 +130,9 @@ class ToolDefinition:
     parameters: Dict[str, Any]  # JSON Schema for the tool's arguments (e.g. {"type": "object", "properties": {...}})
     execute_async: ToolExecutor
     short_description: Optional[str] = None  # One-line cue for local LLMs; used when description_max_chars > 0
+    # Policy hooks (optional). Used when core.yml tool_policy.default_mode=allow_read_restrict_write.
+    risk_tier: Optional[str] = None  # read | write | network | exec | user_data; unset → treated as read
+    requires_confirmation: bool = False  # When true, blocked in allow_read_restrict_write (before risk_tier check)
 
     def to_openai_function(self, max_description_chars: Optional[int] = None) -> Dict[str, Any]:
         """OpenAI/OpenAI-compatible function descriptor for chat API. When max_description_chars > 0, use short_description or truncate for local LLM."""
@@ -156,6 +208,42 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if not tool:
             raise KeyError(f"Unknown tool: {name}")
+        try:
+            from base.tool_permissions import evaluate_tool_permission
+
+            perm_ctx = getattr(context, "permission_context", None)
+            pr = evaluate_tool_permission(tool, arguments if isinstance(arguments, dict) else {}, perm_ctx)
+            if not pr.allowed:
+                args_redacted = redact_params_for_log(arguments) if isinstance(arguments, dict) else arguments
+                logger.info("[TOOL_CALL] name={} DENIED reason={}", name, pr.reason_code)
+                _trace_emit_event(
+                    event_type="permission_denied",
+                    component="tool_registry",
+                    summary=f"permission denied: {name}",
+                    details={
+                        "tool_name": name,
+                        "reason_code": pr.reason_code,
+                        "source": "policy",
+                        "arguments": args_redacted,
+                    },
+                )
+                try:
+                    req = getattr(context, "request", None)
+                    md = getattr(req, "request_metadata", None) if req is not None else None
+                    pq = md.get("progress_queue") if isinstance(md, dict) else None
+                    if pq is not None and hasattr(pq, "put_nowait"):
+                        pq.put_nowait(
+                            {
+                                "event": "progress",
+                                "tool": name,
+                                "message": f"Permission denied ({pr.reason_code})",
+                            }
+                        )
+                except Exception:
+                    pass
+                return f"Error: {pr.message}"
+        except Exception as _perm_e:
+            logger.debug("Tool permission check failed (allowing execution): {}", _perm_e)
         # [TOOL_CALL] / [TOOL_RESULT]: grep these in logs to see only tool/skill invocations and outcomes.
         args_redacted = redact_params_for_log(arguments) if isinstance(arguments, dict) else arguments
         logger.info("[TOOL_CALL] name={} parameters={}", name, args_redacted)

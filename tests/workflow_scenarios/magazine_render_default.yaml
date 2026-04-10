@@ -1,0 +1,4 @@
+id: magazine_render_default
+contract: magazine_render_default
+prompt: "Magazine render layout preview for this newsletter issue."
+description: "Magazine-render skill trace."

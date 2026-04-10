@@ -1,0 +1,4 @@
+id: summarize_skill_url_default
+contract: summarize_skill_url_default
+prompt: "Summarize this article url https://example.com/page for me."
+description: "summarize-1.0.0 skill trace with URL-shaped prompt."

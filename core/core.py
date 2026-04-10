@@ -576,9 +576,14 @@ class Core(CoreInterface):
             sem = Util()._get_llm_semaphore(mtype)
             async with sem:
                 async with aiohttp.ClientSession() as session:
+                    _u = Util()
                     if mtype == "ollama":
                         # Ollama: POST /api/embed with {"model": name, "input": list of strings}
-                        embedding_url = "http://" + str(host) + ":" + str(port) + "/api/embed"
+                        _panda_oll = _u.panda_ollama_embed_url()
+                        if _panda_oll:
+                            embedding_url = _panda_oll
+                        else:
+                            embedding_url = "http://" + str(host) + ":" + str(port) + "/api/embed"
                         body = {"model": path_or_name or request.model, "input": getattr(request, "input", []) or []}
                         if not body["input"]:
                             return []
@@ -593,7 +598,11 @@ class Core(CoreInterface):
                             emb = response_json["embeddings"]
                             return emb if isinstance(emb, list) else []
                     # OpenAI-compatible /v1/embeddings (llama.cpp, LiteLLM)
-                    embedding_url = "http://" + str(host) + ":" + str(port) + "/v1/embeddings"
+                    _panda_emb = _u.panda_openai_embedding_url()
+                    if _panda_emb:
+                        embedding_url = _panda_emb
+                    else:
+                        embedding_url = "http://" + str(host) + ":" + str(port) + "/v1/embeddings"
                     request_json = request.model_dump_json()
                     async with session.post(
                         embedding_url,
@@ -903,6 +912,28 @@ class Core(CoreInterface):
                     ContentType.VIDEO,
                 )
                 if processable:
+                    try:
+                        from core.clawcode_store import prepare_prompt_request_clawcode
+
+                        _cc_err = prepare_prompt_request_clawcode(request)
+                    except Exception as _cc_pe:
+                        logger.debug("prepare_prompt_request_clawcode skipped: {}", _cc_pe)
+                        _cc_err = None
+                    if _cc_err:
+                        err_resp = AsyncResponse(
+                            request_id=request.request_id,
+                            request_metadata=request.request_metadata or {},
+                            host=request.host,
+                            port=request.port,
+                            from_channel=request.channel_name,
+                            response_data={
+                                "text": self._format_outbound_text(_cc_err),
+                                "format": "plain",
+                                "error": True,
+                            },
+                        )
+                        await self.response_queue.put(err_resp)
+                        continue
                     txt = (request.text or "")[:50]
                     if len(request.text or "") > 50:
                         txt += "..."
@@ -950,6 +981,14 @@ class Core(CoreInterface):
                         req_meta["user_id"] = (getattr(request, "user_id", None) or getattr(request, "system_user_id", None) or "").strip() or "companion"
                     async_resp: AsyncResponse = AsyncResponse(request_id=request.request_id, request_metadata=req_meta, host=request.host, port=request.port, from_channel=request.channel_name, response_data=resp_data)
                     await self.response_queue.put(async_resp)
+                    try:
+                        from core import clawcode_store as _cc_rec
+
+                        _cs_done = str((request.request_metadata or {}).get("clawcode_session_id") or "").strip()
+                        if _cs_done:
+                            _cc_rec.record_clawcode_turn_finished(_cs_done, request.request_id, request=request)
+                    except Exception:
+                        pass
                 else:
                     # Unsupported content type (e.g. HTML, OTHER)
                     pass
@@ -1763,13 +1802,21 @@ class Core(CoreInterface):
                 )
             if answer is None or (isinstance(answer, str) and not answer.strip()):
                 answer = "I'm sorry, I don't have the answer to that question. Please try asking a different question or restart your system."
+            try:
+                md_cc = getattr(request, "request_metadata", None)
+                if isinstance(md_cc, dict) and str(md_cc.get("clawcode_session_id") or "").strip():
+                    md_cc["_clawcode_last_user_text"] = human_message
+                    if isinstance(answer, str):
+                        md_cc["_clawcode_last_assistant_text"] = answer
+            except Exception:
+                pass
             return answer
         except Exception as e:
             logger.exception(e)
             return "Something went wrong on our side. Please try again. If it keeps happening, the service may be temporarily unavailable."
 
 
-    def prompt_template(self, section: str, prompt_name: str) -> List[Dict] | None:
+    def prompt_template(self, section: str, prompt_name: str) -> Optional[List[Dict]]:
         try:
             main_language = Util().main_llm_language()
             current_path = os.path.dirname(os.path.abspath(__file__))
@@ -2271,7 +2318,7 @@ class Core(CoreInterface):
                                      grammar: str=None,
                                      tools: Optional[List[Dict]] = None,
                                      tool_choice: str = "auto",
-                                     llm_name: str = None) -> str | None:
+                                     llm_name: str = None) -> Optional[str]:
         try:
             resp = await Util().openai_chat_completion(messages, grammar, tools, tool_choice, llm_name=llm_name)
             return resp
@@ -2324,7 +2371,7 @@ class Core(CoreInterface):
             return matches[0]
         return response
 
-    async def openai_completion(self, prompt: str, llm_name: str = "") -> str | None:
+    async def openai_completion(self, prompt: str, llm_name: str = "") -> Optional[str]:
         try:
             llm = Util().get_llm(llm_name)
             model_host = llm.host
@@ -2342,7 +2389,12 @@ class Core(CoreInterface):
             }
             data_json = json.dumps(data, ensure_ascii=False).encode('utf-8')
 
-            completion_api_url = 'http://' + model_host + ':' + str(model_port) + '/v1/completions'
+            _u = Util()
+            _panda_comp = _u.panda_openai_completions_url()
+            if _panda_comp:
+                completion_api_url = _panda_comp
+            else:
+                completion_api_url = 'http://' + model_host + ':' + str(model_port) + '/v1/completions'
             logger.debug(f"completion_api_url: {completion_api_url}")
             async with aiohttp.ClientSession() as session:
                 async with session.post(completion_api_url, headers=headers, data=data_json) as resp:

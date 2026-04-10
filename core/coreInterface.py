@@ -35,7 +35,7 @@ class CoreInterface(ABC):
                                      grammar: str=None,
                                      tools: Optional[List[Dict]] = None,
                                      tool_choice: str = "auto", 
-                                     llm_name: str = None) -> str | None:  
+                                     llm_name: str = None) -> Optional[str]:
         pass
 
     @abstractmethod

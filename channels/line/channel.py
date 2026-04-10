@@ -23,6 +23,7 @@ import yaml
 from base.util import Util
 from base.BaseChannel import ChannelMetadata, BaseChannel
 from base.base import PromptRequest, AsyncResponse, ChannelType, ContentType
+from channels.clawcode_binding import merge_clawcode_binding_into_prompt_request, try_clawcode_command_reply
 
 from .download import download_line_media
 from .send import send_line_text, send_line_messages
@@ -196,6 +197,15 @@ class Channel(BaseChannel):
 
         if msg_type == "text":
             text = message.get("text", "") or ""
+            _cc_l = try_clawcode_command_reply(line_user_id, text)
+            if _cc_l is not None:
+                send_line_messages(
+                    reply_token if reply_token else line_user_id,
+                    [{"type": "text", "text": _cc_l[:5000]}],
+                    token,
+                    is_reply_token=bool(reply_token),
+                )
+                return
         elif msg_type in ("image", "video", "audio", "file") and msg_id and token:
             path = download_line_media(msg_id, token, LINE_MEDIA_MAX_BYTES)
             if path and os.path.isfile(path):
@@ -226,6 +236,7 @@ class Channel(BaseChannel):
             reply_token=reply_token,
             request_metadata=request_metadata,
         )
+        merge_clawcode_binding_into_prompt_request(req)
         try:
             self.syncTransferTocore(request=req)
         except Exception as e:

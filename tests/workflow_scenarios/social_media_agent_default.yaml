@@ -1,0 +1,4 @@
+id: social_media_agent_default
+contract: social_media_agent_default
+prompt: "Social media agent schedule cross platform post for Monday."
+description: "social-media-agent skill trace."

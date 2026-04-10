@@ -150,6 +150,8 @@ def get_websocket_handler(core):
                         location=(data.get("location") or "").strip() or None,
                         cursor_agent_yolo=data.get("cursor_agent_yolo"),
                         claude_skip_permissions=data.get("claude_skip_permissions"),
+                        tool_profile=(data.get("tool_profile") or "").strip() or None,
+                        clawcode_session_id=(data.get("clawcode_session_id") or "").strip() or None,
                     )
                 except Exception as e:
                     await websocket.send_json({"error": str(e), "text": ""})

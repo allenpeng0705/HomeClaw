@@ -42,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from base.util import Util
 from base.BaseChannel import ChannelMetadata, BaseChannel
 from base.base import PromptRequest, AsyncResponse, ChannelType, ContentType
-
+from channels.clawcode_binding import merge_clawcode_binding_into_prompt_request, try_clawcode_command_reply
 
 
 channel_app: FastAPI = FastAPI()  
@@ -173,6 +173,14 @@ class Channel(BaseChannel):
             else:
                 contentType = ContentType.TEXT.value
 
+            _cc_w = try_clawcode_command_reply(sender_str, text)
+            if _cc_w is not None:
+                try:
+                    client.send_message(chat, _cc_w)
+                except Exception as _cc_we:
+                    logger.debug("WhatsApp clawcode command reply failed: {}", _cc_we)
+                return {"message": "ok", "response": _cc_w}
+
             request = PromptRequest(
                 request_id=msg_id,
                 channel_name=self.metadata.name,
@@ -193,6 +201,7 @@ class Channel(BaseChannel):
                 timestamp=datetime.now().timestamp(),
                 reply_accepts=["text", "image"],
             )
+            merge_clawcode_binding_into_prompt_request(request)
             self.syncTransferTocore(request=request)
 
         except Exception as e:

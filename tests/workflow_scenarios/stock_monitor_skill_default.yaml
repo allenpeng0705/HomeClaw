@@ -1,0 +1,4 @@
+id: stock_monitor_skill_default
+contract: stock_monitor_skill_default
+prompt: "Check my stock monitor watchlist for alerts today."
+description: "Stock monitor skill routing (before generic stock branch)."
