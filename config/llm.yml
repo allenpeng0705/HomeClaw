@@ -55,7 +55,7 @@ llama_cpp:
   # Self-extend (long context with less slowdown): grp_attn_n = expansion factor (e.g. 4 for 4k→16k), grp_attn_w = window (e.g. 1024).
   #grp_attn_n: 4
   #grp_attn_w: 1024
-  qwen_mode: qwen35
+  # qwen_mode: qwen35
   # stop: null   # optional; fallback when completion.stop not set. e.g. ["<|im_end|>", "</s>"]. For Qwen see completion.stop.
   # ——— Qwen / Qwen 3.5 (single entry point: all Qwen settings here only) ———
   # qwen_mode: "qwen3" | "qwen35" — applies to main_llm when set here. tool_selection_llm and vision_llm use root unless overridden in llama_cpp.tool_selection / llama_cpp.vision.
@@ -66,7 +66,8 @@ llama_cpp:
   # qwen35_grammar_path: "config/grammars/qwen35_tools.gbnf"
   # Optional when qwen_mode: qwen35: set to true to enable GBNF grammar. Default: false (we parse both JSON and XML <tool_call> from prompt + stop).
   # When true: we inject tool definitions into the system prompt and do not send the tools array, so grammar can be used with tools (llama-server would return 400 if both were sent).
-  qwen35_use_grammar: true
+  # If function_calling is also true, llama-server still rejects GBNF grammar (400); Core will skip grammar and use native tools only unless you set function_calling: false.
+  # qwen35_use_grammar: true
   # ——— Qwen 3.5 performance (reasoning models): optional server defaults. Restart server after changing.
   # min_p: 0.05        # min-p sampling; reasoning models need a little room (0.05); 0 = disabled. Passed as --min-p to llama-server.
   # temp: 0.6          # for Qwen 3.5: 0.6 recommended (temp 0 hurts reasoning; too high breaks tool calls). Override in completion.temperature per-request.
@@ -77,8 +78,8 @@ llama_cpp:
   # • reasoning_budget: -1 (recommended): Fewer truncation issues; we remove </think> from stop so the answer after <think> is not cut off. Downside: some servers put the full reply in reasoning_content and leave content empty — we use reasoning_content as the reply and strip <think>, so empty-content issues are reduced. If you still see empty replies, set qwen_always_use_fallback_for_empty: true under completion (or tools_config).
   # • reasoning_budget: 0: Thinking disabled; server is asked to put output in content. Downside: with 0 some setups produce more malformed tool output or truncation. Prefer -1 unless you must disable <think>.
   # • disable_thinking_when_tools: default false. When false we do NOT send enable_thinking: false on tool turns (server keeps thinking on). This restores the previous stable behavior with Qwen VL (tool_calls work, no truncation). Set to true in completion or llama_cpp only if you see empty content with reasoning_content full (e.g. 4B).
-  reasoning_budget: 0   # -1 = allow thinking (recommended); 0 = disable <think> (may increase malformed tool calls or truncation)
-  enable_thinking: false
+  # reasoning_budget: 0   # -1 = allow thinking (recommended); 0 = disable <think> (may increase malformed tool calls or truncation)
+  # enable_thinking: false
   
   # ——— Embedding server: fully separate from main model. Only the keys below are used.
   # Uncomment and set any optional key as needed. Defaults when omitted: ctx_size 0, threads 4, n_gpu_layers 20, verbose false.
@@ -431,7 +432,7 @@ cloud_models:
 # If the local llama.cpp server is not running (e.g. connection refused to 127.0.0.1:5022), use main_llm_mode: cloud so only cloud is used, or start the local server.
 #main_llm: local_models/main_vl_model_4B
 main_llm_mode: mix
-main_llm_local: local_models/Qwen3.5-9B-Q5_K_M
+main_llm_local: local_models/main_vl_model_4B
 main_llm_cloud: cloud_models/DeepSeek-Chat
 # ——— Stability: if tool turns often fail (empty content, 500s, cloud errors), set use_tool_selection_llm: false so main_llm does every turn, or set tool_selection_llm to the same as main_llm_local (e.g. 8B) so one model handles both "which tool" and "after tool result".
 # tool_selection_llm: optional. When use_tool_selection_llm is true, every LLM call in the tool loop uses this model (tool selection + parameter extraction). Good for models fine-tuned on function calling (e.g. Qwen3-4B-toolcalling). When not used (default): main_llm handles everything — all tool selection, parameter extraction, and final replies.
@@ -660,6 +661,9 @@ main_llm_port: 5023
 # Cloud (LiteLLM) proxy: used for cloud-only and mix when route=cloud. Run LiteLLM on this host/port (e.g. litellm --port 14005).
 cloud_llm_host: 127.0.0.1
 cloud_llm_port: 14005
+# Optional: HTTP path for POST chat completions (OpenAI-style). Defaults /v1/chat/completions. Use e.g. /cloud/v1/chat/completions when a gateway routes cloud by path.
+main_llm_chat_path: /v1/chat/completions
+cloud_llm_chat_path: /cloud/v1/chat/completions
 
 # Vision sidecar: when vision_llm is set (e.g. local_models/small_vision_2B), Core uses this host/port to call it for image description.
 # Run the vision model server on this port so Core always knows where to reach it (or use on-demand below).
@@ -669,3 +673,28 @@ vision_llm_start_on_demand: true   # default true: do not start vision at Core s
 vision_llm_idle_stop_seconds: 300 # after last vision use, stop the server after this many seconds (0 = stop as soon as the request finishes). Only when vision_llm_start_on_demand is true.
 # Optional: resize images before sending to vision sidecar (max width or height). 0 = use completion.image_max_dimension only. E.g. 1024 for small vision models.
 vision_image_max_dimension: 1024
+
+# ——— Panda Gateway integration ———
+# When enabled, Core will route LLM requests through Panda Gateway instead of directly to LLM servers
+# This provides caching, rate limiting, and observability benefits
+panda:
+  # Enable Panda Gateway integration
+  enabled: false
+  # Panda Gateway host and port
+  host: 127.0.0.1
+  port: 8081
+  # Path prefixes for different LLM types
+  paths:
+    # Must match Panda route path_prefix + OpenAI suffix /completions (POST .../chat/completions).
+    # Example Panda routes: path_prefix /v1/chat -> local llama:5023; path_prefix /cloud/v1/chat -> LiteLLM (e.g. backend_base http://127.0.0.1:14005/v1/chat).
+    # Wrong: a single /v1/chat route that appends the whole cloud path → /v1/chat/cloud/v1/chat/completions (404). Use separate path_prefix entries as in Panda config.
+    main_llm: /v1/chat/completions
+    embedding: /v1/embeddings
+    cloud_llm: /cloud/v1/chat/completions
+  # Additional Panda-specific settings
+  timeout_seconds: 120
+  # Enable/disable caching for different LLM types
+  caching:
+    main_llm: true
+    embedding: true
+    cloud_llm: true
