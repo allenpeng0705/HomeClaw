@@ -163,7 +163,7 @@ completion:
 completion_vision:
   max_tokens: 2048           # vision replies often shorter; omit to use completion.max_tokens
   # cloud_max_tokens_cap: 8192
-  temperature: 0.3           # slightly lower for concise image answers
+  temperature: 0.2           # slightly lower for concise image answers
   top_p: 1.0
   presence_penalty: 0.4
   frequency_penalty: 0.3
