@@ -1314,7 +1314,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
     _startLoadingStatusTimer();
     _scrollToBottom();
-    _persistChatHistory();
+    // Persist the optimistic user bubble before any outbound request so Hive matches Core append order
+    // (assistant is appended after inbound returns) and reloads cannot race an incomplete save.
+    await _persistChatHistory();
+    if (!mounted) {
+      _stopLoadingStatusTimer();
+      return;
+    }
     // User-to-user: send via POST /api/user-message; no AI reply.
     if (isUserToUserSend) {
       try {
@@ -1529,14 +1535,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ? imageList.whereType<String>().where((s) => s.startsWith('data:image/')).toList()
             : <String>[];
         _lastReply = reply;
-        setState(() {
-          _messages.add(MapEntry(reply.isEmpty ? '(no reply)' : reply, false));
-          _messageImages.add(imageDataUrls.isEmpty ? null : imageDataUrls);
-          _messageAudios.add(null);
-          _messageVideos.add(null);
-          _messageFileLabels.add(null);
-          _messageFileRefs.add(null);
-        });
+        // [core_service] already persisted the reply and emitted chat_history_updated; that can run
+        // _loadChatHistory() before we return. Do not append the assistant again or the same reply shows twice.
+        _loadChatHistory();
+        final rtext = reply.isEmpty ? '(no reply)' : reply;
+        if (mounted && _messages.isNotEmpty && _messages.last.value) {
+          setState(() {
+            _messages.add(MapEntry(rtext, false));
+            _messageImages.add(imageDataUrls.isEmpty ? null : imageDataUrls);
+            _messageAudios.add(null);
+            _messageVideos.add(null);
+            _messageFileLabels.add(null);
+            _messageFileRefs.add(null);
+          });
+        }
         _scrollToBottom(force: true);
         await _persistChatHistory();
         final preview = reply.isEmpty ? 'No reply' : (reply.length > 80 ? '${reply.substring(0, 80)}…' : reply);

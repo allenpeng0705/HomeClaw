@@ -46,6 +46,9 @@ class ToolContext:
     browser_session: Dict[str, Any] = field(default_factory=dict)
     # Optional: set by Core from core.yml tool_policy for execute_async gate (see base.tool_permissions).
     permission_context: Optional[Any] = None
+    # Optional: concatenated recent **user** message texts (from the in-flight OpenAI-style message list) so tools
+    # (e.g. document_read) can infer filenames/paths from prior turns without reading the full model context.
+    recent_user_messages_text: Optional[str] = None
 
 
 # Executor: async (arguments: dict, context: ToolContext) -> str

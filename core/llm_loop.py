@@ -7,6 +7,7 @@ import asyncio
 import json
 import re
 import time
+import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -179,7 +180,11 @@ def _is_pending_user_action_cancel(text: str) -> bool:
     return any(p in raw for p in ("不要", "不用", "算了", "取消", "别生成"))
 
 
-from tools.builtin import close_browser_session, _daily_brief_document_layout_from_user_query
+from tools.builtin import (
+    close_browser_session,
+    _daily_brief_document_layout_from_user_query,
+    _snippet_recent_user_messages_for_file_inference,
+)
 
 # System prompt: per-user standard dirs + global share.
 _PRIVATE_STANDARD_FOLDERS_PROMPT = ", ".join(sorted(STANDARD_USER_SANDBOX_SUBDIRS))
@@ -428,6 +433,16 @@ except (ImportError, ModuleNotFoundError):
         remind_me_needs_clarification as _remind_me_needs_clarification,
         remind_me_clarification_question as _remind_me_clarification_question,
     )
+
+
+def _normalize_tool_path_whitespace(p: str) -> str:
+    """Collapse accidental spaces around slashes in LLM-generated file paths."""
+    s = (p or "").strip()
+    if not s:
+        return s
+    s = re.sub(r"/\s+", "/", s)
+    s = re.sub(r"\s+/", "/", s)
+    return s
 
 
 async def _strict_fallback_run_daily_brief_magazine(registry: Any, context: Any, query: str) -> Optional[str]:
@@ -3752,6 +3767,15 @@ async def answer_from_memory(
                 pass
             for _ in (range(max_tool_rounds) if _planner_executor_final_response is None else []):
                 try:
+                    context.recent_user_messages_text = _snippet_recent_user_messages_for_file_inference(
+                        current_messages
+                    )
+                except Exception:
+                    try:
+                        context.recent_user_messages_text = None
+                    except Exception:
+                        pass
+                try:
                     _al_tok = getattr(Util().get_core_metadata(), "agent_limits", None) or {}
                     _max_est = max(0, int(_al_tok.get("max_estimated_tokens_per_turn", 0) or 0))
                 except (TypeError, ValueError):
@@ -4148,6 +4172,63 @@ async def answer_from_memory(
                         "LLM returned no tool_calls (content={})",
                         _truncate_for_log(content_str or "(empty)", 120),
                     )
+                    # strict_fallback: user message contained an explicit sandbox-relative path (see _document_read_forced_path)
+                    # but the model returned prose only (no tool_calls). Run document_read so the next round has real content.
+                    try:
+                        _meta_sdr = Util().get_core_metadata()
+                        _tc_sdr = getattr(_meta_sdr, "tools_config", None) or {}
+                        _strict_fb_sdr = bool(_tc_sdr.get("strict_fallback", True))
+                    except Exception:
+                        _strict_fb_sdr = True
+                    if (
+                        _strict_fb_sdr
+                        and registry
+                        and any(t.name == "document_read" for t in (registry.list_tools() or []))
+                        and _document_read_forced_path
+                        and last_tool_name != "document_read"
+                    ):
+                        try:
+                            _path_auto = (_document_read_forced_path or "").strip()
+                            if _path_auto:
+                                _component_log(
+                                    "tools",
+                                    "strict_fallback: model returned no tool_calls; invoking document_read for user-specified path",
+                                )
+                                if current_messages and isinstance(current_messages[-1], dict) and (current_messages[-1].get("role") or "").strip() == "assistant":
+                                    current_messages.pop()
+                                doc_result = await registry.execute_async("document_read", {"path": _path_auto}, context)
+                                _document_read_forced_path = None
+                                _tcid = f"call_{uuid.uuid4().hex[:24]}"
+                                current_messages.append(
+                                    {
+                                        "role": "assistant",
+                                        "content": None,
+                                        "tool_calls": [
+                                            {
+                                                "id": _tcid,
+                                                "type": "function",
+                                                "function": {
+                                                    "name": "document_read",
+                                                    "arguments": json.dumps({"path": _path_auto}),
+                                                },
+                                            }
+                                        ],
+                                    }
+                                )
+                                current_messages.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": _tcid,
+                                        "content": doc_result if isinstance(doc_result, str) else str(doc_result),
+                                    }
+                                )
+                                last_tool_name = "document_read"
+                                last_tool_result_raw = doc_result if isinstance(doc_result, str) else str(doc_result)
+                                last_tool_args = {"path": _path_auto}
+                                response = None
+                                continue
+                        except Exception as _e_sdr:
+                            logger.debug("strict_fallback document_read failed: {}", _e_sdr)
                     # After a successful daily-brief / fetch-vmprint run_skill, local models often emit a follow-up with
                     # fractured <tool_call> or “[tool call]” prose + save_result_page fantasy. Parser drops invalid run_skill;
                     # prefer the real digest / preview JSON instead of an apology or fake tool narrative.
@@ -5309,6 +5390,22 @@ async def answer_from_memory(
                             args = _norm_args
                     except Exception:
                         pass
+
+                    _doc_path_norm = ""
+                    _last_doc_path_norm = ""
+                    if name == "document_read" and isinstance(args, dict):
+                        _doc_path_norm = _normalize_tool_path_whitespace(str(args.get("path") or ""))
+                    if last_tool_name == "document_read" and isinstance(last_tool_args, dict):
+                        _last_doc_path_norm = _normalize_tool_path_whitespace(str(last_tool_args.get("path") or ""))
+                    _skip_duplicate_document_read = (
+                        name == "document_read"
+                        and _doc_path_norm
+                        and _doc_path_norm == _last_doc_path_norm
+                        and isinstance(last_tool_result_raw, str)
+                        and last_tool_result_raw.strip()
+                        and not last_tool_result_raw.strip().lower().startswith("error:")
+                        and not _tool_result_looks_like_error(last_tool_result_raw)
+                    )
                     # Phase 3.3: optional verification — ask LLM if tool matches user intent before executing (e.g. exec, file_write).
                     _tool_verified_skip = False
                     try:
@@ -5339,6 +5436,15 @@ async def answer_from_memory(
                     if _skip_duplicate_run_skill:
                         result = "This skill was already run in this conversation. Use the results above or call another tool (e.g. save_result_page)."
                         logger.info("Skipping duplicate run_skill({}); already executed this request", _skill_key)
+                    elif _skip_duplicate_document_read:
+                        result = (
+                            "Duplicate document_read: this path was already read successfully in the previous tool message. "
+                            "Do not call document_read again with the same path. Use that content to finish the task "
+                            "(e.g. save_result_page with HTML slides, or put HTML in your assistant message). "
+                            "【重复读取】相同路径已成功读取，请勿再次 document_read；请用已有正文继续完成任务。"
+                        )
+                        logger.info("Skipping duplicate document_read({}); already read successfully this request", _doc_path_norm)
+                        _executed_any_this_batch = True
                     elif _remind_me_skip_repeat:
                         try:
                             _qtxt = (query or "").strip()

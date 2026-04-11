@@ -5,7 +5,7 @@ File serving and HTML generation for Core.
   Links use core_public_url (top-level in config). Tokens are signed with auth_api_key.
 - When auth_api_key is unset, file links use unsigned dev mode: GET /files/out?scope=...&path=...&dev_unsigned=1
   (or static style with ?dev_unsigned=1). Insecure — anyone who can reach Core can request sandbox paths by URL.
-- build_file_view_link(): single place to build file view URLs; use it everywhere for stable, consistent links (token-first, 7-day expiry). Token format is base64(payload)+hex(sig) with no separator so links stay valid when copied or linkified.
+- build_file_view_link(): single place to build file view URLs; use it everywhere for stable, consistent links (token-first, 7-day expiry). Token format is base64(payload)+hex(sig) with no separator so links stay valid when copied or linkified. Query values use percent-encoding (quote); final URLs pass normalize_public_url_for_clients() so no literal whitespace remains (clickable in markdown/chat).
 - generate_result_html(): build HTML from title/content for save_result_page tool (saves to user output folder).
 - When a path is a directory, /files/out returns an HTML listing with links to files/subdirs.
 
@@ -20,10 +20,31 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 from urllib.parse import quote, unquote, urlparse
 
 from loguru import logger
+
+
+def normalize_public_url_for_clients(url: str) -> str:
+    """
+    Remove every whitespace character (space, tab, newline, NBSP) so the string is one URL token:
+    markdown autolinks, chat UIs, and SMS linkifiers do not break mid-URL. Paths and query values built
+    with ``quote()`` use %20 for spaces; this only strips *accidental* literal spaces (e.g. config/proxy typos).
+    Never raises.
+    """
+    try:
+        if not url or not isinstance(url, str):
+            return ""
+        return "".join(url.split())
+    except Exception:
+        return ""
+
+
+def _normalize_link_base_url(raw: Optional[str]) -> str:
+    """Strip accidental whitespace in public base URLs (core_public_url, X-Forwarded-Host). Never raises."""
+    return normalize_public_url_for_clients((raw or "").strip()).rstrip("/")
+
 
 # Default expiry for file view links (7 days). Override via config: file_view_link_expiry_sec (seconds or e.g. "7d").
 DEFAULT_FILE_VIEW_LINK_EXPIRY_SEC = 7 * 86400
@@ -190,7 +211,101 @@ def verify_file_access_token(token: str) -> Optional[Tuple[str, str]]:
         return None
 
 
-def build_file_view_link(scope: str, path: str) -> Tuple[Optional[str], Optional[str]]:
+def infer_public_base_url_from_http_request(request: Any) -> Optional[str]:
+    """
+    Derive http(s) base URL from a Starlette/FastAPI Request (Host, X-Forwarded-Host, X-Forwarded-Proto).
+    Use for file view links so they match how the client reached Core (tunnel, reverse proxy, LAN).
+    Never raises.
+    """
+    try:
+        if request is None:
+            return None
+        hdr = getattr(request, "headers", None)
+        if hdr is not None:
+            fwd_host = (hdr.get("x-forwarded-host") or hdr.get("X-Forwarded-Host") or "").strip()
+            fwd_proto = (hdr.get("x-forwarded-proto") or hdr.get("X-Forwarded-Proto") or "").strip().lower()
+        if fwd_host:
+            host = fwd_host.split(",")[0].strip()
+            scheme = fwd_proto if fwd_proto in ("http", "https") else str(getattr(request.url, "scheme", None) or "http")
+            if host:
+                return _normalize_link_base_url(f"{scheme}://{host}")
+        bu = getattr(request, "base_url", None)
+        if bu is not None and str(bu).strip():
+            return _normalize_link_base_url(str(bu))
+    except Exception as e:
+        logger.debug("infer_public_base_url_from_http_request failed: {}", e)
+    return None
+
+
+def infer_public_base_url_from_websocket(websocket: Any) -> Optional[str]:
+    """Derive http(s) base from a WebSocket (wss -> https). Same goal as HTTP inbound. Never raises."""
+    try:
+        if websocket is None:
+            return None
+        hdr = getattr(websocket, "headers", None)
+        if hdr is not None:
+            fwd_host = (hdr.get("x-forwarded-host") or hdr.get("X-Forwarded-Host") or "").strip()
+            fwd_proto = (hdr.get("x-forwarded-proto") or hdr.get("X-Forwarded-Proto") or "").strip().lower()
+            if fwd_host:
+                host = fwd_host.split(",")[0].strip()
+                scheme = fwd_proto if fwd_proto in ("http", "https") else "https"
+                if host:
+                    return _normalize_link_base_url(f"{scheme}://{host}")
+        u = getattr(websocket, "url", None)
+        if u is None:
+            return None
+        sch = str(getattr(u, "scheme", "") or "").lower()
+        scheme = "https" if sch in ("wss", "https") else "http"
+        host = getattr(u, "hostname", None) or ""
+        if not host:
+            return None
+        port = getattr(u, "port", None)
+        if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+            netloc = f"{host}:{port}"
+        else:
+            netloc = host
+        return _normalize_link_base_url(f"{scheme}://{netloc}")
+    except Exception as e:
+        logger.debug("infer_public_base_url_from_websocket failed: {}", e)
+    return None
+
+
+def preferred_file_link_base_from_context(context: Any) -> Optional[str]:
+    """Read public_request_base_url from PromptRequest.request_metadata (set by inbound). Never raises."""
+    try:
+        req = getattr(context, "request", None)
+        if req is None:
+            return None
+        md = getattr(req, "request_metadata", None) or {}
+        if isinstance(md, dict):
+            u = _normalize_link_base_url(md.get("public_request_base_url") or "")
+            return u or None
+    except Exception:
+        pass
+    return None
+
+
+def resolve_file_link_base_url(preferred_base_url: Optional[str] = None) -> str:
+    """
+    Effective base URL for /files/out links.
+    Order: (1) preferred (from inbound HTTP/WS), (2) core_public_url or Pinggy runtime, (3) if unsigned dev (no auth_api_key), localhost Core URL from config.
+    Returns "" if nothing can be determined (signed tokens need auth_api_key + a reachable base).
+    Never raises.
+    """
+    u = _normalize_link_base_url(preferred_base_url)
+    if u:
+        return u
+    u2 = _normalize_link_base_url(get_result_link_base_url())
+    if u2:
+        return u2
+    if file_unsigned_dev_mode_active():
+        return _normalize_link_base_url(get_core_public_url() or "")
+    return ""
+
+
+def build_file_view_link(
+    scope: str, path: str, preferred_base_url: Optional[str] = None
+) -> Tuple[Optional[str], Optional[str]]:
     """
     Build a file view URL. Single place for link generation so format and config checks are consistent.
     Returns (url, None) on success, or (None, error_message) when link cannot be generated (caller should show error_message to user).
@@ -205,11 +320,19 @@ def build_file_view_link(scope: str, path: str) -> Tuple[Optional[str], Optional
         if not validate_file_link_scope_path(scope_s, path_norm):
             return (None, "Invalid scope or path for file link.")
         unsigned_dev = file_unsigned_dev_mode_active()
-        base_url = get_result_link_base_url()
-        if not base_url and unsigned_dev:
-            base_url = (get_core_public_url() or "").strip().rstrip("/")
+        base_url = resolve_file_link_base_url(preferred_base_url)
         if not base_url:
-            return (None, "Set core_public_url in config (e.g. your tunnel or public URL) for shareable file links.")
+            return (
+                None,
+                "Set core_public_url in config to the URL clients use to reach Core (e.g. tunnel or LAN IP), "
+                "or call Core via HTTP so the link can be derived from the request. "
+                "With auth_api_key set, signed links require a stable public base.",
+            )
+
+        def _link_ok(u: str) -> Tuple[Optional[str], None]:
+            """Strip all whitespace so the URL is one token for markdown/linkifiers; values are already percent-encoded."""
+            return (normalize_public_url_for_clients(u), None)
+
         try:
             from base.util import Util
             meta = Util().get_core_metadata()
@@ -233,30 +356,35 @@ def build_file_view_link(scope: str, path: str) -> Tuple[Optional[str], Optional
                 if len(token_safe) < 33:
                     return (None, "Could not generate file link (token invalid).")
                 url = f"{base_url.rstrip('/')}/{static_prefix}/{scope_safe}/{path_encoded}?token={token_safe}"
-                return (url, None)
+                return _link_ok(url)
             if unsigned_dev:
                 _maybe_warn_dev_unsigned_file_links()
                 url = f"{base_url.rstrip('/')}/{static_prefix}/{scope_safe}/{path_encoded}?dev_unsigned=1"
-                return (url, None)
+                return _link_ok(url)
             return (None, "Set auth_api_key in config for shareable file links.")
         token = create_file_access_token(scope_s, path_norm, expiry_sec=expiry_sec)
         if token:
             token_safe = "".join(c for c in token if c in _TOKEN_ALPHABET)
             if len(token_safe) < 33:
                 return (None, "Could not generate file link (token invalid).")
-            # Keep "/" readable in query path (e.g. output/report.pdf), avoid %2F confusion on some clients.
-            url = f"{base_url.rstrip('/')}/files/out?token={token_safe}&path={quote(path_norm, safe='/')}"
-            return (url, None)
+            # Keep "/" readable in query path (e.g. output/report.pdf); quote encodes spaces and special chars.
+            url = f"{base_url.rstrip('/')}/files/out?token={quote(token_safe, safe='')}&path={quote(path_norm, safe='/')}"
+            return _link_ok(url)
         if unsigned_dev:
             _maybe_warn_dev_unsigned_file_links()
             scope_q = quote(scope_s, safe="")
             path_q = quote(path_norm, safe="/")
             url = f"{base_url.rstrip('/')}/files/out?scope={scope_q}&path={path_q}&dev_unsigned=1"
-            return (url, None)
+            return _link_ok(url)
         return (None, "Set auth_api_key in config for shareable file links.")
     except Exception as e:
         logger.debug("build_file_view_link failed: {}", e)
         return (None, "Could not generate file link; check core_public_url and auth_api_key in config.")
+
+
+def build_file_view_link_for_context(scope: str, path: str, context: Any) -> Tuple[Optional[str], Optional[str]]:
+    """build_file_view_link with inbound-derived base URL when ToolContext comes from POST /inbound or /ws."""
+    return build_file_view_link(scope, path, preferred_file_link_base_from_context(context))
 
 
 def rewrite_vmprint_preview_html_assets(html: str, scope: str, path_arg: str) -> str:

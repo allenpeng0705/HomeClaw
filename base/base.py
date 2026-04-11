@@ -114,6 +114,8 @@ class InboundRequest(BaseModel):
     tool_profile: Optional[str] = None
     # Claw-Code: bind inbound turn to a session created via POST /api/clawcode/sessions (requires clawcode.enabled).
     clawcode_session_id: Optional[str] = None
+    # Set only by Core from the HTTP/WebSocket transport (stripped from JSON body before validate). Used for /files/out links.
+    public_request_base_url: Optional[str] = Field(default=None, exclude=True)
 
     @field_validator("cursor_agent_yolo", "claude_skip_permissions", "bridge_agent_stream_preview", mode="before")
     @classmethod

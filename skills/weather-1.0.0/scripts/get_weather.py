@@ -419,6 +419,12 @@ def _looks_like_plain_place(t: str) -> bool:
     )
     if any(tl.startswith(w) or f" {w.strip()}" in tl for w in qwords):
         return False
+    # Short CJK lines like "明天天气怎么样" match [\u4e00-\u9fff]{2,24} but are questions, not place names.
+    if re.search(r"[\u4e00-\u9fff]", t) and re.search(
+        r"(怎么样|如何|怎样|好不好|可不可以|是不是|有没有)",
+        t,
+    ):
+        return False
     if re.search(r"\b(weather|forecast|temperature|rain|snow|wind|humid|cold|hot)\b", tl):
         # Probably a sentence, not "London" alone
         if len(t.split()) > 4:
@@ -548,6 +554,10 @@ def main() -> None:
             extracted = extract_location_from_query(location)
             if extracted:
                 location = extracted
+            elif not _looks_like_plain_place(location):
+                # Full question with no extractable city (e.g. 明天天气怎么样); do not send the whole
+                # sentence to wttr.in (500). Fall through to profile / HOMECLAW_USER_LAT_LNG.
+                location = ""
 
         if not location:
             core_loc = get_location_from_core()

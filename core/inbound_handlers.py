@@ -218,6 +218,9 @@ async def handle_inbound_request_impl(
     else:
         content_type_for_perm = ContentType.TEXT
     request_metadata = {"user_id": request.user_id, "channel": request.channel_name}
+    _pub_base = (getattr(request, "public_request_base_url", None) or "").strip().rstrip("/")
+    if _pub_base:
+        request_metadata["public_request_base_url"] = _pub_base
     if getattr(request, "session_id", None):
         request_metadata["session_id"] = request.session_id
     if getattr(request, "conversation_type", None):

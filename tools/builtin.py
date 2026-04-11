@@ -3019,11 +3019,11 @@ def _append_file_link_to_run_skill_output(script_output: str, context: Optional[
                 parsed = obj
                 break
         if isinstance(parsed, dict) and parsed.get("success") and parsed.get("output_rel_path"):
-            from core.result_viewer import build_file_view_link
+            from core.result_viewer import build_file_view_link_for_context
             scope = _get_file_workspace_subdir(context)
             path_rel = (parsed.get("output_rel_path") or "").strip()
             if path_rel and scope:
-                link, _ = build_file_view_link(scope, path_rel)
+                link, _ = build_file_view_link_for_context(scope, path_rel, context)
                 if link:
                     msg = (parsed.get("message") or "File saved.").strip()
                     return f"{msg}\n\nCRITICAL: Use ONLY the URL on the next line. Copy it exactly—do not modify, truncate, or append anything.\n{link}"
@@ -4414,10 +4414,142 @@ def _is_bare_filename(path_arg: Optional[str]) -> bool:
     return True
 
 
+def _normalize_path_whitespace_for_tool(p: str) -> str:
+    """Collapse accidental spaces around path slashes (common in LLM-generated absolute paths)."""
+    s = (p or "").strip()
+    if not s:
+        return s
+    s = re.sub(r"/\s+", "/", s)
+    s = re.sub(r"\s+/", "/", s)
+    return s
+
+
+def _get_request_text_for_tools(context: Optional[Any]) -> str:
+    """Current turn user message (PromptRequest.text)."""
+    try:
+        req = getattr(context, "request", None) if context is not None else None
+        t = getattr(req, "text", None) if req is not None else None
+        return (t or "").strip() if isinstance(t, str) else ""
+    except Exception:
+        return ""
+
+
+def _user_message_content_as_plain_text(msg: Dict[str, Any]) -> str:
+    """OpenAI-style message content to string (handles string or multimodal list)."""
+    try:
+        c = msg.get("content")
+        if isinstance(c, str):
+            return c.strip()
+        if isinstance(c, list):
+            chunks: List[str] = []
+            for p in c:
+                if isinstance(p, dict) and (str(p.get("type") or "").lower() == "text"):
+                    t = (p.get("text") or "").strip()
+                    if t:
+                        chunks.append(t)
+            return "\n".join(chunks).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _snippet_recent_user_messages_for_file_inference(messages: Any, max_chars: int = 12000) -> str:
+    """
+    Concatenate recent **user** message texts from OpenAI-style `messages` for file name / path hints.
+    Core sets ToolContext.recent_user_messages_text from the live chat list (includes current round).
+    """
+    if not isinstance(messages, list) or not messages:
+        return ""
+    parts: List[str] = []
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        if (m.get("role") or "").strip().lower() != "user":
+            continue
+        txt = _user_message_content_as_plain_text(m)
+        if txt:
+            parts.append(txt)
+    out = "\n\n---\n\n".join(parts)
+    if len(out) > max_chars:
+        out = out[-max_chars:]
+    return out
+
+
+def _get_file_inference_text(context: Optional[Any]) -> str:
+    """Prefer recent user-message snippet (multi-turn); else current request only."""
+    try:
+        hist = getattr(context, "recent_user_messages_text", None) if context is not None else None
+        if isinstance(hist, str) and hist.strip():
+            return hist.strip()
+    except Exception:
+        pass
+    return _get_request_text_for_tools(context)
+
+
+def _extract_filename_tokens_from_user_text(q: str) -> List[str]:
+    """Likely file names in the user message (e.g. Allen_Peng_resume_en.docx next to CJK text).
+    Uses ASCII-first pattern so \\w does not swallow CJK prefixes (e.g. 把Allen_...docx).
+    """
+    if not q or not isinstance(q, str):
+        return []
+    out: List[str] = []
+    seen = set()
+    # Not \\b at start: CJK before ASCII breaks \\b; not \\b at end: CJK after extension breaks \\b.
+    _pat = r"(?<![A-Za-z0-9_\-])([A-Za-z0-9][A-Za-z0-9_\-\.]*\.(?:pdf|docx|doc|pptx|ppt|txt|md|html|xlsx|xls|csv|json|xml))"
+    for m in re.finditer(_pat, q, re.IGNORECASE):
+        s = (m.group(1) or "").strip()
+        key = s.lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(s)
+    return out
+
+
+def _try_resolve_via_user_message_filenames(
+    context: Optional[Any],
+    path_arg: str,
+) -> Tuple[Optional[Tuple[Path, Optional[Path]]], Optional[str]]:
+    """
+    When the model invented a bad path, search the sandbox using file names from the **current** user message
+    (request.text). Returns (resolved_tuple, None) on success, (None, error_message) if ambiguous, (None, None) if no match.
+    """
+    ut = _get_file_inference_text(context)
+    candidates: List[str] = _extract_filename_tokens_from_user_text(ut)
+    try:
+        bn = os.path.basename(path_arg.replace("\\", "/").strip())
+        if bn and "." in bn:
+            bl = bn.lower()
+            if bl not in {c.lower() for c in candidates}:
+                candidates.insert(0, bn)
+    except Exception:
+        pass
+    for cand in candidates:
+        matches = _search_sandbox_for_filename(context, cand)
+        if len(matches) == 1:
+            r = _resolve_file_path(matches[0], context, for_write=False)
+            if r:
+                return r, None
+        if len(matches) > 1:
+            try:
+                _stem = Path(cand).stem
+            except Exception:
+                _stem = cand.split(".")[0] if "." in cand else cand
+            msg = (
+                f"Multiple files match the name '{cand}' (from the user's message) in the sandbox: "
+                + ", ".join(matches[:12])
+                + (" ..." if len(matches) > 12 else "")
+                + ". Call folder_list(path='documents') or file_find(pattern='*"
+                + re.escape(_stem)
+                + "*') and use document_read with that exact relative path. Do not invent /Users/... or other host paths."
+            )
+            return None, msg
+    return None, None
+
+
 async def _document_read_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Read document content: PDF, PPT, Word, MD, HTML, XML, JSON, etc. Use 'share/...' or path in your user or companion folder. When base not set, absolute paths allowed."""
     config = _get_tools_config()
-    path_arg = (arguments.get("path") or "").strip()
+    path_arg = _normalize_path_whitespace_for_tool((arguments.get("path") or "").strip())
     if not path_arg:
         return "Path is required."
     default_max = int(config.get("file_read_max_chars") or 0) or 64_000
@@ -4478,7 +4610,19 @@ async def _document_read_executor(arguments: Dict[str, Any], context: ToolContex
                         + " — e.g. document_read(path='documents/Allen_Peng_resume_en.docx')."
                     )
         if r is None:
-            return _file_resolve_error_msg(path_arg)
+            _r_um, _ambig_um = _try_resolve_via_user_message_filenames(context, path_arg)
+            if _ambig_um:
+                return _ambig_um
+            if _r_um is not None:
+                r = _r_um
+        if r is None:
+            _msg = _file_resolve_error_msg(path_arg)
+            if _get_homeclaw_root():
+                _msg += (
+                    " If the user mentioned a file name, use file_find(pattern='*partial*') or folder_list(path='documents') "
+                    "to discover the sandbox-relative path—do not invent host paths like /Users/...."
+                )
+            return _msg
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -4744,7 +4888,7 @@ def _normalize_format_arg(raw: Any) -> str:
 async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Save a result page as HTML or Markdown. format=markdown: returns markdown content + link so reply can show it in chat. format=html: returns link only (open in browser)."""
     try:
-        from core.result_viewer import build_file_view_link, generate_result_html
+        from core.result_viewer import build_file_view_link_for_context, generate_result_html
         title = (arguments.get("title") or "").strip() or "Result"
         content = arguments.get("content") or ""
         fmt = _normalize_format_arg(arguments.get("format"))
@@ -4815,7 +4959,7 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
         except Exception as e:
             logger.debug("save_result_page write failed: {}", e)
             return "Failed to save the result page to your output folder."
-        link, link_err = build_file_view_link(scope, path_arg)
+        link, link_err = build_file_view_link_for_context(scope, path_arg, context)
 
         if is_md:
             # Return markdown so the model can include it in the reply → channel/companion/web chat display it in the chat view. Cap length for the reply.
@@ -4855,11 +4999,11 @@ async def _file_write_executor(arguments: Dict[str, Any], context: ToolContext) 
         if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
             scope = _get_file_workspace_subdir(context)
             if scope:
-                from core.result_viewer import build_file_view_link
+                from core.result_viewer import build_file_view_link_for_context
                 # Do not return a view link for empty or minimal content (same threshold as save_result_page for HTML).
                 content_size = len((content_str or "").strip())
                 if content_size >= 250:
-                    link, _ = build_file_view_link(scope, path_arg)
+                    link, _ = build_file_view_link_for_context(scope, path_arg, context)
                     if link:
                         out = f"File saved. CRITICAL: Use ONLY the URL on the next line; copy it exactly—do not modify, truncate, or append anything.\n{link}\n{out}"
                     else:
@@ -4939,8 +5083,8 @@ async def _markdown_to_pdf_executor(arguments: Dict[str, Any], context: ToolCont
         if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
             scope = _get_file_workspace_subdir(context)
             if scope:
-                from core.result_viewer import build_file_view_link
-                link, _ = build_file_view_link(scope, path_arg)
+                from core.result_viewer import build_file_view_link_for_context
+                link, _ = build_file_view_link_for_context(scope, path_arg, context)
                 if link:
                     return f"PDF saved. CRITICAL: Use ONLY the URL on the next line; copy it exactly—do not modify, truncate, or append anything.\n{link}\n{out}"
                 out = f"{out}\nPath: {path_arg}. To get a view link, set core_public_url and auth_api_key in config/core.yml."
@@ -5697,8 +5841,8 @@ async def _vmprint_render_executor(arguments: Dict[str, Any], context: ToolConte
         if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
             scope = _get_file_workspace_subdir(context)
             if scope:
-                from core.result_viewer import build_file_view_link
-                link, _ = build_file_view_link(scope, path_arg)
+                from core.result_viewer import build_file_view_link_for_context
+                link, _ = build_file_view_link_for_context(scope, path_arg, context)
                 if link:
                     return f"VMPrint render saved. CRITICAL: Use ONLY the URL on the next line; copy it exactly—do not modify, truncate, or append anything.\n{link}\n{out}"
                 out = f"{out}\nPath: {path_arg}. To get a view link, set core_public_url and auth_api_key in config/core.yml."
@@ -5844,10 +5988,10 @@ async def _get_file_view_link_executor(arguments: Dict[str, Any], context: ToolC
             if not scope:
                 return "Could not determine user/companion scope."
             path_for_link = path_arg.replace("\\", "/")
-        from core.result_viewer import build_file_view_link
-        link, link_err = build_file_view_link(scope, path_for_link)
+        from core.result_viewer import build_file_view_link_for_context
+        link, link_err = build_file_view_link_for_context(scope, path_for_link, context)
         if not link:
-            return f"View link is not available: {link_err or 'set core_public_url and auth_api_key in config/core.yml.'}"
+            return f"View link is not available: {link_err or 'set core_public_url (or use HTTP inbound so the link can match your client URL) and optionally auth_api_key in config/core.yml.'}"
         # When the file is an image and size <= limit, attach it so the client can display it directly; above limit we send only the link. Never crash; on failure we still return the link.
         try:
             abs_path = str(full.resolve())
@@ -6028,27 +6172,64 @@ def _path_under(full: Path, base: Optional[Path]) -> bool:
 
 
 def _search_sandbox_for_filename(context: Optional[Any], filename: Optional[str], max_results: int = 50) -> List[str]:
-    """Search user sandbox for files whose path or name matches filename. Returns list of relative path strings (files only). Empty on error or no homeclaw_root. Never raises."""
+    """
+    Search the **user sandbox** (homeclaw_root/{user_id}/, recursive) and the **global share folder**
+    (homeclaw_root/share/, recursive) for files whose path or name matches filename.
+
+    Returns sandbox-relative path strings (e.g. ``documents/a.pdf``, ``share/pub/b.pdf``) suitable for
+    ``_resolve_file_path``. Empty on error or no homeclaw_root. Never raises.
+    """
     try:
         safe_name = (filename or "").strip() if isinstance(filename, str) else ""
-        r = _resolve_file_path(".", context, for_write=False)
-        if r is None:
-            return []
-        full_dir, base = r
-        if not full_dir.is_dir() or base is None:
-            return []
         pattern = "*" + safe_name + "*" if safe_name else "*"
         results: List[str] = []
-        for i, p in enumerate(full_dir.rglob(pattern)):
-            if i >= max_results:
-                break
-            if p.is_file():
-                try:
-                    rel = str(p.relative_to(base))
-                except ValueError:
-                    rel = p.name
-                if rel not in results:
-                    results.append(rel)
+        seen: set = set()
+        remaining = max(0, int(max_results))
+
+        r = _resolve_file_path(".", context, for_write=False)
+        if r is not None:
+            full_dir, base = r
+            if full_dir.is_dir() and base is not None:
+                for p in full_dir.rglob(pattern):
+                    if remaining <= 0:
+                        break
+                    if not p.is_file():
+                        continue
+                    try:
+                        rel = str(p.relative_to(base)).replace("\\", "/")
+                    except ValueError:
+                        rel = p.name
+                    if rel not in seen:
+                        seen.add(rel)
+                        results.append(rel)
+                        remaining -= 1
+
+        if remaining > 0:
+            try:
+                config = _get_tools_config()
+                shared_dir = (config.get("file_read_shared_dir") or "share").strip() or "share"
+                user_key = _get_file_workspace_subdir(context)
+                paths = get_sandbox_paths_for_user_key(user_key)
+                if paths:
+                    share_root = Path(paths["share"])
+                    if share_root.is_dir():
+                        for p in share_root.rglob(pattern):
+                            if remaining <= 0:
+                                break
+                            if not p.is_file():
+                                continue
+                            try:
+                                rel_s = p.relative_to(share_root)
+                                rel = f"{shared_dir}/{str(rel_s).replace('\\', '/')}".replace("//", "/")
+                            except ValueError:
+                                rel = f"{shared_dir}/{p.name}"
+                            if rel not in seen:
+                                seen.add(rel)
+                                results.append(rel)
+                                remaining -= 1
+            except Exception:
+                pass
+
         return results
     except Exception:
         return []
@@ -7313,11 +7494,11 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
         try:
             parsed = json.loads(result_text.strip()) if isinstance(result_text, str) else None
             if isinstance(parsed, dict) and parsed.get("success") and parsed.get("output_rel_path"):
-                from core.result_viewer import build_file_view_link
+                from core.result_viewer import build_file_view_link_for_context
                 scope = _get_file_workspace_subdir(context)  # per-user or companion; same as resolution above
                 path_rel = (parsed.get("output_rel_path") or "").strip()
                 if path_rel and scope:
-                    link, _ = build_file_view_link(scope, path_rel)
+                    link, _ = build_file_view_link_for_context(scope, path_rel, context)
                     if link:
                         msg = (parsed.get("message") or "File saved.").strip()
                         result_text = f"{msg}\n\nCRITICAL: Use ONLY the URL on the next line. Copy it exactly—do not modify, truncate, or append anything.\n{link}"
@@ -7325,7 +7506,9 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
             pass
         # Post-process with LLM if capability has post_process and post_process_prompt (only prompt + plugin output; no extra info).
         # Skip post_process when result contains a file view link: the LLM often corrupts the URL (spaces, truncation). Send the exact link instead.
-        has_file_view_link = isinstance(result_text, str) and "/files/out" in result_text and "token=" in result_text
+        has_file_view_link = isinstance(result_text, str) and "/files/out" in result_text and (
+            "token=" in result_text or "dev_unsigned=" in result_text
+        )
         if capability and capability.get("post_process") and capability.get("post_process_prompt") and not has_file_view_link:
             try:
                 messages = [
@@ -8741,7 +8924,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
     registry.register(
         ToolDefinition(
             name="document_read",
-            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. When the user wants to summarize, edit, or use a file but does not give a path: pass the file name or a short description (e.g. 'resume', 'Allen_Peng_resume_en.docx') as path — the tool will search the sandbox first and read the file if exactly one match. When path is a full path: use the **path** from folder_list or file_find. User sandbox: documents/, output/, work/, share/, etc. Use 'share/...' for global share. For long files, increase max_chars.",
+            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. When the user wants to summarize, edit, or use a file but does not give a path: pass the file name or a short description (e.g. 'resume', 'Allen_Peng_resume_en.docx') as path — the tool will search the sandbox first and read the file if exactly one match. When path is a full path: use the **path** from folder_list or file_find. Do **not** invent absolute host paths (e.g. /Users/.../file.pdf); only sandbox-relative paths (documents/..., share/...) or bare filenames work when homeclaw_root is set. User sandbox: documents/, output/, work/, share/, etc. Use 'share/...' for global share. For long files, increase max_chars.",
             parameters={
                 "type": "object",
                 "properties": {

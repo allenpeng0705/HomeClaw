@@ -32,7 +32,11 @@ from core.app_layer_encryption import (
     encrypt_response as app_encrypt_response,
     parse_inbound_body as app_parse_inbound_body,
 )
-from core.result_viewer import build_image_view_links, get_result_link_base_url
+from core.result_viewer import (
+    build_image_view_links,
+    get_result_link_base_url,
+    infer_public_base_url_from_http_request,
+)
 
 from core.routes import (
     auth,
@@ -882,7 +886,12 @@ def register_all_routes(core: Any) -> None:
                     status_code=422,
                     content={"error": "Invalid or unreadable body", "text": ""},
                 )
+            if isinstance(parsed, dict):
+                parsed.pop("public_request_base_url", None)
             request = InboundRequest.model_validate(parsed)
+            _inbound_pub = infer_public_base_url_from_http_request(raw_request)
+            if _inbound_pub:
+                request = request.model_copy(update={"public_request_base_url": _inbound_pub})
         except Exception as parse_err:
             logger.warning("inbound body parse failed: {}", parse_err)
             return JSONResponse(
