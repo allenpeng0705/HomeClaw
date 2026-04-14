@@ -4,9 +4,11 @@ Extracted from core/core.py (Phase 6 refactor). Takes core as first argument; no
 """
 
 import asyncio
+import copy
 import json
 import re
 import time
+import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -15,7 +17,15 @@ from loguru import logger
 
 from base.base import PromptRequest, PluginResult
 from base.prompt_manager import get_prompt_manager
-from base.tools import ToolContext, get_tool_registry, ROUTING_RESPONSE_ALREADY_SENT
+from base.tool_permissions import tool_permission_context_from_meta
+from base.tools import (
+    ToolContext,
+    get_tool_registry,
+    ROUTING_RESPONSE_ALREADY_SENT,
+    filter_openai_tools_for_llm,
+    strip_deferred_tools_from_openai_list,
+)
+from base.token_estimate import estimate_messages_token_budget
 from base.util import Util, redact_params_for_log, strip_reasoning_from_assistant_text, _sanitize_tool_calls
 from base.workspace import (
     get_workspace_dir,
@@ -80,6 +90,7 @@ from base.skills import (
     load_skills_from_dirs,
     load_skill_by_folder_from_dirs,
     build_skills_system_block,
+    trim_skills_list_for_char_budget,
 )
 from memory.prompts import RESPONSE_TEMPLATE
 from memory.chat.message import ChatMessage
@@ -170,7 +181,13 @@ def _is_pending_user_action_cancel(text: str) -> bool:
     return any(p in raw for p in ("不要", "不用", "算了", "取消", "别生成"))
 
 
-from tools.builtin import close_browser_session, _daily_brief_document_layout_from_user_query
+from tools.builtin import (
+    close_browser_session,
+    _daily_brief_document_layout_from_user_query,
+    _normalize_daily_brief_args,
+    _snippet_recent_user_messages_for_file_inference,
+    long_document_output_is_vmprint,
+)
 
 # System prompt: per-user standard dirs + global share.
 _PRIVATE_STANDARD_FOLDERS_PROMPT = ", ".join(sorted(STANDARD_USER_SANDBOX_SUBDIRS))
@@ -421,6 +438,16 @@ except (ImportError, ModuleNotFoundError):
     )
 
 
+def _normalize_tool_path_whitespace(p: str) -> str:
+    """Collapse accidental spaces around slashes in LLM-generated file paths."""
+    s = (p or "").strip()
+    if not s:
+        return s
+    s = re.sub(r"/\s+", "/", s)
+    s = re.sub(r"\s+/", "/", s)
+    return s
+
+
 async def _strict_fallback_run_daily_brief_magazine(registry: Any, context: Any, query: str) -> Optional[str]:
     """
     run_skill(daily-brief) then optional magazine-render AST/HTML; used from multiple no-tool_call paths.
@@ -430,6 +457,30 @@ async def _strict_fallback_run_daily_brief_magazine(registry: Any, context: Any,
         return None
     if not any(t.name == "run_skill" for t in (registry.list_tools() or [])):
         return None
+    if not long_document_output_is_vmprint():
+        # Markdown path only: return daily-brief fetch output without magazine-render VMPrint chain.
+        _lang = _daily_brief_lang_from_query(query)
+        _max_items = 20
+        _q_raw = query.strip()
+        _q_lo = _q_raw.lower()
+        _m_cn = re.search(r"(\d{1,3})\s*条", _q_raw)
+        _m_en = re.search(r"\b(\d{1,3})\s*(items?|headlines?)\b", _q_lo)
+        _m = _m_cn or _m_en
+        if _m:
+            try:
+                _max_items = max(1, min(100, int(_m.group(1))))
+            except Exception:
+                _max_items = 20
+        _res_md = await registry.execute_async(
+            "run_skill",
+            {
+                "skill_name": "daily-brief-1.0.0",
+                "script": "fetch_rss.py",
+                "args": ["fetch", "--max", str(_max_items), "--lang", _lang],
+            },
+            context,
+        )
+        return _res_md.strip() if isinstance(_res_md, str) and _res_md.strip() else None
     _lang = _daily_brief_lang_from_query(query)
     _max_items = 20
     _q_raw = query.strip()
@@ -1039,6 +1090,7 @@ async def answer_from_memory(
                             session_id=session_id or "",
                             run_id=run_id,
                             request=request,
+                            permission_context=tool_permission_context_from_meta(Util().get_core_metadata(), request),
                         )
                         _payload = _pend.get("payload") or {}
                         if not isinstance(_payload, dict):
@@ -1108,6 +1160,14 @@ async def answer_from_memory(
                                 return (f"Scheduled. The action will run in {n_mins} minutes. （已安排。）", None)
         except Exception as _confirm_e:
             logger.debug("Delayed action confirm failed (non-fatal): {}", _confirm_e)
+    from base.llm_usage_buffer import attach_prompt_request_for_usage, detach_prompt_request_for_usage
+
+    _llm_usage_ctx = False
+    if request is not None:
+        _md_cc = getattr(request, "request_metadata", None)
+        if isinstance(_md_cc, dict) and str(_md_cc.get("clawcode_session_id") or "").strip():
+            attach_prompt_request_for_usage(request)
+            _llm_usage_ctx = True
     try:
         # If user is replying to a "missing parameters" question, fill and retry the pending plugin call
         app_id_val = app_id or "homeclaw"
@@ -1184,6 +1244,7 @@ async def answer_from_memory(
                             session_id=session_id_val or "",
                             run_id=run_id,
                             request=request,
+                            permission_context=tool_permission_context_from_meta(Util().get_core_metadata(), request),
                         )
                         _res = await _reg.execute_async(resume_tool, resume_args, _ctx)
                         _res_str = str(_res) if _res is not None else ""
@@ -1209,6 +1270,7 @@ async def answer_from_memory(
                                 session_id=session_id_val or "",
                                 run_id=run_id,
                                 request=request,
+                                permission_context=tool_permission_context_from_meta(Util().get_core_metadata(), request),
                             )
                             _res = await _reg.execute_async(confirm_tool, confirm_args, _ctx)
                             return (str(_res).strip() if _res is not None else "Done.", None)
@@ -1516,6 +1578,17 @@ async def answer_from_memory(
             except Exception:
                 pass
 
+        # Claw-Code session: validated main_llm_ref overrides global main model for this turn (after friend preset).
+        try:
+            if request:
+                from core.clawcode_store import apply_clawcode_main_llm_override
+
+                _cc_main = apply_clawcode_main_llm_override(effective_llm_name, request)
+                if _cc_main:
+                    effective_llm_name = _cc_main
+        except Exception as _cc_llm_e:
+            logger.debug("clawcode main_llm_ref override skipped: {}", _cc_llm_e)
+
         # Cursor/ClaudeCode preset friends: pure bridge — no LLM. Route by pattern then call the bridge plugin.
         if request and _current_friend and (query or "").strip():
             try:
@@ -1554,6 +1627,7 @@ async def answer_from_memory(
                             session_id=session_id,
                             run_id=run_id,
                             request=request,
+                            permission_context=tool_permission_context_from_meta(Util().get_core_metadata(), request),
                         )
                         _bridge_result = await _reg.execute_async(
                             "route_to_plugin",
@@ -1866,11 +1940,16 @@ async def answer_from_memory(
         if _intent_router_config.get("enabled") and (query or "").strip():
             try:
                 _ir_timeout = max(0, int(_intent_router_config.get("timeout_seconds", 25) or 25))
+                _ir_llm_ref = _intent_router_config.get("router_llm")
+                if isinstance(_ir_llm_ref, str):
+                    _ir_llm_ref = _ir_llm_ref.strip() or None
+                else:
+                    _ir_llm_ref = None
                 _route_coro = intent_router_route(
                     query=(query or "").strip(),
                     config=_intent_router_config,
                     completion_fn=core,
-                    llm_name=None,
+                    llm_name=_ir_llm_ref,
                     recent_messages=messages if isinstance(messages, list) else None,
                 )
                 if _ir_timeout > 0:
@@ -1956,6 +2035,17 @@ async def answer_from_memory(
                         core.skills_vector_store, core.embedder, query or "",
                         limit=max_retrieved, min_similarity=threshold,
                     )
+                    if getattr(meta_skills, "skills_usage_rerank_enabled", False) and hits:
+                        try:
+                            from base.skill_usage import rerank_skill_vector_hits
+
+                            _w = float(getattr(meta_skills, "skills_usage_rerank_weight", 0.12) or 0.12)
+                            hits = rerank_skill_vector_hits(
+                                hits, uid, weight=max(0.0, _w), enabled=True
+                            )
+                            _component_log("skills", "reranked vector hits by usage (skills_usage_rerank_enabled)")
+                        except Exception as _ru:
+                            logger.debug("skills usage rerank skipped: {}", _ru)
                     skills_test_dir_str = (getattr(meta_skills, 'skills_test_dir', None) or "").strip()
                     skills_test_path = get_skills_dir(skills_test_dir_str, root=root) if skills_test_dir_str else None
                     for item in (hits or []):
@@ -2181,16 +2271,6 @@ async def answer_from_memory(
                                 _component_log("intent_router", f"filtered skills by category: {len(skills_list)} skill(s)")
                     except Exception as _e:
                         logger.debug("Phase 3.1 category skills filter failed: {}", _e)
-                # Phase 1.1: list of skill folder names in prompt; used to constrain run_skill skill_name to enum when building tools for LLM.
-                _injected_skill_folders = [
-                    (s.get("folder") or s.get("name") or "").strip()
-                    for s in (skills_list or [])
-                    if isinstance(s, dict) and ((s.get("folder") or s.get("name") or "").strip())
-                ]
-                # Skills list is built from RAG/load + force-include (e.g. reminder/scheduling). LLM decides when to call run_skill; we only force-include for special cases.
-                if skills_list:
-                    selected_names = [s.get("folder") or s.get("name") or "?" for s in skills_list]
-                    _component_log("skills", f"selected: {', '.join(selected_names)}")
                 # OpenClaw-style: when skills_use_location_only is true, inject only name + description + location; model reads SKILL.md via file_read(path='skill:folder') to reduce context tokens.
                 use_location_only = bool(getattr(meta_skills, "skills_use_location_only", False))
                 _body_for_raw = getattr(meta_skills, "skills_include_body_for", None)
@@ -2206,7 +2286,30 @@ async def answer_from_memory(
                             if full_skill:
                                 skills_list[i] = full_skill
                 include_body = bool(include_body_for) and not use_location_only
-                skills_block = build_skills_system_block(skills_list, include_body=include_body, use_location_only=use_location_only)
+                _bud = max(0, int(getattr(meta_skills, "skills_prompt_budget_chars", 0) or 0))
+                _ent = max(20, int(getattr(meta_skills, "skills_prompt_entry_max_chars", 250) or 250))
+                if _bud > 0 and skills_list:
+                    _nb = len(skills_list)
+                    skills_list = trim_skills_list_for_char_budget(skills_list, _bud, _ent)
+                    if len(skills_list) < _nb:
+                        _component_log("skills", f"trimmed skills listing to {len(skills_list)} (skills_prompt_budget_chars={_bud})")
+                # Phase 1.1: list of skill folder names in prompt; used to constrain run_skill skill_name to enum when building tools for LLM.
+                _injected_skill_folders = [
+                    (s.get("folder") or s.get("name") or "").strip()
+                    for s in (skills_list or [])
+                    if isinstance(s, dict) and ((s.get("folder") or s.get("name") or "").strip())
+                ]
+                # Skills list is built from RAG/load + force-include (e.g. reminder/scheduling). LLM decides when to call run_skill; we only force-include for special cases.
+                if skills_list:
+                    selected_names = [s.get("folder") or s.get("name") or "?" for s in skills_list]
+                    _component_log("skills", f"selected: {', '.join(selected_names)}")
+                _inv_contract = bool(getattr(meta_skills, "skills_invocation_contract_enabled", True))
+                skills_block = build_skills_system_block(
+                    skills_list,
+                    include_body=include_body,
+                    use_location_only=use_location_only,
+                    include_invocation_contract=_inv_contract,
+                )
                 if skills_block:
                     system_parts.append(skills_block)
                     # Hint so the model can suggest installing more skills via HomeClaw (Companion, Portal, or converter script).
@@ -2723,6 +2826,90 @@ async def answer_from_memory(
         # Append date/time block last so system prefix is static for KV cache (cache_prompt: true)
         if _system_context_block:
             system_parts.append(_system_context_block)
+        try:
+            _md_cc = getattr(request, "request_metadata", None) or {}
+            if isinstance(_md_cc, dict):
+                _csid = str(_md_cc.get("clawcode_session_id") or "").strip()
+                if _csid:
+                    from core.clawcode_store import clawcode_feature_enabled, get_session as _cc_get_session
+
+                    if clawcode_feature_enabled():
+                        s = _cc_get_session(_csid)
+                        if isinstance(s, dict):
+                            try:
+                                from core.clawcode_store import session_mode_value as _cc_sess_mode
+
+                                _cc_m = _cc_sess_mode(s)
+                            except Exception:
+                                _cc_m = str(s.get("mode") or "agent").strip().lower() or "agent"
+                            system_parts.append(
+                                "## Claw-Code session\n"
+                                f"- Session id: `{_csid}`\n"
+                                f"- Mode: **`{_cc_m}`** — `plan` keeps tool execution read-biased (write/exec/network tiers blocked unless global policy allows); `agent` uses normal tool policy.\n"
+                                f"- Working directory (cwd): `{s.get('cwd', '')}`\n"
+                                f"- Owner user id: `{s.get('owner_user_id', '')}`\n"
+                                "When using file or shell tools, prefer paths under this cwd unless the user specifies otherwise.\n"
+                                "**Secrets:** Do not paste `.env` values, API keys, or tokens into the chat or tool arguments; assume operator logs and traces may exist.\n\n"
+                            )
+                            try:
+                                _tp = s.get("task_plan")
+                                if isinstance(_tp, list) and _tp:
+                                    _lines = []
+                                    for _row in _tp[:32]:
+                                        if not isinstance(_row, dict):
+                                            continue
+                                        _tid = str(_row.get("id") or "").strip() or "—"
+                                        _tit = str(_row.get("title") or "").strip()[:240]
+                                        _st = str(_row.get("status") or "pending").strip().lower()
+                                        _lines.append(f"- [{_st}] `{_tid}` {_tit}".strip())
+                                    if _lines:
+                                        system_parts.append(
+                                            "### Task plan (operator)\n"
+                                            + "\n".join(_lines)
+                                            + "\n\n"
+                                            "Update statuses as you complete steps; prefer finishing `pending` before starting new work unless the user redirects.\n\n"
+                                        )
+                                _cp = str(s.get("checkpoint") or "").strip()
+                                if _cp:
+                                    system_parts.append(
+                                        f"### Checkpoint (operator)\n{_cp[:4000]}\n\n"
+                                    )
+                                _rh = str(s.get("resume_hint") or "").strip()
+                                if _rh:
+                                    system_parts.append(
+                                        "### Resume / recovery (operator)\n"
+                                        f"{_rh[:8000]}\n\n"
+                                    )
+                                _lre = str(s.get("last_run_error") or "").strip()
+                                if _lre:
+                                    system_parts.append(
+                                        "### Last run error (operator note)\n"
+                                        f"{_lre[:4000]}\n\n"
+                                    )
+                            except Exception:
+                                pass
+                            try:
+                                from core.clawcode_prompt import load_system_prompt_addendum
+
+                                _cc_add = load_system_prompt_addendum()
+                                if _cc_add:
+                                    system_parts.append(_cc_add.rstrip() + "\n\n")
+                            except Exception:
+                                pass
+                            try:
+                                from core.clawcode_store import clawcode_mcp_preset_note
+
+                                _mcp_note = clawcode_mcp_preset_note()
+                                if _mcp_note:
+                                    system_parts.append(
+                                        "## MCP (configured servers)\n"
+                                        + _mcp_note
+                                        + "\n\n"
+                                    )
+                            except Exception:
+                                pass
+        except Exception:
+            pass
         if system_parts:
             llm_input = [{"role": "system", "content": "\n".join(system_parts)}]
 
@@ -2761,6 +2948,12 @@ async def answer_from_memory(
                         if not all_tools_flush:
                             _component_log("compaction", "memory flush skipped: no tools available")
                         else:
+                            _trace_emit_event(
+                                event_type="memory_flush_started",
+                                component="llm_loop",
+                                summary="compaction memory flush",
+                                details={"message_count": len(messages)},
+                            )
                             context_flush = ToolContext(
                                 core=core,
                                 app_id=app_id or "homeclaw",
@@ -2771,6 +2964,7 @@ async def answer_from_memory(
                                 session_id=session_id,
                                 run_id=run_id,
                                 request=request,
+                                permission_context=tool_permission_context_from_meta(Util().get_core_metadata(), request),
                             )
                             current_flush = list(flush_input)
                             meta_flush = Util().get_core_metadata()
@@ -2784,8 +2978,13 @@ async def answer_from_memory(
                             for _round in range(10):
                                 try:
                                     msg_flush = await Util().openai_chat_completion_message(
-                                        current_flush, tools=all_tools_flush, tool_choice="auto", grammar=_flush_grammar, llm_name=effective_llm_name,
+                                        current_flush,
+                                        tools=all_tools_flush,
+                                        tool_choice="auto",
+                                        grammar=_flush_grammar,
+                                        llm_name=effective_llm_name,
                                         stop_extra=None,
+                                        request=request,
                                     )
                                 except Exception as e:
                                     logger.debug("Memory flush LLM call failed: {}", e)
@@ -2836,6 +3035,12 @@ async def answer_from_memory(
                                     except Exception:
                                         break
                             _component_log("compaction", "memory flush turn completed")
+                            _trace_emit_event(
+                                event_type="memory_flush_finished",
+                                component="llm_loop",
+                                summary="compaction memory flush done",
+                                details={},
+                            )
                 except Exception as e:
                     logger.warning("Memory flush failed (continuing with compaction): {}", e, exc_info=True)
                 finally:
@@ -2845,8 +3050,15 @@ async def answer_from_memory(
                         except Exception as e:
                             logger.debug("Memory flush close_browser_session failed: {}", e)
             if len(messages) > max_msg:
+                _before_trim = len(messages)
                 messages = messages[-max_msg:]
                 _component_log("compaction", f"trimmed to last {max_msg} messages")
+                _trace_emit_event(
+                    event_type="context_compacted",
+                    component="llm_loop",
+                    summary="messages trimmed",
+                    details={"before": _before_trim, "after": len(messages), "max_messages": max_msg},
+                )
 
         # Friend preset: limit chat history to last N turns when preset has history as number (saves context tokens).
         if _current_friend and isinstance(messages, list) and messages:
@@ -2933,6 +3145,7 @@ async def answer_from_memory(
                         session_id=session_id,
                         run_id=run_id,
                         request=request,
+                        permission_context=tool_permission_context_from_meta(Util().get_core_metadata(), request),
                     )
                     _res_fast = await registry.execute_async(_direct_tool, _direct_args, _ctx_fast)
                     if isinstance(_res_fast, str) and _res_fast.strip():
@@ -2950,6 +3163,15 @@ async def answer_from_memory(
         except Exception as _e:
             logger.debug("Companion scheduling fast-path skipped: {}", _e)
         description_max_chars = max(0, int(tools_cfg_for_desc.get("description_max_chars") or 0))
+        # Merge optional per-request tool profile (InboundRequest / PromptRequest) into tools config when intent router does not override profile.
+        _tools_cfg_for_profile = dict(tools_cfg_for_desc) if isinstance(tools_cfg_for_desc, dict) else {}
+        try:
+            _req_pf = (getattr(request, "tool_profile", None) or "").strip().lower() if request else ""
+            if _req_pf:
+                _tools_cfg_for_profile = {**_tools_cfg_for_profile, "profile": _req_pf}
+                _tools_cfg_for_profile.pop("profiles", None)
+        except Exception:
+            pass
         # OpenClaw-style: when tools.profile or tools.profiles is set, only tools in that profile are sent to the LLM.
         _tool_defs = (registry.list_tools() or []) if use_tools else []
         # Phase 3.4: RAG for tools — when tools_use_vector_search is true, retrieve tools by query similarity (off by default).
@@ -2992,12 +3214,12 @@ async def answer_from_memory(
                     _tool_defs_filtered = [t for t in _tool_defs if getattr(t, "name", None) in _allowed]
                     _component_log("intent_router", f"filtered tools by allowlist: {len(_tool_defs_filtered)} tools")
                 else:
-                    _tool_defs_filtered = get_tools_for_llm(_tool_defs, tools_cfg_for_desc)
+                    _tool_defs_filtered = get_tools_for_llm(_tool_defs, _tools_cfg_for_profile)
             else:
-                _tool_defs_filtered = get_tools_for_llm(_tool_defs, tools_cfg_for_desc)
+                _tool_defs_filtered = get_tools_for_llm(_tool_defs, _tools_cfg_for_profile)
         except Exception as _e:
             logger.debug("Intent router tool filter failed: {}; using config profile", _e)
-            _tool_defs_filtered = get_tools_for_llm(_tool_defs, tools_cfg_for_desc)
+            _tool_defs_filtered = get_tools_for_llm(_tool_defs, _tools_cfg_for_profile)
         # Fallback: tools_always_included — add these tools to every category so narrow intents can still save/list (e.g. search_web + save_result_page).
         try:
             _always = _intent_router_config.get("tools_always_included") if isinstance(_intent_router_config, dict) else None
@@ -3031,6 +3253,16 @@ async def answer_from_memory(
             all_tools = [t for t in all_tools if (t.get("function") or {}).get("name") != "peer_call"]
             if len(all_tools) < _n:
                 _component_log("peer_call", "peer_call tool omitted (peer_call_enabled false or unset; set true in core.yml to enable)")
+        try:
+            _tp_def = getattr(Util().get_core_metadata(), "tool_policy", None) or {}
+            _defer = _tp_def.get("llm_tool_defer")
+            if isinstance(_defer, list) and all_tools:
+                _n_def = len(all_tools)
+                all_tools = strip_deferred_tools_from_openai_list(all_tools, _defer)
+                if all_tools and len(all_tools) < _n_def:
+                    _component_log("tool_policy", f"deferred {_n_def - len(all_tools)} tool(s) from LLM list (llm_tool_defer)")
+        except Exception:
+            pass
         _filtered_by_preset = False
         # Friend preset: when current friend has a preset, restrict tools to that preset's list (Step 2).
         # tools_preset in config can be a string (single preset) or array of preset names (union of tool sets).
@@ -3140,6 +3372,14 @@ async def answer_from_memory(
         except Exception as _e:
             logger.debug("Peer roster tool description inject failed: {}", _e)
         openai_tools = all_tools if (all_tools and (unified or len(all_tools) > 0)) else None
+        try:
+            _tp_ol = getattr(Util().get_core_metadata(), "tool_policy", None) or {}
+            _allow_ol = _tp_ol.get("llm_tool_allowlist")
+            if isinstance(_allow_ol, list) and _allow_ol:
+                _disc = bool(_tp_ol.get("always_include_discovery_tools", True))
+                openai_tools = filter_openai_tools_for_llm(openai_tools, _allow_ol, always_include_discovery=_disc)
+        except Exception:
+            pass
         tool_names = [((t or {}).get("function") or {}).get("name") for t in (openai_tools or []) if isinstance(t, dict)]
         logger.debug(
             "Tools for LLM: use_tools={} unified={} count={} has_route_to_plugin={}",
@@ -3175,11 +3415,34 @@ async def answer_from_memory(
                     and not any(k in _q_lo_dag for k in ("web search", "search web", "google", "bing", "tavily", "live web", "latest on web"))
                     and not any(k in _q_raw_dag for k in ("网页搜索", "上网搜", "实时搜索", "全网搜索"))
                 )
+                # Only clear search_web DAG here; news_digest has its own run_skill DAG for feed-style asks.
                 if _dag_flow and _is_feed_digest_req:
-                    _dag_flow = None
-                    _component_log("planner_executor", "skipped DAG for feed-digest request; using normal tool loop")
+                    _dag_cat_fb = (_dag_flow.get("category") or "").strip().lower()
+                    if _dag_cat_fb == "search_web":
+                        _dag_flow = None
+                        _component_log("planner_executor", "skipped DAG for feed-digest request; using normal tool loop")
             except Exception:
                 pass
+        # When long_document_output is markdown (default), news_digest DAG uses fetch instead of fetch-vmprint.
+        if _dag_flow and not long_document_output_is_vmprint():
+            try:
+                if (_dag_flow.get("category") or "").strip().lower() == "news_digest":
+                    _dag_flow = copy.deepcopy(_dag_flow)
+                    for st in _dag_flow.get("steps") or []:
+                        if not isinstance(st, dict):
+                            continue
+                        if (st.get("tool") or "").strip().lower() != "run_skill":
+                            continue
+                        args0 = st.get("args")
+                        if not isinstance(args0, dict):
+                            continue
+                        if str(args0.get("skill_name") or "").strip() != "daily-brief-1.0.0":
+                            continue
+                        ra = args0.get("args")
+                        if isinstance(ra, list) and ra and str(ra[0]).strip().lower() == "fetch-vmprint":
+                            args0["args"] = _normalize_daily_brief_args(["fetch"] + list(ra[1:]))
+            except Exception as _dag_md_e:
+                logger.debug("news_digest DAG markdown patch: {}", _dag_md_e)
         # Planner–Executor Phase 2: call planner only when no DAG flow (DAG first for category). Never crash; fall back to ReAct on any error.
         _planner_plan = None
         _pe_tool_names = []  # always defined so executor/DAG below never see NameError
@@ -3304,18 +3567,31 @@ async def answer_from_memory(
                         _thr_md = max(200, min(50000, int(tools_cfg_for_desc.get("response_markdown_ok_max_chars", 2500) or 2500)))
                     except (TypeError, ValueError):
                         _thr_md = 2500
-                    _out_pol = (
-                        "\n\n## Response format policy (HomeClaw)\n"
-                        "Pick how you show results. For **long or structured** content, prefer **VMPrint / magazine preview links**, not huge paste in chat.\n\n"
-                        f"**Plain text** — only for very short replies (about ≤{_thr_plain} characters): greetings, one fact, one short paragraph, no long lists.\n\n"
-                        f"**Markdown in chat** — for medium replies (about ≤{_thr_md} characters): short bullets, small tables, brief summaries. "
-                        "Do **not** paste raw JSON, full tool payloads, RSS/HTML dumps, or multi-page reports into the message.\n\n"
-                        "**VMPrint / magazine layout** — for news digests, web-search roundups, reports, magazine-style layouts, or anything over the Markdown guideline: "
-                        "use **run_skill(magazine-render-1.0.0)** (e.g. `render-daily-brief-ast` for digest/search-shaped JSON with a `results` list, or `render-md` for Markdown) "
-                        "with **browser_preview_html**, or **save_result_page** with **format='html'** when appropriate. "
-                        "Reply with the **URL line from the tool** plus a **1–3 sentence** summary — not the full HTML/JSON body.\n\n"
-                        "**After web_search or daily-brief** — summarize in a few sentences; if you save anything, use structured rendering + link; never make the entire reply a JSON string."
-                    )
+                    if long_document_output_is_vmprint():
+                        _out_pol = (
+                            "\n\n## Response format policy (HomeClaw)\n"
+                            "Pick how you show results. For **long or structured** content, prefer **VMPrint / magazine preview links**, not huge paste in chat.\n\n"
+                            f"**Plain text** — only for very short replies (about ≤{_thr_plain} characters): greetings, one fact, one short paragraph, no long lists.\n\n"
+                            f"**Markdown in chat** — for medium replies (about ≤{_thr_md} characters): short bullets, small tables, brief summaries. "
+                            "Do **not** paste raw JSON, full tool payloads, RSS/HTML dumps, or multi-page reports into the message.\n\n"
+                            "**VMPrint / magazine layout** — for news digests, web-search roundups, reports, magazine-style layouts, or anything over the Markdown guideline: "
+                            "use **run_skill(magazine-render-1.0.0)** (e.g. `render-daily-brief-ast` for digest/search-shaped JSON with a `results` list, or `render-md` for Markdown) "
+                            "with **browser_preview_html**, or **save_result_page** with **format='html'** when appropriate. "
+                            "Reply with the **URL line from the tool** plus a **1–3 sentence** summary — not the full HTML/JSON body.\n\n"
+                            "**After web_search or daily-brief** — summarize in a few sentences; if you save anything, use structured rendering + link; never make the entire reply a JSON string."
+                        )
+                    else:
+                        _out_pol = (
+                            "\n\n## Response format policy (HomeClaw)\n"
+                            "Pick how you show results. **Default: Markdown in chat** for news digests, web-search summaries, and medium-length reports. "
+                            "Avoid huge paste; prefer tight bullets and short tables.\n\n"
+                            f"**Plain text** — only for very short replies (about ≤{_thr_plain} characters): greetings, one fact, one short paragraph, no long lists.\n\n"
+                            f"**Markdown in chat** — for most replies up to about ≤{_thr_md} characters: bullets, small tables, brief summaries of tool output. "
+                            "Do **not** paste raw JSON, full tool payloads, or multi-page HTML into the message.\n\n"
+                            "**VMPrint / magazine preview (optional)** — only when the user explicitly asks for a browser/HTML/magazine layout, or for content that truly cannot fit Markdown: "
+                            "then use **run_skill(magazine-render-1.0.0)** with **browser_preview_html** (or **save_result_page** with **format='html'**) and return the **URL** plus a short summary.\n\n"
+                            "**After web_search or daily-brief** — summarize in a few sentences in Markdown; do not make the entire reply a JSON string."
+                        )
                     llm_input[0]["content"] = (llm_input[0].get("content") or "") + _out_pol
             except Exception:
                 pass
@@ -3330,6 +3606,7 @@ async def answer_from_memory(
                 session_id=session_id,
                 run_id=run_id,
                 request=request,
+                permission_context=tool_permission_context_from_meta(Util().get_core_metadata(), request),
             )
             # DAG first: if a flow is defined for this category, run it (no planner). On success use result and skip ReAct.
             _planner_executor_final_response = None
@@ -3485,8 +3762,19 @@ async def answer_from_memory(
                 current_messages = list(llm_input)
             try:
                 _tc = getattr(Util().get_core_metadata(), "tools_config", None) or {}
-                _n = _tc.get("max_tool_rounds")
+                _al_mr = getattr(Util().get_core_metadata(), "agent_limits", None) or {}
+                _n = _al_mr.get("max_tool_rounds") if isinstance(_al_mr, dict) else None
+                if _n is None:
+                    _n = _tc.get("max_tool_rounds")
                 max_tool_rounds = max(1, int(_n)) if (_n is not None and int(_n) >= 1) else 30
+                try:
+                    _md_sub = getattr(request, "request_metadata", None) or {}
+                    if int(_md_sub.get("skill_subagent_depth", 0) or 0) > 0:
+                        _sub_mr = _md_sub.get("skill_subagent_max_tool_rounds")
+                        if _sub_mr is not None:
+                            max_tool_rounds = min(max_tool_rounds, max(1, int(_sub_mr)))
+                except (TypeError, ValueError, AttributeError):
+                    pass
             except (TypeError, ValueError):
                 max_tool_rounds = 30
             try:
@@ -3538,6 +3826,42 @@ async def answer_from_memory(
             except Exception:
                 pass
             for _ in (range(max_tool_rounds) if _planner_executor_final_response is None else []):
+                try:
+                    context.recent_user_messages_text = _snippet_recent_user_messages_for_file_inference(
+                        current_messages
+                    )
+                except Exception:
+                    try:
+                        context.recent_user_messages_text = None
+                    except Exception:
+                        pass
+                try:
+                    _al_tok = getattr(Util().get_core_metadata(), "agent_limits", None) or {}
+                    _max_est = max(0, int(_al_tok.get("max_estimated_tokens_per_turn", 0) or 0))
+                except (TypeError, ValueError):
+                    _max_est = 0
+                try:
+                    _md_tok = getattr(request, "request_metadata", None) or {}
+                    if int(_md_tok.get("skill_subagent_depth", 0) or 0) > 0:
+                        _ov_t = _md_tok.get("skill_subagent_max_estimated_tokens")
+                        if _ov_t is not None:
+                            _max_est = max(0, int(_ov_t))
+                except (TypeError, ValueError, AttributeError):
+                    pass
+                if _max_est > 0:
+                    _used = estimate_messages_token_budget(current_messages)
+                    if _used >= _max_est:
+                        _trace_emit_event(
+                            event_type="agent_limit_reached",
+                            component="llm_loop",
+                            summary="estimated token budget exceeded",
+                            details={"reason": "max_estimated_tokens_per_turn", "estimated": _used, "limit": _max_est},
+                        )
+                        response = (
+                            "This turn exceeded the configured estimated token budget (agent_limits.max_estimated_tokens_per_turn). "
+                            "Start a shorter thread or raise the limit in config/core.yml."
+                        )
+                        break
                 # Default: main model (effective_llm_name) for every turn — tool selection, parameter extraction, and final reply. Override only when tool_selection_llm is configured and use_tool_selection_llm is true.
                 llm_name_this_turn = effective_llm_name
                 # Sync mix_route_this_request with effective_llm_name each iteration so override applies only for one turn and fallback knows the current route. Defensive: never crash on metadata/config access.
@@ -3555,10 +3879,21 @@ async def answer_from_memory(
                 except Exception as _sync_err:
                     logger.debug("mix route sync failed (non-fatal): {}", _sync_err)
                 _last_role = (current_messages[-1].get("role") or "").strip() if (isinstance(current_messages, list) and current_messages and isinstance(current_messages[-1], dict)) else ""
-                # Optional: use a dedicated tool-calling model for every tool turn when use_tool_selection_llm is true (tool selection + parameter extraction). When not used, main_llm handles all tool-call-related turns.
+                _cc_has_session_tool_llm = False
+                try:
+                    if openai_tools and request:
+                        from core.clawcode_store import clawcode_tool_llm_ref_for_session
+
+                        _cc_tlm = clawcode_tool_llm_ref_for_session(request)
+                        if _cc_tlm:
+                            llm_name_this_turn = _cc_tlm
+                            _cc_has_session_tool_llm = True
+                except Exception as _cc_tlm_e:
+                    logger.debug("clawcode tool_llm_ref skipped: {}", _cc_tlm_e)
+                # Optional: dedicated tool-selection model when configured — skipped if Claw-Code session already set tool_llm_ref.
                 _tool_sel = (getattr(Util().get_core_metadata(), "tool_selection_llm", None) or "").strip()
                 _use_tool_sel = getattr(Util().get_core_metadata(), "use_tool_selection_llm", False)
-                if openai_tools and _tool_sel and _use_tool_sel:
+                if openai_tools and _tool_sel and _use_tool_sel and not _cc_has_session_tool_llm:
                     llm_name_this_turn = _tool_sel
                 # Per-tool route override (tool loop only, mix mode): when the last message is a tool result and that tool is in tool_loop_route_overrides, use the override for this turn only (do not set effective_llm_name so next turn uses original route). If the overridden model fails, fallback (below) retries with the other model.
                 try:
@@ -3718,8 +4053,14 @@ async def answer_from_memory(
                     _decision_timeout_sec = 0
                 try:
                     _llm_coro = Util().openai_chat_completion_message(
-                        _msgs_for_llm, tools=_tools_req, tool_choice=_tool_choice_req, grammar=_use_grammar, llm_name=llm_name_this_turn,
-                        max_tokens_override=_max_tokens_override, stop_extra=_stop_extra,
+                        _msgs_for_llm,
+                        tools=_tools_req,
+                        tool_choice=_tool_choice_req,
+                        grammar=_use_grammar,
+                        llm_name=llm_name_this_turn,
+                        max_tokens_override=_max_tokens_override,
+                        stop_extra=_stop_extra,
+                        request=request,
                     )
                     if _decision_timeout_sec > 0:
                         msg = await asyncio.wait_for(_llm_coro, timeout=float(_decision_timeout_sec))
@@ -3761,8 +4102,14 @@ async def answer_from_memory(
                     ):
                         try:
                             msg_main = await Util().openai_chat_completion_message(
-                                _msgs_for_llm, tools=None, tool_choice="auto", grammar=None, llm_name=effective_llm_name,
-                                max_tokens_override=_max_tokens_override, stop_extra=None,
+                                _msgs_for_llm,
+                                tools=None,
+                                tool_choice="auto",
+                                grammar=None,
+                                llm_name=effective_llm_name,
+                                max_tokens_override=_max_tokens_override,
+                                stop_extra=None,
+                                request=request,
                             )
                             if msg_main is not None and isinstance(msg_main, dict):
                                 msg = msg_main
@@ -3826,8 +4173,14 @@ async def answer_from_memory(
                                 _msgs_for_cloud = _messages_sanitized_for_tool_role(current_messages)
                                 try:
                                     msg = await Util().openai_chat_completion_message(
-                                        _msgs_for_cloud, tools=openai_tools, tool_choice="auto", grammar=_use_grammar, llm_name=other_llm,
+                                        _msgs_for_cloud,
+                                        tools=openai_tools,
+                                        tool_choice="auto",
+                                        grammar=_use_grammar,
+                                        llm_name=other_llm,
                                         stop_extra=_stop_extra,
+                                        request=request,
+                                        bypass_clawcode_direct=True,
                                     )
                                     if msg is not None:
                                         mix_route_this_request = other_route
@@ -3879,6 +4232,63 @@ async def answer_from_memory(
                         "LLM returned no tool_calls (content={})",
                         _truncate_for_log(content_str or "(empty)", 120),
                     )
+                    # strict_fallback: user message contained an explicit sandbox-relative path (see _document_read_forced_path)
+                    # but the model returned prose only (no tool_calls). Run document_read so the next round has real content.
+                    try:
+                        _meta_sdr = Util().get_core_metadata()
+                        _tc_sdr = getattr(_meta_sdr, "tools_config", None) or {}
+                        _strict_fb_sdr = bool(_tc_sdr.get("strict_fallback", True))
+                    except Exception:
+                        _strict_fb_sdr = True
+                    if (
+                        _strict_fb_sdr
+                        and registry
+                        and any(t.name == "document_read" for t in (registry.list_tools() or []))
+                        and _document_read_forced_path
+                        and last_tool_name != "document_read"
+                    ):
+                        try:
+                            _path_auto = (_document_read_forced_path or "").strip()
+                            if _path_auto:
+                                _component_log(
+                                    "tools",
+                                    "strict_fallback: model returned no tool_calls; invoking document_read for user-specified path",
+                                )
+                                if current_messages and isinstance(current_messages[-1], dict) and (current_messages[-1].get("role") or "").strip() == "assistant":
+                                    current_messages.pop()
+                                doc_result = await registry.execute_async("document_read", {"path": _path_auto}, context)
+                                _document_read_forced_path = None
+                                _tcid = f"call_{uuid.uuid4().hex[:24]}"
+                                current_messages.append(
+                                    {
+                                        "role": "assistant",
+                                        "content": None,
+                                        "tool_calls": [
+                                            {
+                                                "id": _tcid,
+                                                "type": "function",
+                                                "function": {
+                                                    "name": "document_read",
+                                                    "arguments": json.dumps({"path": _path_auto}),
+                                                },
+                                            }
+                                        ],
+                                    }
+                                )
+                                current_messages.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": _tcid,
+                                        "content": doc_result if isinstance(doc_result, str) else str(doc_result),
+                                    }
+                                )
+                                last_tool_name = "document_read"
+                                last_tool_result_raw = doc_result if isinstance(doc_result, str) else str(doc_result)
+                                last_tool_args = {"path": _path_auto}
+                                response = None
+                                continue
+                        except Exception as _e_sdr:
+                            logger.debug("strict_fallback document_read failed: {}", _e_sdr)
                     # After a successful daily-brief / fetch-vmprint run_skill, local models often emit a follow-up with
                     # fractured <tool_call> or “[tool call]” prose + save_result_page fantasy. Parser drops invalid run_skill;
                     # prefer the real digest / preview JSON instead of an apology or fake tool narrative.
@@ -3921,8 +4331,14 @@ async def answer_from_memory(
                     if content_str and (content_str.strip() == "NO_TOOL_REQUIRED"):
                         try:
                             msg_no_tools = await Util().openai_chat_completion_message(
-                                _msgs_for_llm, tools=None, tool_choice="auto", grammar=None, llm_name=llm_name_this_turn,
-                                max_tokens_override=_max_tokens_override, stop_extra=None,
+                                _msgs_for_llm,
+                                tools=None,
+                                tool_choice="auto",
+                                grammar=None,
+                                llm_name=llm_name_this_turn,
+                                max_tokens_override=_max_tokens_override,
+                                stop_extra=None,
+                                request=request,
                             )
                             if msg_no_tools and isinstance(msg_no_tools.get("content"), str) and msg_no_tools.get("content").strip():
                                 _tc = msg_no_tools.get("tool_calls") or []
@@ -4030,8 +4446,14 @@ async def answer_from_memory(
                                 if _greeting:
                                     try:
                                         msg_no_tools = await Util().openai_chat_completion_message(
-                                            _msgs_for_llm, tools=None, tool_choice="auto", grammar=None, llm_name=llm_name_this_turn,
-                                            max_tokens_override=_max_tokens_override, stop_extra=None,
+                                            _msgs_for_llm,
+                                            tools=None,
+                                            tool_choice="auto",
+                                            grammar=None,
+                                            llm_name=llm_name_this_turn,
+                                            max_tokens_override=_max_tokens_override,
+                                            stop_extra=None,
+                                            request=request,
                                         )
                                         if msg_no_tools and isinstance(msg_no_tools.get("content"), str) and msg_no_tools.get("content").strip():
                                             _tc = msg_no_tools.get("tool_calls") or []
@@ -4897,9 +5319,10 @@ async def answer_from_memory(
                                     _max_items = max(1, min(100, int(_m.group(1))))
                                 except Exception:
                                     _max_items = 20
-                            _fv_args = ["fetch-vmprint", "--max", str(_max_items), "--lang", _lang]
+                            _fv_cmd = "fetch-vmprint" if long_document_output_is_vmprint() else "fetch"
+                            _fv_args = [_fv_cmd, "--max", str(_max_items), "--lang", _lang]
                             _lay2 = _daily_brief_document_layout_from_user_query(_q_raw_news)
-                            if _lay2:
+                            if _lay2 and _fv_cmd == "fetch-vmprint":
                                 _fv_args.extend(["--document-layout", _lay2])
                             name = "run_skill"
                             args = {
@@ -4907,7 +5330,10 @@ async def answer_from_memory(
                                 "script": "fetch_rss.py",
                                 "args": _fv_args,
                             }
-                            _component_log("tools", "guardrail: rerouted web_search drift to run_skill(daily-brief fetch-vmprint) for feed-digest intent")
+                            _component_log(
+                                "tools",
+                                f"guardrail: rerouted web_search drift to run_skill(daily-brief {_fv_cmd}) for feed-digest intent",
+                            )
                     except Exception:
                         pass
                     # Override document_read path when user specified an explicit path (e.g. documents/norm-v4.pdf) so we use it even if the model returned a wrong path (e.g. norm/v4/pdf).
@@ -5028,6 +5454,22 @@ async def answer_from_memory(
                             args = _norm_args
                     except Exception:
                         pass
+
+                    _doc_path_norm = ""
+                    _last_doc_path_norm = ""
+                    if name == "document_read" and isinstance(args, dict):
+                        _doc_path_norm = _normalize_tool_path_whitespace(str(args.get("path") or ""))
+                    if last_tool_name == "document_read" and isinstance(last_tool_args, dict):
+                        _last_doc_path_norm = _normalize_tool_path_whitespace(str(last_tool_args.get("path") or ""))
+                    _skip_duplicate_document_read = (
+                        name == "document_read"
+                        and _doc_path_norm
+                        and _doc_path_norm == _last_doc_path_norm
+                        and isinstance(last_tool_result_raw, str)
+                        and last_tool_result_raw.strip()
+                        and not last_tool_result_raw.strip().lower().startswith("error:")
+                        and not _tool_result_looks_like_error(last_tool_result_raw)
+                    )
                     # Phase 3.3: optional verification — ask LLM if tool matches user intent before executing (e.g. exec, file_write).
                     _tool_verified_skip = False
                     try:
@@ -5058,6 +5500,15 @@ async def answer_from_memory(
                     if _skip_duplicate_run_skill:
                         result = "This skill was already run in this conversation. Use the results above or call another tool (e.g. save_result_page)."
                         logger.info("Skipping duplicate run_skill({}); already executed this request", _skill_key)
+                    elif _skip_duplicate_document_read:
+                        result = (
+                            "Duplicate document_read: this path was already read successfully in the previous tool message. "
+                            "Do not call document_read again with the same path. Use that content to finish the task "
+                            "(e.g. save_result_page with HTML slides, or put HTML in your assistant message). "
+                            "【重复读取】相同路径已成功读取，请勿再次 document_read；请用已有正文继续完成任务。"
+                        )
+                        logger.info("Skipping duplicate document_read({}); already read successfully this request", _doc_path_norm)
+                        _executed_any_this_batch = True
                     elif _remind_me_skip_repeat:
                         try:
                             _qtxt = (query or "").strip()
@@ -5085,25 +5536,45 @@ async def answer_from_memory(
                             if _tool_verified_skip:
                                 result = "Verification: tool selection did not match user intent; execution skipped."
                             else:
-                                _exec_args = args
-                                if (
-                                    name == "run_skill"
-                                    and isinstance(args, dict)
-                                    and (query or "").strip()
-                                ):
-                                    _sn0 = str(args.get("skill_name") or args.get("skill") or "").strip().lower()
-                                    if "daily-brief" in _sn0:
-                                        _exec_args = dict(args)
-                                        _exec_args["_homeclaw_user_query"] = (query or "").strip()
-                                if tool_timeout_sec > 0:
-                                    _run_skill_executed = True
-                                    result = await asyncio.wait_for(
-                                        registry.execute_async(name, _exec_args, context),
-                                        timeout=tool_timeout_sec,
-                                    )
+                                _cc_pf = None
+                                try:
+                                    from core.clawcode_store import clawcode_tool_preflight
+
+                                    _cc_pf = clawcode_tool_preflight(name, args, context)
+                                except Exception as _cc_pfe:
+                                    logger.debug("clawcode tool preflight skipped: {}", _cc_pfe)
+                                if _cc_pf is not None:
+                                    result = _cc_pf
                                 else:
-                                    _run_skill_executed = True
-                                    result = await registry.execute_async(name, _exec_args, context)
+                                    _cc_gate = None
+                                    try:
+                                        from core.clawcode_approvals import maybe_block_clawcode_tool
+
+                                        _cc_gate = maybe_block_clawcode_tool(name, args, context)
+                                    except Exception as _cc_ge:
+                                        logger.debug("clawcode approval gate skipped: {}", _cc_ge)
+                                    if _cc_gate is not None:
+                                        result = _cc_gate
+                                    else:
+                                        _exec_args = args
+                                        if (
+                                            name == "run_skill"
+                                            and isinstance(args, dict)
+                                            and (query or "").strip()
+                                        ):
+                                            _sn0 = str(args.get("skill_name") or args.get("skill") or "").strip().lower()
+                                            if "daily-brief" in _sn0:
+                                                _exec_args = dict(args)
+                                                _exec_args["_homeclaw_user_query"] = (query or "").strip()
+                                        if tool_timeout_sec > 0:
+                                            _run_skill_executed = True
+                                            result = await asyncio.wait_for(
+                                                registry.execute_async(name, _exec_args, context),
+                                                timeout=tool_timeout_sec,
+                                            )
+                                        else:
+                                            _run_skill_executed = True
+                                            result = await registry.execute_async(name, _exec_args, context)
                         except asyncio.TimeoutError:
                             result = f"Error: tool {name} timed out after {tool_timeout_sec}s. The system did not hang; you can retry or use a different approach."
                         except Exception as e:
@@ -5192,11 +5663,10 @@ async def answer_from_memory(
                         except Exception as _e_doc:
                             logger.debug("Generic document_ast auto-chain failed: {}", _e_doc)
                             pass
-                    # Auto-chain AST renderer after daily-brief.
-                    # Do this unconditionally (when fetch succeeded) so daily-brief tool path returns VMPrint output,
-                    # not only markdown, even if the user didn't explicitly mention "magazine/pdf".
+                    # Auto-chain AST renderer after daily-brief (only when tools.long_document_output is vmprint).
                     if (
-                        name == "run_skill"
+                        long_document_output_is_vmprint()
+                        and name == "run_skill"
                         and isinstance(args, dict)
                         and "daily-brief" in str(args.get("skill_name") or "").strip().lower()
                         and isinstance(result, str)
@@ -5500,6 +5970,12 @@ async def answer_from_memory(
             else:
                 # Loop exhausted (e.g. max_tool_rounds). Use last message content only if it is from the assistant; never use a tool result as the user-facing response. Do not overwrite planner-executor response.
                 if _planner_executor_final_response is None:
+                    _trace_emit_event(
+                        event_type="agent_limit_reached",
+                        component="llm_loop",
+                        summary="tool loop exhausted max_tool_rounds",
+                        details={"reason": "max_tool_rounds_exhausted", "max_tool_rounds": max_tool_rounds},
+                    )
                     if current_messages:
                         _last = current_messages[-1]
                         if isinstance(_last, dict) and (_last.get("role") or "").strip() == "assistant":
@@ -5650,7 +6126,10 @@ async def answer_from_memory(
                     ):
                         response = _canon_ws
                 _tcfg_ws = (getattr(Util().get_core_metadata(), "tools_config", None) or {})
-                if _tcfg_ws.get("web_search_magazine_preview", True) is not False:
+                if (
+                    long_document_output_is_vmprint()
+                    and _tcfg_ws.get("web_search_magazine_preview", True) is not False
+                ):
                     _mag_link = await _magazine_preview_from_web_search_json(
                         registry,
                         context,
@@ -5843,5 +6322,8 @@ async def answer_from_memory(
         if _trace_started:
             _trace_end_turn(final_output="", artifact={"error": str(e), "trace_path": _trace_current_path() or ""})
         return (None, None)
+    finally:
+        if _llm_usage_ctx:
+            detach_prompt_request_for_usage()
 
 

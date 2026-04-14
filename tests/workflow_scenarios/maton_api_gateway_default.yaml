@@ -1,0 +1,4 @@
+id: maton_api_gateway_default
+contract: maton_api_gateway_default
+prompt: "Maton api gateway webhook trigger test call."
+description: "maton-api-gateway skill trace."

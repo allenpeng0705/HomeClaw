@@ -1,0 +1,4 @@
+id: baidu_search_default
+contract: baidu_search_default
+prompt: "Baidu search web results china tech news today."
+description: "baidu-search skill trace."

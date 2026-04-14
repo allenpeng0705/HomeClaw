@@ -39,6 +39,13 @@ class MockHomeclawNativePlatform
 
   @override
   Future<void> setTrayIcon({String? iconPath, String? tooltip}) => Future.value();
+
+  @override
+  Future<String?> getApnsToken() => Future.value(null);
+
+  @override
+  Future<Map<String, dynamic>?> consumePendingNotificationChatPayload() =>
+      Future.value(null);
 }
 
 void main() {

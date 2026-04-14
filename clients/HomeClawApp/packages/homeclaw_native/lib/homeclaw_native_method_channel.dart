@@ -100,4 +100,15 @@ class MethodChannelHomeclawNative extends HomeclawNativePlatform {
     final result = await methodChannel.invokeMethod<String?>('getApnsToken');
     return result;
   }
+
+  @override
+  Future<Map<String, dynamic>?> consumePendingNotificationChatPayload() async {
+    final raw = await methodChannel.invokeMethod<Map<Object?, Object?>>(
+      'consumePendingNotificationChatPayload',
+    );
+    if (raw == null || raw.isEmpty) return null;
+    return Map<String, dynamic>.fromEntries(
+      raw.entries.map((e) => MapEntry(e.key?.toString() ?? '', e.value)),
+    );
+  }
 }

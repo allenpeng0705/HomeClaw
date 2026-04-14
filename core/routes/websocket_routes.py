@@ -13,6 +13,7 @@ from loguru import logger
 from base.base import InboundRequest
 
 from core.routes import auth
+from core.result_viewer import infer_public_base_url_from_websocket
 
 
 def get_websocket_handler(core):
@@ -150,6 +151,9 @@ def get_websocket_handler(core):
                         location=(data.get("location") or "").strip() or None,
                         cursor_agent_yolo=data.get("cursor_agent_yolo"),
                         claude_skip_permissions=data.get("claude_skip_permissions"),
+                        tool_profile=(data.get("tool_profile") or "").strip() or None,
+                        clawcode_session_id=(data.get("clawcode_session_id") or "").strip() or None,
+                        public_request_base_url=infer_public_base_url_from_websocket(websocket),
                     )
                 except Exception as e:
                     await websocket.send_json({"error": str(e), "text": ""})

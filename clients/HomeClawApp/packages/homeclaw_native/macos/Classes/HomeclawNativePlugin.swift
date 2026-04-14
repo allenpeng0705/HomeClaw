@@ -40,6 +40,18 @@ public class HomeclawNativePlugin: NSObject, FlutterPlugin {
       result(nil)
     case "getApnsToken":
       requestApnsToken(result: result)
+    case "consumePendingNotificationChatPayload":
+      let ud = UserDefaults.standard
+      guard let text = ud.string(forKey: "homeclaw_pending_push_text"), !text.isEmpty else {
+        result(nil)
+        return
+      }
+      let uid = ud.string(forKey: "homeclaw_pending_push_user_id") ?? ""
+      let ff = ud.string(forKey: "homeclaw_pending_push_from_friend") ?? "HomeClaw"
+      ud.removeObject(forKey: "homeclaw_pending_push_text")
+      ud.removeObject(forKey: "homeclaw_pending_push_user_id")
+      ud.removeObject(forKey: "homeclaw_pending_push_from_friend")
+      result(["text": text, "user_id": uid, "from_friend": ff])
     case "startScreenRecord":
       let args = call.arguments as? [String: Any] ?? [:]
       let durationSec = args["durationSec"] as? Int ?? 10

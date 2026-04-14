@@ -35,6 +35,18 @@ from memory.chat.message import ChatMessage
 from memory.prompts import MEMORY_SUMMARIZATION_PROMPT
 from base.base import CoreMetadata, Friend, User, LLM, EmailAccount
 
+
+def _maybe_note_llm_usage(resp_json: Any) -> None:
+    try:
+        if not isinstance(resp_json, dict):
+            return
+        from base.llm_usage_buffer import note_completion_usage
+
+        note_completion_usage(resp_json.get("usage"))
+    except Exception:
+        pass
+
+
 root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 core_metadata = CoreMetadata.from_yaml(os.path.join(root_dir, "config", "core.yml"))
 try:
@@ -577,6 +589,109 @@ class Util:
                 return m, 'litellm'
         return None, None
 
+    def _panda_cfg(self) -> Dict[str, Any]:
+        meta = self.get_core_metadata()
+        if meta is None:
+            return {}
+        p = getattr(meta, "panda", None)
+        return p if isinstance(p, dict) else {}
+
+    def panda_enabled(self) -> bool:
+        return bool(self._panda_cfg().get("enabled"))
+
+    def _panda_base_netloc(self) -> Tuple[str, int]:
+        p = self._panda_cfg()
+        h = str(p.get("host") or "127.0.0.1").strip() or "127.0.0.1"
+        try:
+            port = max(1, min(65535, int(p.get("port") or 8080)))
+        except (TypeError, ValueError):
+            port = 8080
+        return h, port
+
+    def _panda_path(self, kind: str) -> str:
+        """Paths under Panda for main_llm, cloud_llm, embedding, completions, ollama_embed."""
+        p = self._panda_cfg()
+        paths = p.get("paths") if isinstance(p.get("paths"), dict) else {}
+        defaults = {
+            "main_llm": "/v1/chat/completions",
+            "cloud_llm": "/v1/chat/completions",
+            "embedding": "/v1/embeddings",
+            "completions": "/v1/completions",
+            "ollama_embed": "/api/embed",
+        }
+        raw = paths.get(kind) or defaults.get(kind, "/")
+        s = str(raw).strip() if raw is not None else (defaults.get(kind) or "/")
+        if not s.startswith("/"):
+            s = "/" + s
+        return s
+
+    def panda_openai_chat_url(self, mtype: str) -> Optional[str]:
+        """When Panda is enabled, full POST URL for OpenAI-style chat completions. litellm → cloud_llm path; else main_llm path."""
+        if not self.panda_enabled():
+            return None
+        h, port = self._panda_base_netloc()
+        path = self._panda_path("cloud_llm" if mtype == "litellm" else "main_llm")
+        return f"http://{h}:{port}{path}"
+
+    def openai_chat_completions_path(self, mtype: str) -> str:
+        """HTTP path for POST chat completions when not using Panda (local/ollama vs litellm). From llm.yml main_llm_chat_path / cloud_llm_chat_path."""
+        meta = self.get_core_metadata()
+        default = "/v1/chat/completions"
+        if mtype == "litellm":
+            raw = getattr(meta, "cloud_llm_chat_path", None) if meta is not None else None
+        else:
+            raw = getattr(meta, "main_llm_chat_path", None) if meta is not None else None
+        s = (str(raw).strip() if raw is not None and raw != "" else "") or default
+        if not s.startswith("/"):
+            s = "/" + s
+        return s
+
+    def panda_openai_embedding_url(self) -> Optional[str]:
+        if not self.panda_enabled():
+            return None
+        h, port = self._panda_base_netloc()
+        return f"http://{h}:{port}{self._panda_path('embedding')}"
+
+    def panda_openai_completions_url(self) -> Optional[str]:
+        """Legacy POST /v1/completions."""
+        if not self.panda_enabled():
+            return None
+        h, port = self._panda_base_netloc()
+        return f"http://{h}:{port}{self._panda_path('completions')}"
+
+    def panda_ollama_embed_url(self) -> Optional[str]:
+        if not self.panda_enabled():
+            return None
+        h, port = self._panda_base_netloc()
+        return f"http://{h}:{port}{self._panda_path('ollama_embed')}"
+
+    def panda_http_timeout_seconds(self) -> Optional[int]:
+        """When set in panda.timeout_seconds, overrides aiohttp total for Panda-routed calls."""
+        if not self.panda_enabled():
+            return None
+        raw = self._panda_cfg().get("timeout_seconds")
+        if raw is None:
+            return None
+        try:
+            v = int(raw)
+            return max(1, v) if v > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    def _client_timeout_for_llm_http(self) -> aiohttp.ClientTimeout:
+        """Total timeout for LLM HTTP; honors panda.timeout_seconds when Panda is enabled."""
+        pt = self.panda_http_timeout_seconds()
+        if pt is not None:
+            return aiohttp.ClientTimeout(total=pt)
+        meta = self.get_core_metadata()
+        _raw = getattr(meta, "llm_completion_timeout_seconds", 300) if meta is not None else 300
+        try:
+            _raw = 300 if _raw is None else int(_raw)
+        except (TypeError, ValueError):
+            _raw = 300
+        timeout_sec = None if _raw == 0 else max(60, _raw)
+        return aiohttp.ClientTimeout(total=timeout_sec)
+
     def main_llm(self):
         """Return (path_or_model, raw_id, mtype, host, port). Never returns None so callers can always unpack. Uses main_llm_local/main_llm_cloud when main_llm_mode is set (no need for main_llm in config)."""
         main_llm_name = self._effective_main_llm_ref()
@@ -1097,6 +1212,8 @@ class Util:
     def check_main_model_server_health(self, timeout: int = 300) -> bool:
         """Check if the LLM server is ready by making a request to its health endpoint."""
         _, model, type, model_host, model_port = Util().main_llm()
+        if self.panda_enabled():
+            model_host, model_port = self._panda_base_netloc()
         health_url = f"http://{model_host}:{model_port}/health"
         logger.debug(f"Main model Health URL: {health_url}")
         start_time = time.time()
@@ -1139,6 +1256,8 @@ class Util:
             logger.error("Embedding LLM not configured; cannot check health.")
             return False
         _, model, _type, model_host, model_port = res
+        if self.panda_enabled():
+            model_host, model_port = self._panda_base_netloc()
         base_url = f"http://{model_host}:{model_port}"
         health_url = f"{base_url}/health"
         models_url = f"{base_url}/v1/models"
@@ -1541,6 +1660,46 @@ class Util:
             return extra_body_params
         return {k: v for k, v in extra_body_params.items() if k not in self._GEMINI_UNSUPPORTED_EXTRA_KEYS}
 
+    def _coerce_grammar_for_chat_request(
+        self, mtype: str, llm_name: Optional[str], grammar: Optional[str]
+    ) -> Optional[str]:
+        """Drop llama.cpp GBNF grammar for cloud (litellm); then apply function_calling conflict rule for local/ollama."""
+        if mtype == "litellm" and isinstance(grammar, str) and grammar.strip():
+            logger.debug("Omitting GBNF grammar for litellm (OpenAI/cloud APIs do not use llama.cpp grammar)")
+            return None
+        return self._strip_grammar_when_llama_function_calling(mtype, llm_name, grammar)
+
+    def _strip_grammar_when_llama_function_calling(
+        self, mtype: str, llm_name: Optional[str], grammar: Optional[str]
+    ) -> Optional[str]:
+        """llama-server rejects requests that combine GBNF grammar with OpenAI function/tool-calling mode (400)."""
+        if mtype not in ("local", "ollama") or not isinstance(grammar, str) or not grammar.strip():
+            return grammar
+        try:
+            _, lcpp = self._get_completion_and_llama_cpp_for_llm(llm_name)
+            if isinstance(lcpp, dict) and lcpp.get("function_calling"):
+                logger.info(
+                    "Skipping GBNF grammar: llama_cpp.function_calling is true (server rejects grammar with tool-calling). "
+                    "Using native tools only. To use qwen35_use_grammar + tools-in-prompt instead, set function_calling: false in llm.yml."
+                )
+                return None
+        except Exception:
+            pass
+        return grammar
+
+    @staticmethod
+    def _strip_grammar_if_tools_in_payload(data: dict, mtype: str) -> None:
+        """Never send grammar together with the OpenAI tools array to local/ollama (llama-server 400)."""
+        if mtype not in ("local", "ollama") or not isinstance(data, dict):
+            return
+        if not data.get("tools"):
+            return
+        if data.pop("grammar", None) is not None:
+            logger.debug("LLM request: removed grammar because tools array is present (llama-server)")
+        eb = data.get("extra_body")
+        if isinstance(eb, dict) and eb.pop("grammar", None) is not None:
+            logger.debug("LLM request: removed extra_body.grammar because tools array is present")
+
     def _get_llm_semaphore(self, mtype: str):
         """Lazy-create semaphores for local (llama.cpp), ollama, and cloud (LiteLLM). mtype 'local' or 'ollama' use llm_max_concurrent_local; 'litellm' uses llm_max_concurrent_cloud. Never raises: uses defaults on bad config."""
         lock = getattr(Util, '_llm_semaphore_creation_lock', None)
@@ -1569,7 +1728,7 @@ class Util:
                                      functions: Optional[List] = None,
                                      function_call: Optional[str] = None,
                                      llm_name: Optional[str] = None,
-                                     ) -> str | None:
+                                     ) -> Optional[str]:
         resolved = self._resolve_llm(llm_name) or self.main_llm()
         mtype = resolved[2] if (resolved and len(resolved) > 2) else 'local'
         sem = self._get_llm_semaphore(mtype)
@@ -1586,7 +1745,7 @@ class Util:
                                      functions: Optional[List] = None,
                                      function_call: Optional[str] = None,
                                      llm_name: Optional[str] = None,
-                                     ) -> str | None:
+                                     ) -> Optional[str]:
         try:
             resolved = Util()._resolve_llm(llm_name)
             if resolved is None:
@@ -1604,6 +1763,7 @@ class Util:
                 except Exception:
                     pass
             model_for_request, headers = Util()._llm_request_model_and_headers(path_or_model, raw_id, mtype, llm_ref=llm_ref)
+            grammar = self._coerce_grammar_for_chat_request(mtype, llm_name, grammar)
             qwen_model = self._get_qwen_model_for_llm(llm_name)
             _grammar_ok = isinstance(grammar, str) and len(grammar) > 0
             use_tools_in_prompt_q35 = (
@@ -1711,6 +1871,7 @@ class Util:
             extra_body_params = self._filter_extra_body_for_model(extra_body_params, model_for_request)
             if extra_body_params:
                 data.setdefault("extra_body", {}).update(extra_body_params)
+            self._strip_grammar_if_tools_in_payload(data, mtype)
             data_json = None
             if self.is_utf8_compatible(data):
                 data_json = json.dumps(data, ensure_ascii=False)
@@ -1718,15 +1879,14 @@ class Util:
                 data_json = json.dumps(data, ensure_ascii=False).encode('utf-8')
 
             #logger.debug(f"Message Request to LLM: {data_json}")
-            chat_completion_api_url = 'http://' + model_host + ':' + str(model_port) + '/v1/chat/completions'
-            meta = Util().get_core_metadata()
-            _raw = getattr(meta, 'llm_completion_timeout_seconds', 300) if meta is not None else 300
-            try:
-                _raw = 300 if _raw is None else int(_raw)
-            except (TypeError, ValueError):
-                _raw = 300
-            timeout_sec = None if _raw == 0 else max(60, _raw)  # 0 = no timeout (long tasks allowed; use shortcuts for simple replies)
-            timeout = aiohttp.ClientTimeout(total=timeout_sec)
+            chat_completion_api_url = ""
+            _panda_chat = self.panda_openai_chat_url(mtype)
+            if _panda_chat:
+                chat_completion_api_url = _panda_chat
+            else:
+                chat_completion_api_url = "http://" + model_host + ":" + str(model_port) + self.openai_chat_completions_path(mtype)
+            timeout = self._client_timeout_for_llm_http()
+            timeout_sec = getattr(timeout, "total", None)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(chat_completion_api_url, headers=headers, data=data_json) as resp:
                     resp_json = await resp.text(encoding='utf-8')
@@ -1765,16 +1925,20 @@ class Util:
                                 # Filter out the <think> tag and its content
                                 filtered_message_content = self.process_text(message_content)
                                 if filtered_message_content is not None:
+                                    _maybe_note_llm_usage(resp_json)
                                     return filtered_message_content
                                 else:
                                     #logger.error("filtered message content is None")
+                                    _maybe_note_llm_usage(resp_json)
                                     return None
                     logger.error("Invalid response structure")
                     return None
         except asyncio.TimeoutError:
+            _tu = (chat_completion_api_url or "").strip() or f"http://{model_host}:{model_port}{self.openai_chat_completions_path(mtype)}"
             logger.warning(
-                "LLM chat completion timed out after {}s ({}:{})",
+                "LLM chat completion timed out after {}s url={} (configured model backend {}:{})",
                 timeout_sec if timeout_sec is not None else "(no limit)",
+                _tu,
                 model_host,
                 model_port,
             )
@@ -1850,6 +2014,8 @@ class Util:
         llm_name: Optional[str] = None,
         max_tokens_override: Optional[int] = None,
         stop_extra: Optional[List[str]] = None,
+        request: Any = None,
+        bypass_clawcode_direct: bool = False,
     ) -> Optional[dict]:
         """
         Same as openai_chat_completion but returns the full assistant message dict for tool loop.
@@ -1859,14 +2025,32 @@ class Util:
         When llm_name is set (e.g. mix-mode route ref), uses that model for this call.
         When max_tokens_override is set (e.g. for long-output turns like HTML slides/reports), uses it instead of completion.max_tokens to avoid truncation.
         When stop_extra is set, those strings are appended to the stop list (if not already present). Use for conditional stop (e.g. add "</tool_call>" only on tool-decision turns).
+        When [request] is set and clawcode.direct_openai is configured, Claw-Code turns use that URL/key/model (bypass LiteLLM proxy). Use bypass_clawcode_direct=True for mix-mode fallback to another llm_name.
         """
+        _direct_on = False
+        if not bypass_clawcode_direct and request is not None:
+            try:
+                from core.clawcode_store import clawcode_direct_openai_settings
+
+                _direct_on = clawcode_direct_openai_settings(request) is not None
+            except Exception:
+                _direct_on = False
         resolved = self._resolve_llm(llm_name) or self.main_llm()
-        mtype = resolved[2] if (resolved and len(resolved) > 2) else 'local'
+        mtype = resolved[2] if (resolved and len(resolved) > 2) else "local"
+        if _direct_on:
+            mtype = "litellm"
         sem = self._get_llm_semaphore(mtype)
         async with sem:
             return await self._openai_chat_completion_message_impl(
-                messages, tools=tools, tool_choice=tool_choice, grammar=grammar, llm_name=llm_name,
-                max_tokens_override=max_tokens_override, stop_extra=stop_extra,
+                messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                grammar=grammar,
+                llm_name=llm_name,
+                max_tokens_override=max_tokens_override,
+                stop_extra=stop_extra,
+                request=request,
+                bypass_clawcode_direct=bypass_clawcode_direct,
             )
 
     async def _openai_chat_completion_message_impl(
@@ -1878,27 +2062,59 @@ class Util:
         llm_name: Optional[str] = None,
         max_tokens_override: Optional[int] = None,
         stop_extra: Optional[List[str]] = None,
+        request: Any = None,
+        bypass_clawcode_direct: bool = False,
     ) -> Optional[dict]:
         try:
-            if llm_name and str(llm_name).strip():
-                resolved = self._resolve_llm(llm_name.strip())
-            else:
-                resolved = None
-            if resolved is None:
-                resolved = Util().main_llm()
-            if not resolved or len(resolved) < 5:
-                logger.warning("LLM resolve failed (message): resolved=%s; skipping request", type(resolved).__name__ if resolved is not None else "None")
-                return None
-            path_or_model, raw_id, mtype, model_host, model_port = resolved
-            _meta = Util().get_core_metadata()
-            llm_ref = (llm_name or "").strip() if (llm_name and str(llm_name).strip()) else (getattr(_meta, "main_llm", None) or "").strip() if _meta else ""
-            if mtype == "litellm":
+            _direct_cfg = None
+            if not bypass_clawcode_direct and request is not None:
+                try:
+                    from core.clawcode_store import clawcode_direct_openai_settings
+
+                    _direct_cfg = clawcode_direct_openai_settings(request)
+                except Exception:
+                    _direct_cfg = None
+            if _direct_cfg:
+                path_or_model = _direct_cfg["model"]
+                raw_id = _direct_cfg["model"]
+                mtype = "litellm"
+                model_host = ""
+                model_port = 0
+                model_for_request = _direct_cfg["model"]
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer " + _direct_cfg["api_key"],
+                }
+                _chat_url_override = _direct_cfg["url"]
                 try:
                     from hybrid_router.metrics import log_cloud_usage
+
                     log_cloud_usage()
                 except Exception:
                     pass
-            model_for_request, headers = Util()._llm_request_model_and_headers(path_or_model, raw_id, mtype, llm_ref=llm_ref)
+            else:
+                _chat_url_override = None
+                if llm_name and str(llm_name).strip():
+                    resolved = self._resolve_llm(llm_name.strip())
+                else:
+                    resolved = None
+                if resolved is None:
+                    resolved = Util().main_llm()
+                if not resolved or len(resolved) < 5:
+                    logger.warning("LLM resolve failed (message): resolved=%s; skipping request", type(resolved).__name__ if resolved is not None else "None")
+                    return None
+                path_or_model, raw_id, mtype, model_host, model_port = resolved
+                _meta = Util().get_core_metadata()
+                llm_ref = (llm_name or "").strip() if (llm_name and str(llm_name).strip()) else (getattr(_meta, "main_llm", None) or "").strip() if _meta else ""
+                if mtype == "litellm":
+                    try:
+                        from hybrid_router.metrics import log_cloud_usage
+
+                        log_cloud_usage()
+                    except Exception:
+                        pass
+                model_for_request, headers = Util()._llm_request_model_and_headers(path_or_model, raw_id, mtype, llm_ref=llm_ref)
+            grammar = self._coerce_grammar_for_chat_request(mtype, llm_name, grammar)
             # Local/ollama servers with tool grammar can fail parsing when message content contains raw <tool_call> (e.g. from previous turn). Sanitize so we send placeholder instead.
             if mtype in ("local", "ollama") and tools:
                 sanitized_messages = []
@@ -2046,27 +2262,40 @@ class Util:
             extra_body_params = self._filter_extra_body_for_model(extra_body_params, model_for_request)
             if extra_body_params:
                 data.setdefault("extra_body", {}).update(extra_body_params)
+            self._strip_grammar_if_tools_in_payload(data, mtype)
             data_json = json.dumps(data, ensure_ascii=False) if self.is_utf8_compatible(data) else json.dumps(data, ensure_ascii=False).encode("utf-8")
-            chat_completion_api_url = "http://" + model_host + ":" + str(model_port) + "/v1/chat/completions"
+            chat_completion_api_url = ""
+            if _chat_url_override:
+                chat_completion_api_url = _chat_url_override
+            else:
+                _panda_chat = self.panda_openai_chat_url(mtype)
+                if _panda_chat:
+                    chat_completion_api_url = _panda_chat
+                else:
+                    chat_completion_api_url = "http://" + model_host + ":" + str(model_port) + self.openai_chat_completions_path(mtype)
             logger.debug("LLM request: mtype={} url={} model={}", mtype, chat_completion_api_url, model_for_request)
-            meta = Util().get_core_metadata()
-            _raw = getattr(meta, 'llm_completion_timeout_seconds', 300) if meta is not None else 300
-            try:
-                _raw = 300 if _raw is None else int(_raw)
-            except (TypeError, ValueError):
-                _raw = 300
-            timeout_sec = None if _raw == 0 else max(60, _raw)  # 0 = no timeout (long tasks allowed; use shortcuts for simple replies)
-            timeout = aiohttp.ClientTimeout(total=timeout_sec)
+            timeout = self._client_timeout_for_llm_http()
+            timeout_sec = getattr(timeout, "total", None)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(chat_completion_api_url, headers=headers, data=data_json) as resp:
                     resp_text = await resp.text()
                     if resp.status != 200:
                         logger.warning(
-                            "Local LLM returned HTTP {} ({}:{}). Response: {}",
-                            resp.status, model_host, model_port, (resp_text or "")[:500],
+                            "LLM returned HTTP {} url={} model={}. Response: {}",
+                            resp.status,
+                            chat_completion_api_url,
+                            model_for_request,
+                            (resp_text or "")[:500],
                         )
                         try:
-                            setattr(self, "_last_llm_error", "The model server at {}:{} returned HTTP {}. Check that the server is running and the model is loaded.".format(model_host, model_port, resp.status))
+                            setattr(
+                                self,
+                                "_last_llm_error",
+                                "The LLM endpoint returned HTTP {} ({}). Check Core logs and provider response.".format(
+                                    resp.status,
+                                    chat_completion_api_url,
+                                ),
+                            )
                         except Exception:
                             setattr(self, "_last_llm_error", "The model server returned an error. Check Core logs.")
                         return None
@@ -2239,6 +2468,7 @@ class Util:
                             # Sanitize so each function.arguments is valid JSON (avoids HTTP 500 when this message is sent back to the server)
                             out["tool_calls"] = _sanitize_tool_calls(msg["tool_calls"])
                         setattr(self, "_last_llm_error", None)
+                        _maybe_note_llm_usage(resp_json)
                         return out
                     err_msg = (resp_json.get("error") or resp_json.get("message") or "").strip() if isinstance(resp_json, dict) else ""
                     logger.warning(
@@ -2251,9 +2481,11 @@ class Util:
                         setattr(self, "_last_llm_error", "The model returned no valid response. Check Core logs.")
                     return None
         except asyncio.TimeoutError:
+            _tu = (chat_completion_api_url or "").strip() or f"http://{model_host}:{model_port}{self.openai_chat_completions_path(mtype)}"
             logger.warning(
-                "LLM chat completion timed out after {}s ({}:{})",
+                "LLM chat completion timed out after {}s url={} (configured model backend {}:{})",
                 timeout_sec if timeout_sec is not None else "(no limit)",
+                _tu,
                 model_host,
                 model_port,
             )
@@ -2487,9 +2719,17 @@ class Util:
         sem = self._get_llm_semaphore(mtype)
         try:
             async with sem:
-                async with aiohttp.ClientSession() as session:
+                # Pre-Panda: no ClientSession timeout on embedding. With Panda: honor panda.timeout_seconds / same as chat when set.
+                _sess_kw = {}
+                if self.panda_enabled():
+                    _sess_kw["timeout"] = self._client_timeout_for_llm_http()
+                async with aiohttp.ClientSession(**_sess_kw) as session:
                     if mtype == "ollama":
-                        embedding_url = "http://" + str(host) + ":" + str(port) + "/api/embed"
+                        _panda_oll = self.panda_ollama_embed_url()
+                        if _panda_oll:
+                            embedding_url = _panda_oll
+                        else:
+                            embedding_url = "http://" + str(host) + ":" + str(port) + "/api/embed"
                         body = {"model": path_or_name or "", "input": text if isinstance(text, str) else (text if isinstance(text, list) else [str(text)])}
                         if isinstance(body["input"], str):
                             body["input"] = [body["input"]]
@@ -2501,7 +2741,11 @@ class Util:
                             if not isinstance(emb, list) or not emb:
                                 return None
                             return emb[0] if isinstance(emb[0], list) else None
-                    embedding_url = "http://" + host + ":" + str(port) + "/v1/embeddings"
+                    _panda_emb = self.panda_openai_embedding_url()
+                    if _panda_emb:
+                        embedding_url = _panda_emb
+                    else:
+                        embedding_url = "http://" + host + ":" + str(port) + "/v1/embeddings"
                     logger.debug(f"Embedding URL: {embedding_url}")
                     body = {"input": text}
                     if model_for_body:

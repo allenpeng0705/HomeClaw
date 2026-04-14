@@ -1,0 +1,4 @@
+id: apple_notes_default
+contract: apple_notes_default
+prompt: "Apple notes read icloud note title shopping list."
+description: "apple-notes skill trace."

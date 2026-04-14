@@ -105,4 +105,13 @@ class HomeclawNative {
       return null;
     }
   }
+
+  /// iOS/macOS: after user taps an inbound APNs notification, returns stashed `text` / `user_id` / `from_friend` once, then clears.
+  Future<Map<String, dynamic>?> consumePendingNotificationChatPayload() async {
+    try {
+      return await _platform.consumePendingNotificationChatPayload();
+    } catch (_) {
+      return null;
+    }
+  }
 }

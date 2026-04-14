@@ -7,8 +7,12 @@ can do it. This module uses exactly one LLM completion for query -> category.
 
 Phase 3.2 fallback: On parse failure, timeout, or any exception, route() returns
 "general_chat" so the main turn gets full tools (or config profile).
+
+Config (intent_router): optional router_llm — model ref passed to completion_fn as llm_name for
+this call only (use a small/fast model). timeout_seconds caps wait before fallback (see llm_loop).
 """
 
+import re
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -32,6 +36,9 @@ DEFAULT_CATEGORIES = [
     "memory",
     "knowledge_base",
     "image",
+    "weather",
+    "news_digest",
+    "stock_monitor",
     "general_chat",
     "coding",
 ]
@@ -52,6 +59,9 @@ DEFAULT_CATEGORY_DESCRIPTIONS: Dict[str, str] = {
     "memory": "User wants to remember something, recall past context, or search memory.",
     "knowledge_base": "User wants to search or save something in their knowledge base.",
     "image": "User wants to generate, analyze, or describe an image.",
+    "weather": "User asks for weather, forecast, or temperature for a place or time.",
+    "news_digest": "User wants RSS headlines, daily brief, or news digest (not generic web search).",
+    "stock_monitor": "User wants watchlist quotes, portfolio, stock prices, 自选股, or A股/港股/美股行情 (stock-monitor skill).",
     "general_chat": "General conversation, question, or intent that does not fit a specific category above.",
     "coding": "User wants to run code, edit files, use dev tools, or automate something.",
 }
@@ -102,6 +112,49 @@ def _normalize_category(raw: str, allowed: List[str]) -> str:
     return "general_chat"
 
 
+def match_frequent_fast_path(
+    query: str,
+    categories: List[str],
+    config: Dict[str, Any],
+) -> Optional[str]:
+    """
+    Optional YAML: intent_router.frequent_fast_paths — list of { category, patterns: [regex] }.
+    If the user message matches any pattern (re.search) and category is in the configured categories list,
+    return that category without calling the classifier LLM. Invalid regex entries are skipped with a warning.
+    """
+    if not query or not isinstance(query, str) or not query.strip():
+        return None
+    raw = config.get("frequent_fast_paths") if isinstance(config, dict) else None
+    if not isinstance(raw, list) or not raw:
+        return None
+    try:
+        cat_set = {str(c).strip().lower() for c in (categories or []) if c is not None and str(c).strip()}
+    except Exception:
+        cat_set = set()
+    if not cat_set:
+        return None
+    q = query.strip()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        cat = (entry.get("category") or "").strip()
+        if not cat or cat.lower() not in cat_set:
+            continue
+        pats = entry.get("patterns")
+        if not isinstance(pats, list):
+            continue
+        for pat in pats:
+            if not isinstance(pat, str) or not pat.strip():
+                continue
+            try:
+                if re.search(pat, q):
+                    logger.debug("Intent router: frequent_fast_paths matched -> category {}", cat)
+                    return cat
+            except re.error as e:
+                logger.warning("intent_router.frequent_fast_paths invalid regex {!r}: {}", pat, e)
+    return None
+
+
 def _format_recent_context(
     recent_messages: List[Dict[str, Any]],
     max_chars_per_message: int,
@@ -141,7 +194,7 @@ async def route(
 
     Args:
         query: User message to classify.
-        config: intent_router config (enabled, categories, optional category_tools, include_recent_turns, recent_turns_max_chars).
+        config: intent_router config (enabled, categories, optional frequent_fast_paths, category_tools, include_recent_turns, recent_turns_max_chars).
         completion_fn: Async callable(messages, llm_name=None) -> str, e.g. core.openai_chat_completion.
         llm_name: Optional model ref for router (e.g. smaller/faster); None = use default.
         recent_messages: Optional chat history (list of {role, content}). Used when include_recent_turns > 0.
@@ -164,9 +217,7 @@ async def route(
     if not categories:
         return "general_chat"
 
-    # Stocks / watchlist / quotes: always general_chat (run_skill), never "memory".
-    # Small local router models often output "memory" for 自选股/昨天怎么样-style questions; that applies the
-    # memory tool allowlist and removes run_skill, so the main model cannot call stock-monitor and hallucinates timeouts.
+    # Stocks / watchlist: never "memory" (run_skill would be stripped). Prefer stock_monitor + DAG run_skill(portfolio) when configured; else general_chat.
     try:
         if query is not None and isinstance(query, str) and query.strip():
             q_lo = query.strip().lower()
@@ -191,6 +242,9 @@ async def route(
                     )
                 )
             ):
+                if "stock_monitor" in categories:
+                    logger.debug("Intent router: stock/watchlist query -> category stock_monitor (preempt LLM)")
+                    return "stock_monitor"
                 logger.debug("Intent router: stock/watchlist query -> category general_chat (preempt LLM)")
                 return "general_chat"
     except Exception as e:
@@ -258,40 +312,128 @@ async def route(
                 logger.debug("Intent router: query matches Baidu search skill -> category general_chat")
                 return "general_chat"
 
-            # RSS / Daily brief skill (explicit RSS/news digest phrasing)
-            if any(p in q_lo for p in ("daily brief", "morning report", "rss")) or any(p in q_raw for p in ("新闻订阅", "今日新闻")):
+            # RSS / Daily brief: prefer news_digest (DAG run_skill) when that category exists; else general_chat + run_skill.
+            if any(p in q_lo for p in ("daily brief", "morning report", "rss")) or any(
+                p in q_raw for p in ("新闻订阅", "今日新闻", "每日简报", "头条新闻", "rss摘要")
+            ):
+                if "news_digest" in categories:
+                    logger.debug("Intent router: query matches daily-brief -> category news_digest (preempt)")
+                    return "news_digest"
                 logger.debug("Intent router: query matches daily-brief skill -> category general_chat")
                 return "general_chat"
 
-            # Stocks / portfolio skill
-            if any(p in q_lo for p in ("portfolio", "watchlist", "ticker", "stock")) or any(
-                p in q_raw for p in ("股票", "持仓", "行情", "股价", "自选股", "大盘", "涨停", "跌停", "个股", "A股", "港股", "美股")
-            ):
-                logger.debug("Intent router: query matches stock-monitor skill -> category general_chat")
-                return "general_chat"
+            # Stocks: handled by early preempt (stock_monitor or general_chat).
 
     except Exception as e:
         logger.debug("Intent router skill-intent pre-check failed (non-fatal): {}", e)
 
-    # Weather queries should not be forced into search_web DAG.
-    # Route to general_chat so the main tool loop can pick weather skill (run_skill weather-1.0.0)
-    # and use Companion/profile location fallback when city is omitted.
+    # Weather: use dedicated category so planner DAG runs run_skill(weather) without main LLM tool rounds.
+    # Falls back to ReAct + web_search when skill returns Error (see planner_executor dag_fail_if_last_starts_with_error).
     try:
-        if "general_chat" in categories and query is not None and isinstance(query, str) and query.strip():
+        if "weather" in categories and query is not None and isinstance(query, str) and query.strip():
             q = query.strip().lower()
+            q_raw = query.strip()
             if (
                 "weather" in q
                 or "forecast" in q
                 or "temperature" in q
                 or "wttr" in q
-                or "天气" in query
-                or "气温" in query
-                or "天气预报" in query
+                or "天气" in q_raw
+                or "气温" in q_raw
+                or "天气预报" in q_raw
             ):
-                logger.debug("Intent router: query matches weather -> category general_chat")
-                return "general_chat"
+                logger.debug("Intent router: query matches weather -> category weather")
+                return "weather"
     except Exception as e:
         logger.debug("Intent router weather pre-check failed (non-fatal): {}", e)
+
+    # Hot intents: preempt to category so DAG runs (or narrow ReAct) without the classifier LLM.
+    # Placed after weather so 天气/forecast queries stay weather, not search_web.
+    try:
+        if query is not None and isinstance(query, str) and query.strip():
+            q_raw = query.strip()
+            q_lo = q_raw.lower()
+            _wx = (
+                "天气" in q_raw
+                or "气温" in q_raw
+                or "天气预报" in q_raw
+                or "weather" in q_lo
+                or "forecast" in q_lo
+                or "wttr" in q_lo
+            )
+            if "search_web" in categories and not _wx:
+                if (
+                    "上网搜" in q_raw
+                    or "网上搜索" in q_raw
+                    or "查一下网上" in q_raw
+                    or "search the web" in q_lo
+                    or "web search" in q_lo
+                    or "look it up online" in q_lo
+                    or "google it" == q_lo.strip()
+                    or "百度一下" in q_raw
+                    or ("百度" in q_raw and "搜" in q_raw)
+                ):
+                    logger.debug("Intent router: query matches search_web -> category search_web (preempt)")
+                    return "search_web"
+            if "summarize_to_page" in categories:
+                if (
+                    "总结成网页" in q_raw
+                    or "总结到页面" in q_raw
+                    or "summary page" in q_lo
+                    or "summarize to a page" in q_lo
+                    or "readable page" in q_lo
+                ):
+                    logger.debug("Intent router: query matches summarize_to_page -> category summarize_to_page (preempt)")
+                    return "summarize_to_page"
+            if "send_email" in categories:
+                if (
+                    "发封邮件" in q_raw
+                    or "发邮件" in q_raw
+                    or ("写邮件" in q_raw and "给" in q_raw)
+                    or "send an email" in q_lo
+                    or "send email to" in q_lo
+                    or "write an email" in q_lo
+                    or "write me an email" in q_lo
+                ):
+                    logger.debug("Intent router: query matches send_email -> category send_email (preempt)")
+                    return "send_email"
+            if "schedule_remind" in categories:
+                if (
+                    "提醒我" in q_raw
+                    or "定个闹钟" in q_raw
+                    or "定个提醒" in q_raw
+                    or "remind me" in q_lo
+                    or "set a reminder" in q_lo
+                    or "set reminder" in q_lo
+                ):
+                    logger.debug("Intent router: query matches schedule_remind -> category schedule_remind (preempt)")
+                    return "schedule_remind"
+            if "open_url" in categories and ("http://" in q_raw or "https://" in q_raw):
+                if (
+                    "打开" in q_raw
+                    or "访问" in q_raw
+                    or "点开" in q_raw
+                    or "open " in q_lo
+                    or "visit " in q_lo
+                    or "go to " in q_lo
+                ):
+                    logger.debug("Intent router: query matches open_url -> category open_url (preempt)")
+                    return "open_url"
+            if "memory" in categories:
+                if (
+                    q_raw.startswith("请记住")
+                    or q_raw.startswith("帮我记住")
+                    or q_lo.startswith("remember this:")
+                    or q_lo.startswith("save to memory:")
+                ):
+                    logger.debug("Intent router: query matches memory -> category memory (preempt)")
+                    return "memory"
+            if "knowledge_base" in categories and "知识库" in q_raw:
+                if "搜索" in q_raw or "查找" in q_raw or "添加" in q_raw or "保存到" in q_raw:
+                    logger.debug("Intent router: query matches knowledge_base -> category knowledge_base (preempt)")
+                    return "knowledge_base"
+    except Exception as e:
+        logger.debug("Intent router hot-intent preempt failed (non-fatal): {}", e)
 
     # Image generation requests: route to image category so only image-related tools/skills are available.
     try:
@@ -353,6 +495,14 @@ async def route(
                 return "generate_pdf"
     except Exception as e:
         logger.debug("Intent router generate_pdf pre-check failed (non-fatal): {}", e)
+
+    # Config-driven regex fast paths (extend without code changes). See intent_router.frequent_fast_paths in skills_and_plugins.yml.
+    try:
+        _ffp = match_frequent_fast_path(query or "", categories, config)
+        if _ffp:
+            return _ffp
+    except Exception as e:
+        logger.debug("Intent router frequent_fast_paths failed (non-fatal): {}", e)
 
     try:
         include_turns = max(0, int(config.get("include_recent_turns", 0) or 0))

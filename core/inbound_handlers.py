@@ -218,6 +218,9 @@ async def handle_inbound_request_impl(
     else:
         content_type_for_perm = ContentType.TEXT
     request_metadata = {"user_id": request.user_id, "channel": request.channel_name}
+    _pub_base = (getattr(request, "public_request_base_url", None) or "").strip().rstrip("/")
+    if _pub_base:
+        request_metadata["public_request_base_url"] = _pub_base
     if getattr(request, "session_id", None):
         request_metadata["session_id"] = request.session_id
     if getattr(request, "conversation_type", None):
@@ -228,9 +231,18 @@ async def handle_inbound_request_impl(
     if getattr(request, "bridge_agent_stream_preview", None):
         request_metadata["bridge_agent_stream_preview"] = True
     inbound_user_id = (getattr(request, "user_id", None) or "").strip() or "companion"
+    _cc_sid_request = (getattr(request, "clawcode_session_id", None) or "").strip()
+    if _cc_sid_request:
+        request_metadata["clawcode_session_id"] = _cc_sid_request
     inbound_app_id = getattr(request, "app_id", None) or "homeclaw"
     _fid = getattr(request, "friend_id", None)
     inbound_friend_id = (str(_fid).strip() if _fid is not None else "") or "HomeClaw"
+    _tp_in = getattr(request, "tool_profile", None)
+    _tp_in = (str(_tp_in).strip() if _tp_in is not None and str(_tp_in).strip() else None)
+    if _cc_sid_request and not _tp_in:
+        from core import clawcode_store as _cc_store
+
+        _tp_in = _cc_store.default_clawcode_tool_profile()
     pr = PromptRequest(
         request_id=req_id,
         channel_name=request.channel_name or "webhook",
@@ -243,6 +255,7 @@ async def handle_inbound_request_impl(
         friend_id=inbound_friend_id,
         text=request.text,
         action=request.action or "respond",
+        tool_profile=_tp_in,
         host="inbound",
         port=0,
         images=images_list,
@@ -262,6 +275,42 @@ async def handle_inbound_request_impl(
     if user:
         pr.system_user_id = user.id or user.name
     pr.friend_id = inbound_friend_id
+    # P5: merge channel binding (Core user id) when client omitted clawcode_session_id; validate with system_user_id.
+    from core import clawcode_channel_bindings as _ccb
+    from core import clawcode_store as _cc_store
+
+    _cc_sid = str((pr.request_metadata or {}).get("clawcode_session_id") or "").strip()
+    if not _cc_sid and _cc_store.clawcode_feature_enabled():
+        for key in ((getattr(pr, "system_user_id", None) or "").strip(), inbound_user_id):
+            if not key:
+                continue
+            _bound = _ccb.get_binding(key)
+            if _bound:
+                _cc_sid = _bound
+                break
+    if _cc_sid:
+        _sys = (getattr(pr, "system_user_id", None) or "").strip() or None
+        _err, _code = _cc_store.validate_clawcode_turn(_cc_sid, inbound_user_id, system_user_id=_sys)
+        if _err and _code is not None:
+            return False, _err, int(_code), None
+        pr.request_metadata = dict(pr.request_metadata or {})
+        pr.request_metadata["clawcode_session_id"] = _cc_sid
+        if not pr.tool_profile or not str(pr.tool_profile).strip():
+            try:
+                pr.tool_profile = _cc_store.default_clawcode_tool_profile()
+            except Exception:
+                pass
+        try:
+            from base.workflow_trace import emit_event
+
+            emit_event(
+                event_type="clawcode_turn_started",
+                component="clawcode",
+                summary="inbound turn with clawcode session",
+                details={"clawcode_session_id": _cc_sid, "user_id": inbound_user_id},
+            )
+        except Exception:
+            pass
     try:
         loc_in = request_metadata.get("location") or getattr(request, "location", None)
         if loc_in is not None:
@@ -299,6 +348,14 @@ async def handle_inbound_request_impl(
         img_paths = [single] if single and isinstance(single, str) else None
     if not img_paths and getattr(core, "_response_image_paths_by_request_id", None):
         img_paths = core._response_image_paths_by_request_id.pop(pr.request_id, None)
+    try:
+        from core import clawcode_store as _cc_rec
+
+        _cc_sid_done = str((pr.request_metadata or {}).get("clawcode_session_id") or "").strip()
+        if _cc_sid_done:
+            _cc_rec.record_clawcode_turn_finished(_cc_sid_done, pr.request_id, request=pr)
+    except Exception:
+        pass
     return True, resp_text, 200, img_paths
 
 

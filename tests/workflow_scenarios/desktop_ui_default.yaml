@@ -1,0 +1,4 @@
+id: desktop_ui_default
+contract: desktop_ui_default
+prompt: "Desktop ui automation focus window named Terminal."
+description: "desktop-ui skill trace."

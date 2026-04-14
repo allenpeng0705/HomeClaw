@@ -97,6 +97,7 @@ def send_apns_one(
     user_id: Optional[str] = None,
     source: Optional[str] = None,
     from_friend: Optional[str] = None,
+    link: Optional[str] = None,
 ) -> bool:
     """
     Send one APNs notification to one device token.
@@ -129,7 +130,10 @@ def send_apns_one(
             payload["source"] = str(source).strip()[:64]
         if from_friend is not None and str(from_friend).strip():
             payload["from_friend"] = str(from_friend).strip()[:128]
-        payload["link"] = _chat_deep_link(from_friend)
+        # Custom key for Flutter / native tap handler (same idea as FCM data["text"]).
+        payload["text"] = body_s
+        link_s = (str(link).strip() if link is not None else "") or _chat_deep_link(from_friend)
+        payload["link"] = link_s[:2048]
         headers = {
             "authorization": f"bearer {jwt_token}",
             "apns-topic": str(config.get("bundle_id", "")),

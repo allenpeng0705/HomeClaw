@@ -20,6 +20,7 @@ from typing import Optional
 
 load_dotenv(_root / "channels" / ".env")
 from base.util import Util
+from channels.clawcode_binding import apply_clawcode_inbound_flow
 
 app = FastAPI(title="HomeClaw Zalo Channel")
 INBOUND_URL = f"{Util().get_channels_core_url()}/inbound"
@@ -61,6 +62,9 @@ async def message(body: ZaloMessage):
         payload["audios"] = body.audios
     if body.files:
         payload["files"] = body.files
+    _cc = apply_clawcode_inbound_flow(payload["user_id"], payload.get("text") or "", payload)
+    if _cc is not None:
+        return {"text": _cc}
     try:
         headers = Util().get_channels_core_api_headers()
         async with httpx.AsyncClient(trust_env=False) as client:

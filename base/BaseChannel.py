@@ -7,7 +7,7 @@ import signal
 import sys
 import threading
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 import aiohttp
 from dotenv import dotenv_values
 from fastapi import FastAPI, Request, Response
@@ -158,12 +158,12 @@ class BaseChannel:
             return False
         
 
-    def core_url(self) -> str | None:
+    def core_url(self) -> Optional[str]:
         """Core URL from channels/.env only (core_host, core_port or CORE_URL)."""
         return Util().get_channels_core_url()
     
 
-    async def transferTocore(self, request: PromptRequest) -> bool | None:
+    async def transferTocore(self, request: PromptRequest) -> Optional[bool]:
         logger.debug("channel transfering messages to core...")
         try:
             core_url = self.core_url()
@@ -188,7 +188,7 @@ class BaseChannel:
             logger.exception(f"Unexpected error: {err}")
             return False
         
-    async def localChatWithcore(self, request: PromptRequest) -> str | None:
+    async def localChatWithcore(self, request: PromptRequest) -> Optional[str]:
         try:
             core_url = self.core_url()
             process_url = f"{core_url}/local_chat"
@@ -211,7 +211,7 @@ class BaseChannel:
             return None
         
 
-    def syncTransferTocore(self, request: PromptRequest) -> str | None:
+    def syncTransferTocore(self, request: PromptRequest) -> Optional[str]:
         logger.info("channel transfering messages to core...")
         try:
             core_url = self.core_url()

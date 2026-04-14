@@ -2,6 +2,8 @@
 
 HomeClaw can surface answers in three main shapes. This document is the **product policy** for when to use each. Core **injects a short version** of this into the system prompt when `tools.response_output_policy_in_prompt` is true (default) in `config/skills_and_plugins.yml`.
 
+**Operational default:** `tools.long_document_output` in `config/skills_and_plugins.yml` selects how aggressively Core uses VMPrint for **daily-brief** and **web_search** (DAG `news_digest`, auto-chain after `fetch`, magazine preview attachment). Values: **`markdown`** (default — inline Markdown / `fetch` path) or **`vmprint`** (AST/HTML preview chains). Users can still ask for “VMPrint”, “HTML preview”, “杂志排版”, etc., to get the preview path when the default is Markdown.
+
 ## 1. Plaintext (chat body)
 
 **Use for:** Tiny, conversational replies.

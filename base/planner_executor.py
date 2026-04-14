@@ -68,16 +68,34 @@ Use the contacts list to resolve names to email addresses. If the user said "sen
 def get_flow_for_categories(categories: List[str], config: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """
     Return the first flow whose category is in the given list. config is planner_executor_config; flows = config.get("flows").
-    Returns None if no flow matches. Never raises.
+    When multiple categories are returned (comma-separated intents), categories that have a DAG flow are tried first
+    (stable order within each group) so e.g. general_chat, weather still picks the weather flow. Returns None if no flow matches. Never raises.
     """
     if not categories or not isinstance(config, dict):
         return None
     flows = config.get("flows")
     if not isinstance(flows, dict) or not flows:
         return None
-    for c in categories:
-        if not c or not isinstance(c, str):
-            continue
+    try:
+        flow_cats = set()
+        for flow in flows.values():
+            if isinstance(flow, dict):
+                fc = (flow.get("category") or "").strip().lower()
+                if fc:
+                    flow_cats.add(fc)
+        with_flow: List[str] = []
+        without_flow: List[str] = []
+        for c in categories:
+            if not c or not isinstance(c, str):
+                continue
+            cn = (c or "").strip().lower()
+            if not cn:
+                continue
+            (with_flow if cn in flow_cats else without_flow).append(c)
+        ordered = with_flow + without_flow
+    except Exception:
+        ordered = [c for c in categories if c and isinstance(c, str)]
+    for c in ordered:
         cat = (c or "").strip().lower()
         for flow_name, flow in flows.items():
             if not isinstance(flow, dict):
@@ -469,6 +487,10 @@ async def _resolve_flow_step_args(
             out[key] = _extract_folder_from_user_message(user_message) or (default if default is not None else ".")
         elif source == "user_message_text":
             out[key] = _user_message_text(user_message, 500) or (default or "")
+        elif source == "user_message_text_as_run_skill_args":
+            # run_skill expects args as a list of CLI strings; pass the full user message as a single argument.
+            txt = _user_message_text(user_message, 2000) or (str(default) if default is not None else "")
+            out[key] = [txt] if txt else ([str(default)] if default not in (None, "") else [""])
         elif isinstance(source, str) and source.startswith("result_of_step_"):
             n = source.replace("result_of_step_", "").strip()
             out[key] = (step_results.get(n) or step_results.get(str(n)) or "") if n else (default or "")
@@ -620,6 +642,17 @@ async def run_dag(
                         if summary:
                             return True, summary.strip()
                     return True, prev_result.strip() or last_result
+            # Run this step only when the previous step returned a tool/skill error (e.g. wttr.in down → web_search fallback).
+            _only_if_prev_err = step.get("run_only_if_previous_step_error")
+            if _only_if_prev_err is True and i > 0:
+                prev_id = str(i)
+                prev_result = (step_results.get(prev_id) or "").strip()
+                prev_is_err = bool(
+                    prev_result.lower().startswith("error:")
+                    or prev_result.startswith(TOOL_ERROR_PREFIX)
+                )
+                if not prev_is_err:
+                    continue
             args = await _resolve_flow_step_args(
                 step=step,
                 step_index_1based=step_index_1based,
@@ -646,6 +679,11 @@ async def run_dag(
                 err_msg = f"Error running tool {tool_name}: {e!s}"
                 logger.debug("DAG step {} failed: {}", step_index_1based, e)
                 return False, err_msg
+        # Optional: treat skill/tool error text as DAG failure so Core falls back to ReAct (e.g. weather skill → web_search).
+        if bool(flow.get("dag_fail_if_last_starts_with_error")) and isinstance(last_result, str):
+            lr = last_result.lstrip()
+            if lr.lower().startswith("error:"):
+                return False, last_result.strip()
         # Success: prefer last result that looks like a link or is short
         if last_result and isinstance(last_result, str) and ("/files/out?" in last_result or "http" in last_result):
             return True, last_result.strip()

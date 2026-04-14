@@ -1,0 +1,4 @@
+id: ip_cameras_default
+contract: ip_cameras_default
+prompt: "Ip camera rtsp snapshot pull for the front door feed."
+description: "ip-cameras skill trace."

@@ -19,6 +19,11 @@ import httpx
 # Core connection: channels/.env only
 load_dotenv(_root / "channels" / ".env")
 from base.util import Util
+from channels.clawcode_binding import (
+    merge_clawcode_binding_into_inbound_payload,
+    try_clawcode_command_reply,
+)
+
 CORE_URL = Util().get_channels_core_url()
 INBOUND_URL = f"{CORE_URL}/inbound"
 
@@ -70,6 +75,7 @@ async def post_to_core(
         payload["audios"] = audios
     if files:
         payload["files"] = files
+    merge_clawcode_binding_into_inbound_payload(payload, user_id)
     try:
         headers = Util().get_channels_core_api_headers()
         async with httpx.AsyncClient(trust_env=False) as client:
@@ -108,6 +114,13 @@ def main():
         text = (message.content or "").strip()
         user_id = f"discord_{message.author.id}"
         user_name = message.author.display_name or str(message.author)
+        _cc = try_clawcode_command_reply(user_id, text)
+        if _cc is not None:
+            try:
+                await message.reply(_cc[:2000])
+            except discord.HTTPException:
+                await message.channel.send(_cc[:2000])
+            return
         images, videos, audios, files = [], [], [], []
         for att in getattr(message, "attachments", [])[:10]:
             url = getattr(att, "url", None)

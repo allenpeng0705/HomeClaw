@@ -16,6 +16,7 @@ Troubleshooting and where to find more.
 | **Add AI friends / family** | [Friends & Family](friends-and-family.md) — create AI personalities, add family members. |
 | **Set up Telegram / Discord** | [Channels](channels.md) — connect HomeClaw to Telegram, Discord, Slack, WebChat. |
 | **Use Cursor / Claude Code** | [Coding with HomeClaw](coding-with-homeclaw.md) — drive IDEs from your phone. |
+| **Claw-Code (session → bind → first run)** | [Claw-Code operator checklist](clawcode-operator-checklist.md) — enable, create session, bind channel or Companion, first message. |
 
 ---
 

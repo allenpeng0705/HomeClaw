@@ -1,0 +1,4 @@
+id: image_generation_default
+contract: image_generation_default
+prompt: "Image generation from text prompt studio quality landscape."
+description: "image-generation skill trace."

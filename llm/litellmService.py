@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -79,7 +79,7 @@ class LiteLLMService:
             ) 
     
 
-        def _api_key_from_request(http_request: Request, body_api_key: Any) -> str | None:
+        def _api_key_from_request(http_request: Request, body_api_key: Any) -> Optional[str]:
             """Use api_key from body if set; else from Authorization: Bearer <key> (Core sends key in header)."""
             if body_api_key is not None and isinstance(body_api_key, str) and body_api_key.strip():
                 return body_api_key.strip()

@@ -56,7 +56,7 @@ contracts:
       - event_type: tool_call_finished
         details_contains:
           tool_name: remind_me
-          status: ok
+          status: error
   file_happy:
     must_have_events:
       - event_type: tool_call_started
@@ -144,3 +144,118 @@ contracts:
       - event_type: tool_call_started
         details_contains:
           tool_name: file_read
+  stock_monitor_skill_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: stock-monitor-1.0.0
+  weather_skill_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: weather-1.0.0
+  magazine_render_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: magazine-render-1.0.0
+  vmprint_ast_layout_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: vmprint-ast-layout-1.0.0
+  ppt_generation_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: ppt-generation-1.0.0
+  ip_cameras_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: ip-cameras
+  desktop_ui_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: desktop-ui
+  summarize_skill_url_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: summarize-1.0.0
+  self_improving_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: self-improving-1.2.16
+  cli_anything_bridge_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: cli-anything-bridge-1.0.0
+  html_slides_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: html-slides-1.0.0
+  x_api_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: x-api-1.0.0
+  social_media_agent_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: social-media-agent-1.0.0
+  openai_whisper_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: openai-whisper-1.0.0
+  meta_social_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: meta-social-1.0.0
+  maton_api_gateway_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: maton-api-gateway-1.0.0
+  linkedin_writer_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: linkedin-writer-1.0.0
+  image_generation_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: image-generation-1.0.0
+  hootsuite_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: hootsuite-1.0.0
+  gog_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: gog-1.0.0
+  baidu_search_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: baidu-search-1.1.0
+  apple_notes_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: apple-notes-1.0.0
+  answeroverflow_default:
+    must_have_events:
+      - event_type: skill_call_started
+        details_contains:
+          skill_name: answeroverflow-1.0.2

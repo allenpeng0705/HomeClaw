@@ -1,0 +1,150 @@
+# Claw-Code REST fragment (Core). Merge into a parent OpenAPI 3 spec or use as reference.
+# Base URL: same as Core (e.g. http://127.0.0.1:9000). Auth: X-API-Key or Authorization: Bearer when Core auth_enabled.
+openapi: 3.0.3
+info:
+  title: HomeClaw Claw-Code API (fragment)
+  version: "1.0"
+paths:
+  /api/clawcode/sessions:
+    post:
+      summary: Create session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [owner_user_id, cwd]
+              properties:
+                owner_user_id: { type: string }
+                cwd: { type: string }
+    get:
+      summary: List sessions for owner
+      parameters:
+        - name: owner_user_id
+          in: query
+          required: true
+          schema: { type: string }
+  /api/clawcode/sessions/{session_id}:
+    parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      summary: Session detail (+ worktree_hint, usage_hint)
+      parameters:
+        - name: owner_user_id
+          in: query
+          required: true
+          schema: { type: string }
+    patch:
+      summary: Patch metadata (git_remote_hint, main_llm_ref, tool_llm_ref, mode)
+      parameters:
+        - name: owner_user_id
+          in: query
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                git_remote_hint: { type: string }
+                main_llm_ref: { type: string }
+                tool_llm_ref: { type: string }
+                mode: { type: string, enum: [plan, agent] }
+                task_plan:
+                  type: array
+                  items: { type: object }
+                checkpoint: { type: string }
+                resume_hint: { type: string }
+                last_run_error: { type: string }
+  /api/clawcode/mcp/servers:
+    get:
+      summary: List configured MCP servers (sanitized)
+  /api/clawcode/mcp/health:
+    post:
+      summary: Probe list_tools per MCP server
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                server_ids:
+                  type: array
+                  items: { type: string }
+  /api/clawcode/sessions/{session_id}/rebind:
+    post:
+      summary: Change session cwd (same validation as create)
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: owner_user_id
+          in: query
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cwd]
+              properties:
+                cwd: { type: string }
+  /api/clawcode/sessions/{session_id}/files:
+    get:
+      summary: List workspace files under session cwd
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: owner_user_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: path
+          in: query
+          schema: { type: string, default: "" }
+  /api/clawcode/approvals:
+    get:
+      summary: List pending approvals
+      parameters:
+        - name: owner_user_id
+          in: query
+          required: true
+          schema: { type: string }
+  /api/clawcode/approvals/{approval_id}/resolve:
+    post:
+      summary: Approve or reject risky tool
+      parameters:
+        - name: approval_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: owner_user_id
+          in: query
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approve, reject] }
+  /api/clawcode/channel-bindings:
+    get:
+      summary: List bindings (optional owner_user_id filter)
+    put:
+      summary: Put binding owner → session
+    delete:
+      summary: Clear binding for owner

@@ -38,8 +38,8 @@ try:
 except ImportError:
     ssl = None
 
-# Reasonable HTTP timeout (seconds)
-_TIMEOUT_SEC = 30
+# HTTP timeout (seconds); keep moderate so a dead wttr.in does not block the chat for a full minute.
+_TIMEOUT_SEC = 12
 _USER_AGENT = "HomeClaw-weather/1.0 (+https://github.com/allenpeng0705/HomeClaw)"
 
 
@@ -58,8 +58,8 @@ def fetch_weather(location: str, compact: bool = True) -> str:
     else:
         url = f"https://wttr.in/{loc_encoded}?T"
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    max_attempts = 3
-    retry_delay_sec = 2
+    max_attempts = 2
+    retry_delay_sec = 1
     for attempt in range(max_attempts):
         try:
             with urllib.request.urlopen(req, timeout=_TIMEOUT_SEC) as resp:
@@ -419,6 +419,12 @@ def _looks_like_plain_place(t: str) -> bool:
     )
     if any(tl.startswith(w) or f" {w.strip()}" in tl for w in qwords):
         return False
+    # Short CJK lines like "明天天气怎么样" match [\u4e00-\u9fff]{2,24} but are questions, not place names.
+    if re.search(r"[\u4e00-\u9fff]", t) and re.search(
+        r"(怎么样|如何|怎样|好不好|可不可以|是不是|有没有)",
+        t,
+    ):
+        return False
     if re.search(r"\b(weather|forecast|temperature|rain|snow|wind|humid|cold|hot)\b", tl):
         # Probably a sentence, not "London" alone
         if len(t.split()) > 4:
@@ -548,6 +554,10 @@ def main() -> None:
             extracted = extract_location_from_query(location)
             if extracted:
                 location = extracted
+            elif not _looks_like_plain_place(location):
+                # Full question with no extractable city (e.g. 明天天气怎么样); do not send the whole
+                # sentence to wttr.in (500). Fall through to profile / HOMECLAW_USER_LAT_LNG.
+                location = ""
 
         if not location:
             core_loc = get_location_from_core()

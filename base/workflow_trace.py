@@ -3,12 +3,17 @@ from __future__ import annotations
 import contextvars
 import json
 import os
+import queue
 import re
 import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+
+# Optional live subscribers (SSE). No overhead when empty.
+_TRACE_SSE_QUEUES: List[queue.Queue] = []
+_FANOUT_LOCK = threading.Lock()
 
 
 def apply_workflow_trace_env_from_config(meta: Any, *, project_root: str) -> None:
@@ -182,6 +187,10 @@ def emit_event(
         with _WRITE_LOCK:
             with path.open("a", encoding="utf-8") as f:
                 f.write(line + "\n")
+        try:
+            _fanout_trace_line(line)
+        except Exception:
+            pass
     except Exception:
         # Never break runtime due to tracing.
         return
@@ -191,3 +200,57 @@ def current_trace_path() -> Optional[str]:
     state = _TRACE_STATE.get({})
     p = state.get("trace_path")
     return str(p) if p else None
+
+
+def subscribe_trace_sse_queue(maxsize: int = 200) -> queue.Queue:
+    """Register a queue to receive each JSON trace line (same as JSONL). Unsubscribe when done."""
+    q: queue.Queue = queue.Queue(maxsize=maxsize)
+    with _FANOUT_LOCK:
+        _TRACE_SSE_QUEUES.append(q)
+    return q
+
+
+def unsubscribe_trace_sse_queue(q: queue.Queue) -> None:
+    with _FANOUT_LOCK:
+        try:
+            _TRACE_SSE_QUEUES.remove(q)
+        except ValueError:
+            pass
+
+
+def _fanout_trace_line(line: str) -> None:
+    with _FANOUT_LOCK:
+        qs = list(_TRACE_SSE_QUEUES)
+    for q in qs:
+        try:
+            q.put_nowait(line)
+        except queue.Full:
+            try:
+                q.get_nowait()
+            except Exception:
+                pass
+            try:
+                q.put_nowait(line)
+            except Exception:
+                pass
+
+
+def emit_tool_progress(
+    *,
+    tool_name: str,
+    phase: str,
+    message: str = "",
+    fraction: Optional[float] = None,
+) -> None:
+    """Structured progress for long-running tools (optional)."""
+    det: Dict[str, Any] = {"tool_name": tool_name, "phase": phase}
+    if message:
+        det["message"] = message
+    if fraction is not None:
+        det["fraction"] = fraction
+    emit_event(
+        event_type="tool_progress",
+        component="tool_registry",
+        summary=f"tool progress: {tool_name} {phase}",
+        details=det,
+    )

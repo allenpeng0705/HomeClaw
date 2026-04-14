@@ -9,7 +9,8 @@ Profiles:
 - full: all tools (no filtering)
 - minimal: very small set (web_search, folder_list, run_skill, remind_me, time, route_to_plugin)
 - messaging: typical chat assistant (search, files, document, skills, save page, cron, memory, sessions, route_to_plugin)
-- coding: dev/shell (exec, file ops, edit, apply_patch, process_*, folder_list, document_read, etc.)
+- coding: dev/shell (exec, file ops, edit, apply_patch, process_*, folder_list, document_read, run_skill, MCP, etc.)
+- clawcode: alias for **coding** (Claw-Code CLI / terminal coding sessions)
 """
 
 from typing import Any, Dict, List, Optional
@@ -20,8 +21,10 @@ from base.tools import ToolDefinition
 TOOL_PROFILES: Dict[str, List[str]] = {
     # minimal
     "web_search": ["minimal", "messaging"],
+    "list_available_tools": ["minimal", "messaging", "coding"],
+    "search_available_tools": ["minimal", "messaging", "coding"],
     "folder_list": ["minimal", "messaging", "coding"],
-    "run_skill": ["minimal", "messaging"],
+    "run_skill": ["minimal", "messaging", "coding"],
     "remind_me": ["minimal", "messaging"],
     "time": ["minimal", "messaging"],
     # echo: testing only; not in any default profile so LLM responds in content (no tool for simple replies)
@@ -98,7 +101,15 @@ TOOL_PROFILES: Dict[str, List[str]] = {
     "mcp_call": ["coding", "messaging"],
 }
 
-VALID_PROFILES = frozenset({"full", "minimal", "messaging", "coding"})
+VALID_PROFILES = frozenset({"full", "minimal", "messaging", "coding", "clawcode"})
+
+
+def _canonical_profile_id(profile: str) -> str:
+    """clawcode → coding for tool map lookup."""
+    p = (profile or "").strip().lower()
+    if p == "clawcode":
+        return "coding"
+    return p
 
 
 def get_tool_names_for_profile(
@@ -112,7 +123,7 @@ def get_tool_names_for_profile(
     """
     if not profile or not isinstance(profile, str):
         return []
-    p = profile.strip().lower()
+    p = _canonical_profile_id(profile)
     if p == "full":
         return []
     m = tool_profiles_map if tool_profiles_map is not None else TOOL_PROFILES
@@ -151,7 +162,8 @@ def filter_tools_by_profile(
     """
     if not selected_profiles:
         return tools
-    normalized = [p.strip().lower() for p in selected_profiles if p and str(p).strip()]
+    normalized = [_canonical_profile_id(p) for p in selected_profiles if p and str(p).strip()]
+    normalized = [p.strip().lower() for p in normalized if p and str(p).strip()]
     if not normalized:
         return tools
     m = tool_profiles_map if tool_profiles_map is not None else TOOL_PROFILES

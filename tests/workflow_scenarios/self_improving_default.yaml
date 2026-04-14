@@ -1,0 +1,4 @@
+id: self_improving_default
+contract: self_improving_default
+prompt: "Self improving agent run feedback loop capture."
+description: "self-improving skill trace."

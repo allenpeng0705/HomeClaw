@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
-from base.tools import ToolContext, ToolDefinition, ToolRegistry, ROUTING_RESPONSE_ALREADY_SENT
+from base.tools import ToolContext, ToolDefinition, ToolRegistry, ROUTING_RESPONSE_ALREADY_SENT, get_tool_registry
 from base.skills import get_all_skills_dirs, resolve_skill_to_path
 from base.workspace import get_workspace_dir, get_agent_memory_file_path, append_daily_memory
 from base.user_sandbox_folders import FOLDER_NAMES_FOR_USER_MESSAGE, STANDARD_USER_SANDBOX_SUBDIRS
@@ -2902,6 +2902,14 @@ async def _exec_executor(arguments: Dict[str, Any], context: ToolContext) -> str
     background = arguments.get("background") is True
     if not command:
         return "Error: command is required"
+    try:
+        from core.clawcode_store import clawcode_exec_git_block_message
+
+        _cc_git = clawcode_exec_git_block_message(command, context)
+        if _cc_git:
+            return _cc_git
+    except Exception:
+        pass
     parts = command.split()
     if not parts:
         return "Error: command is required"
@@ -3011,11 +3019,11 @@ def _append_file_link_to_run_skill_output(script_output: str, context: Optional[
                 parsed = obj
                 break
         if isinstance(parsed, dict) and parsed.get("success") and parsed.get("output_rel_path"):
-            from core.result_viewer import build_file_view_link
+            from core.result_viewer import build_file_view_link_for_context
             scope = _get_file_workspace_subdir(context)
             path_rel = (parsed.get("output_rel_path") or "").strip()
             if path_rel and scope:
-                link, _ = build_file_view_link(scope, path_rel)
+                link, _ = build_file_view_link_for_context(scope, path_rel, context)
                 if link:
                     msg = (parsed.get("message") or "File saved.").strip()
                     return f"{msg}\n\nCRITICAL: Use ONLY the URL on the next line. Copy it exactly—do not modify, truncate, or append anything.\n{link}"
@@ -3280,8 +3288,65 @@ def _normalize_daily_brief_args(argv: List[str]) -> List[str]:
     return out
 
 
-def _derive_daily_brief_args_from_query(user_text: str, plain_markdown_requested: bool) -> List[str]:
+def long_document_output_is_vmprint() -> bool:
+    """
+    When True (tools.long_document_output: vmprint), prefer AST/VMPrint chains for daily-brief and web_search.
+    Default is markdown (False) — inline Markdown / fetch path, no auto magazine-render after daily-brief.
+    """
+    try:
+        cfg = _get_tools_config() or {}
+        v = str(cfg.get("long_document_output") or "markdown").strip().lower()
+        return v in ("vmprint", "ast", "magazine", "html_preview", "browser_preview")
+    except Exception:
+        return False
+
+
+def _user_explicitly_wants_vmprint_daily_brief(user_text: str) -> bool:
+    """User asked for VMPrint / HTML preview path (overrides long_document_output default)."""
+    q = (user_text or "").strip()
+    if not q:
+        return False
+    ql = q.lower()
+    if "vmprint" in ql:
+        return True
+    if "fetch-vmprint" in ql.replace(" ", ""):
+        return True
+    if "html preview" in ql or "browser preview" in ql or "preview in browser" in ql:
+        return True
+    if "magazine preview" in ql or "ast preview" in ql:
+        return True
+    return False
+
+
+def _daily_brief_plain_markdown_effective(user_text: str) -> bool:
+    """
+    True => use daily-brief ``fetch`` (Markdown) path, not ``fetch-vmprint``.
+    Respects tools.long_document_output (default markdown) unless user asks for VMPrint or a document layout.
+    """
+    q = (user_text or "").strip()
+    if not q:
+        return not long_document_output_is_vmprint()
+    q_lo = q.lower()
+    if _user_explicitly_wants_vmprint_daily_brief(q):
+        return False
+    if _daily_brief_document_layout_from_user_query(q) is not None:
+        return False
+    if (
+        "markdown" in q_lo
+        or "plain text" in q_lo
+        or "text only" in q_lo
+        or "纯文本" in q
+        or "纯 markdown" in q_lo
+        or "不要链接" in q
+        or "不需要链接" in q
+    ):
+        return True
+    return not long_document_output_is_vmprint()
+
+
+def _derive_daily_brief_args_from_query(user_text: str) -> List[str]:
     """Derive a deterministic daily-brief argv from natural-language user text."""
+    plain_markdown_requested = _daily_brief_plain_markdown_effective(user_text)
     q = (user_text or "").strip()
     q_lo = q.lower()
     if (
@@ -3335,6 +3400,21 @@ async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -
     )
     try:
         out = await _run_skill_executor_impl(arguments, context)
+        try:
+            if isinstance(out, str) and out.strip() and not out.strip().startswith("Error"):
+                _sf = getattr(context, "_last_run_skill_folder", None) or (
+                    (arguments.get("skill_name") or arguments.get("skill") or "").strip()
+                )
+                if _sf:
+                    from base.skill_usage import record_skill_invocation
+
+                    _uid = (
+                        (getattr(context, "system_user_id", None) or getattr(context, "user_id", None) or "").strip()
+                        or "_global"
+                    )
+                    record_skill_invocation(_uid, str(_sf))
+        except Exception:
+            pass
         _trace_emit_event(
             event_type="skill_call_finished",
             component="run_skill",
@@ -3392,11 +3472,36 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
         skill_folder = resolve_skill_to_path(skill_name, skills_dirs)
         if skill_folder is not None:
             skill_name = skill_folder.name
+            try:
+                setattr(context, "_last_run_skill_folder", skill_name)
+            except Exception:
+                pass
     except Exception as e:
         logger.debug("run_skill setup failed: %s", e)
         return f"Error: run_skill failed: {e!s}"
     if skill_folder is None or not skill_folder.is_dir():
         return f"Error: skill folder not found: {skill_name} (searched skills_dir, external_skills_dir, skills_extra_dirs). Try the exact folder name from Available skills (e.g. html-slides-1.0.0)."
+    try:
+        _tc_sub = getattr(meta, "tools_config", None) or {}
+        if not isinstance(_tc_sub, dict):
+            _tc_sub = {}
+        _sub_skills = _tc_sub.get("run_skill_subagent_skills") or []
+        _sub_set = {str(x).strip() for x in _sub_skills if x is not None and str(x).strip()}
+        if skill_name in _sub_set and context.request and getattr(context, "core", None):
+            _md0 = dict(getattr(context.request, "request_metadata", None) or {})
+            if int(_md0.get("skill_subagent_depth", 0) or 0) < 1:
+                from core.skill_subagent import delegate_run_skill_to_inner_agent
+
+                return await delegate_run_skill_to_inner_agent(
+                    context.core,
+                    skill_name,
+                    script_arg,
+                    args_input,
+                    context,
+                    user_query_tail=_homeclaw_user_query,
+                )
+    except Exception as _sub_e:
+        logger.debug("run_skill subagent branch skipped: {}", _sub_e)
     scripts_dir = (skill_folder / "scripts").resolve()
     if not scripts_dir.is_dir():
         if not script_arg:
@@ -3521,9 +3626,11 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                 lang = "cn"
             elif any(k in q for k in ("英文", "英语")) or any(k in q_lo for k in (" english", "lang en", "en ")):
                 lang = "en"
-            args_input = ["fetch-vmprint", "--max", str(max_items), "--lang", lang]
+            _cmd0 = "fetch-vmprint" if long_document_output_is_vmprint() else "fetch"
+            args_input = [_cmd0, "--max", str(max_items), "--lang", lang]
         except Exception:
-            args_input = ["fetch-vmprint", "--max", "20", "--lang", "all"]
+            _cmd0 = "fetch-vmprint" if long_document_output_is_vmprint() else "fetch"
+            args_input = [_cmd0, "--max", "20", "--lang", "all"]
     config = _get_tools_config() or {}
     allowlist = config.get("run_skill_allowlist")
     if allowlist and script_path.name not in allowlist:
@@ -3711,17 +3818,15 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
             cmd_ok = bool(args_list) and (args_list[0] in ("list", "fetch", "fetch-vmprint"))
             _q = user_text_for_args or ""
             _q_lo = _q.lower()
-            _plain_markdown_requested = (
-                "markdown" in _q_lo
-                or "plain text" in _q_lo
-                or "text only" in _q_lo
-                or "纯文本" in _q
-                or "纯 markdown" in _q_lo
-                or "不要链接" in _q
-                or "不需要链接" in _q
-            )
-            # Stabilize default: convert legacy 'fetch' to AST-first unless user explicitly asks text/markdown.
-            if cmd_ok and args_list and args_list[0] == "fetch" and not _plain_markdown_requested:
+            _plain_markdown_requested = _daily_brief_plain_markdown_effective(_q)
+            # When long_document_output is vmprint: convert legacy 'fetch' to AST-first unless user asks text/markdown.
+            if (
+                cmd_ok
+                and args_list
+                and args_list[0] == "fetch"
+                and long_document_output_is_vmprint()
+                and not _plain_markdown_requested
+            ):
                 _trace_emit_event(
                     event_type="fallback_applied",
                     component="run_skill",
@@ -3763,7 +3868,7 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                     args_list = _merge_fetch_vmprint_document_layout(args_list, _layout_from_q)
 
             if not cmd_ok:
-                args_list = _derive_daily_brief_args_from_query(_q or "daily brief", _plain_markdown_requested)
+                args_list = _derive_daily_brief_args_from_query(_q or "daily brief")
                 _trace_emit_event(
                     event_type="arg_normalization",
                     component="run_skill",
@@ -4366,10 +4471,142 @@ def _is_bare_filename(path_arg: Optional[str]) -> bool:
     return True
 
 
+def _normalize_path_whitespace_for_tool(p: str) -> str:
+    """Collapse accidental spaces around path slashes (common in LLM-generated absolute paths)."""
+    s = (p or "").strip()
+    if not s:
+        return s
+    s = re.sub(r"/\s+", "/", s)
+    s = re.sub(r"\s+/", "/", s)
+    return s
+
+
+def _get_request_text_for_tools(context: Optional[Any]) -> str:
+    """Current turn user message (PromptRequest.text)."""
+    try:
+        req = getattr(context, "request", None) if context is not None else None
+        t = getattr(req, "text", None) if req is not None else None
+        return (t or "").strip() if isinstance(t, str) else ""
+    except Exception:
+        return ""
+
+
+def _user_message_content_as_plain_text(msg: Dict[str, Any]) -> str:
+    """OpenAI-style message content to string (handles string or multimodal list)."""
+    try:
+        c = msg.get("content")
+        if isinstance(c, str):
+            return c.strip()
+        if isinstance(c, list):
+            chunks: List[str] = []
+            for p in c:
+                if isinstance(p, dict) and (str(p.get("type") or "").lower() == "text"):
+                    t = (p.get("text") or "").strip()
+                    if t:
+                        chunks.append(t)
+            return "\n".join(chunks).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _snippet_recent_user_messages_for_file_inference(messages: Any, max_chars: int = 12000) -> str:
+    """
+    Concatenate recent **user** message texts from OpenAI-style `messages` for file name / path hints.
+    Core sets ToolContext.recent_user_messages_text from the live chat list (includes current round).
+    """
+    if not isinstance(messages, list) or not messages:
+        return ""
+    parts: List[str] = []
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        if (m.get("role") or "").strip().lower() != "user":
+            continue
+        txt = _user_message_content_as_plain_text(m)
+        if txt:
+            parts.append(txt)
+    out = "\n\n---\n\n".join(parts)
+    if len(out) > max_chars:
+        out = out[-max_chars:]
+    return out
+
+
+def _get_file_inference_text(context: Optional[Any]) -> str:
+    """Prefer recent user-message snippet (multi-turn); else current request only."""
+    try:
+        hist = getattr(context, "recent_user_messages_text", None) if context is not None else None
+        if isinstance(hist, str) and hist.strip():
+            return hist.strip()
+    except Exception:
+        pass
+    return _get_request_text_for_tools(context)
+
+
+def _extract_filename_tokens_from_user_text(q: str) -> List[str]:
+    """Likely file names in the user message (e.g. Allen_Peng_resume_en.docx next to CJK text).
+    Uses ASCII-first pattern so \\w does not swallow CJK prefixes (e.g. 把Allen_...docx).
+    """
+    if not q or not isinstance(q, str):
+        return []
+    out: List[str] = []
+    seen = set()
+    # Not \\b at start: CJK before ASCII breaks \\b; not \\b at end: CJK after extension breaks \\b.
+    _pat = r"(?<![A-Za-z0-9_\-])([A-Za-z0-9][A-Za-z0-9_\-\.]*\.(?:pdf|docx|doc|pptx|ppt|txt|md|html|xlsx|xls|csv|json|xml))"
+    for m in re.finditer(_pat, q, re.IGNORECASE):
+        s = (m.group(1) or "").strip()
+        key = s.lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(s)
+    return out
+
+
+def _try_resolve_via_user_message_filenames(
+    context: Optional[Any],
+    path_arg: str,
+) -> Tuple[Optional[Tuple[Path, Optional[Path]]], Optional[str]]:
+    """
+    When the model invented a bad path, search the sandbox using file names from the **current** user message
+    (request.text). Returns (resolved_tuple, None) on success, (None, error_message) if ambiguous, (None, None) if no match.
+    """
+    ut = _get_file_inference_text(context)
+    candidates: List[str] = _extract_filename_tokens_from_user_text(ut)
+    try:
+        bn = os.path.basename(path_arg.replace("\\", "/").strip())
+        if bn and "." in bn:
+            bl = bn.lower()
+            if bl not in {c.lower() for c in candidates}:
+                candidates.insert(0, bn)
+    except Exception:
+        pass
+    for cand in candidates:
+        matches = _search_sandbox_for_filename(context, cand)
+        if len(matches) == 1:
+            r = _resolve_file_path(matches[0], context, for_write=False)
+            if r:
+                return r, None
+        if len(matches) > 1:
+            try:
+                _stem = Path(cand).stem
+            except Exception:
+                _stem = cand.split(".")[0] if "." in cand else cand
+            msg = (
+                f"Multiple files match the name '{cand}' (from the user's message) in the sandbox: "
+                + ", ".join(matches[:12])
+                + (" ..." if len(matches) > 12 else "")
+                + ". Call folder_list(path='documents') or file_find(pattern='*"
+                + re.escape(_stem)
+                + "*') and use document_read with that exact relative path. Do not invent /Users/... or other host paths."
+            )
+            return None, msg
+    return None, None
+
+
 async def _document_read_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Read document content: PDF, PPT, Word, MD, HTML, XML, JSON, etc. Use 'share/...' or path in your user or companion folder. When base not set, absolute paths allowed."""
     config = _get_tools_config()
-    path_arg = (arguments.get("path") or "").strip()
+    path_arg = _normalize_path_whitespace_for_tool((arguments.get("path") or "").strip())
     if not path_arg:
         return "Path is required."
     default_max = int(config.get("file_read_max_chars") or 0) or 64_000
@@ -4430,7 +4667,19 @@ async def _document_read_executor(arguments: Dict[str, Any], context: ToolContex
                         + " — e.g. document_read(path='documents/Allen_Peng_resume_en.docx')."
                     )
         if r is None:
-            return _file_resolve_error_msg(path_arg)
+            _r_um, _ambig_um = _try_resolve_via_user_message_filenames(context, path_arg)
+            if _ambig_um:
+                return _ambig_um
+            if _r_um is not None:
+                r = _r_um
+        if r is None:
+            _msg = _file_resolve_error_msg(path_arg)
+            if _get_homeclaw_root():
+                _msg += (
+                    " If the user mentioned a file name, use file_find(pattern='*partial*') or folder_list(path='documents') "
+                    "to discover the sandbox-relative path—do not invent host paths like /Users/...."
+                )
+            return _msg
         full, base = r
         if not _path_under(full, base):
             return _FILE_ACCESS_DENIED_MSG
@@ -4696,7 +4945,7 @@ def _normalize_format_arg(raw: Any) -> str:
 async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Save a result page as HTML or Markdown. format=markdown: returns markdown content + link so reply can show it in chat. format=html: returns link only (open in browser)."""
     try:
-        from core.result_viewer import build_file_view_link, generate_result_html
+        from core.result_viewer import build_file_view_link_for_context, generate_result_html
         title = (arguments.get("title") or "").strip() or "Result"
         content = arguments.get("content") or ""
         fmt = _normalize_format_arg(arguments.get("format"))
@@ -4767,7 +5016,7 @@ async def _save_result_page_executor(arguments: Dict[str, Any], context: ToolCon
         except Exception as e:
             logger.debug("save_result_page write failed: {}", e)
             return "Failed to save the result page to your output folder."
-        link, link_err = build_file_view_link(scope, path_arg)
+        link, link_err = build_file_view_link_for_context(scope, path_arg, context)
 
         if is_md:
             # Return markdown so the model can include it in the reply → channel/companion/web chat display it in the chat view. Cap length for the reply.
@@ -4807,11 +5056,11 @@ async def _file_write_executor(arguments: Dict[str, Any], context: ToolContext) 
         if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
             scope = _get_file_workspace_subdir(context)
             if scope:
-                from core.result_viewer import build_file_view_link
+                from core.result_viewer import build_file_view_link_for_context
                 # Do not return a view link for empty or minimal content (same threshold as save_result_page for HTML).
                 content_size = len((content_str or "").strip())
                 if content_size >= 250:
-                    link, _ = build_file_view_link(scope, path_arg)
+                    link, _ = build_file_view_link_for_context(scope, path_arg, context)
                     if link:
                         out = f"File saved. CRITICAL: Use ONLY the URL on the next line; copy it exactly—do not modify, truncate, or append anything.\n{link}\n{out}"
                     else:
@@ -4891,8 +5140,8 @@ async def _markdown_to_pdf_executor(arguments: Dict[str, Any], context: ToolCont
         if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
             scope = _get_file_workspace_subdir(context)
             if scope:
-                from core.result_viewer import build_file_view_link
-                link, _ = build_file_view_link(scope, path_arg)
+                from core.result_viewer import build_file_view_link_for_context
+                link, _ = build_file_view_link_for_context(scope, path_arg, context)
                 if link:
                     return f"PDF saved. CRITICAL: Use ONLY the URL on the next line; copy it exactly—do not modify, truncate, or append anything.\n{link}\n{out}"
                 out = f"{out}\nPath: {path_arg}. To get a view link, set core_public_url and auth_api_key in config/core.yml."
@@ -5649,8 +5898,8 @@ async def _vmprint_render_executor(arguments: Dict[str, Any], context: ToolConte
         if path_arg.startswith(FILE_OUTPUT_SUBDIR + "/") or path_arg == FILE_OUTPUT_SUBDIR:
             scope = _get_file_workspace_subdir(context)
             if scope:
-                from core.result_viewer import build_file_view_link
-                link, _ = build_file_view_link(scope, path_arg)
+                from core.result_viewer import build_file_view_link_for_context
+                link, _ = build_file_view_link_for_context(scope, path_arg, context)
                 if link:
                     return f"VMPrint render saved. CRITICAL: Use ONLY the URL on the next line; copy it exactly—do not modify, truncate, or append anything.\n{link}\n{out}"
                 out = f"{out}\nPath: {path_arg}. To get a view link, set core_public_url and auth_api_key in config/core.yml."
@@ -5796,10 +6045,10 @@ async def _get_file_view_link_executor(arguments: Dict[str, Any], context: ToolC
             if not scope:
                 return "Could not determine user/companion scope."
             path_for_link = path_arg.replace("\\", "/")
-        from core.result_viewer import build_file_view_link
-        link, link_err = build_file_view_link(scope, path_for_link)
+        from core.result_viewer import build_file_view_link_for_context
+        link, link_err = build_file_view_link_for_context(scope, path_for_link, context)
         if not link:
-            return f"View link is not available: {link_err or 'set core_public_url and auth_api_key in config/core.yml.'}"
+            return f"View link is not available: {link_err or 'set core_public_url (or use HTTP inbound so the link can match your client URL) and optionally auth_api_key in config/core.yml.'}"
         # When the file is an image and size <= limit, attach it so the client can display it directly; above limit we send only the link. Never crash; on failure we still return the link.
         try:
             abs_path = str(full.resolve())
@@ -5980,27 +6229,64 @@ def _path_under(full: Path, base: Optional[Path]) -> bool:
 
 
 def _search_sandbox_for_filename(context: Optional[Any], filename: Optional[str], max_results: int = 50) -> List[str]:
-    """Search user sandbox for files whose path or name matches filename. Returns list of relative path strings (files only). Empty on error or no homeclaw_root. Never raises."""
+    """
+    Search the **user sandbox** (homeclaw_root/{user_id}/, recursive) and the **global share folder**
+    (homeclaw_root/share/, recursive) for files whose path or name matches filename.
+
+    Returns sandbox-relative path strings (e.g. ``documents/a.pdf``, ``share/pub/b.pdf``) suitable for
+    ``_resolve_file_path``. Empty on error or no homeclaw_root. Never raises.
+    """
     try:
         safe_name = (filename or "").strip() if isinstance(filename, str) else ""
-        r = _resolve_file_path(".", context, for_write=False)
-        if r is None:
-            return []
-        full_dir, base = r
-        if not full_dir.is_dir() or base is None:
-            return []
         pattern = "*" + safe_name + "*" if safe_name else "*"
         results: List[str] = []
-        for i, p in enumerate(full_dir.rglob(pattern)):
-            if i >= max_results:
-                break
-            if p.is_file():
-                try:
-                    rel = str(p.relative_to(base))
-                except ValueError:
-                    rel = p.name
-                if rel not in results:
-                    results.append(rel)
+        seen: set = set()
+        remaining = max(0, int(max_results))
+
+        r = _resolve_file_path(".", context, for_write=False)
+        if r is not None:
+            full_dir, base = r
+            if full_dir.is_dir() and base is not None:
+                for p in full_dir.rglob(pattern):
+                    if remaining <= 0:
+                        break
+                    if not p.is_file():
+                        continue
+                    try:
+                        rel = str(p.relative_to(base)).replace("\\", "/")
+                    except ValueError:
+                        rel = p.name
+                    if rel not in seen:
+                        seen.add(rel)
+                        results.append(rel)
+                        remaining -= 1
+
+        if remaining > 0:
+            try:
+                config = _get_tools_config()
+                shared_dir = (config.get("file_read_shared_dir") or "share").strip() or "share"
+                user_key = _get_file_workspace_subdir(context)
+                paths = get_sandbox_paths_for_user_key(user_key)
+                if paths:
+                    share_root = Path(paths["share"])
+                    if share_root.is_dir():
+                        for p in share_root.rglob(pattern):
+                            if remaining <= 0:
+                                break
+                            if not p.is_file():
+                                continue
+                            try:
+                                rel_s = p.relative_to(share_root)
+                                rel = f"{shared_dir}/{str(rel_s).replace('\\', '/')}".replace("//", "/")
+                            except ValueError:
+                                rel = f"{shared_dir}/{p.name}"
+                            if rel not in seen:
+                                seen.add(rel)
+                                results.append(rel)
+                                remaining -= 1
+            except Exception:
+                pass
+
         return results
     except Exception:
         return []
@@ -7265,11 +7551,11 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
         try:
             parsed = json.loads(result_text.strip()) if isinstance(result_text, str) else None
             if isinstance(parsed, dict) and parsed.get("success") and parsed.get("output_rel_path"):
-                from core.result_viewer import build_file_view_link
+                from core.result_viewer import build_file_view_link_for_context
                 scope = _get_file_workspace_subdir(context)  # per-user or companion; same as resolution above
                 path_rel = (parsed.get("output_rel_path") or "").strip()
                 if path_rel and scope:
-                    link, _ = build_file_view_link(scope, path_rel)
+                    link, _ = build_file_view_link_for_context(scope, path_rel, context)
                     if link:
                         msg = (parsed.get("message") or "File saved.").strip()
                         result_text = f"{msg}\n\nCRITICAL: Use ONLY the URL on the next line. Copy it exactly—do not modify, truncate, or append anything.\n{link}"
@@ -7277,7 +7563,9 @@ async def _route_to_plugin_executor(arguments: Dict[str, Any], context: ToolCont
             pass
         # Post-process with LLM if capability has post_process and post_process_prompt (only prompt + plugin output; no extra info).
         # Skip post_process when result contains a file view link: the LLM often corrupts the URL (spaces, truncation). Send the exact link instead.
-        has_file_view_link = isinstance(result_text, str) and "/files/out" in result_text and "token=" in result_text
+        has_file_view_link = isinstance(result_text, str) and "/files/out" in result_text and (
+            "token=" in result_text or "dev_unsigned=" in result_text
+        )
         if capability and capability.get("post_process") and capability.get("post_process_prompt") and not has_file_view_link:
             try:
                 messages = [
@@ -7447,6 +7735,7 @@ def _register_browser_tools_if_available(registry: ToolRegistry) -> None:
                 "required": ["url"],
             },
             execute_async=_browser_navigate_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -7461,6 +7750,7 @@ def _register_browser_tools_if_available(registry: ToolRegistry) -> None:
                 "required": [],
             },
             execute_async=_browser_snapshot_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -7475,6 +7765,7 @@ def _register_browser_tools_if_available(registry: ToolRegistry) -> None:
                 "required": ["selector"],
             },
             execute_async=_browser_click_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -7490,6 +7781,7 @@ def _register_browser_tools_if_available(registry: ToolRegistry) -> None:
                 "required": ["selector", "text"],
             },
             execute_async=_browser_type_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -7506,6 +7798,7 @@ def _register_browser_tools_if_available(registry: ToolRegistry) -> None:
                 "required": ["query"],
             },
             execute_async=_web_search_browser_executor,
+            risk_tier="network",
         )
     )
 
@@ -7608,6 +7901,34 @@ async def _mcp_list_tools_executor(arguments: Dict[str, Any], context: ToolConte
 
     out = await _mcp_run_with_session(server_id, _list)
     if isinstance(out, str) and out.strip().startswith("{"):
+        try:
+            req = getattr(context, "request", None)
+            md = getattr(req, "request_metadata", None) if req is not None else None
+            if isinstance(md, dict) and str(md.get("clawcode_session_id") or "").strip():
+                from core.clawcode_store import clawcode_mcp_allowlist_entries
+
+                entries = clawcode_mcp_allowlist_entries()
+                if entries:
+                    obj = json.loads(out)
+                    tools = obj.get("tools")
+                    if isinstance(tools, list):
+                        sid_key = (server_id or "").strip().lower()
+                        allowed_names = set()
+                        for e in entries:
+                            if "/" not in (e or ""):
+                                continue
+                            a, b = e.split("/", 1)
+                            if a.strip().lower() == sid_key:
+                                allowed_names.add(b.strip().lower())
+                        obj["tools"] = [
+                            t
+                            for t in tools
+                            if isinstance(t, dict) and str(t.get("name") or "").strip().lower() in allowed_names
+                        ]
+                        obj["clawcode_mcp_allowlist_filtered"] = True
+                    return json.dumps(obj, ensure_ascii=False)
+        except Exception:
+            pass
         return out
     return json.dumps({"tools": [], "error": str(out)})
 
@@ -7620,6 +7941,23 @@ async def _mcp_call_executor(arguments: Dict[str, Any], context: ToolContext) ->
         return json.dumps({"error": "server_id is required.", "results": []})
     if not tool_name:
         return json.dumps({"error": "tool_name is required.", "results": []})
+    req = getattr(context, "request", None)
+    md = getattr(req, "request_metadata", None) if req is not None else None
+    if isinstance(md, dict) and str(md.get("clawcode_session_id") or "").strip():
+        from core.clawcode_store import clawcode_mcp_pair_allowed
+
+        if not clawcode_mcp_pair_allowed(server_id, tool_name):
+            return json.dumps(
+                {
+                    "error": (
+                        f"MCP tool not allowlisted for Claw-Code: {server_id}/{tool_name}. "
+                        "Add `server_id/tool_name` to clawcode.mcp_tool_allowlist in core.yml or clear the list to allow all."
+                    ),
+                    "server_id": server_id,
+                    "tool": tool_name,
+                },
+                ensure_ascii=False,
+            )
     args = arguments.get("arguments") or arguments.get("params") or {}
     if not isinstance(args, dict):
         args = {}
@@ -7640,8 +7978,89 @@ async def _mcp_call_executor(arguments: Dict[str, Any], context: ToolContext) ->
     return json.dumps({"content": "", "error": str(out)})
 
 
+async def _list_available_tools_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    reg = get_tool_registry()
+    limit = 80
+    try:
+        limit = max(1, min(200, int((arguments or {}).get("limit") or 80)))
+    except (TypeError, ValueError):
+        limit = 80
+    tools = reg.list_tools()[:limit]
+    rows = [
+        {
+            "name": t.name,
+            "risk_tier": getattr(t, "risk_tier", None),
+            "description": ((t.short_description or t.description or "")[:240]),
+        }
+        for t in tools
+    ]
+    return json.dumps(
+        {"tools": rows, "total_registered": len(reg.list_tools()), "returned": len(rows)},
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+async def _search_available_tools_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
+    reg = get_tool_registry()
+    q = str((arguments or {}).get("query") or (arguments or {}).get("q") or "").strip().lower()
+    limit = 30
+    try:
+        limit = max(1, min(100, int((arguments or {}).get("limit") or 30)))
+    except (TypeError, ValueError):
+        limit = 30
+    if not q:
+        return json.dumps({"error": "query (or q) is required"}, ensure_ascii=False)
+    matches = []
+    for t in reg.list_tools():
+        desc = ((t.short_description or "") + " " + (t.description or "")).lower()
+        nm = (t.name or "").lower()
+        if q in nm or q in desc:
+            matches.append({"name": t.name, "description": (t.short_description or t.description or "")[:200]})
+        if len(matches) >= limit:
+            break
+    return json.dumps({"query": q, "matches": matches}, ensure_ascii=False, indent=2)
+
+
 def register_builtin_tools(registry: ToolRegistry) -> None:
     """Register all built-in tools. Call once at startup (e.g. from Core)."""
+    registry.register(
+        ToolDefinition(
+            name="list_available_tools",
+            description=(
+                "List tools currently registered on this Core (name, short description, optional risk_tier). "
+                "Use when the injected tools list is trimmed or you need to discover what you can call next."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max tools to return (default 80, max 200)."},
+                },
+                "required": [],
+            },
+            execute_async=_list_available_tools_executor,
+            short_description="List registered tool names and descriptions (tool discovery).",
+            risk_tier="read",
+        )
+    )
+    registry.register(
+        ToolDefinition(
+            name="search_available_tools",
+            description="Search registered tools by substring in name or description. Use after list_available_tools when you need a narrower set.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Substring to match (case-insensitive)."},
+                    "q": {"type": "string", "description": "Alias for query."},
+                    "limit": {"type": "integer", "description": "Max matches (default 30)."},
+                },
+                "required": [],
+            },
+            execute_async=_search_available_tools_executor,
+            short_description="Search tools by keyword in name or description.",
+            risk_tier="read",
+        )
+    )
     # Session tools
     registry.register(
         ToolDefinition(
@@ -7857,6 +8276,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             },
             execute_async=_run_skill_executor,
             short_description="Use when: user asks for a skill (email, slides, HTML report, image, etc.). Pass skill_name and script (or skill_name only for instruction-only skills); then continue with document_read/save_result_page.",
+            risk_tier="exec",
         )
     )
 
@@ -8312,6 +8732,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["query"],
             },
             execute_async=_web_search_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8331,6 +8752,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["urls"],
             },
             execute_async=_tavily_extract_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8351,6 +8773,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["url"],
             },
             execute_async=_tavily_crawl_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8370,6 +8793,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["input"],
             },
             execute_async=_tavily_research_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8401,6 +8825,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["server_id"],
             },
             execute_async=_mcp_list_tools_executor,
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8420,6 +8845,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["server_id", "tool_name"],
             },
             execute_async=_mcp_call_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8437,6 +8863,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": [],
             },
             execute_async=_image_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8495,6 +8922,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["command"],
             },
             execute_async=_exec_executor,
+            risk_tier="exec",
         )
     )
     registry.register(
@@ -8503,6 +8931,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             description="List background exec jobs (job_id, command, started_at, status). Use after exec with background=true.",
             parameters={"type": "object", "properties": {}, "required": []},
             execute_async=_process_list_executor,
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8515,6 +8944,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["job_id"],
             },
             execute_async=_process_poll_executor,
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8527,6 +8957,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["job_id"],
             },
             execute_async=_process_kill_executor,
+            risk_tier="exec",
         )
     )
 
@@ -8544,12 +8975,13 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path"],
             },
             execute_async=_file_read_executor,
+            risk_tier="read",
         )
     )
     registry.register(
         ToolDefinition(
             name="document_read",
-            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. When the user wants to summarize, edit, or use a file but does not give a path: pass the file name or a short description (e.g. 'resume', 'Allen_Peng_resume_en.docx') as path — the tool will search the sandbox first and read the file if exactly one match. When path is a full path: use the **path** from folder_list or file_find. User sandbox: documents/, output/, work/, share/, etc. Use 'share/...' for global share. For long files, increase max_chars.",
+            description="Read document content from PDF, PPT, Word, MD, HTML, XML, JSON, Excel, and more. When the user wants to summarize, edit, or use a file but does not give a path: pass the file name or a short description (e.g. 'resume', 'Allen_Peng_resume_en.docx') as path — the tool will search the sandbox first and read the file if exactly one match. When path is a full path: use the **path** from folder_list or file_find. Do **not** invent absolute host paths (e.g. /Users/.../file.pdf); only sandbox-relative paths (documents/..., share/...) or bare filenames work when homeclaw_root is set. User sandbox: documents/, output/, work/, share/, etc. Use 'share/...' for global share. For long files, increase max_chars.",
             parameters={
                 "type": "object",
                 "properties": {
@@ -8560,6 +8992,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             },
             execute_async=_document_read_executor,
             short_description="Use when: user wants to read/summarize a document (PDF, Word, etc.). Pass path from folder_list/file_find or a filename (e.g. 'resume') to search sandbox.",
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8575,6 +9008,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path"],
             },
             execute_async=_file_understand_executor,
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8590,6 +9024,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path", "content"],
             },
             execute_async=_file_write_executor,
+            risk_tier="write",
         )
     )
     registry.register(
@@ -8607,6 +9042,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path", "old_string", "new_string"],
             },
             execute_async=_file_edit_executor,
+            risk_tier="write",
         )
     )
     registry.register(
@@ -8622,6 +9058,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["patch"],
             },
             execute_async=_apply_patch_executor,
+            risk_tier="write",
         )
     )
 
@@ -8643,6 +9080,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             },
             execute_async=_folder_list_executor,
             short_description="List files in a folder. You MUST pass path: use the folder name from the user's message (e.g. images, documents) or '.' for root. Never call with empty path.",
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8661,6 +9099,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path"],
             },
             execute_async=_file_find_executor,
+            risk_tier="read",
         )
     )
 
@@ -8678,6 +9117,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["url"],
             },
             execute_async=_fetch_url_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8695,6 +9135,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": [],
             },
             execute_async=_web_extract_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8714,6 +9155,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["url"],
             },
             execute_async=_web_crawl_executor,
+            risk_tier="network",
         )
     )
     _register_browser_tools_if_available(registry)
@@ -8736,6 +9178,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["url"],
             },
             execute_async=_http_request_executor,
+            risk_tier="network",
         )
     )
     registry.register(
@@ -8751,6 +9194,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["url"],
             },
             execute_async=_webhook_trigger_executor,
+            risk_tier="network",
         )
     )
 
@@ -8768,6 +9212,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["query"],
             },
             execute_async=_knowledge_base_search_executor,
+            risk_tier="read",
         )
     )
     registry.register(
@@ -8785,6 +9230,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["content"],
             },
             execute_async=_knowledge_base_add_executor,
+            risk_tier="write",
         )
     )
     registry.register(
@@ -8799,6 +9245,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["source_id"],
             },
             execute_async=_knowledge_base_remove_executor,
+            risk_tier="write",
         )
     )
     registry.register(
@@ -8814,6 +9261,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": [],
             },
             execute_async=_knowledge_base_list_executor,
+            risk_tier="read",
         )
     )
 
@@ -8833,6 +9281,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["title", "content"],
             },
             execute_async=_save_result_page_executor,
+            risk_tier="write",
         )
     )
     registry.register(
@@ -8848,6 +9297,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["path"],
             },
             execute_async=_get_file_view_link_executor,
+            risk_tier="read",
         )
     )
     # Markdown → PDF: save long Markdown as PDF and return link (used by summarize skill when result is long).

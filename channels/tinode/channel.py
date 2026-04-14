@@ -47,6 +47,7 @@ import yaml
 from os import getenv
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from base.util import Util
+from channels.clawcode_binding import merge_clawcode_binding_into_prompt_request, try_clawcode_command_reply
 from base.BaseChannel import ChannelMetadata, BaseChannel
 from base.base import PromptRequest, AsyncResponse, ChannelType, ContentType
 
@@ -510,6 +511,11 @@ def client_message_loop(stream):
                         text_content = encoded_content if isinstance(encoded_content, str) else encoded_content.decode('utf-8')
                         msg_id = str(msg.data.seq_id)
                         if _tinode_channel is not None:
+                            _t_uid = 'tinode:' + msg.data.topic
+                            _cc_t = try_clawcode_command_reply(_t_uid, text_content)
+                            if _cc_t:
+                                client_post(publish(msg.data.topic, _cc_t))
+                                continue
                             core_url = Util().get_channels_core_url()
                             log("Tinode: sending text to Core at", core_url + "/process", "(msg_id=%s, topic=%s)" % (msg_id, msg.data.topic))
                             logger.info(f"Tinode: sending text to Core at {core_url}/process (msg_id={msg_id}, topic={msg.data.topic})")
@@ -534,6 +540,7 @@ def client_message_loop(stream):
                                 timestamp=datetime.now().timestamp(),
                                 reply_accepts=["text", "image"],
                             )
+                            merge_clawcode_binding_into_prompt_request(request)
                             try:
                                 _tinode_channel.syncTransferTocore(request=request)
                             except Exception as e:
@@ -572,6 +579,7 @@ def client_message_loop(stream):
                                 reply_accepts=["text", "image"],
                             )
                             if _tinode_channel is not None:
+                                merge_clawcode_binding_into_prompt_request(request)
                                 _tinode_channel.syncTransferTocore(request=request)
                             else:
                                 client_post(publish(msg.data.topic, 'Image received'))
@@ -612,6 +620,7 @@ def client_message_loop(stream):
                                         timestamp=datetime.now().timestamp(),
                                         reply_accepts=["text", "image"],
                                     )
+                                    merge_clawcode_binding_into_prompt_request(request)
                                     _tinode_channel.syncTransferTocore(request=request)
                                 else:
                                     client_post(publish(msg.data.topic, 'Audio received'))
@@ -652,6 +661,7 @@ def client_message_loop(stream):
                                         timestamp=datetime.now().timestamp(),
                                         reply_accepts=["text", "image"],
                                     )
+                                    merge_clawcode_binding_into_prompt_request(request)
                                     _tinode_channel.syncTransferTocore(request=request)
                                 else:
                                     client_post(publish(msg.data.topic, 'Video received'))
@@ -693,6 +703,7 @@ def client_message_loop(stream):
                                         timestamp=datetime.now().timestamp(),
                                         reply_accepts=["text", "image"],
                                     )
+                                    merge_clawcode_binding_into_prompt_request(request)
                                     _tinode_channel.syncTransferTocore(request=request)
                                 else:
                                     client_post(publish(msg.data.topic, 'File received'))

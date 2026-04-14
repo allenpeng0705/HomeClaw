@@ -132,6 +132,7 @@ auth_api_key: ""   # when auth_enabled: true, require X-API-Key header or Author
 # federation_require_accepted_relationship: false   # when true, inbound federated user messages require accepted row in federated_friendships.sqlite (not YAML alone)
 # federation_e2e_enabled: false   # P5: allow hc-e2e-v1 envelopes on federated user messages; Companion registers public key via PUT /api/me/federation-e2e-key
 # federation_e2e_require_encrypted: false   # when true, federated user messages must use E2E envelope (no plaintext)
+# peer_outbound_user_agent: ""   # optional User-Agent for Core→Core HTTP (peer_call, federation). Empty = built-in non-Python-urllib default. Override env: HOMECLAW_PEER_HTTP_USER_AGENT
 # Tool layer config (used when use_tools: true). Cross-platform (Mac/Linux/Windows) where possible.
 # Built-in tools: time, cron_*, sessions_*, session_status; memory_search, memory_get; file_*,
 # folder_list; fetch_url, web_search; browser_*; exec, process_*; image; channel_send; run_skill;
@@ -146,9 +147,16 @@ tools:
   # Max characters returned by file_read when the tool does not pass max_chars (default 32000). Increase for long PDFs/documents (e.g. 128000).
   file_read_max_chars: 128000
   run_skill_allowlist: ["run.sh", "main.py", "run.bat", "generate_image.py", "run.py", "search.py"]   # run_skill: if set, only these script names. Use [] to allow all.
+  # run_skill_requirements_txt: true   # when true (default in skills_and_plugins merge): if <skill>/requirements.txt exists, pip install -r once per Core process before running .py. Set false to install manually only.
+  # run_skill_npm_install: true   # when true (default): if <skill>/package.json exists, npm install in that folder once per process before .js/.mjs/.cjs/.ts. Set false if you manage node_modules yourself.
   # run_skill_py_in_process: true   # true = run .py scripts in Core's process (same env). false = subprocess.
   # run_skill_auto_install_missing: { "google": "google-genai pillow" }   # optional: on ModuleNotFoundError, pip install and retry (subprocess only)
   run_skill_timeout: 60   # Unit: seconds
+  # VMPrint inline preview policy (Companion/chat): when generated preview metadata says inline, Companion may open in-app.
+  # If AST/pages exceed limits, policy hint becomes "link" so client opens external preview link instead.
+  vmprint_preview_inline:
+    max_ast_chars: 120000
+    max_pages: 2
   web:                  # web_search: free (no key) duckduckgo | free tier google_cse (100/day), bing (1000/mo) | tavily, brave, serpapi. Browser: web_search_browser (Google/Bing/Baidu, no key, needs Playwright).
     search:
       provider: tavily  # duckduckgo (no key) | google_cse (100 free/day) | bing (1000 free/mo) | tavily | brave | serpapi. When tavily: Tavily is used first (key under tavily below).
@@ -618,3 +626,69 @@ cognee:
   #   TELEMETRY_DISABLED: "true"
   #   VECTOR_STORE_PROVIDER: "qdrant"
   endpoints: []
+
+# --- Agent harness (Claude Code–style; see docs_design/AgentHarness_ClaudeCode_Backlog.md) ---
+# Optional: hard limits per inbound turn. max_tool_rounds overrides tools.max_tool_rounds when set here.
+# agent_limits:
+#   max_tool_rounds: 30
+#   max_estimated_tokens_per_turn: 0   # 0 = disabled; rough estimate from message sizes
+#
+# Optional: tool execution policy and LLM-facing allowlist (execution still uses full registry unless you add checks later).
+# tool_policy:
+#   default_mode: allow_all                    # allow_all | allow_read_restrict_write (blocks tools with requires_confirmation=true, then write/exec/network/user_data risk_tier; see tools/builtin.py ToolDefinition)
+#   llm_tool_allowlist: []                     # when non-empty, only these names (+ discovery tools) go to the model
+#   always_include_discovery_tools: true       # adds list_available_tools, search_available_tools to allowlist
+#
+# workflow_trace_sse_enabled: false            # when true: GET /dev/workflow-trace/stream (SSE); same auth as /inbound
+#
+# Claw-Code (terminal coding agent): POST/GET /api/clawcode/sessions, GET /api/clawcode/sessions/{id}?owner_user_id=…,
+# GET …/sessions/{id}/files?path= (list names under session cwd); inbound optional clawcode_session_id (docs_design/ClawCode_API_Sketch.md).
+# Optional prompt: config/clawcode.yml → system_prompt_addendum (merged in llm_loop when session active).
+# Web UI: Core serves GET /clawcode and GET /clawcode/config (same port as API, e.g. 9000). Optional: WebChat 8014 /clawcode (see channels/webchat/README.md, docs/clawcode-ui-security.md).
+# clawcode:
+#   enabled: false
+#   # web_ui_default_user_id: webchat_user        # optional default for browser UI user_id field (GET /clawcode/config)
+#   default_session_mode: agent                # plan | agent — new sessions get this mode; plan = read-biased tool policy for Claw-Code turns
+#   default_tool_profile: coding               # or clawcode (alias for coding tool set); see base/tool_profiles.py
+#   allowed_roots: []                          # empty = any cwd; else list of absolute paths — session cwd must be under one
+#   # git_write_allowed: omit = allow git mutating commands via exec; false = block (commit/push/etc.); true = explicitly allow
+#   # git_write_allowed: false
+#   usage_hint: ""                            # optional: custom text appended to GET session detail (Companion / CLI worktree); default explains trace/dashboard
+#   mcp_preset_note: ""                       # optional operator note (MCP server ids, allowed tools); injected into system prompt as "## MCP (configured servers)" when a Claw-Code session is active
+#   mcp_tool_allowlist: []                    # when non-empty, Claw-Code turns may only call MCP tools listed as "server_id/tool_name" (see tools.mcp.servers keys); mcp_list_tools is filtered the same way
+#   # When non-empty, tool calls in this set are blocked during Claw-Code turns until approved via POST /api/clawcode/approvals/{id}/resolve
+#   approval_tools: []                        # e.g. ["file_write", "run_skill"] — empty = no approval gate
+#   approval_ttl_seconds: 1800                # pending approval file lifetime (60–604800)
+#   # P5: channel bindings — API GET/PUT/DELETE /api/clawcode/channel-bindings; database/clawcode_channel_bindings.json; channels/clawcode_binding.py
+#   # Per-session main/tool models: PATCH main_llm_ref / tool_llm_ref (must exist and be available in merged llm.yml or ignored)
+#   # Change cwd after create: POST /api/clawcode/sessions/{id}/rebind — same allowed_roots rules as create; CLI: clawcode session rebind --cwd DIR
+#   # Optional: bypass LiteLLM proxy for Claw-Code turns only — OpenAI-compatible POST .../chat/completions with Authorization: Bearer <key>
+#   # direct_openai:
+#   #   base_url: https://api.minimax.chat/v1   # https:// added if scheme omitted; /chat/completions appended if missing
+#   #   model: abab6.5s-chat                   # JSON body "model"
+#   #   api_key_env: MINIMAX_API_KEY           # preferred for secrets
+#   #   # api_key: "hardcoded"                 # optional instead of api_key_env
+#
+# Optional: defer heavy tools from the LLM tool list (still executable; use list_available_tools / search_available_tools).
+# tool_policy:
+#   llm_tool_defer: ["mcp_call", "tavily_research"]
+#
+# Optional: skills prompt shaping (design A–B). Budget applies after RAG/force-include/body injection.
+# skills_prompt_budget_chars: 0                 # 0 = disabled; e.g. 8000 caps total listing size
+# skills_prompt_entry_max_chars: 250            # per-skill description cap when budget is enabled
+# skills_invocation_contract_enabled: true      # stronger run_skill contract paragraph in Available skills
+#
+# Optional: rerank skills RAG hits by per-user usage (database/skill_usage.json; updated on successful run_skill).
+# skills_usage_rerank_enabled: false
+# skills_usage_rerank_weight: 0.12              # additive to similarity, capped at 1.0
+#
+# Optional: inner LLM turn for selected skills (design D). Empty list = disabled (default).
+# tools:
+#   run_skill_subagent_skills: []               # e.g. ["weather-1.0.0"] — uses answer_from_memory with tighter limits
+# agent_limits:
+#   skill_subagent:
+#     max_tool_rounds: 12
+#     max_estimated_tokens_per_turn: 0          # 0 = use parent agent_limits only
+#
+# Per-request tool profile (design E): POST /inbound JSON field tool_profile: minimal | messaging | coding | full
+# (overrides tools.profile from core.yml when intent router does not set a category profile).

@@ -114,3 +114,7 @@ tests/.DS_Store
 /skills/daily-brief-1.0.0/scripts/__pycache__
 /skills/daily-brief-1.0.0/scripts/__pycache__
 /skills/magazine-render-1.0.0/scripts/__pycache__
+/clients/__pycache__
+/clients/clawcode/__pycache__
+/clients/homeclaw_mcp/__pycache__
+.DS_Store

@@ -19,6 +19,7 @@ def send_push_to_user(
     source: str = "push",
     from_friend: str = "HomeClaw",
     max_tokens_per_user: Optional[int] = None,
+    link: Optional[str] = None,
 ) -> int:
     """
     Send push to tokens registered for user_id.
@@ -51,7 +52,15 @@ def send_push_to_user(
             if platform in _APPLE_PLATFORMS:
                 try:
                     from base import apns_send
-                    if apns_send.send_apns_one(token, title or "HomeClaw", body or "", user_id=user_id, source=source, from_friend=from_friend):
+                    if apns_send.send_apns_one(
+                        token,
+                        title or "HomeClaw",
+                        body or "",
+                        user_id=user_id,
+                        source=source,
+                        from_friend=from_friend,
+                        link=link,
+                    ):
                         sent += 1
                     else:
                         logger.debug("APNs send to ...{} failed; token may be invalid", token[-8:] if len(token) > 8 else token)
@@ -60,7 +69,15 @@ def send_push_to_user(
             else:
                 try:
                     from base import fcm_send
-                    if fcm_send.send_fcm_one(token, title or "HomeClaw", body or "", user_id=user_id, source=source, from_friend=from_friend):
+                    if fcm_send.send_fcm_one(
+                        token,
+                        title or "HomeClaw",
+                        body or "",
+                        user_id=user_id,
+                        source=source,
+                        from_friend=from_friend,
+                        link=link,
+                    ):
                         sent += 1
                     else:
                         logger.debug("FCM send to ...{} failed", token[-8:] if len(token) > 8 else token)

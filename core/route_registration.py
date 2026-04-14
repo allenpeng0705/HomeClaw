@@ -32,12 +32,18 @@ from core.app_layer_encryption import (
     encrypt_response as app_encrypt_response,
     parse_inbound_body as app_parse_inbound_body,
 )
-from core.result_viewer import build_image_view_links, get_result_link_base_url
+from core.result_viewer import (
+    build_image_view_links,
+    get_result_link_base_url,
+    infer_public_base_url_from_http_request,
+)
 
 from core.routes import (
     auth,
     chat_history_api,
     companion_auth,
+    clawcode_api,
+    clawcode_web,
     companion_push_api,
     config_api,
     federated_friend_request_api,
@@ -57,6 +63,7 @@ from core.routes import (
     portal_proxy,
     ui_routes,
     websocket_routes,
+    workflow_trace_stream,
 )
 
 
@@ -95,6 +102,12 @@ def register_all_routes(core: Any) -> None:
     )
     app.add_api_route("/ready", lifecycle.get_ready_handler(core), methods=["GET"])
     app.add_api_route(
+        "/dev/workflow-trace/stream",
+        workflow_trace_stream.get_workflow_trace_sse_handler(),
+        methods=["GET"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
         "/pinggy",
         lifecycle.get_pinggy_handler(core, _pinggy_getter),
         methods=["GET"],
@@ -128,6 +141,95 @@ def register_all_routes(core: Any) -> None:
         "/api/config/core",
         config_api.get_api_config_core_patch_handler(core),
         methods=["PATCH"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    # Claw-Code SPA on Core (port 9000): same-origin /api/clawcode/* + /inbound — no WebChat 8014 required.
+    app.add_api_route(
+        "/clawcode/config",
+        clawcode_web.get_clawcode_web_config_handler(core),
+        methods=["GET"],
+    )
+    app.add_api_route(
+        "/clawcode",
+        clawcode_web.get_clawcode_page_handler(),
+        methods=["GET"],
+    )
+    app.add_api_route(
+        "/api/clawcode/sessions",
+        clawcode_api.get_api_clawcode_sessions_post_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/clawcode/sessions",
+        clawcode_api.get_api_clawcode_sessions_list_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/clawcode/sessions/{session_id}/rebind",
+        clawcode_api.get_api_clawcode_session_rebind_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/clawcode/sessions/{session_id}/files",
+        clawcode_api.get_api_clawcode_session_files_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/clawcode/sessions/{session_id}",
+        clawcode_api.get_api_clawcode_session_detail_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/clawcode/sessions/{session_id}",
+        clawcode_api.get_api_clawcode_session_patch_handler(core),
+        methods=["PATCH"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/clawcode/approvals",
+        clawcode_api.get_api_clawcode_approvals_list_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/clawcode/approvals/{approval_id}/resolve",
+        clawcode_api.get_api_clawcode_approvals_resolve_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/clawcode/channel-bindings",
+        clawcode_api.get_api_clawcode_channel_bindings_get_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/clawcode/channel-bindings",
+        clawcode_api.get_api_clawcode_channel_bindings_put_handler(core),
+        methods=["PUT"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/clawcode/channel-bindings",
+        clawcode_api.get_api_clawcode_channel_bindings_delete_handler(core),
+        methods=["DELETE"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/clawcode/mcp/servers",
+        clawcode_api.get_api_clawcode_mcp_servers_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/clawcode/mcp/health",
+        clawcode_api.get_api_clawcode_mcp_health_handler(core),
+        methods=["POST"],
         dependencies=[Depends(auth.verify_inbound_auth)],
     )
     # Multi-instance: identity (public) + pairing invites (create auth'd; consume token-only)
@@ -784,7 +886,12 @@ def register_all_routes(core: Any) -> None:
                     status_code=422,
                     content={"error": "Invalid or unreadable body", "text": ""},
                 )
+            if isinstance(parsed, dict):
+                parsed.pop("public_request_base_url", None)
             request = InboundRequest.model_validate(parsed)
+            _inbound_pub = infer_public_base_url_from_http_request(raw_request)
+            if _inbound_pub:
+                request = request.model_copy(update={"public_request_base_url": _inbound_pub})
         except Exception as parse_err:
             logger.warning("inbound body parse failed: {}", parse_err)
             return JSONResponse(

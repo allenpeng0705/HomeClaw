@@ -47,6 +47,7 @@
         <li><a href="#config">Configuration</a></li>
         <li><a href="#add-friend">Add Cursor/ClaudeCode Friend</a></li>
         <li><a href="#companion">Use from Companion App</a></li>
+        <li><a href="#clawcode-web">Claw-Code Web UI (HomeClaw)</a></li>
         <li><a href="#mcp">Claude Code MCP Server</a></li>
         <li><a href="#tips">Tips</a></li>
       </ul>
@@ -347,6 +348,25 @@ claude_code_path: "/usr/local/bin/claude"</code></pre>
           <li><strong>"New cursor session"</strong></li>
           <li><strong>"Clear claude session"</strong></li>
         </ul>
+      </div>
+    </section>
+
+    <section class="doc-section doc-section-no-img" id="clawcode-web">
+      <div class="doc-section-img-wrap" aria-hidden="true"></div>
+      <div class="doc-section-body">
+        <h2>Claw-Code Web UI (HomeClaw-native)</h2>
+        <p>Separate from the Cursor/Claude <strong>bridge</strong> friends above, HomeClaw includes <strong>Claw-Code</strong>: coding sessions stored on Core (<code>clawcode.enabled: true</code> in <code>config/core.yml</code>). Same <code>clawcode_session_id</code> works across CLI, IM channels, WebSocket, and browser.</p>
+        <h3>Browser IDE-style UI</h3>
+        <ol>
+          <li>Enable Claw-Code in Core config (see <code>config/core.yml.reference</code>).</li>
+          <li>Run the WebChat channel: <code>python3 -m channels.run webchat</code></li>
+          <li>Open <strong><code>http://&lt;your-host&gt;:8014/clawcode</code></strong> — sessions sidebar, streaming tool progress, image replies, pending approvals, and a read-only workspace file list under the session <code>cwd</code>.</li>
+        </ol>
+        <p>The page uses the same saved Core URL / API key pattern as plain WebChat. Operators should read <a href="../../docs/clawcode-ui-security.md">docs/clawcode-ui-security.md</a> before exposing the port beyond a trusted network.</p>
+        <h3>CLI</h3>
+        <p><code>python3 -m main clawcode login</code>, <code>session new</code> / <code>list</code> / <code>show</code> / <code>worktree</code>, <code>run</code>, <code>attach</code>, and channel bindings — see project <code>clients/clawcode/cli.py</code> help.</p>
+        <h3>Companion app</h3>
+        <p>Open <strong>More (⋮) → Claw-Code</strong> on the friends list: view sessions (cwd, last run), resolve risky-tool approvals, optionally browse files via Core, and launch the Claw-Code web URL in the system browser (defaults to port <strong>8014</strong> on the Core host).</p>
       </div>
     </section>
 

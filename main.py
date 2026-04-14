@@ -808,13 +808,13 @@ if __name__ == "__main__":
         "command",
         nargs="?",
         default="start",
-        choices=["start", "onboard", "doctor", "ollama", "portal", "skills", "peer"],
-        help="start (default): run Core; onboard: wizard; doctor: check config; peer: multi-instance CLI (invite-create, invite-accept, import, list); ollama: …; portal: …; skills: ClawHub",
+        choices=["start", "onboard", "doctor", "ollama", "portal", "skills", "peer", "clawcode", "homeclaw_mcp"],
+        help="start (default): run Core; onboard: wizard; doctor: check config; peer: multi-instance CLI; ollama: …; portal: …; skills: ClawHub; clawcode: coding CLI; homeclaw_mcp: stdio MCP server → Core (pip install mcp httpx)",
     )
     parser.add_argument(
         "ollama_action",
         nargs="?",
-        help="ollama subcommand: list, pull <name>, set-main <name>. For skills: search <query...> | install <skill[@version]> [--dry-run] [--with-deps]",
+        help="ollama subcommand: list, pull <name>, set-main <name>. For skills: search <query...> | install <skill[@version]> [--dry-run] [--with-deps]. For clawcode: login | session new|list | run ... | attach",
     )
     parser.add_argument(
         "ollama_name",
@@ -824,7 +824,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "extra",
         nargs=argparse.REMAINDER,
-        help="Extra args for subcommands (e.g. skills search query words...).",
+        help="Extra args for subcommands (e.g. skills search query words...; clawcode session new|list|show|worktree --cwd /path).",
     )
     parser.add_argument(
         "--no-open-browser",
@@ -1017,6 +1017,21 @@ if __name__ == "__main__":
                 sys.exit(0)
             print("Usage: python -m main skills search <query...> | install <skill[@version]> | remove <folder-name>")
             sys.exit(2)
+        elif args.command == "clawcode":
+            from clients.clawcode.cli import run_cli
+
+            parts: list = []
+            if args.ollama_action:
+                parts.append(str(args.ollama_action).strip())
+            if args.extra:
+                parts.extend(str(x) for x in args.extra if x is not None)
+            rc = run_cli(parts)
+            sys.exit(rc if isinstance(rc, int) else 0)
+        elif args.command == "homeclaw_mcp":
+            from clients.homeclaw_mcp.server import main as homeclaw_mcp_main
+
+            homeclaw_mcp_main()
+            sys.exit(0)
         else:
             start(open_browser=not args.no_open_browser)
     except KeyboardInterrupt:

@@ -9,6 +9,7 @@
 #   finder   — search/list (file_find, folder_list); read (document_read, file_read); view (get_file_view_link); edit (file_write); save_result_page (e.g. HTML slides from doc)
 #   bridge   — shared by Cursor, ClaudeCode, Trae: time, route_to_plugin, folder_list, file_find (message is pattern-routed to the right bridge; no general LLM tool loop)
 #   cursor   — same as bridge; kept for backward compat
+#   clawcode — omit tools_preset in YAML: no preset tool filter; Companion binds a Claw-Code session to this friend; turns use Core coding agent + clawcode_session_id (not route_to_plugin).
 #   tutor    — time, sessions_spawn, models_list, web_search (use with llm_ref for math/science-dedicated local models)
 # Use tools_preset so the friend only sees the tools it needs (saves tokens, clearer behavior). E.g. Note uses "note" to get save/query/file tools only, no reminder or routing tools.
 #
@@ -85,6 +86,17 @@ presets:
     model_routing: any
     save_policy: default
     system_prompt: "You are the ClaudeCode assistant. You help the user run Claude Code CLI on their computer via the Dev Bridge. Always use route_to_plugin(plugin_id='claude-code-bridge') with capability_id and capability_parameters. When the user asks to set/open a project (e.g. 'open D:\\mygithub\\HomeClaw project'), call set_cwd with path set to the folder. For normal coding tasks, call run_agent with task. For shell commands, call run_command with command. Reply briefly and confirm what you did."
+
+  # Claw-Code: built-in terminal coding agent on Core (sessions via API/CLI). Like Cursor/ClaudeCode as a named AI friend; no bridge. Omit tools_preset so the normal tool profile applies; Companion sends clawcode_session_id for this friend only. Add to user.yml: - name: Clawcode / preset: clawcode
+  # clawcode:
+  #   thumbnail: clawcode.png
+  #   skills: []
+  #   plugins: []
+  #   memory_sources: [cognee, agent_memory]
+  #   history: 20
+  #   model_routing: any
+  #   save_policy: default
+  #   system_prompt: "You are the Claw-Code assistant — HomeClaw's built-in coding agent on the Core host (workspace sessions, tools, MCP as configured). The Companion user binds a Claw-Code session to this chat (terminal icon). Use tools to read, edit, run commands, and call MCP when appropriate. If no session is bound yet, briefly tell them to open this chat and tap the terminal icon to pick or create a session."
 
   # Trae: Trae Agent (trae-cli) via the same dev bridge. Requires trae_agent_enabled: true in skills_and_plugins.yml. Set project folder, run natural-language tasks and get output. See github.com/bytedance/trae-agent.
   # trae:

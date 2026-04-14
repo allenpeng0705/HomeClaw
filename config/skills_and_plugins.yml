@@ -29,14 +29,16 @@ skills_use_vector_search: false
 
 # --- Intent router (Phase 2/3): LLM-based query -> category -> filter tools and skills ---
 # When enabled: one short LLM call classifies the user message; tools (and optionally skills) are filtered by category. No phrase tables — LLM does the classification.
-# Multi-category: if the request needs several types of actions (e.g. search then save), the router may return two comma-separated categories; Core then uses the union of tools/skills from both. See docs_design/IntentRouter_CategoriesCoverage.md § Multi-category tasks.
+# Multi-category: if the request needs several types of actions (e.g. search then save), the router may return two comma-separated categories; Core then uses the union of tools/skills from both. DAG: only one flow runs per turn — get_flow_for_categories picks the first category in the router string that has a flow (put the category you want DAG’d first, e.g. list_files, search_web). See docs_design/IntentRouter_CategoriesCoverage.md § Multi-category tasks.
 # Phase 3.1: per category use "skills: [folder1, folder2]" to restrict which skills are in the prompt (skill_name enum then matches). Phase 3.3: verify_tool_selection + verify_tools to optionally verify exec/file_write before execution.
 intent_router:
   enabled: true
-  # Timeout (seconds) for the intent router LLM call. If the router does not respond in time (e.g. main LLM busy), we fall back to general_chat so the request does not hang. Default 25 when not set; set 0 to disable timeout.
-  # timeout_seconds: 25
+  # Faster fallback when the router model stalls (lower = snappier, higher = fewer misroutes on slow local LLMs).
+  timeout_seconds: 15
+  # Optional: LLM name from llm.yml (same as main_llm refs) for classification only — use a small/fast model so routing does not queue behind the main chat model. Omit or null = same as main path (llm_name=None).
+  # router_llm: null
   # Full coverage: see docs_design/IntentRouter_CategoriesCoverage.md. Every category has a mapping so router is enough for tools/skills.
-  categories: [search_web, list_files, get_file_link, read_document, create_slides, create_html_slides, generate_pdf, summarize_to_page, send_email, schedule_remind, open_url, memory, knowledge_base, image, general_chat, coding]
+  categories: [search_web, list_files, get_file_link, read_document, create_slides, create_html_slides, generate_pdf, summarize_to_page, send_email, schedule_remind, open_url, memory, knowledge_base, image, weather, news_digest, stock_monitor, general_chat, coding]
   # Short description per category so the router LLM can classify more accurately. Reply must still be the exact category name.
   category_descriptions:
     search_web: "User wants to search the web or look up information online."
@@ -53,6 +55,9 @@ intent_router:
     memory: "User wants to remember something, recall past context, or search memory."
     knowledge_base: "User wants to search or save something in their knowledge base."
     image: "User wants to generate, analyze, or describe an image, or to receive/send an image file (e.g. 发给我, send me that image)."
+    weather: "User asks for weather, forecast, or temperature for a place or time (e.g. 北京明天天气, London tomorrow, 气温, 下雨吗)."
+    news_digest: "User wants RSS headlines, daily brief, morning report, or 今日新闻 — not generic open-ended chat."
+    stock_monitor: "User wants watchlist / 自选股 / portfolio quotes, 股票行情, A股港股美股 — stock-monitor skill (not generic news RSS)."
     general_chat: "General conversation, question, or intent that does not fit a specific category above."
     coding: "User wants to run code, edit files, use dev tools, or automate something."
   category_tools:
@@ -63,7 +68,7 @@ intent_router:
     get_file_link: { tools: [get_file_view_link, folder_list, file_find] }
     read_document: { tools: [document_read, file_read, file_understand, folder_list, file_find, get_file_view_link] }
     create_slides: { profile: minimal, skills: [html-slides-1.0.0, ppt-generation-1.0.0] }
-    # create_html_slides uses a DAG flow (document_read -> run_skill(html-slides) -> save_result_page). Allow those tools so the DAG runs without fallback.
+    # create_html_slides: no fixed DAG (skill is instruction-only); allow tools so ReAct can document_read -> run_skill(html-slides) -> save_result_page.
     create_html_slides: { tools: [document_read, run_skill, save_result_page, file_read, file_understand], skills: [html-slides-1.0.0] }
     generate_pdf: { tools: [document_read, markdown_to_pdf] }
     summarize_to_page: { tools: [document_read, save_result_page] }
@@ -74,6 +79,12 @@ intent_router:
     knowledge_base: { tools: [knowledge_base_search, knowledge_base_add, knowledge_base_remove, knowledge_base_list] }
     # Include get_file_view_link so "发给我 img1.png" returns a view link; folder_list/file_find to resolve path if needed.
     image: { tools: [image, get_file_view_link, folder_list, file_find], skills: [image-generation-1.0.0] }
+    # weather: narrow tools — DAG runs weather skill first; on skill failure Core falls back to ReAct with web_search.
+    weather: { tools: [run_skill, web_search, time], skills: [weather-1.0.0] }
+    # news_digest: DAG runs daily-brief fetch-vmprint; fallback ReAct is still narrow (web_search). magazine-render for optional PDF path stays in prompt via skills list.
+    news_digest: { tools: [run_skill, web_search, time], skills: [daily-brief-1.0.0, magazine-render-1.0.0] }
+    # stock_monitor: DAG runs portfolio table; use ReAct for news/context SYMBOL or magazine-render (web_search for deeper why).
+    stock_monitor: { tools: [run_skill, web_search, time], skills: [stock-monitor-1.0.0, magazine-render-1.0.0] }
     # general_chat: greetings and open-ended chat; use minimal (time, web_search, folder_list, run_skill, remind_me, route_to_plugin) so "你好" etc. get ~6 tools, not 71.
     general_chat: { profile: minimal }
     coding: { profile: coding }
@@ -88,6 +99,32 @@ intent_router:
   # mislabels queries (e.g. stocks → memory): without run_skill, skills cannot run. See IntentRouter_CategoriesCoverage.md § Fallbacks.
   tools_always_included: [run_skill]
   # Optional extras if you often need save/list across categories: [save_result_page, file_write, folder_list]
+  # Regex fast paths (re.search) → category; skips classifier LLM when matched. Extend as you learn hot phrases.
+  # Inspect usage: database/skill_usage.json or base.skill_usage.top_skill_folders(user_id).
+  frequent_fast_paths:
+    - category: read_document
+      patterns:
+        - "(?i)read\\s+(the\\s+)?file\\s+"
+        - "(?i)show\\s+(me\\s+)?(the\\s+)?(contents?|content)\\s+of\\s+"
+        - "(?i)open\\s+documents?/"
+        - "读一下\\s*documents?/"
+        - "读一下\\s*share/"
+        - "打开\\s*documents?/.*\\.(md|txt|pdf|docx)"
+    - category: summarize_to_page
+      patterns:
+        - "(?i)summarize\\s+documents?/"
+        - "总结\\s*documents?/.*(md|markdown)"
+    - category: list_files
+      patterns:
+        - "(?i)list\\s+files\\s+in\\s+"
+        - "(?i)what'?s\\s+in\\s+(folder|directory)\\s+"
+    - category: stock_monitor
+      patterns:
+        - "(?i)\\bportfolio\\b"
+        - "(?i)\\bwatchlist\\b"
+        - "自选股"
+        - "持仓"
+        - "股票行情"
 
 # --- Identity / capabilities shortcut (no LLM) ---
 # When the user asks "what can you do?" or "你能为我做什么?", reply directly from workspace IDENTITY.md + TOOLS.md. Chatting is detected accurately: when intent_router is enabled, shortcut runs only when the router returns general_chat (chatting intent); then greeting/capabilities phrase+length decide the reply. When intent_router is disabled, phrase+length are checked early (no LLM).
@@ -126,14 +163,33 @@ identity_capabilities_shortcut:
 # DAG flows: when a flow is defined for the intent category, run the fixed flow (no planner call); else use planner or ReAct. See §3 in PlannerExecutorAndDAG.md.
 planner_executor:
   enabled: true
-  skip_planner_for_categories: [general_chat]
+  # Skip the planner LLM for intents that use a DAG and/or narrow ReAct; keeps latency down. coding omitted so dev-style turns can use the planner when no DAG applies (Cursor/Claude Code use Companion preset chats + bridge, not this path).
+  skip_planner_for_categories:
+    - general_chat
+    - weather
+    - search_web
+    - list_files
+    - get_file_link
+    - generate_pdf
+    - summarize_to_page
+    - send_email
+    - read_document
+    - create_slides
+    - create_html_slides
+    - schedule_remind
+    - open_url
+    - memory
+    - knowledge_base
+    - image
+    - news_digest
+    - stock_monitor
   # planner_llm: null   # null = use main_llm; or set LLM ref for planning
   # max_steps_per_plan: 12
   # max_replans: 2
   # re_plan_on_error: true
   # requires_final_summary: true
   # fallback_to_react_on_plan_failure: true
-  # --- DAG flows (fixed chains per category). Trigger: category from intent router. create_html_slides = HTML slides only (differs from ppt-generation). ---
+  # --- DAG flows (fixed chains per category). Trigger: category from intent router. create_html_slides has no DAG (html-slides is instruction-only); ReAct uses document_read + run_skill + save_result_page per skill body. ---
   # Path resolution: user_message_path extracts path from the message (documents/, share/, output/, images/, work/, downloads/, knowledge/, or bare filename like report.pdf). Default "documents/" is used only when no path is found.
   flows:
     # Generate PDF: read document → LLM produces Markdown → markdown_to_pdf. Path: from message (any sandbox folder or bare filename) or default documents/ when none found.
@@ -180,6 +236,40 @@ planner_executor:
             content: [result_of_step_1]
           args:
             format: "markdown"
+    # Weather: one run_skill call with the user message (no main LLM tool-picking). If wttr.in/skill returns Error:, DAG fails → ReAct with web_search only.
+    weather:
+      trigger: category
+      category: weather
+      dag_fail_if_last_starts_with_error: true
+      steps:
+        - tool: run_skill
+          args:
+            skill_name: weather-1.0.0
+            script: get_weather.py
+          args_from:
+            args: [user_message_text_as_run_skill_args, ""]
+    # RSS daily brief: fixed fetch-vmprint (VMPrint preview). On Error: DAG fails → narrow ReAct. News+magazine combo still bypasses DAG in llm_loop when both intents appear.
+    news_digest:
+      trigger: category
+      category: news_digest
+      dag_fail_if_last_starts_with_error: true
+      steps:
+        - tool: run_skill
+          args:
+            skill_name: daily-brief-1.0.0
+            script: fetch_rss.py
+            args: ["fetch-vmprint", "--max", "20", "--lang", "all"]
+    # Stock watchlist / portfolio table (default skill mode). For news SYMBOL / context SYMBOL use ReAct after DAG failure or skip classifier to stock_monitor and let model call run_skill with args from SKILL.md.
+    stock_monitor:
+      trigger: category
+      category: stock_monitor
+      dag_fail_if_last_starts_with_error: true
+      steps:
+        - tool: run_skill
+          args:
+            skill_name: stock-monitor-1.0.0
+            script: stock_monitor.py
+            args: ["portfolio"]
     # summarize_to_page DAG flow (simple): read document -> LLM summary -> save_result_page
     summarize_to_page:
       trigger: category
@@ -473,8 +563,8 @@ tools:
   # OpenClaw-style tool profiles: only tools in the selected profile(s) are sent to the LLM. Reduces wrong tool selection. Omit or "full" = all tools.
   # profile: "full"   # full | minimal | messaging | coding. Or use profiles: [messaging, coding] for union.
   # profiles: []
-  # When > 0: tool descriptions sent to the LLM are shortened (use ToolDefinition.short_description if set, else truncate to this many chars at sentence boundary). Helps local/smaller LLMs select tools more accurately. 0 = full description (default).
-  # description_max_chars: 200
+  # When > 0: tool descriptions sent to the LLM are shortened (use ToolDefinition.short_description if set, else truncate at sentence boundary). Fewer tokens → faster tool-decision turns on local models.
+  description_max_chars: 240
   # When true (default): inject few-shot tool selection examples (User / Thought / Call) from config/prompts/tools/selection_examples.yml into the system prompt. Helps local/Qwen models map natural language to the right tool.
   # tool_selection_examples: true
   # When true (default): never auto-invoke tools when the model returned no tool_calls. Rely on the model to decide; no our own if-else to run tools. When false: allow legacy fallbacks (force_include, remind_me, route_to_plugin, folder_list, etc.) when model didn't call a tool.
@@ -484,12 +574,13 @@ tools:
   # Guideline numbers cited in that injected prompt (not hard caps in code).
   response_plaintext_max_chars: 400
   response_markdown_ok_max_chars: 1000
-  # Optional timeout (seconds) for tool-decision LLM turns (first call that should emit tool_calls).
-  # 0 = disabled. Recommended 45-90 for local models that may stall with tools.
-  tool_decision_timeout_seconds: 300
+  # Long daily-brief / web_search: "markdown" (default, inline Markdown; no auto VMPrint after daily-brief) | "vmprint" (AST/HTML preview chains).
+  long_document_output: markdown
+  # Timeout (seconds) for tool-decision LLM turns (calls that should emit tool_calls). 0 = disabled. Lower = fail fast; raise if local model needs more time per turn.
+  tool_decision_timeout_seconds: 120
   # In mix/cloud modes only: if run_skill succeeds for these skills, return tool result directly
   # and skip the expensive follow-up LLM round (reduces stalls). Local mode is unchanged.
-  run_skill_direct_return_skills_in_mix_cloud: [daily-brief-1.0.0, magazine-render-1.0.0, weather-1.0.0]
+  run_skill_direct_return_skills_in_mix_cloud: [daily-brief-1.0.0, magazine-render-1.0.0, weather-1.0.0, stock-monitor-1.0.0]
   # In mix mode only: after a tool result, prefer local for these tool names. Keep this narrow.
   # Default includes document_read only. Do not include run_skill unless needed.
   prefer_local_after_tools_in_mix_cloud: [document_read]

@@ -176,6 +176,11 @@ class ChromaDB(VectorStoreBase):
         Returns:
             List[OutputData]: Search results.
         """
+        if query is None or (isinstance(query, list) and len(query) == 0):
+            logger.debug(
+                "ChromaDB.search: missing or empty query embeddings; returning no results"
+            )
+            return []
         kwargs = {"query_embeddings": query, "n_results": limit}
         if filters and len(filters) > 0:
             # ChromaDB requires $and/$or to have at least two expressions; single filter use plain dict.

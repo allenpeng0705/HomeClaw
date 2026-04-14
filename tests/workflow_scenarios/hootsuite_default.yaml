@@ -1,0 +1,4 @@
+id: hootsuite_default
+contract: hootsuite_default
+prompt: "Hootsuite schedule social campaigns for next week."
+description: "hootsuite skill trace."

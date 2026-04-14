@@ -1,0 +1,4 @@
+id: gog_default
+contract: gog_default
+prompt: "Gog gmail search inbox workflow for unread messages."
+description: "gog Google Workspace CLI skill trace."

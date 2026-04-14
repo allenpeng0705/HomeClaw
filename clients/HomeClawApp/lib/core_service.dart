@@ -69,6 +69,8 @@ class CoreService {
   static const String _keyCursorChatPlainText = 'cursor_chat_plain_text';
   static const String _keyBridgeAgentStreamPreview = 'bridge_agent_stream_preview';
   static const String _keyVmprintNativePreview = 'vmprint_native_preview';
+  static const String _keyClawcodeWebUrl = 'clawcode_web_ui_url';
+  static const String _keyClawcodeComposePrefix = 'clawcode_compose_v1_';
   static const String _keyCompanionToken = 'companion_session_token';
   static const String _keyCompanionUserId = 'companion_session_user_id';
   static const String _keyCompanionSavedUsername = 'companion_saved_username';
@@ -94,6 +96,7 @@ class CoreService {
   bool _cursorChatPlainText = true;
   bool _bridgeAgentStreamPreview = true;
   bool _vmprintNativePreview = false;
+  String? _clawcodeWebUiUrl;
   String? _portalAdminToken;
 
   String get baseUrl => _baseUrl;
@@ -102,6 +105,8 @@ class CoreService {
   bool get cursorChatPlainText => _cursorChatPlainText;
   bool get bridgeAgentStreamPreview => _bridgeAgentStreamPreview;
   bool get vmprintNativePreview => _vmprintNativePreview;
+  /// Optional override for "Open Claw-Code web" (default: same host and port as Core, path `/clawcode`).
+  String? get clawcodeWebUiUrl => _clawcodeWebUiUrl;
   String? get apiKey => _apiKey;
   String? get sessionToken => _sessionToken;
   String? get sessionUserId => _sessionUserId;
@@ -157,6 +162,27 @@ class CoreService {
   void addPushNotificationTap(Map<String, dynamic> data) {
     try {
       if (!_pushNotificationTapController.isClosed) _pushNotificationTapController.add(Map<String, dynamic>.from(data));
+    } catch (_) {}
+  }
+
+  /// Persist notification body into [ChatHistoryStore] and notify [pushMessageStream] (`chat_history_updated`) so [ChatScreen] reloads when user returns from background or cold start.
+  Future<void> persistChatMessageFromPushNotificationData(Map<String, dynamic> data) async {
+    try {
+      final text = (data['text'] ?? '').toString().trim();
+      if (text.isEmpty) return;
+      var uid = (data['user_id'] ?? '').toString().trim();
+      if (uid.isEmpty) uid = (_sessionUserId ?? '').trim();
+      if (uid.isEmpty) return;
+      final rawFriend = (data['from_friend'] ?? data['friend_id'] ?? 'HomeClaw').toString().trim();
+      final fid = rawFriend.isEmpty ? 'HomeClaw' : rawFriend;
+      await ChatHistoryStore().appendMessage(uid, fid, text, false, null);
+      try {
+        _pushMessageController.add({
+          'event': 'chat_history_updated',
+          'user_id': uid,
+          'friend_id': fid,
+        });
+      } catch (_) {}
     } catch (_) {}
   }
 
@@ -242,6 +268,8 @@ class CoreService {
     _cursorChatPlainText = prefs.getBool(_keyCursorChatPlainText) ?? true;
     _bridgeAgentStreamPreview = prefs.getBool(_keyBridgeAgentStreamPreview) ?? true;
     _vmprintNativePreview = prefs.getBool(_keyVmprintNativePreview) ?? false;
+    _clawcodeWebUiUrl = prefs.getString(_keyClawcodeWebUrl)?.trim();
+    if (_clawcodeWebUiUrl != null && _clawcodeWebUiUrl!.isEmpty) _clawcodeWebUiUrl = null;
     _sessionToken = prefs.getString(_keyCompanionToken)?.trim();
     if (_sessionToken != null && _sessionToken!.isEmpty) _sessionToken = null;
     _sessionUserId = prefs.getString(_keyCompanionUserId)?.trim();
@@ -1365,6 +1393,230 @@ class CoreService {
   /// Same auth as Core inbound APIs; use with [Image.network] for URLs on this Core (e.g. resolved upload paths).
   Map<String, String> get coreMediaFetchHeaders => _authHeaders();
 
+  /// Claw-Code browser UI is served by Core at `/clawcode` (same port as API). WebChat 8014 `/clawcode` is optional.
+  static String defaultClawcodeWebUrlFromCore(String coreBaseUrl) {
+    try {
+      final u = Uri.parse(coreBaseUrl.trim().replaceFirst(RegExp(r'/$'), ''));
+      final scheme = u.scheme.isEmpty ? 'http' : u.scheme;
+      if (u.host.isEmpty) return 'http://127.0.0.1:9000/clawcode';
+      return Uri(
+        scheme: scheme,
+        host: u.host,
+        port: u.hasPort ? u.port : null,
+        path: '/clawcode',
+      ).toString();
+    } catch (_) {
+      return 'http://127.0.0.1:9000/clawcode';
+    }
+  }
+
+  /// Saved override or [defaultClawcodeWebUrlFromCore] for [_baseUrl].
+  String resolvedClawcodeWebUrl() {
+    final c = _clawcodeWebUiUrl;
+    if (c != null && c.trim().isNotEmpty) return c.trim().replaceFirst(RegExp(r'/$'), '');
+    return defaultClawcodeWebUrlFromCore(_baseUrl);
+  }
+
+  /// Persist Claw-Code browser URL (empty string clears → use default from Core URL).
+  Future<void> saveClawcodeWebUiUrl(String? url) async {
+    final t = url?.trim();
+    _clawcodeWebUiUrl = (t == null || t.isEmpty) ? null : t.replaceFirst(RegExp(r'/$'), '');
+    final prefs = await SharedPreferences.getInstance();
+    if (_clawcodeWebUiUrl != null) {
+      await prefs.setString(_keyClawcodeWebUrl, _clawcodeWebUiUrl!);
+    } else {
+      await prefs.remove(_keyClawcodeWebUrl);
+    }
+  }
+
+  /// GET /api/clawcode/sessions — requires Core API key when auth_enabled.
+  Future<List<Map<String, dynamic>>> fetchClawcodeSessions(String ownerUserId) async {
+    final uid = ownerUserId.trim();
+    if (uid.isEmpty) throw Exception('owner_user_id required');
+    final url = Uri.parse('$_baseUrl/api/clawcode/sessions').replace(queryParameters: {'owner_user_id': uid});
+    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    return _toListOfMaps(map['sessions']);
+  }
+
+  /// GET /api/clawcode/sessions/{id} — includes worktree_hint and usage_hint when Claw-Code enabled.
+  Future<Map<String, dynamic>> fetchClawcodeSessionDetail({
+    required String sessionId,
+    required String ownerUserId,
+  }) async {
+    final url = Uri.parse('$_baseUrl/api/clawcode/sessions/${Uri.encodeComponent(sessionId.trim())}')
+        .replace(queryParameters: {'owner_user_id': ownerUserId.trim()});
+    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final raw = jsonDecode(response.body);
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    throw Exception('Invalid session detail JSON');
+  }
+
+  /// PATCH /api/clawcode/sessions/{id} — whitelisted metadata (`git_remote_hint`, `main_llm_ref`, `tool_llm_ref`, `mode`).
+  Future<Map<String, dynamic>> patchClawcodeSession({
+    required String sessionId,
+    required String ownerUserId,
+    required Map<String, dynamic> body,
+  }) async {
+    if (body.isEmpty) throw Exception('patch body must include at least one allowed field');
+    final url = Uri.parse('$_baseUrl/api/clawcode/sessions/${Uri.encodeComponent(sessionId.trim())}')
+        .replace(queryParameters: {'owner_user_id': ownerUserId.trim()});
+    final response = await http
+        .patch(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders()},
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final raw = jsonDecode(response.body);
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    throw Exception('Invalid session patch JSON');
+  }
+
+  /// POST /api/clawcode/sessions/{id}/rebind — change session `cwd` (same allowed_roots rules as create).
+  Future<Map<String, dynamic>> rebindClawcodeSession({
+    required String sessionId,
+    required String ownerUserId,
+    required String cwd,
+  }) async {
+    final c = cwd.trim();
+    if (c.isEmpty) throw Exception('cwd required');
+    final url = Uri.parse('$_baseUrl/api/clawcode/sessions/${Uri.encodeComponent(sessionId.trim())}/rebind')
+        .replace(queryParameters: {'owner_user_id': ownerUserId.trim()});
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders()},
+          body: jsonEncode({'cwd': c}),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final raw = jsonDecode(response.body);
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    throw Exception('Invalid session rebind JSON');
+  }
+
+  /// GET /api/clawcode/sessions/{id}/files?path= — names under session cwd.
+  Future<List<Map<String, dynamic>>> fetchClawcodeWorkspaceFiles({
+    required String sessionId,
+    required String ownerUserId,
+    String relativePath = '',
+  }) async {
+    final url = Uri.parse('$_baseUrl/api/clawcode/sessions/${Uri.encodeComponent(sessionId.trim())}/files')
+        .replace(queryParameters: {'owner_user_id': ownerUserId.trim(), 'path': relativePath});
+    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    return _toListOfMaps(map['entries']);
+  }
+
+  /// GET /api/clawcode/approvals
+  Future<List<Map<String, dynamic>>> fetchClawcodeApprovals(String ownerUserId) async {
+    final url = Uri.parse('$_baseUrl/api/clawcode/approvals').replace(queryParameters: {'owner_user_id': ownerUserId.trim()});
+    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    return _toListOfMaps(map['approvals']);
+  }
+
+  /// Last Claw-Code compose text per owner + session (for Retry on device).
+  Future<void> saveClawcodeComposeDraft({
+    required String ownerUserId,
+    required String sessionId,
+    required String text,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final k = '$_keyClawcodeComposePrefix${ownerUserId.trim()}_${sessionId.trim()}';
+    if (text.trim().isEmpty) {
+      await prefs.remove(k);
+    } else {
+      await prefs.setString(k, text);
+    }
+  }
+
+  Future<String?> loadClawcodeComposeDraft({
+    required String ownerUserId,
+    required String sessionId,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('$_keyClawcodeComposePrefix${ownerUserId.trim()}_${sessionId.trim()}');
+  }
+
+  /// GET /api/clawcode/mcp/servers — sanitized MCP server list (Milestone C).
+  Future<Map<String, dynamic>> fetchClawcodeMcpServers() async {
+    final url = Uri.parse('$_baseUrl/api/clawcode/mcp/servers');
+    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final raw = jsonDecode(response.body);
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    throw Exception('Invalid MCP servers JSON');
+  }
+
+  /// POST /api/clawcode/mcp/health — optional [serverIds]; may take minutes if many stdio servers.
+  Future<Map<String, dynamic>> postClawcodeMcpHealth({List<String>? serverIds}) async {
+    final url = Uri.parse('$_baseUrl/api/clawcode/mcp/health');
+    final body = <String, dynamic>{};
+    if (serverIds != null && serverIds.isNotEmpty) {
+      body['server_ids'] = serverIds;
+    }
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders()},
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 120));
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final raw = jsonDecode(response.body);
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    throw Exception('Invalid MCP health JSON');
+  }
+
+  /// POST /api/clawcode/approvals/{id}/resolve — decision approve | reject.
+  Future<void> resolveClawcodeApproval({
+    required String approvalId,
+    required String ownerUserId,
+    required String decision,
+  }) async {
+    final url = Uri.parse('$_baseUrl/api/clawcode/approvals/${Uri.encodeComponent(approvalId.trim())}/resolve')
+        .replace(queryParameters: {'owner_user_id': ownerUserId.trim()});
+    final body = jsonEncode({'decision': decision});
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders()},
+          body: body,
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+  }
+
   /// Persistent device ID for push registration (one per install; iOS, macOS, Android). Stored in SharedPreferences.
   Future<String> getOrCreateDeviceId() async {
     final prefs = await SharedPreferences.getInstance();
@@ -1465,6 +1717,7 @@ class CoreService {
   /// For remote Core: uses async: true so the initial POST returns 202 immediately (no long-held connection for proxies like Cloudflare); then polls GET /inbound/result until done. Use [onProgress] to show "Processing…" while polling.
   /// [cursorAgentYolo]: Cursor friend only — sends `cursor_agent_yolo` on POST /inbound so Core passes `yolo` to the bridge for that `run_agent` (true = CLI `--yolo`).
   /// [claudeSkipPermissions]: Claude Code friend only — sends `claude_skip_permissions` so the bridge adds `--dangerously-skip-permissions` when true for that `run_agent`.
+  /// [clawcodeSessionId]: when set, binds this turn to a Claw-Code session (`clawcode_session_id` + `tool_profile` on /inbound).
   /// Throws on network or API error.
   Future<Map<String, dynamic>> sendMessage(
     String text, {
@@ -1480,13 +1733,18 @@ class CoreService {
     void Function(String message)? onProgress,
     bool? cursorAgentYolo,
     bool? claudeSkipPermissions,
+    String? clawcodeSessionId,
+    String? clawcodeToolProfile,
   }) async {
     final url = Uri.parse('$_baseUrl/inbound');
+    final ccSid = (clawcodeSessionId ?? '').trim();
+    final isClawcode = ccSid.isNotEmpty;
     final useAsyncForRemote = _isRemoteCore;
     // Use async (202 + poll) for dev-bridge friends so long-running trae-cli/Cursor/Claude tasks don't hold the connection and trigger proxy 502.
     final fid = (friendId ?? '').trim().toLowerCase();
     final useAsyncForBridge = fid == 'trae' || fid == 'cursor' || fid == 'claudecode';
-    final useAsync = useAsyncForRemote || useAsyncForBridge;
+    // Long Claw-Code turns: prefer async on remote Core; local can use SSE when stream requested.
+    final useAsync = useAsyncForRemote || useAsyncForBridge || (isClawcode && _isRemoteCore);
     final useStreamPath = !useAsync &&
         ((useStream ?? _showProgressDuringLongTasks) && onProgress != null);
 
@@ -1496,6 +1754,11 @@ class CoreService {
       'action': 'respond',
       'channel_name': 'companion',
     };
+    if (isClawcode) {
+      body['clawcode_session_id'] = ccSid;
+      body['tool_profile'] = (clawcodeToolProfile ?? 'coding').trim();
+      body['channel_name'] = 'clawcode_companion';
+    }
     if (appId != null && appId.isNotEmpty) body['app_id'] = appId;
     if (friendId != null && friendId.trim().isNotEmpty) body['friend_id'] = friendId.trim();
     if (location != null && location.trim().isNotEmpty) body['location'] = location.trim();
@@ -1522,7 +1785,7 @@ class CoreService {
     }
     if (useStreamPath) {
       final result = await _sendMessageStream(url, body, onProgress!);
-      _persistInboundResultToStore(userId, friendId, result);
+      await _persistInboundResultToStore(userId, friendId, result);
       return result;
     }
 
@@ -1546,7 +1809,7 @@ class CoreService {
           ? responseImages.map((e) => e as String).toList()
           : (responseImage != null ? [responseImage as String] : null),
     };
-    _persistInboundResultToStore(userId, friendId, result);
+    await _persistInboundResultToStore(userId, friendId, result);
     return result;
   }
 
@@ -1658,7 +1921,8 @@ class CoreService {
   }
 
   /// Persist an inbound reply to the correct chat so it is not lost when the user has navigated away or app is in background.
-  void _persistInboundResultToStore(String userId, String? friendId, Map<String, dynamic> result) {
+  /// Awaits Hive write so reopening the chat does not race an in-flight append. Emits [chat_history_updated] so any open [ChatScreen] can reload.
+  Future<void> _persistInboundResultToStore(String userId, String? friendId, Map<String, dynamic> result) async {
     try {
       final text = (result['text'] as String?) ?? '';
       if (text.isEmpty) return;
@@ -1667,7 +1931,14 @@ class CoreService {
           ? images.whereType<String>().toList()
           : (images is List<String> ? images : null);
       final effectiveFriendId = (friendId?.trim().isEmpty != false) ? 'HomeClaw' : friendId!.trim();
-      ChatHistoryStore().appendMessage(userId, effectiveFriendId, text, false, imageList);
+      await ChatHistoryStore().appendMessage(userId, effectiveFriendId, text, false, imageList);
+      try {
+        _pushMessageController.add({
+          'event': 'chat_history_updated',
+          'user_id': userId,
+          'friend_id': effectiveFriendId,
+        });
+      } catch (_) {}
     } catch (_) {}
   }
 
@@ -1733,7 +2004,7 @@ class CoreService {
         'images': imageList != null && imageList.isNotEmpty ? imageList : null,
         if (cancelled) 'cancelled': true,
       };
-      _persistInboundResultToStore(userId, friendId, result);
+      await _persistInboundResultToStore(userId, friendId, result);
       return result;
     } catch (_) {}
     return null;
@@ -1893,9 +2164,12 @@ class CoreService {
       return null;
     })();
     final effectiveMeta = meta ?? metaFromMessage;
-    if (effectiveMeta != null) {
-      _persistInboundResultToStore(effectiveMeta.userId, effectiveMeta.friendId, resultMap);
-      _clearPendingRequestId(effectiveMeta.userId, effectiveMeta.friendId);
+    // If poll already won, [completer] is null — still persist so the reply is not lost.
+    if (effectiveMeta != null && completer == null) {
+      unawaited(() async {
+        await _persistInboundResultToStore(effectiveMeta.userId, effectiveMeta.friendId, resultMap);
+        await _clearPendingRequestId(effectiveMeta.userId, effectiveMeta.friendId);
+      }());
     }
     if (effectiveMeta != null) {
       try {
@@ -1961,8 +2235,10 @@ class CoreService {
           _currentInboundCompleter = null;
           _pendingInboundResult.remove(requestId);
           _pendingRequestMeta.remove(requestId);
-          _persistInboundResultToStore(meta.userId, meta.friendId, r);
-          _clearPendingRequestId(meta.userId, meta.friendId);
+          unawaited(() async {
+            await _persistInboundResultToStore(meta.userId, meta.friendId, r);
+            await _clearPendingRequestId(meta.userId, meta.friendId);
+          }());
           resultCompleter.complete(r);
         }
       }

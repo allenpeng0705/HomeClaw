@@ -2,6 +2,12 @@
 
 ## Running tests
 
+Use the **`pytorch`** conda environment for Python (includes `mcp` and matches typical HomeClaw dev setup):
+
+```bash
+conda activate pytorch
+```
+
 From the **project root** (directory containing `core/`, `tests/`, `config/`, etc.). Use **pytest** to run tests (do not use `python -m tests.test_core_routes`):
 
 ```bash
@@ -34,6 +40,9 @@ python scripts/workflow_trace_runner.py --mode real_core --base-url http://127.0
 
 # Or start Core from runner (slower)
 python scripts/workflow_trace_runner.py --mode real_core --start-core --api-key <YOUR_API_KEY>
+
+# Same in-process mock suite via pytest (one parametrized test per scenario)
+python -m pytest tests/test_workflow_runner_in_process.py -v
 
 # Compare two traces
 python scripts/workflow_trace_compare.py --baseline output/workflow_traces/<base>.jsonl --candidate output/workflow_traces/<cand>.jsonl

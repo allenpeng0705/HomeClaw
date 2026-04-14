@@ -76,4 +76,9 @@ abstract class HomeclawNativePlatform extends PlatformInterface {
   Future<String?> getApnsToken() {
     throw UnimplementedError('getApnsToken() has not been implemented.');
   }
+
+  /// iOS/macOS: read and clear payload stashed when user tapped an APNs notification (reply text + routing). Null if none.
+  Future<Map<String, dynamic>?> consumePendingNotificationChatPayload() {
+    throw UnimplementedError('consumePendingNotificationChatPayload() has not been implemented.');
+  }
 }

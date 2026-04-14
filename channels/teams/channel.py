@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 
 load_dotenv(_root / "channels" / ".env")
 from base.util import Util
+from channels.clawcode_binding import apply_clawcode_inbound_flow
 
 app = FastAPI(title="HomeClaw Teams Channel")
 INBOUND_URL = f"{Util().get_channels_core_url()}/inbound"
@@ -201,6 +202,13 @@ async def api_messages(request: Request):
         payload["audios"] = audios
     if files:
         payload["files"] = files
+    _cc = apply_clawcode_inbound_flow(inbound_id, text, payload)
+    if _cc is not None:
+        reply = _cc
+        reply_images = []
+        if not send_reply(activity, reply, image_content_urls=reply_images if reply_images else None):
+            pass
+        return JSONResponse(status_code=200, content={})
     try:
         headers = Util().get_channels_core_api_headers()
         async with httpx.AsyncClient(trust_env=False) as client:

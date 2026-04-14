@@ -10,6 +10,7 @@ import secrets
 import sys
 import time
 from pathlib import Path
+from typing import Dict, Optional, Tuple
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request
@@ -49,10 +50,10 @@ def _get_portal_auth():
         return None
 
 # In-memory token store: token -> (username, expires_at). Purged on validation.
-_PORTAL_ADMIN_TOKENS: dict[str, tuple[str, float]] = {}
+_PORTAL_ADMIN_TOKENS: Dict[str, Tuple[str, float]] = {}
 _TOKEN_TTL_SEC = 3600  # 1 hour
 # Last ImportError message when portal.app failed to load (for fallback response).
-_portal_import_error: str | None = None
+_portal_import_error: Optional[str] = None
 
 def _get_portal_secret() -> str:
     """Portal secret for API auth. Empty if not configured."""
@@ -190,7 +191,7 @@ def _purge_expired_tokens() -> None:
         _PORTAL_ADMIN_TOKENS.pop(t, None)
 
 
-def get_portal_admin_from_request(request: Request) -> str | None:
+def get_portal_admin_from_request(request: Request) -> Optional[str]:
     """Return username if request has valid portal admin auth (Bearer token, Basic, or query token). Else None. Never raises."""
     try:
         _purge_expired_tokens()
