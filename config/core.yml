@@ -12,7 +12,12 @@ model_path: models
 # When false: log [memory], [tools], [skills], [plugin], [TAM], [orchestrator] activity at INFO (verbose). When true: only INFO to console (less noise). On Windows CMD, use true to avoid huge output and "Press Space to continue" blocking.
 silent: false
 # When false: all logs go only to the log file (logs/core_debug.log); nothing to console. To monitor: "Get-Content logs\core_debug.log -Wait -Tail 50 -Encoding UTF8" (PowerShell; -Encoding UTF8 needed for Chinese/special chars on Windows) or "tail -f logs/core_debug.log" (Unix). When true: logs also go to console.
-log_to_console: true
+log_to_console: false
+# Access-log filter for noisy high-frequency polling endpoints (keeps other logs unchanged).
+logging:
+  access_log_exclude_paths:
+    - /inbound/result
+    - /api/config/core
 # Debug tool/skill calls: grep "TOOL_CALL" in logs to see every tool/skill invocation and parameters; grep "TOOL_RESULT" (DEBUG level) to see result length and ok/error. Example: Get-Content logs\core_debug.log -Wait | Select-String "TOOL_CALL"
 # Memory, knowledge base, database: moved to memory_kb.yml. Set path below; edit config/memory_kb.yml.
 memory_kb_config_file: memory_kb.yml
@@ -22,8 +27,8 @@ use_workspace_bootstrap: true
 # Which workspace dir to load (e.g. config/workspace_day vs config/workspace_night for day/night agents)
 workspace_dir: config/workspace
 # Root for file/folder tools and links. Required for channel/companion file access. When empty, file tools return a clear error; do not use workspace for user files. Each user has two major folders: (1) their sandbox homeclaw_root/{user_id}/ (private), (2) the share folder homeclaw_root/share/ (accessible by all users). Companion app uses homeclaw_root/companion/. Subfolders: output/, knowledge/.
-homeclaw_root: "/User/shileipeng/Documents/homeclawroot"
-#homeclaw_root: "D:/homeclaw"
+#homeclaw_root: "/User/shileipeng/Documents/homeclawroot"
+homeclaw_root: "D:/homeclaw"
 # Session management: in config/memory_kb.yml (see memory_kb_config_file above).
 # When an unknown user (not in user.yml) tries to access, notify the owner via last-used channel so they can add to user.yml. See docs_design/OutboundMarkdownAndUnknownRequest.md.
 notify_unknown_request: false
@@ -72,8 +77,8 @@ prompts_dir: config/prompts
 prompt_default_language: en
 prompt_cache_ttl_seconds: 0   # Unit: seconds. 0 = cache by file mtime; >0 = TTL
 # Optional: require API key for /inbound and /ws when exposing Core on the internet; see docs/RemoteAccess.md
-auth_enabled: true
-auth_api_key: "1234567890"   # when auth_enabled: true, require X-API-Key or Bearer. Also used to sign file links. Optional encrypted storage: set env HOMECLAW_AUTH_KEY then save via Portal or PATCH — see docs_design/RemoteAccess.md "How to store the API key".
+# auth_enabled: true
+# auth_api_key: "1234567890"   # when auth_enabled: true, require X-API-Key or Bearer. Also used to sign file links. Optional encrypted storage: set env HOMECLAW_AUTH_KEY then save via Portal or PATCH — see docs_design/RemoteAccess.md "How to store the API key".
 
 peer_pairing_enabled: true   # when false, disable POST /api/peer/invite/create and consume (404). See docs/multi-instance-peers.md
 federation_enabled: true   # when true, allow cross-instance user-to-user messages via peers.yml + POST /api/federation/user-message; see docs/federated-companion-messaging.md
@@ -90,7 +95,10 @@ federation_e2e_require_encrypted: false   # when true, federated user messages m
 # Optional: application-layer encryption (Companion–Core). When set, Companion can send body as {"encrypted": true, "nonce": "<b64>", "ciphertext": "<b64>"}; Core decrypts and encrypts responses. Leave empty to disable.
 # app_layer_encryption_secret: ""
 # Public URL that reaches this Core instance (e.g. https://homeclaw.example.com via Cloudflare Tunnel). Used for: (1) file/report links core_public_url/files/out?path=...&token=... (2) GET /pinggy scan-to-connect page and QR for Companion. Leave empty for local-only or if using pinggy.token for tunnel.
-core_public_url: "https://mymac.gpt4people.online"
+# Testing for Mac
+#core_public_url: "https://mymac.gpt4people.online"
+# Testing for Windows
+core_public_url: "https://homeclaw.gpt4people.online"
 # Pinggy tunnel: when token is set, Core starts a tunnel to this port and serves /pinggy with public URL + QR for Companion. open_browser: true = open browser to /pinggy when tunnel is ready. See docs_design/PinggyIntegration.md.
 pinggy:
   token: ""        # empty = do not start Pinggy; set to your Pinggy token to enable
