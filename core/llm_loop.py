@@ -4,6 +4,7 @@ Extracted from core/core.py (Phase 6 refactor). Takes core as first argument; no
 """
 
 import asyncio
+import copy
 import json
 import re
 import time
@@ -183,7 +184,9 @@ def _is_pending_user_action_cancel(text: str) -> bool:
 from tools.builtin import (
     close_browser_session,
     _daily_brief_document_layout_from_user_query,
+    _normalize_daily_brief_args,
     _snippet_recent_user_messages_for_file_inference,
+    long_document_output_is_vmprint,
 )
 
 # System prompt: per-user standard dirs + global share.
@@ -454,6 +457,30 @@ async def _strict_fallback_run_daily_brief_magazine(registry: Any, context: Any,
         return None
     if not any(t.name == "run_skill" for t in (registry.list_tools() or [])):
         return None
+    if not long_document_output_is_vmprint():
+        # Markdown path only: return daily-brief fetch output without magazine-render VMPrint chain.
+        _lang = _daily_brief_lang_from_query(query)
+        _max_items = 20
+        _q_raw = query.strip()
+        _q_lo = _q_raw.lower()
+        _m_cn = re.search(r"(\d{1,3})\s*条", _q_raw)
+        _m_en = re.search(r"\b(\d{1,3})\s*(items?|headlines?)\b", _q_lo)
+        _m = _m_cn or _m_en
+        if _m:
+            try:
+                _max_items = max(1, min(100, int(_m.group(1))))
+            except Exception:
+                _max_items = 20
+        _res_md = await registry.execute_async(
+            "run_skill",
+            {
+                "skill_name": "daily-brief-1.0.0",
+                "script": "fetch_rss.py",
+                "args": ["fetch", "--max", str(_max_items), "--lang", _lang],
+            },
+            context,
+        )
+        return _res_md.strip() if isinstance(_res_md, str) and _res_md.strip() else None
     _lang = _daily_brief_lang_from_query(query)
     _max_items = 20
     _q_raw = query.strip()
@@ -3396,6 +3423,26 @@ async def answer_from_memory(
                         _component_log("planner_executor", "skipped DAG for feed-digest request; using normal tool loop")
             except Exception:
                 pass
+        # When long_document_output is markdown (default), news_digest DAG uses fetch instead of fetch-vmprint.
+        if _dag_flow and not long_document_output_is_vmprint():
+            try:
+                if (_dag_flow.get("category") or "").strip().lower() == "news_digest":
+                    _dag_flow = copy.deepcopy(_dag_flow)
+                    for st in _dag_flow.get("steps") or []:
+                        if not isinstance(st, dict):
+                            continue
+                        if (st.get("tool") or "").strip().lower() != "run_skill":
+                            continue
+                        args0 = st.get("args")
+                        if not isinstance(args0, dict):
+                            continue
+                        if str(args0.get("skill_name") or "").strip() != "daily-brief-1.0.0":
+                            continue
+                        ra = args0.get("args")
+                        if isinstance(ra, list) and ra and str(ra[0]).strip().lower() == "fetch-vmprint":
+                            args0["args"] = _normalize_daily_brief_args(["fetch"] + list(ra[1:]))
+            except Exception as _dag_md_e:
+                logger.debug("news_digest DAG markdown patch: {}", _dag_md_e)
         # Planner–Executor Phase 2: call planner only when no DAG flow (DAG first for category). Never crash; fall back to ReAct on any error.
         _planner_plan = None
         _pe_tool_names = []  # always defined so executor/DAG below never see NameError
@@ -3520,18 +3567,31 @@ async def answer_from_memory(
                         _thr_md = max(200, min(50000, int(tools_cfg_for_desc.get("response_markdown_ok_max_chars", 2500) or 2500)))
                     except (TypeError, ValueError):
                         _thr_md = 2500
-                    _out_pol = (
-                        "\n\n## Response format policy (HomeClaw)\n"
-                        "Pick how you show results. For **long or structured** content, prefer **VMPrint / magazine preview links**, not huge paste in chat.\n\n"
-                        f"**Plain text** — only for very short replies (about ≤{_thr_plain} characters): greetings, one fact, one short paragraph, no long lists.\n\n"
-                        f"**Markdown in chat** — for medium replies (about ≤{_thr_md} characters): short bullets, small tables, brief summaries. "
-                        "Do **not** paste raw JSON, full tool payloads, RSS/HTML dumps, or multi-page reports into the message.\n\n"
-                        "**VMPrint / magazine layout** — for news digests, web-search roundups, reports, magazine-style layouts, or anything over the Markdown guideline: "
-                        "use **run_skill(magazine-render-1.0.0)** (e.g. `render-daily-brief-ast` for digest/search-shaped JSON with a `results` list, or `render-md` for Markdown) "
-                        "with **browser_preview_html**, or **save_result_page** with **format='html'** when appropriate. "
-                        "Reply with the **URL line from the tool** plus a **1–3 sentence** summary — not the full HTML/JSON body.\n\n"
-                        "**After web_search or daily-brief** — summarize in a few sentences; if you save anything, use structured rendering + link; never make the entire reply a JSON string."
-                    )
+                    if long_document_output_is_vmprint():
+                        _out_pol = (
+                            "\n\n## Response format policy (HomeClaw)\n"
+                            "Pick how you show results. For **long or structured** content, prefer **VMPrint / magazine preview links**, not huge paste in chat.\n\n"
+                            f"**Plain text** — only for very short replies (about ≤{_thr_plain} characters): greetings, one fact, one short paragraph, no long lists.\n\n"
+                            f"**Markdown in chat** — for medium replies (about ≤{_thr_md} characters): short bullets, small tables, brief summaries. "
+                            "Do **not** paste raw JSON, full tool payloads, RSS/HTML dumps, or multi-page reports into the message.\n\n"
+                            "**VMPrint / magazine layout** — for news digests, web-search roundups, reports, magazine-style layouts, or anything over the Markdown guideline: "
+                            "use **run_skill(magazine-render-1.0.0)** (e.g. `render-daily-brief-ast` for digest/search-shaped JSON with a `results` list, or `render-md` for Markdown) "
+                            "with **browser_preview_html**, or **save_result_page** with **format='html'** when appropriate. "
+                            "Reply with the **URL line from the tool** plus a **1–3 sentence** summary — not the full HTML/JSON body.\n\n"
+                            "**After web_search or daily-brief** — summarize in a few sentences; if you save anything, use structured rendering + link; never make the entire reply a JSON string."
+                        )
+                    else:
+                        _out_pol = (
+                            "\n\n## Response format policy (HomeClaw)\n"
+                            "Pick how you show results. **Default: Markdown in chat** for news digests, web-search summaries, and medium-length reports. "
+                            "Avoid huge paste; prefer tight bullets and short tables.\n\n"
+                            f"**Plain text** — only for very short replies (about ≤{_thr_plain} characters): greetings, one fact, one short paragraph, no long lists.\n\n"
+                            f"**Markdown in chat** — for most replies up to about ≤{_thr_md} characters: bullets, small tables, brief summaries of tool output. "
+                            "Do **not** paste raw JSON, full tool payloads, or multi-page HTML into the message.\n\n"
+                            "**VMPrint / magazine preview (optional)** — only when the user explicitly asks for a browser/HTML/magazine layout, or for content that truly cannot fit Markdown: "
+                            "then use **run_skill(magazine-render-1.0.0)** with **browser_preview_html** (or **save_result_page** with **format='html'**) and return the **URL** plus a short summary.\n\n"
+                            "**After web_search or daily-brief** — summarize in a few sentences in Markdown; do not make the entire reply a JSON string."
+                        )
                     llm_input[0]["content"] = (llm_input[0].get("content") or "") + _out_pol
             except Exception:
                 pass
@@ -5259,9 +5319,10 @@ async def answer_from_memory(
                                     _max_items = max(1, min(100, int(_m.group(1))))
                                 except Exception:
                                     _max_items = 20
-                            _fv_args = ["fetch-vmprint", "--max", str(_max_items), "--lang", _lang]
+                            _fv_cmd = "fetch-vmprint" if long_document_output_is_vmprint() else "fetch"
+                            _fv_args = [_fv_cmd, "--max", str(_max_items), "--lang", _lang]
                             _lay2 = _daily_brief_document_layout_from_user_query(_q_raw_news)
-                            if _lay2:
+                            if _lay2 and _fv_cmd == "fetch-vmprint":
                                 _fv_args.extend(["--document-layout", _lay2])
                             name = "run_skill"
                             args = {
@@ -5269,7 +5330,10 @@ async def answer_from_memory(
                                 "script": "fetch_rss.py",
                                 "args": _fv_args,
                             }
-                            _component_log("tools", "guardrail: rerouted web_search drift to run_skill(daily-brief fetch-vmprint) for feed-digest intent")
+                            _component_log(
+                                "tools",
+                                f"guardrail: rerouted web_search drift to run_skill(daily-brief {_fv_cmd}) for feed-digest intent",
+                            )
                     except Exception:
                         pass
                     # Override document_read path when user specified an explicit path (e.g. documents/norm-v4.pdf) so we use it even if the model returned a wrong path (e.g. norm/v4/pdf).
@@ -5599,11 +5663,10 @@ async def answer_from_memory(
                         except Exception as _e_doc:
                             logger.debug("Generic document_ast auto-chain failed: {}", _e_doc)
                             pass
-                    # Auto-chain AST renderer after daily-brief.
-                    # Do this unconditionally (when fetch succeeded) so daily-brief tool path returns VMPrint output,
-                    # not only markdown, even if the user didn't explicitly mention "magazine/pdf".
+                    # Auto-chain AST renderer after daily-brief (only when tools.long_document_output is vmprint).
                     if (
-                        name == "run_skill"
+                        long_document_output_is_vmprint()
+                        and name == "run_skill"
                         and isinstance(args, dict)
                         and "daily-brief" in str(args.get("skill_name") or "").strip().lower()
                         and isinstance(result, str)
@@ -6063,7 +6126,10 @@ async def answer_from_memory(
                     ):
                         response = _canon_ws
                 _tcfg_ws = (getattr(Util().get_core_metadata(), "tools_config", None) or {})
-                if _tcfg_ws.get("web_search_magazine_preview", True) is not False:
+                if (
+                    long_document_output_is_vmprint()
+                    and _tcfg_ws.get("web_search_magazine_preview", True) is not False
+                ):
                     _mag_link = await _magazine_preview_from_web_search_json(
                         registry,
                         context,

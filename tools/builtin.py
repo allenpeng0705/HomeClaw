@@ -3288,8 +3288,65 @@ def _normalize_daily_brief_args(argv: List[str]) -> List[str]:
     return out
 
 
-def _derive_daily_brief_args_from_query(user_text: str, plain_markdown_requested: bool) -> List[str]:
+def long_document_output_is_vmprint() -> bool:
+    """
+    When True (tools.long_document_output: vmprint), prefer AST/VMPrint chains for daily-brief and web_search.
+    Default is markdown (False) — inline Markdown / fetch path, no auto magazine-render after daily-brief.
+    """
+    try:
+        cfg = _get_tools_config() or {}
+        v = str(cfg.get("long_document_output") or "markdown").strip().lower()
+        return v in ("vmprint", "ast", "magazine", "html_preview", "browser_preview")
+    except Exception:
+        return False
+
+
+def _user_explicitly_wants_vmprint_daily_brief(user_text: str) -> bool:
+    """User asked for VMPrint / HTML preview path (overrides long_document_output default)."""
+    q = (user_text or "").strip()
+    if not q:
+        return False
+    ql = q.lower()
+    if "vmprint" in ql:
+        return True
+    if "fetch-vmprint" in ql.replace(" ", ""):
+        return True
+    if "html preview" in ql or "browser preview" in ql or "preview in browser" in ql:
+        return True
+    if "magazine preview" in ql or "ast preview" in ql:
+        return True
+    return False
+
+
+def _daily_brief_plain_markdown_effective(user_text: str) -> bool:
+    """
+    True => use daily-brief ``fetch`` (Markdown) path, not ``fetch-vmprint``.
+    Respects tools.long_document_output (default markdown) unless user asks for VMPrint or a document layout.
+    """
+    q = (user_text or "").strip()
+    if not q:
+        return not long_document_output_is_vmprint()
+    q_lo = q.lower()
+    if _user_explicitly_wants_vmprint_daily_brief(q):
+        return False
+    if _daily_brief_document_layout_from_user_query(q) is not None:
+        return False
+    if (
+        "markdown" in q_lo
+        or "plain text" in q_lo
+        or "text only" in q_lo
+        or "纯文本" in q
+        or "纯 markdown" in q_lo
+        or "不要链接" in q
+        or "不需要链接" in q
+    ):
+        return True
+    return not long_document_output_is_vmprint()
+
+
+def _derive_daily_brief_args_from_query(user_text: str) -> List[str]:
     """Derive a deterministic daily-brief argv from natural-language user text."""
+    plain_markdown_requested = _daily_brief_plain_markdown_effective(user_text)
     q = (user_text or "").strip()
     q_lo = q.lower()
     if (
@@ -3569,9 +3626,11 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                 lang = "cn"
             elif any(k in q for k in ("英文", "英语")) or any(k in q_lo for k in (" english", "lang en", "en ")):
                 lang = "en"
-            args_input = ["fetch-vmprint", "--max", str(max_items), "--lang", lang]
+            _cmd0 = "fetch-vmprint" if long_document_output_is_vmprint() else "fetch"
+            args_input = [_cmd0, "--max", str(max_items), "--lang", lang]
         except Exception:
-            args_input = ["fetch-vmprint", "--max", "20", "--lang", "all"]
+            _cmd0 = "fetch-vmprint" if long_document_output_is_vmprint() else "fetch"
+            args_input = [_cmd0, "--max", "20", "--lang", "all"]
     config = _get_tools_config() or {}
     allowlist = config.get("run_skill_allowlist")
     if allowlist and script_path.name not in allowlist:
@@ -3759,17 +3818,15 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
             cmd_ok = bool(args_list) and (args_list[0] in ("list", "fetch", "fetch-vmprint"))
             _q = user_text_for_args or ""
             _q_lo = _q.lower()
-            _plain_markdown_requested = (
-                "markdown" in _q_lo
-                or "plain text" in _q_lo
-                or "text only" in _q_lo
-                or "纯文本" in _q
-                or "纯 markdown" in _q_lo
-                or "不要链接" in _q
-                or "不需要链接" in _q
-            )
-            # Stabilize default: convert legacy 'fetch' to AST-first unless user explicitly asks text/markdown.
-            if cmd_ok and args_list and args_list[0] == "fetch" and not _plain_markdown_requested:
+            _plain_markdown_requested = _daily_brief_plain_markdown_effective(_q)
+            # When long_document_output is vmprint: convert legacy 'fetch' to AST-first unless user asks text/markdown.
+            if (
+                cmd_ok
+                and args_list
+                and args_list[0] == "fetch"
+                and long_document_output_is_vmprint()
+                and not _plain_markdown_requested
+            ):
                 _trace_emit_event(
                     event_type="fallback_applied",
                     component="run_skill",
@@ -3811,7 +3868,7 @@ async def _run_skill_executor_impl(arguments: Dict[str, Any], context: ToolConte
                     args_list = _merge_fetch_vmprint_document_layout(args_list, _layout_from_q)
 
             if not cmd_ok:
-                args_list = _derive_daily_brief_args_from_query(_q or "daily brief", _plain_markdown_requested)
+                args_list = _derive_daily_brief_args_from_query(_q or "daily brief")
                 _trace_emit_event(
                     event_type="arg_normalization",
                     component="run_skill",

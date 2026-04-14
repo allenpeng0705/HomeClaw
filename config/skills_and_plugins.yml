@@ -574,6 +574,8 @@ tools:
   # Guideline numbers cited in that injected prompt (not hard caps in code).
   response_plaintext_max_chars: 400
   response_markdown_ok_max_chars: 1000
+  # Long daily-brief / web_search: "markdown" (default, inline Markdown; no auto VMPrint after daily-brief) | "vmprint" (AST/HTML preview chains).
+  long_document_output: markdown
   # Timeout (seconds) for tool-decision LLM turns (calls that should emit tool_calls). 0 = disabled. Lower = fail fast; raise if local model needs more time per turn.
   tool_decision_timeout_seconds: 120
   # In mix/cloud modes only: if run_skill succeeds for these skills, return tool result directly

@@ -110,16 +110,16 @@ llama_cpp:
 
   # ——— Tool-selection LLM (when you run it and Core starts it, or for reference when you start it yourself): overrides merged with root.
   # When main_llm is GPT but tool_selection_llm is Qwen: leave root qwen_mode unset and set qwen_mode here so only tool_selection requests get Qwen behavior (enable_thinking: false, tool_temperature, etc.). Also set completion_tool_selection.stop (e.g. ["<|im_end|>"]) and optionally temperature.
-  tool_selection:
-    ctx_size: 262142
-    predict: 8192
-    function_calling: true
-    stop: ["<|im_end|>"]
-    cache_prompt: false   # disable only for tool_selection_llm
-    qwen_mode: qwen3    # set when tool_selection_llm is Qwen and main_llm is not (e.g. GPT main + Qwen tool_selection). Omit to use root qwen_mode.
-    # ——— Qwen3-4B xLAM/Codex (e.g. Manojb/Qwen3-4B-toolcalling-gguf-codex): model uses <tool_call> XML and conflicts with native toolcall parser. Set qwen3_xlam_style: true so Core injects tools in prompt, sends grammar, and omits tools array; we add "</tool_call>" to stop.
-    qwen3_xlam_style: true
-    # qwen3_xlam_grammar_path: "config/grammars/qwen3_xlam.gbnf"   # optional; default above. When self-hosting: use --grammar-file and --reverse-prompt "</tool_call>".
+  # tool_selection:
+  #   ctx_size: 262142
+  #   predict: 8192
+  #   function_calling: true
+  #   stop: ["<|im_end|>"]
+  #   cache_prompt: false   # disable only for tool_selection_llm
+  #   qwen_mode: qwen3    # set when tool_selection_llm is Qwen and main_llm is not (e.g. GPT main + Qwen tool_selection). Omit to use root qwen_mode.
+  #   # ——— Qwen3-4B xLAM/Codex (e.g. Manojb/Qwen3-4B-toolcalling-gguf-codex): model uses <tool_call> XML and conflicts with native toolcall parser. Set qwen3_xlam_style: true so Core injects tools in prompt, sends grammar, and omits tools array; we add "</tool_call>" to stop.
+  #   qwen3_xlam_style: true
+  #   # qwen3_xlam_grammar_path: "config/grammars/qwen3_xlam.gbnf"   # optional; default above. When self-hosting: use --grammar-file and --reverse-prompt "</tool_call>".
 
 # ——— Completion (per-request generation) ———
 # Root completion applies to main_llm. Use completion_vision and completion_tool_selection (same keys as completion) to override when calling vision_llm or tool_selection_llm; they are merged with completion.
@@ -335,12 +335,21 @@ local_models:
     port: 5029
     capabilities: [Chat]
 
-  - id: gemma_3_4b_it_4B
-    alias: gemma_3_4b_it_4B
-    path: gemma-3-4b-it-Q4_K_M.gguf
-    mmproj: mmproj-gemma-3-4b-BF16.gguf
+  - id: gemma-4-26B-A4B-it-UD-Q4_K_M
+    alias: gemma-4-26B-A4B-it-UD-Q4_K_M
+    path: gemma-4-26B-A4B-it-UD-Q4_K_M.gguf
+    mmproj: mmproj-gemma-4-26B-BF16.gguf
     host: 127.0.0.1
     port: 5030
+    capabilities: [Chat]
+    supported_media: [image]
+
+  - id: gemma-4-E4B-it-Q5_K_M
+    alias: gemma-4-E4B-it-Q5_K_M
+    path: gemma-4-E4B-it-Q5_K_M.gguf
+    mmproj: mmproj-gemma-4-e4b.gguf
+    host: 127.0.0.1
+    port: 5031
     capabilities: [Chat]
     supported_media: [image]
 
@@ -349,7 +358,7 @@ local_models:
     alias: classifier
     path: Qwen3-0.6B-Q5_K_M.gguf
     host: 127.0.0.1
-    port: 5031
+    port: 5032
     capabilities: [Chat]
 
 # Ollama (local): type: ollama, path = Ollama model name (e.g. qwen2.5:7b). Core does not start a process; ensure Ollama server is running (default 127.0.0.1:11434). See docs_design/OllamaAsLocalModelAndCLI.md.
@@ -432,7 +441,7 @@ cloud_models:
 # If the local llama.cpp server is not running (e.g. connection refused to 127.0.0.1:5022), use main_llm_mode: cloud so only cloud is used, or start the local server.
 #main_llm: local_models/main_vl_model_4B
 main_llm_mode: mix
-main_llm_local: local_models/main_vl_model_4B
+main_llm_local: local_models/gemma-4-E4B-it-Q5_K_M
 main_llm_cloud: cloud_models/DeepSeek-Chat
 # ——— Stability: if tool turns often fail (empty content, 500s, cloud errors), set use_tool_selection_llm: false so main_llm does every turn, or set tool_selection_llm to the same as main_llm_local (e.g. 8B) so one model handles both "which tool" and "after tool result".
 # tool_selection_llm: optional. When use_tool_selection_llm is true, every LLM call in the tool loop uses this model (tool selection + parameter extraction). Good for models fine-tuned on function calling (e.g. Qwen3-4B-toolcalling). When not used (default): main_llm handles everything — all tool selection, parameter extraction, and final replies.
@@ -661,9 +670,10 @@ main_llm_port: 5023
 # Cloud (LiteLLM) proxy: used for cloud-only and mix when route=cloud. Run LiteLLM on this host/port (e.g. litellm --port 14005).
 cloud_llm_host: 127.0.0.1
 cloud_llm_port: 14005
-# Optional: HTTP path for POST chat completions (OpenAI-style). Defaults /v1/chat/completions. Use e.g. /cloud/v1/chat/completions when a gateway routes cloud by path.
+# Optional: HTTP path for POST chat completions (OpenAI-style). Defaults /v1/chat/completions.
+# Standalone LiteLLM on cloud_llm_port uses /v1/chat/completions. Use /cloud/v1/chat/completions only when a gateway (e.g. Panda) exposes cloud at that path.
 main_llm_chat_path: /v1/chat/completions
-cloud_llm_chat_path: /cloud/v1/chat/completions
+cloud_llm_chat_path: /v1/chat/completions
 
 # Vision sidecar: when vision_llm is set (e.g. local_models/small_vision_2B), Core uses this host/port to call it for image description.
 # Run the vision model server on this port so Core always knows where to reach it (or use on-demand below).

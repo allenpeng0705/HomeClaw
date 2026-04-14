@@ -92,7 +92,8 @@ def run_mock_turn(prompt: str, trace_dir: Path) -> Dict[str, Any]:
     p = (prompt or "").strip()
     p_lo = p.lower()
     if ("今日新闻" in p) or ("daily brief" in p_lo) or ("每日简报" in p):
-        plain_md = ("markdown" in p_lo) or ("纯markdown" in p_lo) or ("纯文本" in p)
+        # Mirror HomeClaw default: Markdown unless prompt asks for VMPrint.
+        plain_md = "vmprint" not in p_lo
         argv = _derive_daily_brief_args_from_query_local(p, plain_md)
         emit_event(
             event_type="skill_call_started",
