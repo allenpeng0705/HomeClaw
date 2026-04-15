@@ -1034,32 +1034,35 @@ class CoreMetadata:
     clawhub_token: str = ""  # optional; when set, Core uses this to log in to ClawHub (get token from clawhub.ai). Enables search/install without browser OAuth.
     skills_extra_dirs: List[str] = field(default_factory=list)  # optional extra dirs (paths relative to project root); user can put more skills here
     skills_disabled: List[str] = field(default_factory=list)  # folder names to not load (e.g. ["x-api-1.0.0"]); case-insensitive match
-    skills_max_in_prompt: int = 5  # when skills_use_vector_search=true, cap RAG results to this many in prompt; when false (include all) this is not used
+    skills_max_in_prompt: int = 5  # legacy compatibility cap for skills prompt size; semantic router prefers skills_router.semantic.final_top_n
     plugins_max_in_prompt: int = 5  # when plugins_use_vector_search=true, cap RAG results to this many; when false (include all) this is not used
     plugins_use_vector_search: bool = False  # default: load all plugins; when True, use vector store and RAG to pick top-N
     plugins_vector_collection: str = "homeclaw_plugins"  # Chroma collection when plugins_use_vector_search
     plugins_description_max_chars: int = 0  # max chars per plugin description in routing block; 0 = no truncation. With RAG or plugins_max_in_prompt we already cap how many plugins appear; this only limits per-item length. Use 0 (default) for full descriptions; set 512 or 300 only if you need to shrink prompt or cap one very long description.
-    # Vector retrieval for skills (separate collection from memory); see docs/ToolsSkillsPlugins.md §8
-    skills_use_vector_search: bool = False  # when True, retrieve skills by similarity to user query instead of injecting all/first N
+    # Skills router config (new): mode-driven semantic retrieval/rerank for skills.
+    # Example: {enabled: true, mode: semantic|hybrid|legacy, semantic: {enabled: true, top_k: 20, ...}}
+    # Legacy skills_use_vector_search is removed in favor of this block.
+    skills_router_config: Dict[str, Any] = field(default_factory=dict)
+    # Vector retrieval for skills (separate collection from memory); used by skills_router semantic/hybrid modes.
     skills_vector_collection: str = "homeclaw_skills"  # Chroma collection name for skills (separate from memory)
-    skills_max_retrieved: int = 10  # max skills to retrieve and inject per request when skills_use_vector_search
+    skills_max_retrieved: int = 10  # legacy compatibility for retrieval width; semantic router prefers skills_router.semantic.top_k
     skills_similarity_threshold: float = 0.0  # min similarity (0..1); results below are dropped (similarity = 1 - distance for cosine)
-    skills_refresh_on_startup: bool = True  # resync skills_dir → vector DB on Core startup when skills_use_vector_search
+    skills_refresh_on_startup: bool = True  # legacy compatibility startup sync flag; semantic router prefers skills_router.semantic.refresh_on_startup
     skills_test_dir: str = ""  # optional; if set, full sync every time (id = test__<folder>); for testing skills
     skills_incremental_sync: bool = False  # when true, skills_dir only processes folders not already in vector store (new only)
     # Optional: for these skill folders, include SKILL.md body (and USAGE.md if present) in the prompt so the model can answer "how do I use this?". List of folder names.
     skills_include_body_for: List[str] = field(default_factory=list)
     # When > 0, cap the body for skills in skills_include_body_for to this many chars (avoids blowing up context). 0 = no truncation.
     skills_include_body_max_chars: int = 0
-    # When True (OpenClaw-style): inject only name, description, and location (skill:<folder>) into the prompt; model reads SKILL.md via file_read(path='skill:<folder>'). Reduces context tokens.
-    skills_use_location_only: bool = False
+    # When True (OpenClaw-style): inject only name, description, and skill path (skill:<folder>); model reads SKILL.md via file_read(path='skill:<folder>'). Reduces context tokens. Deprecated YAML alias: skills_use_location_only.
+    skills_use_path_only: bool = False
     # When > 0: cap total characters for the "Available skills" listing (after RAG/force-include/body injection). 0 = no extra cap beyond skills_max_in_prompt.
     skills_prompt_budget_chars: int = 0
     # Max characters per skill description in the listing when skills_prompt_budget_chars > 0 (truncation with ellipsis).
     skills_prompt_entry_max_chars: int = 250
     # When True (default): inject the stronger "Skill invocation contract" paragraph into the skills block.
     skills_invocation_contract_enabled: bool = True
-    # When True with skills_use_vector_search: rerank RAG hits using per-user skill usage (database/skill_usage.json).
+    # When True with skills router semantic retrieval: rerank vector hits using per-user skill usage (database/skill_usage.json).
     skills_usage_rerank_enabled: bool = False
     # Additive boost to similarity: effective = min(1, sim + weight * usage_boost), usage_boost in [0,1].
     skills_usage_rerank_weight: float = 0.12
@@ -1082,7 +1085,7 @@ class CoreMetadata:
     tools_config: Dict[str, Any] = field(default_factory=dict)  # merged tools dict from core.yml + optional skills_and_plugins file; used by tool layer (exec_allowlist, web.search, etc.)
     # Intent router (Phase 2): when enabled, one short LLM call classifies query -> category; tools/skills filtered by category. Config: enabled, categories, category_tools (profile or tools list).
     intent_router_config: Dict[str, Any] = field(default_factory=dict)
-    # Identity/capabilities shortcut: when user asks "what can you do?" / "你能为我做什么", reply from workspace IDENTITY.md + TOOLS.md without calling intent router or main LLM. Config: enabled, match_phrases (list of substrings).
+    # Legacy: optional key from skills_and_plugins merge; Core no longer implements no-LLM identity shortcut (use intent category identity_capabilities).
     identity_capabilities_shortcut_config: Dict[str, Any] = field(default_factory=dict)
     # Planner–Executor: when enabled, plan once then execute steps (see docs_design/PlannerExecutorAndDAG.md). Config: enabled, skip_planner_for_categories, planner_llm, max_steps_per_plan, max_replans, fallback_to_react_on_plan_failure.
     planner_executor_config: Dict[str, Any] = field(default_factory=dict)
@@ -1288,7 +1291,7 @@ class CoreMetadata:
                         _ext_data = yaml.safe_load(_f)
                     if isinstance(_ext_data, dict):
                         for _k, _v in _ext_data.items():
-                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k in ('tools', 'external_skills_dir', 'clawhub_download_dir', 'intent_router', 'planner_executor', 'identity_capabilities_shortcut', 'cursor_bridge_auto_start', 'cursor_bridge_port', 'cursor_bridge_agent_path', 'cursor_bridge_cursor_cli_path', 'cursor_bridge_cursor_api_key', 'cursor_bridge_bridge_api_key', 'cursor_bridge_forward_logs', 'cursor_bridge_claude_settings_path', 'cursor_bridge_claude_continue_session', 'cursor_bridge_cursor_continue_session', 'trae_agent_enabled', 'cursor_bridge_trae_agent_path', 'cursor_bridge_trae_agent_config', 'claude_code_path', 'claude_code_api_key')):
+                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k in ('tools', 'external_skills_dir', 'clawhub_download_dir', 'intent_router', 'planner_executor', 'identity_capabilities_shortcut', 'skills_router', 'cursor_bridge_auto_start', 'cursor_bridge_port', 'cursor_bridge_agent_path', 'cursor_bridge_cursor_cli_path', 'cursor_bridge_cursor_api_key', 'cursor_bridge_bridge_api_key', 'cursor_bridge_forward_logs', 'cursor_bridge_claude_settings_path', 'cursor_bridge_claude_continue_session', 'cursor_bridge_cursor_continue_session', 'trae_agent_enabled', 'cursor_bridge_trae_agent_path', 'cursor_bridge_trae_agent_config', 'claude_code_path', 'claude_code_api_key')):
                                 continue
                             if _k == 'identity_capabilities_shortcut' and not isinstance(_v, dict):
                                 logging.warning("skills_and_plugins config %s: identity_capabilities_shortcut must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
@@ -1541,6 +1544,11 @@ class CoreMetadata:
                         main_llm_api_key_val = entry_key
                         main_llm_api_key_name_val = (m.get('api_key_name') or main_llm_api_key_name_val or '').strip()
                     break
+        if 'skills_use_vector_search' in data:
+            logging.warning(
+                "Config key skills_use_vector_search is deprecated and ignored. "
+                "Use skills_router.enabled/mode/semantic.* instead."
+            )
         hybrid_router_raw = data.get('hybrid_router')
         hybrid_router_val = hybrid_router_raw if isinstance(hybrid_router_raw, dict) else {}
         cognee = data.get('cognee')
@@ -1612,7 +1620,7 @@ class CoreMetadata:
             plugins_use_vector_search=bool(data.get('plugins_use_vector_search', False)),
             plugins_vector_collection=(data.get('plugins_vector_collection') or 'homeclaw_plugins').strip(),
             plugins_description_max_chars=max(0, int(data.get('plugins_description_max_chars', 0) or 0)),
-            skills_use_vector_search=bool(data.get('skills_use_vector_search', False)),
+            skills_router_config=dict(data.get('skills_router')) if isinstance(data.get('skills_router'), dict) else {},
             skills_vector_collection=(data.get('skills_vector_collection') or 'homeclaw_skills').strip(),
             skills_max_retrieved=max(1, min(100, int(data.get('skills_max_retrieved', 10) or 10))),
             skills_similarity_threshold=float(data.get('skills_similarity_threshold', 0.0) or 0.0),
@@ -1621,7 +1629,11 @@ class CoreMetadata:
             skills_incremental_sync=bool(data.get('skills_incremental_sync', False)),
             skills_include_body_for=[str(f).strip() for f in (data.get('skills_include_body_for') or []) if f],
             skills_include_body_max_chars=max(0, int(data.get('skills_include_body_max_chars', 0) or 0)),
-            skills_use_location_only=bool(data.get('skills_use_location_only', False)),
+            skills_use_path_only=(
+                bool(data["skills_use_path_only"])
+                if "skills_use_path_only" in data
+                else bool(data.get("skills_use_location_only", False))
+            ),
             skills_prompt_budget_chars=max(0, int(data.get('skills_prompt_budget_chars', 0) or 0)),
             skills_prompt_entry_max_chars=max(20, int(data.get('skills_prompt_entry_max_chars', 250) or 250)),
             skills_invocation_contract_enabled=bool(data.get('skills_invocation_contract_enabled', True)),
@@ -1778,7 +1790,7 @@ class CoreMetadata:
                 'plugins_use_vector_search': getattr(core, 'plugins_use_vector_search', False),
                 'plugins_vector_collection': getattr(core, 'plugins_vector_collection', 'homeclaw_plugins') or 'homeclaw_plugins',
                 'plugins_description_max_chars': getattr(core, 'plugins_description_max_chars', 0),
-                'skills_use_vector_search': getattr(core, 'skills_use_vector_search', False),
+                'skills_router': getattr(core, 'skills_router_config', None) or {},
                 'skills_vector_collection': getattr(core, 'skills_vector_collection', 'homeclaw_skills') or 'homeclaw_skills',
                 'skills_max_retrieved': getattr(core, 'skills_max_retrieved', 10),
                 'skills_similarity_threshold': getattr(core, 'skills_similarity_threshold', 0.0),
@@ -1787,6 +1799,7 @@ class CoreMetadata:
                 'skills_incremental_sync': getattr(core, 'skills_incremental_sync', False),
                 'skills_include_body_for': getattr(core, 'skills_include_body_for', None) or [],
                 'skills_include_body_max_chars': getattr(core, 'skills_include_body_max_chars', 0),
+                'skills_use_path_only': getattr(core, 'skills_use_path_only', False),
                 'skills_force_include_rules': getattr(core, 'skills_force_include_rules', None) or [],
                 'plugins_force_include_rules': getattr(core, 'plugins_force_include_rules', None) or [],
                 'skills_and_plugins_config_file': getattr(core, 'skills_and_plugins_config_file', '') or '',

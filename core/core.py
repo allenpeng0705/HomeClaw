@@ -91,6 +91,7 @@ from base.workspace import (
     load_friend_identity_file,
 )
 from base.skills import get_skills_dir, load_skills, load_skills_from_dirs, load_skill_by_folder_from_dirs, build_skills_system_block
+from base.skill_router import skills_router_semantic_enabled
 from base.tools import ToolContext, get_tool_registry, ROUTING_RESPONSE_ALREADY_SENT
 from base import last_channel as last_channel_store
 from base.markdown_outbound import markdown_to_channel, looks_like_markdown, classify_outbound_format
@@ -1996,9 +1997,15 @@ class Core(CoreInterface):
             self.llmManager.run()
             logger.debug("LLM manager started!")
             # When embedding is local, wait for the embedding server BEFORE initialize() so Cognee (and other init) does not block waiting for embedding. Cognee may wait for embedding to be ready during CogneeMemory(config=...).
+            _skills_router_sem_enabled = skills_router_semantic_enabled(core_metadata)
+            _intent_router_cfg = getattr(core_metadata, "intent_router_config", None) or {}
+            _intent_router_sem = _intent_router_cfg.get("semantic") if isinstance(_intent_router_cfg.get("semantic"), dict) else {}
+            _intent_router_mode = str(_intent_router_cfg.get("mode") or "static").strip().lower()
+            _intent_router_sem_enabled = bool(_intent_router_cfg.get("enabled")) and _intent_router_mode in ("semantic", "hybrid") and bool(_intent_router_sem.get("enabled", True))
             need_embedder = (
                 (getattr(core_metadata, "memory_backend", None) or "cognee").strip().lower() == "cognee"
-                or getattr(core_metadata, "skills_use_vector_search", False)
+                or _skills_router_sem_enabled
+                or _intent_router_sem_enabled
                 or getattr(core_metadata, "plugins_use_vector_search", False)
                 or getattr(core_metadata, "use_agent_memory_search", True)
             )
@@ -2014,13 +2021,23 @@ class Core(CoreInterface):
                     logger.warning("Embedding server health check failed: {}; Cognee/sync may fail.", e)
             # Initialize (register routes and middleware) before starting the HTTP server. Starlette/FastAPI do not allow add_middleware() after the app has started serving.
             self.initialize()
-            # Start HTTP server after app is fully configured. /ready returns 503 until lifecycle sets ready.
+            # Start HTTP server after app is fully configured. /ready returns 503 until we set _core_http_ready.
             server_task = asyncio.create_task(self.server.serve())
             await asyncio.sleep(0.5)
             self.start_email_channel()
+            # Mark HTTP ready as soon as the server is accepting connections. Remaining work below
+            # (vector syncs, plugin load) can take minutes; without this, curl /ready blocks on 503 and
+            # operators assume Core is dead. Semantic/plugin sync may still be running after 200.
+            self._core_http_ready = True
+            logger.info("Core HTTP ready: GET /ready returns 200 (startup continues: vector sync, plugins).")
 
-            # Sync skills to vector store when skills_use_vector_search and skills_refresh_on_startup
-            if getattr(core_metadata, "skills_use_vector_search", False) and getattr(core_metadata, "skills_refresh_on_startup", True):
+            # Sync skills to vector store when skills_router semantic/hybrid is enabled.
+            _skills_router_cfg = getattr(core_metadata, "skills_router_config", None) or {}
+            _skills_router_sem = _skills_router_cfg.get("semantic") if isinstance(_skills_router_cfg.get("semantic"), dict) else {}
+            _skills_router_mode = str(_skills_router_cfg.get("mode") or "legacy").strip().lower()
+            _skills_router_sem_enabled = bool(_skills_router_cfg.get("enabled")) and _skills_router_mode in ("semantic", "hybrid") and bool(_skills_router_sem.get("enabled", True))
+            _skills_refresh = bool(_skills_router_sem.get("refresh_on_startup", getattr(core_metadata, "skills_refresh_on_startup", True)))
+            if _skills_router_sem_enabled and _skills_refresh:
                 if getattr(self, "skills_vector_store", None) and getattr(self, "embedder", None):
                     from base.skills import get_all_skills_dirs, get_skills_dir, sync_skills_to_vector_store
                     root = Path(__file__).resolve().parent.parent
@@ -2037,8 +2054,11 @@ class Core(CoreInterface):
                     disabled_folders = getattr(core_metadata, "skills_disabled", None) or []
                     incremental = bool(getattr(core_metadata, "skills_incremental_sync", False))
                     try:
+                        from base.skill_router import skills_semantic_embed_body_max_chars
+
                         n = await sync_skills_to_vector_store(
                             skills_path, self.skills_vector_store, self.embedder,
+                            refined_body_max_chars=skills_semantic_embed_body_max_chars(core_metadata),
                             skills_test_dir=skills_test_path, incremental=incremental,
                             skills_extra_dirs=skills_extra_paths if skills_extra_paths else None,
                             disabled_folders=disabled_folders if disabled_folders else None,
@@ -2046,6 +2066,41 @@ class Core(CoreInterface):
                         _component_log("skills", f"synced {n} skill(s) to vector store")
                     except Exception as e:
                         logger.warning("Skills vector sync failed: {}", e)
+
+            # Sync intent category docs for semantic/hybrid intent routing.
+            _intent_router_cfg = getattr(core_metadata, "intent_router_config", None) or {}
+            _intent_router_sem = _intent_router_cfg.get("semantic") if isinstance(_intent_router_cfg.get("semantic"), dict) else {}
+            _intent_router_mode = str(_intent_router_cfg.get("mode") or "static").strip().lower()
+            _intent_router_sem_enabled = bool(_intent_router_cfg.get("enabled")) and _intent_router_mode in ("semantic", "hybrid") and bool(_intent_router_sem.get("enabled", True))
+            _intent_refresh = bool(_intent_router_sem.get("refresh_on_startup", True))
+            if _intent_router_sem_enabled and _intent_refresh:
+                if getattr(self, "intent_categories_vector_store", None) and getattr(self, "embedder", None):
+                    try:
+                        from base.intent_category_router import merge_intent_router_config_with_docs, sync_intent_categories_to_vector_store
+                        from base.intent_router import DEFAULT_CATEGORY_DESCRIPTIONS
+
+                        root = Path(__file__).resolve().parent.parent
+                        docs_dir = str(_intent_router_sem.get("docs_dir") or "config/intent_category").strip() or "config/intent_category"
+                        docs_path = Path(docs_dir)
+                        if not docs_path.is_absolute():
+                            docs_path = root / docs_path
+                        _merged_ir = merge_intent_router_config_with_docs(
+                            dict(_intent_router_cfg),
+                            root_path=root,
+                            default_descriptions=DEFAULT_CATEGORY_DESCRIPTIONS,
+                        )
+                        cats = _merged_ir.get("categories") if isinstance(_merged_ir.get("categories"), list) else []
+                        if not cats and isinstance(_intent_router_cfg.get("categories"), list):
+                            cats = [str(c).strip() for c in _intent_router_cfg["categories"] if c is not None and str(c).strip()]
+                        n = await sync_intent_categories_to_vector_store(
+                            docs_path,
+                            self.intent_categories_vector_store,
+                            self.embedder,
+                            allowed_categories=[str(c).strip() for c in cats if str(c).strip()],
+                        )
+                        _component_log("intent_router", f"synced {n} intent category doc(s) to vector store")
+                    except Exception as e:
+                        logger.warning("Intent category vector sync failed: {}", e)
 
             # Load plugins (orchestrator/TAM/plugins always enabled)
             self.load_plugins()
@@ -2157,8 +2212,6 @@ class Core(CoreInterface):
             # File serving: sandbox files and folder listings at GET /files/out (core_public_url/files/out?path=...&token=...)
             if (getattr(core_metadata, "core_public_url", None) or "").strip():
                 _component_log("files", "serving sandbox files at GET /files/out (core_public_url set)")
-            self._core_http_ready = True
-            # GET /ready now returns 200 so probe will succeed.
             # Optionally start and register system_plugins (e.g. homeclaw-browser) so one command runs Core + plugins.
             if getattr(core_metadata, "system_plugins_auto_start", False):
                 asyncio.create_task(self._run_system_plugins_startup())

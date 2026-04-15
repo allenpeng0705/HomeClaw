@@ -10,6 +10,8 @@ import types
 from pathlib import Path
 from typing import Optional, Tuple
 
+from tools.vmprint_preview_loader import vmprint_hybrid_preview_loaders
+
 class _Proc:
     def __init__(self, returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""):
         self.returncode = returncode
@@ -44,6 +46,7 @@ def _load_vmprint_render_sync():
         "logger": _DummyLogger(),
         "_get_tools_config": lambda: {},
         "_vmprint_preview_client_engine_enabled": lambda: False,
+        "vmprint_hybrid_preview_loaders": vmprint_hybrid_preview_loaders,
     }
     exec(fn_src, ns)
     return ns["_vmprint_render_sync"], ns
@@ -56,6 +59,15 @@ def _make_fake_vmprint_tree(tmp_path: Path, with_vm_cli: bool = True) -> Path:
     if with_vm_cli:
         (vmp / "cli" / "dist").mkdir(parents=True, exist_ok=True)
         (vmp / "cli" / "dist" / "index.js").write_text("// fake", encoding="utf-8")
+    # Stubs so HomeClaw resolves preview deps before subprocess.run (which tests monkeypatch).
+    (vmp / "node_modules" / "@vmprint" / "standard-fonts" / "dist").mkdir(parents=True, exist_ok=True)
+    (vmp / "node_modules" / "@vmprint" / "standard-fonts" / "dist" / "index.cjs").write_text(
+        "module.exports = { StandardFontManager: class {} };", encoding="utf-8"
+    )
+    (vmp / "node_modules" / "@vmprint" / "context-canvas" / "dist").mkdir(parents=True, exist_ok=True)
+    (vmp / "node_modules" / "@vmprint" / "context-canvas" / "dist" / "index.js").write_text(
+        "module.exports = { CanvasContext: class {} };", encoding="utf-8"
+    )
     return vmp
 
 
@@ -233,6 +245,8 @@ def test_vmprint_render_sync_browser_preview_html_success(tmp_path: Path, monkey
     assert "view-mode" not in txt
     assert "homeclaw-vmprint-client-engine" not in txt
     assert "vmprint-client-engine-loader" not in txt
+    assert "window.__hcVmprintAsset" in txt
+    assert "src='./_vmprint_assets/" not in txt
 
 
 def test_vmprint_render_sync_browser_preview_html_includes_client_engine_when_enabled(tmp_path: Path, monkeypatch):

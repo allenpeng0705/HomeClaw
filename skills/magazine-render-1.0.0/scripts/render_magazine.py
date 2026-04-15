@@ -22,8 +22,13 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from tools.vmprint_preview_loader import vmprint_hybrid_preview_loaders
 
 _VMPRINT_ASSET_VERSION = "v1"
 
@@ -90,13 +95,65 @@ def _default_vmprint_dir(root: Path) -> Optional[Path]:
     return None
 
 
+def _vmprint_cli_marker_path(vmroot: Path) -> Path:
+    return (vmroot / "cli" / "dist" / "index.js").resolve()
+
+
+def _vmprint_root_from_built_cli_js(cli_js: Path) -> Optional[Path]:
+    """If cli_js is .../cli/dist/index.js, return the vmprint monorepo root."""
+    try:
+        r = cli_js.expanduser().resolve()
+        if not r.is_file():
+            return None
+        if r.name != "index.js":
+            return None
+        if r.parent.name != "dist" or r.parent.parent.name != "cli":
+            return None
+        return r.parent.parent.parent
+    except Exception:
+        return None
+
+
 def _vmprint_root_for_ast(root: Path) -> Optional[Path]:
     """Monorepo root with built @vmprint/cli (AST / layout / browser preview). Draft2Final is not required."""
+    for env_key in ("HOMECLAW_VMPRINT_CLI", "VMPRINT_CLI"):
+        raw = (os.environ.get(env_key) or "").strip()
+        if not raw:
+            continue
+        p = Path(raw).expanduser().resolve()
+        vmroot = _vmprint_root_from_built_cli_js(p)
+        if vmroot is not None and _vmprint_cli_marker_path(vmroot).is_file():
+            return vmroot
+    for env_key in ("HOMECLAW_VMPRINT_ROOT", "VMPRINT_ROOT"):
+        raw = (os.environ.get(env_key) or "").strip()
+        if not raw:
+            continue
+        p = Path(raw).expanduser().resolve()
+        if p.is_dir() and _vmprint_cli_marker_path(p).is_file():
+            return p
     for name in ("vmprint", "vm_print"):
         p = (root / "tools" / name).resolve()
-        if p.is_dir() and (p / "cli" / "dist" / "index.js").is_file():
+        if p.is_dir() and _vmprint_cli_marker_path(p).is_file():
             return p
     return None
+
+
+def _vmprint_ast_cli_missing_message(root: Path) -> str:
+    """Actionable multi-line message when cli/dist/index.js is missing."""
+    default_dir = (root / "tools" / "vmprint").resolve()
+    lines = [
+        "VMPrint CLI missing: expected cli/dist/index.js (run a full workspace build).",
+        f"  Default path: {default_dir}",
+        "  Optional: set HOMECLAW_VMPRINT_ROOT or VMPRINT_ROOT to a vmprint clone that already has cli/dist/index.js,",
+        "  or HOMECLAW_VMPRINT_CLI / VMPRINT_CLI to the absolute path of cli/dist/index.js.",
+        "  From HomeClaw repo root (first-time):",
+        "    git clone --depth 1 https://github.com/cosmiciron/vmprint.git tools/vmprint",
+        "    cd tools/vmprint && npm install && npm run build",
+        "  If clone exists but error persists: cd tools/vmprint && rm -rf node_modules */node_modules */dist && npm install && npm run build",
+        "  For browser_preview_html (SVG canvas): cd tools/vmprint && npm install @vmprint/context-canvas",
+        "  Docs: skills/magazine-render-1.0.0/ast_templates/README.md",
+    ]
+    return "\n".join(lines)
 
 
 def _vmprint_root_for_assets(root: Path, prefer: Optional[Path] = None) -> Path:
@@ -109,6 +166,64 @@ def _vmprint_root_for_assets(root: Path, prefer: Optional[Path] = None) -> Path:
     if q is not None:
         return q
     return (root / "tools" / "vmprint").resolve()
+
+
+def _vmprint_npm_package_dist_entry(
+    vmroot: Path, scope: str, name: str, dist_names: Tuple[str, ...]
+) -> Optional[Path]:
+    """Resolve a built npm package entry (hoisted under vmroot or nested under cli/engine)."""
+    for root in (vmroot, vmroot / "cli", vmroot / "engine"):
+        pkg = root / "node_modules" / scope / name
+        if not pkg.is_dir():
+            continue
+        for rel in dist_names:
+            p = (pkg / rel).resolve()
+            if p.is_file():
+                return p
+        pkg_json = pkg / "package.json"
+        if pkg_json.is_file():
+            try:
+                main = json.loads(pkg_json.read_text(encoding="utf-8")).get("main")
+                if isinstance(main, str) and main.strip():
+                    p = (pkg / main.strip()).resolve()
+                    if p.is_file():
+                        return p
+            except Exception:
+                pass
+    return None
+
+
+def _vmprint_preview_standard_fonts_cjs(vmroot: Path) -> Optional[Path]:
+    p = _vmprint_npm_package_dist_entry(vmroot, "@vmprint", "standard-fonts", ("dist/index.cjs", "dist/index.js"))
+    if p is not None:
+        return p
+    legacy = (vmroot / "font-managers" / "standard" / "dist" / "index.js").resolve()
+    return legacy if legacy.is_file() else None
+
+
+def _vmprint_preview_context_canvas_js(vmroot: Path) -> Optional[Path]:
+    p = _vmprint_npm_package_dist_entry(vmroot, "@vmprint", "context-canvas", ("dist/index.js", "dist/index.cjs"))
+    if p is not None:
+        return p
+    legacy = (vmroot / "contexts" / "canvas" / "dist" / "index.js").resolve()
+    return legacy if legacy.is_file() else None
+
+
+def _vmprint_preview_node_deps_missing_message(vmroot: Path) -> str:
+    std = _vmprint_preview_standard_fonts_cjs(vmroot)
+    ctx = _vmprint_preview_context_canvas_js(vmroot)
+    missing: List[str] = []
+    if std is None:
+        missing.append("@vmprint/standard-fonts")
+    if ctx is None:
+        missing.append("@vmprint/context-canvas")
+    if not missing:
+        return ""
+    pkgs = " ".join(missing)
+    return (
+        f"Missing preview packages ({', '.join(missing)}). "
+        f"From your VMPrint root run: npm install {pkgs}"
+    )
 
 
 def _find_vmprint_cli(vmprint_dir: Path) -> Optional[Path]:
@@ -176,11 +291,24 @@ def _ensure_vmprint_static_assets(out_dir: Path, root: Path, vmroot: Optional[Pa
         preview_assets_dir = (out_dir / "assets").resolve()
         preview_assets_dir.mkdir(parents=True, exist_ok=True)
         vmroot = _vmprint_root_for_assets(root, prefer=vmroot)
-        copies = [
-            (vmroot / "engine" / "dist" / "index.js", assets_dir / "vmprint-engine.js"),
-            (vmroot / "contexts" / "canvas" / "dist" / "index.js", assets_dir / "vmprint-context-canvas.js"),
-            (vmroot / "font-managers" / "standard" / "dist" / "index.js", assets_dir / "vmprint-web-fonts.js"),
-        ]
+        copies: List[Tuple[Path, Path]] = []
+        eng_js = (vmroot / "engine" / "dist" / "index.js").resolve()
+        if eng_js.is_file():
+            copies.append((eng_js, assets_dir / "vmprint-engine.js"))
+        cc_js = _vmprint_preview_context_canvas_js(vmroot)
+        if cc_js is not None and cc_js.is_file():
+            copies.append((cc_js, assets_dir / "vmprint-context-canvas.js"))
+        else:
+            legacy_cc = (vmroot / "contexts" / "canvas" / "dist" / "index.js").resolve()
+            if legacy_cc.is_file():
+                copies.append((legacy_cc, assets_dir / "vmprint-context-canvas.js"))
+        std_js = _vmprint_preview_standard_fonts_cjs(vmroot)
+        if std_js is not None and std_js.is_file():
+            copies.append((std_js, assets_dir / "vmprint-web-fonts.js"))
+        else:
+            legacy_std = (vmroot / "font-managers" / "standard" / "dist" / "index.js").resolve()
+            if legacy_std.is_file():
+                copies.append((legacy_std, assets_dir / "vmprint-web-fonts.js"))
         for src, dst in copies:
             if src.is_file() and (not dst.exists() or dst.stat().st_size == 0):
                 shutil.copy2(src, dst)
@@ -192,9 +320,10 @@ def _ensure_vmprint_static_assets(out_dir: Path, root: Path, vmroot: Optional[Pa
             )
         styles_css = (out_dir / "styles.css").resolve()
         styles_css.write_text(
-            "body{font-family:system-ui;margin:0;background:#111;color:#eee}"
-            ".pages{padding:12px;display:grid;gap:16px;justify-items:center}"
-            ".page{background:#fff;color:#111;box-shadow:0 2px 12px rgba(0,0,0,.35);overflow:auto}",
+            "body{font-family:system-ui;margin:0;background:#111;color:#eee;overflow-x:auto}"
+            ".pages{padding:12px;display:grid;gap:16px;justify-items:start}"
+            ".page{min-width:612px;background:#fff;color:#111;box-shadow:0 2px 12px rgba(0,0,0,.35);overflow:auto}"
+            ".page>svg{max-width:none;height:auto;display:block}",
             encoding="utf-8",
         )
         pipeline_js = preview_assets_dir / "pipeline.js"
@@ -284,7 +413,6 @@ def _validate_ast_1_1(doc: Dict[str, Any]) -> None:
         "header",
         "footer",
         "assets",
-        "meta",
     }
     unknown = [k for k in doc.keys() if k not in allowed_top]
     if unknown:
@@ -585,6 +713,7 @@ def _editorial_items_to_lead_rail(
     top_story_fallback: str = "TOP STORY",
     no_snippet_line: str = "No excerpt — open the link for the full story.",
     max_sidebar: int = 16,
+    lead_body_columns: int = 1,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     lead_elements: List[Dict[str, Any]]
     if not items:
@@ -595,15 +724,13 @@ def _editorial_items_to_lead_rail(
         ]
     else:
         first = items[0]
-        sec_k = (first["feed"] or top_story_fallback).strip().upper()
-        if len(sec_k) > 36:
-            sec_k = sec_k[:33] + "…"
+        kicker_line = (top_story_fallback or "TOP STORY").strip().upper()
+        if len(kicker_line) > 36:
+            kicker_line = kicker_line[:33] + "…"
         raw_deck = first["summary"].strip() or no_snippet_line
         deck = raw_deck[:320] + ("…" if len(raw_deck) > 320 else "")
-        link = first["link"]
-        byline = (first["feed"] or "Source").strip()
-        if link:
-            byline = f"{byline}\n{link}"
+        link = (first.get("link") or "").strip()
+        byline = (first.get("feed") or "Source").strip()
         story_children: List[Dict[str, Any]] = []
         for para in _split_summary_bodies(first["summary"]):
             story_children.append(
@@ -617,19 +744,36 @@ def _editorial_items_to_lead_rail(
             story_children.append(
                 {
                     "type": "body",
-                    "content": f"No summary text. Link: {link or '—'}",
+                    "content": "No summary text — see the link below." if link else no_snippet_line,
                     "properties": {"style": {"textAlign": "left"}},
                 }
             )
+        if link:
+            story_children.append(
+                {
+                    "type": "body",
+                    "content": link,
+                    "properties": {
+                        "style": {
+                            "fontSize": 8.5,
+                            "lineHeight": 1.35,
+                            "textAlign": "left",
+                            "marginTop": 2,
+                            "color": "#57534e",
+                        }
+                    },
+                }
+            )
+        cols = max(1, min(3, int(lead_body_columns)))
         lead_elements = [
-            {"type": "kicker", "content": sec_k},
+            {"type": "kicker", "content": kicker_line},
             {"type": "headline", "content": first["title"]},
             {"type": "deck", "content": deck},
             {"type": "byline", "content": byline},
             {
                 "type": "story",
                 "content": "",
-                "columns": 2,
+                "columns": cols,
                 "gutter": 12,
                 "balance": False,
                 "children": story_children,
@@ -645,23 +789,36 @@ def _editorial_items_to_lead_rail(
     else:
         for it in items[1 : 1 + max_sidebar]:
             sn = it["summary"]
-            snippet = sn[:140] + ("…" if len(sn) > 140 else "")
+            snippet = sn[:200] + ("…" if len(sn) > 200 else "")
             lk = (it.get("link") or "").strip()
-            line = f"• {it['title']}"
-            if it["feed"]:
-                line += f"\n{it['feed']}"
+            src = (it.get("feed") or "").strip()
+            parts_r: list[str] = [it["title"]]
             if snippet:
-                line += f"\n{snippet}"
+                parts_r.append(snippet)
+            if src:
+                parts_r.append(f"— {src}")
             if lk:
-                line += f"\n{lk}"
+                parts_r.append(lk)
+            line = "\n\n".join(parts_r)
             side_elements.append({"type": "sidebar_body", "content": line})
     return lead_elements, side_elements
 
 
 def _daily_brief_magazine_ast(data: Dict[str, Any], title: str, theme: str = "dispatch") -> Dict[str, Any]:
-    """Specimen front page like newspaper, but no HEADLINE INDEX table (editorial / 杂志系)."""
+    """
+    Two-column editorial magazine: same masthead/zone lead as newspaper, but secondary items are
+    separate story blocks (kicker → headline → byline → justified body) in 2 columns, like a
+    printed front page—header/footer still come from layout + optional chrome merge.
+    """
     return _daily_brief_newspaper_ast(
-        data, title, theme, folio_footer_right="Magazine", include_headline_index_table=False
+        data,
+        title,
+        theme,
+        folio_footer_right="Magazine",
+        include_headline_index_table=False,
+        secondary_story_columns=2,
+        secondary_story_balance=True,
+        secondary_stories_as_blocks=True,
     )
 
 
@@ -906,7 +1063,8 @@ def _specimen_daily_brief_header_footer_strip(mast: str, folio_footer_right: str
                     },
                 }
             ]
-        }
+        },
+        "firstPage": None,
     }
     footer = {
         "default": {
@@ -947,11 +1105,18 @@ def _daily_brief_newspaper_ast(
     *,
     folio_footer_right: str = "Newspaper",
     include_headline_index_table: bool = True,
+    secondary_story_columns: int = 3,
+    secondary_story_balance: bool = False,
+    secondary_stories_as_blocks: bool = False,
 ) -> Dict[str, Any]:
     """
     Front-page style from RSS: masthead + dateline, lead + sidebar (optional pull-quote),
     multi-column secondary heads, optional headline index table. Typography matches VMPrint
     practitioner specimen (Tinos/Cousine/Arimo, footer-text running head).
+
+    When ``secondary_stories_as_blocks`` is True, each secondary RSS item is its own ``story``
+    (same column count as ``secondary_story_columns``) so blocks stack vertically; pagination
+    is handled by VMPrint as content fills pages.
     """
     items = _daily_brief_items_normalized(data)[:22]
     as_of = str(data.get("as_of") or data.get("generated_at") or _now_local_str())
@@ -1036,8 +1201,9 @@ def _daily_brief_newspaper_ast(
             },
         ]
 
+    rail_title = "TODAY AT A GLANCE" if str(folio_footer_right).strip().lower() == "magazine" else "IN BRIEF"
     sidebar_els: List[Dict[str, Any]] = [
-        {"type": "sidebar-head", "content": "IN BRIEF"},
+        {"type": "sidebar-head", "content": rail_title},
         {"type": "col-rule", "content": ""},
     ]
     if len(items) <= 1:
@@ -1057,22 +1223,41 @@ def _daily_brief_newspaper_ast(
             sidebar_els.append({"type": "sidebar-body", "content": line})
 
     multi_children: List[Dict[str, Any]] = []
+    secondary_story_blocks: List[Dict[str, Any]] = []
     if len(items) > 1:
         for it in items[1:8]:
             fk = (it["feed"] or "FEED").strip().upper()
             if len(fk) > 34:
                 fk = fk[:31] + "…"
-            multi_children.append({"type": "kicker", "content": fk})
-            multi_children.append({"type": "headline", "content": it["title"][:220]})
             by = (it["feed"] or "Source").strip()
             lk = (it.get("link") or "").strip()
             if lk:
                 by = f"{by}\n{lk}"
-            multi_children.append({"type": "byline", "content": by[:500]})
             sn = it["summary"].strip() or "—"
-            multi_children.append(
-                {"type": "body", "content": sn[:480] + ("…" if len(sn) > 480 else "")}
-            )
+            body_text = sn[:480] + ("…" if len(sn) > 480 else "")
+            block_ch = [
+                {"type": "kicker", "content": fk},
+                {"type": "headline", "content": it["title"][:220]},
+                {"type": "byline", "content": by[:500]},
+                {
+                    "type": "body",
+                    "content": body_text,
+                    "properties": {"style": {"textAlign": "justify"}},
+                },
+            ]
+            if secondary_stories_as_blocks:
+                secondary_story_blocks.append(
+                    {
+                        "type": "story",
+                        "content": "",
+                        "columns": max(1, min(4, int(secondary_story_columns))),
+                        "gutter": 14,
+                        "balance": bool(secondary_story_balance),
+                        "children": block_ch,
+                    }
+                )
+            else:
+                multi_children.extend(block_ch)
 
     table_block: Optional[Dict[str, Any]] = None
     if include_headline_index_table:
@@ -1139,23 +1324,39 @@ def _daily_brief_newspaper_ast(
             "type": "zone-map",
             "content": "",
             "properties": {"style": {"marginBottom": 10}},
-            "zoneLayout": {"columns": [{"mode": "flex", "fr": 2}, {"mode": "flex", "fr": 1}], "gap": 18},
+            "zoneLayout": {
+                "columns": [{"mode": "flex", "fr": 2}, {"mode": "flex", "fr": 1}],
+                "gap": 22 if str(folio_footer_right).strip().lower() == "magazine" else 18,
+            },
             "zones": [
                 {"id": "lead", "elements": lead_elements},
                 {"id": "sidebar", "elements": sidebar_els},
             ],
         },
     ]
-    if multi_children:
+    if secondary_stories_as_blocks and secondary_story_blocks:
+        body_elements.append({"type": "col-rule", "content": ""})
+        body_elements.append({"type": "section-flag", "content": "MORE HEADLINES"})
+        for i, blk in enumerate(secondary_story_blocks):
+            body_elements.append(blk)
+            if i < len(secondary_story_blocks) - 1:
+                body_elements.append(
+                    {
+                        "type": "col-rule",
+                        "content": "",
+                        "properties": {"style": {"marginTop": 6, "marginBottom": 10}},
+                    }
+                )
+    elif multi_children:
         body_elements += [
             {"type": "col-rule", "content": ""},
             {"type": "section-flag", "content": "MORE HEADLINES"},
             {
                 "type": "story",
                 "content": "",
-                "columns": 3,
+                "columns": max(1, min(4, int(secondary_story_columns))),
                 "gutter": 14,
-                "balance": False,
+                "balance": bool(secondary_story_balance),
                 "children": multi_children,
             },
         ]
@@ -1972,6 +2173,88 @@ def _ast_collect_body_digest_rows(ast_doc: Dict[str, Any], max_rows: int = 28, m
 _DIGEST_URL_ONLY = re.compile(r"^https?://[^\s<>'\"]+$", re.I)
 _DIGEST_URL_SUB = re.compile(r"https?://[^\s<>'\"]+", re.I)
 
+_DIGEST_HEADER_TO_ROLE: Dict[str, str] = {
+    "headline": "title",
+    "title": "title",
+    "feed": "source",
+    "source": "source",
+    "site": "source",
+    "snippet": "snippet",
+    "summary": "snippet",
+    "description": "snippet",
+    "link": "url",
+    "url": "url",
+}
+
+
+def _digest_news_table_column_map(header_cells: list[str]) -> Optional[Dict[str, int]]:
+    """Map digest table header (#, Headline, …) to semantic column indices for card layout."""
+    if not header_cells or len(header_cells) < 3:
+        return None
+    if str(header_cells[0]).strip() != "#":
+        return None
+    roles: Dict[str, int] = {}
+    for i in range(1, len(header_cells)):
+        key = _DIGEST_HEADER_TO_ROLE.get(str(header_cells[i]).strip().lower())
+        if key and key not in roles:
+            roles[key] = i
+    if "title" not in roles:
+        return None
+    if "snippet" not in roles and "url" not in roles:
+        return None
+    return roles
+
+
+def _digest_render_news_cards(
+    roles: Dict[str, int], data_rows: list[list[str]], max_cell: int
+) -> str:
+    """Vertical article cards: headline, optional source, snippet, URL last (not a multi-column grid)."""
+    tit_i = roles["title"]
+    snip_i = roles.get("snippet")
+    src_i = roles.get("source")
+    url_i = roles.get("url")
+    parts: list[str] = [
+        "<div role='feed' aria-label='Stories' style='margin-top:8px;border-top:2px solid #1c1917;"
+        "display:flex;flex-direction:column;gap:16px;font-size:14px'>"
+    ]
+    for r in data_rows:
+        if tit_i >= len(r):
+            continue
+        title = str(r[tit_i]).strip()
+        if not title:
+            continue
+        snippet = ""
+        if snip_i is not None and snip_i < len(r):
+            snippet = str(r[snip_i]).strip()
+        src = ""
+        if src_i is not None and src_i < len(r):
+            src = str(r[src_i]).strip()
+        url = ""
+        if url_i is not None and url_i < len(r):
+            url = str(r[url_i]).strip()
+        parts.append(
+            "<article style='padding:14px 16px;background:#fff;border:1px solid #e7e5e4;border-radius:2px;"
+            "box-shadow:0 1px 3px rgba(0,0,0,.06)'>"
+        )
+        parts.append(
+            "<h3 style='margin:0 0 8px;font:600 17px/1.3 Georgia,\"Noto Serif SC\",\"Songti SC\",serif;color:#1c1917'>"
+            f"{html.escape(title[:800])}</h3>"
+        )
+        if src and src != "-":
+            parts.append(
+                "<p style='margin:0 0 10px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#78716c'>"
+                f"{html.escape(src[:240])}</p>"
+            )
+        if snippet and snippet != "-":
+            parts.append(
+                f"<p style='margin:0 0 12px;color:#44403c;line-height:1.5'>{_digest_mixed_text_html(snippet, max_cell)}</p>"
+            )
+        if url and url != "-":
+            parts.append(f"<p style='margin:0;font-size:12px'>{_digest_cell_inner_html(url, max_cell)}</p>")
+        parts.append("</article>")
+    parts.append("</div>")
+    return "".join(parts)
+
 
 def _digest_mixed_text_html(text: str, max_cell: int) -> str:
     """Escape plain text but turn http(s) URLs into <a> tags (multiline-safe)."""
@@ -2070,8 +2353,8 @@ def _ast_digest_html(ast_doc: Dict[str, Any]) -> str:
         "<div style='font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#78716c;margin-bottom:8px'>"
         "Magazine digest</div>",
         "<div style='font-size:12px;color:#57534e;margin-bottom:12px;line-height:1.45'>"
-        "Same content as the layout above; <strong>links open in a new tab</strong>. "
-        "Use this block when the canvas preview omits CJK glyphs.</div>",
+        "<strong>Links open in a new tab.</strong> This block mirrors story text for accessibility; "
+        "the rendered magazine pages appear above this section.</div>",
     ]
     parts.extend(heads)
     if rows:
@@ -2088,24 +2371,36 @@ def _ast_digest_html(ast_doc: Dict[str, Any]) -> str:
                 or "url" in blob
             )
 
-        parts.append(
-            "<table style='width:100%;border-collapse:collapse;margin-top:4px;font-size:13px;"
-            "border-top:2px solid #1c1917'>"
-        )
-        for i, r in enumerate(rows):
-            is_hdr = i == 0 and _row_is_table_header(r)
-            tag = "th" if is_hdr else "td"
-            bg = "#fafaf9" if is_hdr else ("#ffffff" if i % 2 == 1 else "#faf8f5")
-            fw = "font-weight:600;" if is_hdr else ""
-            parts.append("<tr>")
-            for cell in r:
-                inner = _digest_cell_inner_html(str(cell), max_cell)
+        use_cards = False
+        if len(rows) >= 2 and _row_is_table_header(rows[0]):
+            cmap = _digest_news_table_column_map(rows[0])
+            if cmap is not None:
+                card_html = _digest_render_news_cards(cmap, rows[1:], max_cell)
+                if card_html:
+                    parts.append(card_html)
+                    use_cards = True
+        if not use_cards:
+            parts.append(
+                "<div role='list' aria-label='Story excerpts' style='margin-top:8px;border-top:2px solid #1c1917;"
+                "display:flex;flex-direction:column;gap:0;font-size:13px'>"
+            )
+            for i, r in enumerate(rows):
+                is_hdr = i == 0 and _row_is_table_header(r)
+                bg = "#fafaf9" if is_hdr else ("#ffffff" if i % 2 == 1 else "#faf8f5")
+                fw = "font-weight:600;letter-spacing:.04em;text-transform:uppercase;font-size:10px;" if is_hdr else ""
                 parts.append(
-                    f"<{tag} style='border:1px solid #d6d3d1;padding:9px 11px;vertical-align:top;"
-                    f"background:{bg};{fw}text-align:left'>{inner}</{tag}>"
+                    f"<div role='listitem' style='display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));"
+                    f"gap:10px 14px;padding:12px 10px;border-bottom:1px solid #e7e5e4;background:{bg};{fw}'>"
                 )
-            parts.append("</tr>")
-        parts.append("</table>")
+                for cell in r:
+                    inner = _digest_cell_inner_html(str(cell), max_cell)
+                    parts.append(
+                        "<div style='min-width:0;line-height:1.45;text-align:left;border-left:3px solid #e7e5e4;"
+                        "padding-left:10px;margin:0'>"
+                        f"{inner}</div>"
+                    )
+                parts.append("</div>")
+            parts.append("</div>")
     parts.append("</div>")
     out = "".join(parts)
     return out if len(out) <= max_total else (out[: max_total - 40] + "…</div>")
@@ -2121,8 +2416,8 @@ def _build_browser_preview_html(layout_json_text: str, digest_html: str = "") ->
         ".box{position:absolute;border:1px dashed rgba(0,0,0,.12);font-size:10px;line-height:1.2;overflow:hidden;white-space:pre-wrap}"
         ".meta{font-size:12px;color:#bbb}</style></head><body>"
         "<div class='top'><strong>VMPrint Scene Preview</strong><div class='meta'>HomeClaw generated preview (layout boxes).</div></div>"
-        f"{digest_html or ''}"
         "<div id='root' class='pages'></div>"
+        f"{digest_html or ''}"
         f"<script id='layout-data' type='application/json'>{esc}</script>"
         "<script>const d=JSON.parse(document.getElementById('layout-data').textContent||'{}');"
         "const pages=d.pages||[];const root=document.getElementById('root');"
@@ -2173,6 +2468,7 @@ def _build_hybrid_runtime_preview_html(
     fallback_svg_pages: list,
     layout_json_text: Optional[str] = None,
     digest_html: str = "",
+    extra_body_script_rels: Optional[Sequence[str]] = None,
 ) -> str:
     ast_esc = html.escape(ast_json_text or "{}")
     svg_esc = html.escape(json.dumps(fallback_svg_pages or [], ensure_ascii=False))
@@ -2184,19 +2480,21 @@ def _build_hybrid_runtime_preview_html(
     lim = _magazine_layout_embed_max_chars()
     if layout_json_text and (lim <= 0 or len(layout_json_text) <= lim):
         embed = f"<script id='layout-data' type='application/json'>{html.escape(layout_json_text)}</script>"
+    head_ld, body_ld = vmprint_hybrid_preview_loaders(
+        _VMPRINT_ASSET_VERSION, extra_body_script_rels=tuple(extra_body_script_rels or ())
+    )
     return (
         "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<meta name='homeclaw-vmprint-ui-hint' content='{ui_hint}'>"
         f"<meta name='homeclaw-vmprint-ast-chars' content='{ast_chars}'>"
         f"<meta name='homeclaw-vmprint-pages' content='{page_count}'>"
-        "<title>VMPrint Browser Preview</title><link rel='stylesheet' href='./styles.css'></head><body>"
-        f"{digest_html or ''}"
+        f"<title>VMPrint Browser Preview</title>{head_ld}</head><body>"
         "<div id='root' class='pages'></div>"
+        f"{digest_html or ''}"
         f"<script id='ast-data' type='application/json'>{ast_esc}</script>"
         f"{embed}"
         f"<script id='svg-pages-data' type='application/json'>{svg_esc}</script>"
-        f"<script src='./_vmprint_assets/{_VMPRINT_ASSET_VERSION}/vmprint-fontkit.js'></script><script src='./_vmprint_assets/{_VMPRINT_ASSET_VERSION}/vmprint-engine.js'></script><script src='./_vmprint_assets/{_VMPRINT_ASSET_VERSION}/vmprint-web-fonts.js'></script><script src='./_vmprint_assets/{_VMPRINT_ASSET_VERSION}/vmprint-context-canvas.js'></script>"
-        "<script src='./assets/pipeline.js'></script><script src='./assets/ui.js'></script>"
+        f"{body_ld}"
         "</body></html>"
     )
 
@@ -2211,12 +2509,9 @@ def _render_ast_with_vmprint(
     root = _repo_root()
     vmprint_dir = _vmprint_root_for_ast(root)
     if vmprint_dir is None:
-        return (
-            False,
-            "VMPrint CLI missing under tools/vmprint or tools/vm_print: expected cli/dist/index.js after npm run build.",
-        )
+        return (False, _vmprint_ast_cli_missing_message(root))
     _ensure_vmprint_static_assets(out_abs.parent, root, vmroot=vmprint_dir)
-    vm_cli = (vmprint_dir / "cli" / "dist" / "index.js").resolve()
+    vm_cli = _vmprint_cli_marker_path(vmprint_dir)
     out_abs.parent.mkdir(parents=True, exist_ok=True)
     ast_tf = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
     ast_tf.close()
@@ -2259,14 +2554,19 @@ def _render_ast_with_vmprint(
             out_abs.write_text(layout_raw, encoding="utf-8")
             return (True, "ok")
         if output_format == "browser_preview_html":
-            # npm workspace layout: font/canvas packages live under node_modules/@vmprint/* (not font-managers/ or contexts/).
+            std_entry = _vmprint_preview_standard_fonts_cjs(vmprint_dir)
+            ctx_entry = _vmprint_preview_context_canvas_js(vmprint_dir)
+            dep_msg = _vmprint_preview_node_deps_missing_message(vmprint_dir)
+            # Upstream monorepo does not always install @vmprint/context-canvas; resolve absolute paths for require().
             canvas_script = (
                 "const fs=require('fs');"
-                "const {LayoutEngine,Renderer,toLayoutConfig,createEngineRuntime}=require('./engine/dist/index.js');"
-                "const {StandardFontManager}=require('./node_modules/@vmprint/standard-fonts/dist/index.cjs');"
-                "const {CanvasContext}=require('./node_modules/@vmprint/context-canvas/dist/index.js');"
-                "const p=process.argv[1];"
-                "const raw=fs.readFileSync(p,'utf8');"
+                "const stdPath=process.argv[1];"
+                "const canvasPath=process.argv[2];"
+                "const astInput=process.argv[3];"
+                "const {LayoutEngine,ContextRenderer,toLayoutConfig,createPrintEngineRuntime}=require('./engine/dist/index.js');"
+                "const {StandardFontManager}=require(stdPath);"
+                "const {CanvasContext}=require(canvasPath);"
+                "const raw=fs.readFileSync(astInput,'utf8');"
                 "let doc;"
                 "if(String(raw||'').trimStart().startsWith('---')){const parts=String(raw).split(/\\n---\\n/);doc=JSON.parse(parts[parts.length-1]);}"
                 "else{doc=JSON.parse(raw);}"
@@ -2281,7 +2581,7 @@ def _render_ast_with_vmprint(
                 "if(o==='portrait'&&s.width>s.height){s={width:s.height,height:s.width};}"
                 "return s;}"
                 "(async()=>{"
-                "const runtime=createEngineRuntime({fontManager:new StandardFontManager()});"
+                "const runtime=createPrintEngineRuntime({fontManager:new StandardFontManager()});"
                 "const cfg=toLayoutConfig(doc);"
                 "const rawPageSize=(cfg&&cfg.pageSize)?cfg.pageSize:((doc&&doc.layout)?doc.layout.pageSize:null);"
                 "const orientation=(cfg&&cfg.orientation)?cfg.orientation:((doc&&doc.layout)?doc.layout.orientation:null);"
@@ -2290,32 +2590,35 @@ def _render_ast_with_vmprint(
                 "await engine.waitForFonts();"
                 "const pages=engine.simulate(doc.elements);"
                 "const ctx=new CanvasContext({size:pageSize,margins:cfg.margins,autoFirstPage:false,bufferPages:false,textRenderMode:'text'});"
-                "const renderer=new Renderer(cfg,false,runtime);"
+                "const renderer=new ContextRenderer(cfg,false,runtime);"
                 "await renderer.render(pages,ctx); ctx.end();"
                 "process.stdout.write(JSON.stringify({svgs:ctx.toSvgPages()}));"
                 "})().catch(e=>{console.error(String(e&&e.stack||e)); process.exit(2);});"
             )
-            c = subprocess.run(
-                ["node", "-e", canvas_script, ast_path],
-                cwd=str(vmprint_dir),
-                capture_output=True,
-                timeout=180,
-                check=False,
-            )
             canvas_err = ""
-            if c.returncode != 0:
-                canvas_err = (c.stderr or c.stdout or b"").decode("utf-8", errors="replace").strip()
             svgs: list = []
-            if c.returncode == 0:
-                try:
-                    payload = json.loads((c.stdout or b"{}").decode("utf-8", errors="replace"))
-                    raw_svgs = payload.get("svgs") if isinstance(payload, dict) else None
-                    if isinstance(raw_svgs, list) and raw_svgs:
-                        svgs = raw_svgs
-                    else:
-                        canvas_err = canvas_err or "no pages rendered"
-                except Exception as e:
-                    canvas_err = str(e)
+            if std_entry is None or ctx_entry is None:
+                canvas_err = dep_msg or "Missing @vmprint/context-canvas or @vmprint/standard-fonts for SVG preview."
+            else:
+                c = subprocess.run(
+                    ["node", "-e", canvas_script, str(std_entry), str(ctx_entry), ast_path],
+                    cwd=str(vmprint_dir),
+                    capture_output=True,
+                    timeout=180,
+                    check=False,
+                )
+                if c.returncode != 0:
+                    canvas_err = (c.stderr or c.stdout or b"").decode("utf-8", errors="replace").strip()
+                if c.returncode == 0:
+                    try:
+                        payload = json.loads((c.stdout or b"{}").decode("utf-8", errors="replace"))
+                        raw_svgs = payload.get("svgs") if isinstance(payload, dict) else None
+                        if isinstance(raw_svgs, list) and raw_svgs:
+                            svgs = raw_svgs
+                        else:
+                            canvas_err = canvas_err or "no pages rendered"
+                    except Exception as e:
+                        canvas_err = str(e)
             digest = _ast_digest_html(ast_doc)
             if canvas_err or not svgs:
                 # Layout emit already succeeded; canvas/SVG often fails on large CJK tables or font edge cases.
@@ -2777,6 +3080,11 @@ def main() -> None:
         choices=["digest_table", "magazine", "newspaper"],
         help="digest_table: headline table (default). magazine: lead+rail. newspaper: masthead + multi-column + index (daily brief only).",
     )
+    p_dba.add_argument(
+        "--chrome-template",
+        default="",
+        help="Optional path to static chrome JSON (layout/styles/header/footer/meta) merged after building AST; see ast_templates/README.md.",
+    )
 
     p_ta = sub.add_parser("render-template-ast", help="Compile template JSON -> VMPrint AST -> artifact.")
     p_ta.add_argument("--template", required=True, choices=["daily_brief", "weather", "stock", "web_search"])
@@ -2887,6 +3195,12 @@ def main() -> None:
                 )
             else:
                 ast_doc = _daily_brief_ast(data, title=str(args.title or "Daily Brief"), theme=str(args.theme or "dispatch"))
+            _ctp = str(getattr(args, "chrome_template", "") or "").strip()
+            if _ctp:
+                from ast_template_merge import load_chrome_template, merge_chrome_template_into_ast
+
+                _chrome = load_chrome_template(Path(_ctp))
+                ast_doc = merge_chrome_template_into_ast(ast_doc, _chrome)
             _validate_ast_1_1(ast_doc)
             ok, err = _render_ast_with_vmprint(
                 ast_doc,

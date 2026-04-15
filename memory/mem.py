@@ -29,6 +29,7 @@ from memory.storage import SQLiteManager
 from memory.configs import MemoryItem, MemoryConfig
 from loguru import logger
 from base.util import Util, strip_reasoning_from_assistant_text
+from core.log_helpers import _strip_leading_route_label, strip_routing_debug_footer_for_memory
 
 # Debug logs: avoid multi‑KB lines (e.g. assistant pasted web_search JSON).
 _MEMORY_LOG_PREVIEW_CHARS = 600
@@ -134,6 +135,8 @@ class Memory(MemoryBase):
                     parts.append("User: " + content)
                 elif role == "assistant":
                     content = strip_reasoning_from_assistant_text(content)
+                    content = _strip_leading_route_label(content)
+                    content = strip_routing_debug_footer_for_memory(content)
                     content = _strip_trailing_web_search_json(content)
                     content = strip_vmprint_file_link_block(content)
                     if not content:

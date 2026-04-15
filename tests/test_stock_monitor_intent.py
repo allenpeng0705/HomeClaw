@@ -2,7 +2,7 @@
 
 import pytest
 
-from base.intent_router import match_frequent_fast_path, route
+from base.intent_router import route
 from base.planner_executor import get_flow_for_categories
 
 
@@ -13,6 +13,7 @@ async def test_stock_preempt_returns_stock_monitor():
 
     cfg = {
         "enabled": True,
+        "intent_category_docs_dir": "",
         "categories": ["stock_monitor", "memory", "general_chat"],
         "category_descriptions": {},
     }
@@ -26,18 +27,11 @@ async def test_stock_preempt_falls_back_general_chat_without_category():
 
     cfg = {
         "enabled": True,
+        "intent_category_docs_dir": "",
         "categories": ["memory", "general_chat"],
         "category_descriptions": {},
     }
     assert await route("股票行情", cfg, _no_llm) == "general_chat"
-
-
-def test_frequent_fast_path_stock_monitor():
-    cfg = {
-        "frequent_fast_paths": [{"category": "stock_monitor", "patterns": [r"自选股", r"(?i)watchlist"]}],
-        "categories": ["stock_monitor", "general_chat"],
-    }
-    assert match_frequent_fast_path("看下自选股", ["stock_monitor", "general_chat"], cfg) == "stock_monitor"
 
 
 def test_planner_has_stock_monitor_flow():

@@ -17,14 +17,12 @@ flowchart TD
   D --> D2
   D2 --> E{intent_router enabled?}
   E -->|no| H[Full tools/skills; main LLM]
-  E -->|yes| F[Intent router: preempts / fast paths]
+  E -->|yes| F[Intent router: preempts / optional semantic]
   F --> G{Classifier LLM needed?}
   G -->|no| I[Category known]
   G -->|yes| J[1 short completion: category]
   J --> I
-  I --> K{identity_capabilities_shortcut + general_chat?}
-  K -->|yes match| L[Return canned reply — no main LLM]
-  K -->|no| M{planner_executor + category}
+  I --> M{planner_executor + category}
   M --> N{DAG for category?}
   N -->|yes| O[Fixed tool chain — no planner LLM]
   N -->|no| P{skip_planner_for_category?}
@@ -60,7 +58,7 @@ When `intent_router.enabled` is true, routing runs **early** so **tools and skil
 
 **2a. Preempts (no classifier LLM)** — fast path.
 
-Code applies **keyword / regex heuristics** before any completion. Examples (see `base/intent_router.py`):
+Code applies **keyword / regex heuristics** before any completion. Optional **`match_patterns`** in each `config/intent_category/<id>.md` frontmatter adds **`re.search`** rules when using the default intent category doc path (or set **`intent_router.intent_category_docs_dir`** / `""` to disable). Examples (see `base/intent_router.py`):
 
 | User message (illustrative) | Preempt category (if in `categories`) |
 |----------------------------|----------------------------------------|
@@ -69,13 +67,9 @@ Code applies **keyword / regex heuristics** before any completion. Examples (see
 | “**images**里有什么图片” | `list_files` |
 | “**Send me** img1.png / **发给我**那个文件” | `get_file_link` |
 
-**2b. `frequent_fast_paths`** — still **no** classifier LLM.
+**2b. Classifier completion** — **one** short LLM call.
 
-YAML list of `{ category, patterns: [regex] }`. If `re.search` matches and the category exists in `categories`, return that category immediately.
-
-**2c. Classifier completion** — **one** short LLM call.
-
-Runs only if preempts and `frequent_fast_paths` did not return a category.
+Runs only if earlier steps (preempts, and semantic when enabled) did not return a category.
 
 - **`router_llm`** (optional): if set to a model ref string, that ref is passed as `llm_name` to the completion helper for **this call only**. If omitted/null, the router uses the **same default completion path** as the main model (not a separate tiny model unless you configure one).
 - **`timeout_seconds`**: caps wait; on timeout → **`general_chat`** (safe default).
@@ -90,13 +84,9 @@ Example:
 
 ---
 
-### Step C — Shortcut (no main LLM)
+### Step C — Identity / capabilities
 
-If the resolved category includes **`general_chat`** and **`identity_capabilities_shortcut`** is enabled, phrases like “what can you do?” can be answered from **IDENTITY / TOOLS** without calling the main model.
-
-| User message | Result |
-|--------------|--------|
-| “What can you do?” (matches shortcut rules) | **Instant** templated reply |
+“Who are you?”, “what can you do?”, etc. map to category **`identity_capabilities`** (`config/intent_category/identity_capabilities.md`). The **main LLM** responds; **IDENTITY.md** and **TOOLS.md** are in the workspace system prefix as usual.
 
 ---
 
@@ -138,7 +128,7 @@ Goal: **as few blocking steps as possible** per message, and **fail fast** inste
 
 | Step | Cost | Mitigations |
 |------|------|-------------|
-| Intent router classifier | **1 completion** when preempts / `frequent_fast_paths` miss | Add preempts or regex fast paths for common intents; tune **`timeout_seconds`** (e.g. 8–15s) so a stuck router falls back to `general_chat` quickly (**trade-off**: routing quality vs speed). |
+| Intent router classifier | **1 completion** when preempts (and semantic, if enabled) miss | Add code preempts or use **`intent_router.mode: semantic`** for category docs; tune **`timeout_seconds`** (e.g. 8–15s) so a stuck router falls back to `general_chat` quickly (**trade-off**: routing quality vs speed). |
 | Planner | **1 completion** when planner is on and **no DAG** applies | Use **`skip_planner_for_categories`** for chit-chat and stable intents; define **DAGs** for fixed chains. |
 | ReAct loop | **1 main LLM call per round** + tool time | **Narrow `category_tools`**; prefer **DAG** over “model figures out the chain”; keep **`max_tool_rounds`** reasonable (safety vs stall). |
 
@@ -150,7 +140,6 @@ Optional: set **`intent_router.router_llm`** to a **small, fast** local/cloud re
 
 **3. Skip work entirely when possible**
 
-- **`identity_capabilities_shortcut`**: greetings / capability questions → **no main LLM**.
 - **DAG success**: **no** planner and often **minimal** reasoning before tools.
 - **`run_skill_direct_return_*`**: avoid an extra synthesis pass when output is already display-ready.
 
@@ -202,11 +191,6 @@ Embedding / model **health waits** affect **first** interaction more than steady
 2. DAG runs **`run_skill`** only (**0** planner calls).
 3. Skill output returned directly (**0** extra synthesis LLM calls).
 
-### Fast: shortcut only
-
-1. Intent router → **`general_chat`** (or preempt).
-2. **`identity_capabilities_shortcut`** matches → return canned text (**0** main LLM calls).
-
 ### Slower: full router + planner + multi-round ReAct
 
 1. **1×** router classifier (no preempt).
@@ -219,9 +203,18 @@ Embedding / model **health waits** affect **first** interaction more than steady
 
 | Area | Keys / files |
 |------|----------------|
-| Intent router | `config/skills_and_plugins.yml` → `intent_router` (`enabled`, `categories`, `timeout_seconds`, `router_llm`, `frequent_fast_paths`, `category_tools`, …) |
+| Intent router | `config/skills_and_plugins.yml` → `intent_router` (`enabled`, `intent_category_docs_dir`, `timeout_seconds`, `router_llm`, `mode`, `semantic`, optional YAML overrides, …) |
 | Planner / DAG | `planner_executor` (`enabled`, `skip_planner_for_categories`, `flows`) |
 | Mix routing | `config/llm.yml` → `main_llm_mode`, `hybrid_router`, `main_llm_local`, `main_llm_cloud` |
-| Shortcut | `identity_capabilities_shortcut` (see `core.yml` / merged metadata) |
 
 For mix-mode **local vs cloud** selection details, see the hybrid router section in `core/llm_loop.py` and `docs_design/LlmConfigCloudAndMixModeReview.md`.
+
+---
+
+## 6. Taxonomy maintenance notes
+
+- Prefer **high-precision** preempt/pattern cues for delivery verbs such as `发给我` only when combined with **file-like evidence** (path/filename/extension). This avoids misrouting news/web asks into `get_file_link`.
+- Keep **mutual boundaries** between confusing pairs (both sides): `get_file_link` vs `search_web/news_digest`, `list_files` vs `coding`, `read_document` vs `summarize_to_page/generate_pdf`.
+- For multilingual traffic, include **Chinese + English + mixed** examples in each category doc; short Chinese requests are otherwise easy to collapse into broad categories in semantic mode.
+- Use `match_patterns` sparingly: add only patterns with strong intent precision. Broad regex on common verbs can create deterministic false positives that override semantic/classifier logic.
+- After category-doc updates, refresh intent category vectors (`/api/intent-category/sync-vector-store` or startup refresh) before evaluating semantic routing quality.

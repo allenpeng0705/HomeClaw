@@ -39,6 +39,26 @@ def test_log_helpers_truncate():
     assert _truncate_for_log(None) == ""
 
 
+def test_format_json_for_user_web_search_results_not_python_repr():
+    """web_search JSON must become Markdown bullets, not `- **results:**` + repr(list)."""
+    import json
+
+    from core.log_helpers import format_json_for_user
+
+    payload = {
+        "results": [
+            {"title": "Example", "url": "https://example.com/a", "description": "Short snippet."},
+        ],
+        "provider": "tavily",
+    }
+    out = format_json_for_user(json.dumps(payload, ensure_ascii=False))
+    assert out is not None
+    assert "## 搜索结果" in out
+    assert "[Example](https://example.com/a)" in out
+    assert "Short snippet" in out
+    assert "- **results:**" not in out
+
+
 def test_log_helpers_strip_route_label():
     """_strip_leading_route_label removes [Local]/[Cloud] prefix."""
     from core.log_helpers import _strip_leading_route_label

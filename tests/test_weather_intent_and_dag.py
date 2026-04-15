@@ -25,6 +25,7 @@ async def test_intent_router_weather_preempt_no_llm():
 
     cfg = {
         "enabled": True,
+        "intent_category_docs_dir": "",
         "categories": ["weather", "general_chat"],
         "category_descriptions": {},
     }

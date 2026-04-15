@@ -6,6 +6,83 @@ HomeClaw uses VMPrint as a **document UI runtime**: AST in, **canvas or PDF** ou
 - **flat box output as scene graph**
 - **PDF / SVG / canvas as renderer targets** (not “HTML print CSS + hope”)
 
+## Manual installation for HomeClaw
+
+HomeClaw expects a **checkout of the upstream VMPrint monorepo** (not a random fork unless you know the layout matches). The default location is **`tools/vmprint`** under the HomeClaw repo root; **`markdown_to_pdf`** / **`vmprint_render`** / **`magazine-render`** resolve that path unless you override it (see below).
+
+### Prerequisites
+
+- **Node.js** and **npm** on your PATH (LTS recommended; match whatever the upstream `package.json` engines field expects if present).
+- **git** (to clone), or download a GitHub ZIP and fix the folder name (next step).
+
+### 1. Put the repo at `tools/vmprint`
+
+From the HomeClaw project root:
+
+```bash
+mkdir -p tools
+git clone --depth 1 https://github.com/cosmiciron/vmprint.git tools/vmprint
+```
+
+If you unpacked a **ZIP** from GitHub, the folder is often named **`vmprint-main`**. Rename it so the path is exactly **`tools/vmprint`** (same as `install.sh` / `install.ps1`):
+
+```bash
+mv tools/vmprint-main tools/vmprint
+```
+
+### 2. Install dependencies and build workspaces
+
+```bash
+cd tools/vmprint
+npm install
+npm run build
+```
+
+The root **`npm run build`** builds the **contracts**, **engine**, and **cli** workspaces in order (see `tools/vmprint/package.json`). That produces at least:
+
+- **`engine/dist/index.js`** — used by Node-side preview and layout paths in HomeClaw.
+- **`cli/dist/index.js`** — VMPrint CLI for PDF / `--emit-layout` / AST input.
+
+### 3. Packages required for **magazine / `browser_preview_html`** (canvas SVG)
+
+HomeClaw’s **hybrid browser preview** (magazine skill, `vmprint_render` with `browser_preview_html`) loads **`@vmprint/context-canvas`** and **`@vmprint/standard-fonts`** from **`tools/vmprint/node_modules`** (see `skills/magazine-render-1.0.0/scripts/render_magazine.py` and `tools/builtin.py`). The upstream root `package.json` already lists **`@vmprint/context-canvas`** as a dependency and **`@vmprint/standard-fonts`** as a devDependency, so a normal **`npm install`** at the repo root should install both.
+
+Quick checks (from `tools/vmprint`):
+
+```bash
+test -f engine/dist/index.js && echo "engine OK"
+test -f node_modules/@vmprint/context-canvas/package.json && echo "context-canvas OK"
+test -f node_modules/@vmprint/standard-fonts/package.json && echo "standard-fonts OK"
+node cli/dist/index.js --help
+```
+
+If **`context-canvas`** or **`standard-fonts`** is missing, run **`npm install`** again at the repo root (not only inside `engine/`). If **`engine/dist`** is missing, run **`npm run build`** again.
+
+### 4. Point HomeClaw at your tree (config and env)
+
+- **`config/core.yml`** (or merged config): under **`tools.markdown_to_pdf`**, set **`vmprint_dir`** to a path **relative to the HomeClaw repo root** (default **`tools/vmprint`**) or an **absolute** path if you keep the clone elsewhere.
+
+- **Optional environment variables** (same shell as Core, or your process manager):
+
+  | Variable | Purpose |
+  |----------|---------|
+  | **`HOMECLAW_VMPRINT_ROOT`** or **`VMPRINT_ROOT`** | Absolute path to a VMPrint clone when it is **not** under the default `tools/vmprint` discovery rules. |
+  | **`HOMECLAW_VMPRINT_CLI`** or **`VMPRINT_CLI`** | Absolute path to **`cli/dist/index.js`** if you want to bypass directory discovery. |
+  | **`HOMECLAW_VMPRINT_EMBED_LAYOUT_MAX_CHARS`** | Caps embedded `layout.json` in preview HTML (magazine path). |
+  | **`HOMECLAW_VMPRINT_INLINE_MAX_AST_CHARS`** / **`HOMECLAW_VMPRINT_INLINE_MAX_PAGES`** | Magazine-render inline preview hints. |
+
+Restart **Core** after changing **`vmprint_dir`** or env vars.
+
+### 5. Installers vs manual
+
+**`install.sh`**, **`install.ps1`**, and **`install.bat`** automate the same clone + **`npm install`** + **`npm run build`** flow and can **re-run `npm install` / `npm run build`** when `engine/dist` or **`@vmprint/*`** packages are missing (see installer “Step 4b”). Use manual steps above when you install on an air-gapped machine, use a fork, or need to debug a broken `node_modules`.
+
+### Troubleshooting
+
+- **`Module not found`** for **`@vmprint/context-canvas`** in Node preview: run **`npm install`** at **`tools/vmprint`** root; confirm **`node_modules/@vmprint/context-canvas`** exists.
+- **CLI `fileURLToPath` / `import_meta` errors** after rebuilding only **`cli`**: see the section **“VMPrint `cli/dist/index.js` and `ERR_INVALID_ARG_TYPE`”** later in this document.
+- **After `git pull` in `tools/vmprint`**: run **`npm install && npm run build`** again so workspaces and **`node_modules`** stay aligned with upstream.
+
 ## Why this model
 
 VMPrint describes a deterministic simulation engine with flat `Page[] -> Box[]` output, source traceability, and optional **post-settlement scripting** (e.g. real page counts in footers), not a one-shot formatter:

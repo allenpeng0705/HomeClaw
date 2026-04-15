@@ -16,13 +16,19 @@ _CATS = [
     "memory",
     "knowledge_base",
     "read_document",
+    "identity_capabilities",
     "coding",
 ]
 
 
 @pytest.fixture
 def cfg():
-    return {"enabled": True, "categories": _CATS, "category_descriptions": {}}
+    return {
+        "enabled": True,
+        "intent_category_docs_dir": "",
+        "categories": _CATS,
+        "category_descriptions": {},
+    }
 
 
 @pytest.mark.asyncio
@@ -64,6 +70,15 @@ async def test_preempt_schedule_remind(cfg):
         raise AssertionError("classifier LLM must not run")
 
     assert await route("提醒我明天9点开会", cfg, _no_llm) == "schedule_remind"
+
+
+@pytest.mark.asyncio
+async def test_preempt_identity_capabilities(cfg):
+    async def _no_llm(*_a, **_k):
+        raise AssertionError("classifier LLM must not run")
+
+    assert await route("what can you do?", cfg, _no_llm) == "identity_capabilities"
+    assert await route("你是谁", cfg, _no_llm) == "identity_capabilities"
 
 
 @pytest.mark.asyncio

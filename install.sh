@@ -3,7 +3,7 @@
 # Run from project root (existing clone) or from a parent directory (script will clone).
 # Do NOT use sudo. Run as your normal user:   bash install.sh   (or   chmod +x install.sh   then   ./install.sh).
 # If you see "Permission denied", use   bash install.sh   — it does not require the file to be executable.
-# Steps: Python (3.9+) -> Node.js -> tsx -> ClawHub -> [clone if needed] -> optional Dev CLIs + bundled memex npm ci -> VMPrint -> pip install -> Cognee deps (cognee in vendor/) -> document stack -> MemOS (vendor/memos) -> llama.cpp -> GGUF/Ollama -> open Portal.
+# Steps: Python (3.9+) -> Node.js -> tsx -> ClawHub -> [clone if needed] -> optional Dev CLIs + bundled memex npm ci -> VMPrint (PDF + AST preview) -> pip install -> Cognee deps (cognee in vendor/) -> document stack -> MemOS (vendor/memos) -> llama.cpp -> GGUF/Ollama -> open Portal.
 
 set -e
 REPO_URL="${HOMECLAW_REPO_URL:-https://github.com/allenpeng0705/HomeClaw.git}"
@@ -322,9 +322,11 @@ fi
 # ----- Step 3: already done if IN_REPO -----
 # (clone was done above if needed)
 
-# ----- Step 4b: VMPrint (Markdown → PDF tool) -----
+# ----- Step 4b: VMPrint (Markdown→PDF + magazine / AST browser preview) -----
 echo ""
-echo "=== Step 4b: VMPrint (Markdown to PDF) ==="
+echo "=== Step 4b: VMPrint (Markdown to PDF + AST preview) ==="
+echo "    (npm install + npm run build under tools/vmprint; needs @vmprint/context-canvas + standard-fonts for preview.)"
+echo "    Optional: HOMECLAW_VMPRINT_ROOT=/path/to/vmprint if the repo lives outside tools/vmprint."
 VMPRINT_DIR="$ROOT/tools/vmprint"
 VMPRINT_MAIN="$ROOT/tools/vmprint-main"
 # If user downloaded GitHub ZIP, folder is vmprint-main; rename to vmprint so config path works
@@ -332,9 +334,19 @@ if [ -d "$VMPRINT_MAIN" ] && [ ! -d "$VMPRINT_DIR" ]; then
   echo "Renaming tools/vmprint-main to tools/vmprint ..."
   mv "$VMPRINT_MAIN" "$VMPRINT_DIR" 2>/dev/null || { echo "Warning: could not rename vmprint-main to vmprint (e.g. permission). You can rename manually."; true; }
 fi
-# Monorepo (cli/ + package.json) or legacy tree with draft2final/; Markdown→PDF uses npm package draft2final.
+# Monorepo (cli/ + package.json) or legacy tree with draft2final/; Markdown→PDF uses draft2final; AST preview uses engine + @vmprint/*.
 if [ -f "$VMPRINT_DIR/package.json" ] && { [ -d "$VMPRINT_DIR/draft2final" ] || [ -d "$VMPRINT_DIR/cli" ]; }; then
   echo "OK: VMPrint already at tools/vmprint"
+  _vmprint_need_build=0
+  if [ ! -f "$VMPRINT_DIR/engine/dist/index.js" ]; then _vmprint_need_build=1; fi
+  if [ ! -f "$VMPRINT_DIR/node_modules/@vmprint/context-canvas/package.json" ]; then _vmprint_need_build=1; fi
+  if [ ! -f "$VMPRINT_DIR/node_modules/@vmprint/standard-fonts/package.json" ]; then _vmprint_need_build=1; fi
+  if [ "$_vmprint_need_build" = 1 ] && command -v npm >/dev/null 2>&1; then
+    echo "VMPrint engine or @vmprint preview packages missing; running npm install && npm run build ..."
+    (cd "$VMPRINT_DIR" && npm install --silent && npm run build 2>/dev/null) || echo "Warning: VMPrint refresh failed. Retry: cd $VMPRINT_DIR && npm install && npm run build"
+  elif [ "$_vmprint_need_build" = 1 ]; then
+    echo "VMPrint needs npm install/build but npm was not found. Install Node from https://nodejs.org then: cd $VMPRINT_DIR && npm install && npm run build"
+  fi
 else
   if command -v git >/dev/null 2>&1; then
     mkdir -p "$ROOT/tools"
@@ -342,7 +354,7 @@ else
       echo "Updating VMPrint at tools/vmprint ..."
       (cd "$VMPRINT_DIR" && git pull --quiet 2>/dev/null || true)
     else
-      echo "Cloning VMPrint from GitHub into tools/vmprint (optional Markdown-to-PDF tool)..."
+      echo "Cloning VMPrint from GitHub into tools/vmprint (Markdown/PDF + AST browser preview)..."
       git clone --progress --depth 1 https://github.com/cosmiciron/vmprint.git "$VMPRINT_DIR" 2>&1 || true
     fi
     if [ -f "$VMPRINT_DIR/package.json" ] && command -v npm >/dev/null 2>&1; then
@@ -352,6 +364,11 @@ else
         echo "Building VMPrint workspace (ordered dependency build) ..."
         (cd "$VMPRINT_DIR" && npm run build 2>/dev/null) || true
         echo "OK: VMPrint installed at tools/vmprint"
+        if [ -f "$VMPRINT_DIR/engine/dist/index.js" ] && [ -f "$VMPRINT_DIR/node_modules/@vmprint/context-canvas/package.json" ] && [ -f "$VMPRINT_DIR/node_modules/@vmprint/standard-fonts/package.json" ]; then
+          echo "    Verified: engine/dist + @vmprint/context-canvas + @vmprint/standard-fonts (magazine browser_preview_html)."
+        else
+          echo "    Warning: build finished but engine/dist or @vmprint packages look incomplete; run: cd $VMPRINT_DIR && npm install && npm run build"
+        fi
       else
         echo "VMPrint clone present; run manually: cd $VMPRINT_DIR && npm install"
       fi

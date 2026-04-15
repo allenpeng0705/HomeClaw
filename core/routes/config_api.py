@@ -25,7 +25,7 @@ CONFIG_CORE_WHITELIST = frozenset({
     "use_daily_memory", "daily_memory_dir", "session", "notify_unknown_request", "outbound_markdown_format",
     "llm_max_concurrent_local", "llm_max_concurrent_cloud", "compaction", "use_tools",     "use_skills", "skills_dir", "external_skills_dir", "clawhub_download_dir", "clawhub_token",
     "skills_max_in_prompt", "plugins_max_in_prompt",
-    "plugins_description_max_chars", "skills_use_vector_search", "skills_vector_collection",
+    "plugins_description_max_chars", "skills_router", "skills_vector_collection",
     "skills_max_retrieved", "skills_similarity_threshold", "skills_refresh_on_startup", "skills_test_dir",
     "skills_incremental_sync", "plugins_use_vector_search", "plugins_vector_collection",
     "plugins_max_retrieved", "plugins_similarity_threshold", "plugins_refresh_on_startup",
@@ -49,7 +49,7 @@ CONFIG_CORE_WHITELIST = frozenset({
 CONFIG_CORE_BOOL_KEYS = frozenset({
     "silent", "use_memory", "auth_enabled", "use_tools", "use_skills",
     "use_workspace_bootstrap", "use_agent_memory_file", "use_agent_memory_search", "use_daily_memory", "memory_check_before_add",
-    "use_prompt_manager", "system_plugins_auto_start", "skills_use_vector_search", "skills_refresh_on_startup",
+    "use_prompt_manager", "system_plugins_auto_start", "skills_refresh_on_startup",
     "skills_incremental_sync", "plugins_use_vector_search", "plugins_refresh_on_startup",
     "orchestrator_unified_with_tools",
     "peer_pairing_enabled", "federation_enabled", "peer_call_enabled",

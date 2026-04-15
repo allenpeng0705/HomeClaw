@@ -31,9 +31,10 @@ WHITELIST_MEMORY_KB = frozenset({
 })
 WHITELIST_SKILLS_PLUGINS = frozenset({
     "plugins_description_max_chars",
-    "skills_use_vector_search", "skills_vector_collection", "skills_max_retrieved",
+    "skills_router", "skills_vector_collection", "skills_max_retrieved",
     "skills_max_in_prompt", "skills_similarity_threshold", "skills_refresh_on_startup",
     "skills_test_dir", "skills_incremental_sync", "skills_include_body_for",
+    "skills_use_path_only", "skills_use_location_only",
     "skills_force_include_rules",
     "plugins_use_vector_search", "plugins_vector_collection", "plugins_max_retrieved",
     "plugins_max_in_prompt", "plugins_similarity_threshold", "plugins_refresh_on_startup",

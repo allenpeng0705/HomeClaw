@@ -6,6 +6,12 @@
 # Path is relative to the directory containing core.yml (config/).
 # Only keys listed below are read; they override or supply values merged into
 # the main config. Edit this file for all LLM/model settings.
+#
+# Intent router (query → category → narrow tools/skills) is NOT configured here.
+# Set intent_router in config/skills_and_plugins.yml and category docs in config/intent_category/*.md
+# (e.g. identity_capabilities.md for “who are you” / “what can you do?”). See docs/intent_router_flow.md.
+# mode: static | semantic | hybrid — semantic/hybrid embed those docs for similarity routing.
+# Optional intent_router.router_llm must match a ref here, e.g. local_models/classifier_0_6b.
 # =============================================================================
 
 # ——— 1. llama.cpp server settings (for local models) ———
@@ -361,6 +367,20 @@ local_models:
     port: 5032
     capabilities: [Chat]
 
+  - id: Reranker-0.6B-Q5_K_M
+    alias: Reranker-0.6B-Q5_K_M
+    path: qwen3-reranker-0.6b-q8_0.gguf
+    host: 127.0.0.1
+    port: 5077
+    capabilities: [Chat]  
+
+  - id: sr_0.6b_q5_k_m
+    alias: sr_0.6b_q5_k_m
+    path: sr_0.6b_q5_k_m.gguf
+    host: 127.0.0.1
+    port: 5077
+    capabilities: [Chat]  
+
 # Ollama (local): type: ollama, path = Ollama model name (e.g. qwen2.5:7b). Core does not start a process; ensure Ollama server is running (default 127.0.0.1:11434). See docs_design/OllamaAsLocalModelAndCLI.md.
   - id: Ollama-qwen2
     type: ollama
@@ -549,6 +569,10 @@ vision_llm: local_models/main_vl_model_2B
 hybrid_router:
   default_route: local
   show_route_in_response: true
+  # Optional: append intent / skills-in-prompt / tools-exposed / execution path to the reply (debug). Same family as show_route_in_response.
+  # show_routing_debug_in_response: false
+  # With ReAct (tool loop), also list each tool invocation (args redacted like logs):
+  routing_debug_include_react_trace: true
   fallback_on_llm_error: true
   prefer_cloud_if_long_chars: 800
   # Use local for the turn after these tools (read/list done by tool; model only formats or continues).

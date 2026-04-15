@@ -19,75 +19,85 @@
 # When using RAG or plugins_max_in_prompt, this only caps per-item length; set 512 or 300 to shrink prompt.
 plugins_description_max_chars: 0
 
-# --- Skills: vector search (RAG) ---
-# When false (default): include ALL skills in the prompt. When true: create vector store, sync skills_dir, retrieve by query similarity.
-# Kept off by default: RAG for skills often selects wrong skills (cross-lingual, short query). Turn on only when confident. Same policy for tools RAG (when implemented).
-# See docs_design/SkillsAndPluginsSamePolicy.md.
-skills_use_vector_search: false
+# Skills router: mode legacy = load all skills from disk; semantic|hybrid = vector retrieve + rerank (falls back to disk if no index).
+skills_router:
+  enabled: true
+  mode: semantic
+  semantic:
+    enabled: true
+    top_k: 15
+    threshold: 0.5
+    final_top_n: 5
+    rerank_top_n: 20
+    confidence_floor: 0
+    union_trigger_matched_skills: true
+    refresh_on_startup: true
+    # If rerank runs and the top combined score is still below this (0 = disabled), load all skills from disk (like legacy).
+    rerank_fallback_min_combined_score: 0.4
+    reranker:
+      enabled: true
+      model_ref: local_models/Reranker-0.6B-Q5_K_M
+      timeout_seconds: 30
 # OpenClaw-style skill filter: when set, only these skill folder names are in the prompt. Empty = all skills (or RAG result).
 # skills_filter: [html-slides-1.0.0, ppt-generation-1.0.0]
 
 # --- Intent router (Phase 2/3): LLM-based query -> category -> filter tools and skills ---
-# When enabled: one short LLM call classifies the user message; tools (and optionally skills) are filtered by category. No phrase tables — LLM does the classification.
-# Multi-category: if the request needs several types of actions (e.g. search then save), the router may return two comma-separated categories; Core then uses the union of tools/skills from both. DAG: only one flow runs per turn — get_flow_for_categories picks the first category in the router string that has a flow (put the category you want DAG’d first, e.g. list_files, search_web). See docs_design/IntentRouter_CategoriesCoverage.md § Multi-category tasks.
-# Phase 3.1: per category use "skills: [folder1, folder2]" to restrict which skills are in the prompt (skill_name enum then matches). Phase 3.3: verify_tool_selection + verify_tools to optionally verify exec/file_write before execution.
+# When enabled: tools (and optionally skills) are filtered by category. Classification uses code preempts,
+# optional per-category regex (match_patterns in intent_category/*.md), optional vector retrieval over embedded
+# category docs (each enabled *.md is one vector, including identity_capabilities.md), and finally one short
+# classifier LLM call when nothing else decides.
+#
+# mode (see intent_router.mode below):
+#   static  — No vector step. Order: built-in preempts (stocks, list_files, weather, …) → doc match_patterns
+#             → classifier LLM. Use when you have no intent_categories_vector_store or want cheapest routing.
+#   semantic — Vector search runs FIRST (before preempts). Embeds the user query, retrieves similar category
+#             docs from the DB (synced from config/intent_category/*.md), optional lexical + model rerank,
+#             then returns a category if similarity passes semantic.threshold. If no hit: semantic.fail_open_to_static
+#             (default true) falls through to the same preempts + classifier as static; if false, returns general_chat.
+#             Requires Core to have intent_categories_vector_store + embedder (semantic routing enabled in intent_router.semantic).
+#   hybrid — Same as static for the first stage: preempts and doc match_patterns run BEFORE vector search.
+#             If still undecided, vector retrieval runs, then the classifier LLM. Best when you want cheap
+#             deterministic rules to win first, and embeddings only for ambiguous phrasing.
+# Full pipeline: docs/intent_router_flow.md
+#
+# Multi-category: the router may return two comma-separated categories; Core uses the union of tools/skills.
+# DAG: only one flow per turn — get_flow_for_categories uses the first category in the string that has a flow.
+# See docs_design/IntentRouter_CategoriesCoverage.md § Multi-category tasks.
+# Phase 3.1: per category use "skills: [folder1, folder2]" in category_tools. Phase 3.3: verify_tool_selection + verify_tools.
 intent_router:
   enabled: true
+  # mode: static | semantic | hybrid (default: static). Uncomment one:
+  # mode: static
+  mode: hybrid
+  # mode: hybrid
+  #
+  # Semantic / hybrid need intent_router.semantic (enabled: true) and a populated vector store
+  # (POST /api/intent-category/sync-vector-store or semantic.refresh_on_startup at Core start).
+  semantic:
+    enabled: true
+    docs_dir: config/intent_category
+    top_k: 20
+    rerank_top_n: 10
+    threshold: 0.6
+    fail_open_to_static: true   # if false and vector miss: general_chat (semantic mode only)
+    reranker:
+      enabled: true
+      model_ref: local_models/sr_0.6b_q5_k_m
+      # optional host/port override:
+      # host: 127.0.0.1
+      # port: 5033
+      timeout_seconds: 60
   # Faster fallback when the router model stalls (lower = snappier, higher = fewer misroutes on slow local LLMs).
-  timeout_seconds: 15
-  # Optional: LLM name from llm.yml (same as main_llm refs) for classification only — use a small/fast model so routing does not queue behind the main chat model. Omit or null = same as main path (llm_name=None).
+  timeout_seconds: 30
+  # Optional: model ref from llm.yml for the intent classifier only (one short completion per turn when the LLM path runs). Omit or null = use main_llm for routing too.
+  # Example (define local_models/classifier_0_6b under local_models: in llm.yml):
+  #   router_llm: local_models/classifier_0_6b
   # router_llm: null
-  # Full coverage: see docs_design/IntentRouter_CategoriesCoverage.md. Every category has a mapping so router is enough for tools/skills.
-  categories: [search_web, list_files, get_file_link, read_document, create_slides, create_html_slides, generate_pdf, summarize_to_page, send_email, schedule_remind, open_url, memory, knowledge_base, image, weather, news_digest, stock_monitor, general_chat, coding]
-  # Short description per category so the router LLM can classify more accurately. Reply must still be the exact category name.
-  category_descriptions:
-    search_web: "User wants to search the web or look up information online."
-    list_files: "User wants to list, browse, or find files or folders."
-    get_file_link: "User wants to get a view/download link for a specific file (e.g. 'send me that file', '发给我 img1.png')."
-    read_document: "User wants to read, summarize, or understand a specific document or file."
-    summarize_to_page: "User wants a summary of a document as a viewable page (link), not necessarily as PDF."
-    send_email: "User wants to send an email. The assistant will use a contacts list, compose a draft, and ask for confirmation before sending."
-    create_slides: "User wants to create slides, a presentation, or PPT from content (generic; may be HTML or PowerPoint)."
-    create_html_slides: "User wants to create HTML slides or a web-based slide deck from a document (not PowerPoint/PPT)."
-    generate_pdf: "User wants to generate or export a PDF from a document (e.g. summarize to PDF, report to PDF). Markdown is generated first, then converted to PDF."
-    schedule_remind: "User wants to set a reminder, schedule, recurring task, or record a date."
-    open_url: "User wants to open a URL, visit a webpage, or navigate to a link."
-    memory: "User wants to remember something, recall past context, or search memory."
-    knowledge_base: "User wants to search or save something in their knowledge base."
-    image: "User wants to generate, analyze, or describe an image, or to receive/send an image file (e.g. 发给我, send me that image)."
-    weather: "User asks for weather, forecast, or temperature for a place or time (e.g. 北京明天天气, London tomorrow, 气温, 下雨吗)."
-    news_digest: "User wants RSS headlines, daily brief, morning report, or 今日新闻 — not generic open-ended chat."
-    stock_monitor: "User wants watchlist / 自选股 / portfolio quotes, 股票行情, A股港股美股 — stock-monitor skill (not generic news RSS)."
-    general_chat: "General conversation, question, or intent that does not fit a specific category above."
-    coding: "User wants to run code, edit files, use dev tools, or automate something."
-  category_tools:
-    search_web: { profile: minimal }
-    # list_files: include get_file_view_link so "send me that file" / "发给我" can return a view link (path from folder_list/file_find).
-    list_files: { tools: [folder_list, file_find, document_read, get_file_view_link] }
-    # get_file_link: "发给我 img1.png" / "send me that file" — DAG runs get_file_view_link with path from user_message_path (resolved from prior folder_list via path_resolution_context).
-    get_file_link: { tools: [get_file_view_link, folder_list, file_find] }
-    read_document: { tools: [document_read, file_read, file_understand, folder_list, file_find, get_file_view_link] }
-    create_slides: { profile: minimal, skills: [html-slides-1.0.0, ppt-generation-1.0.0] }
-    # create_html_slides: no fixed DAG (skill is instruction-only); allow tools so ReAct can document_read -> run_skill(html-slides) -> save_result_page.
-    create_html_slides: { tools: [document_read, run_skill, save_result_page, file_read, file_understand], skills: [html-slides-1.0.0] }
-    generate_pdf: { tools: [document_read, markdown_to_pdf] }
-    summarize_to_page: { tools: [document_read, save_result_page] }
-    send_email: { tools: [file_read, run_skill], skills: [imap-smtp-email] }
-    schedule_remind: { tools: [remind_me, cron_schedule, cron_list, cron_remove, cron_update, record_date, recorded_events_list, route_to_tam, time] }
-    open_url: { tools: [fetch_url, route_to_plugin, browser_navigate] }
-    memory: { tools: [memory_search, memory_get, agent_memory_search, agent_memory_get, append_agent_memory, append_daily_memory] }
-    knowledge_base: { tools: [knowledge_base_search, knowledge_base_add, knowledge_base_remove, knowledge_base_list] }
-    # Include get_file_view_link so "发给我 img1.png" returns a view link; folder_list/file_find to resolve path if needed.
-    image: { tools: [image, get_file_view_link, folder_list, file_find], skills: [image-generation-1.0.0] }
-    # weather: narrow tools — DAG runs weather skill first; on skill failure Core falls back to ReAct with web_search.
-    weather: { tools: [run_skill, web_search, time], skills: [weather-1.0.0] }
-    # news_digest: DAG runs daily-brief fetch-vmprint; fallback ReAct is still narrow (web_search). magazine-render for optional PDF path stays in prompt via skills list.
-    news_digest: { tools: [run_skill, web_search, time], skills: [daily-brief-1.0.0, magazine-render-1.0.0] }
-    # stock_monitor: DAG runs portfolio table; use ReAct for news/context SYMBOL or magazine-render (web_search for deeper why).
-    stock_monitor: { tools: [run_skill, web_search, time], skills: [stock-monitor-1.0.0, magazine-render-1.0.0] }
-    # general_chat: greetings and open-ended chat; use minimal (time, web_search, folder_list, run_skill, remind_me, route_to_plugin) so "你好" etc. get ~6 tools, not 71.
-    general_chat: { profile: minimal }
-    coding: { profile: coding }
+  # Category ids, classifier blurbs, match_patterns, and category_tools: config/intent_category/<id>.md (YAML frontmatter).
+  # Optional override path; set to "" to disable doc overlay and use only YAML lists below.
+  intent_category_docs_dir: config/intent_category
+  # Optional: sparse overrides if you use doc overlay; per-file category_tools in .md merges over this.
+  # category_tools: {}
   # Optional: include recent chat turns so router can resolve "that document", "it", "the same". Trade-off: helps follow-ups, can dilute current intent. 0 = only current message (default).
   include_recent_turns: 0
   # When include_recent_turns > 0: max chars per message in recent context (default 300).
@@ -99,64 +109,6 @@ intent_router:
   # mislabels queries (e.g. stocks → memory): without run_skill, skills cannot run. See IntentRouter_CategoriesCoverage.md § Fallbacks.
   tools_always_included: [run_skill]
   # Optional extras if you often need save/list across categories: [save_result_page, file_write, folder_list]
-  # Regex fast paths (re.search) → category; skips classifier LLM when matched. Extend as you learn hot phrases.
-  # Inspect usage: database/skill_usage.json or base.skill_usage.top_skill_folders(user_id).
-  frequent_fast_paths:
-    - category: read_document
-      patterns:
-        - "(?i)read\\s+(the\\s+)?file\\s+"
-        - "(?i)show\\s+(me\\s+)?(the\\s+)?(contents?|content)\\s+of\\s+"
-        - "(?i)open\\s+documents?/"
-        - "读一下\\s*documents?/"
-        - "读一下\\s*share/"
-        - "打开\\s*documents?/.*\\.(md|txt|pdf|docx)"
-    - category: summarize_to_page
-      patterns:
-        - "(?i)summarize\\s+documents?/"
-        - "总结\\s*documents?/.*(md|markdown)"
-    - category: list_files
-      patterns:
-        - "(?i)list\\s+files\\s+in\\s+"
-        - "(?i)what'?s\\s+in\\s+(folder|directory)\\s+"
-    - category: stock_monitor
-      patterns:
-        - "(?i)\\bportfolio\\b"
-        - "(?i)\\bwatchlist\\b"
-        - "自选股"
-        - "持仓"
-        - "股票行情"
-
-# --- Identity / capabilities shortcut (no LLM) ---
-# When the user asks "what can you do?" or "你能为我做什么?", reply directly from workspace IDENTITY.md + TOOLS.md. Chatting is detected accurately: when intent_router is enabled, shortcut runs only when the router returns general_chat (chatting intent); then greeting/capabilities phrase+length decide the reply. When intent_router is disabled, phrase+length are checked early (no LLM).
-identity_capabilities_shortcut:
-  enabled: true
-  # Max length (chars, after normalize) for greeting match. Only messages this short can trigger greeting_reply. 0 = no limit.
-  greeting_max_length: 20
-  # Max length (chars, after normalize) for capabilities match. Only messages this short can return identity+TOOLS.md. 0 = no limit.
-  capabilities_max_length: 600
-  # Greeting: exact match after normalize (strip + trim trailing punctuation). If the user message equals one of these, reply with greeting_reply and skip the LLM.
-  greeting_phrases:
-    - "你好"
-    - "您好"
-    - "hello"
-    - "hi"
-    - "hey"
-    - "嗨"
-  # Reply for greeting_phrases. If empty, a default bilingual greeting is used.
-  greeting_reply: ""
-  # Substring match (case-insensitive for ASCII). If the user message contains any phrase, return identity + capabilities from workspace.
-  match_phrases:
-    - "你能为我做什么"
-    - "你能做什么"
-    - "你能帮我做什么"
-    - "你有什么功能"
-    - "介绍你自己"
-    - "你是谁"
-    - "what can you do"
-    - "what can you do for me"
-    - "who are you"
-    - "what are your capabilities"
-    - "introduce yourself"
 
 # --- Planner–Executor (optional): plan once → execute steps; fallback to ReAct on failure. See docs_design/PlannerExecutorAndDAG.md. ---
 # When enabled: use planner for all intents except skip_planner_for_categories. Implemented step-by-step; set enabled: true when planner + executor are ready.
@@ -165,7 +117,9 @@ planner_executor:
   enabled: true
   # Skip the planner LLM for intents that use a DAG and/or narrow ReAct; keeps latency down. coding omitted so dev-style turns can use the planner when no DAG applies (Cursor/Claude Code use Companion preset chats + bridge, not this path).
   skip_planner_for_categories:
+    - greeting
     - general_chat
+    - identity_capabilities
     - weather
     - search_web
     - list_files
@@ -297,20 +251,20 @@ planner_executor:
           append: "\n\n---\nReply **send** to send this email, or **cancel** to discard."
 
 skills_vector_collection: homeclaw_skills   # Chroma collection name (default: homeclaw_skills)
-skills_max_retrieved: 10                     # When using vector search: max skills from RAG before threshold + cap (default: 10)
-skills_max_in_prompt: 5                      # When skills_use_vector_search=true: cap skills in prompt (default: 5); ignored when false
+skills_max_retrieved: 10                     # Legacy compatibility fallback; semantic router uses skills_router.semantic.top_k
+skills_max_in_prompt: 5                      # Used when skills_router.mode is legacy only; semantic/hybrid uses skills_router.semantic.final_top_n (no second trim)
 # Min similarity (0..1) to keep a skill; below this, RAG drops it. 0.5 helps cross-lingual/short queries (e.g. Chinese "创建图片").
 # Code default is 0.0; 0.3–0.5 improves selection for mixed-language prompts.
 skills_similarity_threshold: 0.5
-skills_refresh_on_startup: true              # When skills_use_vector_search: resync skills_dir → vector DB on Core startup (default: true)
+skills_refresh_on_startup: true              # Legacy compatibility fallback; prefer skills_router.semantic.refresh_on_startup
 skills_test_dir: ""                          # Optional: test folder for full sync every time (id = test__<folder>); default ""
 skills_incremental_sync: false               # When true: only process skill folders not already in vector store (default: false)
 
 # --- Skills: body in prompt ---
 # When true (OpenClaw-style): inject only name, description, and location (skill:<folder>) into the prompt; the model reads SKILL.md on demand via file_read(path='skill:<folder>'). Reduces context tokens; set to true to save tokens.
 # When false (default): inject name, description, keywords, and optionally body; model infers script/args from the text.
-skills_use_location_only: false
-# For these skill folders only (when skills_use_location_only is false), include SKILL.md body (and USAGE.md) in the prompt so the model can answer "how do I use this?" and follow the workflow (e.g. Finder uses html-slides and ppt-generation to complete tasks).
+skills_use_path_only: false
+# For these folders only (when skills_use_path_only is false), include SKILL.md body in the prompt. Deprecated alias: skills_use_location_only.
 # Set skills_include_body_max_chars > 0 (e.g. 8000) in core.yml or below to cap body length; 0 = no truncation (default).
 skills_include_body_for: [maton-api-gateway-1.0.0, x-api-1.0.0, meta-social-1.0.0, html-slides-1.0.0, ppt-generation-1.0.0]
 
@@ -575,7 +529,7 @@ tools:
   response_plaintext_max_chars: 400
   response_markdown_ok_max_chars: 1000
   # Long daily-brief / web_search: "markdown" (default, inline Markdown; no auto VMPrint after daily-brief) | "vmprint" (AST/HTML preview chains).
-  long_document_output: markdown
+  long_document_output: vmprint
   # Timeout (seconds) for tool-decision LLM turns (calls that should emit tool_calls). 0 = disabled. Lower = fail fast; raise if local model needs more time per turn.
   tool_decision_timeout_seconds: 120
   # In mix/cloud modes only: if run_skill succeeds for these skills, return tool result directly
@@ -637,9 +591,9 @@ tools:
   # interactive_idle_ttl_sec: 1800
   # Allowed commands for interactive_start. Empty or omitted = use exec_allowlist. List of regex patterns (e.g. ["bash", "powershell", "sh", "cmd"]).
   # interactive_allowed_commands: []
-  # markdown_to_pdf: VMPrint (github.com/cosmiciron/vmprint). install.sh/install.ps1 clone to tools/vmprint; if you installed manually as tools/vm_print, set vmprint_dir to "tools/vm_print" (or use absolute path).
+  # markdown_to_pdf: VMPrint (github.com/cosmiciron/vmprint). install.sh / install.ps1 clone to tools/vmprint and run npm install + npm run build. Manual steps: docs/vmprint-ui-runtime.md#manual-installation-for-homeclaw. If the clone lives elsewhere, set vmprint_dir (relative to repo root or absolute).
   markdown_to_pdf:
-    vmprint_dir: "tools/vmprint"   # or "tools/vm_print"; run npm install (pulls draft2final for Markdown→PDF) + npm run build
+    vmprint_dir: "tools/vmprint"   # npm install + npm run build at that path; see doc for @vmprint/context-canvas / standard-fonts (magazine preview)
   exec_timeout: 120   # seconds
   # Max characters returned by file_read when the tool does not pass max_chars. Increase for long PDFs/documents.
   file_read_max_chars: 5000000

@@ -1,0 +1,23 @@
+{
+  "as_of": "2026-04-15T12:00:00",
+  "items": [
+    {
+      "title": "Demo: chrome template + dynamic items",
+      "feed": "homeclaw.demo",
+      "summary": "This preview uses --chrome-template to overlay layout/styles from daily_brief_magazine_chrome_v1.json. Story blocks still come from your JSON items.",
+      "link": "https://example.com/demo-lead"
+    },
+    {
+      "title": "Second story in sidebar",
+      "feed": "rss.example",
+      "summary": "Sidebar and more-headlines sections grow with item count (within built-in caps).",
+      "link": "https://example.com/demo-2"
+    },
+    {
+      "title": "Third item",
+      "feed": "wire.service",
+      "summary": "Short blurb for list styling.",
+      "link": "https://example.com/demo-3"
+    }
+  ]
+}

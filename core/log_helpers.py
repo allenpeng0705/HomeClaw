@@ -5,11 +5,157 @@ No dependency on core.core; safe to import from core. Never raises; defensive.
 import json
 import logging
 import re
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
 from base.util import Util
+
+
+def strip_routing_debug_footer_for_memory(text: Optional[str]) -> str:
+    """
+    Remove the optional HomeClaw routing debug footer from assistant text before memory/embeddings.
+    Never raises.
+    """
+    if not text or not isinstance(text, str):
+        return text or ""
+    try:
+        _full = "\n\n---\n**[HomeClaw routing debug]**"
+        idx = text.find(_full)
+        if idx >= 0:
+            return text[:idx].rstrip()
+    except Exception:
+        pass
+    return text
+
+
+def format_routing_debug_response_suffix(
+    *,
+    intent_enabled: bool,
+    categories: Optional[List[str]],
+    skills_folders: Optional[List[str]],
+    skills_note: str,
+    llm_exposed_tool_names: Optional[List[str]],
+    execution_path: str,
+    main_llm_mode: str,
+    mix_route: Optional[str],
+    mix_layer: Optional[str],
+    effective_model: Optional[str],
+    react_trace: Optional[List[Dict[str, Any]]],
+    include_react_trace: bool,
+    max_tool_names: int = 40,
+    max_react_lines: int = 80,
+) -> str:
+    """
+    Markdown footer appended to the user-visible reply when hybrid_router.show_routing_debug_in_response is true.
+    Never raises; returns "" on error.
+    """
+    try:
+        lines: List[str] = []
+        lines.append("---")
+        lines.append("**[HomeClaw routing debug]**")
+        if not intent_enabled:
+            lines.append("- **Intent:** (router disabled)")
+        elif categories:
+            lines.append("- **Intent:** " + ", ".join(str(c).strip() for c in categories if (c or "").strip()) or "(no category)")
+        else:
+            lines.append("- **Intent:** (no category)")
+        _sf = [str(f).strip() for f in (skills_folders or []) if f and str(f).strip()]
+        if _sf:
+            _shown = _sf[:max_tool_names]
+            _extra = f" … (+{len(_sf) - len(_shown)} more)" if len(_sf) > len(_shown) else ""
+            lines.append(f"- **Skills in prompt:** {', '.join(_shown)}{_extra}")
+        else:
+            lines.append("- **Skills in prompt:** (none)")
+        sn = (skills_note or "").strip()
+        if sn:
+            lines.append(f"- **Skills router note:** {sn}")
+        _tn = [str(n).strip() for n in (llm_exposed_tool_names or []) if n and str(n).strip()]
+        if _tn:
+            _shown_t = _tn[:max_tool_names]
+            _extra_t = f" … (+{len(_tn) - len(_shown_t)} more)" if len(_tn) > len(_shown_t) else ""
+            lines.append(f"- **Tools exposed to LLM:** {', '.join(_shown_t)}{_extra_t}")
+        else:
+            lines.append("- **Tools exposed to LLM:** (none)")
+        lines.append(f"- **Execution path:** {(execution_path or 'unknown').strip()}")
+        lines.append(f"- **main_llm_mode:** {(main_llm_mode or '').strip() or '(unset)'}")
+        if mix_route:
+            _lay = f" · {mix_layer}" if (mix_layer or "").strip() else ""
+            lines.append(f"- **Mix route (this turn):** {mix_route}{_lay}")
+        if (effective_model or "").strip():
+            lines.append(f"- **Effective model:** {(effective_model or '').strip()}")
+        if include_react_trace and execution_path.strip().lower() == "react":
+            lines.append("- **ReAct trace** (tool rounds; args redacted like logs):")
+            _rt = react_trace or []
+            if _rt:
+                for row in _rt[:max_react_lines]:
+                    if not isinstance(row, dict):
+                        continue
+                    _r = row.get("react_round")
+                    _tool = row.get("tool") or "?"
+                    _llm = row.get("llm") or ""
+                    _ap = row.get("args_preview") or ""
+                    lines.append(f"  - round {_r} · `{_tool}` · llm=`{_llm}` · {_ap}")
+                if len(_rt) > max_react_lines:
+                    lines.append(f"  - … (+{len(_rt) - max_react_lines} more)")
+            else:
+                lines.append("  - (no tool executions recorded this turn)")
+        lines.append("")
+        lines.append("*(Debug footer: set `hybrid_router.show_routing_debug_in_response: false` in config/llm.yml to hide.)*")
+        return "\n\n" + "\n".join(lines) + "\n"
+    except Exception:
+        return ""
+
+
+def log_routing_selection_summary(
+    *,
+    intent_enabled: bool,
+    categories: Optional[List[str]],
+    skills_folders: Optional[List[str]],
+    skills_note: str,
+    tool_names: Optional[List[str]],
+    max_names_per_line: int = 36,
+) -> None:
+    """
+    One-line summary for intent category, skills in prompt, and tools exposed to the LLM.
+    Respects core silent: false in core.yml (same as _component_log).
+    """
+    try:
+        if Util().is_silent():
+            return
+    except Exception:
+        return
+    try:
+        if not intent_enabled:
+            cat_s = "(intent router disabled)"
+        elif categories:
+            cat_s = ", ".join(str(c).strip() for c in categories if (c or "").strip()) or "(no category)"
+        else:
+            cat_s = "(no category)"
+        _sf = [str(f).strip() for f in (skills_folders or []) if f and str(f).strip()]
+        if _sf:
+            _shown = _sf[:max_names_per_line]
+            sk = ", ".join(_shown)
+            if len(_sf) > max_names_per_line:
+                sk += f" … (+{len(_sf) - max_names_per_line} more)"
+            sk_part = f"{len(_sf)} skill(s): {sk}"
+        else:
+            sk_part = "0 skill(s)"
+        sn = (skills_note or "").strip()
+        if sn:
+            sk_part = f"{sk_part} | {sn}"
+        _tn = [str(n).strip() for n in (tool_names or []) if n and str(n).strip()]
+        if _tn:
+            _tshown = _tn[:max_names_per_line]
+            tl = ", ".join(_tshown)
+            if len(_tn) > max_names_per_line:
+                tl += f" … (+{len(_tn) - max_names_per_line} more)"
+            tools_part = f"{len(_tn)} tool(s): {tl}"
+        else:
+            tools_part = "0 tools"
+        logger.info("[routing] intent: {} | skills: {} | tools: {}", cat_s, sk_part, tools_part)
+    except Exception:
+        pass
 
 
 def _component_log(component: str, message: str) -> None:
@@ -145,7 +291,15 @@ def format_web_search_result(raw: str) -> Optional[str]:
                 url = str(e.get("url") or "").strip()
                 desc = str(e.get("description") or "").strip()
                 if url:
-                    lines.append(f"- **{title}**\n  {url}" + (f"\n  {desc[:200]}…" if len(desc) > 200 else (f"\n  {desc}" if desc else "")))
+                    # Markdown link when title is safe for [](url); else title + URL on next line
+                    if "[" in title or "]" in title or "(" in title:
+                        line = f"- **{title}**\n  {url}"
+                    else:
+                        line = f"- [{title}]({url})"
+                    if desc:
+                        desc_bit = (desc[:200] + "…") if len(desc) > 200 else desc
+                        line += f"\n  {desc_bit}"
+                    lines.append(line)
                 else:
                     lines.append(f"- **{title}**" + (f"\n  {desc[:200]}…" if len(desc) > 200 else (f"\n  {desc}" if desc else "")))
             except (TypeError, AttributeError, ValueError):
@@ -195,6 +349,20 @@ def format_json_for_user(raw: str) -> Optional[str]:
                     return "## 目录下的内容 / Folder contents\n\n" + "\n".join(lines)
             return "\n".join(f"- {_item_to_line(x)}" for x in data)
         if isinstance(data, dict):
+            # web_search / Tavily JSON: { "results": [ {title, url, description}, ... ], ... }
+            # Generic dict formatting used `- **results:**` + str(list) which looked like raw Python/JSON.
+            _res = data.get("results")
+            if isinstance(_res, list) and _res and isinstance(_res[0], dict):
+                _f0 = _res[0]
+                if ("url" in _f0 or "title" in _f0 or "name" in _f0) and not (
+                    "session_id" in data and "app_id" in data
+                ):
+                    try:
+                        ws = format_web_search_result(json.dumps(data, ensure_ascii=False))
+                    except (TypeError, ValueError):
+                        ws = None
+                    if ws:
+                        return ws
             if "session_id" in data and "app_id" in data and "user_name" in data:
                 app_id_val = str(data.get("app_id") or "HomeClaw")
                 user_name_val = str(data.get("user_name") or "")

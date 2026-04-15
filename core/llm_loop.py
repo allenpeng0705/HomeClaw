@@ -86,12 +86,12 @@ from base.planner_executor import (
 )
 from base.skills import (
     get_all_skills_dirs,
-    get_skills_dir,
     load_skills_from_dirs,
     load_skill_by_folder_from_dirs,
     build_skills_system_block,
     trim_skills_list_for_char_budget,
 )
+from base.skill_router import load_skills_for_query, skills_router_semantic_enabled
 from memory.prompts import RESPONSE_TEMPLATE
 from memory.chat.message import ChatMessage
 
@@ -200,6 +200,9 @@ from core.log_helpers import (
     format_folder_list_file_find_result,
     format_json_for_user,
     format_web_search_result,
+    format_routing_debug_response_suffix,
+    log_routing_selection_summary,
+    strip_routing_debug_footer_for_memory,
 )
 
 
@@ -773,17 +776,6 @@ def _try_extract_web_search_json_blob(text: str) -> Optional[str]:
     return None
 
 
-def _normalize_for_chat_match(text: str) -> str:
-    """Normalize user message for accurate chat/shortcut matching: strip, remove trailing punctuation, collapse spaces. Never raises."""
-    if not text or not isinstance(text, str):
-        return ""
-    s = text.strip()
-    s = re.sub(r"[。！？!?.,，、\s]+$", "", s)  # trailing punctuation and spaces
-    s = re.sub(r"^\s*[。！？!?.,，、]+", "", s)  # leading punctuation
-    s = re.sub(r"\s+", " ", s).strip()  # collapse internal spaces
-    return s
-
-
 def _cursor_bridge_capability_and_params(query: str) -> tuple:
     """
     For Cursor preset: route message to the right bridge capability (no LLM).
@@ -953,62 +945,6 @@ def _claude_bridge_capability_and_params(query: str) -> tuple:
     ):
         return "clear_claude_session", {}
     return "run_agent", {"task": q}
-
-
-def _try_chat_shortcut(query: str, shortcut_cfg: dict) -> Optional[str]:
-    """
-    If the query is a short greeting or capabilities question, return the shortcut reply (greeting_reply or identity+TOOLS). Otherwise return None.
-    Used when intent_router is disabled (early) or when intent_router returned general_chat (chatting intent).
-    """
-    if not query or not isinstance(shortcut_cfg, dict) or not shortcut_cfg.get("enabled"):
-        return None
-    _q_norm = _normalize_for_chat_match(query)
-    _greeting_max = max(0, int(shortcut_cfg.get("greeting_max_length", 20) or 20))
-    _cap_max = max(0, int(shortcut_cfg.get("capabilities_max_length", 60) or 60))
-    # Greeting
-    _greeting_phrases = shortcut_cfg.get("greeting_phrases") or []
-    if isinstance(_greeting_phrases, list) and _greeting_phrases and (_greeting_max == 0 or len(_q_norm) <= _greeting_max):
-        _q_norm_lower = _q_norm.lower()
-        for _gp in _greeting_phrases:
-            if not isinstance(_gp, str):
-                continue
-            _g = _normalize_for_chat_match(_gp.strip())
-            if not _g:
-                continue
-            if _q_norm == _g or _q_norm_lower == _g.lower():
-                _reply = (shortcut_cfg.get("greeting_reply") or "").strip()
-                if not _reply:
-                    _reply = "你好！我是 HomeClaw，有什么可以帮你？ / Hello! I'm HomeClaw, how can I help?"
-                logger.debug("Greeting shortcut: replying without main LLM (chat detected)")
-                return _reply
-    # Capabilities
-    _phrases = shortcut_cfg.get("match_phrases") or []
-    if isinstance(_phrases, list) and _phrases and (_cap_max == 0 or len(_q_norm) <= _cap_max):
-        _q_lower = _q_norm.lower()
-        for _p in _phrases:
-            if not isinstance(_p, str) or not _p.strip():
-                continue
-            _p_strip = _normalize_for_chat_match(_p.strip())
-            if not _p_strip:
-                continue
-            if _p_strip in _q_norm or _p_strip.lower() in _q_lower:
-                try:
-                    _ws_dir = get_workspace_dir(getattr(Util().core_metadata, "workspace_dir", None) or "config/workspace")
-                    _workspace = load_workspace(_ws_dir)
-                    _id_block = (_workspace.get("identity") or "").strip()
-                    _tools_block = (_workspace.get("tools") or "").strip()
-                    _parts = []
-                    if _id_block:
-                        _parts.append("## Identity\n" + _id_block)
-                    if _tools_block:
-                        _parts.append("## Tools / capabilities\n" + _tools_block)
-                    if _parts:
-                        logger.debug("Identity/capabilities shortcut: replying from workspace (chat detected)")
-                        return "\n\n".join(_parts)
-                except Exception as _e:
-                    logger.debug("Identity/capabilities shortcut failed: {}; continuing normal flow", _e)
-                break
-    return None
 
 
 async def answer_from_memory(
@@ -1279,13 +1215,30 @@ async def answer_from_memory(
                 logger.debug("Workflow resume failed (non-fatal): {}", _wf_e)
                 core.clear_pending_workflow(app_id_val, user_id_val, session_id_val)
 
-        # When intent_router is disabled, apply greeting/capabilities shortcut early (no LLM). When enabled, shortcut runs after intent router and only when category is general_chat (see below).
-        _shortcut_cfg = getattr(Util().get_core_metadata(), "identity_capabilities_shortcut_config", None) or {}
-        _intent_router_enabled = isinstance(getattr(Util().get_core_metadata(), "intent_router_config", None), dict) and (getattr(Util().get_core_metadata(), "intent_router_config", None) or {}).get("enabled")
-        if not _intent_router_enabled and isinstance(_shortcut_cfg, dict) and _shortcut_cfg.get("enabled") and (query or "").strip():
-            _early_reply = _try_chat_shortcut((query or "").strip(), _shortcut_cfg)
-            if _early_reply is not None:
-                return (_early_reply, None)
+        # Per-turn phase timings for ops (grep [turn_timing]). Respects silent: false like _component_log.
+        _turn_tt = {
+            "t0": time.perf_counter(),
+            "mark": time.perf_counter(),
+            "phases": {},
+            "llm_s": 0.0,
+            "llm_n": 0,
+            "tool_loop_iters": 0,
+        }
+
+        def _turn_tt_split(label: str) -> None:
+            try:
+                now = time.perf_counter()
+                _turn_tt["phases"][label] = round((now - _turn_tt["mark"]) * 1000, 1)
+                _turn_tt["mark"] = now
+            except Exception:
+                pass
+
+        def _turn_tt_add_llm(dt_s: float) -> None:
+            try:
+                _turn_tt["llm_s"] = float(_turn_tt.get("llm_s", 0.0)) + float(dt_s)
+                _turn_tt["llm_n"] = int(_turn_tt.get("llm_n", 0)) + 1
+            except Exception:
+                pass
 
         # Hybrid router (mix mode): run before injecting tools, skills, plugins. Router uses only user message (query).
         effective_llm_name = None
@@ -1497,6 +1450,16 @@ async def answer_from_memory(
             except Exception as _e_nm:
                 logger.debug("non-mix route/model init failed (non-fatal): {}", _e_nm)
 
+        try:
+            _hr_dbg = getattr(Util().get_core_metadata(), "hybrid_router", None) or {}
+            routing_debug_show = bool(_hr_dbg.get("show_routing_debug_in_response", False))
+            routing_debug_react_full = bool(_hr_dbg.get("routing_debug_include_react_trace", False))
+        except Exception:
+            routing_debug_show = False
+            routing_debug_react_full = False
+
+        _turn_tt_split("hybrid_router_and_debug_config")
+
         use_memory = Util().has_memory()
         llm_input = []
         response = ''
@@ -1506,6 +1469,9 @@ async def answer_from_memory(
         force_include_auto_invoke = []  # when model returns no tool_calls, run these (e.g. run_skill) so the skill runs anyway; each item: {"tool": str, "arguments": dict}
         force_include_plugin_ids = set()  # plugin ids to add to plugin list when skills_force_include_rules match (optional "plugins" in rule)
         _injected_skill_folders = []  # skill folder names in prompt; used to constrain run_skill skill_name to enum (Phase 1.1)
+        _skills_selection_note = ""  # skills_router source message for [routing] log
+        _routing_debug_react_trace = []  # optional ReAct tool trace for response footer
+        _routing_debug_path = "unknown"
         _document_read_forced_path = None  # when user message contains explicit path (e.g. documents/norm-v4.pdf), override first document_read(path) to this
 
         # Resolve current user once: used to decide workspace Identity vs who-based identity and for who injection.
@@ -1951,6 +1917,10 @@ async def answer_from_memory(
                     completion_fn=core,
                     llm_name=_ir_llm_ref,
                     recent_messages=messages if isinstance(messages, list) else None,
+                    semantic_context={
+                        "vector_store": getattr(core, "intent_categories_vector_store", None),
+                        "embedder": getattr(core, "embedder", None),
+                    },
                 )
                 if _ir_timeout > 0:
                     _intent_router_category = await asyncio.wait_for(_route_coro, timeout=float(_ir_timeout))
@@ -1968,15 +1938,26 @@ async def answer_from_memory(
             c.strip() for c in ((_intent_router_category or "").split(","))
             if (c or "").strip()
         ] if _intent_router_category else []
+        # Force coding intent only for Cursor/ClaudeCode preset chats; keep HomeClaw/ClawCode out of coding route.
+        try:
+            _preset_name = ""
+            if _current_friend is not None:
+                _preset_name = (getattr(_current_friend, "preset", None) or "").strip().lower()
+            _force_coding_presets = {"cursor", "claudecode"}
+            if _preset_name in _force_coding_presets and (query or "").strip():
+                _intent_router_categories = ["coding"]
+                _intent_router_category = "coding"
+                _component_log("intent_router", "forced coding category for cursor/claudecode preset chat")
+            elif _intent_router_categories:
+                _filtered_cats = [c for c in _intent_router_categories if (c or "").strip().lower() != "coding"]
+                if len(_filtered_cats) != len(_intent_router_categories):
+                    _intent_router_categories = _filtered_cats or ["general_chat"]
+                    _intent_router_category = ",".join(_intent_router_categories)
+                    _component_log("intent_router", "removed coding category outside cursor/claudecode preset chats")
+        except Exception as _e:
+            logger.debug("coding category preset guard failed (non-fatal): {}", _e)
 
-        # When intent router says general_chat (chatting intent), apply shortcut so greeting/capabilities skip the main LLM.
-        _general_chat_norm = "general_chat"
-        if _intent_router_categories and any((c or "").strip().lower() == _general_chat_norm for c in _intent_router_categories):
-            _shortcut_cfg_ir = getattr(Util().get_core_metadata(), "identity_capabilities_shortcut_config", None) or {}
-            if isinstance(_shortcut_cfg_ir, dict) and _shortcut_cfg_ir.get("enabled") and (query or "").strip():
-                _chat_reply = _try_chat_shortcut((query or "").strip(), _shortcut_cfg_ir)
-                if _chat_reply is not None:
-                    return (_chat_reply, None)
+        _turn_tt_split("intent_router")
 
         # Planner–Executor: when enabled and category not in skip list, use planner path (Phase 2+). Never crash on config.
         try:
@@ -2008,78 +1989,30 @@ async def answer_from_memory(
         except Exception:
             pass
 
-        # Skills (SKILL.md from skills_dir + skills_extra_dirs); skills_disabled excluded
+        # Skills pipeline (high level): (A) Intent router already ran — category only affects Step C filters.
+        # (B) load_skills_for_query — vector retrieval + unions + rerank + semantic.final_top_n (or full disk if legacy).
+        # (C) force-include / per-skill triggers / preset / skills_filter / intent category skill list / budget — then prompt.
+        # When semantic mode is on, length is capped in skill_router (final_top_n); do not truncate again with skills_max_in_prompt.
         if getattr(Util().core_metadata, 'use_skills', True):
             try:
                 root = Path(__file__).resolve().parent.parent
                 meta_skills = Util().core_metadata
-                skills_dirs = get_all_skills_dirs(
-                    getattr(meta_skills, 'skills_dir', None) or 'skills',
-                    (getattr(meta_skills, 'external_skills_dir', None) or "").strip(),
-                    getattr(meta_skills, 'skills_extra_dirs', None) or [],
-                    root,
+                (
+                    skills_list,
+                    skills_dirs,
+                    use_vector_search,
+                    _skills_src,
+                    _skills_full_catalog_cache,
+                ) = await load_skills_for_query(
+                    meta=meta_skills,
+                    core=core,
+                    query=query or "",
+                    root=root,
+                    uid=uid,
                 )
-                disabled_folders = getattr(meta_skills, 'skills_disabled', None) or []
-                skills_list = []
-                use_vector_search = bool(getattr(meta_skills, 'skills_use_vector_search', False))
-                if not use_vector_search:
-                    # skills_use_vector_search=false means include ALL skills (no RAG, no cap)
-                    skills_list = load_skills_from_dirs(skills_dirs, disabled_folders=disabled_folders, include_body=False)
-                    if skills_list:
-                        _component_log("skills", f"included all {len(skills_list)} skill(s) (skills_use_vector_search=false)")
-                if not skills_list and use_vector_search and getattr(core, 'skills_vector_store', None) and getattr(core, 'embedder', None):
-                    from base.skills import search_skills_by_query, load_skill_by_folder, TEST_ID_PREFIX
-                    max_retrieved = max(1, min(100, int(getattr(meta_skills, 'skills_max_retrieved', 10) or 10)))
-                    threshold = float(getattr(meta_skills, 'skills_similarity_threshold', 0.0) or 0.0)
-                    hits = await search_skills_by_query(
-                        core.skills_vector_store, core.embedder, query or "",
-                        limit=max_retrieved, min_similarity=threshold,
-                    )
-                    if getattr(meta_skills, "skills_usage_rerank_enabled", False) and hits:
-                        try:
-                            from base.skill_usage import rerank_skill_vector_hits
-
-                            _w = float(getattr(meta_skills, "skills_usage_rerank_weight", 0.12) or 0.12)
-                            hits = rerank_skill_vector_hits(
-                                hits, uid, weight=max(0.0, _w), enabled=True
-                            )
-                            _component_log("skills", "reranked vector hits by usage (skills_usage_rerank_enabled)")
-                        except Exception as _ru:
-                            logger.debug("skills usage rerank skipped: {}", _ru)
-                    skills_test_dir_str = (getattr(meta_skills, 'skills_test_dir', None) or "").strip()
-                    skills_test_path = get_skills_dir(skills_test_dir_str, root=root) if skills_test_dir_str else None
-                    for item in (hits or []):
-                        try:
-                            if not isinstance(item, (list, tuple)) or len(item) < 2:
-                                continue
-                            hit_id, _ = item[0], item[1]
-                        except (TypeError, IndexError, ValueError):
-                            continue
-                        if hit_id.startswith(TEST_ID_PREFIX):
-                            load_path = skills_test_path if skills_test_path and skills_test_path.is_dir() else None
-                            folder_name = hit_id[len(TEST_ID_PREFIX):]
-                            skill_dict = load_skill_by_folder(load_path, folder_name, include_body=False) if load_path else None
-                        else:
-                            folder_name = hit_id
-                            skill_dict = load_skill_by_folder_from_dirs(skills_dirs, folder_name, include_body=False)
-                        if skill_dict is None:
-                            try:
-                                core.skills_vector_store.delete(hit_id)
-                            except Exception:
-                                pass
-                            continue
-                        skills_list.append(skill_dict)
-                    if skills_list:
-                        _component_log("skills", f"retrieved {len(skills_list)} skill(s) by vector search")
-                    skills_max = max(0, int(getattr(meta_skills, 'skills_max_in_prompt', 5) or 5))
-                    if skills_max > 0 and len(skills_list) > skills_max:
-                        skills_list = skills_list[:skills_max]
-                        _component_log("skills", f"capped to {skills_max} skill(s) after threshold (skills_max_in_prompt)")
-                if not skills_list:
-                    # RAG returned nothing; fallback: load all skills from disk
-                    skills_list = load_skills_from_dirs(skills_dirs, disabled_folders=disabled_folders, include_body=False)
-                    if skills_list:
-                        _component_log("skills", f"loaded {len(skills_list)} skill(s) from disk (RAG had no hits)")
+                _skills_selection_note = str(_skills_src or "").strip()
+                if skills_list:
+                    _component_log("skills", _skills_src)
                 # Special cases only: force-include rules (e.g. reminder, scheduling) and skill-driven triggers add skills/auto_invoke when query matches. For all other cases the LLM decides whether to use run_skill from the available skills list.
                 matched_instructions = []
                 skills_list = skills_list or []
@@ -2151,7 +2084,13 @@ async def answer_from_memory(
                             if pid:
                                 force_include_plugin_ids.add(pid)
                 # Skill-driven triggers: declare trigger.patterns + instruction + auto_invoke in each skill's SKILL.md; no need to repeat in core.yml
-                for skill_dict in load_skills_from_dirs(skills_dirs, disabled_folders=disabled_folders, include_body=False):
+                # Reuse full catalog from skill_router when it already loaded it (union path), avoiding a second parse of every SKILL.md.
+                _catalog_for_triggers = (
+                    _skills_full_catalog_cache
+                    if _skills_full_catalog_cache is not None
+                    else load_skills_from_dirs(skills_dirs, disabled_folders=disabled_folders, include_body=False)
+                )
+                for skill_dict in _catalog_for_triggers:
                     if not isinstance(skill_dict, dict):
                         continue
                     trigger = skill_dict.get("trigger") if isinstance(skill_dict.get("trigger"), dict) else None
@@ -2215,7 +2154,7 @@ async def answer_from_memory(
                         "arguments": {"path": _inferred_path},
                         "always_run": True,
                     })
-                if use_vector_search:
+                if not skills_router_semantic_enabled(meta_skills):
                     skills_max = max(0, int(getattr(meta_skills, "skills_max_in_prompt", 5) or 5))
                     if skills_max > 0 and len(skills_list) > skills_max:
                         skills_list = skills_list[:skills_max]
@@ -2271,12 +2210,14 @@ async def answer_from_memory(
                                 _component_log("intent_router", f"filtered skills by category: {len(skills_list)} skill(s)")
                     except Exception as _e:
                         logger.debug("Phase 3.1 category skills filter failed: {}", _e)
-                # OpenClaw-style: when skills_use_location_only is true, inject only name + description + location; model reads SKILL.md via file_read(path='skill:folder') to reduce context tokens.
-                use_location_only = bool(getattr(meta_skills, "skills_use_location_only", False))
+                # OpenClaw-style: when skills_use_path_only is true, inject only name + description + skill path; model reads SKILL.md via file_read(path='skill:folder'). Deprecated alias: skills_use_location_only.
+                use_path_only = bool(
+                    getattr(meta_skills, "skills_use_path_only", getattr(meta_skills, "skills_use_location_only", False))
+                )
                 _body_for_raw = getattr(meta_skills, "skills_include_body_for", None)
                 include_body_for = list(_body_for_raw) if isinstance(_body_for_raw, (list, tuple)) else []
                 body_max_chars = max(0, int(getattr(meta_skills, "skills_include_body_max_chars", 0) or 0))
-                if not use_location_only and include_body_for:
+                if not use_path_only and include_body_for:
                     for i, s in enumerate(skills_list):
                         folder = (s.get("folder") or "").strip()
                         if folder and folder in include_body_for:
@@ -2285,7 +2226,7 @@ async def answer_from_memory(
                             )
                             if full_skill:
                                 skills_list[i] = full_skill
-                include_body = bool(include_body_for) and not use_location_only
+                include_body = bool(include_body_for) and not use_path_only
                 _bud = max(0, int(getattr(meta_skills, "skills_prompt_budget_chars", 0) or 0))
                 _ent = max(20, int(getattr(meta_skills, "skills_prompt_entry_max_chars", 250) or 250))
                 if _bud > 0 and skills_list:
@@ -2307,7 +2248,7 @@ async def answer_from_memory(
                 skills_block = build_skills_system_block(
                     skills_list,
                     include_body=include_body,
-                    use_location_only=use_location_only,
+                    use_path_only=use_path_only,
                     include_invocation_contract=_inv_contract,
                 )
                 if skills_block:
@@ -2326,6 +2267,8 @@ async def answer_from_memory(
                 force_include_instructions.extend(matched_instructions)
             except Exception as e:
                 logger.warning("Failed to load skills: {}", e)
+
+        _turn_tt_split("skills")
 
         if use_memory:
             if _preset_allow_cognee:
@@ -2628,12 +2571,35 @@ async def answer_from_memory(
                 _greeting_phrases = ("你好", "hi", "hello", "嗨", "hey", "thanks", "谢谢", "thank you", "help", "哈喽")
                 if any((p in _q if p.isascii() else p in _q_raw) for p in _greeting_phrases) and not any(c in _q_raw for c in ("?", "？", "吗", "什么", "怎么", "how", "what", "why", "can you", "帮我")):
                     _greeting_only = True
+            _capability_only = False
+            if isinstance(query, str):
+                _q_cap = query.strip().lower()
+                _q_cap_raw = query.strip()
+                _cap_phrases = (
+                    "what can you do",
+                    "what can you do for me",
+                    "who are you",
+                    "your capabilities",
+                    "introduce yourself",
+                )
+                _cap_zh_phrases = ("你能为我做什么", "你能做什么", "你是谁", "你有什么功能", "介绍你自己")
+                _capability_only = any(p in _q_cap for p in _cap_phrases) or any(p in _q_cap_raw for p in _cap_zh_phrases)
             _greeting_instruction = ""
             if _greeting_only:
                 _greeting_instruction = (
                     "**This turn:** The user message is only a short greeting (e.g. 你好, hello). "
                     "Reply with a brief friendly greeting in your message content only. Do NOT call any tool. "
                     "Do NOT invent or act on hypothetical user requests (e.g. do not say \"I want to make a presentation\" and then call run_skill).\n\n"
+                )
+            def _quick_greeting_reply(_q_raw: str) -> str:
+                _q = (_q_raw or "").strip().lower()
+                if any(k in _q for k in ("thanks", "thank you")) or ("谢谢" in (_q_raw or "")):
+                    return "不客气！有需要随时叫我。"
+                return "您好！我是 HomeClaw，很高兴为您服务。"
+            def _quick_capability_reply() -> str:
+                return (
+                    "我是 HomeClaw，可以帮你处理网页搜索、文档阅读与总结、文件列表与链接、天气与新闻简报、"
+                    "提醒与日程、邮件发送、图片相关任务、知识库与记忆检索等。"
                 )
             routing_block = (
                 _greeting_instruction
@@ -3102,6 +3068,8 @@ async def answer_from_memory(
         logger.debug("Start to generate the response for user input: " + query)
         logger.info("Main LLM input (user query): {}", _truncate_for_log(query, 500))
 
+        _turn_tt_split("context_build")
+
         use_tools = getattr(Util().get_core_metadata(), "use_tools", True)
         registry = get_tool_registry()
         tools_cfg_for_desc = getattr(Util().get_core_metadata(), "tools_config", None) or {}
@@ -3385,6 +3353,46 @@ async def answer_from_memory(
             "Tools for LLM: use_tools={} unified={} count={} has_route_to_plugin={}",
             use_tools, unified, len(openai_tools or []), "route_to_plugin" in (tool_names or []),
         )
+        try:
+            log_routing_selection_summary(
+                intent_enabled=bool(_intent_router_config.get("enabled")),
+                categories=_intent_router_categories,
+                skills_folders=list(_injected_skill_folders or []),
+                skills_note=_skills_selection_note,
+                tool_names=[n for n in (tool_names or []) if n],
+            )
+        except Exception as _e:
+            logger.debug("routing selection summary log failed: {}", _e)
+        _llm_exposed_tool_names = [n for n in (tool_names or []) if n]
+        if not openai_tools:
+            _routing_debug_path = "no_tools"
+        else:
+            _routing_debug_path = "plain_llm"
+
+        def _routing_debug_suffix() -> str:
+            if not routing_debug_show:
+                return ""
+            try:
+                return format_routing_debug_response_suffix(
+                    intent_enabled=bool((_intent_router_config or {}).get("enabled")),
+                    categories=_intent_router_categories,
+                    skills_folders=list(_injected_skill_folders or []),
+                    skills_note=_skills_selection_note,
+                    llm_exposed_tool_names=list(_llm_exposed_tool_names or []),
+                    execution_path=str(_routing_debug_path or "unknown"),
+                    main_llm_mode=(main_llm_mode or "").strip() or "",
+                    mix_route=mix_route_this_request if mix_route_this_request in ("local", "cloud") else None,
+                    mix_layer=mix_route_layer_this_request if isinstance(mix_route_layer_this_request, str) else None,
+                    effective_model=(effective_llm_name.strip() if isinstance(effective_llm_name, str) else None),
+                    react_trace=_routing_debug_react_trace,
+                    include_react_trace=routing_debug_react_full,
+                )
+            except Exception as _rds_e:
+                logger.debug("routing debug suffix failed: {}", _rds_e)
+                return ""
+
+        _turn_tt_split("tools_prepare")
+
         # DAG: if a flow is defined for this category, we will run it after context is built (no planner call). See docs_design/PlannerExecutorAndDAG.md §3.
         # Skip DAG when friend preset is "cursor": Cursor friend must use route_to_plugin (open_project, run_agent, run_command), not category DAGs (e.g. list_files would run folder_list and return sandbox listing instead of opening the path in Cursor).
         _dag_flow = None
@@ -3449,7 +3457,9 @@ async def answer_from_memory(
         if openai_tools:
             _pe_tool_names = [((t or {}).get("function") or {}).get("name") for t in openai_tools if isinstance(t, dict)]
             _pe_tool_names = [n for n in _pe_tool_names if n]
-        if _use_planner_executor and openai_tools and not _dag_flow:
+        # Skip planner for short greetings: planner adds a full LLM round (~seconds–tens of s on local) before ReAct;
+        # greeting turns use tool_choice=none and need no plan.
+        if _use_planner_executor and openai_tools and not _dag_flow and not _greeting_only:
             try:
                 _pe_tools_desc = None
                 if openai_tools:
@@ -3464,6 +3474,7 @@ async def answer_from_memory(
                             _parts.append(f"- {name}: {desc}" if desc else f"- {name}")
                     if _parts:
                         _pe_tools_desc = "Available tools:\n" + "\n".join(_parts)
+                _pl_t0 = time.perf_counter()
                 _planner_plan = await planner_run_planner(
                     completion_fn=core,
                     query=query,
@@ -3473,6 +3484,10 @@ async def answer_from_memory(
                     tools_description=_pe_tools_desc,
                     config=_planner_executor_config,
                 )
+                try:
+                    _turn_tt["phases"]["planner"] = round((time.perf_counter() - _pl_t0) * 1000, 1)
+                except Exception:
+                    pass
                 if _planner_plan:
                     _goal = (_planner_plan.get("goal") or "").strip() or "(no goal)"
                     _n_steps = len(_planner_plan.get("steps") or [])
@@ -3694,6 +3709,7 @@ async def answer_from_memory(
                     except Exception:
                         pass
                     try:
+                        _dag_t0 = time.perf_counter()
                         _dag_success, _dag_result = await dag_run_dag(
                             _dag_flow,
                             registry,
@@ -3704,7 +3720,12 @@ async def answer_from_memory(
                             tool_names=_dag_tool_names if _dag_tool_names else None,
                             path_resolution_context=_path_ctx if _path_ctx else None,
                         )
+                        try:
+                            _turn_tt["phases"]["dag"] = round((time.perf_counter() - _dag_t0) * 1000, 1)
+                        except Exception:
+                            pass
                         if _dag_success:
+                            _routing_debug_path = "dag"
                             # If user asked to send in N minutes in the same message (e.g. "3分钟后帮我发封邮件"), schedule delayed send instead of showing "Reply send"
                             _delayed_mins = parse_delayed_minutes(query) if (_dag_flow.get("category") or "").strip().lower() == "send_email" else None
                             _draft_from_dag = parse_email_draft(_dag_result) if isinstance(_dag_result, str) and _dag_result and "To:" in _dag_result and "reply **send**" in (_dag_result or "").lower() else None
@@ -3741,6 +3762,7 @@ async def answer_from_memory(
             # Planner–Executor Phase 3: if we have a valid plan (and no DAG result), run executor; on success use its result and skip ReAct.
             if _planner_executor_final_response is None and _planner_plan:
                 try:
+                    _ex_t0 = time.perf_counter()
                     _exec_success, _exec_results, _exec_final = await planner_run_executor(
                         _planner_plan,
                         registry,
@@ -3750,7 +3772,12 @@ async def answer_from_memory(
                         tool_names=_pe_tool_names if _pe_tool_names else None,
                         user_message=query,
                     )
+                    try:
+                        _turn_tt["phases"]["planner_executor"] = round((time.perf_counter() - _ex_t0) * 1000, 1)
+                    except Exception:
+                        pass
                     if _exec_success:
+                        _routing_debug_path = "planner_executor"
                         _planner_executor_final_response = _exec_final
                         _component_log("planner_executor", "executor completed; using plan result (Phase 3)")
                 except Exception as _ex:
@@ -3825,7 +3852,12 @@ async def answer_from_memory(
                     _qwen3_xlam_grammar = Util.get_qwen3_xlam_grammar()
             except Exception:
                 pass
-            for _ in (range(max_tool_rounds) if _planner_executor_final_response is None else []):
+            for _react_round in (range(max_tool_rounds) if _planner_executor_final_response is None else []):
+                try:
+                    _turn_tt["tool_loop_iters"] = int(_turn_tt.get("tool_loop_iters", 0)) + 1
+                except Exception:
+                    pass
+                _routing_debug_path = "react"
                 try:
                     context.recent_user_messages_text = _snippet_recent_user_messages_for_file_inference(
                         current_messages
@@ -4006,6 +4038,9 @@ async def answer_from_memory(
                     # Greeting-only turn: plain-text reply only. No grammar; and no tools so the server does not try to parse response as tool_call (avoids 500 on local servers).
                     _use_grammar = None
                     _stop_extra = None
+                elif _capability_only:
+                    _use_grammar = None
+                    _stop_extra = None
                 if _last_role != "tool" and not _greeting_only:
                     if (
                         _tool_sel
@@ -4019,7 +4054,7 @@ async def answer_from_memory(
                     else:
                         _use_grammar = _qwen35_grammar
                         _stop_extra = None  # Do not add "</tool_call>" for Qwen 3.5 — can truncate; we parse <tool_call>... from full response
-                _tools_req = None if _greeting_only else openai_tools
+                _tools_req = None if (_greeting_only or _capability_only) else openai_tools
                 # After instruction-only run_skill (or "skill already run"), or after save_result_page returned "format is markdown" error, restrict tools so the model does not call run_skill again. Allow save_result_page, file_write, document_read, file_read only (no web_search) to avoid the model looping on web_search with garbage queries (e.g. PDF cid codes); run_skill stays blocked. Only applies when that run_skill/save_result_page result is the *last* tool result—if another tool ran after it, no restriction.
                 _restrict_to_save = False
                 if _tools_req and _last_role == "tool" and isinstance(last_tool_result_raw, str):
@@ -4040,7 +4075,7 @@ async def answer_from_memory(
                     if _tools_save_only:
                         _tools_req = _tools_save_only
                         _component_log("tools", "restricted to save_result_page, file_write, document_read, file_read this turn (last result was instruction-only or already run)")
-                _tool_choice_req = "none" if _greeting_only else "auto"
+                _tool_choice_req = "none" if (_greeting_only or _capability_only) else "auto"
                 # Optional guard timeout for tool-decision turns to avoid local model stalls.
                 # Applies only when this turn asks the model to decide/use tools (not tool-result summarization turns).
                 _decision_timeout_sec = 0
@@ -4051,33 +4086,44 @@ async def answer_from_memory(
                         _decision_timeout_sec = max(0, int(_tc_to.get("tool_decision_timeout_seconds", 0) or 0))
                 except Exception:
                     _decision_timeout_sec = 0
-                try:
-                    _llm_coro = Util().openai_chat_completion_message(
-                        _msgs_for_llm,
-                        tools=_tools_req,
-                        tool_choice=_tool_choice_req,
-                        grammar=_use_grammar,
-                        llm_name=llm_name_this_turn,
-                        max_tokens_override=_max_tokens_override,
-                        stop_extra=_stop_extra,
-                        request=request,
-                    )
-                    if _decision_timeout_sec > 0:
-                        msg = await asyncio.wait_for(_llm_coro, timeout=float(_decision_timeout_sec))
-                    else:
-                        msg = await _llm_coro
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "LLM tool-decision turn timed out after {}s (route={}, model={}); will try fallback if available.",
-                        _decision_timeout_sec,
-                        mix_route_this_request or "default",
-                        llm_name_this_turn or "main_llm",
-                    )
-                    msg = None
-                except Exception as e:
-                    logger.warning("LLM call failed (will try fallback if available): {}", e)
-                    msg = None
-                _elapsed = time.time() - _t0
+                if _greeting_only and _last_role != "tool":
+                    msg = {"role": "assistant", "content": _quick_greeting_reply(query or ""), "tool_calls": []}
+                    _elapsed = 0.0
+                    _component_log("llm_loop", "greeting fast path: skipped main LLM call")
+                elif _capability_only and _last_role != "tool":
+                    msg = {"role": "assistant", "content": _quick_capability_reply(), "tool_calls": []}
+                    _elapsed = 0.0
+                    _component_log("llm_loop", "capabilities fast path: skipped main LLM call")
+                else:
+                    try:
+                        _llm_coro = Util().openai_chat_completion_message(
+                            _msgs_for_llm,
+                            tools=_tools_req,
+                            tool_choice=_tool_choice_req,
+                            grammar=_use_grammar,
+                            llm_name=llm_name_this_turn,
+                            max_tokens_override=_max_tokens_override,
+                            stop_extra=_stop_extra,
+                            request=request,
+                        )
+                        _llm_t0 = time.perf_counter()
+                        if _decision_timeout_sec > 0:
+                            msg = await asyncio.wait_for(_llm_coro, timeout=float(_decision_timeout_sec))
+                        else:
+                            msg = await _llm_coro
+                        _turn_tt_add_llm(time.perf_counter() - _llm_t0)
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "LLM tool-decision turn timed out after {}s (route={}, model={}); will try fallback if available.",
+                            _decision_timeout_sec,
+                            mix_route_this_request or "default",
+                            llm_name_this_turn or "main_llm",
+                        )
+                        msg = None
+                    except Exception as e:
+                        logger.warning("LLM call failed (will try fallback if available): {}", e)
+                        msg = None
+                    _elapsed = time.time() - _t0
                 logger.debug("LLM call returned in {:.1f}s", _elapsed)
                 if msg is not None:
                     _content = (msg.get("content") or "").strip()
@@ -4101,6 +4147,7 @@ async def answer_from_memory(
                         and getattr(Util().get_core_metadata(), "use_main_llm_for_direct_reply", True)
                     ):
                         try:
+                            _llm_t1 = time.perf_counter()
                             msg_main = await Util().openai_chat_completion_message(
                                 _msgs_for_llm,
                                 tools=None,
@@ -4111,6 +4158,7 @@ async def answer_from_memory(
                                 stop_extra=None,
                                 request=request,
                             )
+                            _turn_tt_add_llm(time.perf_counter() - _llm_t1)
                             if msg_main is not None and isinstance(msg_main, dict):
                                 msg = msg_main
                                 _content = (msg.get("content") or "").strip()
@@ -4172,6 +4220,7 @@ async def answer_from_memory(
                                 # Sanitize so cloud API never sees orphaned 'tool' messages (DeepSeek etc. require tool to follow assistant with tool_calls)
                                 _msgs_for_cloud = _messages_sanitized_for_tool_role(current_messages)
                                 try:
+                                    _llm_t0 = time.perf_counter()
                                     msg = await Util().openai_chat_completion_message(
                                         _msgs_for_cloud,
                                         tools=openai_tools,
@@ -4182,6 +4231,7 @@ async def answer_from_memory(
                                         request=request,
                                         bypass_clawcode_direct=True,
                                     )
+                                    _turn_tt_add_llm(time.perf_counter() - _llm_t0)
                                     if msg is not None:
                                         mix_route_this_request = other_route
                                         effective_llm_name = other_llm  # use working model for rest of tool rounds
@@ -4330,6 +4380,7 @@ async def answer_from_memory(
                     # Grammar returned literal NO_TOOL_REQUIRED: get the actual reply by retrying without tools so the user doesn't see that string.
                     if content_str and (content_str.strip() == "NO_TOOL_REQUIRED"):
                         try:
+                            _llm_nt0 = time.perf_counter()
                             msg_no_tools = await Util().openai_chat_completion_message(
                                 _msgs_for_llm,
                                 tools=None,
@@ -4340,6 +4391,7 @@ async def answer_from_memory(
                                 stop_extra=None,
                                 request=request,
                             )
+                            _turn_tt_add_llm(time.perf_counter() - _llm_nt0)
                             if msg_no_tools and isinstance(msg_no_tools.get("content"), str) and msg_no_tools.get("content").strip():
                                 _tc = msg_no_tools.get("tool_calls") or []
                                 if not any((t.get("function") or {}).get("name") for t in _tc if isinstance(t, dict)):
@@ -4445,6 +4497,7 @@ async def answer_from_memory(
                                 )
                                 if _greeting:
                                     try:
+                                        _llm_nt1 = time.perf_counter()
                                         msg_no_tools = await Util().openai_chat_completion_message(
                                             _msgs_for_llm,
                                             tools=None,
@@ -4455,6 +4508,7 @@ async def answer_from_memory(
                                             stop_extra=None,
                                             request=request,
                                         )
+                                        _turn_tt_add_llm(time.perf_counter() - _llm_nt1)
                                         if msg_no_tools and isinstance(msg_no_tools.get("content"), str) and msg_no_tools.get("content").strip():
                                             _tc = msg_no_tools.get("tool_calls") or []
                                             if not any((t.get("function") or {}).get("name") for t in _tc if isinstance(t, dict)):
@@ -5196,7 +5250,9 @@ async def answer_from_memory(
                                                             "---\n\n" + (doc_content[:120000] if len(doc_content) > 120000 else doc_content)
                                                         )},
                                                     ]
+                                                    _llm_sum = time.perf_counter()
                                                     response = await core.openai_chat_completion(summary_messages, llm_name=effective_llm_name)
+                                                    _turn_tt_add_llm(time.perf_counter() - _llm_sum)
                                                     if not response or not response.strip():
                                                         response = "I read the document but could not generate a summary. You can ask for a specific section."
                                                 else:
@@ -5261,6 +5317,25 @@ async def answer_from_memory(
                         args = {}
                     args_redacted = redact_params_for_log(args) if isinstance(args, dict) else args
                     logger.info("Tool selected: name={} parameters={}", name, args_redacted)
+                    if routing_debug_show and routing_debug_react_full:
+                        try:
+                            _ap = (
+                                json.dumps(args_redacted, ensure_ascii=False)
+                                if isinstance(args_redacted, dict)
+                                else str(args_redacted)
+                            )
+                            if len(_ap) > 500:
+                                _ap = _ap[:500] + "…"
+                            _routing_debug_react_trace.append(
+                                {
+                                    "react_round": _react_round,
+                                    "tool": name,
+                                    "args_preview": _ap,
+                                    "llm": (llm_name_this_turn or "") if isinstance(llm_name_this_turn, str) else "",
+                                }
+                            )
+                        except Exception:
+                            pass
                     # Guardrail: for "news brief / magazine" intent, do not let model drift into file tools.
                     # Force run_skill(daily-brief) so routing stays on the intended path.
                     try:
@@ -5956,6 +6031,11 @@ async def answer_from_memory(
                         layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
                         label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
                         out = label + (_strip_leading_route_label(out or "") or "")
+                    try:
+                        if routing_debug_show and isinstance(out, str) and out is not ROUTING_RESPONSE_ALREADY_SENT:
+                            out = out + _routing_debug_suffix()
+                    except Exception:
+                        pass
                     return (out, None)
                 # Use exact tool result as response when it contains a file view link, so the model cannot corrupt the URL in a follow-up reply
                 if last_file_link_result:
@@ -5988,9 +6068,11 @@ async def answer_from_memory(
             await close_browser_session(context)
         else:
             try:
+                _llm_nt2 = time.perf_counter()
                 response = await core.openai_chat_completion(
                     messages=llm_input, llm_name=effective_llm_name
                 )
+                _turn_tt_add_llm(time.perf_counter() - _llm_nt2)
             except Exception as e:
                 logger.warning("LLM call failed (no-tool path, will try fallback if available): {}", e)
                 response = None
@@ -6003,7 +6085,9 @@ async def answer_from_memory(
                     if other_llm:
                         _component_log("mix", f"first model failed (no-tool path), retrying with {other_route} ({other_llm})")
                         try:
+                            _llm_nt3 = time.perf_counter()
                             response = await core.openai_chat_completion(messages=llm_input, llm_name=other_llm)
+                            _turn_tt_add_llm(time.perf_counter() - _llm_nt3)
                             if response and isinstance(response, str) and response.strip():
                                 mix_route_this_request = other_route
                                 mix_route_layer_this_request = (mix_route_layer_this_request or "") + "_fallback" if mix_route_layer_this_request else "fallback"
@@ -6064,6 +6148,11 @@ async def answer_from_memory(
                     layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
                     label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
                     out = label + (_strip_leading_route_label(out or "") or "")
+                try:
+                    if routing_debug_show and isinstance(out, str):
+                        out = out + _routing_debug_suffix()
+                except Exception:
+                    pass
                 return (out, None)
         # If the model echoed raw "[]" (e.g. from empty folder_list/file_find), show a friendly message instead
         if isinstance(response, str) and response.strip() == "[]":
@@ -6243,6 +6332,11 @@ async def answer_from_memory(
             layer_suffix = f" · {mix_route_layer_this_request}" if mix_route_layer_this_request else ""
             label = f"[Local{layer_suffix}] " if mix_route_this_request == "local" else f"[Cloud{layer_suffix}] "
             response = label + (_strip_leading_route_label(response or "") or "")
+        try:
+            if routing_debug_show and isinstance(response, str):
+                response = response + _routing_debug_suffix()
+        except Exception:
+            pass
         # Never surface raw JSON to the end user: convert to readable text if it still looks like JSON
         # Strip reasoning blocks (e.g. <think>...</think>) so they are not stored in chat history, memory, or embeddings
         if isinstance(response, str) and response.strip():
@@ -6271,6 +6365,22 @@ async def answer_from_memory(
             _fmt = format_json_for_user(response)
             if _fmt:
                 response = _fmt
+        try:
+            if not Util().is_silent():
+                _ph = dict(_turn_tt.get("phases") or {})
+                _ph["llm_total_ms"] = round(float(_turn_tt.get("llm_s", 0.0)) * 1000, 1)
+                _ph["llm_calls"] = int(_turn_tt.get("llm_n", 0))
+                _ph["total_wall_ms"] = round((time.perf_counter() - _turn_tt["t0"]) * 1000, 1)
+                logger.info(
+                    "[turn_timing] greeting_only={} tool_loop_iters={} phases_ms={} query_preview={!r} "
+                    "(planner/planner_executor ms include LLM inside those modules; llm_total_ms = main ReAct/no-tool path only)",
+                    _greeting_only,
+                    int(_turn_tt.get("tool_loop_iters", 0)),
+                    _ph,
+                    _truncate_for_log((query or "").strip(), 80),
+                )
+        except Exception:
+            pass
         logger.info("Main LLM output (final response): {}", _truncate_for_log(response, 2000))
         message: ChatMessage = ChatMessage()
         message.add_user_message(query)
@@ -6293,7 +6403,8 @@ async def answer_from_memory(
         # Build full-turn data for MemOS (user + assistant + tool messages)
         memory_turn_data = None
         if response is not None and isinstance(response, str) and (response.strip() or memory_turn_tool_messages):
-            _assistant = str(response or "").strip()
+            _assistant = strip_routing_debug_footer_for_memory(str(response or "").strip())
+            _assistant = _strip_leading_route_label(_assistant).strip()
             # Don't store instruction-only boilerplate as assistant message (pollutes memory and embeddings).
             if _assistant and ("Instruction-only skill confirmed" in _assistant or "Instruction-only skill" in _assistant) and "You MUST in this turn" in _assistant:
                 _assistant = "[Task could not be completed in this turn; instruction-only skill result.]"

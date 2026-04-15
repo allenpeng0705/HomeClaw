@@ -732,14 +732,19 @@ def get_api_skills_sync_vector_store_handler(core):
                 meta = Util().get_core_metadata()
             except Exception:
                 meta = None
-            if not meta or not getattr(meta, "skills_use_vector_search", False):
-                return JSONResponse(content={"synced": 0, "message": "skills_use_vector_search is disabled"})
+            _sr_cfg = getattr(meta, "skills_router_config", None) or {}
+            _sr_sem = _sr_cfg.get("semantic") if isinstance(_sr_cfg.get("semantic"), dict) else {}
+            _sr_mode = str(_sr_cfg.get("mode") or "legacy").strip().lower()
+            _sr_enabled = bool(_sr_cfg.get("enabled")) and _sr_mode in ("semantic", "hybrid") and bool(_sr_sem.get("enabled", True))
+            if not meta or not _sr_enabled:
+                return JSONResponse(content={"synced": 0, "message": "skills_router semantic mode is disabled"})
 
             vs = getattr(core, "skills_vector_store", None)
             embedder = getattr(core, "embedder", None)
             if not vs or not embedder:
                 return JSONResponse(content={"synced": 0, "message": "Skills vector store not enabled"})
 
+            from base.skill_router import skills_semantic_embed_body_max_chars
             from base.skills import get_all_skills_dirs, get_skills_dir, sync_skills_to_vector_store
             root = Path(Util().root_path()).resolve()
             all_dirs = get_all_skills_dirs(
@@ -756,6 +761,7 @@ def get_api_skills_sync_vector_store_handler(core):
             incremental = bool(getattr(meta, "skills_incremental_sync", False))
             n = await sync_skills_to_vector_store(
                 skills_path, vs, embedder,
+                refined_body_max_chars=skills_semantic_embed_body_max_chars(meta),
                 skills_test_dir=skills_test_path, incremental=incremental,
                 skills_extra_dirs=skills_extra_paths if skills_extra_paths else None,
                 disabled_folders=disabled_folders if disabled_folders else None,
@@ -765,6 +771,65 @@ def get_api_skills_sync_vector_store_handler(core):
             logger.exception(e)
             return JSONResponse(status_code=500, content={"detail": str(e)})
     return api_skills_sync_vector_store
+
+
+def get_api_intent_category_sync_vector_store_handler(core):
+    """Return handler for POST /api/intent-category/sync-vector-store."""
+    async def api_intent_category_sync_vector_store(request: Request):
+        try:
+            meta = Util().get_core_metadata()
+            _ir_cfg = getattr(meta, "intent_router_config", None) or {}
+            _ir_sem = _ir_cfg.get("semantic") if isinstance(_ir_cfg.get("semantic"), dict) else {}
+            _mode = str(_ir_cfg.get("mode") or "static").strip().lower()
+            _enabled = bool(_ir_cfg.get("enabled")) and _mode in ("semantic", "hybrid") and bool(
+                _ir_sem.get("enabled", True)
+            )
+            if not meta or not _enabled:
+                return JSONResponse(content={"synced": 0, "message": "intent_router semantic mode is disabled"})
+
+            vs = getattr(core, "intent_categories_vector_store", None)
+            embedder = getattr(core, "embedder", None)
+            if not vs or not embedder:
+                return JSONResponse(content={"synced": 0, "message": "Intent categories vector store not enabled"})
+
+            try:
+                body = await request.json() if request.headers.get("content-type", "").strip().startswith("application/json") else {}
+            except Exception:
+                body = {}
+            if not isinstance(body, dict):
+                body = {}
+            incremental = body.get("incremental", True)
+            if isinstance(incremental, str):
+                incremental = incremental.strip().lower() not in ("0", "false", "no", "off")
+
+            from base.intent_category_router import merge_intent_router_config_with_docs, sync_intent_categories_to_vector_store
+            from base.intent_router import DEFAULT_CATEGORY_DESCRIPTIONS
+
+            root = Path(Util().root_path()).resolve()
+            docs_dir = str(_ir_sem.get("docs_dir") or "config/intent_category").strip() or "config/intent_category"
+            docs_path = Path(docs_dir)
+            if not docs_path.is_absolute():
+                docs_path = root / docs_path
+            _merged_ir = merge_intent_router_config_with_docs(
+                dict(_ir_cfg),
+                root_path=root,
+                default_descriptions=DEFAULT_CATEGORY_DESCRIPTIONS,
+            )
+            cats = _merged_ir.get("categories") if isinstance(_merged_ir.get("categories"), list) else []
+            if not cats and isinstance(_ir_cfg.get("categories"), list):
+                cats = [str(c).strip() for c in _ir_cfg["categories"] if c is not None and str(c).strip()]
+            n = await sync_intent_categories_to_vector_store(
+                docs_path,
+                vs,
+                embedder,
+                allowed_categories=[str(c).strip() for c in cats if str(c).strip()],
+                incremental=bool(incremental),
+            )
+            return JSONResponse(content={"synced": int(n) if n is not None else 0})
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+    return api_intent_category_sync_vector_store
 
 
 def get_api_testing_clear_all_handler(core):

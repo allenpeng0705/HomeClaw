@@ -537,6 +537,124 @@ def filter_skills_by_query(skills: List[Dict[str, Any]], query: str) -> List[Dic
     return result
 
 
+def skills_with_matching_trigger_patterns(skills: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
+    """
+    Skills that declare non-empty trigger.patterns and match the query.
+
+    Used to widen semantic retrieval: embedding may miss the right skill while a declared
+    regex still matches. Omits skills with no trigger or no patterns (those are not
+    keyword-rescue candidates — use full catalog or intent filters instead).
+
+    Never raises; returns a new list.
+    """
+    if not skills:
+        return []
+    q = (query or "").strip()
+    if not q:
+        return []
+    out: List[Dict[str, Any]] = []
+    for s in skills:
+        if not isinstance(s, dict):
+            continue
+        trigger = s.get("trigger") if isinstance(s.get("trigger"), dict) else None
+        if not trigger:
+            continue
+        patterns = trigger.get("patterns")
+        if patterns is None and trigger.get("pattern") is not None:
+            patterns = [trigger.get("pattern")]
+        if not patterns or not isinstance(patterns, (list, tuple)):
+            continue
+        clean_pats = [str(p).strip() for p in patterns if p is not None and str(p).strip()]
+        if not clean_pats:
+            continue
+        matched = False
+        for pat in clean_pats:
+            try:
+                if re.search(pat, q, re.IGNORECASE):
+                    matched = True
+                    break
+            except re.error:
+                continue
+        if matched:
+            out.append(s)
+    return out
+
+
+def skills_with_lexical_overlap(
+    skills: List[Dict[str, Any]],
+    query: str,
+    *,
+    min_token_len: int = 3,
+    max_skills: int = 12,
+) -> List[Dict[str, Any]]:
+    """
+    Skills whose name/description/keywords share word-boundary matches with query tokens.
+
+    Widen retrieval when vector search returns neighbors that omit the right skill but the
+    user still named a distinctive term (e.g. tool name). Does not replace trigger patterns
+    or intent routing — use as an optional union before rerank.
+
+    Never raises; returns a new list sorted by match count (desc), capped at max_skills.
+    """
+    if not skills:
+        return []
+    q = (query or "").strip()
+    if not q:
+        return []
+    try:
+        mtl = max(2, min(12, int(min_token_len)))
+    except (TypeError, ValueError):
+        mtl = 3
+    tokens = []
+    for t in re.findall(r"[\w']+", q):
+        tl = len(t)
+        if tl >= mtl:
+            tokens.append(t.lower())
+    if not tokens:
+        return []
+    try:
+        cap = max(1, min(50, int(max_skills)))
+    except (TypeError, ValueError):
+        cap = 12
+
+    def _token_hits(blob: str) -> int:
+        n = 0
+        for tok in tokens:
+            try:
+                if re.search(r"(?<!\w)" + re.escape(tok) + r"(?!\w)", blob, re.IGNORECASE):
+                    n += 1
+            except re.error:
+                continue
+        return n
+
+    scored: List[Tuple[int, Dict[str, Any]]] = []
+    for s in skills:
+        if not isinstance(s, dict):
+            continue
+        parts = [str(s.get("name") or ""), str(s.get("description") or "")]
+        k = s.get("keywords")
+        if isinstance(k, list):
+            parts.extend(str(x) for x in k if str(x).strip())
+        else:
+            parts.append(str(k or ""))
+        blob = " ".join(parts)
+        hits = _token_hits(blob)
+        if hits > 0:
+            scored.append((hits, s))
+    scored.sort(key=lambda x: -x[0])
+    out: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for _n, s in scored:
+        if len(out) >= cap:
+            break
+        fk = str((s.get("folder") or s.get("name") or "")).strip().lower()
+        if not fk or fk in seen:
+            continue
+        seen.add(fk)
+        out.append(s)
+    return out
+
+
 def trim_skills_list_for_char_budget(
     skills: List[Dict[str, Any]],
     budget_chars: int,
@@ -585,17 +703,17 @@ def trim_skills_list_for_char_budget(
 def build_skills_system_block(
     skills: List[Dict[str, Any]],
     include_body: bool = False,
-    use_location_only: bool = False,
+    use_path_only: bool = False,
     include_invocation_contract: bool = True,
 ) -> str:
     """
     Build a system-prompt block listing available skills.
 
-    When use_location_only is True (OpenClaw-style): inject only name, description, and location
-    (path for file_read). Instruction: read SKILL.md at <location> with file_read, then follow it.
+    When use_path_only is True (OpenClaw-style): inject only name, description, and skill path
+    (skill:<folder> for file_read). Instruction: read SKILL.md via file_read(path='skill:...'), then follow it.
     Reduces context tokens; model loads skill content on demand.
 
-    When use_location_only is False: inject name, description, keywords, and optionally body.
+    When use_path_only is False: inject name, description, keywords, and optionally body.
     Instruction: infer script/args from description/body and call run_skill. Never raises.
     """
     if not isinstance(skills, (list, tuple)) or not skills:
@@ -606,15 +724,15 @@ def build_skills_system_block(
         "Do not only mention a skill in prose—invoke the tool when the task requires it. "
         "If this turn already includes full instructions for that skill from a prior `run_skill` or `file_read`/`document_read` on that skill, you may continue without calling `run_skill` again for the same step."
     )
-    if use_location_only:
+    if use_path_only:
         lines = ["## Available skills"]
         if include_invocation_contract:
             lines.append(_contract)
             lines.append("")
         lines.extend(
             [
-                "Before using a skill: scan the list below by <description>. If exactly one skill clearly applies, read its SKILL.md with file_read(path='<location>'), then follow the instructions in that file (including calling run_skill(skill_name, script, args) when the skill has scripts). If multiple could apply, choose the most specific one. If none apply, do not read any SKILL.md.",
-                "Locations use the form skill:<folder>; pass that string as path to file_read (e.g. file_read(path='skill:imap-smtp-email')).",
+                "Before using a skill: scan the list below by <description>. If exactly one skill clearly applies, read its SKILL.md with file_read(path='<path>'), then follow the instructions in that file (including calling run_skill(skill_name, script, args) when the skill has scripts). If multiple could apply, choose the most specific one. If none apply, do not read any SKILL.md.",
+                "Paths use the form skill:<folder>; pass that string to file_read (e.g. file_read(path='skill:imap-smtp-email')).",
                 "",
             ]
         )
@@ -628,10 +746,10 @@ def build_skills_system_block(
                 if not folder:
                     continue
                 desc = str(s.get("description") or "").strip()
-                location = f"skill:{folder}"
+                skill_path = f"skill:{folder}"
                 line = f"- **{name}** — {desc}" if desc else f"- **{name}**"
                 lines.append(line)
-                lines.append(f"  location: {location}")
+                lines.append(f"  path: {skill_path}")
             except Exception:
                 continue
             lines.append("")
@@ -679,6 +797,8 @@ def build_skill_refined_text(skill: Dict[str, Any], body_max_chars: int = 0) -> 
     Build the text to embed for a skill. Used as the single index vector for RAG.
     Embedded: name, description, keywords, trigger (instruction snippet + pattern terms), optionally body.
     body_max_chars=0 (default): do not include body; body is in the prompt when skill is selected.
+    Aligns with SkillRouter-style full-text routing: at large scale, body text materially improves
+    retrieval vs metadata-only (see docs_design/2603.22455v4.pdf); set skills_router.semantic.embed_body_max_chars.
     Never raises: returns "" on any error so RAG sync never crashes.
     """
     try:

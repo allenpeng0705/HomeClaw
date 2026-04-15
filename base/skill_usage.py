@@ -96,7 +96,7 @@ def record_skill_invocation(user_id: str, skill_folder: str) -> None:
 def top_skill_folders(user_id: str, *, limit: int = 12) -> List[Tuple[str, int]]:
     """
     Return (skill_folder, count) for the user (or _global) sorted by descending count.
-    Use to tune intent_router.frequent_fast_paths or skills_include_body_for from real usage (see database/skill_usage.json).
+    Use to tune skills_include_body_for from real usage (see database/skill_usage.json).
     Never raises.
     """
     uid = _norm_user(user_id)

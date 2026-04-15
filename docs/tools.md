@@ -57,7 +57,7 @@ tools:
 The **markdown_to_pdf** tool converts Markdown text to a PDF file and saves it under the user's output folder, returning a view link. Used by the **summarize** skill when the summary is long so the user gets both the inline summary and a downloadable PDF without asking.
 
 - **Parameters:** `content` (Markdown string), `path` (e.g. `output/summary.pdf`).
-- **Converter (priority):** (1) **VMPrint** — install via **`./install.sh`** or **`install.ps1`** / **`install.bat`** (clones into `tools/vmprint`, runs `npm install`). Config default: `tools.markdown_to_pdf.vmprint_dir: "tools/vmprint"`. (2) **pandoc** on PATH. (3) **pip install markdown weasyprint** (Markdown → HTML → PDF).
+- **Converter (priority):** (1) **VMPrint** — install via **`./install.sh`** or **`install.ps1`** / **`install.bat`** (clones into `tools/vmprint`, runs **`npm install`** + **`npm run build`**; refreshes missing preview deps). **Manual install:** [VMPrint as UI runtime — Manual installation for HomeClaw](vmprint-ui-runtime.md#manual-installation-for-homeclaw). Config default: `tools.markdown_to_pdf.vmprint_dir: "tools/vmprint"`. (2) **pandoc** on PATH. (3) **pip install markdown weasyprint** (Markdown → HTML → PDF).
 
 ---
 

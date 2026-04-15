@@ -36,6 +36,7 @@ from base.user_sandbox_folders import FOLDER_NAMES_FOR_USER_MESSAGE, STANDARD_US
 from base.util import Util, redact_params_for_log
 from base.base import PluginResult, User
 from base.media_io import save_data_url_to_media_folder
+from tools.vmprint_preview_loader import vmprint_hybrid_preview_loaders
 try:
     from base.workflow_trace import emit_event as _trace_emit_event
 except ImportError:
@@ -5332,6 +5333,64 @@ def _vmprint_repo_root_from_dir_str(vmprint_dir: Optional[str]) -> Optional[Path
     return None
 
 
+def _vmprint_npm_package_dist_entry(
+    vmroot: Path, scope: str, name: str, dist_names: Tuple[str, ...]
+) -> Optional[Path]:
+    """Resolve a built npm package entry (hoisted under vmroot or nested under cli/engine)."""
+    for root in (vmroot, vmroot / "cli", vmroot / "engine"):
+        pkg = root / "node_modules" / scope / name
+        if not pkg.is_dir():
+            continue
+        for rel in dist_names:
+            p = (pkg / rel).resolve()
+            if p.is_file():
+                return p
+        pkg_json = pkg / "package.json"
+        if pkg_json.is_file():
+            try:
+                main = json.loads(pkg_json.read_text(encoding="utf-8")).get("main")
+                if isinstance(main, str) and main.strip():
+                    p = (pkg / main.strip()).resolve()
+                    if p.is_file():
+                        return p
+            except Exception:
+                pass
+    return None
+
+
+def _vmprint_preview_standard_fonts_cjs(vmroot: Path) -> Optional[Path]:
+    p = _vmprint_npm_package_dist_entry(vmroot, "@vmprint", "standard-fonts", ("dist/index.cjs", "dist/index.js"))
+    if p is not None:
+        return p
+    legacy = (vmroot / "font-managers" / "standard" / "dist" / "index.js").resolve()
+    return legacy if legacy.is_file() else None
+
+
+def _vmprint_preview_context_canvas_js(vmroot: Path) -> Optional[Path]:
+    p = _vmprint_npm_package_dist_entry(vmroot, "@vmprint", "context-canvas", ("dist/index.js", "dist/index.cjs"))
+    if p is not None:
+        return p
+    legacy = (vmroot / "contexts" / "canvas" / "dist" / "index.js").resolve()
+    return legacy if legacy.is_file() else None
+
+
+def _vmprint_preview_node_deps_missing_message(vmroot: Path) -> str:
+    std = _vmprint_preview_standard_fonts_cjs(vmroot)
+    ctx = _vmprint_preview_context_canvas_js(vmroot)
+    missing: List[str] = []
+    if std is None:
+        missing.append("@vmprint/standard-fonts")
+    if ctx is None:
+        missing.append("@vmprint/context-canvas")
+    if not missing:
+        return ""
+    pkgs = " ".join(missing)
+    return (
+        f"Missing preview packages ({', '.join(missing)}). "
+        f"From your VMPrint root run: npm install {pkgs}"
+    )
+
+
 def _ensure_vmprint_static_assets(base_dir: Path, *, client_engine: bool = False) -> None:
     """Ensure VMPrint runtime + preview shell assets exist under output/."""
     try:
@@ -5350,11 +5409,24 @@ def _ensure_vmprint_static_assets(base_dir: Path, *, client_engine: bool = False
                     break
         if vmroot is None:
             vmroot = (project_root / "tools" / "vmprint").resolve()
-        copies = [
-            (vmroot / "engine" / "dist" / "index.js", assets_dir / "vmprint-engine.js"),
-            (vmroot / "contexts" / "canvas" / "dist" / "index.js", assets_dir / "vmprint-context-canvas.js"),
-            (vmroot / "font-managers" / "standard" / "dist" / "index.js", assets_dir / "vmprint-web-fonts.js"),
-        ]
+        copies: List[Tuple[Path, Path]] = []
+        eng_js = (vmroot / "engine" / "dist" / "index.js").resolve()
+        if eng_js.is_file():
+            copies.append((eng_js, assets_dir / "vmprint-engine.js"))
+        cc_js = _vmprint_preview_context_canvas_js(vmroot)
+        if cc_js is not None and cc_js.is_file():
+            copies.append((cc_js, assets_dir / "vmprint-context-canvas.js"))
+        else:
+            legacy_cc = (vmroot / "contexts" / "canvas" / "dist" / "index.js").resolve()
+            if legacy_cc.is_file():
+                copies.append((legacy_cc, assets_dir / "vmprint-context-canvas.js"))
+        std_js = _vmprint_preview_standard_fonts_cjs(vmroot)
+        if std_js is not None and std_js.is_file():
+            copies.append((std_js, assets_dir / "vmprint-web-fonts.js"))
+        else:
+            legacy_std = (vmroot / "font-managers" / "standard" / "dist" / "index.js").resolve()
+            if legacy_std.is_file():
+                copies.append((legacy_std, assets_dir / "vmprint-web-fonts.js"))
         for src, dst in copies:
             if src.is_file() and (not dst.exists() or dst.stat().st_size == 0):
                 shutil.copy2(src, dst)
@@ -5371,9 +5443,10 @@ def _ensure_vmprint_static_assets(base_dir: Path, *, client_engine: bool = False
             )
         styles_css = (base_dir / FILE_OUTPUT_SUBDIR / "styles.css").resolve()
         styles_css.write_text(
-            "body{font-family:system-ui;margin:0;background:#111;color:#eee}"
-            ".pages{padding:12px;display:grid;gap:16px;justify-items:center}"
-            ".page{background:#fff;color:#111;box-shadow:0 2px 12px rgba(0,0,0,.35);overflow:auto}",
+            "body{font-family:system-ui;margin:0;background:#111;color:#eee;overflow-x:auto}"
+            ".pages{padding:12px;display:grid;gap:16px;justify-items:start}"
+            ".page{min-width:612px;background:#fff;color:#111;box-shadow:0 2px 12px rgba(0,0,0,.35);overflow:auto}"
+            ".page>svg{max-width:none;height:auto;display:block}",
             encoding="utf-8",
         )
         pipeline_js = preview_assets_dir / "pipeline.js"
@@ -5416,7 +5489,7 @@ try{
 var eng=await import(_u("../_vmprint_assets/AV_PLACEHOLDER/vmprint-engine.mjs"));
 var ctxM=await import(_u("../_vmprint_assets/AV_PLACEHOLDER/vmprint-context-canvas.js"));
 var fmM=await import(_u("../_vmprint_assets/AV_PLACEHOLDER/vmprint-web-fonts.js"));
-var LayoutEngine=eng.LayoutEngine,Renderer=eng.Renderer,toLayoutConfig=eng.toLayoutConfig,createEngineRuntime=eng.createEngineRuntime;
+var LayoutEngine=eng.LayoutEngine,ContextRenderer=eng.ContextRenderer,toLayoutConfig=eng.toLayoutConfig,createPrintEngineRuntime=eng.createPrintEngineRuntime;
 var CanvasContext=ctxM.CanvasContext||ctxM.default;
 var StandardFontManager=fmM.StandardFontManager||fmM.default;
 var raw=(document.getElementById("ast-data")||{}).textContent||"{}";
@@ -5441,7 +5514,7 @@ if(o==="landscape"&&s.width<s.height)s={width:s.height,height:s.width};
 if(o==="portrait"&&s.width>s.height)s={width:s.height,height:s.width};
 return s;
 }
-var runtime=createEngineRuntime({fontManager:new StandardFontManager()});
+var runtime=createPrintEngineRuntime({fontManager:new StandardFontManager()});
 var cfg=toLayoutConfig(doc);
 var rawPageSize=(cfg&&cfg.pageSize)?cfg.pageSize:(doc&&doc.layout?doc.layout.pageSize:null);
 var orientation=(cfg&&cfg.orientation)?cfg.orientation:(doc&&doc.layout?doc.layout.orientation:null);
@@ -5450,7 +5523,7 @@ var engine=new LayoutEngine(cfg,runtime);
 await engine.waitForFonts();
 var pages=engine.simulate(doc.elements);
 var ctx=new CanvasContext({size:pageSize,margins:cfg.margins,autoFirstPage:false,bufferPages:false,textRenderMode:"text"});
-var renderer=new Renderer(cfg,false,runtime);
+var renderer=new ContextRenderer(cfg,false,runtime);
 await renderer.render(pages,ctx);
 ctx.end();
 var svgs=[];
@@ -5706,26 +5779,34 @@ def _vmprint_render_sync(
                         embed_layout_script = (
                             f"<script id='layout-data' type='application/json'>{html.escape(layout_text)}</script>"
                         )
+                    std_entry = _vmprint_preview_standard_fonts_cjs(vmp)
+                    ctx_entry = _vmprint_preview_context_canvas_js(vmp)
+                    dep_msg = _vmprint_preview_node_deps_missing_message(vmp)
+                    if std_entry is None or ctx_entry is None:
+                        return (None, None, dep_msg or "VMPrint canvas preview failed: missing node preview deps.", None)
                     canvas_script = (
                         "const fs=require('fs');"
-                        "const {LayoutEngine,Renderer,toLayoutConfig,createEngineRuntime}=require('./engine/dist/index.js');"
-                        "const {StandardFontManager}=require('./font-managers/standard/dist/index.js');"
-                        "const {CanvasContext}=require('./contexts/canvas/dist/index.js');"
-                        "const p=process.argv[1]; const doc=JSON.parse(fs.readFileSync(p,'utf8'));"
+                        "const stdPath=process.argv[1];"
+                        "const canvasPath=process.argv[2];"
+                        "const astInput=process.argv[3];"
+                        "const {LayoutEngine,ContextRenderer,toLayoutConfig,createPrintEngineRuntime}=require('./engine/dist/index.js');"
+                        "const {StandardFontManager}=require(stdPath);"
+                        "const {CanvasContext}=require(canvasPath);"
+                        "const doc=JSON.parse(fs.readFileSync(astInput,'utf8'));"
                         "(async()=>{"
-                        "const runtime=createEngineRuntime({fontManager:new StandardFontManager()});"
+                        "const runtime=createPrintEngineRuntime({fontManager:new StandardFontManager()});"
                         "const cfg=toLayoutConfig(doc);"
                         "const engine=new LayoutEngine(cfg,runtime);"
                         "await engine.waitForFonts();"
                         "const pages=engine.simulate(doc.elements);"
                         "const ctx=new CanvasContext({size:cfg.pageSize,margins:cfg.margins,autoFirstPage:false,bufferPages:false,textRenderMode:'text'});"
-                        "const renderer=new Renderer(cfg,false,runtime);"
+                        "const renderer=new ContextRenderer(cfg,false,runtime);"
                         "await renderer.render(pages,ctx); ctx.end();"
                         "process.stdout.write(JSON.stringify({svgs:ctx.toSvgPages()}));"
                         "})().catch(e=>{console.error(String(e&&e.stack||e)); process.exit(2);});"
                     )
                     c = subprocess.run(
-                        ["node", "-e", canvas_script, str(ast_path)],
+                        ["node", "-e", canvas_script, str(std_entry), str(ctx_entry), str(ast_path)],
                         cwd=str(vmp),
                         capture_output=True,
                         timeout=180,
@@ -5761,25 +5842,23 @@ def _vmprint_render_sync(
                         if _use_client_engine
                         else ""
                     )
+                    _extra_scripts = ("assets/vmprint-client-engine-loader.js",) if _use_client_engine else ()
+                    _head_ld, _body_ld = vmprint_hybrid_preview_loaders(
+                        asset_version, extra_body_script_rels=_extra_scripts
+                    )
                     viewer_html = (
                         "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
                         f"<meta name='homeclaw-vmprint-ui-hint' content='{html.escape(ui_hint, quote=True)}'>"
                         f"<meta name='homeclaw-vmprint-ast-chars' content='{html.escape(str(ast_chars), quote=True)}'>"
                         f"<meta name='homeclaw-vmprint-pages' content='{html.escape(str(page_count), quote=True)}'>"
                         f"{_ce_meta}"
-                        "<title>VMPrint preview</title><link rel='stylesheet' href='./styles.css'></head><body>"
+                        f"<title>VMPrint preview</title>{_head_ld}</head><body>"
                         "<div id='root' class='pages'></div>"
                         f"<script id='ast-data' type='application/json'>{ast_json}</script>"
                         f"{embed_layout_script}"
                         f"<script id='svg-pages-data' type='application/json'>{esc_json}</script>"
-                        f"<script src='./_vmprint_assets/{asset_version}/vmprint-fontkit.js'></script><script src='./_vmprint_assets/{asset_version}/vmprint-engine.js'></script><script src='./_vmprint_assets/{asset_version}/vmprint-web-fonts.js'></script><script src='./_vmprint_assets/{asset_version}/vmprint-context-canvas.js'></script>"
-                        "<script src='./assets/pipeline.js'></script><script src='./assets/ui.js'></script>"
-                        + (
-                            "<script src='./assets/vmprint-client-engine-loader.js'></script>"
-                            if _use_client_engine
-                            else ""
-                        )
-                        + "</body></html>"
+                        f"{_body_ld}"
+                        "</body></html>"
                     )
                     return (None, viewer_html, None, layout_for_sidecar)
                 vm_cli = vmp / "cli" / "dist" / "index.js"
@@ -6277,7 +6356,8 @@ def _search_sandbox_for_filename(context: Optional[Any], filename: Optional[str]
                                 continue
                             try:
                                 rel_s = p.relative_to(share_root)
-                                rel = f"{shared_dir}/{str(rel_s).replace('\\', '/')}".replace("//", "/")
+                                rel_norm = str(rel_s).replace("\\", "/")
+                                rel = f"{shared_dir}/{rel_norm}".replace("//", "/")
                             except ValueError:
                                 rel = f"{shared_dir}/{p.name}"
                             if rel not in seen:

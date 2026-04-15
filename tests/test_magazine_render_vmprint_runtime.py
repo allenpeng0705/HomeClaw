@@ -194,6 +194,13 @@ def test_ast_from_template_web_search_magazine_layout():
     zm = next(n for n in ast["elements"] if n.get("type") == "zone-map")
     lead = next(z for z in zm["zones"] if z["id"] == "lead")
     assert any(e.get("type") == "headline" and e.get("content") == "First hit" for e in lead["elements"])
+    kicker = next(e for e in lead["elements"] if e.get("type") == "kicker")
+    assert kicker["content"] == "TOP RESULT"
+    story = next(e for e in lead["elements"] if e.get("type") == "story")
+    assert story.get("columns") == 1
+    assert any(
+        e.get("type") == "body" and e.get("content") == "https://news.example.com/a" for e in story["children"]
+    )
     dig = m._ast_digest_html(ast)
     assert "First hit" in dig and "Second" in dig
 
@@ -350,6 +357,26 @@ def test_ast_digest_includes_cjk_table_cells():
     assert "Magazine digest" in dig
     assert 'href="https://x.test"' in dig
     assert 'target="_blank"' in dig
+    assert "<article" in dig
+    assert "grid-template-columns:repeat(auto-fit" not in dig
+
+
+def test_ast_digest_web_search_table_is_vertical_cards_not_multi_column_grid():
+    m = _load_magazine_render_module()
+    ast = m._web_search_ast(
+        {
+            "results": [
+                {"title": "Alpha story", "url": "https://a.example/x", "snippet": "First paragraph."},
+                {"title": "Beta", "url": "https://b.example/y", "content": "Second body."},
+            ]
+        },
+        title="Search",
+        theme="dispatch",
+    )
+    dig = m._ast_digest_html(ast)
+    assert dig.count("<article") == 2
+    assert "Alpha story" in dig and "Beta" in dig
+    assert "grid-template-columns:repeat(auto-fit" not in dig
 
 
 def test_browser_preview_html_embeds_layout_payload():

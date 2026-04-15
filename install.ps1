@@ -1,6 +1,6 @@
 # HomeClaw install script for Windows.
 # Run from project root (existing clone) or from a parent directory (script will clone).
-# Steps (same as install.sh): Python (3.9+) -> Node.js -> tsx -> ClawHub -> [clone if needed] -> optional Dev CLIs + bundled memex npm ci -> VMPrint -> pip install -> Cognee deps (cognee in vendor/) -> document stack -> MemOS (vendor/memos) -> llama.cpp -> GGUF/Ollama -> open Portal.
+# Steps (same as install.sh): Python (3.9+) -> Node.js -> tsx -> ClawHub -> [clone if needed] -> optional Dev CLIs + bundled memex npm ci -> VMPrint (PDF + AST preview) -> pip install -> Cognee deps (cognee in vendor/) -> document stack -> MemOS (vendor/memos) -> llama.cpp -> GGUF/Ollama -> open Portal.
 #
 # If you see "cannot be loaded... not digitally signed" (execution policy):
 #   Easiest: run install.bat instead (it uses Bypass automatically).
@@ -353,9 +353,11 @@ if ($DoBundledMemex) {
   Write-Host "Skipping bundled memex (use Cursor/Claude install flags, or HOMECLAW_INSTALL_BUNDLED_MEMEX=1)"
 }
 
-# ----- Step 4b: VMPrint (Markdown to PDF tool) -----
+# ----- Step 4b: VMPrint (Markdown to PDF + magazine / AST browser preview) -----
 Write-Host ""
-Write-Host "=== Step 4b: VMPrint (Markdown to PDF) ==="
+Write-Host "=== Step 4b: VMPrint (Markdown to PDF + AST preview) ==="
+Write-Host "    (npm install + npm run build under tools\vmprint; @vmprint/context-canvas + standard-fonts for preview.)"
+Write-Host "    Optional: env HOMECLAW_VMPRINT_ROOT if vmprint lives outside tools\vmprint."
 $VmprintDir = Join-Path $Root "tools\vmprint"
 $VmprintMain = Join-Path $Root "tools\vmprint-main"
 # If user downloaded GitHub ZIP, folder is vmprint-main; rename to vmprint so config path works
@@ -370,6 +372,24 @@ if ((Test-Path $VmprintMain) -and -not (Test-Path $VmprintDir)) {
 $VmprintOk = (Test-Path (Join-Path $VmprintDir "package.json")) -and ((Test-Path (Join-Path $VmprintDir "draft2final")) -or (Test-Path (Join-Path $VmprintDir "cli")))
 if ($VmprintOk) {
   Write-Host "OK: VMPrint already at tools\vmprint"
+  $needBuild = $false
+  if (-not (Test-Path (Join-Path $VmprintDir "engine\dist\index.js"))) { $needBuild = $true }
+  if (-not (Test-Path (Join-Path $VmprintDir "node_modules\@vmprint\context-canvas\package.json"))) { $needBuild = $true }
+  if (-not (Test-Path (Join-Path $VmprintDir "node_modules\@vmprint\standard-fonts\package.json"))) { $needBuild = $true }
+  if ($needBuild -and (Get-Command node -ErrorAction SilentlyContinue)) {
+    Write-Host "VMPrint engine or @vmprint preview packages missing; running npm install && npm run build ..."
+    Push-Location $VmprintDir
+    try {
+      npm install --silent 2>$null
+      npm run build 2>$null
+    } catch {
+      Write-Host "Warning: VMPrint refresh failed. Retry: cd $VmprintDir; npm install; npm run build"
+    } finally {
+      Pop-Location -ErrorAction SilentlyContinue
+    }
+  } elseif ($needBuild) {
+    Write-Host "VMPrint needs npm install/build but Node was not found. Install from https://nodejs.org then: cd $VmprintDir; npm install; npm run build"
+  }
 } else {
   try {
     $null = Get-Command git -ErrorAction SilentlyContinue
@@ -379,7 +399,7 @@ if ($VmprintOk) {
         Write-Host "Updating VMPrint at tools\vmprint ..."
         Set-Location $VmprintDir; git pull --quiet 2>$null
       } else {
-        Write-Host "Cloning VMPrint from GitHub into tools\vmprint (optional Markdown-to-PDF tool)..."
+        Write-Host "Cloning VMPrint from GitHub into tools\vmprint (Markdown/PDF + AST browser preview)..."
         & git clone --progress --depth 1 https://github.com/cosmiciron/vmprint.git $VmprintDir
       }
       if ((Test-Path (Join-Path $VmprintDir "package.json")) -and (Get-Command node -ErrorAction SilentlyContinue)) {
@@ -389,6 +409,11 @@ if ($VmprintOk) {
           Write-Host "Building VMPrint workspace (ordered dependency build) ..."
           npm run build 2>$null
           Write-Host "OK: VMPrint installed at tools\vmprint"
+          if ((Test-Path (Join-Path $VmprintDir "engine\dist\index.js")) -and (Test-Path (Join-Path $VmprintDir "node_modules\@vmprint\context-canvas\package.json")) -and (Test-Path (Join-Path $VmprintDir "node_modules\@vmprint\standard-fonts\package.json"))) {
+            Write-Host "    Verified: engine\dist + @vmprint\context-canvas + @vmprint\standard-fonts (magazine browser_preview_html)."
+          } else {
+            Write-Host "    Warning: build finished but engine\dist or @vmprint packages look incomplete; run: cd $VmprintDir; npm install; npm run build"
+          }
         } else {
           Write-Host "VMPrint clone present; run manually: cd $VmprintDir; npm install"
         }

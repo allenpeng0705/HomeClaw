@@ -15,17 +15,18 @@ except Exception:
 from loguru import logger
 
 from base.util import Util
+from base.skill_router import skills_router_semantic_enabled
 from memory.embedding import LlamaCppEmbedding
 from memory.llm import LlamaCppLLM
 from memory.mem import Memory
 
 
 def _create_skills_vector_store(core: Any) -> None:
-    """Create a dedicated vector store for skills (separate collection from memory). Used when skills_use_vector_search."""
+    """Create a dedicated vector store for skills (separate collection from memory). Used when skills_router semantic/hybrid is enabled."""
     from memory.vector_store_factory import create_vector_store
 
     meta = Util().get_core_metadata()
-    if not getattr(meta, "skills_use_vector_search", False):
+    if not skills_router_semantic_enabled(meta):
         return
     vdb = meta.vectorDB
     backend = getattr(vdb, "backend", "chroma") or "chroma"
@@ -69,6 +70,36 @@ def _create_tools_vector_store(core: Any) -> None:
         backend=backend,
         config=config,
         collection_name=tools_cfg.get("tools_vector_collection", "homeclaw_tools") or "homeclaw_tools",
+        chroma_client=chroma_client,
+    )
+
+
+def _create_intent_categories_vector_store(core: Any) -> None:
+    """Create vector store for semantic intent category docs when enabled."""
+    from memory.vector_store_factory import create_vector_store
+
+    meta = Util().get_core_metadata()
+    cfg = getattr(meta, "intent_router_config", None) or {}
+    sem = cfg.get("semantic") if isinstance(cfg.get("semantic"), dict) else {}
+    mode = str(cfg.get("mode") or "static").strip().lower()
+    enabled = bool(cfg.get("enabled")) and mode in ("semantic", "hybrid") and bool(sem.get("enabled", True))
+    if not enabled:
+        return
+    vdb = meta.vectorDB
+    backend = getattr(vdb, "backend", "chroma") or "chroma"
+    config = {
+        "backend": backend,
+        "Chroma": vars(vdb.Chroma),
+        "Qdrant": vars(vdb.Qdrant),
+        "Milvus": vars(vdb.Milvus),
+        "Pinecone": vars(vdb.Pinecone),
+        "Weaviate": vars(vdb.Weaviate),
+    }
+    chroma_client = getattr(core, "chromra_memory_client", None) if backend == "chroma" else None
+    core.intent_categories_vector_store = create_vector_store(
+        backend=backend,
+        config=config,
+        collection_name=(sem.get("vector_collection") or "homeclaw_intent_categories"),
         chroma_client=chroma_client,
     )
 
@@ -349,6 +380,7 @@ def run_initialize(core: Any) -> None:
     logger.debug("core init: embedder done")
     meta = Util().get_core_metadata()
     _create_skills_vector_store(core)
+    _create_intent_categories_vector_store(core)
     _create_tools_vector_store(core)
     _create_plugins_vector_store(core)
     _create_agent_memory_vector_store(core)

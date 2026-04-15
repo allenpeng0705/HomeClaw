@@ -48,7 +48,11 @@ def get_deregister_channel_handler(core):
 
 
 def get_ready_handler(core):
-    """Returns async handler for GET /ready."""
+    """Returns async handler for GET /ready.
+
+    200 means the HTTP server is accepting requests and Core finished bind-time init; heavy startup
+    (vector store sync for skills/intent/memory) may still be running in the same event loop.
+    """
 
     async def ready():
         if getattr(core, "_core_http_ready", False):

@@ -414,6 +414,12 @@ def register_all_routes(core: Any) -> None:
         methods=["POST"],
         dependencies=[Depends(auth.verify_inbound_auth)],
     )
+    app.add_api_route(
+        "/api/intent-category/sync-vector-store",
+        misc_api.get_api_intent_category_sync_vector_store_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
     # Companion->Core direct: list/search/install skills (no Portal)
     app.add_api_route(
         "/api/skills/list",
