@@ -276,7 +276,7 @@ class KnowledgeBase:
                 try:
                     new_meta = {**payload, METADATA_LAST_USED: now}
                     if self.store_timeout > 0:
-                        asyncio.wait_for(
+                        await asyncio.wait_for(
                             asyncio.get_event_loop().run_in_executor(
                                 None,
                                 lambda: self.store.update(vector_id=pid, payload=new_meta),

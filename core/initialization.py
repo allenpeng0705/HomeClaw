@@ -215,6 +215,8 @@ def _create_knowledge_base_cognee(core: Any, meta: Any, kb_cfg: Dict[str, Any]) 
             kb_config={
                 "unused_ttl_days": float(kb_cfg.get("unused_ttl_days", 30) or 30),
                 "max_sources_per_user": int(kb_cfg.get("max_sources_per_user", 0) or 0),
+                "cognee_search_type": kb_cfg.get("cognee_search_type"),
+                "cognee_search_timeout_seconds": kb_cfg.get("cognee_search_timeout_seconds"),
             },
         )
         logger.debug("Knowledge base initialized (Cognee backend)")

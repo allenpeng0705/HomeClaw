@@ -98,6 +98,13 @@ intent_router:
   intent_category_docs_dir: config/intent_category
   # Optional: sparse overrides if you use doc overlay; per-file category_tools in .md merges over this.
   # category_tools: {}
+  # Omit or default: skip the intent-router LLM for dedicated Reminder / Finder / Knowledge friends (faster, preset-only tools).
+  # Set to [] to disable. Value may be a YAML list or a comma-separated string (e.g. "reminder, finder, knowledge").
+  # Lists with only blank entries are ignored (router not skipped). See base/friend_presets.should_skip_intent_router_for_friend.
+  skip_for_friend_presets:
+    - reminder
+    - finder
+    - knowledge
   # Optional: include recent chat turns so router can resolve "that document", "it", "the same". Trade-off: helps follow-ups, can dilute current intent. 0 = only current message (default).
   include_recent_turns: 0
   # When include_recent_turns > 0: max chars per message in recent context (default 300).
@@ -174,6 +181,17 @@ planner_executor:
         - tool: get_file_view_link
           args_from:
             path: [user_message_path, ""]
+    # Knowledge base: one-step semantic search (same backend as prompt auto-inject). Skipped in llm_loop when the
+    # message clearly asks to add/remove/save to KB — then ReAct uses knowledge_base_add/remove/list.
+    knowledge_base:
+      trigger: category
+      category: knowledge_base
+      steps:
+        - tool: knowledge_base_search
+          args:
+            limit: 8
+          args_from:
+            query: [user_message_text, ""]
     # Web search: query from user message → web_search. If result short: summarize and reply directly; if long: save as markdown page and return link.
     search_web:
       trigger: category
@@ -519,6 +537,10 @@ tools:
   # profiles: []
   # When > 0: tool descriptions sent to the LLM are shortened (use ToolDefinition.short_description if set, else truncate at sentence boundary). Fewer tokens → faster tool-decision turns on local models.
   description_max_chars: 240
+  # When true (default): remind_me / cron message / record_date remind_message get one short LLM pass to rewrite the user-visible label; on timeout/error, heuristic rules apply. Set false to avoid extra LLM latency/cost.
+  reminder_message_llm_refine: true
+  # Max seconds for that single completion (default 20).
+  reminder_message_llm_refine_timeout_seconds: 20
   # When true (default): inject few-shot tool selection examples (User / Thought / Call) from config/prompts/tools/selection_examples.yml into the system prompt. Helps local/Qwen models map natural language to the right tool.
   # tool_selection_examples: true
   # When true (default): never auto-invoke tools when the model returned no tool_calls. Rely on the model to decide; no our own if-else to run tools. When false: allow legacy fallbacks (force_include, remind_me, route_to_plugin, folder_list, etc.) when model didn't call a tool.

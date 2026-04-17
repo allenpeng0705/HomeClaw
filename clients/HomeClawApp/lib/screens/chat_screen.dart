@@ -30,6 +30,7 @@ import 'canvas_screen.dart';
 import 'clawcode_screen.dart';
 import 'settings_screen.dart';
 import 'vmprint_preview_screen.dart';
+import '../utils/product_preset_chat.dart';
 
 double? _parseTranscriptTimestampSeconds(Map<String, dynamic> m) {
   final t = m['timestamp'];
@@ -72,6 +73,10 @@ class ChatScreen extends StatefulWidget {
   final String? remotePeerInstanceId;
   /// Core preset key for this AI friend (e.g. `cursor`, `claudecode`, `clawcode`) from GET /api/me/friends.
   final String? friendPreset;
+
+  /// Resolved product preset (reminder / finder / knowledge) for quick actions; null if unknown.
+  String? get resolvedProductPresetKey =>
+      resolveProductPresetKey(preset: friendPreset, friendName: friendId);
 
   const ChatScreen({
     super.key,
@@ -2853,6 +2858,78 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _loadingStatusTimer = null;
   }
 
+  String _inputHintText() {
+    if (_pendingImagePaths.isNotEmpty || _pendingVideoPaths.isNotEmpty || _pendingFilePaths.isNotEmpty) {
+      return 'Add a message (optional)';
+    }
+    final k = widget.resolvedProductPresetKey;
+    if (k == null) return 'Message';
+    switch (k) {
+      case 'reminder':
+        return 'e.g. Remind me in 1 hour to…';
+      case 'finder':
+        return 'e.g. Find report.pdf in documents';
+      case 'knowledge':
+        return 'e.g. Search my KB for…';
+      default:
+        return 'Message';
+    }
+  }
+
+  Widget _buildProductPresetBar() {
+    final k = widget.resolvedProductPresetKey;
+    if (k == null || widget.isUserFriend) return const SizedBox.shrink();
+    final actions = presetQuickActionsFor(k);
+    final hint = _messages.isEmpty ? productPresetEmptyHint(k) : null;
+    if (actions.isEmpty && (hint == null || hint.isEmpty)) {
+      return const SizedBox.shrink();
+    }
+    return Material(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (hint != null && hint.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  hint,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+              ),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final a in actions)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: ActionChip(
+                        label: Text(a.label),
+                        onPressed: _loading
+                            ? null
+                            : () {
+                                setState(() {
+                                  _inputController.text = a.text;
+                                  _inputController.selection = TextSelection.collapsed(offset: a.text.length);
+                                });
+                              },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -3177,6 +3254,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ),
       body: Column(
         children: [
+          _buildProductPresetBar(),
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
@@ -3732,9 +3810,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   child: TextField(
                     controller: _inputController,
                     decoration: InputDecoration(
-                      hintText: (_pendingImagePaths.isNotEmpty || _pendingVideoPaths.isNotEmpty || _pendingFilePaths.isNotEmpty)
-                          ? 'Add a message (optional)'
-                          : 'Message',
+                      hintText: _inputHintText(),
                       border: const OutlineInputBorder(),
                     ),
                     onSubmitted: (_) => _send(),

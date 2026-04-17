@@ -56,6 +56,7 @@ def _raw_parsed_tool_call_executable(tc: Dict[str, Any]) -> bool:
         return False
 
 # Re-use single robust implementation for reminder/cron inference (many NL styles/languages).
+from core.reminder_message_refine import refine_scheduled_message_text
 from core.tool_helpers_fallback import (
     infer_annual_birthday_advance_reminder_fallback,
     infer_cron_schedule_fallback,

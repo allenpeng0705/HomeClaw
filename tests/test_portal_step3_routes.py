@@ -24,16 +24,24 @@ def client():
         yield c
 
 
-def test_root_redirects_to_setup_when_no_admin(portal_temp_config, client):
+def test_root_redirects_to_app_when_no_admin(portal_temp_config, client):
     r = client.get("/", follow_redirects=False)
     assert r.status_code == 302
-    assert r.headers.get("location") == "/setup"
+    assert r.headers.get("location") == "/app"
 
 
-def test_setup_get_returns_200_when_no_admin(portal_temp_config, client):
+def test_setup_get_redirects_to_spa_setup_when_no_admin(portal_temp_config, client):
+    r = client.get("/setup", follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers.get("location") == "/app/setup"
+
+
+def test_setup_get_follows_to_spa_shell(portal_temp_config, client):
     r = client.get("/setup")
     assert r.status_code == 200
-    assert "Set admin account" in (r.text or "")
+    text = r.text or ""
+    assert "HomeClaw Portal" in text
+    assert "/static/app/" in text
 
 
 def test_setup_post_creates_admin_and_redirects_to_login(portal_temp_config, client):
@@ -42,11 +50,11 @@ def test_setup_post_creates_admin_and_redirects_to_login(portal_temp_config, cli
     assert r.headers.get("location") == "/login"
 
 
-def test_after_setup_root_redirects_to_login(portal_temp_config, client):
+def test_after_setup_root_redirects_to_app(portal_temp_config, client):
     client.post("/setup", data={"username": "admin", "password": "secret123"})
     r = client.get("/", follow_redirects=False)
     assert r.status_code == 302
-    assert r.headers.get("location") == "/login"
+    assert r.headers.get("location") == "/app"
 
 
 def test_login_post_sets_cookie_and_redirects_to_dashboard(portal_temp_config, client):
@@ -57,11 +65,11 @@ def test_login_post_sets_cookie_and_redirects_to_dashboard(portal_temp_config, c
     assert "portal_session" in r.cookies
 
 
-def test_dashboard_without_session_redirects_to_login(portal_temp_config, client):
+def test_dashboard_without_session_redirects_to_app(portal_temp_config, client):
     client.post("/setup", data={"username": "u", "password": "p"})
     r = client.get("/dashboard", follow_redirects=False)
     assert r.status_code == 302
-    assert r.headers.get("location") == "/login"
+    assert r.headers.get("location") == "/app"
 
 
 def test_dashboard_with_session_returns_200(portal_temp_config, client):
@@ -87,11 +95,11 @@ def test_login_wrong_password_redirects_to_login_with_error(portal_temp_config, 
     assert r.headers.get("location") == "/login?error=1"
 
 
-def test_settings_without_session_redirects_to_login(portal_temp_config, client):
+def test_settings_without_session_redirects_to_app(portal_temp_config, client):
     client.post("/setup", data={"username": "u", "password": "p"})
     r = client.get("/settings", follow_redirects=False)
     assert r.status_code == 302
-    assert r.headers.get("location") == "/login"
+    assert r.headers.get("location") == "/app"
 
 
 def test_settings_with_session_returns_200(portal_temp_config, client):
@@ -107,7 +115,7 @@ def test_logout_clears_cookie_and_redirects(portal_temp_config, client):
     client.post("/login", data={"username": "u", "password": "p"})
     r = client.get("/logout", follow_redirects=False)
     assert r.status_code == 302
-    assert r.headers.get("location") == "/login"
+    assert r.headers.get("location") == "/app/login"
     # Cookie should be cleared (max-age=0 or missing)
     set_cookie = r.headers.get("set-cookie") or ""
     assert "portal_session" in set_cookie.lower() or "max-age=0" in set_cookie.lower()

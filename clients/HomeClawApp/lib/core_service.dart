@@ -560,7 +560,7 @@ class CoreService {
   /// URL for a user's avatar by id (for friend list). Use [fetchAvatarWithAuth] to load with auth.
   String userAvatarUrl(String userId) => '$_baseUrl/api/users/${Uri.encodeComponent(userId)}/avatar';
   /// URL for an AI friend's avatar. Use [fetchAvatarWithAuth] to load with auth.
-  /// When [preset] is set (e.g. reminder, note, finder), appends ?preset= so Core can serve the preset thumbnail even if the stored friend has no preset.
+  /// When [preset] is set (e.g. reminder, note, knowledge, finder), appends ?preset= so Core can serve the preset thumbnail even if the stored friend has no preset.
   String friendAvatarUrl(String friendId, {String? preset}) {
     final base = '$_baseUrl/api/me/friends/${Uri.encodeComponent(friendId)}/avatar';
     final p = (preset ?? '').trim();

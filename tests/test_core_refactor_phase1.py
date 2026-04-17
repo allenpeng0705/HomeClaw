@@ -149,6 +149,8 @@ def test_infer_remind_me_fallback():
     dt2 = datetime.strptime(_at2[:19], "%Y-%m-%d %H:%M:%S")
     assert (dt2.month, dt2.day) == (8, 19)
     assert dt2.hour == 9
+    # Do not map "生日 + 提前一周" to at_time on the birthday — annual fallback handles it; flat fallback stays None.
+    assert infer_remind_me_fallback("我儿子生日是8月19号，能不能提前一周提醒我买礼物") is None
     assert infer_remind_me_fallback("hello world") is None
     assert infer_remind_me_fallback("") is None
     assert infer_remind_me_fallback(None) is None
@@ -166,6 +168,13 @@ def test_infer_annual_birthday_advance_reminder_fallback():
     r2 = infer_annual_birthday_advance_reminder_fallback("女朋友生日3月28号提前2天提醒我")
     assert r2 is not None
     assert r2.get("arguments", {}).get("cron_expr") == "0 9 26 3 *"
+    # 提前一周 / 一个星期 → 7 days before (not the birthday itself)
+    r_week = infer_annual_birthday_advance_reminder_fallback(
+        "我儿子生日是8月19号，能不能提前一周提醒我买礼物"
+    )
+    assert r_week is not None
+    assert r_week.get("tool") == "cron_schedule"
+    assert r_week.get("arguments", {}).get("cron_expr") == "0 9 12 8 *"
     assert infer_annual_birthday_advance_reminder_fallback("明天提醒我") is None
 
 

@@ -61,7 +61,7 @@ def get_friend_avatar_path(user_id: str, friend_id: str, data_root: Optional[str
 def get_preset_thumbnail_path(preset_name: str) -> Optional[Path]:
     """
     Return path to preset thumbnail image if it exists.
-    preset_name: e.g. 'reminder', 'note', 'finder'.
+    preset_name: e.g. 'reminder', 'knowledge', 'finder'.
     Reads friend_presets.yml for thumbnail filename (default {preset}.png under config/preset_thumbnails/).
     Returns None if file missing or config invalid. Never raises.
     """

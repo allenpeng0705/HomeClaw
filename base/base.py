@@ -296,7 +296,7 @@ class Friend:
     relation: Optional[Union[str, List[str]]] = None  # e.g. girlfriend, friend, or [friend]
     who: Optional[Dict[str, Any]] = None  # persona: description, gender, roles, personalities, language, response_length
     identity: Optional[str] = None  # None = do not read file; "" or "identity.md" = default file; "other.md" = that filename in friend root
-    preset: Optional[str] = None  # optional: name of friend preset (e.g. "reminder", "note", "finder"); when set, Core applies preset config for tools/skills/plugins/memory. See docs_design/FriendConfigFrameworkImplementation.md.
+    preset: Optional[str] = None  # optional: name of friend preset (e.g. "reminder", "knowledge", "finder"); when set, Core applies preset config for tools/skills/plugins/memory. See docs_design/FriendConfigFrameworkImplementation.md.
     # User-type friend (another user in same HomeClaw): type="user", user_id=<id>. When set, Core forwards user-to-user messages; no LLM. Omitted or not "user" = core_role (AI).
     type: Optional[str] = None  # "user" = friend is another user (user_id required); else AI friend
     user_id: Optional[str] = None  # when type=="user", the other user's id (must exist in user.yml)

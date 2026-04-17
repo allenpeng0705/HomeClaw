@@ -115,7 +115,7 @@ def user_create_get(request: Request):
     if not auth.admin_is_configured():
         return RedirectResponse(url="/setup", status_code=302)
     if _get_session_username(request) is None:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     presets = _get_portal_friend_presets()
     saved = request.query_params.get("saved") == "1"
     error = request.query_params.get("error") == "1"
@@ -129,7 +129,7 @@ async def user_create_post(request: Request):
     if not auth.admin_is_configured():
         return RedirectResponse(url="/setup", status_code=302)
     if _get_session_username(request) is None:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     try:
         form = await request.form()
         name = (form.get("name") or "").strip()
@@ -174,7 +174,7 @@ def user_edit_get(request: Request, name: str):
     if not auth.admin_is_configured():
         return RedirectResponse(url="/setup", status_code=302)
     if _get_session_username(request) is None:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     name = (name or "").strip()
     if not name:
         return RedirectResponse(url="/settings/user", status_code=302)
@@ -199,7 +199,7 @@ async def user_edit_post(request: Request, name: str):
     if not auth.admin_is_configured():
         return RedirectResponse(url="/setup", status_code=302)
     if _get_session_username(request) is None:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     edit_url = "/settings/user/" + quote(name, safe="") + "/edit"
     try:
         form = await request.form()
@@ -246,7 +246,7 @@ async def user_delete_post(request: Request, name: str):
     if not auth.admin_is_configured():
         return RedirectResponse(url="/setup", status_code=302)
     if _get_session_username(request) is None:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     ok, _err = config_api.delete_user(name)
     if ok:
         return RedirectResponse(url="/settings/user?saved=1", status_code=302)
@@ -259,7 +259,7 @@ async def user_reset_password_post(request: Request, name: str):
     if not auth.admin_is_configured():
         return RedirectResponse(url="/setup", status_code=302)
     if _get_session_username(request) is None:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     edit_url = "/settings/user/" + quote(name, safe="") + "/edit"
     try:
         form = await request.form()
@@ -280,7 +280,7 @@ def settings_index(request: Request):
     if not auth.admin_is_configured():
         return RedirectResponse(url="/setup", status_code=302)
     if _get_session_username(request) is None:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     return RedirectResponse(url="/settings/core", status_code=302)
 
 
@@ -290,7 +290,7 @@ def settings_get(request: Request, page: str):
     if not auth.admin_is_configured():
         return RedirectResponse(url="/setup", status_code=302)
     if _get_session_username(request) is None:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     if page in ("memory_kb", "skills_and_plugins"):
         return RedirectResponse(url="/settings/advanced", status_code=302)
     valid = [p[0] for p in SETTINGS_PAGES]
@@ -309,7 +309,7 @@ async def settings_post(request: Request, page: str):
     if not auth.admin_is_configured():
         return RedirectResponse(url="/setup", status_code=302)
     if _get_session_username(request) is None:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     if page in ("memory_kb", "skills_and_plugins"):
         return RedirectResponse(url="/settings/advanced", status_code=302)
     valid = [p[0] for p in SETTINGS_PAGES]

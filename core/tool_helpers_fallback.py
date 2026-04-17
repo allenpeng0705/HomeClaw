@@ -12,6 +12,8 @@ from typing import Any, Dict, Optional, Tuple
 
 from loguru import logger
 
+from core.reminder_message_refine import refine_scheduled_message_text
+
 
 def tool_result_looks_like_error(result: Any) -> bool:
     """True if the tool result looks like an error or not-found; do not use as final response. Never raises."""
@@ -361,10 +363,10 @@ def _infer_remind_me_calendar_at_time(q: str) -> Optional[Dict[str, Any]]:
                 break
         if chosen is None:
             return None
-        msg = (q[:80].strip() if len(q) > 80 else q.strip()) or "Reminder"
+        msg = refine_scheduled_message_text(q, max_chars=120)
         return {
             "tool": "remind_me",
-            "arguments": {"at_time": chosen.strftime("%Y-%m-%d %H:%M:%S"), "message": msg[:120] or "Reminder"},
+            "arguments": {"at_time": chosen.strftime("%Y-%m-%d %H:%M:%S"), "message": msg},
         }
     except Exception:
         return None
@@ -418,10 +420,10 @@ def _infer_remind_me_relative_day_at_time(q: str) -> Optional[Dict[str, Any]]:
             return None
         run_dt = datetime.now() + timedelta(days=day_offset)
         run_dt = run_dt.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        msg = (q[:80].strip() if len(q) > 80 else q.strip()) or "Reminder"
+        msg = refine_scheduled_message_text(q, max_chars=120)
         return {
             "tool": "remind_me",
-            "arguments": {"at_time": run_dt.strftime("%Y-%m-%d %H:%M:%S"), "message": msg[:120] or "Reminder"},
+            "arguments": {"at_time": run_dt.strftime("%Y-%m-%d %H:%M:%S"), "message": msg},
         }
     except Exception:
         return None
@@ -467,13 +469,16 @@ def infer_remind_me_fallback(query: str) -> Optional[Dict[str, Any]]:
                         continue
         if minutes is not None and 0 < minutes <= 43200:
             # Short message without date/time (tool will show time; we avoid inventing)
-            msg = (q[:80].strip() if len(q) > 80 else q.strip()) or "Reminder"
+            msg = refine_scheduled_message_text(q, max_chars=120)
             # If message is only a clock/time fragment (e.g. "下午5:19"), use generic label so we don't duplicate time in UI
             if len(msg) <= 25 and re.search(r"\d{1,2}\s*[点:]\s*\d{1,2}|下午\d|上午\d|^\d{1,2}:\d{2}", msg):
                 msg = "Reminder"
-            return {"tool": "remind_me", "arguments": {"minutes": minutes, "message": msg[:120] or "Reminder"}}
-        # Birthday/date + "提前N天" should be handled by annual/cron fallback, not "on the date" one-shot.
-        if re.search(r"\d{1,2}\s*月\s*\d{1,2}\s*(?:日|号)", q) and re.search(r"提前\s*(?:\d+\s*天|两天|一天|三天|四天|五天|六天|七天|八天|九天|十天)", q):
+            return {"tool": "remind_me", "arguments": {"minutes": minutes, "message": msg}}
+        # Birthday/date + "提前N天/一周" should be handled by annual/cron fallback, not "on the date" one-shot.
+        if re.search(r"\d{1,2}\s*月\s*\d{1,2}\s*(?:日|号)", q) and re.search(
+            r"提前\s*(?:\d+\s*天|一周|一个\s*星期|两天|一天|三天|四天|五天|六天|七天|八天|九天|十天)",
+            q,
+        ):
             return None
         rel = _infer_remind_me_relative_day_at_time(q)
         if rel:
@@ -537,8 +542,7 @@ def infer_cron_schedule_fallback(query: str) -> Optional[Dict[str, Any]]:
         ):
             return None
         cron_expr = None
-        message = (q[:80].strip() if len(q) > 80 else q.strip()) or "Reminder"
-        message = str(message)[:120]
+        message = refine_scheduled_message_text(q, max_chars=120)
 
         # "every N hours" / "每N小时" -> 0 */N * * *
         m = re.search(r"every\s+(\d+)\s*hours?", q_lower) or re.search(r"每\s*(\d+)\s*小时", q)
@@ -653,19 +657,25 @@ def infer_annual_birthday_advance_reminder_fallback(query: str) -> Optional[Dict
         if "生日" not in q:
             return None
         m_date = re.search(r"(\d{1,2})\s*月\s*(\d{1,2})\s*(?:日|号)", q)
-        m_adv = re.search(r"提前\s*(?:(\d{1,2})\s*天|(两天|一天|三天|四天|五天|六天|七天|八天|九天|十天))", q)
-        if not m_date or not m_adv:
+        if not m_date:
             return None
         month, day = int(m_date.group(1)), int(m_date.group(2))
-        if m_adv.group(1):
-            days_before = int(m_adv.group(1))
+        days_before = 0
+        m_num = re.search(r"提前\s*(\d{1,2})\s*天", q)
+        if m_num:
+            days_before = int(m_num.group(1))
+        elif re.search(r"提前\s*(?:一周|一个\s*星期)", q):
+            days_before = 7
         else:
-            days_before = _CN_ADV_DAYS.get(m_adv.group(2) or "", 0)
+            m_word = re.search(r"提前\s*(两天|一天|三天|四天|五天|六天|七天|八天|九天|十天)", q)
+            if m_word:
+                days_before = _CN_ADV_DAYS.get(m_word.group(1) or "", 0)
         if days_before <= 0 or not (1 <= month <= 12 and 1 <= day <= 31):
             return None
         h = _extract_hour_from_schedule_query(q, 9)
-        msg = (q[:100].strip() if len(q) > 100 else q.strip()) or "生日提醒"
-        msg = msg[:120]
+        msg = refine_scheduled_message_text(q, max_chars=120)
+        if msg == "Reminder" and "生日" in q:
+            msg = "生日提醒"
         mdg = _stable_yearly_reminder_md(month, day, days_before)
         if mdg:
             rm, rd = mdg

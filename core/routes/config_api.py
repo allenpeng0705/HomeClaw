@@ -173,6 +173,8 @@ def get_api_config_core_patch_handler(core):  # noqa: ARG001
 
 def _friends_from_preset_names(preset_names: list) -> list:
     """Build friends list: HomeClaw first, then one Friend per preset. Never raises."""
+    from base.friend_presets import format_preset_display_name
+
     result = [Friend(name="HomeClaw", relation=None, who=None, identity=None, preset=None, type="ai", user_id=None)]
     if not isinstance(preset_names, list):
         return result
@@ -185,8 +187,9 @@ def _friends_from_preset_names(preset_names: list) -> list:
             if not k or k == "homeclaw":
                 continue
             if k in presets:
-                # Display name: capitalize first letter (e.g. reminder -> Reminder)
-                display = k[0].upper() + k[1:] if len(k) > 1 else k.upper()
+                display = format_preset_display_name(k, presets.get(k) if isinstance(presets.get(k), dict) else None)
+                if not display:
+                    display = k[0].upper() + k[1:] if len(k) > 1 else k.upper()
                 result.append(Friend(name=display, relation=None, who=None, identity=None, preset=k, type="ai", user_id=None))
     except Exception:
         pass
@@ -204,6 +207,8 @@ def get_api_config_friend_presets_handler(core):  # noqa: ARG001
             presets = load_friend_presets()
             if not isinstance(presets, dict):
                 return JSONResponse(content={"presets": []})
+            from base.friend_presets import format_preset_display_name
+
             out = []
             for pid, pconfig in presets.items():
                 if not pid or not isinstance(pid, str):
@@ -211,7 +216,10 @@ def get_api_config_friend_presets_handler(core):  # noqa: ARG001
                 pid_str = str(pid).strip()
                 if not pid_str or pid_str.lower() == "homeclaw":
                     continue
-                name = pid_str[0].upper() + pid_str[1:] if len(pid_str) > 1 else pid_str.upper()
+                pc = pconfig if isinstance(pconfig, dict) else None
+                name = format_preset_display_name(pid_str, pc)
+                if not name:
+                    name = pid_str[0].upper() + pid_str[1:] if len(pid_str) > 1 else pid_str.upper()
                 out.append({"id": pid_str, "name": name})
             return JSONResponse(content={"presets": out})
         except Exception as e:

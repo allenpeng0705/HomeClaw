@@ -37,6 +37,16 @@ const Map<String, Map<String, String>> _presetDisplayNames = {
     'ja': 'プライベートメモ',
     'ko': '비공개 메모',
   },
+  'knowledge': {
+    'en': 'Knowledge Base',
+    'zh': '知识库',
+    'es': 'Base de conocimiento',
+    'fr': 'Base de connaissances',
+    'de': 'Wissensbasis',
+    'it': 'Knowledge base',
+    'ja': 'ナレッジベース',
+    'ko': '지식 베이스',
+  },
   'cursor': {
     'en': 'Cursor',
     'zh': 'Cursor',
@@ -105,9 +115,10 @@ int friendListSortOrder(Map<String, dynamic> friend) {
   if (name == 'HomeClaw') return 0;
   if (preset == 'reminder') return 1;
   if (preset == 'finder') return 2;
-  if (preset == 'note') return 3;
-  if (preset == 'cursor') return 4;
-  return 5;
+  if (preset == 'knowledge') return 3;
+  if (preset == 'note') return 4;
+  if (preset == 'cursor') return 5;
+  return 6;
 }
 
 /// Sorts the friends list so system friends appear first: HomeClaw, Reminder, Files, Note, then others.

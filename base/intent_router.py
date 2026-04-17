@@ -665,9 +665,33 @@ async def route(
                 ):
                     logger.debug("Intent router: query matches memory -> category memory (preempt)")
                     return "memory"
-            if "knowledge_base" in categories and "知识库" in q_raw:
-                if "搜索" in q_raw or "查找" in q_raw or "添加" in q_raw or "保存到" in q_raw:
+            if "knowledge_base" in categories:
+                # Chinese: 知识库 + clear action
+                if "知识库" in q_raw and (
+                    "搜索" in q_raw or "查找" in q_raw or "添加" in q_raw or "保存到" in q_raw
+                ):
                     logger.debug("Intent router: query matches knowledge_base -> category knowledge_base (preempt)")
+                    return "knowledge_base"
+                # English / mixed: explicit "knowledge base" or word "kb" + search/add/list/remove cue
+                _kb_scope = (
+                    "knowledge base" in q_lo
+                    or bool(re.search(r"\bkb\b", q_lo))
+                    or "my kb" in q_lo
+                    or "in my kb" in q_lo
+                    or q_lo.startswith("kb ")
+                )
+                # Word-boundary verbs so "research" does not match "search"
+                _kb_action = bool(
+                    re.search(
+                        r"\b(search|find|lookup|list|add|append|remove|delete|query)\b",
+                        q_lo,
+                    )
+                ) or "look up" in q_lo or "what's in" in q_lo or "what is in" in q_lo or "save to" in q_lo
+                _kb_action = _kb_action or any(
+                    p in q_raw for p in ("检索", "查找", "搜索", "添加", "保存到", "删除", "列出")
+                )
+                if _kb_scope and _kb_action:
+                    logger.debug("Intent router: query matches knowledge_base (EN/KB scope) -> category knowledge_base (preempt)")
                     return "knowledge_base"
             if "identity_capabilities" in categories:
                 if (

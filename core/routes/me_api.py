@@ -293,7 +293,7 @@ def _preset_for_friend(user_id: str, friend_id: str) -> Optional[str]:
 
 def get_api_me_friends_avatar_get_handler(core):  # noqa: ARG001
     """GET /api/me/friends/{friend_id}/avatar. Returns custom avatar, or preset thumbnail if friend has a preset and no custom avatar.
-    Optional query param: preset= (e.g. reminder, note, finder) to request preset thumbnail directly so Companion can pass preset from the friends list."""
+    Optional query param: preset= (e.g. reminder, knowledge, finder) to request preset thumbnail directly so Companion can pass preset from the friends list."""
 
     async def handler(
         request: Request,

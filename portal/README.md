@@ -114,10 +114,12 @@ Core sends the secret in the `X-Portal-Secret` header on every proxied request. 
 
 ## Step 3 (admin auth)
 
-- **`GET /`** — Redirect: no admin → `/setup`; not logged in → `/login`; else → `/dashboard`.
-- **`GET/POST /setup`** — First-time admin account creation (username + password). Stored in `config/portal_admin.yml` (ignored by git). Env override for dev: `PORTAL_ADMIN_USERNAME`, `PORTAL_ADMIN_PASSWORD`.
-- **`GET/POST /login`** — Login form; on success sets `portal_session` cookie (signed, 24h). Secret: `PORTAL_SESSION_SECRET`.
-- **`GET /dashboard`** — Protected; minimal dashboard when session valid.
+- **`GET /`** — Redirect: no admin or not logged in → **`/app`** (React setup / sign-in); logged in → `/dashboard`.
+- **`GET /setup`**, **`GET /login`** — Redirect into the SPA (`/app/setup`, `/app/login`). Legacy **`POST /setup`** and **`POST /login`** (form) are unchanged for scripts and tests.
+- **`portal/web`** — Vite + React UI for first-time **Create admin** and **Welcome back** sign-in. Production assets live in **`portal/static/app/`** (run `cd portal/web && npm ci && npm run build`). If the bundle is missing, **`GET /app`** returns 503 with build instructions.
+- **`GET /api/portal/auth/status`** — JSON: `admin_configured`, `logged_in`, `username` (no auth).
+- **`POST /api/portal/auth/setup`**, **`POST /api/portal/auth/login`**, **`POST /api/portal/auth/logout`** — JSON equivalents of the form posts; login sets `portal_session` (signed, 24h). Secret: `PORTAL_SESSION_SECRET`.
+- **`GET /dashboard`** — Protected; classic dashboard (HTML) when session valid; after sign-in from the SPA, users land here until more routes move into the SPA.
 - **`portal/auth.py`** — `admin_is_configured()`, `verify_portal_admin()`, `set_admin()`. **`portal/session.py`** — `create_session_value()`, `verify_session_value()`.
 
 ## Step 1.4 (config API)
@@ -130,7 +132,7 @@ Core sends the secret in the `X-Portal-Secret` header on every proxied request. 
 
 - **GET /dashboard** — Logged-in layout with nav: Dashboard | Manage settings | Log out. Link to **Manage settings**.
 - **GET /settings** — Manage settings page: tabs (Core, LLM, Memory & KB, Skills & Plugins, Users, Friend presets). Each tab loads config via GET /api/config/{name}, shows a form (scalars as inputs, objects/arrays as JSON textareas). Redacted values show as ••• and are not sent on save. **Save** sends only changed fields via PATCH. Requires session.
-- **GET /logout** — Clears session cookie and redirects to /login.
+- **GET /logout** — Clears session cookie and redirects to `/app/login`.
 
 All route handlers use a global exception handler so the server never crashes.
 

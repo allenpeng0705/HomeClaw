@@ -215,6 +215,15 @@ def get_last_assistant_content(messages: Optional[List[Dict[str, Any]]]) -> Opti
 _PATH_EXTRACT_EXTENSIONS = r"pdf|docx|doc|pptx|ppt|txt|md|html|png|jpg|jpeg|gif|webp|bmp|svg"
 
 
+def user_message_has_resolvable_file_path(message: Optional[str]) -> bool:
+    """
+    True if the message names a sandbox file (folder/.../file.ext or bare name.ext) suitable for get_file_view_link.
+    Used to skip get_file_link DAG when the user asked for something else (e.g. a LinkedIn or web URL, no file).
+    Never raises.
+    """
+    return _extract_path_from_user_message(message) is not None
+
+
 def _extract_path_from_user_message(message: Optional[str]) -> Optional[str]:
     """
     Extract a relative file path from the user message. Works for:

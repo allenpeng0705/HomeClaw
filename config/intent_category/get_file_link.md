@@ -3,7 +3,7 @@ id: get_file_link
 display_name: Get or send file link
 enabled: true
 priority: 56
-classifier_description: "Get a view or download link for one specific file, or 'send me that file' — deliverable URL, not folder listing and not deep text analysis."
+classifier_description: "Get a view or download link for one **sandbox file** the user named (path or filename.ext), or explicit 'send me that file/image'. NOT for external website URLs (LinkedIn profile URL, https://…), social handles, or 'what is X's profile URL' — those are knowledge_base, search_web, or general_chat."
 
 match_patterns:
   - (?i)(send|share)\s+me\s+.+\.(pdf|docx?|xlsx?|pptx?|png|jpe?g|gif|webp|txt|md|csv|zip)\b
@@ -29,6 +29,7 @@ The user wants a **shareable or downloadable link** for **one (or a few) concret
 - “Send me that image file link from images folder.”
 
 ## Negative boundaries
+- **External / social URLs**: "Allen Peng's LinkedIn profile URL", "my Twitter link", "what's her Instagram URL", "github.com/…" — user wants a **web** or **profile** URL, not a file in their sandbox → **knowledge_base**, **search_web**, or **general_chat**, never **get_file_link**.
 - **list_files**: User only asked **what’s in the folder**, not for a link to one file.
 - **read_document**: User wants **summary or Q&A** on content — primary intent is understanding, not the link.
 - **image**: User wants to **generate**, **edit**, or **vision-analyze** an image — not only fetch a link (unless “send me that image file” as delivery — can overlap; prefer **get_file_link** when it’s clearly **file delivery**).

@@ -43,24 +43,19 @@ So the **current implementation does not need a mandatory upgrade** for correctn
 | **B. Preset category_allowlist** | In preset config, optional `category_allowlist: [schedule_remind]`. If intent_router returns a category not in the list, immediately return a fixed message (“I’m the Reminder assistant; I only handle reminders.”) without calling the main LLM. | Saves tokens and latency when user asks the wrong friend something off-topic. | New config surface; need to maintain allowlist per preset. |
 | **C. Document only** | No code change; document in `FriendConfigFrameworkImplementation.md` and/or `Tools-Skills-Plugins-Summary.md` that (1) tools = category ∩ preset, (2) DAG/Planner use preset-filtered tools. | No risk; clarifies behavior for future changes. | No behavioral or performance improvement. |
 
-**Recommendation:**
+**Recommendation (updated):**
 
-- **Short term:** Do **C** (document the interaction). No code change; behavior is already correct.
-- **Later, if desired:** Add **A** (skip intent_router when friend has a preset with `tools_preset`) to make preset friends fully independent of the router and save one LLM call per request for those friends. Option **B** can be added on top if you want a cheap “wrong friend” reply.
+- **Implemented:** **A** — For friend presets listed in `intent_router.skip_for_friend_presets` in `config/skills_and_plugins.yml` (default: `reminder`, `finder`, `knowledge`), Core **does not** call the intent-router LLM. Categories stay empty; tools/skills use the global tool profile intersected with the friend’s `tools_preset` only. See `base/friend_presets.should_skip_intent_router_for_friend` and `core/llm_loop.py` (“skipped for friend preset”).
+- **Still optional:** **B** — `category_allowlist` or a fixed “wrong friend” reply (partially addressed via stronger `system_prompt` text in `config/friend_presets.yml`).
+- **C** — This document and YAML comments remain the reference for behavior.
 
 ---
 
-## 3. Implementation sketch for Option A (skip intent_router for preset)
+## 3. Option A (implemented): skip intent_router for product presets
 
-If we adopt Option A later:
-
-- After resolving `_current_friend` and `preset_name`, if `preset_name` is non-empty and `get_friend_preset_config(preset_name)` has a `tools_preset` (or non-empty `tools` list), set a flag e.g. `_preset_strict_tools = True`.
-- When `_preset_strict_tools` is True:
-  - Do **not** call `intent_router_route(...)` (or treat as “no category”).
-  - Do **not** apply category_tools; build `_tool_defs_filtered` from the full registry, then apply **only** the preset tool filter (so the LLM sees exactly the preset’s tools).
-  - Skip DAG/Planner for category (no `_intent_router_categories`), so the request is handled by ReAct with preset tools only.
-
-No change to preset YAML schema is required for A; only the order of operations in `llm_loop.py` (conditional skip of intent_router when preset is strict).
+- Config: `intent_router.skip_for_friend_presets` in `config/skills_and_plugins.yml`. If the key is **omitted**, Core uses the built-in default `reminder`, `finder`, `knowledge`. If set to **`[]`**, no preset skips the router.
+- Code: `should_skip_intent_router_for_friend` requires the preset to exist in YAML with a non-null `tools_preset`.
+- Effect: intent router LLM is not called; `_intent_router_categories` is empty; tools flow is `get_tools_for_llm` (global profile) → preset filter → OpenAI tool list. Planner runs only when categories are non-empty, so preset product chats use ReAct + DAG only if triggered elsewhere (typically they stay on ReAct).
 
 ---
 

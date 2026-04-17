@@ -4,6 +4,7 @@ Place avatar images here for AI friend presets. Filenames are set in `config/fri
 
 - `reminder.png` — Reminder assistant
 - `note.png` — Private Notes assistant  
+- `knowledge.png` — Knowledge base assistant
 - `finder.png` — Files (Finder) assistant
 - `cursor.png` — Cursor (Cursor Bridge) assistant
 

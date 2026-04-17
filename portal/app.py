@@ -16,7 +16,7 @@ from urllib.error import URLError
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import FastAPI, Request, Form, Body
-from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, HTMLResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from portal import config as portal_config
@@ -37,6 +37,8 @@ _portal_static = Path(__file__).resolve().parent / "static"
 if _portal_static.is_dir():
     app.mount("/static", StaticFiles(directory=str(_portal_static)), name="static")
 
+_SPA_INDEX = _portal_static / "app" / "index.html"
+
 _log = logging.getLogger(__name__)
 
 SESSION_COOKIE = "portal_session"
@@ -49,6 +51,33 @@ def _get_session_username(request: Request) -> Optional[str]:
         return verify_session_value(c or "")
     except Exception:
         return None
+
+
+def _portal_api_public_path(path: str, method: str) -> bool:
+    """Unauthenticated JSON auth endpoints for the Portal SPA."""
+    if path == "/api/portal/auth/status" and method == "GET":
+        return True
+    if path == "/api/portal/auth/setup" and method == "POST":
+        return True
+    if path == "/api/portal/auth/login" and method == "POST":
+        return True
+    if path == "/api/portal/auth/logout" and method == "POST":
+        return True
+    return False
+
+
+def _spa_index_response():
+    """Serve the Portal SPA (setup / login). 503 with instructions if not built."""
+    if not _SPA_INDEX.is_file():
+        return HTMLResponse(
+            "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Portal</title></head>"
+            "<body style='font-family:system-ui;padding:2rem;max-width:36rem;'>"
+            "<p><strong>Portal UI is not built.</strong> Run:</p>"
+            "<pre style='background:#f1f5f9;padding:0.75rem;border-radius:0.5rem;'>cd portal/web &amp;&amp; npm ci &amp;&amp; npm run build</pre>"
+            "</body></html>",
+            status_code=503,
+        )
+    return FileResponse(_SPA_INDEX)
 
 
 @app.exception_handler(Exception)
@@ -68,6 +97,8 @@ class _APIAuthMiddleware(BaseHTTPMiddleware):
         try:
             path = request.url.path
             if not path.startswith("/api/"):
+                return await call_next(request)
+            if _portal_api_public_path(path, request.method):
                 return await call_next(request)
             secret = get_portal_secret()
             has_session = _get_session_username(request) is not None
@@ -96,11 +127,11 @@ app.add_middleware(_APIAuthMiddleware)
 
 @app.get("/")
 def root(request: Request):
-    """Redirect: no admin -> /setup; not logged in -> /login; else -> /dashboard."""
+    """Redirect: no admin or not logged in -> /app (SPA); else -> /dashboard."""
     if not auth.admin_is_configured():
-        return RedirectResponse(url="/setup", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     if _get_session_username(request) is None:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     return RedirectResponse(url="/dashboard", status_code=302)
 
 
@@ -255,17 +286,20 @@ def _get_channels_list() -> list:
 def friend_presets_list():
     """Return { presets: [ { id, name }, ... ] } for multi-select (HomeClaw excluded; always added server-side). Never raises."""
     try:
-        from base.friend_presets import load_friend_presets
+        from base.friend_presets import format_preset_display_name, load_friend_presets
         config_path = str(portal_config.get_config_dir() / "friend_presets.yml")
         presets = load_friend_presets(config_path) or {}
         out = []
-        for pid, _ in (presets.items() if isinstance(presets, dict) else []):
+        for pid, pconfig in (presets.items() if isinstance(presets, dict) else []):
             if not pid or not isinstance(pid, str):
                 continue
             pid_str = str(pid).strip()
             if not pid_str or pid_str.lower() == "homeclaw":
                 continue
-            name = pid_str[0].upper() + pid_str[1:] if len(pid_str) > 1 else pid_str.upper()
+            pc = pconfig if isinstance(pconfig, dict) else None
+            name = format_preset_display_name(pid_str, pc)
+            if not name:
+                name = pid_str[0].upper() + pid_str[1:] if len(pid_str) > 1 else pid_str.upper()
             out.append({"id": pid_str, "name": name})
         return JSONResponse(content={"presets": out})
     except Exception as e:
@@ -693,33 +727,12 @@ def _logged_in_page(title: str, nav_active: str, content: str, card_class: str =
 
 # ----- Setup (first-time admin) -----
 
-def _setup_html(has_error: bool) -> str:
-    err = '<p class="error">Please choose a username and password (both required).</p>' if has_error else ""
-    return _portal_page("Set admin account", f"""
-  <h1 class="title">Create admin account</h1>
-  <p class="subtitle">Set the single admin account for this Portal. You’ll use it to log in from now on.</p>
-  <form method="post" action="/setup">
-    <div class="form-group">
-      <label for="username">Username</label>
-      <input type="text" id="username" name="username" required autocomplete="username" placeholder="admin">
-    </div>
-    <div class="form-group">
-      <label for="password">Password</label>
-      <input type="password" id="password" name="password" required autocomplete="new-password" placeholder="••••••••">
-    </div>
-    <button type="submit" class="btn">Create account</button>
-    {err}
-  </form>
-""")
-
-
 @app.get("/setup", response_class=HTMLResponse)
 def setup_get(request: Request):
-    """Show setup form if admin not configured; else redirect to login."""
+    """Redirect to SPA setup (or login if admin already exists)."""
     if auth.admin_is_configured():
-        return RedirectResponse(url="/login", status_code=302)
-    has_error = request.query_params.get("error") == "1"
-    return HTMLResponse(_setup_html(has_error))
+        return RedirectResponse(url="/app/login", status_code=302)
+    return RedirectResponse(url="/app/setup", status_code=302)
 
 
 @app.post("/setup")
@@ -734,33 +747,12 @@ def setup_post(username: str = Form(""), password: str = Form("")):
 
 # ----- Login -----
 
-def _login_html(has_error: bool) -> str:
-    err = '<p class="error">Invalid username or password.</p>' if has_error else ""
-    return _portal_page("Log in", f"""
-  <h1 class="title">Welcome back</h1>
-  <p class="subtitle">Sign in with your Portal admin account.</p>
-  <form method="post" action="/login">
-    <div class="form-group">
-      <label for="username">Username</label>
-      <input type="text" id="username" name="username" required autocomplete="username" placeholder="admin">
-    </div>
-    <div class="form-group">
-      <label for="password">Password</label>
-      <input type="password" id="password" name="password" required autocomplete="current-password" placeholder="••••••••">
-    </div>
-    <button type="submit" class="btn">Log in</button>
-    {err}
-  </form>
-""")
-
-
 @app.get("/login", response_class=HTMLResponse)
 def login_get(request: Request):
-    """Show login form; if admin not set redirect to setup."""
+    """Redirect to SPA login (or setup if admin not configured)."""
     if not auth.admin_is_configured():
-        return RedirectResponse(url="/setup", status_code=302)
-    has_error = request.query_params.get("error") == "1"
-    return HTMLResponse(_login_html(has_error))
+        return RedirectResponse(url="/app/setup", status_code=302)
+    return RedirectResponse(url="/app/login", status_code=302)
 
 
 @app.post("/login")
@@ -791,8 +783,75 @@ def login_post(
 
 @app.get("/logout")
 def logout():
-    """Clear session and redirect to login."""
-    r = RedirectResponse(url="/login", status_code=302)
+    """Clear session and redirect to SPA login."""
+    r = RedirectResponse(url="/app/login", status_code=302)
+    r.delete_cookie(SESSION_COOKIE, path="/")
+    return r
+
+
+# ----- Portal SPA auth (JSON; used by /app) -----
+
+@app.get("/api/portal/auth/status")
+def api_portal_auth_status(request: Request):
+    """Return whether admin exists, session valid, and username."""
+    user = _get_session_username(request)
+    return JSONResponse(content={
+        "admin_configured": auth.admin_is_configured(),
+        "logged_in": user is not None,
+        "username": user,
+    })
+
+
+@app.post("/api/portal/auth/setup")
+async def api_portal_auth_setup(request: Request):
+    """Create admin account (same rules as POST /setup)."""
+    if auth.admin_is_configured():
+        return JSONResponse(status_code=400, content={"detail": "Admin already configured"})
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"detail": "Invalid JSON body"})
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"detail": "JSON object required"})
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    if auth.set_admin(username, password):
+        return JSONResponse(content={"ok": True})
+    return JSONResponse(status_code=400, content={"detail": "Username and password required"})
+
+
+@app.post("/api/portal/auth/login")
+async def api_portal_auth_login(request: Request):
+    """Verify credentials and set session cookie (same as POST /login)."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"detail": "Invalid JSON body"})
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"detail": "JSON object required"})
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    if not auth.admin_is_configured():
+        return JSONResponse(status_code=400, content={"detail": "Setup required"})
+    if auth.verify_portal_admin(username, password):
+        value = create_session_value(username)
+        r = JSONResponse(content={"ok": True, "username": username})
+        r.set_cookie(
+            key=SESSION_COOKIE,
+            value=value,
+            max_age=24 * 3600,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+        return r
+    return JSONResponse(status_code=401, content={"detail": "Invalid credentials"})
+
+
+@app.post("/api/portal/auth/logout")
+def api_portal_auth_logout():
+    """Clear session cookie (JSON)."""
+    r = JSONResponse(content={"ok": True})
     r.delete_cookie(SESSION_COOKIE, path="/")
     return r
 
@@ -833,7 +892,7 @@ def dashboard_get(request: Request):
         return RedirectResponse(url="/setup", status_code=302)
     user = _get_session_username(request)
     if user is None:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     return HTMLResponse(_dashboard_html(user))
 
 
@@ -899,7 +958,7 @@ def channels_page_get(request: Request):
     if not auth.admin_is_configured():
         return RedirectResponse(url="/setup", status_code=302)
     if _get_session_username(request) is None:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     return HTMLResponse(_logged_in_page("Start channel", "channels", _channels_page_content()))
 
 
@@ -1045,7 +1104,7 @@ def skills_page_get(request: Request):
     if not auth.admin_is_configured():
         return RedirectResponse(url="/setup", status_code=302)
     if _get_session_username(request) is None:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     return HTMLResponse(_logged_in_page("Skills", "skills", _skills_page_content(), card_class="card card-wide"))
 
 
@@ -1228,7 +1287,7 @@ def guide_get(request: Request):
     if not auth.admin_is_configured():
         return RedirectResponse(url="/setup", status_code=302)
     if _get_session_username(request) is None:
-        return RedirectResponse(url="/login", status_code=302)
+        return RedirectResponse(url="/app", status_code=302)
     return HTMLResponse(_logged_in_page("Guide to install", "guide", _guide_page_content(), card_class="card card-wide"))
 
 
@@ -1416,7 +1475,7 @@ def _get_portal_users_list():
 def _get_portal_friend_presets():
     """Return list of {id, name} for presets (HomeClaw excluded). Never raises."""
     try:
-        from base.friend_presets import load_friend_presets
+        from base.friend_presets import format_preset_display_name, load_friend_presets
         config_path = str(portal_config.get_config_dir() / "friend_presets.yml")
         presets = load_friend_presets(config_path) or {}
         out = []
@@ -1424,7 +1483,11 @@ def _get_portal_friend_presets():
             if not pid or str(pid).strip().lower() == "homeclaw":
                 continue
             pid_str = str(pid).strip()
-            name = pid_str[0].upper() + pid_str[1:] if len(pid_str) > 1 else pid_str.upper()
+            pc = presets.get(pid_str) if isinstance(presets, dict) else None
+            pc = pc if isinstance(pc, dict) else None
+            name = format_preset_display_name(pid_str, pc)
+            if not name:
+                name = pid_str[0].upper() + pid_str[1:] if len(pid_str) > 1 else pid_str.upper()
             out.append({"id": pid_str, "name": name})
         return out
     except Exception:
@@ -2269,17 +2332,20 @@ def api_config_users_list(request: Request):
 def api_config_friend_presets_list(request: Request):
     """Return { presets: [ { id, name }, ... ] } for multi-select. HomeClaw excluded (always added server-side)."""
     try:
-        from base.friend_presets import load_friend_presets
+        from base.friend_presets import format_preset_display_name, load_friend_presets
         config_path = str(portal_config.get_config_dir() / "friend_presets.yml")
         presets = load_friend_presets(config_path) or {}
         out = []
-        for pid, _ in (presets.items() if isinstance(presets, dict) else []):
+        for pid, pconfig in (presets.items() if isinstance(presets, dict) else []):
             if not pid or not isinstance(pid, str):
                 continue
             pid_str = str(pid).strip()
             if not pid_str or pid_str.lower() == "homeclaw":
                 continue
-            name = pid_str[0].upper() + pid_str[1:] if len(pid_str) > 1 else pid_str.upper()
+            pc = pconfig if isinstance(pconfig, dict) else None
+            name = format_preset_display_name(pid_str, pc)
+            if not name:
+                name = pid_str[0].upper() + pid_str[1:] if len(pid_str) > 1 else pid_str.upper()
             out.append({"id": pid_str, "name": name})
         return JSONResponse(content={"presets": out})
     except Exception as e:
@@ -2372,3 +2438,18 @@ async def api_config_patch(request: Request, name: str):
     if not ok:
         return JSONResponse(status_code=500, content={"detail": "Update failed"})
     return JSONResponse(content={"result": "ok"})
+
+
+# ----- Portal SPA shell (/app, /app/*) -----
+
+@app.get("/app")
+@app.get("/app/")
+def spa_app_root():
+    """Serve React shell for first-time setup and sign-in."""
+    return _spa_index_response()
+
+
+@app.get("/app/{spa_path:path}")
+def spa_app_nested(spa_path: str):
+    """Client-side routes under /app (setup, login, …)."""
+    return _spa_index_response()

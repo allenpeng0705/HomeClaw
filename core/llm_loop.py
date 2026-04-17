@@ -41,6 +41,7 @@ from base.friend_presets import (
     get_tool_names_for_preset,
     get_tool_names_for_preset_value,
     get_friend_preset_config,
+    should_skip_intent_router_for_friend,
     trim_messages_to_last_n_turns,
 )
 from base.tool_profiles import get_tools_for_llm
@@ -121,6 +122,113 @@ def _memory_looks_like_stale_timeout_echo(mem_text: str) -> bool:
     ):
         return True
     return False
+
+
+def _should_auto_inject_knowledge_base(
+    query: Optional[str],
+    kb_cfg: Any,
+    intent_router_categories: Optional[List[str]],
+    friend_preset: Optional[str] = None,
+) -> bool:
+    """
+    Whether to run KB retrieval for prompt injection this turn (config: knowledge_base.auto_inject).
+    When mode is intent_match and the active friend uses preset \"knowledge\", always inject (router may be skipped for that preset).
+    When mode is skip_light, short or greeting-only messages skip injection (same rules for all friends).
+    """
+    if not isinstance(kb_cfg, dict):
+        kb_cfg = {}
+    mode = (kb_cfg.get("auto_inject") or "every_turn").strip().lower()
+    if mode in ("off", "false", "none", "0", "disabled"):
+        return False
+    if mode in ("every_turn", "", "always", "true", "1", "on"):
+        return True
+    q = (query or "").strip()
+    cats = [str(c).strip().lower() for c in (intent_router_categories or []) if c and str(c).strip()]
+    if mode == "intent_match":
+        if (friend_preset or "").strip().lower() == "knowledge":
+            return True
+        if "knowledge_base" in cats:
+            return True
+        fb = (kb_cfg.get("intent_match_fallback") or "skip").strip().lower()
+        return fb in ("every_turn", "always", "true", "on")
+    if mode == "skip_light":
+        try:
+            min_c = max(0, int(kb_cfg.get("auto_inject_min_query_chars") or 12))
+        except (TypeError, ValueError):
+            min_c = 12
+        if len(q) < min_c:
+            return False
+        if len(q) <= 30:
+            _q_lo = q.lower()
+            _greeting_phrases = ("你好", "hi", "hello", "嗨", "hey", "thanks", "谢谢", "thank you", "help", "哈喽")
+            if any((p in _q_lo if p.isascii() else p in q) for p in _greeting_phrases) and not any(
+                c in q for c in ("?", "？", "吗", "什么", "怎么", "how", "what", "why", "can you", "帮我")
+            ):
+                return False
+        return True
+    logger.debug("knowledge_base.auto_inject unknown mode {!r}; defaulting to every_turn", mode)
+    return True
+
+
+def _kb_user_message_implies_crud_not_search_dag(message: Optional[str]) -> bool:
+    """
+    True → skip one-step knowledge_base_search DAG; use ReAct so the model can call
+    knowledge_base_add / _remove / _list as appropriate.
+    """
+    if not message or not isinstance(message, str) or not message.strip():
+        return False
+    raw = message.strip()
+    q_lo = raw.lower()
+    if re.search(r"\b(add to|save to|append to)\s+(my\s+)?(knowledge\s+base|kb)\b", q_lo):
+        return True
+    if re.search(r"\b(remove|delete)\s+.+\b(from|in)\s+(my\s+)?(knowledge\s+base|kb)\b", q_lo):
+        return True
+    if any(p in raw for p in ("添加到知识库", "保存到知识库", "从知识库删除", "删除知识库")):
+        return True
+    return False
+
+
+def _format_reminder_cron_snapshot_for_prompt(tam: Any, *, limit: int = 12) -> str:
+    """Compact enabled cron jobs for Reminder preset system prompt. Never raises."""
+    try:
+        if tam is None or not getattr(tam, "cron_jobs", None):
+            return ""
+        lock = getattr(tam, "_cron_lock", None)
+        if lock:
+            with lock:
+                jobs_raw = list(tam.cron_jobs or [])
+        else:
+            jobs_raw = list(getattr(tam, "cron_jobs", []) or [])
+        lines: List[str] = []
+        for j in jobs_raw:
+            if len(lines) >= limit:
+                break
+            if not isinstance(j, dict):
+                continue
+            p = j.get("params") or {}
+            if not p.get("enabled", True):
+                continue
+            msg = (p.get("message") or "").strip() or "(no message)"
+            jid = (j.get("job_id") or "").strip()
+            nr = j.get("next_run")
+            nr_s = ""
+            if nr is not None:
+                try:
+                    nr_s = nr.isoformat() if hasattr(nr, "isoformat") else str(nr)
+                except Exception:
+                    nr_s = str(nr)
+            ce = (j.get("cron_expr") or "").strip()
+            if jid and nr_s:
+                lines.append(f"- [{jid}] {msg} — next: {nr_s} — schedule: {ce}")
+            elif nr_s:
+                lines.append(f"- {msg} — next: {nr_s}")
+            else:
+                lines.append(f"- {msg} — schedule: {ce}")
+        if not lines:
+            return ""
+        return "## Recurring reminders (cron snapshot)\n" + "\n".join(lines) + "\n\n"
+    except Exception:
+        return ""
 
 
 def _is_confirmation_phrase(text: str) -> bool:
@@ -1899,11 +2007,22 @@ async def answer_from_memory(
                     logger.warning("Skipping daily memory injection due to error: {}", e, exc_info=False)
 
         # Phase 3: call intent router once early so we can filter both skills (3.1) and tools by category.
+        # Product preset friends (reminder / finder / knowledge): optional skip — no router LLM; preset-only tools/skills.
         _intent_router_category = None
         _intent_router_config = getattr(Util().get_core_metadata(), "intent_router_config", None) or {}
         if not isinstance(_intent_router_config, dict):
             _intent_router_config = {}
-        if _intent_router_config.get("enabled") and (query or "").strip():
+        _skip_intent_router_for_preset = False
+        try:
+            if _current_friend is not None:
+                _pn_skip = (getattr(_current_friend, "preset", None) or "").strip()
+                if _pn_skip:
+                    _skip_intent_router_for_preset = should_skip_intent_router_for_friend(_pn_skip, _intent_router_config)
+                    if _skip_intent_router_for_preset:
+                        _component_log("intent_router", f"skipped for friend preset '{_pn_skip}' (strict product preset)")
+        except Exception as _e:
+            logger.debug("intent_router skip-for-preset check failed: {}", _e)
+        if _intent_router_config.get("enabled") and (query or "").strip() and not _skip_intent_router_for_preset:
             try:
                 _ir_timeout = max(0, int(_intent_router_config.get("timeout_seconds", 25) or 25))
                 _ir_llm_ref = _intent_router_config.get("router_llm")
@@ -2270,6 +2389,55 @@ async def answer_from_memory(
 
         _turn_tt_split("skills")
 
+        # Knowledge base: optional auto-inject (see knowledge_base.auto_inject in memory_kb.yml). Independent of RAG memory.
+        _kb_uid = (user_id or user_name or "").strip()
+        kb = getattr(core, "knowledge_base", None)
+        _meta_kb = Util().get_core_metadata()
+        kb_cfg = getattr(_meta_kb, "knowledge_base", None) or {}
+        if (
+            kb
+            and kb_cfg.get("enabled", True) is not False
+            and _kb_uid
+            and _should_auto_inject_knowledge_base(
+                query,
+                kb_cfg,
+                _intent_router_categories,
+                friend_preset=(getattr(_current_friend, "preset", None) or "").strip()
+                if _current_friend
+                else None,
+            )
+        ):
+            try:
+                kb_timeout = 10
+                try:
+                    kb_results = await asyncio.wait_for(
+                        kb.search(user_id=_kb_uid, query=(query or ""), limit=5, friend_id=_mem_scope),
+                        timeout=kb_timeout,
+                    )
+                except TypeError:
+                    kb_results = await asyncio.wait_for(
+                        kb.search(user_id=_kb_uid, query=(query or ""), limit=5),
+                        timeout=kb_timeout,
+                    )
+                retrieval_min_score = kb_cfg.get("retrieval_min_score")
+                if retrieval_min_score is not None:
+                    try:
+                        min_s = float(retrieval_min_score)
+                        kb_results = [r for r in (kb_results or []) if r.get("score") is not None and float(r["score"]) >= min_s]
+                    except (TypeError, ValueError):
+                        pass
+                if kb_results:
+                    kb_lines = [f"- [{r.get('source_type', '')}] {r.get('content', '')[:1500]}" for r in kb_results]
+                    system_parts.append(
+                        "## Knowledge base (from your saved documents/web/notes)\n"
+                        "When this section has bullet points below, use them as authoritative context for questions about the user's own materials (docs, notes, saved pages). Prefer facts from here over guessing.\n"
+                        + "\n\n".join(kb_lines)
+                    )
+            except asyncio.TimeoutError:
+                logger.debug("Knowledge base search timed out")
+            except Exception as e:
+                logger.debug("Knowledge base search failed: {}", e)
+
         if use_memory:
             if _preset_allow_cognee:
                 relevant_memories = await core._fetch_relevant_memories(query,
@@ -2323,38 +2491,6 @@ async def answer_from_memory(
             else:
                 memories_text = ""
             context_val = memories_text if memories_text else "None."
-            # Optional: inject knowledge base (documents, web, URLs) — only chunks that pass threshold; none is fine
-            kb = getattr(core, "knowledge_base", None)
-            meta = Util().get_core_metadata()
-            kb_cfg = getattr(meta, "knowledge_base", None) or {}
-            if kb and (user_id or user_name):
-                try:
-                    kb_timeout = 10
-                    try:
-                        kb_results = await asyncio.wait_for(
-                            kb.search(user_id=(user_id or user_name or ""), query=(query or ""), limit=5, friend_id=_mem_scope),
-                            timeout=kb_timeout,
-                        )
-                    except TypeError:
-                        kb_results = await asyncio.wait_for(
-                            kb.search(user_id=(user_id or user_name or ""), query=(query or ""), limit=5),
-                            timeout=kb_timeout,
-                        )
-                    # Filter by similarity threshold (0-1, higher = more relevant); none left is fine
-                    retrieval_min_score = kb_cfg.get("retrieval_min_score")
-                    if retrieval_min_score is not None:
-                        try:
-                            min_s = float(retrieval_min_score)
-                            kb_results = [r for r in (kb_results or []) if r.get("score") is not None and float(r["score"]) >= min_s]
-                        except (TypeError, ValueError):
-                            pass
-                    if kb_results:
-                        kb_lines = [f"- [{r.get('source_type', '')}] {r.get('content', '')[:1500]}" for r in kb_results]
-                        system_parts.append("## Knowledge base (from your saved documents/web/notes)\n" + "\n\n".join(kb_lines))
-                except asyncio.TimeoutError:
-                    logger.debug("Knowledge base search timed out")
-                except Exception as e:
-                    logger.debug("Knowledge base search failed: {}", e)
             # Per-user profile: inject "About the user" only when active friend is HomeClaw (UserFriendsModelFullDesign.md Step 4)
             meta = Util().get_core_metadata()
             profile_cfg = getattr(meta, "profile", None) or {}
@@ -2738,6 +2874,14 @@ async def answer_from_memory(
                 summary = tam.get_recorded_events_summary(limit=10, system_user_id=_sys_uid)
                 if summary:
                     system_parts.append("## Recorded events (from record_date)\n" + summary)
+            try:
+                if _current_friend and (getattr(_current_friend, "preset", None) or "").strip().lower() == "reminder":
+                    _cron_snap = _format_reminder_cron_snapshot_for_prompt(tam, limit=12)
+                    if _cron_snap:
+                        system_parts.append(_cron_snap)
+                        _component_log("friend_preset", "appended reminder cron snapshot for preset=reminder")
+            except Exception as _e:
+                logger.debug("reminder cron snapshot inject failed: {}", _e)
 
         # Append force-include instructions last so the model sees them immediately before the conversation (better compliance). Order and tradeoffs: docs_design/SystemPromptInjectionOrder.md
         if force_include_instructions:
@@ -3429,6 +3573,32 @@ async def answer_from_memory(
                     if _dag_cat_fb == "search_web":
                         _dag_flow = None
                         _component_log("planner_executor", "skipped DAG for feed-digest request; using normal tool loop")
+                # get_file_link DAG only makes sense when the user named a sandbox file. Otherwise the flow calls
+                # get_file_view_link(path='') and returns an error with llm_total_ms=0 — no KB/ReAct. Skip so normal
+                # tool loop can use knowledge_base_search, memory_search, or web_search (e.g. "LinkedIn profile URL").
+                if _dag_flow and (_dag_flow.get("category") or "").strip().lower() == "get_file_link":
+                    try:
+                        from base.planner_executor import user_message_has_resolvable_file_path
+
+                        if not user_message_has_resolvable_file_path((query or "").strip()):
+                            _dag_flow = None
+                            _component_log(
+                                "planner_executor",
+                                "skipped get_file_link DAG (no sandbox path in user message; use ReAct/KB/web)",
+                            )
+                    except Exception as _gf_e:
+                        logger.debug("get_file_link DAG path check failed (non-fatal): {}", _gf_e)
+                # knowledge_base DAG is search-only; skip when user clearly wants add/remove (ReAct with KB CRUD tools).
+                if _dag_flow and (_dag_flow.get("category") or "").strip().lower() == "knowledge_base":
+                    try:
+                        if _kb_user_message_implies_crud_not_search_dag((query or "").strip()):
+                            _dag_flow = None
+                            _component_log(
+                                "planner_executor",
+                                "skipped knowledge_base DAG (add/remove/save intent; use ReAct for KB CRUD tools)",
+                            )
+                    except Exception as _kbd_e:
+                        logger.debug("knowledge_base DAG CRUD check failed (non-fatal): {}", _kbd_e)
             except Exception:
                 pass
         # When long_document_output is markdown (default), news_digest DAG uses fetch instead of fetch-vmprint.

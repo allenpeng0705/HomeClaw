@@ -15,19 +15,19 @@ def test_user_parse_friends_with_preset():
     raw = [
         {"name": "HomeClaw"},
         {"name": "Reminder", "preset": "reminder"},
-        {"name": "Note", "preset": " note "},
+        {"name": "Knowledge", "preset": " knowledge "},
     ]
     friends = User._parse_friends(raw)
     assert len(friends) >= 2
     # HomeClaw is first
     assert (friends[0].name or "").strip().lower() == "homeclaw"
     assert getattr(friends[0], "preset", None) is None
-    # Find Reminder and Note
+    # Find Reminder and Knowledge
     by_name = {(getattr(f, "name", "") or "").strip(): f for f in friends}
     assert "Reminder" in by_name
     assert getattr(by_name["Reminder"], "preset", None) == "reminder"
-    assert "Note" in by_name
-    assert getattr(by_name["Note"], "preset", None) == "note"  # stripped
+    assert "Knowledge" in by_name
+    assert getattr(by_name["Knowledge"], "preset", None) == "knowledge"  # stripped
 
 
 def test_user_friends_to_dict_list_includes_preset():
@@ -65,7 +65,7 @@ def test_load_friend_presets_from_config():
     assert isinstance(result, dict)
     # May be empty if file not in test env; if present, check structure
     if result:
-        assert "reminder" in result or "note" in result or "finder" in result
+        assert "reminder" in result or "knowledge" in result or "finder" in result
         for key, cfg in result.items():
             assert isinstance(cfg, dict)
             if "tools_preset" in cfg:
@@ -84,17 +84,19 @@ def test_get_tool_names_for_preset_reminder():
     assert "record_date" in names
 
 
-def test_get_tool_names_for_preset_note():
-    """get_tool_names_for_preset('note') returns list with file/save tools; no append_agent_memory/append_daily_memory (Note uses Cognee only)."""
+def test_get_tool_names_for_preset_knowledge():
+    """get_tool_names_for_preset('knowledge') returns KB tools + time only."""
     from base.friend_presets import get_tool_names_for_preset
 
-    names = get_tool_names_for_preset("note")
+    names = get_tool_names_for_preset("knowledge")
     assert names is not None
-    assert "file_write" in names
-    assert "document_read" in names
-    assert "save_result_page" in names
-    assert "append_agent_memory" not in names
-    assert "append_daily_memory" not in names
+    assert "knowledge_base_search" in names
+    assert "knowledge_base_add" in names
+    assert "knowledge_base_remove" in names
+    assert "knowledge_base_list" in names
+    assert "time" in names
+    assert "document_read" not in names
+    assert "web_search" not in names
 
 
 def test_get_tool_names_for_preset_finder():
@@ -105,6 +107,34 @@ def test_get_tool_names_for_preset_finder():
     assert names is not None
     assert "file_find" in names
     assert "folder_list" in names
+
+
+def test_format_preset_display_name():
+    """format_preset_display_name uses YAML display_name/friend_display_name or capitalizes id."""
+    from base.friend_presets import format_preset_display_name
+
+    assert format_preset_display_name("finder") == "Finder"
+    assert format_preset_display_name("knowledge", {"display_name": "知识库"}) == "知识库"
+    assert format_preset_display_name("knowledge", {"friend_display_name": "KB"}) == "KB"
+    assert format_preset_display_name("reminder", {}) == "Reminder"
+
+
+def test_should_skip_intent_router_for_friend():
+    """Product presets with tools_preset skip router when listed; empty list disables; unknown preset False."""
+    from base.friend_presets import should_skip_intent_router_for_friend
+
+    assert should_skip_intent_router_for_friend("reminder", {}) is True
+    assert should_skip_intent_router_for_friend("finder", {}) is True
+    assert should_skip_intent_router_for_friend("knowledge", {}) is True
+    assert should_skip_intent_router_for_friend("cursor", {}) is False
+    assert should_skip_intent_router_for_friend("", {}) is False
+    assert should_skip_intent_router_for_friend("reminder", {"skip_for_friend_presets": []}) is False
+    assert should_skip_intent_router_for_friend("reminder", {"skip_for_friend_presets": ["reminder"]}) is True
+    assert should_skip_intent_router_for_friend("reminder", {"skip_for_friend_presets": ["finder"]}) is False
+    # Only blank entries → must not skip router for all presets (regression guard)
+    assert should_skip_intent_router_for_friend("reminder", {"skip_for_friend_presets": ["", "  "]}) is False
+    assert should_skip_intent_router_for_friend("reminder", {"skip_for_friend_presets": "reminder, finder"}) is True
+    assert should_skip_intent_router_for_friend("knowledge", {"skip_for_friend_presets": "knowledge"}) is True
 
 
 def test_get_tool_names_for_preset_unknown_returns_none():
@@ -146,11 +176,13 @@ def test_get_tool_names_for_preset_value_array():
     assert "remind_me" in combined
     assert "file_find" in combined
     assert "folder_list" in combined
-    # No duplicates (e.g. document_read in both note and finder)
-    note_finder = get_tool_names_for_preset_value(["note", "finder"])
-    assert note_finder is not None
-    doc_read_count = sum(1 for t in note_finder if t == "document_read")
-    assert doc_read_count == 1
+    # No duplicates (e.g. time in both reminder and knowledge)
+    reminder_knowledge = get_tool_names_for_preset_value(["reminder", "knowledge"])
+    assert reminder_knowledge is not None
+    time_count = sum(1 for t in reminder_knowledge if t == "time")
+    assert time_count == 1
+    assert "knowledge_base_search" in reminder_knowledge
+    assert "remind_me" in reminder_knowledge
 
 
 def test_filter_tools_by_preset_logic():
@@ -173,14 +205,15 @@ def test_filter_tools_by_preset_logic():
     assert "run_skill" not in names
 
 
-def test_note_preset_has_model_routing_and_save_policy():
-    """Step 5: note preset has model_routing local_only and save_policy full for Core to enforce."""
+def test_knowledge_preset_has_tools_and_history():
+    """knowledge preset defines tools_preset and history for Companion KB friend."""
     from base.friend_presets import get_friend_preset_config
 
-    cfg = get_friend_preset_config("note")
+    cfg = get_friend_preset_config("knowledge")
     assert cfg is not None and isinstance(cfg, dict)
-    assert str(cfg.get("model_routing") or "").strip().lower() == "local_only"
-    assert str(cfg.get("save_policy") or "").strip().lower() == "full"
+    assert str(cfg.get("tools_preset") or "").strip().lower() == "knowledge"
+    hist = cfg.get("history")
+    assert hist == "full" or (isinstance(hist, int) and hist > 0)
 
 
 def test_trim_messages_to_last_n_turns():
@@ -205,10 +238,10 @@ def test_trim_messages_to_last_n_turns():
 
 
 def test_preset_history_integer_from_config():
-    """Preset can have history as integer (last N turns) or 'full'; reminder/note/finder use a number."""
+    """Preset can have history as integer (last N turns) or 'full'; reminder/knowledge/finder use a number."""
     from base.friend_presets import get_friend_preset_config
 
-    for name in ("reminder", "note", "finder"):
+    for name in ("reminder", "knowledge", "finder"):
         cfg = get_friend_preset_config(name)
         assert cfg is not None
         hist = cfg.get("history")

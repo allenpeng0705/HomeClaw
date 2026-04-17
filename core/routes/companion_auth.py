@@ -132,16 +132,22 @@ def _clean_expired_tokens() -> None:
 
 
 def _name_to_preset_key(name: str) -> Optional[str]:
-    """Map known preset friend names to preset key so API always returns preset for Reminder/Note/Finder. Never raises."""
-    n = (name or "").strip().lower()
+    """Map known preset friend names to preset key so API returns preset for Reminder/Finder/Knowledge. Never raises."""
+    raw = (name or "").strip()
+    n = raw.lower()
     if not n:
         return None
+    # Chinese display_name for knowledge preset (see friend_presets.yml display_name)
+    if raw == "知识库":
+        return "knowledge"
+    if n in ("knowledgebase", "knowledge base"):
+        return "knowledge"
     if n in ("reminder",):
         return "reminder"
     if n in ("finder", "files"):
         return "finder"
-    if n in ("note", "notes") or "note" in n:
-        return "note"
+    if n in ("knowledge", "kb") or n.startswith("knowledge "):
+        return "knowledge"
     if "reminder" in n:
         return "reminder"
     if "finder" in n or "file" in n:

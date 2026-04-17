@@ -70,9 +70,49 @@ knowledge_base:
   embed_timeout: 600           # seconds
   store_timeout: 600            # seconds
   retrieval_min_score: 0.5     # only inject chunks with score >= this (0-1); null = inject top-k regardless
+  # When to run KB search and inject chunks into the system prompt (each turn still embeds + queries the KB backend unless skipped):
+  #   every_turn — always (default; thorough, highest latency/cost on busy chats)
+  #   off — never auto-inject; model uses knowledge_base_search / knowledge_base_add when needed
+  #   intent_match — if intent router lists knowledge_base, OR the active friend preset is \"knowledge\" (Companion)
+  #   skip_light — skip very short lines and trivial greetings (recommended for main HomeClaw chat; lower latency/cost)
+  auto_inject: skip_light
+  auto_inject_min_query_chars: 12   # skip_light: minimum stripped message length to run KB
+  # intent_match: if router did not return knowledge_base, either skip KB or fall back to every_turn
+  intent_match_fallback: skip
+  # --- Cognee KB only (ignored for Chroma). Passed to cognee.search(query_type=...). Values are case-insensitive;
+  # hyphens or underscores OK (e.g. graph-completion = graph_completion). Unknown values log a warning and fall
+  # back to graph_completion. Enum: vendor/cognee/cognee/modules/search/types/SearchType.py; wiring:
+  # vendor/cognee/cognee/modules/search/methods/get_search_type_retriever_instance.py
+  #
+  # Retrieval-first (usually lowest latency; little or no completion LLM in the search step itself):
+  #   summaries                      — Hierarchical summaries from cognify (SummariesRetriever).
+  #   chunks                         — Semantic vector similarity over stored chunks (ChunksRetriever); good default
+  #                                    when you want speed and verbatim-ish passages.
+  #   chunks_lexical                 — Lexical/token overlap on chunks, e.g. Jaccard (JaccardChunksRetriever); good
+  #                                    for exact terms/phrases vs embedding similarity.
+  #
+  # RAG / graph + LLM (richer synthesized answers; slower; ensure Cognee LLM is configured where required):
+  #   rag_completion                 — Chunk retrieval then LLM answer (CompletionRetriever); “classic RAG”.
+  #   triplet_completion             — Graph triplet-oriented retrieval then LLM (TripletRetriever).
+  #   graph_completion               — Default Cognee path: broad graph + retrieval + LLM (GraphCompletionRetriever).
+  #   graph_summary_completion       — Graph retrieval then summarization prompt path (GraphSummaryCompletionRetriever).
+  #   graph_completion_cot           — Graph completion with chain-of-thought / validation rounds (slower, often deeper).
+  #   graph_completion_context_extension — Multi-round context extension before answering (slower).
+  #   temporal                       — Time extraction + temporal graph context + LLM (TemporalRetriever); timelines.
+  #
+  # Query / specialized (advanced; behavior depends on graph, prompts, env):
+  #   cypher                         — Cypher-oriented graph querying (CypherSearchRetriever). Can be disabled with
+  #                                    env ALLOW_CYPHER_QUERY=false.
+  #   natural_language               — Natural language → graph query flow with retries (NaturalLanguageRetriever).
+  #   coding_rules                   — Code/rules-oriented retrieval (CodingRulesRetriever); uses node_name rules.
+  #
+  # Meta (adds an LLM step to pick the mode, then runs it — often higher latency):
+  #   feeling_lucky                  — LLM selects a SearchType, then that search runs (select_search_type).
+  cognee_search_type: graph_completion
+  cognee_search_timeout_seconds: 30     # asyncio timeout around cognee.search (raise if Cognee hangs)
   # Per-user folder sync: scan {homeclaw_root}/{user_id}/knowledge/, add/remove files. See docs_design/PerUserKnowledgeBaseFolder.md. Use folder_name: knowledge (same as friends); legacy: knowledgebase.
   folder_sync:
-    enabled: false
+    enabled: true
     folder_name: knowledge # subdir under each user's sandbox (unified with friends: {FriendName}/knowledge/)
     schedule: ""               # cron, e.g. "0 */6 * * *" every 6h; empty = only on-demand via POST /knowledge_base/sync_folder
     allowed_extensions: [".md", ".txt", ".pdf", ".docx", ".html", ".htm", ".rst", ".csv", ".ppt", ".pptx"]

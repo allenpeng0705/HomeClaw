@@ -45,6 +45,8 @@ except ImportError:
 from loguru import logger
 import time as _time
 
+from core.reminder_message_refine import refine_scheduled_message_for_delivery
+
 try:
     from memory import tam_storage as _tam_storage
 except ImportError:
@@ -786,7 +788,8 @@ async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContex
             args_list = []
         if not skill_name or not script:
             return "Error: For task_type 'run_skill', skill_name and script are required (e.g. skill_name='weather-1.0.0', script='get_weather.py', args=['Beijing'])."
-        message = (arguments.get("message") or "").strip() or f"run_skill {skill_name} {script}"
+        _msg_raw = (arguments.get("message") or "").strip()
+        message = _msg_raw if _msg_raw else f"run_skill {skill_name} {script}"
         params["message"] = message
         params["task_type"] = "run_skill"
         params["skill_name"] = skill_name
@@ -832,7 +835,8 @@ async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContex
         plugin_id = (arguments.get("plugin_id") or "").strip().lower().replace(" ", "_")
         if not plugin_id:
             return "Error: For task_type 'run_plugin', plugin_id is required (e.g. news, ppt-generation)."
-        message = (arguments.get("message") or "").strip() or f"run_plugin {plugin_id}"
+        _msg_raw = (arguments.get("message") or "").strip()
+        message = _msg_raw if _msg_raw else f"run_plugin {plugin_id}"
         params["message"] = message
         params["task_type"] = "run_plugin"
         params["plugin_id"] = plugin_id
@@ -967,7 +971,8 @@ async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContex
         tool_name = (arguments.get("tool_name") or "").strip()
         if not tool_name:
             return "Error: For task_type 'run_tool', tool_name is required (e.g. web_search). Use this for 'search the latest sports news every 7 am' — use run_tool with tool_name=web_search, tool_arguments={query: 'latest sports news', count: 10}. Do NOT use run_plugin headlines for 'search'."
-        message = (arguments.get("message") or "").strip() or f"run_tool {tool_name}"
+        _msg_raw = (arguments.get("message") or "").strip()
+        message = _msg_raw if _msg_raw else f"run_tool {tool_name}"
         params["message"] = message
         params["task_type"] = "run_tool"
         params["tool_name"] = tool_name
@@ -1015,12 +1020,17 @@ async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContex
         message = (arguments.get("message") or "").strip() or "Scheduled reminder"
         params["message"] = message
 
-        def make_task(msg: str, prms: Dict[str, Any]):
+        def make_task(prms: Dict[str, Any]):
             async def _task():
-                await tam._send_reminder_to_channel_safe(msg + hint, prms)
+                m = (prms.get("message") or "").strip() or "Scheduled reminder"
+                await tam._send_reminder_to_channel_safe(m + hint, prms)
             return _task
 
-        task = make_task(message, params)
+        task = make_task(params)
+
+    _pm = params.get("message")
+    if isinstance(_pm, str) and _pm.strip():
+        params["message"] = await refine_scheduled_message_for_delivery(core, _pm.strip(), max_chars=120)
 
     job_id = tam.schedule_cron_task(task, cron_expr, params=params)
     if job_id is None:
@@ -1162,7 +1172,7 @@ async def _cron_status_executor(arguments: Dict[str, Any], context: ToolContext)
 
 
 async def _remind_me_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Schedule a one-shot reminder. Use minutes (e.g. 5 for 'in 5 minutes') or at_time (YYYY-MM-DD HH:MM:SS) for a specific time. No LLM in TAM; model supplies structured args."""
+    """Schedule a one-shot reminder. Use minutes (e.g. 5 for 'in 5 minutes') or at_time (YYYY-MM-DD HH:MM:SS). Message text may be LLM-refined (see tools.reminder_message_llm_refine) before TAM."""
     core = context.core
     orchestrator = getattr(core, "orchestratorInst", None)
     if orchestrator is None:
@@ -1170,7 +1180,8 @@ async def _remind_me_executor(arguments: Dict[str, Any], context: ToolContext) -
     tam = getattr(orchestrator, "tam", None)
     if tam is None or not hasattr(tam, "schedule_one_shot"):
         return "Error: TAM not available"
-    message = (arguments.get("message") or "").strip() or "Reminder"
+    _raw_msg = (arguments.get("message") or "").strip() or "Reminder"
+    message = await refine_scheduled_message_for_delivery(core, _raw_msg, max_chars=120)
     minutes = arguments.get("minutes")
     at_time = (arguments.get("at_time") or "").strip()
     if minutes is not None:
@@ -1289,7 +1300,8 @@ async def _record_date_executor(arguments: Dict[str, Any], context: ToolContext)
     note = (arguments.get("note") or "").strip()
     event_date = (arguments.get("event_date") or "").strip()
     remind_on = (arguments.get("remind_on") or "").strip().lower()
-    remind_message = (arguments.get("remind_message") or "").strip()
+    _remind_raw = (arguments.get("remind_message") or "").strip()
+    remind_message = await refine_scheduled_message_for_delivery(core, _remind_raw, max_chars=120) if _remind_raw else ""
     remind_days_before_raw = arguments.get("remind_days_before")
     repeat_yearly = bool(arguments.get("repeat_yearly", False))
     if not when:

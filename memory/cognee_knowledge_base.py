@@ -207,6 +207,24 @@ def _kb_dataset_name_for_source(user_id: str, source_id: str) -> str:
     return f"{prefix}_{h}"
 
 
+def _resolve_cognee_search_query_type(cognee_mod: Any, raw: Any) -> Any:
+    """
+    Map memory_kb knowledge_base.cognee_search_type string to cognee.SearchType.
+    Default GRAPH_COMPLETION (graph + vector + LLM; slower). CHUNKS = vector-only (faster per Cognee docs).
+    """
+    St = getattr(cognee_mod, "SearchType", None)
+    if St is None:
+        return None
+    default = St.GRAPH_COMPLETION
+    if raw is None or (isinstance(raw, str) and not str(raw).strip()):
+        return default
+    key = str(raw).strip().upper().replace("-", "_")
+    if key in getattr(St, "__members__", {}):
+        return St[key]
+    logger.warning("Unknown cognee_search_type {!r}; using GRAPH_COMPLETION", raw)
+    return default
+
+
 class CogneeKnowledgeBase:
     """
     Knowledge base using Cognee: one dataset per (user_id, source_id).
@@ -232,8 +250,9 @@ class CogneeKnowledgeBase:
         self._unused_ttl_days = float(kbc.get("unused_ttl_days", 30) or 30)
         self._max_sources_per_user = max(0, int(kbc.get("max_sources_per_user", 0) or 0))
         self._add_timeout = 90
-        self._search_timeout = 30
+        self._search_timeout = max(5, int(kbc.get("cognee_search_timeout_seconds", 30) or 30))
         self._list_timeout = 15
+        self._cognee_query_type = _resolve_cognee_search_query_type(self._cognee, kbc.get("cognee_search_type"))
 
     async def _list_user_kb_datasets_async(self, user_id: str, friend_id: Optional[str] = None) -> List[str]:
         """List Cognee dataset names for this user's KB (and optional friend_id scope). Step 9: when friend_id set, prefix kb_{user}_{friend}_."""
@@ -331,10 +350,22 @@ class CogneeKnowledgeBase:
         if not dataset_names:
             return []
         try:
-            results = await asyncio.wait_for(
-                self._cognee.search(query, datasets=dataset_names, top_k=limit or 10),
-                timeout=self._search_timeout,
-            )
+            _qt = self._cognee_query_type
+            if _qt is not None:
+                results = await asyncio.wait_for(
+                    self._cognee.search(
+                        query,
+                        query_type=_qt,
+                        datasets=dataset_names,
+                        top_k=limit or 10,
+                    ),
+                    timeout=self._search_timeout,
+                )
+            else:
+                results = await asyncio.wait_for(
+                    self._cognee.search(query, datasets=dataset_names, top_k=limit or 10),
+                    timeout=self._search_timeout,
+                )
         except asyncio.TimeoutError:
             logger.warning("Cognee KB search timed out")
             return []
@@ -346,12 +377,21 @@ class CogneeKnowledgeBase:
             if isinstance(r, str):
                 out.append({"content": r, "source_type": "cognee", "source_id": "", "score": 0.8 - i * 0.05})
             elif isinstance(r, dict):
-                text = r.get("text") or r.get("content") or r.get("memory") or str(r)
+                sr = r.get("search_result")
+                if isinstance(sr, str) and sr.strip():
+                    text = sr
+                else:
+                    text = r.get("text") or r.get("content") or r.get("memory") or str(r)
+                sid = r.get("source_id", "") or (str(r.get("dataset_name") or "").strip())
+                try:
+                    sc = float(r.get("score", 0.8 - i * 0.05))
+                except (TypeError, ValueError):
+                    sc = 0.8 - i * 0.05
                 out.append({
                     "content": text,
                     "source_type": r.get("source_type", "cognee"),
-                    "source_id": r.get("source_id", ""),
-                    "score": float(r.get("score", 0.8 - i * 0.05)),
+                    "source_id": sid,
+                    "score": sc,
                 })
             else:
                 out.append({"content": str(r), "source_type": "cognee", "source_id": "", "score": 0.8})

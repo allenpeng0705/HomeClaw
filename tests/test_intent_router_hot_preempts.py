@@ -103,3 +103,12 @@ async def test_preempt_knowledge_base(cfg):
         raise AssertionError("classifier LLM must not run")
 
     assert await route("在知识库里搜索 部署流程", cfg, _no_llm) == "knowledge_base"
+
+
+@pytest.mark.asyncio
+async def test_preempt_knowledge_base_english(cfg):
+    async def _no_llm(*_a, **_k):
+        raise AssertionError("classifier LLM must not run")
+
+    assert await route("search my knowledge base for deployment steps", cfg, _no_llm) == "knowledge_base"
+    assert await route("find in KB the onboarding doc", cfg, _no_llm) == "knowledge_base"
