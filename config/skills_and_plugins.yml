@@ -548,6 +548,10 @@ tools:
   reminder_scheduling_llm_infer_timeout_seconds: 60
   # Optional: model id for scheduling infer only (omit = main chat completion routing).
   # reminder_scheduling_llm_infer_llm: null
+  # Tools allowed for cron_schedule(task_type=run_tool) headless ticks. Omit or null = built-in safe set (agent_memory_get, agent_memory_search, document_read, fetch_url, file_find, folder_list, knowledge_base_search, memory_get, memory_search, tavily_extract, time, web_search). Empty list [] disables run_tool in cron. Extend with care (no exec/file_write unless you accept unattended risk).
+  # cron_run_tool_allowlist: null
+  # Example tighter list:
+  # cron_run_tool_allowlist: [web_search, time, document_read]
   # When true (default): inject few-shot tool selection examples (User / Thought / Call) from config/prompts/tools/selection_examples.yml into the system prompt. Helps local/Qwen models map natural language to the right tool.
   # tool_selection_examples: true
   # When true (default): never auto-invoke tools when the model returned no tool_calls. Rely on the model to decide; no our own if-else to run tools. When false: allow legacy fallbacks (force_include, remind_me, route_to_plugin, folder_list, etc.) when model didn't call a tool.

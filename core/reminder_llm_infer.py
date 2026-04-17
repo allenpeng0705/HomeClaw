@@ -10,7 +10,7 @@ import asyncio
 import json
 import re
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
@@ -23,17 +23,23 @@ from core.tool_helpers_fallback import (
 _REMINDER_SCHEDULING_SYSTEM = """You are a scheduling intent parser for a personal assistant.
 Given the user's message and the CURRENT REFERENCE TIME, output ONE JSON object only (no markdown, no prose).
 
-Schema (all string values UTF-8; use null only when the user is NOT asking to schedule a reminder, recurring job, or record a date):
+Schema (use null tool only when NOT scheduling):
 {
   "tool": "remind_me" | "cron_schedule" | "record_date" | null,
-  "arguments": { ... }  // empty object {} if tool is null
+  "arguments": { ... }
 }
 
 Rules:
-- Use ONLY the current reference time for "tomorrow", "next Monday", relative times, etc. Ignore any dates/times in older chat context.
-- remind_me: one-shot reminder. Provide EITHER "minutes" (positive integer, minutes from now) OR "at_time" (string "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD" for 09:00:00), and "message" (short label, <=120 chars).
-- cron_schedule: recurring schedule. "cron_expr" must be a standard 5-field cron (minute hour day month weekday), e.g. "0 8 * * *" for daily 08:00. Include "message".
-- record_date: remember an event (birthday, anniversary). Require "event_name" and "when" (natural phrase). Optional: "event_date" (YYYY-MM-DD), "note", "remind_on" ("day_before"|"on_day"), "remind_days_before" (0-120), "remind_message", "repeat_yearly" (boolean). If the user only wants a simple one-shot reminder with a clear clock time, prefer remind_me over record_date.
+- Use ONLY the current reference time for "tomorrow", "next Monday", relative times, etc. Ignore older chat context for dates/times.
+- remind_me (one-shot, NOTIFY TEXT ONLY): EITHER "minutes" (positive int) OR "at_time" ("YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD" for 09:00:00), plus "message" (short label, <=120 chars). No skills/tools run at fire time.
+- cron_schedule (RECURRING): "cron_expr" = 5-field cron (e.g. "0 8 * * *"). Always include "message" (short label for the job).
+  - NOTIFY-ONLY each tick: omit "task_type" or set "task_type": "message" — user only gets that text.
+  - RUN ACTION each tick: set "task_type" to one of:
+    - "run_skill": require "skill_name", "script", optional "args" (array of strings, e.g. ["--verbatim-place","北京"] for weather). For scheduled file/report work prefer a skill script over inventing args.
+    - "run_tool": require "tool_name" and "tool_arguments" (object, e.g. {"query":"headlines","count":8} for web_search). Only read/search/memory/file-list style tools are allowed from this path; never exec/write.
+    - "run_plugin": require "plugin_id"; optional "capability_id", "parameters" (object).
+  - Optional "post_process_prompt" (string): LLM instruction to shorten or style the tool output before delivery.
+- record_date: "event_name", "when" required; optional "event_date", "note", "remind_on" ("day_before"|"on_day"), "remind_days_before" (0-120), "remind_message", "repeat_yearly" (boolean). Prefer remind_me for a simple one-shot clock reminder.
 
 If ambiguous or not a scheduling request, return {"tool": null, "arguments": {}}.
 Output JSON only, one line if possible."""
@@ -92,19 +98,150 @@ def _validate_remind_me_args(args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _validate_cron_args(args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _cron_expr_ok(expr: str) -> bool:
+    e = (expr or "").strip()
+    return bool(e) and len(e.split()) == 5
+
+
+def _coerce_args_string_list(val: Any, *, max_items: int = 64) -> List[str]:
+    if val is None:
+        return []
+    if isinstance(val, str):
+        return [val.strip()] if val.strip() else []
+    if isinstance(val, list):
+        out: List[str] = []
+        for x in val[:max_items]:
+            if x is None:
+                continue
+            s = str(x).strip()
+            if s:
+                out.append(s[:4096])
+        return out
+    return []
+
+
+def _sanitize_cron_tool_arguments(val: Any) -> Dict[str, Any]:
+    """Keep JSON-serializable scalars and shallow lists for run_tool tool_arguments. Never raises."""
+    if not isinstance(val, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    try:
+        for k, v in list(val.items())[:48]:
+            if not isinstance(k, str) or not k.strip() or len(k) > 120:
+                continue
+            key = k.strip()
+            if isinstance(v, (str, int, float, bool)) or v is None:
+                if isinstance(v, str) and len(v) > 8000:
+                    v = v[:8000]
+                out[key] = v
+            elif isinstance(v, list) and len(v) <= 64:
+                out[key] = [
+                    str(x).strip()[:2000]
+                    for x in v[:64]
+                    if x is not None and str(x).strip()
+                ]
+    except Exception:
+        return {}
+    return out
+
+
+def _validate_cron_schedule_arguments(
+    args: Dict[str, Any],
+    tools_cfg: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Build cron_schedule executor arguments; None if invalid."""
     if not isinstance(args, dict):
         return None
     expr = (args.get("cron_expr") or "").strip()
-    if not expr:
+    if not _cron_expr_ok(expr):
         return None
-    parts = expr.split()
-    if len(parts) != 5:
+    tt = (args.get("task_type") or "message").strip().lower() or "message"
+    if tt not in ("message", "run_skill", "run_tool", "run_plugin"):
         return None
-    msg = (args.get("message") or "").strip() or "Scheduled reminder"
-    if len(msg) > 200:
-        msg = msg[:200]
-    return {"cron_expr": expr, "message": msg}
+
+    def _msg() -> str:
+        m = (args.get("message") or "").strip() or "Scheduled reminder"
+        return m[:200] if len(m) > 200 else m
+
+    if tt == "message":
+        return {"cron_expr": expr, "message": _msg()}
+
+    if tt == "run_skill":
+        sn = (args.get("skill_name") or "").strip()
+        sc = (args.get("script") or "").strip()
+        if not sn or not sc:
+            return None
+        al = _coerce_args_string_list(args.get("args"))
+        try:
+            from tools.builtin import _normalize_weather_cron_run_skill_args
+
+            al = _normalize_weather_cron_run_skill_args(sn, sc, al)
+        except Exception:
+            pass
+        out: Dict[str, Any] = {
+            "cron_expr": expr,
+            "task_type": "run_skill",
+            "skill_name": sn[:256],
+            "script": sc[:256],
+            "args": al,
+            "message": _msg(),
+        }
+        pp = (args.get("post_process_prompt") or "").strip()
+        if pp:
+            out["post_process_prompt"] = pp[:4000]
+        return out
+
+    if tt == "run_tool":
+        tn = (args.get("tool_name") or "").strip()
+        if not tn:
+            return None
+        try:
+            from tools.builtin import is_cron_run_tool_allowed
+
+            ok, _err = is_cron_run_tool_allowed(tn, tools_cfg)
+            if not ok:
+                logger.debug("reminder LLM cron run_tool rejected: {}", _err)
+                return None
+        except Exception as e:
+            logger.debug("cron run_tool allowlist check failed: {}", e)
+            return None
+        ta = _sanitize_cron_tool_arguments(args.get("tool_arguments"))
+        out = {
+            "cron_expr": expr,
+            "task_type": "run_tool",
+            "tool_name": tn[:120],
+            "tool_arguments": ta,
+            "message": _msg(),
+        }
+        pp = (args.get("post_process_prompt") or "").strip()
+        if pp:
+            out["post_process_prompt"] = pp[:4000]
+        return out
+
+    if tt == "run_plugin":
+        pid = (args.get("plugin_id") or "").strip()
+        if not pid:
+            return None
+        cap = (args.get("capability_id") or "").strip()
+        params = args.get("parameters")
+        if not isinstance(params, dict):
+            params = {}
+        params = _sanitize_cron_tool_arguments(params)
+        out = {
+            "cron_expr": expr,
+            "task_type": "run_plugin",
+            "plugin_id": pid[:120],
+            "message": _msg(),
+            "parameters": params,
+        }
+        if cap:
+            out["capability_id"] = cap[:120]
+        pp = (args.get("post_process_prompt") or "").strip()
+        if pp:
+            out["post_process_prompt"] = pp[:4000]
+        return out
+
+    return None
 
 
 def _validate_record_date_args(args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -140,8 +277,11 @@ def _validate_record_date_args(args: Dict[str, Any]) -> Optional[Dict[str, Any]]
     return out
 
 
-def normalize_llm_scheduling_result(obj: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Turn parsed LLM JSON into the same shape as infer_remind_me_fallback / infer_cron_schedule_fallback, or None."""
+def normalize_llm_scheduling_result(
+    obj: Dict[str, Any],
+    tools_cfg: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Turn parsed LLM JSON into tool call dicts for executors, or None."""
     try:
         tool = obj.get("tool")
         if tool is None or (isinstance(tool, str) and tool.strip().lower() in ("null", "none", "")):
@@ -156,7 +296,7 @@ def normalize_llm_scheduling_result(obj: Dict[str, Any]) -> Optional[Dict[str, A
             v = _validate_remind_me_args(args)
             return {"tool": "remind_me", "arguments": v} if v else None
         if t == "cron_schedule":
-            v = _validate_cron_args(args)
+            v = _validate_cron_schedule_arguments(args, tools_cfg)
             return {"tool": "cron_schedule", "arguments": v} if v else None
         if t == "record_date":
             v = _validate_record_date_args(args)
@@ -206,7 +346,7 @@ async def infer_scheduling_tools_from_llm(
     obj = _parse_json_object(raw)
     if not obj:
         return None
-    return normalize_llm_scheduling_result(obj)
+    return normalize_llm_scheduling_result(obj, cfg)
 
 
 async def merge_companion_scheduling_inference(

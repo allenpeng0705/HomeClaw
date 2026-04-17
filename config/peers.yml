@@ -15,7 +15,7 @@ peers:
   - instance_id: "AllenPeng-mac-HomeClaw"
     display_name: "AP-Mac-HomwClaw"
     base_url: "https://mymac.gpt4people.online:9000"
-    inbound_user_id: "allenpeng_mac_homeclaw""
+    inbound_user_id: "allenpeng_mac_homeclaw"
     api_key_env: "1234567890"
     capabilities:
       - vision

@@ -202,6 +202,27 @@ def _build_life_tips(one_line_weather: str) -> list[str]:
     return tips
 
 
+def _cn_place_candidate_is_reminder_junk(g: str) -> bool:
+    """True when a capture is scheduling/action text, not a wttr.in place (mixed 提醒 + 预报)."""
+    if not g or len(g) < 2:
+        return True
+    junk_sub = (
+        "发送",
+        "给我",
+        "帮我",
+        "提醒",
+        "点钟",
+        "分钟",
+        "每天",
+        "早上",
+        "晚上",
+        "中午",
+        "以后",
+        "之后",
+    )
+    return any(s in g for s in junk_sub)
+
+
 def _extract_cn_location_before_weather(t: str) -> str:
     """
     Find 上海天气-style phrases inside longer Chinese text (overlapping),
@@ -209,6 +230,20 @@ def _extract_cn_location_before_weather(t: str) -> str:
     """
     if not t or not re.search(r"[\u4e00-\u9fff]", t):
         return ""
+    # Shortest Han suffix (2–8 chars) before 的+天气+预报 (e.g. …发送北京的天气预报 -> 北京).
+    _tag = "的天气预报"
+    _ti = t.rfind(_tag)
+    if _ti >= 0:
+        for _n in range(2, 9):
+            if _ti < _n:
+                break
+            g0 = t[_ti - _n : _ti]
+            if len(g0) != _n:
+                continue
+            if not re.match(r"^[\u4e00-\u9fff]+$", g0):
+                continue
+            if not _cn_place_candidate_is_reminder_junk(g0):
+                return g0
     candidates: List[str] = []
     # Overlapping: try every start position where N chars + 天气
     for m in re.finditer(r"(?=([\u4e00-\u9fff]{2,8})天气)", t):
@@ -218,6 +253,8 @@ def _extract_cn_location_before_weather(t: str) -> str:
         if any(x in g for x in ("请问", "怎么", "什么", "哪里", "是否", "能否")):
             continue
         if "问" in g:
+            continue
+        if _cn_place_candidate_is_reminder_junk(g):
             continue
         candidates.append(g)
     if not candidates:
