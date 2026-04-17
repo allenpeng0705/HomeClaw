@@ -1,6 +1,6 @@
 """
 Planner–Executor: one planning LLM call → JSON plan (goal + steps); executor runs steps (Phase 3+).
-DAG: fixed flows per category (no planner); run steps in order, resolve args_from (user_message_path, result_of_step_N, llm_from_step_N).
+DAG: fixed flows per category (no planner); run steps in order, resolve args_from (user_message_path, result_of_step_N, llm_from_step_N, llm_weather_place_for_run_skill_args, …).
 
 Phase 2: planning only — build prompt, call LLM, parse and validate plan. Execution still via ReAct.
 Phase 3: executor runs plan steps (resolve placeholders, execute tools); on success return final result; on error fall back to ReAct.
@@ -53,6 +53,14 @@ DAG_LLM_MARKDOWN_SYSTEM = """You are a document assistant. Given the document co
 
 # DAG: one short LLM call to summarize content for a direct reply (e.g. when search result is short and we skip save_result_page).
 DAG_SUMMARIZE_FOR_REPLY_SYSTEM = """You are a helpful assistant. The user asked a question and the system retrieved the content below. Summarize it concisely in 1–4 sentences so the user gets a direct answer. Output only the summary, no preamble or "Here is..."."""
+
+# DAG: extract a single place name for wttr.in (weather skill). Replaces fragile regex on mixed reminder + weather Chinese.
+DAG_WEATHER_LOCATION_SYSTEM = """You extract the geographic place for a weather lookup (wttr.in).
+The user message may mix reminders, times, and weather (any language). Output exactly ONE of:
+- The primary place: a city or region name in English, Chinese, or other script wttr.in accepts (e.g. Beijing, 北京, Paris, New York), OR IATA like PEK if clearly meant as location, OR "lat,lon" if the user gave coordinates.
+- The single word NONE (uppercase) if there is no specific named place, only "here"/device/profile location, or the message is not really about weather for a place.
+
+Rules: one line only; no quotes, no JSON, no explanation, no punctuation around the place. If unsure between two cities, pick the one explicitly tied to "weather" or "预报" or "天气"."""
 
 # DAG: compose email draft from user message + contacts list (for send_email flow).
 DAG_COMPOSE_EMAIL_SYSTEM = """You are an email assistant. You have a contacts list (name, email, and optional notes) and the user's request. Output a single email draft in this exact format, with no other text before or after:
@@ -416,6 +424,32 @@ async def _dag_llm_summarize_for_reply(
     return content[:4096] + ("…" if len(content) > 4096 else "")
 
 
+async def _dag_llm_weather_location_from_user_message(
+    completion_fn: Any,
+    user_message: str,
+    config: Optional[Dict[str, Any]] = None,
+) -> str:
+    """One short LLM call: place name for wttr.in, or NONE. Never raises."""
+    if not completion_fn or not (user_message or "").strip():
+        return ""
+    preview = (user_message.strip()[:2000] + "…") if len(user_message) > 2000 else user_message.strip()
+    messages = [
+        {"role": "system", "content": DAG_WEATHER_LOCATION_SYSTEM},
+        {"role": "user", "content": preview},
+    ]
+    try:
+        planner_llm = (config or {}).get("planner_llm") or None
+        if hasattr(completion_fn, "openai_chat_completion"):
+            response = await completion_fn.openai_chat_completion(messages=messages, llm_name=planner_llm)
+        else:
+            response = await completion_fn(messages, llm_name=planner_llm)
+        if response and isinstance(response, str) and response.strip():
+            return response.strip()[:200]
+    except Exception as e:
+        logger.debug("DAG weather-location LLM failed: {}", e)
+    return ""
+
+
 async def _dag_llm_compose_email_from_step(
     completion_fn: Any,
     step_result: str,
@@ -500,6 +534,21 @@ async def _resolve_flow_step_args(
             # run_skill expects args as a list of CLI strings; pass the full user message as a single argument.
             txt = _user_message_text(user_message, 2000) or (str(default) if default is not None else "")
             out[key] = [txt] if txt else ([str(default)] if default not in (None, "") else [""])
+        elif source == "llm_weather_place_for_run_skill_args":
+            # LLM extracts wttr.in place; get_weather.py --verbatim-place skips regex (see weather DAG in skills_and_plugins.yml).
+            txt_um = _user_message_text(user_message, 2000) or ""
+            if completion_fn and txt_um.strip():
+                raw = await _dag_llm_weather_location_from_user_message(completion_fn, txt_um, config)
+                place = (raw or "").strip().strip('`"\'')
+                if place:
+                    place = place.splitlines()[0][:120].strip()
+                if not place or place.upper() == "NONE":
+                    out[key] = []
+                else:
+                    out[key] = ["--verbatim-place", place]
+            else:
+                txt = txt_um or (str(default) if default is not None else "")
+                out[key] = [txt] if txt else []
         elif isinstance(source, str) and source.startswith("result_of_step_"):
             n = source.replace("result_of_step_", "").strip()
             out[key] = (step_results.get(n) or step_results.get(str(n)) or "") if n else (default or "")

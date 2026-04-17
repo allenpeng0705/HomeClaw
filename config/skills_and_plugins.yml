@@ -208,7 +208,7 @@ planner_executor:
             content: [result_of_step_1]
           args:
             format: "markdown"
-    # Weather: one run_skill call with the user message (no main LLM tool-picking). If wttr.in/skill returns Error:, DAG fails → ReAct with web_search only.
+    # Weather: LLM extracts place (handles mixed reminder + 北京天气预报); get_weather --verbatim-place skips regex. If wttr.in/skill returns Error:, DAG fails → ReAct with web_search only. Without planner LLM, falls back to full user message + script regex.
     weather:
       trigger: category
       category: weather
@@ -219,7 +219,7 @@ planner_executor:
             skill_name: weather-1.0.0
             script: get_weather.py
           args_from:
-            args: [user_message_text_as_run_skill_args, ""]
+            args: [llm_weather_place_for_run_skill_args, ""]
     # RSS daily brief: fixed fetch-vmprint (VMPrint preview). On Error: DAG fails → narrow ReAct. News+magazine combo still bypasses DAG in llm_loop when both intents appear.
     news_digest:
       trigger: category
@@ -542,6 +542,12 @@ tools:
   reminder_message_llm_refine: true
   # Max seconds for that single completion (default 20).
   reminder_message_llm_refine_timeout_seconds: 20
+  # When true (default): for clear scheduling/reminder phrasing, run a small JSON-only LLM pass before regex fallbacks (Companion fast-path, strict_fallback recovery, legacy no-tool_call branch). Set false for regex-only (faster, no extra completion).
+  reminder_scheduling_llm_infer: true
+  # Max seconds for that scheduling-infer completion (default 22).
+  reminder_scheduling_llm_infer_timeout_seconds: 60
+  # Optional: model id for scheduling infer only (omit = main chat completion routing).
+  # reminder_scheduling_llm_infer_llm: null
   # When true (default): inject few-shot tool selection examples (User / Thought / Call) from config/prompts/tools/selection_examples.yml into the system prompt. Helps local/Qwen models map natural language to the right tool.
   # tool_selection_examples: true
   # When true (default): never auto-invoke tools when the model returned no tool_calls. Rely on the model to decide; no our own if-else to run tools. When false: allow legacy fallbacks (force_include, remind_me, route_to_plugin, folder_list, etc.) when model didn't call a tool.

@@ -3229,11 +3229,21 @@ async def answer_from_memory(
                 or (str(getattr(request, "app_id", "") or "").strip().lower() == "homeclaw")
             )
             if use_tools and _is_companion and isinstance(query, str) and _query_looks_like_scheduling(query):
-                _raw_direct = (
-                    _infer_annual_birthday_advance_reminder_fallback(query)
-                    or _infer_remind_me_fallback(query)
-                    or _infer_cron_schedule_fallback(query)
-                )
+                _raw_direct = None
+                try:
+                    from core.reminder_llm_infer import merge_companion_scheduling_inference
+
+                    _dt_for_sched = getattr(core, "_request_current_datetime_line", None) or ""
+                    _raw_direct = await merge_companion_scheduling_inference(
+                        query, core, _dt_for_sched, tools_cfg_for_desc
+                    )
+                except Exception as _merge_e:
+                    logger.debug("Companion scheduling merge failed: {}", _merge_e)
+                    _raw_direct = (
+                        _infer_annual_birthday_advance_reminder_fallback(query)
+                        or _infer_remind_me_fallback(query)
+                        or _infer_cron_schedule_fallback(query)
+                    )
                 _direct_tool = None
                 _direct_args = None
                 # normalize fallback shape:
@@ -3249,6 +3259,8 @@ async def answer_from_memory(
                             _direct_tool = "remind_me"
                         elif "cron_expr" in _direct_args:
                             _direct_tool = "cron_schedule"
+                        elif (_direct_args.get("event_name") or "").strip() and (_direct_args.get("when") or "").strip():
+                            _direct_tool = "record_date"
                 if _direct_tool and isinstance(_direct_args, dict):
                     _component_log("tools", f"companion scheduling fast-path: direct {_direct_tool}")
                     _ctx_fast = ToolContext(
@@ -4986,6 +4998,82 @@ async def answer_from_memory(
                                         response = _res.strip()
                                 except Exception as e_w:
                                     logger.debug("Fallback weather run_skill failed: {}", e_w)
+                        # When strict_fallback is True, infer remind_me / cron_schedule / record_date via LLM (+regex) if the user clearly asked to schedule but the model returned no tool_calls.
+                        if (
+                            _strict_fallback
+                            and bool(tools_cfg.get("reminder_scheduling_llm_infer", True))
+                            and isinstance(query, str)
+                            and (query or "").strip()
+                            and _query_looks_like_scheduling((query or "").strip())
+                            and registry
+                            and last_tool_name not in ("remind_me", "cron_schedule", "record_date", "route_to_tam")
+                            and (
+                                response is None
+                                or not str(response).strip()
+                                or response == content_str
+                            )
+                        ):
+                            try:
+                                from core.reminder_llm_infer import merge_companion_scheduling_inference
+
+                                _dt_sched = getattr(core, "_request_current_datetime_line", None) or ""
+                                _sched_raw = await merge_companion_scheduling_inference(
+                                    (query or "").strip(), core, _dt_sched, tools_cfg
+                                )
+                                if _sched_raw and isinstance(_sched_raw, dict):
+                                    _tn = (_sched_raw.get("tool") or "").strip()
+                                    _ta = _sched_raw.get("arguments")
+                                    if (
+                                        _tn
+                                        and isinstance(_ta, dict)
+                                        and any(getattr(t, "name", None) == _tn for t in (registry.list_tools() or []))
+                                    ):
+                                        _component_log("tools", f"strict_fallback scheduling infer: {_tn}")
+                                        _rs = await registry.execute_async(_tn, _ta, context)
+                                        if _rs == ROUTING_RESPONSE_ALREADY_SENT:
+                                            return (ROUTING_RESPONSE_ALREADY_SENT, None)
+                                        if isinstance(_rs, str) and _rs.strip():
+                                            if _tn == "remind_me" and (
+                                                "provide either minutes" in _rs.lower()
+                                                or "at_time" in _rs.lower()
+                                            ):
+                                                _q_s = _remind_me_clarification_question(query) or ""
+                                                if _q_s.strip():
+                                                    response = _q_s.strip()
+                                            elif _tn == "remind_me" and not _tool_result_looks_like_error(_rs):
+                                                meta_sf = Util().get_core_metadata()
+                                                use_result_cfg = (
+                                                    (getattr(meta_sf, "tools_config", None) or {}).get("use_result_as_response")
+                                                    if meta_sf
+                                                    else None
+                                                )
+                                                if not _tool_result_usable_as_final_response(
+                                                    "remind_me", _rs, use_result_cfg, _ta
+                                                ):
+                                                    tcid = "strict_fallback_sched_1"
+                                                    current_messages.append(
+                                                        {
+                                                            "role": "assistant",
+                                                            "content": "",
+                                                            "tool_calls": [
+                                                                {
+                                                                    "id": tcid,
+                                                                    "type": "function",
+                                                                    "function": {"name": "remind_me", "arguments": json.dumps(_ta)},
+                                                                }
+                                                            ],
+                                                        }
+                                                    )
+                                                    current_messages.append({"role": "tool", "tool_call_id": tcid, "content": _rs})
+                                                    last_tool_name = "remind_me"
+                                                    last_tool_result_raw = _rs
+                                                    last_tool_args = _ta
+                                                    continue
+                                                response = _rs.strip()
+                                            elif not _tool_result_looks_like_error(_rs):
+                                                response = _rs.strip()
+                            except Exception as e_sched:
+                                logger.debug("strict_fallback scheduling infer failed: {}", e_sched)
                         # When strict_fallback is True, run stock-monitor portfolio for clear stock/watchlist queries
                         # when the model returned no tool_calls (Qwen VL often answers with hallucinated tables instead of run_skill).
                         if (
@@ -5243,22 +5331,55 @@ async def answer_from_memory(
                                     except Exception as e:
                                         logger.debug("Fallback folder_list failed: {}", e)
                                         response = content_str or "Could not list directory. Please try again."
-                                # Birthday + 提前N天 → yearly cron or remind_me (same infer as Companion fast-path).
-                                _annual_sched = None
-                                try:
-                                    if query:
-                                        _annual_sched = _infer_annual_birthday_advance_reminder_fallback(query)
-                                except Exception:
-                                    _annual_sched = None
-                                # Check remind_me (e.g. "15分钟后有个会能提醒一下吗") so we set the reminder and return a clean response instead of messy 2:49 text.
-                                remind_fallback = None
+                                # Scheduling infer: annual heuristics, LLM JSON, then regex (same order as Companion fast-path).
+                                _unified = None
                                 if response is None or (response == content_str and not _list_dir_match):
                                     try:
-                                        remind_fallback = _infer_remind_me_fallback(query) if query else None
-                                        if not remind_fallback and _annual_sched and _annual_sched.get("tool") == "remind_me":
-                                            remind_fallback = _annual_sched
-                                    except Exception:
-                                        remind_fallback = None
+                                        from core.reminder_llm_infer import merge_companion_scheduling_inference
+
+                                        _dt_l = getattr(core, "_request_current_datetime_line", None) or ""
+                                        _unified = await merge_companion_scheduling_inference(
+                                            query or "", core, _dt_l, tools_cfg
+                                        )
+                                    except Exception as _ue:
+                                        logger.debug("legacy scheduling merge failed: {}", _ue)
+                                        _unified = (
+                                            _infer_annual_birthday_advance_reminder_fallback(query or "")
+                                            or _infer_remind_me_fallback(query or "")
+                                            or _infer_cron_schedule_fallback(query or "")
+                                        )
+                                remind_fallback = None
+                                if (
+                                    _unified
+                                    and isinstance(_unified, dict)
+                                    and (_unified.get("tool") or "").strip() == "remind_me"
+                                ):
+                                    remind_fallback = _unified
+                                _has_record_date = False
+                                try:
+                                    if registry:
+                                        _has_record_date = any(
+                                            getattr(t, "name", None) == "record_date" for t in (registry.list_tools() or [])
+                                        )
+                                except Exception:
+                                    pass
+                                if (
+                                    (response is None or response == content_str)
+                                    and not _list_dir_match
+                                    and _unified
+                                    and isinstance(_unified, dict)
+                                    and (_unified.get("tool") or "").strip() == "record_date"
+                                    and _has_record_date
+                                    and last_tool_name != "record_date"
+                                ):
+                                    try:
+                                        _component_log("tools", "fallback record_date (model did not call tool)")
+                                        _rd_args = _unified.get("arguments") if isinstance(_unified.get("arguments"), dict) else {}
+                                        _rd_res = await registry.execute_async("record_date", _rd_args, context)
+                                        if isinstance(_rd_res, str) and _rd_res.strip() and "Error:" not in _rd_res[:120]:
+                                            response = _rd_res.strip()
+                                    except Exception as e_rd:
+                                        logger.debug("Fallback record_date failed: {}", e_rd)
                                 _remind_me_ask_generic = "您希望什么时候提醒？例如：「15分钟后」或「下午3点」。 When would you like to be reminded? E.g. in 15 minutes or at 3:00 PM."
                                 def _remind_me_ask_message():
                                     try:
@@ -5322,9 +5443,15 @@ async def answer_from_memory(
                                 # When model didn't call any tool and query looks like recurring (e.g. "every day at 9"), try cron_schedule fallback so the reminder is actually set. Never crash.
                                 if (response is None or response == content_str) and isinstance(query, str) and query.strip() and _query_looks_like_scheduling(query.strip()):
                                     try:
-                                        cron_fallback = _infer_cron_schedule_fallback(query)
-                                        if not cron_fallback and _annual_sched and _annual_sched.get("tool") == "cron_schedule":
-                                            cron_fallback = _annual_sched
+                                        cron_fallback = None
+                                        if (
+                                            _unified
+                                            and isinstance(_unified, dict)
+                                            and (_unified.get("tool") or "").strip() == "cron_schedule"
+                                        ):
+                                            cron_fallback = _unified
+                                        if not cron_fallback:
+                                            cron_fallback = _infer_cron_schedule_fallback(query)
                                         _tools_list = (registry.list_tools() or []) if registry else []
                                         _has_cron = any(getattr(t, "name", None) == "cron_schedule" for t in _tools_list)
                                         if cron_fallback and isinstance(cron_fallback.get("arguments"), dict) and registry and _has_cron and last_tool_name != "cron_schedule":

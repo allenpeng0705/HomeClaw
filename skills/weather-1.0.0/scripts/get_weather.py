@@ -540,8 +540,17 @@ def main() -> None:
             help="City, airport code, or natural language (e.g. 'weather in Beijing')",
         )
         parser.add_argument("--location", dest="location_opt", default="", help="Same as positional location")
+        parser.add_argument(
+            "--verbatim-place",
+            dest="verbatim_place",
+            default="",
+            metavar="PLACE",
+            help="Use PLACE for wttr.in exactly (skip NL extraction). Set by Core DAG after LLM extracts city.",
+        )
         parser.add_argument("--full", action="store_true", help="Full forecast instead of one-line")
         args = parser.parse_args()
+        verbatim = str(getattr(args, "verbatim_place", None) or "").strip()
+
         location = str(args.location_opt or args.location or "").strip()
         if not location and len(sys.argv) > 1 and not str(sys.argv[1]).startswith("-"):
             location = str(sys.argv[1]).strip()
@@ -549,8 +558,19 @@ def main() -> None:
         raw_query = (args.location_opt or args.location or "").strip()
         if not raw_query and len(sys.argv) > 1 and not str(sys.argv[1]).startswith("-"):
             raw_query = str(sys.argv[1]).strip()
+        # Original user text (Core sets when running skill) — used for tomorrow/today hints when args are only --verbatim-place.
+        try:
+            import os as _os
 
-        if location:
+            _um = (_os.environ.get("HOMECLAW_USER_MESSAGE") or "").strip()
+            if _um:
+                raw_query = _um[:2000]
+        except Exception:
+            pass
+
+        if verbatim:
+            location = verbatim
+        elif location:
             extracted = extract_location_from_query(location)
             if extracted:
                 location = extracted

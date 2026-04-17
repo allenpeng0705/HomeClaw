@@ -34,7 +34,7 @@ async def test_intent_router_weather_preempt_no_llm():
 
 
 @pytest.mark.asyncio
-async def test_weather_dag_resolves_run_skill_args():
+async def test_weather_dag_resolves_run_skill_args_legacy_full_message():
     pe_cfg = {
         "flows": {
             "weather": {
@@ -60,6 +60,50 @@ async def test_weather_dag_resolves_run_skill_args():
     assert args.get("skill_name") == "weather-1.0.0"
     assert args.get("script") == "get_weather.py"
     assert args.get("args") == ["北京明天天气怎么样"]
+
+
+class _MockCompletionWeatherPlace:
+    def __init__(self, reply: str):
+        self._reply = reply
+
+    async def openai_chat_completion(self, messages, llm_name=None):
+        return self._reply
+
+
+@pytest.mark.asyncio
+async def test_weather_dag_llm_place_resolves_verbatim_args():
+    step = {
+        "tool": "run_skill",
+        "args": {"skill_name": "weather-1.0.0", "script": "get_weather.py"},
+        "args_from": {"args": ["llm_weather_place_for_run_skill_args", ""]},
+    }
+    fn = _MockCompletionWeatherPlace("北京")
+    args = await _resolve_flow_step_args(
+        step,
+        1,
+        {},
+        "每天早上八点钟发给我北京的天气预报",
+        fn,
+        {},
+        {"category": "weather"},
+        None,
+        "weather",
+    )
+    assert args.get("args") == ["--verbatim-place", "北京"]
+
+
+@pytest.mark.asyncio
+async def test_weather_dag_llm_place_none_uses_profile_args():
+    step = {
+        "tool": "run_skill",
+        "args": {"skill_name": "weather-1.0.0", "script": "get_weather.py"},
+        "args_from": {"args": ["llm_weather_place_for_run_skill_args", ""]},
+    }
+    fn = _MockCompletionWeatherPlace("NONE")
+    args = await _resolve_flow_step_args(
+        step, 1, {}, "明天天气怎么样", fn, {}, {"category": "weather"}, None, "weather"
+    )
+    assert args.get("args") == []
 
 
 class _MockRegistryErrorSkill:
