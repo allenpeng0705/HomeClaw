@@ -264,6 +264,9 @@ async def handle_inbound_request_impl(
         files=files_list if files_list else None,
         timestamp=datetime.now().timestamp(),
         reply_accepts=getattr(request, "reply_accepts", None),
+        cursor_agent_yolo=getattr(request, "cursor_agent_yolo", None),
+        claude_skip_permissions=getattr(request, "claude_skip_permissions", None),
+        bridge_agent_stream_preview=getattr(request, "bridge_agent_stream_preview", None),
     )
     has_permission, user = core.check_permission(
         pr.user_name, pr.user_id, ChannelType.IM, content_type_for_perm

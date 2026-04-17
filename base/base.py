@@ -46,7 +46,24 @@ class ContentType(Enum):
     def list(cls):
         """Returns a list of all content types."""
         return list(map(lambda c: c.value, cls))
-      
+
+
+def _coerce_optional_bridge_flag(v: Any) -> Any:
+    """JSON bool / 0-1 / on-off strings for Cursor yolo, Claude skip-permissions, bridge stream preview."""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return v != 0
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("1", "true", "yes", "on"):
+            return True
+        if s in ("0", "false", "no", "off", ""):
+            return False
+    return v
+
 
 class PromptRequest(BaseModel):
     request_id: str
@@ -74,6 +91,15 @@ class PromptRequest(BaseModel):
     reply_accepts: Optional[List[str]] = None
     # Optional full-turn data for RAG memory (user_message, assistant_message, tool_messages). Set by Core after LLM reply; consumed by process_memory_queue. Not sent by channels.
     memory_turn_data: Optional[dict] = None
+    # Cursor / Claude Code / bridge (POST /inbound → PromptRequest must carry these for preset bridge routing in llm_loop).
+    cursor_agent_yolo: Optional[bool] = None
+    claude_skip_permissions: Optional[bool] = None
+    bridge_agent_stream_preview: Optional[bool] = None
+
+    @field_validator("cursor_agent_yolo", "claude_skip_permissions", "bridge_agent_stream_preview", mode="before")
+    @classmethod
+    def _coerce_optional_bridge_flags_pr(cls, v: Any) -> Any:
+        return _coerce_optional_bridge_flag(v)
 
 
 class InboundRequest(BaseModel):
@@ -120,20 +146,8 @@ class InboundRequest(BaseModel):
     @field_validator("cursor_agent_yolo", "claude_skip_permissions", "bridge_agent_stream_preview", mode="before")
     @classmethod
     def _coerce_optional_bridge_flags(cls, v: Any) -> Any:
-        """Accept true/false from JSON bool, 0/1, or common string forms (WebChat / loose clients)."""
-        if v is None:
-            return None
-        if isinstance(v, bool):
-            return v
-        if isinstance(v, (int, float)) and not isinstance(v, bool):
-            return v != 0
-        if isinstance(v, str):
-            s = v.strip().lower()
-            if s in ("1", "true", "yes", "on"):
-                return True
-            if s in ("0", "false", "no", "off", ""):
-                return False
-        return v
+        return _coerce_optional_bridge_flag(v)
+
 
 class IntentType(Enum):
     TIME = "TIME"
