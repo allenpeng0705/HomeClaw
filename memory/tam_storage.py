@@ -278,6 +278,34 @@ def delete_one_shot_reminder(reminder_id: str) -> bool:
             pass
 
 
+def get_one_shot_reminder(reminder_id: str) -> Optional[Dict[str, Any]]:
+    """Get one one-shot reminder by id. Returns dict or None."""
+    session = _get_session()
+    try:
+        rid = (str(reminder_id).strip() if reminder_id is not None else "")
+        if not rid:
+            return None
+        row = session.query(TamOneShotReminderModel).filter(TamOneShotReminderModel.id == rid).first()
+        if row is None:
+            return None
+        return {
+            "id": getattr(row, "id", None) or "",
+            "run_at": getattr(row, "run_at", None),
+            "message": (getattr(row, "message", None) or "") or "",
+            "user_id": getattr(row, "user_id", None),
+            "channel_key": getattr(row, "channel_key", None),
+            "friend_id": getattr(row, "friend_id", None),
+        }
+    except Exception as e:
+        logger.warning("TAM storage: get_one_shot_reminder failed: {}", e)
+        return None
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
 # --- Scheduled actions (confirm now, execute at run_at). Used for "3分钟后发邮件" etc. ---
 PENDING_ACTION_PREFIX = "__ACTION:"
 PENDING_ACTION_SUFFIX = "__"

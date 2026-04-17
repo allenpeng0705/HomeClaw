@@ -1350,6 +1350,14 @@ class TAM:
     ) -> None:
         """Deliver reminder to user (Companion push + channel) and remove from DB (called when one-shot fires). Step 10: from_friend=friend_id. Never raises."""
         try:
+            rid = (str(reminder_id).strip() if reminder_id is not None else "")
+            # If user deleted this reminder from UI, it no longer exists in DB; skip delivery.
+            if rid and not tam_storage.get_one_shot_reminder(rid):
+                logger.info("TAM: One-shot reminder {} was deleted before trigger; skip delivery", rid)
+                return
+        except Exception as _skip_e:
+            logger.debug("TAM: one-shot pre-check skipped: {}", _skip_e)
+        try:
             from_friend = (str(friend_id or "").strip() or "HomeClaw") if friend_id is not None else "HomeClaw"
         except (TypeError, AttributeError):
             from_friend = "HomeClaw"

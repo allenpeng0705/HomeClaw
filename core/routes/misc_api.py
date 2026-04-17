@@ -1,7 +1,9 @@
 """
 Misc API routes: skills clear-vector-store, skills list/search/install (Companion->Core), testing clear-all, sessions list, reports usage.
 """
+from datetime import datetime
 from pathlib import Path
+from urllib.parse import unquote
 
 from fastapi import Depends
 from fastapi import Request
@@ -11,6 +13,7 @@ from loguru import logger
 from base.util import Util
 from base.base import PromptRequest, ChannelType, ContentType
 from core.routes import companion_auth
+from memory import tam_storage
 
 
 def get_api_cursor_bridge_status_handler(core):
@@ -87,6 +90,386 @@ def get_api_cursor_bridge_status_handler(core):
             logger.exception(e)
             return JSONResponse(status_code=500, content={"detail": str(e)})
     return api_cursor_bridge_status
+
+
+def get_api_cursor_bridge_project_list_handler(core):
+    """GET /api/cursor-bridge/project-list — list directory under Dev Bridge active project (Companion).
+    Query: backend=cursor|claude, path=relative (default .). Trae excluded (not supported for explorer).
+    """
+    async def api_cursor_bridge_project_list(
+        request: Request,
+        token_user=Depends(companion_auth.get_companion_token_user),  # noqa: ARG001
+    ):
+        try:
+            pm = getattr(core, "plugin_manager", None)
+            if pm is None:
+                return JSONResponse(status_code=500, content={"detail": "Plugin manager not available"})
+            backend = (request.query_params.get("backend") or "cursor").strip().lower()
+            if backend not in ("cursor", "claude"):
+                return JSONResponse(status_code=400, content={"detail": "backend must be cursor or claude"})
+            plugin_id = "claude-code-bridge" if backend == "claude" else "cursor-bridge"
+            plug = pm.get_plugin_by_id(plugin_id)
+            if plug is None or not isinstance(plug, dict):
+                return JSONResponse(status_code=404, content={"detail": f"{plugin_id} plugin not found"})
+            rel_path = (request.query_params.get("path") or ".").strip() or "."
+            req = PromptRequest(
+                request_id="cursor-bridge-project-list",
+                channel_name="companion",
+                request_metadata={
+                    "capability_id": "list_project_dir",
+                    "capability_parameters": {"backend": backend, "path": rel_path},
+                },
+                channelType=ChannelType.IM,
+                user_name="companion",
+                app_id="homeclaw",
+                user_id="companion",
+                contentType=ContentType.TEXT,
+                text="",
+                action="respond",
+                host="api",
+                port=0,
+                images=[],
+                videos=[],
+                audios=[],
+                files=None,
+                timestamp=0.0,
+            )
+            result = await pm.run_external_plugin(plug, req)
+            if not getattr(result, "success", False):
+                return JSONResponse(status_code=502, content={"detail": getattr(result, "error", "") or "bridge project list failed"})
+            text = (getattr(result, "text", "") or "").strip()
+            try:
+                import json as _json
+
+                obj = _json.loads(text) if text else {}
+            except Exception:
+                obj = {}
+            if not isinstance(obj, dict):
+                obj = {}
+            return JSONResponse(content=obj)
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+    return api_cursor_bridge_project_list
+
+
+def get_api_cursor_bridge_project_file_handler(core):
+    """GET /api/cursor-bridge/project-file — UTF-8 text preview of a file under active project (Companion)."""
+    async def api_cursor_bridge_project_file(
+        request: Request,
+        token_user=Depends(companion_auth.get_companion_token_user),  # noqa: ARG001
+    ):
+        try:
+            pm = getattr(core, "plugin_manager", None)
+            if pm is None:
+                return JSONResponse(status_code=500, content={"detail": "Plugin manager not available"})
+            backend = (request.query_params.get("backend") or "cursor").strip().lower()
+            if backend not in ("cursor", "claude"):
+                return JSONResponse(status_code=400, content={"detail": "backend must be cursor or claude"})
+            rel_path = (request.query_params.get("path") or "").strip()
+            if not rel_path:
+                return JSONResponse(status_code=400, content={"detail": "path query parameter is required"})
+            plugin_id = "claude-code-bridge" if backend == "claude" else "cursor-bridge"
+            plug = pm.get_plugin_by_id(plugin_id)
+            if plug is None or not isinstance(plug, dict):
+                return JSONResponse(status_code=404, content={"detail": f"{plugin_id} plugin not found"})
+            try:
+                max_chars = int(request.query_params.get("max_chars") or 48000)
+            except (TypeError, ValueError):
+                max_chars = 48000
+            req = PromptRequest(
+                request_id="cursor-bridge-project-file",
+                channel_name="companion",
+                request_metadata={
+                    "capability_id": "read_project_file",
+                    "capability_parameters": {"backend": backend, "path": rel_path, "max_chars": max_chars},
+                },
+                channelType=ChannelType.IM,
+                user_name="companion",
+                app_id="homeclaw",
+                user_id="companion",
+                contentType=ContentType.TEXT,
+                text="",
+                action="respond",
+                host="api",
+                port=0,
+                images=[],
+                videos=[],
+                audios=[],
+                files=None,
+                timestamp=0.0,
+            )
+            result = await pm.run_external_plugin(plug, req)
+            if not getattr(result, "success", False):
+                return JSONResponse(status_code=502, content={"detail": getattr(result, "error", "") or "bridge project file read failed"})
+            text = (getattr(result, "text", "") or "").strip()
+            try:
+                import json as _json
+
+                obj = _json.loads(text) if text else {}
+            except Exception:
+                obj = {}
+            if not isinstance(obj, dict):
+                obj = {}
+            return JSONResponse(content=obj)
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+    return api_cursor_bridge_project_file
+
+
+def get_api_cursor_bridge_project_browser_url_handler(core):  # noqa: ARG001
+    """GET /api/cursor-bridge/project-browser-url — JSON ``{ \"url\": \"...\" }`` for GET /files/bridge-project (Companion)."""
+    async def api_cursor_bridge_project_browser_url(
+        request: Request,
+        token_user=Depends(companion_auth.get_companion_token_user),  # noqa: ARG001
+    ):
+        try:
+            from core.result_viewer import (
+                build_bridge_project_browser_url,
+                infer_public_base_url_from_http_request,
+            )
+
+            backend = (request.query_params.get("backend") or "cursor").strip().lower()
+            if backend not in ("cursor", "claude"):
+                return JSONResponse(status_code=400, content={"detail": "backend must be cursor or claude"})
+            raw_path = (request.query_params.get("path") or "").strip()
+            if not raw_path:
+                return JSONResponse(status_code=400, content={"detail": "path query parameter is required"})
+            rel_path = unquote(raw_path).replace("\\", "/").strip()
+            preferred_base_url = infer_public_base_url_from_http_request(request)
+            url, err = build_bridge_project_browser_url(backend, rel_path, preferred_base_url=preferred_base_url)
+            if not url:
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": err or "Could not build bridge file view URL"},
+                )
+            return JSONResponse(content={"url": url})
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+
+    return api_cursor_bridge_project_browser_url
+
+
+def get_api_cursor_bridge_root_list_handler(core):  # noqa: ARG001
+    """GET /api/cursor-bridge/root-list — list directories/files under bridge allowed root (Companion)."""
+    async def api_cursor_bridge_root_list(
+        request: Request,
+        token_user=Depends(companion_auth.get_companion_token_user),  # noqa: ARG001
+    ):
+        try:
+            import httpx
+
+            backend = (request.query_params.get("backend") or "cursor").strip().lower()
+            if backend not in ("cursor", "claude"):
+                return JSONResponse(status_code=400, content={"detail": "backend must be cursor or claude"})
+            rel_path = (request.query_params.get("path") or ".").strip() or "."
+            pm = getattr(core, "plugin_manager", None)
+            if pm is None:
+                return JSONResponse(status_code=500, content={"detail": "Plugin manager not available"})
+            plugin_id = "claude-code-bridge" if backend == "claude" else "cursor-bridge"
+            plug = pm.get_plugin_by_id(plugin_id)
+            if plug is None or not isinstance(plug, dict):
+                return JSONResponse(status_code=404, content={"detail": f"{plugin_id} plugin not found"})
+            cfg = plug.get("config") or {}
+            if not isinstance(cfg, dict):
+                cfg = {}
+            base_url = (cfg.get("base_url") or "").strip().rstrip("/")
+            if not base_url:
+                return JSONResponse(status_code=503, content={"detail": "Bridge base_url not configured"})
+            bridge_key = (cfg.get("bridge_api_key") or "").strip()
+            headers = {"X-HomeClaw-Bridge-Key": bridge_key} if bridge_key else None
+            url = f"{base_url}/root/list"
+            params = {"backend": backend, "path": rel_path}
+            async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
+                resp = await client.get(url, params=params, headers=headers)
+            data = {}
+            try:
+                data = resp.json() if resp.content else {}
+            except Exception:
+                data = {"detail": resp.text or "Bridge returned invalid JSON"}
+            return JSONResponse(status_code=resp.status_code, content=data if isinstance(data, dict) else {"data": data})
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+
+    return api_cursor_bridge_root_list
+
+
+def get_api_cursor_bridge_open_project_handler(core):  # noqa: ARG001
+    """POST /api/cursor-bridge/open-project — open/switch active project from Companion UI."""
+    async def api_cursor_bridge_open_project(
+        request: Request,
+        token_user=Depends(companion_auth.get_companion_token_user),  # noqa: ARG001
+    ):
+        try:
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+            if not isinstance(body, dict):
+                body = {}
+            backend = (body.get("backend") or "cursor").strip().lower()
+            if backend not in ("cursor", "claude"):
+                return JSONResponse(status_code=400, content={"detail": "backend must be cursor or claude"})
+            p = (body.get("path") or "").strip()
+            if not p:
+                return JSONResponse(status_code=400, content={"detail": "path is required"})
+            pm = getattr(core, "plugin_manager", None)
+            if pm is None:
+                return JSONResponse(status_code=500, content={"detail": "Plugin manager not available"})
+            plugin_id = "claude-code-bridge" if backend == "claude" else "cursor-bridge"
+            plug = pm.get_plugin_by_id(plugin_id)
+            if plug is None or not isinstance(plug, dict):
+                return JSONResponse(status_code=404, content={"detail": f"{plugin_id} plugin not found"})
+            req = PromptRequest(
+                request_id="cursor-bridge-open-project",
+                channel_name="companion",
+                request_metadata={"capability_id": "open_project", "capability_parameters": {"path": p}},
+                channelType=ChannelType.IM,
+                user_name="companion",
+                app_id="homeclaw",
+                user_id="companion",
+                contentType=ContentType.TEXT,
+                text="",
+                action="respond",
+                host="api",
+                port=0,
+                images=[],
+                videos=[],
+                audios=[],
+                files=None,
+                timestamp=0.0,
+            )
+            result = await pm.run_external_plugin(plug, req)
+            if not getattr(result, "success", False):
+                return JSONResponse(status_code=502, content={"detail": getattr(result, "error", "") or "open project failed"})
+            text = (getattr(result, "text", "") or "").strip()
+            return JSONResponse(content={"ok": True, "message": text, "backend": backend, "path": p})
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+
+    return api_cursor_bridge_open_project
+
+
+def get_api_reminders_list_handler(core):  # noqa: ARG001
+    """GET /api/reminders/list — list recurring cron + one-shot reminders for Companion UI."""
+    async def api_reminders_list(
+        request: Request,
+        token_user=Depends(companion_auth.get_companion_token_user),
+    ):
+        try:
+            user_id = ""
+            try:
+                user_id = (token_user[0] if isinstance(token_user, tuple) and len(token_user) > 0 else "") or ""
+                user_id = str(user_id).strip()
+            except Exception:
+                user_id = ""
+            orch = getattr(core, "orchestratorInst", None)
+            tam = getattr(orch, "tam", None) if orch else None
+            cron_rows = []
+            if tam is not None and hasattr(tam, "cron_jobs"):
+                lock = getattr(tam, "_cron_lock", None)
+                raw_jobs = []
+                if lock:
+                    with lock:
+                        raw_jobs = list(getattr(tam, "cron_jobs", []) or [])
+                else:
+                    raw_jobs = list(getattr(tam, "cron_jobs", []) or [])
+                for j in raw_jobs:
+                    if not isinstance(j, dict):
+                        continue
+                    p = j.get("params") or {}
+                    enabled = bool(p.get("enabled", True))
+                    if not enabled:
+                        continue
+                    uid = str(p.get("user_id") or "").strip()
+                    if user_id and uid and uid != user_id:
+                        continue
+                    nr = j.get("next_run")
+                    if nr is None:
+                        continue
+                    try:
+                        if hasattr(nr, "timestamp"):
+                            if nr.timestamp() <= datetime.now().timestamp():
+                                continue
+                    except Exception:
+                        pass
+                    cron_rows.append(
+                        {
+                            "id": str(j.get("job_id") or ""),
+                            "type": "cron",
+                            "message": str(p.get("message") or ""),
+                            "schedule": str(j.get("cron_expr") or ""),
+                            "next_run": nr.isoformat() if hasattr(nr, "isoformat") else str(nr or ""),
+                            "enabled": enabled,
+                            "friend_id": str(p.get("friend_id") or "HomeClaw"),
+                        }
+                    )
+            one_shot_rows = []
+            rows = tam_storage.load_one_shot_reminders(after=datetime.now())
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                uid = str(r.get("user_id") or "").strip()
+                if user_id and uid and uid != user_id:
+                    continue
+                run_at = r.get("run_at")
+                one_shot_rows.append(
+                    {
+                        "id": str(r.get("id") or ""),
+                        "type": "oneshot",
+                        "message": str(r.get("message") or ""),
+                        "schedule": "",
+                        "next_run": run_at.isoformat() if hasattr(run_at, "isoformat") else str(run_at or ""),
+                        "enabled": True,
+                        "friend_id": str(r.get("friend_id") or "HomeClaw"),
+                    }
+                )
+            all_rows = cron_rows + one_shot_rows
+            all_rows.sort(key=lambda x: (x.get("next_run") or ""))
+            return JSONResponse(
+                content={
+                    "items": all_rows,
+                    "counts": {"cron": len(cron_rows), "oneshot": len(one_shot_rows), "total": len(all_rows)},
+                }
+            )
+        except Exception as e:
+            logger.exception(e)
+            return JSONResponse(status_code=500, content={"detail": str(e)})
+
+    return api_reminders_list
+
+
+def get_api_reminders_delete_handler(core):  # noqa: ARG001
+    """POST /api/reminders/delete — delete one reminder item by id and type (cron|oneshot)."""
+    async def api_reminders_delete(
+        request: Request,
+        token_user=Depends(companion_auth.get_companion_token_user),  # noqa: ARG001
+    ):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        rid = str(body.get("id") or "").strip()
+        rtype = str(body.get("type") or "").strip().lower()
+        if not rid or rtype not in ("cron", "oneshot"):
+            return JSONResponse(status_code=400, content={"detail": "id and type (cron|oneshot) are required"})
+        if rtype == "cron":
+            orch = getattr(core, "orchestratorInst", None)
+            tam = getattr(orch, "tam", None) if orch else None
+            if tam is None or not hasattr(tam, "remove_cron_job"):
+                return JSONResponse(status_code=503, content={"detail": "TAM cron not available"})
+            ok = bool(tam.remove_cron_job(rid))
+            return JSONResponse(content={"ok": ok, "id": rid, "type": rtype})
+        ok = bool(tam_storage.delete_one_shot_reminder(rid))
+        return JSONResponse(content={"ok": ok, "id": rid, "type": rtype})
+
+    return api_reminders_delete
 
 
 def _parse_bridge_session_id(session_id: str):

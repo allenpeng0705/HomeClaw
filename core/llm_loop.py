@@ -1769,6 +1769,10 @@ async def answer_from_memory(
                                 _lines.append("Keep replies to a short paragraph unless the user asks for more or less.")
                     else:
                         _lines.append(f"You are {_name}.")
+                    if _current_friend and (getattr(_current_friend, "name", "") or "").strip().lower() != "homeclaw":
+                        _lines.append(
+                            "Never identify yourself as HomeClaw. Use your own name/persona in this chat."
+                        )
                     _lines.append("Stay in character and chat as a human would: natural, conversational, and in-person. Do not say you are an AI, assistant, or language model; do not break character to explain how you work. Reply only as this person would reply.")
                     if _friend_identity:
                         _hroot = (Util().get_core_metadata().get_homeclaw_root() or "").strip()

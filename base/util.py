@@ -3329,7 +3329,13 @@ class Util:
 
                 def on_modified(self, event):
                     try:
-                        if event.src_path.endswith('user.yml') or event.src_path.endswith('users.json'):
+                        if event.src_path.endswith('user.yml'):
+                            from base import user_store
+                            # One-way sync policy: user.yml is editable source, TinyDB is runtime store.
+                            user_store.sync_from_yaml(self.util.config_path, self.util.data_path, force=True)
+                            self.util.users = None
+                            self.util.get_users()
+                        elif event.src_path.endswith('users.json'):
                             self.util.users = None
                             self.util.get_users()
                     except Exception:

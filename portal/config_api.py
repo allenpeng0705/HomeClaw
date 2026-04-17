@@ -103,6 +103,7 @@ def _skills_plugins_form_defaults() -> Dict[str, Any]:
         "cursor_bridge_cursor_cli_path": "",
         "cursor_bridge_cursor_api_key": "",
         "cursor_bridge_bridge_api_key": "",
+        "cursor_bridge_allowed_root": "",
         "cursor_bridge_forward_logs": True,
         "cursor_bridge_claude_settings_path": "",
         "cursor_bridge_claude_continue_session": True,

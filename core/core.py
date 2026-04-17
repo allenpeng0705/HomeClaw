@@ -505,6 +505,10 @@ class Core(CoreInterface):
         if bridge_key:
             env["CURSOR_BRIDGE_API_KEY"] = bridge_key
             _component_log("cursor_bridge", "CURSOR_BRIDGE_API_KEY set from config")
+        allowed_root = (getattr(meta, "cursor_bridge_allowed_root", None) or "").strip()
+        if allowed_root:
+            env["CURSOR_BRIDGE_ALLOWED_ROOT"] = allowed_root
+            _component_log("cursor_bridge", f"CURSOR_BRIDGE_ALLOWED_ROOT={allowed_root}")
         claude_path = (getattr(meta, "claude_code_path", None) or "").strip()
         if not claude_path:
             try:

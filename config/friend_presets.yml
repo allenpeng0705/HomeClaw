@@ -42,7 +42,7 @@ presets:
 
   # Knowledge: dedicated KB chat — tools are only knowledge_base_* (+ time). Core skips intent-router LLM for this preset (skills_and_plugins intent_router.skip_for_friend_presets).
   knowledge:
-    display_name: "知识库"
+    display_name: "KnowledgeBase"
     thumbnail: knowledge.png
     tools_preset: knowledge
     skills: []

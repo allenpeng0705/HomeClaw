@@ -44,7 +44,7 @@ WHITELIST_SKILLS_PLUGINS = frozenset({
     # Dev bridges: Cursor / Claude Code / Trae (top-level keys in skills_and_plugins.yml)
     "cursor_bridge_auto_start", "cursor_bridge_port", "cursor_bridge_agent_path",
     "cursor_bridge_cursor_cli_path", "cursor_bridge_cursor_api_key",
-    "cursor_bridge_bridge_api_key", "cursor_bridge_forward_logs",
+    "cursor_bridge_bridge_api_key", "cursor_bridge_allowed_root", "cursor_bridge_forward_logs",
     "cursor_bridge_claude_settings_path", "cursor_bridge_claude_continue_session",
     "cursor_bridge_cursor_continue_session", "cursor_bridge_trae_agent_path",
     "cursor_bridge_trae_agent_config", "claude_code_path", "claude_code_api_key",

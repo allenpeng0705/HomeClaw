@@ -28,7 +28,10 @@ List<PresetQuickAction> presetQuickActionsFor(String key) {
       return [
         (label: '30 min', text: 'Remind me in 30 minutes to '),
         (label: 'Tomorrow 9:00', text: 'Remind me tomorrow at 9:00 to '),
-        (label: 'List reminders', text: 'List my upcoming reminders and recurring cron jobs'),
+        (
+          label: 'List reminders',
+          text: 'List my upcoming reminders and recurring cron jobs'
+        ),
       ];
     case 'finder':
       return [
@@ -37,11 +40,7 @@ List<PresetQuickAction> presetQuickActionsFor(String key) {
         (label: 'Summarize', text: 'Read and summarize the main points from '),
       ];
     case 'knowledge':
-      return [
-        (label: 'Search KB', text: 'Search my knowledge base for '),
-        (label: 'List sources', text: 'List my knowledge base sources'),
-        (label: 'Save note', text: 'Add this to my knowledge base: '),
-      ];
+      return const [];
     default:
       return const [];
   }

@@ -309,6 +309,12 @@ def register_all_routes(core: Any) -> None:
         files.get_files_out_handler(core),
         methods=["GET"],
     )
+    # Must be registered before /files/{scope}/... so "bridge-project" is not parsed as a sandbox scope.
+    app.add_api_route(
+        "/files/bridge-project",
+        files.get_files_bridge_project_handler(core),
+        methods=["GET"],
+    )
     app.add_api_route(
         "/files/{scope}/{path:path}",
         files.get_files_static_handler(core),
@@ -317,6 +323,18 @@ def register_all_routes(core: Any) -> None:
     app.add_api_route(
         "/api/sandbox/list",
         files.get_api_sandbox_list_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/sandbox/file",
+        files.get_api_sandbox_file_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(auth.verify_inbound_auth)],
+    )
+    app.add_api_route(
+        "/api/sandbox/file-view-url",
+        files.get_api_sandbox_file_view_url_handler(core),
         methods=["GET"],
         dependencies=[Depends(auth.verify_inbound_auth)],
     )
@@ -443,6 +461,48 @@ def register_all_routes(core: Any) -> None:
         "/api/cursor-bridge/status",
         misc_api.get_api_cursor_bridge_status_handler(core),
         methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/cursor-bridge/project-list",
+        misc_api.get_api_cursor_bridge_project_list_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/cursor-bridge/project-file",
+        misc_api.get_api_cursor_bridge_project_file_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/cursor-bridge/project-browser-url",
+        misc_api.get_api_cursor_bridge_project_browser_url_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/cursor-bridge/root-list",
+        misc_api.get_api_cursor_bridge_root_list_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/cursor-bridge/open-project",
+        misc_api.get_api_cursor_bridge_open_project_handler(core),
+        methods=["POST"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/reminders/list",
+        misc_api.get_api_reminders_list_handler(core),
+        methods=["GET"],
+        dependencies=[Depends(companion_auth.get_companion_token_user)],
+    )
+    app.add_api_route(
+        "/api/reminders/delete",
+        misc_api.get_api_reminders_delete_handler(core),
+        methods=["POST"],
         dependencies=[Depends(companion_auth.get_companion_token_user)],
     )
     # Interactive sessions (Companion->Core).

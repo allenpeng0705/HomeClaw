@@ -140,6 +140,133 @@ def create_file_access_token(scope: str, path: str, expiry_sec: int = DEFAULT_FI
 _TOKEN_ALPHABET = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
 
 
+# Dev-bridge project file browser links (Companion → Core GET /files/bridge-project).
+DEFAULT_BRIDGE_PROJECT_LINK_EXPIRY_SEC = 15 * 60  # 15 minutes (short-lived; streams from bridge via Core)
+
+
+def validate_bridge_project_rel_path(backend: str, rel_path: str) -> bool:
+    """True if backend and rel_path are safe for bridge project browser proxy. Never raises."""
+    try:
+        b = (backend or "").strip().lower()
+        if b not in ("cursor", "claude"):
+            return False
+        p = (rel_path or "").replace("\\", "/").strip()
+        if not p or len(p) > 4096:
+            return False
+        if ".." in p.split("/") or p.startswith("/"):
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def create_bridge_project_file_token(
+    backend: str, rel_path: str, expiry_sec: int = DEFAULT_BRIDGE_PROJECT_LINK_EXPIRY_SEC
+) -> Optional[str]:
+    """
+    Signed token for GET /files/bridge-project (Cursor/Claude project file on dev bridge, proxied by Core).
+    Payload: bridgep\\0backend\\0rel_path\\0expiry. Requires auth_api_key.
+    """
+    try:
+        b = (backend or "").strip().lower()
+        p = (rel_path or "").replace("\\", "/").strip()
+        if not validate_bridge_project_rel_path(b, p):
+            return None
+        secret = _get_file_token_secret()
+        if not secret:
+            return None
+        expiry = int(time.time()) + max(60, min(int(expiry_sec) if isinstance(expiry_sec, (int, float)) else DEFAULT_BRIDGE_PROJECT_LINK_EXPIRY_SEC, 86400))
+        payload = f"bridgep\0{b}\0{p}\0{expiry}"
+        full_sig = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        sig = full_sig[:32]
+        b64 = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+        return f"{b64}{sig}"
+    except Exception as e:
+        logger.debug("create_bridge_project_file_token failed: {}", e)
+        return None
+
+
+def verify_bridge_project_file_token(token: str) -> Optional[Tuple[str, str]]:
+    """Verify bridge project token; return (backend, rel_path) or None. Never raises."""
+    try:
+        raw = (token or "").strip()
+        if not raw or len(raw) > 800:
+            return None
+        while "%" in raw:
+            prev, raw = raw, unquote(raw)
+            if prev == raw:
+                break
+        token = "".join(c for c in raw if c in _TOKEN_ALPHABET)
+        if len(token) < 33:
+            return None
+        secret = _get_file_token_secret()
+        if not secret:
+            return None
+        sig = token[-32:]
+        b64 = token[:-32]
+        pad = 4 - (len(b64) % 4)
+        if pad != 4:
+            b64 += "=" * pad
+        try:
+            payload = base64.urlsafe_b64decode(b64).decode("utf-8")
+        except Exception:
+            return None
+        expected_full = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        expected_sig = expected_full[:32]
+        if not (hmac.compare_digest(expected_sig, sig) or hmac.compare_digest(expected_full, sig)):
+            return None
+        parts = payload.split("\0")
+        if len(parts) != 4 or parts[0] != "bridgep":
+            return None
+        _, backend, rel_path, expiry_str = parts
+        try:
+            if time.time() > int(expiry_str):
+                return None
+        except ValueError:
+            return None
+        if not validate_bridge_project_rel_path(backend, rel_path):
+            return None
+        return (backend.strip().lower(), rel_path)
+    except Exception as e:
+        logger.debug("verify_bridge_project_file_token failed: {}", e)
+        return None
+
+
+def build_bridge_project_browser_url(
+    backend: str, rel_path: str, preferred_base_url: Optional[str] = None
+) -> Tuple[Optional[str], Optional[str]]:
+    """Build GET /files/bridge-project URL (token or dev_unsigned). Returns (url, error). Never raises."""
+    try:
+        b = (backend or "").strip().lower()
+        p = (rel_path or "").replace("\\", "/").strip()
+        if not validate_bridge_project_rel_path(b, p):
+            return (None, "Invalid backend or path for bridge file link.")
+        base_url = resolve_file_link_base_url(preferred_base_url)
+        if not base_url:
+            return (
+                None,
+                "Set core_public_url in config to the URL clients use to reach Core (e.g. tunnel or LAN IP).",
+            )
+        tok = create_bridge_project_file_token(b, p)
+        if tok:
+            token_safe = "".join(c for c in tok if c in _TOKEN_ALPHABET)
+            if len(token_safe) < 33:
+                return (None, "Could not generate bridge file link token.")
+            u = f"{base_url.rstrip('/')}/files/bridge-project?token={quote(token_safe, safe='')}"
+            return (normalize_public_url_for_clients(u), None)
+        if file_unsigned_dev_mode_active():
+            _maybe_warn_dev_unsigned_file_links()
+            u = (
+                f"{base_url.rstrip('/')}/files/bridge-project?"
+                f"backend={quote(b, safe='')}&path={quote(p, safe='/')}&dev_unsigned=1"
+            )
+            return (normalize_public_url_for_clients(u), None)
+        return (None, "Set auth_api_key in config for shareable bridge file links (or use dev_unsigned with no auth_api_key).")
+    except Exception as e:
+        logger.debug("build_bridge_project_browser_url failed: {}", e)
+        return (None, "Could not build bridge file view URL.")
+
+
 def verify_file_access_token(token: str) -> Optional[Tuple[str, str]]:
     """Verify token and return (scope, path) if valid and not expired. Otherwise None. Never raises."""
     try:

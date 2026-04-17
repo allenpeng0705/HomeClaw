@@ -1,14 +1,15 @@
 """
-File and sandbox routes: /files/out, /files/{scope}/{path} (static with token), /api/sandbox/list, /api/upload.
+File and sandbox routes: /files/out, /files/bridge-project, /files/{scope}/{path} (static with token), /api/sandbox/list,
+/api/sandbox/file (read file by path relative to homeclaw_root), /api/sandbox/file-view-url (browser link JSON), /api/upload.
 When auth_api_key is unset, ?scope=&path=&dev_unsigned=1 serves the same sandbox paths (dev only; insecure).
 """
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import List
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
-from fastapi import File, UploadFile
+from fastapi import File, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from loguru import logger
 
@@ -261,6 +262,70 @@ def get_files_static_handler(core):  # noqa: ARG001
     return files_static
 
 
+def get_files_bridge_project_handler(core):
+    """GET /files/bridge-project — proxy a Dev Bridge project file (signed token or dev_unsigned). Public URL like /files/out."""
+
+    async def files_bridge_project(request: Request):
+        try:
+            import httpx
+            from starlette.responses import Response
+
+            from core.result_viewer import (
+                file_unsigned_dev_mode_active,
+                validate_bridge_project_rel_path,
+                verify_bridge_project_file_token,
+            )
+
+            qp = request.query_params
+            token = (qp.get("token") or "").strip()
+            backend = ""
+            rel_path = ""
+            if token:
+                got = verify_bridge_project_file_token(token)
+                if not got:
+                    return JSONResponse(status_code=403, content={"error": "Invalid or expired link"})
+                backend, rel_path = got
+            elif file_unsigned_dev_mode_active() and _dev_unsigned_query_truthy(qp.get("dev_unsigned")):
+                backend = (qp.get("backend") or "").strip().lower()
+                rel_path = unquote((qp.get("path") or "").strip()).replace("\\", "/")
+                if not validate_bridge_project_rel_path(backend, rel_path):
+                    return JSONResponse(status_code=400, content={"error": "Invalid backend or path"})
+            else:
+                return JSONResponse(status_code=403, content={"error": "Invalid or missing token"})
+
+            pm = getattr(core, "plugin_manager", None)
+            if pm is None:
+                return JSONResponse(status_code=503, content={"error": "Plugin manager not available"})
+            plugin_id = "claude-code-bridge" if backend == "claude" else "cursor-bridge"
+            plug = pm.get_plugin_by_id(plugin_id)
+            if plug is None or not isinstance(plug, dict):
+                return JSONResponse(status_code=404, content={"error": f"Plugin {plugin_id} not found"})
+            cfg = plug.get("config") or {}
+            if not isinstance(cfg, dict):
+                cfg = {}
+            base_url = (cfg.get("base_url") or "").strip().rstrip("/")
+            if not base_url:
+                return JSONResponse(status_code=503, content={"error": "Bridge base_url not configured"})
+            bridge_key = (cfg.get("bridge_api_key") or "").strip()
+            headers = {}
+            if bridge_key:
+                headers["X-HomeClaw-Bridge-Key"] = bridge_key
+            req_url = f"{base_url}/project/raw?backend={quote(backend, safe='')}&path={quote(rel_path, safe='/')}"
+            async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
+                resp = await client.get(req_url, headers=headers or None)
+            ct = (resp.headers.get("content-type") or "").strip() or "application/octet-stream"
+            cd = (resp.headers.get("content-disposition") or "").strip()
+            out_headers = {}
+            if cd:
+                out_headers["content-disposition"] = cd
+            return Response(content=resp.content, status_code=resp.status_code, media_type=ct, headers=out_headers)
+        except Exception as e:
+            logger.debug("files_bridge_project failed: {}", e)
+            return JSONResponse(status_code=500, content={"error": "Failed to proxy bridge file"})
+
+    return files_bridge_project
+
+
 def get_api_sandbox_list_handler(core):  # noqa: ARG001
     """Return handler for GET /api/sandbox/list."""
     async def api_sandbox_list(scope: str = "companion", path: str = "."):
@@ -327,6 +392,172 @@ def get_api_sandbox_list_handler(core):  # noqa: ARG001
             logger.debug("api_sandbox_list failed: {}", e)
             return JSONResponse(status_code=500, content={"error": "Failed to list sandbox"})
     return api_sandbox_list
+
+
+def get_api_sandbox_file_handler(core):  # noqa: ARG001
+    """Return handler for GET /api/sandbox/file — serve a file by path relative to homeclaw_root (same as entry.path from list)."""
+
+    _max_sandbox_file_bytes = 52_428_800  # 50 MiB
+
+    async def api_sandbox_file(path: str = ""):
+        try:
+            raw = (path or "").strip()
+            if not raw:
+                return JSONResponse(status_code=400, content={"error": "path query parameter is required"})
+            path_clean = unquote(raw).replace("\\", "/").strip().lstrip("/")
+            if not path_clean or ".." in path_clean.split("/"):
+                return JSONResponse(status_code=400, content={"error": "Invalid path"})
+            meta = Util().get_core_metadata()
+            if meta is None:
+                return JSONResponse(status_code=503, content={"error": "Core config not available"})
+            base_str = str(meta.get_homeclaw_root() or "").strip()
+            if not base_str:
+                return JSONResponse(status_code=503, content={"error": "Sandbox not configured (homeclaw_root)"})
+            base = Path(base_str).resolve()
+            try:
+                full = (base / path_clean).resolve()
+            except (OSError, RuntimeError, ValueError):
+                return JSONResponse(status_code=400, content={"error": "Invalid path"})
+            try:
+                full.relative_to(base)
+            except ValueError:
+                return JSONResponse(status_code=403, content={"error": "Path not in sandbox"})
+            if not full.is_file():
+                parent = full.parent
+                if parent.is_dir():
+                    try:
+                        name_lower = full.name.lower()
+                        for sibling in parent.iterdir():
+                            if sibling.is_file() and sibling.name.lower() == name_lower:
+                                full = sibling
+                                break
+                    except OSError:
+                        pass
+            if not full.is_file():
+                attempted = str(full)
+                return JSONResponse(
+                    status_code=404,
+                    content={
+                        "error": "Not a file or not found",
+                        "detail": (
+                            f"Server looked for: {path_clean} (resolved to {attempted}). "
+                            "Use the exact entry.path from /api/sandbox/list and verify the file exists on disk."
+                        ),
+                    },
+                )
+            try:
+                sz = full.stat().st_size
+            except OSError:
+                return JSONResponse(status_code=500, content={"error": "Cannot read file"})
+            if sz > _max_sandbox_file_bytes:
+                return JSONResponse(
+                    status_code=413,
+                    content={"error": f"File too large (max {_max_sandbox_file_bytes} bytes for this endpoint)"},
+                )
+            suf = full.suffix.lower()
+            media_type = None
+            if suf in (".html", ".htm"):
+                media_type = "text/html; charset=utf-8"
+            elif suf == ".md":
+                media_type = "text/markdown; charset=utf-8"
+            elif suf in (".txt", ".csv", ".json", ".xml", ".yml", ".yaml", ".log"):
+                media_type = "text/plain; charset=utf-8"
+            elif suf in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+                media_type = "image/png" if suf == ".png" else "image/jpeg" if suf in (".jpg", ".jpeg") else "image/gif" if suf == ".gif" else "image/webp"
+            elif suf == ".pdf":
+                media_type = "application/pdf"
+            return FileResponse(str(full), media_type=media_type, filename=full.name)
+        except Exception as e:
+            logger.debug("api_sandbox_file failed: {}", e)
+            return JSONResponse(status_code=500, content={"error": "Failed to read file"})
+
+    return api_sandbox_file
+
+
+def _split_list_path_for_file_view_link(path_clean: str) -> tuple:
+    """Split list/API path (relative to homeclaw root) into (scope, path_under_scope) for build_file_view_link."""
+    try:
+        p = (path_clean or "").replace("\\", "/").strip().lstrip("/")
+        if not p or ".." in p.split("/"):
+            return (None, None)
+        parts = [x for x in p.split("/") if x]
+        if len(parts) < 2:
+            return (None, None)
+        return (parts[0], "/".join(parts[1:]))
+    except Exception:
+        return (None, None)
+
+
+def get_api_sandbox_file_view_url_handler(core):  # noqa: ARG001
+    """Return handler for GET /api/sandbox/file-view-url — JSON ``{ \"url\": \"...\" }`` to open in a browser.
+
+    Same ``path`` as ``GET /api/sandbox/list`` entry ``path`` / ``GET /api/sandbox/file`` (relative to homeclaw root).
+    Uses ``build_file_view_link`` (signed token when auth_api_key is set, else dev_unsigned).
+    """
+
+    async def api_sandbox_file_view_url(request: Request, path: str = ""):
+        try:
+            from core.result_viewer import (
+                build_file_view_link,
+                infer_public_base_url_from_http_request,
+                validate_file_link_scope_path,
+            )
+
+            raw = (path or "").strip()
+            if not raw:
+                return JSONResponse(status_code=400, content={"error": "path query parameter is required"})
+            path_clean = unquote(raw).replace("\\", "/").strip().lstrip("/")
+            if not path_clean or ".." in path_clean.split("/"):
+                return JSONResponse(status_code=400, content={"error": "Invalid path"})
+            meta = Util().get_core_metadata()
+            if meta is None:
+                return JSONResponse(status_code=503, content={"error": "Core config not available"})
+            base_str = str(meta.get_homeclaw_root() or "").strip()
+            if not base_str:
+                return JSONResponse(status_code=503, content={"error": "Sandbox not configured (homeclaw_root)"})
+            base = Path(base_str).resolve()
+            try:
+                full = (base / path_clean).resolve()
+            except (OSError, RuntimeError, ValueError):
+                return JSONResponse(status_code=400, content={"error": "Invalid path"})
+            try:
+                full.relative_to(base)
+            except ValueError:
+                return JSONResponse(status_code=403, content={"error": "Path not in sandbox"})
+            if not full.is_file():
+                parent = full.parent
+                if parent.is_dir():
+                    try:
+                        name_lower = full.name.lower()
+                        for sibling in parent.iterdir():
+                            if sibling.is_file() and sibling.name.lower() == name_lower:
+                                full = sibling
+                                break
+                    except OSError:
+                        pass
+            if not full.is_file():
+                return JSONResponse(status_code=404, content={"error": "Not a file or not found"})
+            scope_s, path_under = _split_list_path_for_file_view_link(path_clean)
+            if not scope_s or not path_under:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "path must include workspace and file (e.g. UserId/documents/file.pdf)"},
+                )
+            if not validate_file_link_scope_path(scope_s, path_under):
+                return JSONResponse(status_code=400, content={"error": "Invalid scope or path for file link"})
+            preferred_base_url = infer_public_base_url_from_http_request(request)
+            url, err = build_file_view_link(scope_s, path_under, preferred_base_url=preferred_base_url)
+            if not url:
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": (err or "Could not build view URL (set core_public_url and auth_api_key, or dev_unsigned mode).")},
+                )
+            return JSONResponse(content={"url": url})
+        except Exception as e:
+            logger.debug("api_sandbox_file_view_url failed: {}", e)
+            return JSONResponse(status_code=500, content={"error": "Failed to build file view URL"})
+
+    return api_sandbox_file_view_url
 
 
 def get_api_upload_handler(core):  # noqa: ARG001

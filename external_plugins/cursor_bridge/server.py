@@ -10,6 +10,7 @@ Main features:
 
 Run: python -m external_plugins.cursor_bridge.server
      Optional: CURSOR_BRIDGE_PORT=3104 (default 3104), CURSOR_BRIDGE_CWD=/path/to/project
+     Optional: CURSOR_BRIDGE_ALLOWED_ROOT=/path/to/parent — open_project, set_cwd, run_command cwd, run_agent cwd, and agent work dirs must stay under this directory (Cursor + Claude Code + Trae).
 """
 import asyncio
 import logging
@@ -17,11 +18,13 @@ import json
 import os
 import platform
 import shutil
+import stat as stat_mod
 import subprocess
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI
@@ -87,6 +90,23 @@ BRIDGE_API_KEY = (os.environ.get("CURSOR_BRIDGE_API_KEY") or "").strip()
 # Optional: default cwd for run_command / run_agent when not provided.
 DEFAULT_CWD = os.environ.get("CURSOR_BRIDGE_CWD") or os.getcwd()
 BRIDGE_PORT = int(os.environ.get("CURSOR_BRIDGE_PORT", "3104"))
+
+
+def _allowed_root_resolved() -> Optional[Path]:
+    """When ``CURSOR_BRIDGE_ALLOWED_ROOT`` is set to an existing directory, all project paths must stay under it (Cursor + Claude Code + Trae)."""
+    raw = (os.environ.get("CURSOR_BRIDGE_ALLOWED_ROOT") or "").strip()
+    if not raw:
+        return None
+    try:
+        p = Path(raw).expanduser().resolve()
+        if p.is_dir():
+            return p
+        logger.warning("CURSOR_BRIDGE_ALLOWED_ROOT is not a directory or missing: %s", raw)
+    except Exception as e:
+        logger.warning("CURSOR_BRIDGE_ALLOWED_ROOT invalid (%s): %s", raw, e)
+    return None
+
+
 # Optional: persist the last active project cwd across bridge restarts.
 STATE_FILE = (os.environ.get("CURSOR_BRIDGE_STATE_FILE") or "").strip()
 if not STATE_FILE:
@@ -113,6 +133,7 @@ def _cwd_key(path: str) -> str:
 
 def _agent_run_work_dir(cwd: Optional[str], active_backend: str) -> str:
     """Directory for subprocess cwd: must exist. Falls back DEFAULT_CWD → getcwd → '.'. Never raises."""
+    result = "."
     try:
         w = (cwd or "").strip()
         if not w:
@@ -121,25 +142,26 @@ def _agent_run_work_dir(cwd: Optional[str], active_backend: str) -> str:
             try:
                 ap = os.path.abspath(os.path.normpath(w))
                 if os.path.isdir(ap):
-                    return ap
+                    return _coerce_agent_cwd_to_allowed(ap, active_backend)
             except Exception:
                 pass
         try:
             dw = os.path.abspath(os.path.normpath(DEFAULT_CWD))
             if os.path.isdir(dw):
-                return dw
+                return _coerce_agent_cwd_to_allowed(dw, active_backend)
         except Exception:
             pass
         gc = os.getcwd()
         if gc and os.path.isdir(gc):
-            return gc
+            return _coerce_agent_cwd_to_allowed(gc, active_backend)
     except Exception:
         pass
     try:
         g = os.getcwd()
-        return g if g else "."
+        result = g if g else "."
     except Exception:
-        return "."
+        result = "."
+    return _coerce_agent_cwd_to_allowed(result, active_backend)
 
 
 def _sanitize_stored_session_id_for_cli(s: Optional[Any]) -> Optional[str]:
@@ -174,7 +196,15 @@ def _load_state() -> None:
 
         def _is_dir_safe(p: str) -> bool:
             try:
-                return bool(p) and os.path.isdir(p)
+                if not (p and os.path.isdir(p)):
+                    return False
+                gate = _allowed_root_resolved()
+                if gate is None:
+                    return True
+                Path(p).resolve().relative_to(gate.resolve())
+                return True
+            except ValueError:
+                return False
             except Exception:
                 return False
         raw_claude_sessions = obj.get("claude_sessions")
@@ -256,9 +286,16 @@ def _save_state() -> None:
 # Load persisted state at import time (so it works when started by Core).
 _load_state()
 
+_gate = _allowed_root_resolved()
+if _gate is not None:
+    logger.info(
+        "CURSOR_BRIDGE_ALLOWED_ROOT=%s — open_project, set_cwd, run_command/run_agent cwd, and Companion project browser are limited to this directory tree.",
+        _gate,
+    )
+
 
 def _set_active_cwd(path: str, backend: str = "cursor") -> None:
-    """Set active cwd for a backend if path is an existing directory."""
+    """Set active cwd for a backend if path is an existing directory (and under CURSOR_BRIDGE_ALLOWED_ROOT when set)."""
     p = (path or "").strip()
     if not p:
         return
@@ -266,10 +303,18 @@ def _set_active_cwd(path: str, backend: str = "cursor") -> None:
     if b not in ("cursor", "claude", "trae"):
         b = "cursor"
     try:
-        if os.path.isdir(p):
-            with _ACTIVE_CWD_LOCK:
-                _ACTIVE_CWD_BY_BACKEND[b] = p
-            _save_state()
+        if not os.path.isdir(p):
+            return
+        gate = _allowed_root_resolved()
+        if gate is not None:
+            try:
+                Path(p).resolve().relative_to(gate.resolve())
+            except ValueError:
+                logger.warning("Refusing set_active_cwd outside CURSOR_BRIDGE_ALLOWED_ROOT: %s", p)
+                return
+        with _ACTIVE_CWD_LOCK:
+            _ACTIVE_CWD_BY_BACKEND[b] = p
+        _save_state()
     except Exception:
         return
 
@@ -280,20 +325,236 @@ def _get_active_cwd(backend: str = "cursor") -> Optional[str]:
         if b not in ("cursor", "claude", "trae"):
             b = "cursor"
         with _ACTIVE_CWD_LOCK:
-            return _ACTIVE_CWD_BY_BACKEND.get(b)
+            raw = _ACTIVE_CWD_BY_BACKEND.get(b)
+        if not raw:
+            return None
+        gate = _allowed_root_resolved()
+        if gate is None:
+            return raw
+        try:
+            rp = Path(raw).resolve()
+            if not rp.is_dir():
+                return None
+            rp.relative_to(gate.resolve())
+            return str(rp)
+        except ValueError:
+            with _ACTIVE_CWD_LOCK:
+                if _ACTIVE_CWD_BY_BACKEND.get(b) == raw:
+                    _ACTIVE_CWD_BY_BACKEND[b] = None
+            try:
+                _save_state()
+            except Exception:
+                pass
+            logger.info("Cleared active cwd for %s (outside CURSOR_BRIDGE_ALLOWED_ROOT): %s", b, raw)
+            return None
+        except Exception:
+            return None
     except Exception:
         return None
 
 
 def _resolve_path(p: str) -> str:
-    """Resolve a path relative to DEFAULT_CWD when needed."""
+    """Resolve user path: relative to DEFAULT_CWD when no allowed root; under CURSOR_BRIDGE_ALLOWED_ROOT when set.
+
+    Raises ValueError if CURSOR_BRIDGE_ALLOWED_ROOT is set and the path resolves outside it.
+    """
     s = (p or "").strip()
     if not s:
         return s
-    abs_p = os.path.abspath(s) if not os.path.isabs(s) else s
-    if os.path.exists(abs_p):
-        return abs_p
-    return os.path.normpath(os.path.join(DEFAULT_CWD, s))
+    gate = _allowed_root_resolved()
+    if gate is None:
+        abs_p = os.path.abspath(s) if not os.path.isabs(s) else s
+        if os.path.exists(abs_p):
+            return abs_p
+        return os.path.normpath(os.path.join(DEFAULT_CWD, s))
+    try:
+        if os.path.isabs(s):
+            cand = Path(s).expanduser().resolve()
+        else:
+            cand = (gate / s).resolve()
+        cand.relative_to(gate.resolve())
+    except ValueError:
+        raise ValueError(
+            f"Path must be inside CURSOR_BRIDGE_ALLOWED_ROOT ({gate}): {p!r}"
+        ) from None
+    except Exception as e:
+        raise ValueError(f"Could not resolve path {p!r}: {e!s}") from e
+    return str(cand)
+
+
+def _coerce_agent_cwd_to_allowed(path_str: str, active_backend: str) -> str:
+    """When CURSOR_BRIDGE_ALLOWED_ROOT is set, ensure agent subprocess cwd is under it (fallback: active cwd or root). Never raises."""
+    gate = _allowed_root_resolved()
+    if gate is None:
+        return path_str
+    try:
+        p = Path(path_str).expanduser().resolve()
+        if p.is_dir():
+            p.relative_to(gate.resolve())
+            return str(p)
+    except Exception:
+        pass
+    for cand_str in (
+        (_get_active_cwd(active_backend) or "").strip(),
+        (_get_active_cwd("cursor") or "").strip(),
+        (_get_active_cwd("claude") or "").strip(),
+        (_get_active_cwd("trae") or "").strip(),
+        str(gate.resolve()),
+    ):
+        if not cand_str:
+            continue
+        try:
+            c = Path(cand_str).expanduser().resolve()
+            if not c.is_dir():
+                continue
+            c.relative_to(gate.resolve())
+            return str(c)
+        except Exception:
+            continue
+    try:
+        return str(gate.resolve()) if gate.is_dir() else path_str
+    except Exception:
+        return path_str
+
+
+def _safe_resolve_under_project_root(root: str, rel: str) -> Optional[str]:
+    """Resolve [root]/[rel] and return absolute path only if the result stays under root. rel may be '.' or 'src/foo'."""
+    try:
+        if not root or not isinstance(root, str):
+            return None
+        root_p = Path(root).resolve()
+        if not root_p.is_dir():
+            return None
+        rel_s = (rel or "").strip().replace("\\", "/")
+        if rel_s in ("", ".", "./"):
+            return str(root_p)
+        # Reject absolute rel (different drive roots on Windows still checked below)
+        if Path(rel_s).is_absolute():
+            cand = Path(rel_s).resolve()
+        else:
+            cand = (root_p / rel_s).resolve()
+        try:
+            cand.relative_to(root_p)
+        except ValueError:
+            return None
+        return str(cand)
+    except Exception:
+        return None
+
+
+def _list_project_dir_payload(backend: str, rel_path: str) -> Dict[str, Any]:
+    """List files and folders under the active project for this backend (Companion project explorer)."""
+    b = (backend or "cursor").strip().lower()
+    if b not in ("cursor", "claude"):
+        return {"error": "backend must be cursor or claude", "root": "", "path": "", "entries": []}
+    root = (_get_active_cwd(b) or "").strip()
+    if not root or not os.path.isdir(root):
+        return {
+            "error": "No active project on the bridge. Open a folder first (open_project or set_cwd).",
+            "root": "",
+            "path": "",
+            "entries": [],
+        }
+    abs_dir = _safe_resolve_under_project_root(root, rel_path or ".")
+    if not abs_dir or not os.path.isdir(abs_dir):
+        return {
+            "error": "Invalid path or not a directory under the active project.",
+            "root": os.path.normpath(root),
+            "path": (rel_path or "").strip(),
+            "entries": [],
+        }
+    entries: List[Dict[str, Any]] = []
+    rel_base = (rel_path or "").strip().replace("\\", "/")
+    if rel_base in ("", ".", "./"):
+        rel_base = ""
+    try:
+        with os.scandir(abs_dir) as it:
+            for entry in it:
+                try:
+                    st = entry.stat(follow_symlinks=False)
+                    if stat_mod.S_ISDIR(st.st_mode):
+                        typ = "dir"
+                    elif stat_mod.S_ISREG(st.st_mode):
+                        typ = "file"
+                    else:
+                        continue
+                    name = entry.name
+                    if rel_base:
+                        rel_entry = f"{rel_base}/{name}".replace("//", "/")
+                    else:
+                        rel_entry = name
+                    abs_entry = os.path.join(abs_dir, name)
+                    size = None
+                    if typ == "file":
+                        try:
+                            size = int(st.st_size)
+                        except Exception:
+                            size = None
+                    entries.append(
+                        {
+                            "name": name,
+                            "type": typ,
+                            "rel_path": rel_entry.replace("\\", "/"),
+                            "abs_path": os.path.normpath(abs_entry),
+                            "size": size,
+                        }
+                    )
+                except Exception:
+                    continue
+        entries.sort(key=lambda x: (x.get("type") != "dir", (x.get("name") or "").lower()))
+        entries = entries[:500]
+    except Exception as e:
+        return {"error": str(e), "root": os.path.normpath(root), "path": rel_path, "entries": []}
+    rel_display = "." if rel_base == "" else rel_base
+    return {"error": None, "root": os.path.normpath(root), "path": rel_display, "entries": entries}
+
+
+def _read_project_file_payload(backend: str, rel_path: str, max_chars: int) -> Dict[str, Any]:
+    """Read a text preview of a file under the active project (UTF-8; binary rejected)."""
+    b = (backend or "cursor").strip().lower()
+    if b not in ("cursor", "claude"):
+        return {"error": "backend must be cursor or claude"}
+    rel_path = (rel_path or "").strip().replace("\\", "/")
+    if not rel_path or rel_path in (".", "./"):
+        return {"error": "path must be a file relative to the project root"}
+    root = (_get_active_cwd(b) or "").strip()
+    if not root or not os.path.isdir(root):
+        return {"error": "No active project on the bridge."}
+    abs_file = _safe_resolve_under_project_root(root, rel_path)
+    if not abs_file or not os.path.isfile(abs_file):
+        return {"error": "File not found or not under the active project."}
+    try:
+        sz = os.path.getsize(abs_file)
+    except Exception:
+        return {"error": "Cannot read file."}
+    max_bytes = 50 * 1024 * 1024
+    if sz > max_bytes:
+        return {"error": "File too large for preview (max 50 MB)."}
+    try:
+        raw = Path(abs_file).read_bytes()
+    except Exception as e:
+        return {"error": f"Read failed: {e!s}"}
+    if not raw:
+        return {"content": "", "truncated": False, "abs_path": abs_file}
+    sample = raw[: min(4096, len(raw))]
+    nul = sample.count(b"\x00")
+    if nul > max(8, len(sample) // 200):
+        return {"error": "Binary file — text preview not available.", "abs_path": abs_file}
+    try:
+        mc = max(1000, min(500_000, int(max_chars)))
+    except (TypeError, ValueError):
+        mc = 48_000
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            text = raw.decode("utf-8", errors="replace")
+        except Exception:
+            return {"error": "Could not decode file as text.", "abs_path": abs_file}
+    truncated = len(text) > mc
+    if truncated:
+        text = text[:mc] + "\n…"
+    return {"content": text, "truncated": truncated, "abs_path": abs_file}
 
 
 def _get_claude_session_for_cwd(work_dir: str) -> Optional[str]:
@@ -855,8 +1116,10 @@ def _status_payload() -> Dict[str, Any]:
         with _ACTIVE_CWD_LOCK:
             _n_claude_sessions = len(_CLAUDE_SESSION_BY_CWD)
             _n_cursor_sessions = len(_CURSOR_SESSION_BY_CWD)
+        _ar = _allowed_root_resolved()
         return {
             "default_cwd": DEFAULT_CWD,
+            "allowed_root": str(_ar) if _ar is not None else "",
             "cursor_active_cwd": _cursor_cwd,
             "cursor_stored_session_id": _cursor_sid,
             "cursor_stored_sessions_count": _n_cursor_sessions,
@@ -871,6 +1134,7 @@ def _status_payload() -> Dict[str, Any]:
         logger.warning("status_payload failed: %s", e)
         return {
             "default_cwd": DEFAULT_CWD,
+            "allowed_root": "",
             "cursor_active_cwd": None,
             "cursor_stored_session_id": None,
             "cursor_stored_sessions_count": 0,
@@ -900,6 +1164,17 @@ async def _run_command(command: str, cwd: Optional[str] = None, timeout_sec: int
         return False, "Error: command is empty."
     cmd = str(command).strip()
     work_dir = (cwd or "").strip() or DEFAULT_CWD
+    gate = _allowed_root_resolved()
+    if gate is not None:
+        try:
+            wd = Path(work_dir).expanduser().resolve()
+            if not wd.is_dir():
+                return False, f"cwd is not a directory: {work_dir}"
+            wd.relative_to(gate.resolve())
+        except ValueError:
+            return False, f"cwd must be inside CURSOR_BRIDGE_ALLOWED_ROOT ({gate}): {work_dir!r}"
+        except Exception as e:
+            return False, f"Invalid cwd: {e!s}"
     try:
         eff_cwd = work_dir if os.path.isdir(work_dir) else DEFAULT_CWD
         proc = await asyncio.create_subprocess_shell(
@@ -948,7 +1223,10 @@ def _open_in_cursor(path: str) -> tuple:
     """Open a path (folder or file) in Cursor IDE. Returns (success, message). Uses CURSOR_CLI_PATH or 'cursor' CLI."""
     if not (path or str(path).strip()):
         return False, "Error: path is empty."
-    p = _resolve_path(path)
+    try:
+        p = _resolve_path(path)
+    except ValueError as e:
+        return False, str(e)
     if not os.path.exists(p):
         return False, f"Path does not exist: {path}"
     try:
@@ -1014,7 +1292,10 @@ def _open_in_trae(path: str) -> Tuple[bool, str]:
     """Trae Agent has no IDE to open; set active project cwd so run_agent uses this folder. Returns (success, message)."""
     if not (path or str(path).strip()):
         return False, "Error: path is empty."
-    p = _resolve_path(path)
+    try:
+        p = _resolve_path(path)
+    except ValueError as e:
+        return False, str(e)
     if not os.path.exists(p):
         return False, f"Path does not exist: {path}"
     if not os.path.isdir(p):
@@ -1947,6 +2228,131 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/project/raw")
+def project_raw(request: Request):
+    """
+    Serve a file from the active Dev Bridge project (path relative to project root).
+    Same auth as POST /run (X-HomeClaw-Bridge-Key when CURSOR_BRIDGE_API_KEY is set).
+    Used by Core GET /files/bridge-project proxy for Companion browser preview.
+    """
+    from fastapi.responses import FileResponse
+
+    backend = (request.query_params.get("backend") or "cursor").strip().lower()
+    if backend not in ("cursor", "claude"):
+        return JSONResponse(status_code=400, content={"detail": "backend must be cursor or claude"})
+    rel = (request.query_params.get("path") or "").strip().replace("\\", "/")
+    if not rel or rel in (".", "./"):
+        return JSONResponse(status_code=400, content={"detail": "path must be a file relative to project root"})
+    root = (_get_active_cwd(backend) or "").strip()
+    if not root or not os.path.isdir(root):
+        return JSONResponse(status_code=404, content={"detail": "No active project on the bridge"})
+    gate_pr = _allowed_root_resolved()
+    if gate_pr is not None:
+        try:
+            Path(root).resolve().relative_to(gate_pr.resolve())
+        except ValueError:
+            return JSONResponse(status_code=403, content={"detail": "Active project is outside CURSOR_BRIDGE_ALLOWED_ROOT"})
+    abs_file = _safe_resolve_under_project_root(root, rel)
+    if not abs_file or not os.path.isfile(abs_file):
+        return JSONResponse(status_code=404, content={"detail": "File not found or not under project"})
+    try:
+        sz = os.path.getsize(abs_file)
+    except OSError:
+        return JSONResponse(status_code=500, content={"detail": "Cannot stat file"})
+    max_b = 52 * 1024 * 1024
+    if sz > max_b:
+        return JSONResponse(status_code=413, content={"detail": f"File too large (max {max_b} bytes)"})
+    suf = Path(abs_file).suffix.lower()
+    if suf in (".html", ".htm"):
+        media_type = "text/html; charset=utf-8"
+    elif suf == ".md":
+        media_type = "text/markdown; charset=utf-8"
+    elif suf in (".txt", ".csv", ".json", ".xml", ".yml", ".yaml", ".log"):
+        media_type = "text/plain; charset=utf-8"
+    elif suf in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+        media_type = (
+            "image/png"
+            if suf == ".png"
+            else "image/jpeg"
+            if suf in (".jpg", ".jpeg")
+            else "image/gif"
+            if suf == ".gif"
+            else "image/webp"
+        )
+    elif suf == ".pdf":
+        media_type = "application/pdf"
+    else:
+        media_type = None
+    return FileResponse(abs_file, media_type=media_type, filename=os.path.basename(abs_file))
+
+
+@app.get("/root/list")
+def root_list(request: Request):
+    """List directories/files under CURSOR_BRIDGE_ALLOWED_ROOT for picker UI (Companion)."""
+    backend = (request.query_params.get("backend") or "cursor").strip().lower()
+    if backend not in ("cursor", "claude", "trae"):
+        backend = "cursor"
+    gate = _allowed_root_resolved()
+    if gate is None:
+        return JSONResponse(status_code=400, content={"error": "CURSOR_BRIDGE_ALLOWED_ROOT is not configured"})
+    rel = (request.query_params.get("path") or ".").strip().replace("\\", "/")
+    try:
+        if rel in ("", ".", "./"):
+            abs_dir = gate.resolve()
+            rel_base = "."
+        else:
+            abs_dir = (gate / rel).resolve()
+            abs_dir.relative_to(gate.resolve())
+            rel_base = rel
+    except ValueError:
+        return JSONResponse(status_code=400, content={"error": "path must be under CURSOR_BRIDGE_ALLOWED_ROOT"})
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error": f"Invalid path: {e!s}"})
+    if not abs_dir.is_dir():
+        return JSONResponse(status_code=404, content={"error": "Directory not found"})
+
+    entries: List[Dict[str, Any]] = []
+    try:
+        with os.scandir(str(abs_dir)) as it:
+            for entry in it:
+                try:
+                    st = entry.stat(follow_symlinks=False)
+                    if stat_mod.S_ISDIR(st.st_mode):
+                        typ = "dir"
+                    elif stat_mod.S_ISREG(st.st_mode):
+                        typ = "file"
+                    else:
+                        continue
+                    name = entry.name
+                    rel_entry = name if rel_base in ("", ".") else f"{rel_base.rstrip('/')}/{name}"
+                    abs_entry = os.path.join(str(abs_dir), name)
+                    entries.append(
+                        {
+                            "name": name,
+                            "type": typ,
+                            "rel_path": rel_entry.replace("\\", "/"),
+                            "abs_path": os.path.normpath(abs_entry),
+                            "size": int(st.st_size) if typ == "file" else None,
+                        }
+                    )
+                except Exception:
+                    continue
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+    entries.sort(key=lambda x: (x.get("type") != "dir", (x.get("name") or "").lower()))
+    active = (_get_active_cwd(backend) or "").strip()
+    return JSONResponse(
+        content={
+            "error": None,
+            "root": str(gate.resolve()),
+            "path": rel_base if rel_base else ".",
+            "entries": entries[:500],
+            "active_cwd": active,
+            "backend": backend,
+        }
+    )
+
+
 async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
     """Dispatch by capability_id; return PluginResult. Never raises."""
     request_id = body.get("request_id", "")
@@ -1972,20 +2378,41 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             payload["active_cwd"] = payload.get("cursor_active_cwd")
         text = json.dumps(payload, ensure_ascii=False)
 
+    elif cap_id in ("list_project_dir", "project_list", "list_dir_project"):
+        backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
+        rel = (params.get("path") or params.get("rel_path") or ".").strip() or "."
+        payload = _list_project_dir_payload(backend, rel)
+        text = json.dumps(payload, ensure_ascii=False)
+
+    elif cap_id in ("read_project_file", "project_file_read", "preview_project_file"):
+        backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
+        rel_file = (params.get("path") or params.get("rel_path") or "").strip()
+        try:
+            mx = int(params.get("max_chars") or 48_000)
+        except (TypeError, ValueError):
+            mx = 48_000
+        payload = _read_project_file_payload(backend, rel_file, mx)
+        text = json.dumps(payload, ensure_ascii=False)
+
     elif cap_id in ("set_cwd", "set_project", "set_project_cwd"):
         path = (params.get("path") or params.get("cwd") or "").strip()
         if not path:
             success = False
             error = "set_cwd requires 'path' in capability_parameters."
         else:
-            resolved = _resolve_path(path)
-            if not os.path.isdir(resolved):
+            try:
+                resolved = _resolve_path(path)
+            except ValueError as e:
                 success = False
-                error = f"Path is not a directory: {resolved}"
+                error = str(e)
             else:
-                backend = _infer_backend_from_plugin_id(plugin_id)
-                _set_active_cwd(resolved, backend=backend)
-                text = f"Active project set: {resolved}"
+                if not os.path.isdir(resolved):
+                    success = False
+                    error = f"Path is not a directory: {resolved}"
+                else:
+                    backend = _infer_backend_from_plugin_id(plugin_id)
+                    _set_active_cwd(resolved, backend=backend)
+                    text = f"Active project set: {resolved}"
 
     elif cap_id == "run_command":
         command = (params.get("command") or "").strip()
@@ -2010,17 +2437,22 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             backend = _infer_backend_from_plugin_id(plugin_id)
             try:
                 abs_path = _resolve_path(path)
-                if backend == "trae":
-                    success, text = _open_in_trae(abs_path)
-                    if success:
-                        _set_active_cwd(os.path.dirname(abs_path), backend="trae")
-                else:
-                    success, text = _open_in_cursor(abs_path)
-                    if success:
-                        _set_active_cwd(os.path.dirname(abs_path), backend="cursor")
-            except Exception as e:
+            except ValueError as e:
                 success = False
-                text = f"Could not open {path}: {e!s}."
+                error = str(e)
+            else:
+                try:
+                    if backend == "trae":
+                        success, text = _open_in_trae(abs_path)
+                        if success:
+                            _set_active_cwd(os.path.dirname(abs_path), backend="trae")
+                    else:
+                        success, text = _open_in_cursor(abs_path)
+                        if success:
+                            _set_active_cwd(os.path.dirname(abs_path), backend="cursor")
+                except Exception as e:
+                    success = False
+                    text = f"Could not open {path}: {e!s}."
 
     elif cap_id == "open_project":
         # Open a folder in Cursor IDE, or set active project cwd for Trae Agent (no IDE).
@@ -2029,25 +2461,37 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             success = False
             error = "open_project requires 'path' or 'folder' in capability_parameters."
         else:
-            resolved = _resolve_path(path)
-            backend = _infer_backend_from_plugin_id(plugin_id)
-            if backend == "trae":
-                success, text = _open_in_trae(resolved)
-                if success and os.path.isdir(resolved):
-                    _set_active_cwd(resolved, backend="trae")
+            try:
+                resolved = _resolve_path(path)
+            except ValueError as e:
+                success = False
+                error = str(e)
             else:
-                success, text = _open_in_cursor(resolved)
-                if success and os.path.isdir(resolved):
-                    _set_active_cwd(resolved, backend="cursor")
+                backend = _infer_backend_from_plugin_id(plugin_id)
+                if backend == "trae":
+                    success, text = _open_in_trae(resolved)
+                    if success and os.path.isdir(resolved):
+                        _set_active_cwd(resolved, backend="trae")
+                else:
+                    success, text = _open_in_cursor(resolved)
+                    if success and os.path.isdir(resolved):
+                        _set_active_cwd(resolved, backend="cursor")
 
     elif cap_id == "clear_claude_session":
         # Drop stored Claude Code session id for a project (next run_agent uses --continue, not --resume <id>).
         raw = (params.get("cwd") or params.get("path") or "").strip()
         if raw:
-            resolved = _resolve_path(raw)
+            try:
+                resolved = _resolve_path(raw)
+            except ValueError as e:
+                success = False
+                error = str(e)
+                resolved = ""
         else:
             resolved = (_get_active_cwd("claude") or "").strip()
-        if not resolved or not os.path.isdir(resolved):
+        if not success:
+            pass
+        elif not resolved or not os.path.isdir(resolved):
             success = False
             error = "clear_claude_session requires a valid project directory (set_cwd first or pass path/cwd)."
         else:
@@ -2061,10 +2505,17 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
     elif cap_id == "clear_cursor_session":
         raw = (params.get("cwd") or params.get("path") or "").strip()
         if raw:
-            resolved = _resolve_path(raw)
+            try:
+                resolved = _resolve_path(raw)
+            except ValueError as e:
+                success = False
+                error = str(e)
+                resolved = ""
         else:
             resolved = (_get_active_cwd("cursor") or "").strip()
-        if not resolved or not os.path.isdir(resolved):
+        if not success:
+            pass
+        elif not resolved or not os.path.isdir(resolved):
             success = False
             error = "clear_cursor_session requires a valid project directory (open_project first or pass path/cwd)."
         else:
@@ -2091,9 +2542,19 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             success = False
             error = "run_agent requires 'task' or 'prompt' in capability_parameters, or user_input."
         else:
+            raw_cwd_param = (params.get("cwd") or "").strip() or None
             if not cwd:
                 cwd = _get_active_cwd(backend) or None
-            if backend == "claude":
+            gate_ra = _allowed_root_resolved()
+            if raw_cwd_param and gate_ra is not None and cwd:
+                try:
+                    Path(cwd).expanduser().resolve().relative_to(gate_ra.resolve())
+                except ValueError:
+                    success = False
+                    error = f"cwd must be inside CURSOR_BRIDGE_ALLOWED_ROOT ({gate_ra}): {cwd!r}"
+            if not success:
+                pass
+            elif backend == "claude":
                 _sk = _parse_claude_skip_permissions_override(params)
                 success, text = await _run_claude_task(
                     task, cwd=cwd, timeout_sec=timeout, skip_permissions=_sk
@@ -2113,6 +2574,14 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
         try:
             cmd, cwd = _agent_interactive_command(backend)
             if cwd_override and os.path.isdir(cwd_override):
+                gate_i = _allowed_root_resolved()
+                if gate_i is not None:
+                    try:
+                        Path(cwd_override).resolve().relative_to(gate_i.resolve())
+                    except ValueError as e:
+                        raise ValueError(
+                            f"cwd must be inside CURSOR_BRIDGE_ALLOWED_ROOT ({gate_i}): {cwd_override!r}"
+                        ) from e
                 cwd = cwd_override
             session_env = _claude_subprocess_env() if backend == "claude" else None
             session_id, initial = await asyncio.to_thread(_BRIDGE_INTERACTIVE.start_session, cmd, cwd, session_env)
@@ -2135,13 +2604,22 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
                 cwd = _get_active_cwd(backend) or DEFAULT_CWD
             if not os.path.isdir(cwd):
                 cwd = DEFAULT_CWD
-            try:
-                session_id, initial = await asyncio.to_thread(_BRIDGE_INTERACTIVE.start_session, command, cwd)
-                text = json.dumps({"session_id": session_id, "initial_output": initial, "status": "running"}, ensure_ascii=False)
-            except Exception as e:
-                success = False
-                error = str(e)
-                text = ""
+            gate_ci = _allowed_root_resolved()
+            if gate_ci is not None and cwd:
+                try:
+                    Path(cwd).expanduser().resolve().relative_to(gate_ci.resolve())
+                except ValueError:
+                    success = False
+                    error = f"cwd must be inside CURSOR_BRIDGE_ALLOWED_ROOT ({gate_ci}): {cwd!r}"
+                    text = ""
+            if success:
+                try:
+                    session_id, initial = await asyncio.to_thread(_BRIDGE_INTERACTIVE.start_session, command, cwd)
+                    text = json.dumps({"session_id": session_id, "initial_output": initial, "status": "running"}, ensure_ascii=False)
+                except Exception as e:
+                    success = False
+                    error = str(e)
+                    text = ""
 
     elif cap_id == "interactive_read":
         session_id = (params.get("session_id") or "").strip()

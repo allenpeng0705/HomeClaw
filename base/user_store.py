@@ -50,12 +50,68 @@ def _get_user_yml_path(config_path_fn) -> Path:
     return Path("config") / "user.yml"
 
 
+def sync_from_yaml(config_path_fn, data_path_fn, force: bool = False) -> bool:
+    """
+    One-way sync from config/user.yml -> TinyDB.
+    - force=False: sync only when TinyDB is missing/empty or user.yml is newer.
+    - force=True: always import user.yml when it exists and parses successfully.
+    Returns True when TinyDB was updated, otherwise False. Never raises.
+    """
+    try:
+        yml_path = _get_user_yml_path(config_path_fn)
+        if not yml_path.is_file():
+            return False
+
+        db_path = _get_db_path(config_path_fn, data_path_fn)
+        need_sync = bool(force)
+        if not need_sync:
+            try:
+                if not db_path.is_file():
+                    need_sync = True
+                else:
+                    yml_mtime = yml_path.stat().st_mtime
+                    db_mtime = db_path.stat().st_mtime
+                    if yml_mtime > db_mtime:
+                        need_sync = True
+                    else:
+                        from tinydb import TinyDB
+
+                        db = TinyDB(str(db_path))
+                        try:
+                            docs = db.table(_TABLE_NAME).all()
+                        finally:
+                            try:
+                                db.close()
+                            except Exception:
+                                pass
+                        if not docs:
+                            need_sync = True
+            except Exception:
+                need_sync = True
+
+        if not need_sync:
+            return False
+
+        users = User.from_yaml(str(yml_path))
+        if not users:
+            return False
+        save_all(users, config_path_fn, data_path_fn)
+        logger.info("user_store: synced users from {} to TinyDB", yml_path)
+        return True
+    except Exception as e:
+        logger.debug("user_store: sync_from_yaml failed: {}", e)
+        return False
+
+
 def get_all(config_path_fn, data_path_fn) -> List[User]:
     """
     Load all users from TinyDB. If DB is empty and config/user.yml exists, migrate from YAML then return.
     Never raises; returns [] on error.
     """
     try:
+        # One-way sync: keep TinyDB updated from user.yml when user.yml is newer.
+        sync_from_yaml(config_path_fn, data_path_fn, force=False)
+
         db_path = _get_db_path(config_path_fn, data_path_fn)
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -72,17 +128,7 @@ def get_all(config_path_fn, data_path_fn) -> List[User]:
                 pass
 
         if not docs:
-            # Lazy migration: if user.yml exists, load from it and fill TinyDB
-            yml_path = _get_user_yml_path(config_path_fn)
-            if yml_path.is_file():
-                try:
-                    users = User.from_yaml(str(yml_path))
-                    if users:
-                        save_all(users, config_path_fn, data_path_fn)
-                        return users
-                except Exception as e:
-                    logger.debug("user_store: migration from user.yml failed: {}", e)
-
+            # Fallback: DB still empty after sync attempt.
             return []
 
         users = []

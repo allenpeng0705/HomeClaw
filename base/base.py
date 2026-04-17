@@ -1150,6 +1150,8 @@ class CoreMetadata:
     cursor_bridge_cursor_cli_path: str = ""  # optional full path to Cursor CLI 'cursor' (open project/file in IDE); when set, passed as CURSOR_CLI_PATH so the bridge opens Cursor IDE instead of File Explorer on Windows
     cursor_bridge_cursor_api_key: str = ""  # optional Cursor API key for agent auth; when set, passed as CURSOR_API_KEY to the bridge (so agent works when started by Core). Prefer env CURSOR_API_KEY for secrets.
     cursor_bridge_bridge_api_key: str = ""  # optional shared-secret to protect Cursor Bridge HTTP API. When set, Core passes CURSOR_BRIDGE_API_KEY to the bridge and also sends X-HomeClaw-Bridge-Key on HTTP calls.
+    # When set (absolute path to an existing directory on the bridge machine): Cursor, Claude Code, and Trae may only open/run/list files under this folder. Core passes CURSOR_BRIDGE_ALLOWED_ROOT when cursor_bridge_auto_start is true; or set the env when starting the bridge manually.
+    cursor_bridge_allowed_root: str = ""
     cursor_bridge_forward_logs: bool = False  # when True and cursor_bridge_auto_start, bridge stderr is not discarded so you see agent/bridge logs in Core's terminal (for debugging exit code 1 etc.)
     cursor_bridge_claude_settings_path: str = ""  # optional full path to Claude Code settings.json; when set, passed as CLAUDE_SETTINGS_PATH to the bridge (so it loads auth from that file). Set in config/skills_and_plugins.yml or core.yml.
     # When true (default): bridge passes --continue to claude -p so each run resumes Claude Code's most recent session in the active project cwd (see code.claude.com headless docs). Set false for a fresh claude -p session on every Companion message.
@@ -1291,7 +1293,7 @@ class CoreMetadata:
                         _ext_data = yaml.safe_load(_f)
                     if isinstance(_ext_data, dict):
                         for _k, _v in _ext_data.items():
-                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k in ('tools', 'external_skills_dir', 'clawhub_download_dir', 'intent_router', 'planner_executor', 'identity_capabilities_shortcut', 'skills_router', 'cursor_bridge_auto_start', 'cursor_bridge_port', 'cursor_bridge_agent_path', 'cursor_bridge_cursor_cli_path', 'cursor_bridge_cursor_api_key', 'cursor_bridge_bridge_api_key', 'cursor_bridge_forward_logs', 'cursor_bridge_claude_settings_path', 'cursor_bridge_claude_continue_session', 'cursor_bridge_cursor_continue_session', 'trae_agent_enabled', 'cursor_bridge_trae_agent_path', 'cursor_bridge_trae_agent_config', 'claude_code_path', 'claude_code_api_key')):
+                            if not (_k.startswith('skills_') or _k.startswith('plugins_') or _k.startswith('system_plugins') or _k in ('tools', 'external_skills_dir', 'clawhub_download_dir', 'intent_router', 'planner_executor', 'identity_capabilities_shortcut', 'skills_router', 'cursor_bridge_auto_start', 'cursor_bridge_port', 'cursor_bridge_agent_path', 'cursor_bridge_cursor_cli_path', 'cursor_bridge_cursor_api_key', 'cursor_bridge_bridge_api_key', 'cursor_bridge_allowed_root', 'cursor_bridge_forward_logs', 'cursor_bridge_claude_settings_path', 'cursor_bridge_claude_continue_session', 'cursor_bridge_cursor_continue_session', 'trae_agent_enabled', 'cursor_bridge_trae_agent_path', 'cursor_bridge_trae_agent_config', 'claude_code_path', 'claude_code_api_key')):
                                 continue
                             if _k == 'identity_capabilities_shortcut' and not isinstance(_v, dict):
                                 logging.warning("skills_and_plugins config %s: identity_capabilities_shortcut must be a dict, got %s; skipping", _ext_path, type(_v).__name__)
@@ -1696,6 +1698,7 @@ class CoreMetadata:
             cursor_bridge_cursor_cli_path=(str(data.get('cursor_bridge_cursor_cli_path') or '').strip()),
             cursor_bridge_cursor_api_key=(str(data.get('cursor_bridge_cursor_api_key') or '').strip()),
             cursor_bridge_bridge_api_key=(str(data.get('cursor_bridge_bridge_api_key') or '').strip()),
+            cursor_bridge_allowed_root=(str(data.get('cursor_bridge_allowed_root') or '').strip()),
             cursor_bridge_forward_logs=bool(data.get('cursor_bridge_forward_logs', False)),
             cursor_bridge_claude_settings_path=(str(data.get('cursor_bridge_claude_settings_path') or '').strip()),
             cursor_bridge_claude_continue_session=bool(data.get('cursor_bridge_claude_continue_session', True)),

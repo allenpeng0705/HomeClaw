@@ -53,6 +53,106 @@ String _formatCoreApiError(String body, int statusCode) {
   return body.length > 2000 ? '${body.substring(0, 2000)}…' : body;
 }
 
+/// One row from [CoreService.fetchSandboxList] / GET /api/sandbox/list.
+class SandboxListEntry {
+  final String name;
+  final String type;
+  /// Path relative to homeclaw root (same as [path] query for /api/sandbox/file).
+  final String path;
+
+  const SandboxListEntry({required this.name, required this.type, required this.path});
+}
+
+/// Result of GET /api/sandbox/list.
+class SandboxListResult {
+  final String scope;
+  final String path;
+  final List<SandboxListEntry> entries;
+
+  const SandboxListResult({required this.scope, required this.path, required this.entries});
+}
+
+/// One row from [CoreService.fetchBridgeProjectList] / GET /api/cursor-bridge/project-list (Dev Bridge active project).
+class BridgeProjectListEntry {
+  final String name;
+  final String type;
+  final String relPath;
+  final String absPath;
+  final int? size;
+
+  const BridgeProjectListEntry({
+    required this.name,
+    required this.type,
+    required this.relPath,
+    required this.absPath,
+    this.size,
+  });
+}
+
+/// Result of GET /api/cursor-bridge/project-list.
+class BridgeProjectListResult {
+  final String? error;
+  final String root;
+  final String path;
+  final List<BridgeProjectListEntry> entries;
+
+  const BridgeProjectListResult({
+    this.error,
+    required this.root,
+    required this.path,
+    required this.entries,
+  });
+}
+
+/// UTF-8 preview from GET /api/cursor-bridge/project-file.
+class BridgeProjectFilePreview {
+  final String? error;
+  final String content;
+  final bool truncated;
+  final String absPath;
+
+  const BridgeProjectFilePreview({
+    this.error,
+    required this.content,
+    required this.truncated,
+    required this.absPath,
+  });
+}
+
+class BridgeRootListResult {
+  final String? error;
+  final String root;
+  final String path;
+  final List<BridgeProjectListEntry> entries;
+
+  const BridgeRootListResult({
+    this.error,
+    required this.root,
+    required this.path,
+    required this.entries,
+  });
+}
+
+class ReminderListItem {
+  final String id;
+  final String type; // cron | oneshot
+  final String message;
+  final String schedule;
+  final String nextRun;
+  final bool enabled;
+  final String friendId;
+
+  const ReminderListItem({
+    required this.id,
+    required this.type,
+    required this.message,
+    required this.schedule,
+    required this.nextRun,
+    required this.enabled,
+    required this.friendId,
+  });
+}
+
 /// HomeClaw Core API client.
 /// Sends messages via POST /inbound and returns the reply text.
 class CoreService {
@@ -1667,6 +1767,79 @@ class CoreService {
     }
   }
 
+  /// GET /api/sandbox/list — list folder under homeclaw_root for Companion file explorer (Finder preset).
+  Future<SandboxListResult> fetchSandboxList({
+    required String scope,
+    String path = '.',
+  }) async {
+    final url = Uri.parse('$_baseUrl/api/sandbox/list').replace(queryParameters: {
+      'scope': scope,
+      'path': path,
+    });
+    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 45));
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final map = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
+    final rawEntries = map['entries'];
+    final entries = <SandboxListEntry>[];
+    if (rawEntries is List) {
+      for (final e in rawEntries) {
+        if (e is! Map) continue;
+        final name = e['name']?.toString() ?? '';
+        final typ = e['type']?.toString() ?? 'file';
+        final p = e['path']?.toString() ?? '';
+        if (typ == 'truncated') continue;
+        entries.add(SandboxListEntry(name: name, type: typ, path: p));
+      }
+    }
+    return SandboxListResult(
+      scope: map['scope']?.toString() ?? scope,
+      path: map['path']?.toString() ?? path,
+      entries: entries,
+    );
+  }
+
+  /// GET /api/sandbox/file-view-url — returns ``{ "url": "..." }`` for opening in a browser (same [path] as list/file).
+  /// Uses Core ``/files/out`` (signed token or dev_unsigned). Throws if Core returns an error body.
+  Future<String> fetchSandboxFileViewUrl(String relativePathFromList) async {
+    final url = Uri.parse('$_baseUrl/api/sandbox/file-view-url').replace(
+      queryParameters: {'path': relativePathFromList},
+    );
+    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final raw = jsonDecode(response.body);
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : (raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{});
+    final err = map['error'];
+    if (err != null && '$err'.isNotEmpty) {
+      throw Exception(err.toString());
+    }
+    final u = (map['url'] as String?)?.trim() ?? '';
+    if (u.isEmpty) {
+      throw Exception('Core returned no url');
+    }
+    return u;
+  }
+
+  /// GET /api/sandbox/file — file bytes (path = entry.path from [fetchSandboxList]).
+  Future<Uint8List> fetchSandboxFileBytes(String relativePathFromBase) async {
+    final url = Uri.parse('$_baseUrl/api/sandbox/file').replace(queryParameters: {'path': relativePathFromBase});
+    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 120));
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    return response.bodyBytes;
+  }
+
+  /// URL for [Image.network] with [coreMediaFetchHeaders] (same auth as inbound).
+  Uri sandboxFileUri(String relativePathFromBase) {
+    return Uri.parse('$_baseUrl/api/sandbox/file').replace(queryParameters: {'path': relativePathFromBase});
+  }
+
   /// Upload file(s) to Core POST /api/upload. Returns list of paths Core can read.
   /// Throws on network or API error.
   Future<List<String>> uploadFiles(List<String> filePaths) async {
@@ -1842,6 +2015,280 @@ class CoreService {
   Future<String> getCursorBridgeActiveCwd({String backend = 'cursor'}) async {
     final map = await getCursorBridgeStatus(backend: backend);
     return (map['active_cwd'] as String?)?.trim() ?? '';
+  }
+
+  /// GET /api/cursor-bridge/project-list — list active Dev Bridge project directory (cursor|claude only).
+  Future<BridgeProjectListResult> fetchBridgeProjectList({
+    required String backend,
+    String path = '.',
+  }) async {
+    final b = backend.trim().toLowerCase();
+    final eff = (b == 'claude') ? 'claude' : 'cursor';
+    final url = Uri.parse('$_baseUrl/api/cursor-bridge/project-list').replace(
+      queryParameters: {'backend': eff, 'path': path},
+    );
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final raw = jsonDecode(response.body);
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : (raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{});
+    final err = map['error'];
+    final root = (map['root'] as String?)?.trim() ?? '';
+    final p = (map['path'] as String?)?.trim() ?? '.';
+    final entries = <BridgeProjectListEntry>[];
+    final rawList = map['entries'];
+    if (rawList is List) {
+      for (final e in rawList) {
+        if (e is! Map) continue;
+        final m = Map<String, dynamic>.from(e);
+        final name = m['name']?.toString() ?? '';
+        final typ = m['type']?.toString() ?? 'file';
+        final rp = m['rel_path']?.toString() ?? '';
+        final ap = m['abs_path']?.toString() ?? '';
+        int? sz;
+        final s = m['size'];
+        if (s is int) {
+          sz = s;
+        } else if (s is num) {
+          sz = s.toInt();
+        }
+        entries.add(BridgeProjectListEntry(name: name, type: typ, relPath: rp, absPath: ap, size: sz));
+      }
+    }
+    return BridgeProjectListResult(
+      error: err == null ? null : err.toString(),
+      root: root,
+      path: p,
+      entries: entries,
+    );
+  }
+
+  /// GET /api/cursor-bridge/project-file — UTF-8 text preview of a file under the active project.
+  Future<BridgeProjectFilePreview> fetchBridgeProjectFilePreview({
+    required String backend,
+    required String relativePath,
+    int maxChars = 48000,
+  }) async {
+    final b = backend.trim().toLowerCase();
+    final eff = (b == 'claude') ? 'claude' : 'cursor';
+    final url = Uri.parse('$_baseUrl/api/cursor-bridge/project-file').replace(
+      queryParameters: {
+        'backend': eff,
+        'path': relativePath,
+        'max_chars': '$maxChars',
+      },
+    );
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 60));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final raw = jsonDecode(response.body);
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : (raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{});
+    final err = map['error'];
+    if (err != null && '$err'.isNotEmpty) {
+      return BridgeProjectFilePreview(error: err.toString(), content: '', truncated: false, absPath: '');
+    }
+    return BridgeProjectFilePreview(
+      error: null,
+      content: (map['content'] as String?) ?? '',
+      truncated: map['truncated'] == true,
+      absPath: (map['abs_path'] as String?)?.trim() ?? '',
+    );
+  }
+
+  /// GET /api/cursor-bridge/root-list — list under CURSOR_BRIDGE_ALLOWED_ROOT for folder picker.
+  Future<BridgeRootListResult> fetchBridgeRootList({
+    required String backend,
+    String path = '.',
+  }) async {
+    final b = backend.trim().toLowerCase();
+    final eff = (b == 'claude') ? 'claude' : 'cursor';
+    final url = Uri.parse('$_baseUrl/api/cursor-bridge/root-list').replace(
+      queryParameters: {'backend': eff, 'path': path},
+    );
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final raw = jsonDecode(response.body);
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : (raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{});
+    final err = map['error'];
+    final root = (map['root'] as String?)?.trim() ?? '';
+    final p = (map['path'] as String?)?.trim() ?? '.';
+    final entries = <BridgeProjectListEntry>[];
+    final rawList = map['entries'];
+    if (rawList is List) {
+      for (final e in rawList) {
+        if (e is! Map) continue;
+        final m = Map<String, dynamic>.from(e);
+        final name = m['name']?.toString() ?? '';
+        final typ = m['type']?.toString() ?? 'file';
+        final rp = m['rel_path']?.toString() ?? '';
+        final ap = m['abs_path']?.toString() ?? '';
+        int? sz;
+        final s = m['size'];
+        if (s is int) {
+          sz = s;
+        } else if (s is num) {
+          sz = s.toInt();
+        }
+        entries.add(BridgeProjectListEntry(name: name, type: typ, relPath: rp, absPath: ap, size: sz));
+      }
+    }
+    return BridgeRootListResult(
+      error: err == null ? null : err.toString(),
+      root: root,
+      path: p,
+      entries: entries,
+    );
+  }
+
+  /// POST /api/cursor-bridge/open-project — set/open project quickly from root picker UI.
+  Future<void> openBridgeProject({
+    required String backend,
+    required String path,
+  }) async {
+    final b = backend.trim().toLowerCase();
+    final eff = (b == 'claude') ? 'claude' : 'cursor';
+    final url = Uri.parse('$_baseUrl/api/cursor-bridge/open-project');
+    final body = jsonEncode({'backend': eff, 'path': path});
+    final response = await http
+        .post(
+          url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+          body: body,
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+  }
+
+  /// GET /api/cursor-bridge/project-browser-url — returns ``{ "url": "..." }`` for opening in a browser (Core proxies bridge ``/project/raw``).
+  /// Same [relativePath] as [fetchBridgeProjectList] entry ``rel_path`` / [fetchBridgeProjectFilePreview].
+  Future<String> fetchBridgeProjectBrowserUrl({
+    required String backend,
+    required String relativePath,
+  }) async {
+    final b = backend.trim().toLowerCase();
+    final eff = (b == 'claude') ? 'claude' : 'cursor';
+    final url = Uri.parse('$_baseUrl/api/cursor-bridge/project-browser-url').replace(
+      queryParameters: {'backend': eff, 'path': relativePath},
+    );
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final raw = jsonDecode(response.body);
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : (raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{});
+    final err = map['error'];
+    if (err != null && '$err'.isNotEmpty) {
+      throw Exception(err.toString());
+    }
+    final u = (map['url'] as String?)?.trim() ?? '';
+    if (u.isEmpty) {
+      throw Exception('Core returned no url');
+    }
+    return u;
+  }
+
+  /// GET /api/reminders/list — list recurring + one-shot reminders for current companion user.
+  Future<List<ReminderListItem>> fetchRemindersList() async {
+    final url = Uri.parse('$_baseUrl/api/reminders/list');
+    final response = await http
+        .get(url, headers: _authHeaders(forCompanionApi: true))
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final raw = jsonDecode(response.body);
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : (raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{});
+    final list = map['items'];
+    final out = <ReminderListItem>[];
+    if (list is List) {
+      for (final e in list) {
+        if (e is! Map) continue;
+        final m = Map<String, dynamic>.from(e);
+        out.add(
+          ReminderListItem(
+            id: (m['id'] as String?)?.trim() ?? '',
+            type: (m['type'] as String?)?.trim() ?? '',
+            message: (m['message'] as String?) ?? '',
+            schedule: (m['schedule'] as String?) ?? '',
+            nextRun: (m['next_run'] as String?) ?? '',
+            enabled: m['enabled'] == true,
+            friendId: (m['friend_id'] as String?)?.trim() ?? 'HomeClaw',
+          ),
+        );
+      }
+    }
+    return out;
+  }
+
+  /// POST /api/reminders/delete — delete one reminder by id and type (cron|oneshot).
+  Future<void> deleteReminder({required String id, required String type}) async {
+    final url = Uri.parse('$_baseUrl/api/reminders/delete');
+    final body = jsonEncode({'id': id, 'type': type});
+    final response = await http
+        .post(url, headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)}, body: body)
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode == 401) {
+      await _handleSessionExpired();
+      throw Exception('Session expired');
+    }
+    if (response.statusCode != 200) {
+      throw Exception(_formatCoreApiError(response.body, response.statusCode));
+    }
+    final raw = jsonDecode(response.body);
+    final map = raw is Map<String, dynamic>
+        ? raw
+        : (raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{});
+    if (map['ok'] != true) {
+      throw Exception('Delete failed');
+    }
   }
 
   /// Interactive sessions: HTTP helpers (minimal; experimental).

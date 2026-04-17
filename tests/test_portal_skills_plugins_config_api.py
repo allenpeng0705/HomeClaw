@@ -22,6 +22,7 @@ def test_skills_plugins_load_includes_bridge_defaults_and_redacts_keys(monkeypat
     assert data.get("claude_code_api_key") == "***"
     # default field present even when absent from YAML
     assert "cursor_bridge_agent_path" in data
+    assert "cursor_bridge_allowed_root" in data
 
 
 def test_skills_plugins_update_keeps_redacted_secret_placeholders(monkeypatch, tmp_path):
