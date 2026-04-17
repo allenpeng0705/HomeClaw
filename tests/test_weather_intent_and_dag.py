@@ -112,7 +112,19 @@ class _MockRegistryErrorSkill:
         return "Error: could not reach wttr.in: timed out"
 
 
-@pytest.mark.asyncio
+def test_normalize_weather_cron_run_skill_args_strips_forecast_suffix():
+    from tools.builtin import _normalize_weather_cron_run_skill_args
+
+    assert _normalize_weather_cron_run_skill_args("weather-1.0.0", "get_weather.py", ["北京天气预报"]) == [
+        "--verbatim-place",
+        "北京",
+    ]
+    assert _normalize_weather_cron_run_skill_args("weather-1.0.0", "get_weather.py", ["--verbatim-place", "上海"]) == [
+        "--verbatim-place",
+        "上海",
+    ]
+
+
 async def test_weather_dag_fails_on_error_prefix_for_react_fallback():
     flow = {
         "category": "weather",

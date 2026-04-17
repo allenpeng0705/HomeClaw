@@ -203,10 +203,9 @@ def _build_life_tips(one_line_weather: str) -> list[str]:
 
 
 def _cn_place_candidate_is_reminder_junk(g: str) -> bool:
-    """True when a 'chars before 天气' capture is clearly scheduling/action text, not a place (mixed 提醒+预报)."""
+    """True when a capture is scheduling/action text, not a wttr.in place (mixed 提醒 + 预报)."""
     if not g or len(g) < 2:
         return True
-    # Long reminder + 天气预报 often yields 8 Han chars ending at the wrong 天气 (e.g. 钟给我发送北京的).
     junk_sub = (
         "发送",
         "给我",
@@ -231,7 +230,7 @@ def _extract_cn_location_before_weather(t: str) -> str:
     """
     if not t or not re.search(r"[\u4e00-\u9fff]", t):
         return ""
-    # 地名 + 的 + 天气预报: take the shortest Han suffix (2–8 chars) before 的+天气+预报 that is not reminder junk.
+    # Shortest Han suffix (2–8 chars) before 的+天气+预报 (e.g. …发送北京的天气预报 -> 北京).
     _tag = "的天气预报"
     _ti = t.rfind(_tag)
     if _ti >= 0:

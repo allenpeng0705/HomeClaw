@@ -44,6 +44,6 @@ def test_plain_city_unchanged(gw):
 
 
 def test_mixed_daily_reminder_and_beijing_forecast_not_garbage_city(gw):
-    """Regression: greedy (N chars)+天气 must not yield 钟给我发送北京的 for wttr.in."""
+    """Regression: mixed 提醒 + 北京的天气预报 must resolve to 北京 for wttr."""
     q = "每天早上八点钟给我发送北京的天气预报"
     assert gw.extract_location_from_query(q) == "北京"

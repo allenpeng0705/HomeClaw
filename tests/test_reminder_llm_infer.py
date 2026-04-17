@@ -31,9 +31,89 @@ def test_normalize_cron_five_fields():
         {
             "tool": "cron_schedule",
             "arguments": {"cron_expr": "0 8 * * *", "message": "Weather check"},
-        }
+        },
     )
     assert out and out["arguments"]["cron_expr"] == "0 8 * * *"
+
+
+def test_normalize_cron_run_skill_with_args():
+    out = normalize_llm_scheduling_result(
+        {
+            "tool": "cron_schedule",
+            "arguments": {
+                "cron_expr": "0 7 * * *",
+                "task_type": "run_skill",
+                "skill_name": "weather-1.0.0",
+                "script": "get_weather.py",
+                "args": ["北京天气预报"],
+                "message": "Morning wx",
+            },
+        },
+    )
+    assert out and out["arguments"]["task_type"] == "run_skill"
+    assert out["arguments"]["args"] == ["--verbatim-place", "北京"]
+
+
+def test_normalize_cron_run_tool_web_search():
+    out = normalize_llm_scheduling_result(
+        {
+            "tool": "cron_schedule",
+            "arguments": {
+                "cron_expr": "0 9 * * *",
+                "task_type": "run_tool",
+                "tool_name": "web_search",
+                "tool_arguments": {"query": "tech headlines", "count": 5},
+                "message": "Daily search",
+            },
+        },
+    )
+    assert out and out["arguments"]["tool_name"] == "web_search"
+    assert out["arguments"]["tool_arguments"]["query"] == "tech headlines"
+
+
+def test_normalize_cron_run_tool_document_read_default_allowlist():
+    """document_read is in the built-in cron run_tool allowlist when config omits cron_run_tool_allowlist."""
+    out = normalize_llm_scheduling_result(
+        {
+            "tool": "cron_schedule",
+            "arguments": {
+                "cron_expr": "0 8 * * *",
+                "task_type": "run_tool",
+                "tool_name": "document_read",
+                "tool_arguments": {"path": "docs/README.md"},
+                "message": "Daily readme",
+            },
+        },
+    )
+    assert out and out["arguments"]["tool_name"] == "document_read"
+    assert out["arguments"]["tool_arguments"]["path"] == "docs/README.md"
+
+
+def test_normalize_cron_run_tool_rejected_when_not_allowlisted():
+    assert (
+        normalize_llm_scheduling_result(
+            {
+                "tool": "cron_schedule",
+                "arguments": {
+                    "cron_expr": "0 9 * * *",
+                    "task_type": "run_tool",
+                    "tool_name": "exec",
+                    "tool_arguments": {"cmd": "rm -rf /"},
+                    "message": "bad",
+                },
+            },
+            tools_cfg={"cron_run_tool_allowlist": ["web_search", "time"]},
+        )
+        is None
+    )
+
+
+def test_is_cron_run_tool_allowed_empty_list_disables():
+    from tools.builtin import is_cron_run_tool_allowed
+
+    ok, err = is_cron_run_tool_allowed("web_search", {"cron_run_tool_allowlist": []})
+    assert not ok
+    assert "empty" in err.lower()
 
 
 def test_normalize_rejects_bad_cron_field_count():

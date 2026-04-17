@@ -2751,7 +2751,10 @@ async def answer_from_memory(
                 "Listing connected nodes or \"what nodes are connected\" -> route_to_plugin(plugin_id=homeclaw-browser, capability_id=node_list).\n"
                 "If the request clearly matches one of the available plugins below, call route_to_plugin with that plugin_id (and capability_id/parameters when relevant).\n"
                 "Rule (scheduling): For any reminder or schedule request—in any wording or language (e.g. \"提醒我\", \"remind me\", \"7分钟后喝水\", \"in 10 minutes\", \"every day at 9\")—you MUST call the tool (remind_me, cron_schedule, or record_date). Replying with text only does NOT create a reminder; the user will not be notified. Always invoke the tool in this turn.\n"
-                "For time-related requests: one-shot reminders -> remind_me(minutes or at_time, message); recording a date/event -> record_date(event_name, when); recurring -> cron_schedule(cron_expr, message). Use route_to_tam only when the user clearly asks to schedule or remind.\n"
+                "Scheduling kinds: (A) NOTIFY-ONLY — user wants a text ping at a time: one-shot -> remind_me(minutes or at_time, message); recurring -> cron_schedule(cron_expr, task_type='message', message=...). "
+                "(B) RUN-SOMETHING-THEN-SEND-RESULT — user wants weather/news/stock/file read/etc. on a schedule: recurring -> cron_schedule(cron_expr, task_type='run_skill' with skill_name+script+args, or task_type='run_tool' with tool_name+tool_arguments, or task_type='run_plugin' with plugin_id+capability_id+parameters); optional post_process_prompt to summarize tool output before delivery. "
+                "Do not use task_type message when the user asked for live data or a skill run—use the appropriate run_* task_type with concrete args.\n"
+                "For time-related requests: one-shot notify -> remind_me; recurring notify -> cron_schedule message; recurring action -> cron_schedule run_skill/run_tool/run_plugin; recording a date/event -> record_date(event_name, when). Use route_to_tam only when the user clearly asks to schedule or remind.\n"
                 f"When the user asks to be reminded in N minutes (any phrasing: \"N分钟后\", \"N分钟提醒\", \"remind me in N minutes\", \"in N min\"), you MUST call remind_me with minutes=N (use the number from the user's message) and message= a short label only (e.g. \"喝水\", \"会议提醒\"; do NOT put date/time in message). Current time: {_req_time_24}. Use only this time; never invent times (e.g. never 2:49 PM, 明天下午7点).\n"
                 "For script-based workflows use run_skill(skill_name, script, ...). For instruction-only skills (no scripts/) use run_skill(skill_name) with no script—then you MUST continue in the same turn (document_read, generate content, file_write or save_result_page, return link); do not reply with only the confirmation. skill_name can be folder or short name (e.g. html-slides).\n"
                 "When the user asks to generate an HTML slide or report from a document/file: (1) call document_read(path) to get the file content, (2) use that returned text as the source and generate the full HTML yourself, (3) call save_result_page(title=..., content=<your generated full HTML>, format='html') so the user gets a view link. You MUST call save_result_page—do NOT return the raw HTML in your message. The user must receive the link (e.g. /files/out?token=...) so they can open the slides; returning HTML as text does not save it to the output folder. For HTML slides use format='html' not 'markdown'. Never pass empty or minimal content; content must be the full slide deck/report HTML.\n"
@@ -2796,7 +2799,9 @@ async def answer_from_memory(
         # When user message looks like a reminder/schedule request, add a short instruction so the model prefers calling the tool.
         if query and isinstance(query, str) and _query_looks_like_scheduling(query.strip()):
             force_include_instructions.append(
-                "This message is a reminder or schedule request. You MUST call one of: remind_me (one-shot in N min or at a time), cron_schedule (recurring), or record_date (record event). Do not reply with text only—text does not create a reminder."
+                "This message is a reminder or schedule request. You MUST call a scheduling tool—do not reply with text only. "
+                "If the user only wants a notification (text at a time): remind_me (one-shot) or cron_schedule with task_type message (recurring). "
+                "If they want something executed each time (weather, news digest, stocks, web search, skill script): cron_schedule with task_type run_skill, run_tool, or run_plugin and the concrete arguments—do not use a bare message cron for that."
             )
 
         # When user asks to list files or folder contents (any wording/language), require calling folder_list so the model selects the tool instead of replying with text only.
@@ -4981,7 +4986,8 @@ async def answer_from_memory(
                             _strict_fallback
                             and isinstance(query, str)
                             and registry
-                            and last_tool_name != "run_skill"
+                            and last_tool_name
+                            not in ("run_skill", "cron_schedule", "remind_me", "record_date", "route_to_tam")
                             and any(t.name == "run_skill" for t in (registry.list_tools() or []))
                         ):
                             _weather_phrases = (
@@ -5008,7 +5014,6 @@ async def answer_from_memory(
                                         )
                                         if _place_w and _place_w.upper() != "NONE":
                                             _weather_argv = ["--verbatim-place", _place_w]
-                                    # Always pass script + args so builtin does not inject the full user sentence as argv (regex misparses 提醒+预报).
                                     _weather_payload: Dict[str, Any] = {
                                         "skill_name": "weather-1.0.0",
                                         "script": "get_weather.py",

@@ -749,8 +749,92 @@ async def _time_executor(arguments: Dict[str, Any], context: ToolContext) -> str
         return datetime.now(timezone.utc).isoformat()
 
 
+# Tools permitted for cron_schedule(task_type=run_tool). Omitted config key → this set. Empty list in config disables run_tool in cron.
+_DEFAULT_CRON_RUN_TOOL_ALLOWLIST = frozenset(
+    {
+        "web_search",
+        "time",
+        "document_read",
+        "file_find",
+        "folder_list",
+        "memory_search",
+        "memory_get",
+        "agent_memory_search",
+        "agent_memory_get",
+        "knowledge_base_search",
+        "tavily_extract",
+        "fetch_url",
+    }
+)
+
+# Single source for cron_schedule schema text (OpenAPI / model-facing); keep in sync with allowlist above.
+_CRON_DEFAULT_RUN_TOOL_NAMES_FOR_SCHEMA = ", ".join(sorted(_DEFAULT_CRON_RUN_TOOL_ALLOWLIST))
+
+
+def is_cron_run_tool_allowed(
+    tool_name: str,
+    tools_cfg: Optional[Dict[str, Any]] = None,
+) -> Tuple[bool, str]:
+    """
+    Whether tool_name may run headless from a cron tick (task_type run_tool).
+    tools_cfg: optional merged tools config; if None, reads CoreMetadata.tools_config.
+    Returns (ok, error_message). Never raises.
+    """
+    try:
+        tn = (tool_name or "").strip()
+        if not tn:
+            return False, "tool_name is empty"
+        cfg = tools_cfg if isinstance(tools_cfg, dict) else (_get_tools_config() or {})
+        raw = cfg.get("cron_run_tool_allowlist")
+        if raw is None:
+            allowed: Any = _DEFAULT_CRON_RUN_TOOL_ALLOWLIST
+        elif isinstance(raw, list):
+            if len(raw) == 0:
+                return False, "cron_run_tool_allowlist is empty — scheduled run_tool is disabled in config"
+            allowed = frozenset(str(x).strip() for x in raw if x is not None and str(x).strip())
+        else:
+            return False, "cron_run_tool_allowlist must be a list or omitted for built-in defaults"
+        if tn in allowed:
+            return True, ""
+        try:
+            names = ", ".join(sorted(allowed)) if isinstance(allowed, frozenset) else str(allowed)
+        except Exception:
+            names = "(see config)"
+        return False, f"tool {tn!r} is not allowed for cron run_tool; allowed: {names}"
+    except Exception as e:
+        logger.debug("is_cron_run_tool_allowed failed: {}", e)
+        return False, "could not validate tool allowlist"
+
+
+def _normalize_weather_cron_run_skill_args(skill_name: str, script: str, args_list: List[str]) -> List[str]:
+    """Turn model args like ['北京天气预报'] into wttr-safe ['--verbatim-place', '北京']. Never raises."""
+    try:
+        sn = (skill_name or "").strip()
+        sc = (script or "").strip().lower()
+        if sn != "weather-1.0.0" or "get_weather" not in sc or not args_list:
+            return args_list
+        flat = [str(x).strip() for x in args_list if x is not None and str(x).strip()]
+        if not flat:
+            return args_list
+        if any(x.startswith("--verbatim-place") for x in flat):
+            return args_list
+        if len(flat) == 1 and not flat[0].startswith("--"):
+            place = flat[0]
+            for suf in ("天气预报", "天气", "气温", "forecast", "weather"):
+                low = place.lower()
+                sl = len(suf)
+                if sl and len(place) > sl and low.endswith(suf.lower()):
+                    place = place[:-sl].strip()
+                    break
+            if place and len(place) <= 120:
+                return ["--verbatim-place", place]
+    except Exception:
+        pass
+    return args_list
+
+
 async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
-    """Schedule a reminder, run_skill, or run_plugin at cron times. task_type: 'message' (default), 'run_skill', or 'run_plugin'. Optional: tz, delivery_target 'latest' or 'session'."""
+    """Recurring jobs: task_type message = notify-only text; run_skill / run_tool / run_plugin = execute each tick and deliver result. Optional tz, delivery_target."""
     core = context.core
     orchestrator = getattr(core, "orchestratorInst", None)
     if orchestrator is None:
@@ -777,6 +861,13 @@ async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContex
             params["channel_key"] = f"{context.app_id}:{context.user_id}:{context.session_id}"
     params["_cron"] = True
     hint = "\n(To cancel this recurring reminder, say 'list my recurring reminders' and ask to remove it.)"
+    _fid_src = (getattr(context, "friend_id", None) or "").strip()
+    if not _fid_src:
+        _req_f = getattr(context, "request", None)
+        if _req_f is not None:
+            _fid_src = (getattr(_req_f, "friend_id", None) or "").strip()
+    if _fid_src:
+        params["friend_id"] = _fid_src
 
     if task_type == "run_skill":
         skill_name = (arguments.get("skill_name") or "").strip()
@@ -786,6 +877,7 @@ async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContex
             args_list = [a.strip() for a in args_list.split(",") if a.strip()]
         elif not isinstance(args_list, list):
             args_list = []
+        args_list = _normalize_weather_cron_run_skill_args(skill_name, script, args_list)
         if not skill_name or not script:
             return "Error: For task_type 'run_skill', skill_name and script are required (e.g. skill_name='weather-1.0.0', script='get_weather.py', args=['Beijing'])."
         _msg_raw = (arguments.get("message") or "").strip()
@@ -971,6 +1063,9 @@ async def _cron_schedule_executor(arguments: Dict[str, Any], context: ToolContex
         tool_name = (arguments.get("tool_name") or "").strip()
         if not tool_name:
             return "Error: For task_type 'run_tool', tool_name is required (e.g. web_search). Use this for 'search the latest sports news every 7 am' — use run_tool with tool_name=web_search, tool_arguments={query: 'latest sports news', count: 10}. Do NOT use run_plugin headlines for 'search'."
+        _ok_rt, _err_rt = is_cron_run_tool_allowed(tool_name)
+        if not _ok_rt:
+            return f"Error: {_err_rt}. Adjust tools.cron_run_tool_allowlist in skills_and_plugins.yml if you need this tool on a schedule."
         _msg_raw = (arguments.get("message") or "").strip()
         message = _msg_raw if _msg_raw else f"run_tool {tool_name}"
         params["message"] = message
@@ -8386,27 +8481,48 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             name="cron_schedule",
             description=(
                 "RECURRING only. For ONE-SHOT use remind_me instead. "
+                "Two delivery kinds: (1) NOTIFY-ONLY — task_type 'message' (default): at each tick send the fixed message text to the user (like a recurring ping). "
+                "(2) RUN-ACTION-AND-SEND-RESULT — task_type 'run_skill' (skill+script+args, e.g. weather, daily-brief, stock-monitor), "
+                "'run_tool' (tool_name + tool_arguments, e.g. web_search), or 'run_plugin' (plugin_id + capability_id + parameters); "
+                "Core runs that action and delivers the tool/skill output (optional post_process_prompt to shorten or style the text first). "
+                "Use (1) when the user only wants a reminder phrase; use (2) when they want something executed on a schedule "
+                "(forecast, headlines, portfolio check, file read via run_skill script, etc.). "
                 "cron_expr: 5 fields minute hour day-of-month month day-of-week (0=Sun..6=Sat). "
                 "Examples: daily 7am → 0 7 * * * | every 2h → 0 */2 * * * | Tue 2pm → 0 14 * * 2 | "
                 "15th monthly 10am → 0 10 15 * * | quarterly 1st Jan/Apr/Jul/Oct → 0 9 1 1,4,7,10 * | "
                 "yearly Aug 19 9am → 0 9 19 8 * | Mon/Wed/Fri 6am → 0 6 * * 1,3,5. "
                 "True 'every 14 days from date X' is not exact in standard cron—use weekday repeat, twice-monthly (1,15), or ask the user. "
-                "Schedule message/skill/plugin/tool. Optional: tz, delivery_target. "
+                "Optional: tz, delivery_target. "
                 "For scheduled RSS/feed digests (user-configured sources), prefer task_type run_skill with skill_name daily-brief-1.0.0 "
                 "and script/args from that skill's SKILL.md (e.g. fetch --max N --lang cn). "
-                "Use task_type run_tool + web_search only for ad-hoc live web search, not as a substitute for daily-brief when the user wants feed-style news."
+                "Use task_type run_tool + web_search only for ad-hoc live web search, not as a substitute for daily-brief when the user wants feed-style news. "
+                "Scheduled run_tool is restricted to tools.cron_run_tool_allowlist (skills_and_plugins.yml tools section); when the key is omitted, defaults are: "
+                f"{_CRON_DEFAULT_RUN_TOOL_NAMES_FOR_SCHEMA}. "
+                "Empty list [] disables run_tool in cron. Extend with care—never exec or destructive tools unless you accept unattended risk."
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "cron_expr": {"type": "string", "description": "5-field cron (e.g. daily 9:00 '0 9 * * *', monthly 15th 10:00 '0 10 15 * *')."},
-                    "task_type": {"type": "string", "description": "One of: 'message' (fixed text), 'run_skill' (e.g. daily-brief-1.0.0 for RSS digests; weather skill; see SKILL.md for script+args), 'run_plugin' (e.g. headlines plugin), 'run_tool' (e.g. web_search for one-off live search—not the same as daily-brief feeds). Default 'message'.", "default": "message"},
+                    "task_type": {"type": "string", "description": "One of: 'message' = recurring notify-only (send message text each tick); 'run_skill' = run a skill script and send its output; 'run_plugin' = run a plugin capability and send output; 'run_tool' = run a built-in tool (e.g. web_search) and send output. Default 'message'.", "default": "message"},
                     "message": {"type": "string", "description": "For message: text to send. For run_skill/run_plugin: optional label.", "default": "Scheduled reminder"},
                     "skill_name": {"type": "string", "description": "Required when task_type is run_skill. Skill folder name (e.g. weather-1.0.0)."},
                     "script": {"type": "string", "description": "Required when task_type is run_skill. Script name under skill (e.g. get_weather.py)."},
                     "args": {"type": "array", "items": {"type": "string"}, "description": "When task_type is run_skill: args for the script (e.g. ['Beijing'])."},
-                    "tool_name": {"type": "string", "description": "Required when task_type is run_tool. Tool name (e.g. web_search). Use for 'search the latest sports news every 7 am' with tool_arguments={query: 'latest sports news', count: 10}."},
-                    "tool_arguments": {"type": "object", "description": "When task_type is run_tool: arguments for the tool (e.g. for web_search: {query: 'latest sports news', count: 10})."},
+                    "tool_name": {
+                        "type": "string",
+                        "description": (
+                            "Required when task_type is run_tool. Must be in tools.cron_run_tool_allowlist; "
+                            "when that key is omitted, defaults are: "
+                            f"{_CRON_DEFAULT_RUN_TOOL_NAMES_FOR_SCHEMA}. "
+                            "Examples: web_search + {query, count}; document_read + {path}; time + {}. "
+                            "Prefer run_skill for multi-step or scripted file workflows over bare document_read when possible."
+                        ),
+                    },
+                    "tool_arguments": {
+                        "type": "object",
+                        "description": "When task_type is run_tool: JSON object of arguments for tool_name (same keys as interactive tool calls; shallow scalars/lists only).",
+                    },
                     "plugin_id": {"type": "string", "description": "Required when task_type is run_plugin. Plugin id (e.g. headlines for top headlines from News API). For generic 'daily news from my feeds' use run_skill daily-brief-1.0.0; for live web search use run_tool web_search."},
                     "capability_id": {"type": "string", "description": "Optional when task_type is run_plugin. Capability to call (e.g. fetch_headlines for headlines)."},
                     "parameters": {"type": "object", "description": "When task_type is run_plugin: key-value parameters for the capability (e.g. for headlines: category, page_size, sources, language)."},
@@ -8417,7 +8533,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["cron_expr"],
             },
             execute_async=_cron_schedule_executor,
-            short_description="Use when: recurring — daily/weekly/monthly/quarterly/yearly, 'every N hours', weekdays. Not one-shot → use remind_me. cron_expr required.",
+            short_description="Use when: recurring schedule. cron_expr required. task_type message = text ping only; run_skill / run_tool / run_plugin = run that action each tick and send the result. One-shot → remind_me.",
         )
     )
     registry.register(
@@ -8484,7 +8600,9 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "'remind me at 9am', '明天早上提醒我', or any single future time. "
                 "Supply minutes (integer, e.g. 5 for 'in 5 minutes') OR at_time (YYYY-MM-DD HH:MM:SS). "
                 "message = short label only (e.g. '喝水', 'meeting'); do NOT put date/time in message. "
-                "Do NOT use for: recurring (every day/N hours) -> use cron_schedule; recording an event -> use record_date."
+                "Notify-only: when it fires, the user receives this text—no skill, tool, or file run. "
+                "Do NOT use for: recurring (every day/N hours) -> use cron_schedule; recording an event -> use record_date; "
+                "scheduled work that should run weather/news/stock/file reads -> use cron_schedule with task_type run_skill, run_tool, or run_plugin."
             ),
             parameters={
                 "type": "object",
@@ -8496,7 +8614,7 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
                 "required": ["message"],
             },
             execute_async=_remind_me_executor,
-            short_description="Use when: user says 'remind me in N minutes', 'N分钟后提醒', 'at 9am', one-shot reminder. Pass minutes OR at_time; message = short label. Not for recurring → use cron_schedule.",
+            short_description="Use when: one-shot text reminder only (minutes or at_time + short message). Not for recurring → cron_schedule; not for scheduled skill/tool runs → cron_schedule run_skill/run_tool/run_plugin.",
         )
     )
     registry.register(
