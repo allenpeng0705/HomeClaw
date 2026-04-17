@@ -4992,8 +4992,30 @@ async def answer_from_memory(
                             _q_raw_w = (query or "").strip()
                             if any((p in _q_lo_w if p.isascii() else p in _q_raw_w) for p in _weather_phrases):
                                 try:
+                                    from base.planner_executor import _dag_llm_weather_location_from_user_message
+
+                                    _meta_w = Util().get_core_metadata()
+                                    _planner_cfg = getattr(_meta_w, "planner_executor_config", None) or {}
+                                    if not isinstance(_planner_cfg, dict):
+                                        _planner_cfg = {}
+                                    _weather_argv: List[str] = []
+                                    if core is not None:
+                                        _raw_place = await _dag_llm_weather_location_from_user_message(
+                                            core, (query or "").strip(), _planner_cfg
+                                        )
+                                        _place_w = (
+                                            (_raw_place or "").strip().strip('`"\'').splitlines()[0][:120].strip()
+                                        )
+                                        if _place_w and _place_w.upper() != "NONE":
+                                            _weather_argv = ["--verbatim-place", _place_w]
+                                    # Always pass script + args so builtin does not inject the full user sentence as argv (regex misparses 提醒+预报).
+                                    _weather_payload: Dict[str, Any] = {
+                                        "skill_name": "weather-1.0.0",
+                                        "script": "get_weather.py",
+                                        "args": _weather_argv,
+                                    }
                                     _component_log("tools", "fallback run_skill(weather-1.0.0) (strict_fallback=True; model did not call tool)")
-                                    _res = await registry.execute_async("run_skill", {"skill_name": "weather-1.0.0"}, context)
+                                    _res = await registry.execute_async("run_skill", _weather_payload, context)
                                     if isinstance(_res, str) and _res.strip():
                                         response = _res.strip()
                                 except Exception as e_w:

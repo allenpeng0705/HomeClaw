@@ -41,3 +41,9 @@ def test_cn_city_in_question_keeps_city(gw):
 
 def test_plain_city_unchanged(gw):
     assert gw.extract_location_from_query("Paris") == "Paris"
+
+
+def test_mixed_daily_reminder_and_beijing_forecast_not_garbage_city(gw):
+    """Regression: greedy (N chars)+天气 must not yield 钟给我发送北京的 for wttr.in."""
+    q = "每天早上八点钟给我发送北京的天气预报"
+    assert gw.extract_location_from_query(q) == "北京"
