@@ -3593,8 +3593,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _chatPartnerAvatar != null && _chatPartnerAvatar!.isNotEmpty;
     final hideHomeClawLabel =
         hasThumbnail && widget.userName.trim().toLowerCase() == 'homeclaw';
+    // Mobile Cursor/ClaudeCode: project path is shown in the body bar; hide duplicate app-bar chip.
+    final hideAppBarBridgeProjectChip =
+        _isPhoneLayout && _isBridgeProjectExplorerPreset;
+    // Tablet/desktop: extra toolbar height so the project chip is not clipped above Chat | Project.
+    final expandToolbarForBridgeProjectChip = _isBridgeProjectExplorerPreset &&
+        !_isPhoneLayout &&
+        _isDevBridgeFriend &&
+        _cursorActiveCwd.trim().isNotEmpty;
     return Scaffold(
       appBar: AppBar(
+        toolbarHeight:
+            expandToolbarForBridgeProjectChip ? 80.0 : kToolbarHeight,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -3642,9 +3652,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ),
                       ),
                     if (_isDevBridgeFriend &&
-                        _cursorActiveCwd.trim().isNotEmpty)
+                        _cursorActiveCwd.trim().isNotEmpty &&
+                        !hideAppBarBridgeProjectChip)
                       Padding(
-                        padding: const EdgeInsets.only(top: 4),
+                        padding: const EdgeInsets.only(top: 4, bottom: 2),
                         child: Tooltip(
                           message: _cursorActiveCwd.trim(),
                           child: GestureDetector(
@@ -3897,15 +3908,62 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
         ],
       ),
-      body: _isFinderPreset
-          ? _buildFinderTabbedBody()
-          : (_isBridgeProjectExplorerPreset
-              ? _buildBridgeProjectTabbedBody()
-              : (_isReminderPreset
-                  ? _buildReminderTabbedBody()
-                  : (_isKnowledgePreset
-                      ? _buildKnowledgeTabbedBody()
-                      : _buildChatBody()))),
+      body: (_isPhoneLayout && _isBridgeProjectExplorerPreset)
+          ? Column(
+              children: [
+                Material(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: InkWell(
+                    onTap: _showChangeProjectDialogFromActiveChip,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _cursorActiveCwd.trim().isNotEmpty
+                                  ? 'Active project: ${path.basename(_cursorActiveCwd.trim())}'
+                                  : 'Active project: (not set) — tap to choose',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.chevron_right,
+                            size: 20,
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: _isFinderPreset
+                      ? _buildFinderTabbedBody()
+                      : (_isBridgeProjectExplorerPreset
+                          ? _buildBridgeProjectTabbedBody()
+                          : (_isReminderPreset
+                              ? _buildReminderTabbedBody()
+                              : (_isKnowledgePreset
+                                  ? _buildKnowledgeTabbedBody()
+                                  : _buildChatBody()))),
+                ),
+              ],
+            )
+          : (_isFinderPreset
+              ? _buildFinderTabbedBody()
+              : (_isBridgeProjectExplorerPreset
+                  ? _buildBridgeProjectTabbedBody()
+                  : (_isReminderPreset
+                      ? _buildReminderTabbedBody()
+                      : (_isKnowledgePreset
+                          ? _buildKnowledgeTabbedBody()
+                          : _buildChatBody())))),
     );
   }
 
@@ -4730,6 +4788,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       child: Column(
         children: [
           Material(
+            elevation: 1,
+            shadowColor: Theme.of(context).colorScheme.shadow,
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             child: TabBar(
               labelColor: Theme.of(context).colorScheme.primary,
@@ -4739,6 +4799,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ],
             ),
           ),
+          const Divider(height: 1, thickness: 1),
           Expanded(
             child: TabBarView(
               children: [
@@ -4869,6 +4930,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       (widget.friendId ?? '').trim().toLowerCase() == 'claudecode'
           ? 'claude'
           : 'cursor';
+
+  bool get _isPhoneLayout => MediaQuery.of(context).size.shortestSide < 600;
 
   String get _finderSandboxScope {
     final u = widget.coreService.sessionUserId?.trim() ?? '';

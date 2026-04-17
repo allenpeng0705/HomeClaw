@@ -2455,7 +2455,7 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
                     text = f"Could not open {path}: {e!s}."
 
     elif cap_id == "open_project":
-        # Open a folder in Cursor IDE, or set active project cwd for Trae Agent (no IDE).
+        # Open a folder in Cursor IDE (Cursor backend), or set active project cwd for Claude/Trae (no IDE).
         path = (params.get("path") or params.get("folder") or "").strip()
         if not path:
             success = False
@@ -2472,6 +2472,14 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
                     success, text = _open_in_trae(resolved)
                     if success and os.path.isdir(resolved):
                         _set_active_cwd(resolved, backend="trae")
+                elif backend == "claude":
+                    if os.path.isdir(resolved):
+                        _set_active_cwd(resolved, backend="claude")
+                        success = True
+                        text = f"Set Claude Code project cwd: {resolved}"
+                    else:
+                        success = False
+                        error = f"Path is not a directory: {resolved}"
                 else:
                     success, text = _open_in_cursor(resolved)
                     if success and os.path.isdir(resolved):

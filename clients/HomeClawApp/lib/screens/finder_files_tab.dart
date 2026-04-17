@@ -56,6 +56,24 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
   bool _attachBusy = false;
   bool _openBrowserBusy = false;
 
+  bool _isMobilePreviewMode(BuildContext context) =>
+      MediaQuery.of(context).size.shortestSide < 600;
+
+  Future<void> _openMobilePreviewPage(SandboxListEntry entry) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _FinderFilePreviewPage(
+          coreService: widget.coreService,
+          sandboxScope: widget.sandboxScope,
+          entry: entry,
+          onInsertPathForModel: widget.onInsertPathForModel,
+          onAskAboutFile: widget.onAskAboutFile,
+          onAttachFile: widget.onAttachFile,
+        ),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -104,7 +122,11 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
 
   bool get _isImageName {
     final n = _selected?.name.toLowerCase() ?? '';
-    return n.endsWith('.png') || n.endsWith('.jpg') || n.endsWith('.jpeg') || n.endsWith('.gif') || n.endsWith('.webp');
+    return n.endsWith('.png') ||
+        n.endsWith('.jpg') ||
+        n.endsWith('.jpeg') ||
+        n.endsWith('.gif') ||
+        n.endsWith('.webp');
   }
 
   bool get _isTextPreviewName {
@@ -153,6 +175,7 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final mobilePreviewMode = _isMobilePreviewMode(context);
     if (_error != null && _result == null && !_loading) {
       return Center(
         child: Padding(
@@ -160,7 +183,8 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.error_outline, size: 48, color: theme.colorScheme.error),
+              Icon(Icons.error_outline,
+                  size: 48, color: theme.colorScheme.error),
               const SizedBox(height: 12),
               Text(_error!, textAlign: TextAlign.center),
               const SizedBox(height: 16),
@@ -216,21 +240,31 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
                     final sel = _selected?.path == e.path;
                     return ListTile(
                       selected: sel,
-                      leading: Icon(isDir ? Icons.folder_outlined : Icons.insert_drive_file_outlined),
+                      leading: Icon(isDir
+                          ? Icons.folder_outlined
+                          : Icons.insert_drive_file_outlined),
                       title: Text(e.name),
                       subtitle: isDir ? const Text('Folder') : null,
                       onTap: () {
                         if (isDir) {
                           _openDir(e.name);
                         } else {
-                          setState(() => _selected = e);
+                          if (mobilePreviewMode) {
+                            _openMobilePreviewPage(e);
+                          } else {
+                            setState(() => _selected = e);
+                          }
                         }
                       },
                       onLongPress: () {
                         if (!isDir) {
-                          widget.onInsertPathForModel(finderModelPathFromFullRel(e.path, widget.sandboxScope));
+                          widget.onInsertPathForModel(
+                              finderModelPathFromFullRel(
+                                  e.path, widget.sandboxScope));
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Inserted path: ${finderModelPathFromFullRel(e.path, widget.sandboxScope)}')),
+                            SnackBar(
+                                content: Text(
+                                    'Inserted path: ${finderModelPathFromFullRel(e.path, widget.sandboxScope)}')),
                           );
                         }
                       },
@@ -245,7 +279,8 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
             ? Center(
                 child: Text(
                   'Select a file for preview and actions',
-                  style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
               )
             : _buildPreview(context);
@@ -255,10 +290,14 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               SizedBox(width: constraints.maxWidth * 0.42, child: listPane),
-              VerticalDivider(width: 1, color: theme.colorScheme.outlineVariant),
+              VerticalDivider(
+                  width: 1, color: theme.colorScheme.outlineVariant),
               Expanded(child: previewPane),
             ],
           );
+        }
+        if (mobilePreviewMode) {
+          return listPane;
         }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -278,15 +317,100 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
     final theme = Theme.of(context);
     final uri = widget.coreService.sandboxFileUri(e.path);
     final headers = widget.coreService.coreMediaFetchHeaders;
+    Widget body;
+    if (_isImageName) {
+      body = SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network(
+            uri.toString(),
+            headers: headers,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => const Text('Could not load image'),
+          ),
+        ),
+      );
+    } else if (_isPdfName) {
+      body = Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: FutureBuilder<String>(
+          future: widget.coreService.fetchSandboxFileViewUrl(e.path),
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snap.hasError || (snap.data?.isEmpty ?? true)) {
+              return Text(
+                snap.hasError
+                    ? snap.error.toString()
+                    : 'Could not get PDF preview URL',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.error),
+              );
+            }
+            final ctrl = WebViewController()
+              ..setJavaScriptMode(JavaScriptMode.unrestricted)
+              ..loadRequest(Uri.parse(snap.data!));
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: WebViewWidget(controller: ctrl),
+            );
+          },
+        ),
+      );
+    } else if (_isTextPreviewName) {
+      body = FutureBuilder<String>(
+        future: widget.coreService.fetchSandboxFileBytes(e.path).then((b) {
+          try {
+            var s = utf8.decode(b, allowMalformed: true);
+            if (s.length > 48000) s = '${s.substring(0, 48000)}…';
+            return s;
+          } catch (_) {
+            return '(binary or unsupported encoding)';
+          }
+        }),
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final text = snap.data ?? '';
+          return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: _isMarkdownName
+                ? MarkdownBody(selectable: true, data: text)
+                : SelectableText(text,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(fontFamily: 'monospace')),
+          );
+        },
+      );
+    } else {
+      body = SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            e.name.toLowerCase().endsWith('.pdf')
+                ? 'PDF is not previewed inline here. Tap Open in browser to view in Safari/Chrome, or Attach to next send.'
+                : 'Preview not available for this type. Try Open in browser (PDF, Office, etc.), or Insert path / Attach.',
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+        ),
+      );
+    }
 
-    return SingleChildScrollView(
+    return Padding(
       padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(e.name, style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
-          Text('Tool path: $modelPath', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          Text('Tool path: $modelPath',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -295,7 +419,8 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
               FilledButton.tonalIcon(
                 onPressed: () {
                   widget.onInsertPathForModel(modelPath);
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Inserted: $modelPath')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Inserted: $modelPath')));
                 },
                 icon: const Icon(Icons.text_fields, size: 18),
                 label: const Text('Insert path'),
@@ -305,7 +430,8 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
                   onPressed: () {
                     widget.onAskAboutFile!(modelPath);
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Added file to question: $modelPath')),
+                      SnackBar(
+                          content: Text('Added file to question: $modelPath')),
                     );
                   },
                   child: const Text('Ask about this file'),
@@ -319,7 +445,9 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
                           await widget.onAttachFile(e.path);
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Attached — add a message if needed, then Send')),
+                              const SnackBar(
+                                  content: Text(
+                                      'Attached — add a message if needed, then Send')),
                             );
                           }
                         } catch (err) {
@@ -333,7 +461,10 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
                         }
                       },
                 icon: _attachBusy
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.attach_file, size: 18),
                 label: Text(_attachBusy ? '…' : 'Attach to next send'),
               ),
@@ -343,20 +474,25 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
                     : () async {
                         setState(() => _openBrowserBusy = true);
                         try {
-                          final viewUrl = await widget.coreService.fetchSandboxFileViewUrl(e.path);
+                          final viewUrl = await widget.coreService
+                              .fetchSandboxFileViewUrl(e.path);
                           final uri = Uri.parse(viewUrl);
                           if (!context.mounted) return;
-                          final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          final ok = await launchUrl(uri,
+                              mode: LaunchMode.externalApplication);
                           if (!context.mounted) return;
                           if (!ok) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Could not open browser')),
+                              const SnackBar(
+                                  content: Text('Could not open browser')),
                             );
                           }
                         } catch (err) {
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Open in browser failed: $err')),
+                              SnackBar(
+                                  content:
+                                      Text('Open in browser failed: $err')),
                             );
                           }
                         } finally {
@@ -364,87 +500,308 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
                         }
                       },
                 icon: _openBrowserBusy
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.open_in_browser, size: 18),
                 label: Text(_openBrowserBusy ? '…' : 'Open in browser'),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          if (_isImageName)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.network(
-                uri.toString(),
-                headers: headers,
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => const Text('Could not load image'),
-              ),
-            )
-          else if (_isPdfName)
-            FutureBuilder<String>(
-              future: widget.coreService.fetchSandboxFileViewUrl(e.path),
-              builder: (context, snap) {
-                if (snap.connectionState != ConnectionState.done) {
-                  return const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
-                if (snap.hasError || (snap.data?.isEmpty ?? true)) {
-                  return Text(
-                    snap.hasError ? snap.error.toString() : 'Could not get PDF preview URL',
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
-                  );
-                }
-                final ctrl = WebViewController()
-                  ..setJavaScriptMode(JavaScriptMode.unrestricted)
-                  ..loadRequest(Uri.parse(snap.data!));
-                return SizedBox(
-                  height: 520,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: WebViewWidget(controller: ctrl),
-                  ),
-                );
-              },
-            )
-          else if (_isTextPreviewName)
-            FutureBuilder<String>(
-              future: widget.coreService.fetchSandboxFileBytes(e.path).then((b) {
-                try {
-                  var s = utf8.decode(b, allowMalformed: true);
-                  if (s.length > 48000) s = '${s.substring(0, 48000)}…';
-                  return s;
-                } catch (_) {
-                  return '(binary or unsupported encoding)';
-                }
-              }),
-              builder: (context, snap) {
-                if (snap.connectionState != ConnectionState.done) {
-                  return const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
-                final text = snap.data ?? '';
-                if (_isMarkdownName) {
-                  return MarkdownBody(selectable: true, data: text);
-                }
-                return SelectableText(text, style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'));
-              },
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                e.name.toLowerCase().endsWith('.pdf')
-                    ? 'PDF is not previewed inline here. Tap Open in browser to view in Safari/Chrome, or Attach to next send.'
-                    : 'Preview not available for this type. Try Open in browser (PDF, Office, etc.), or Insert path / Attach.',
-                style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-              ),
-            ),
+          const SizedBox(height: 12),
+          Expanded(child: body),
         ],
+      ),
+    );
+  }
+}
+
+class _FinderFilePreviewPage extends StatefulWidget {
+  final CoreService coreService;
+  final String sandboxScope;
+  final SandboxListEntry entry;
+  final void Function(String modelRelativePath) onInsertPathForModel;
+  final void Function(String modelRelativePath)? onAskAboutFile;
+  final Future<void> Function(String fullRelPathFromBase) onAttachFile;
+
+  const _FinderFilePreviewPage({
+    required this.coreService,
+    required this.sandboxScope,
+    required this.entry,
+    required this.onInsertPathForModel,
+    this.onAskAboutFile,
+    required this.onAttachFile,
+  });
+
+  @override
+  State<_FinderFilePreviewPage> createState() => _FinderFilePreviewPageState();
+}
+
+class _FinderFilePreviewPageState extends State<_FinderFilePreviewPage> {
+  bool _attachBusy = false;
+  bool _openBrowserBusy = false;
+
+  bool get _isImageName {
+    final n = widget.entry.name.toLowerCase();
+    return n.endsWith('.png') ||
+        n.endsWith('.jpg') ||
+        n.endsWith('.jpeg') ||
+        n.endsWith('.gif') ||
+        n.endsWith('.webp');
+  }
+
+  bool get _isTextPreviewName {
+    final n = widget.entry.name.toLowerCase();
+    return n.endsWith('.txt') ||
+        n.endsWith('.md') ||
+        n.endsWith('.csv') ||
+        n.endsWith('.json') ||
+        n.endsWith('.log') ||
+        n.endsWith('.yml') ||
+        n.endsWith('.yaml') ||
+        n.endsWith('.xml') ||
+        n.endsWith('.html') ||
+        n.endsWith('.htm') ||
+        n.endsWith('.css') ||
+        n.endsWith('.dart') ||
+        n.endsWith('.py') ||
+        n.endsWith('.ts') ||
+        n.endsWith('.tsx') ||
+        n.endsWith('.js') ||
+        n.endsWith('.jsx') ||
+        n.endsWith('.rs') ||
+        n.endsWith('.go') ||
+        n.endsWith('.java') ||
+        n.endsWith('.kt') ||
+        n.endsWith('.swift') ||
+        n.endsWith('.c') ||
+        n.endsWith('.h') ||
+        n.endsWith('.cpp') ||
+        n.endsWith('.sh') ||
+        n.endsWith('.toml') ||
+        n.endsWith('.gradle') ||
+        n.endsWith('.properties');
+  }
+
+  bool get _isMarkdownName {
+    final n = widget.entry.name.toLowerCase();
+    return n.endsWith('.md') || n.endsWith('.markdown');
+  }
+
+  bool get _isPdfName {
+    final n = widget.entry.name.toLowerCase();
+    return n.endsWith('.pdf');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final e = widget.entry;
+    final modelPath = finderModelPathFromFullRel(e.path, widget.sandboxScope);
+    final uri = widget.coreService.sandboxFileUri(e.path);
+    final headers = widget.coreService.coreMediaFetchHeaders;
+
+    Widget body;
+    if (_isImageName) {
+      body = SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.network(
+            uri.toString(),
+            headers: headers,
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => const Text('Could not load image'),
+          ),
+        ),
+      );
+    } else if (_isPdfName) {
+      body = Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: FutureBuilder<String>(
+          future: widget.coreService.fetchSandboxFileViewUrl(e.path),
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snap.hasError || (snap.data?.isEmpty ?? true)) {
+              return Text(
+                snap.hasError
+                    ? snap.error.toString()
+                    : 'Could not get PDF preview URL',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.error),
+              );
+            }
+            final ctrl = WebViewController()
+              ..setJavaScriptMode(JavaScriptMode.unrestricted)
+              ..loadRequest(Uri.parse(snap.data!));
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: WebViewWidget(controller: ctrl),
+            );
+          },
+        ),
+      );
+    } else if (_isTextPreviewName) {
+      body = FutureBuilder<String>(
+        future: widget.coreService.fetchSandboxFileBytes(e.path).then((b) {
+          try {
+            var s = utf8.decode(b, allowMalformed: true);
+            if (s.length > 48000) s = '${s.substring(0, 48000)}…';
+            return s;
+          } catch (_) {
+            return '(binary or unsupported encoding)';
+          }
+        }),
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final text = snap.data ?? '';
+          return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: _isMarkdownName
+                ? MarkdownBody(selectable: true, data: text)
+                : SelectableText(text,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(fontFamily: 'monospace')),
+          );
+        },
+      );
+    } else {
+      body = SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            e.name.toLowerCase().endsWith('.pdf')
+                ? 'PDF is not previewed inline here. Tap Open in browser to view in Safari/Chrome, or Attach to next send.'
+                : 'Preview not available for this type. Try Open in browser (PDF, Office, etc.), or Insert path / Attach.',
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+          title: Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis)),
+      body: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Tool path: $modelPath',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: () {
+                    widget.onInsertPathForModel(modelPath);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Inserted: $modelPath')));
+                  },
+                  icon: const Icon(Icons.text_fields, size: 18),
+                  label: const Text('Insert path'),
+                ),
+                if (widget.onAskAboutFile != null)
+                  FilledButton.tonal(
+                    onPressed: () {
+                      widget.onAskAboutFile!(modelPath);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                            content:
+                                Text('Added file to question: $modelPath')),
+                      );
+                    },
+                    child: const Text('Ask about this file'),
+                  ),
+                FilledButton.icon(
+                  onPressed: _attachBusy
+                      ? null
+                      : () async {
+                          setState(() => _attachBusy = true);
+                          try {
+                            await widget.onAttachFile(e.path);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'Attached — add a message if needed, then Send')),
+                              );
+                            }
+                          } catch (err) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Attach failed: $err')),
+                              );
+                            }
+                          } finally {
+                            if (mounted) setState(() => _attachBusy = false);
+                          }
+                        },
+                  icon: _attachBusy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.attach_file, size: 18),
+                  label: Text(_attachBusy ? '…' : 'Attach to next send'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _openBrowserBusy
+                      ? null
+                      : () async {
+                          setState(() => _openBrowserBusy = true);
+                          try {
+                            final viewUrl = await widget.coreService
+                                .fetchSandboxFileViewUrl(e.path);
+                            final uri = Uri.parse(viewUrl);
+                            if (!context.mounted) return;
+                            final ok = await launchUrl(uri,
+                                mode: LaunchMode.externalApplication);
+                            if (!context.mounted) return;
+                            if (!ok) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text('Could not open browser')),
+                              );
+                            }
+                          } catch (err) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                    content:
+                                        Text('Open in browser failed: $err')),
+                              );
+                            }
+                          } finally {
+                            if (mounted) {
+                              setState(() => _openBrowserBusy = false);
+                            }
+                          }
+                        },
+                  icon: _openBrowserBusy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.open_in_browser, size: 18),
+                  label: Text(_openBrowserBusy ? '…' : 'Open in browser'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Expanded(child: body),
+          ],
+        ),
       ),
     );
   }

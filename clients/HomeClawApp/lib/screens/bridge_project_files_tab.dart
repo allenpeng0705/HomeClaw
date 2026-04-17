@@ -17,6 +17,7 @@ String bridgeProjectParentPath(String currentPath) {
 /// Cursor / Claude Code: browse active Dev Bridge project (GET /api/cursor-bridge/project-list).
 class BridgeProjectFilesExplorer extends StatefulWidget {
   final CoreService coreService;
+
   /// `cursor` or `claude` (maps to API backend).
   final String bridgeBackend;
   final void Function(String absolutePathOnDevMachine) onInsertPath;
@@ -31,10 +32,12 @@ class BridgeProjectFilesExplorer extends StatefulWidget {
   });
 
   @override
-  State<BridgeProjectFilesExplorer> createState() => _BridgeProjectFilesExplorerState();
+  State<BridgeProjectFilesExplorer> createState() =>
+      _BridgeProjectFilesExplorerState();
 }
 
-class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer> {
+class _BridgeProjectFilesExplorerState
+    extends State<BridgeProjectFilesExplorer> {
   String _currentPath = '.';
   BridgeProjectListResult? _result;
   String? _error;
@@ -43,6 +46,23 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
   bool _attachBusy = false;
   bool _openBrowserBusy = false;
   bool _openFromRootBusy = false;
+
+  bool _isMobilePreviewMode(BuildContext context) =>
+      MediaQuery.of(context).size.shortestSide < 600;
+
+  Future<void> _openMobilePreviewPage(BridgeProjectListEntry entry) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _BridgeFilePreviewPage(
+          coreService: widget.coreService,
+          bridgeBackend: widget.bridgeBackend,
+          entry: entry,
+          onInsertPath: widget.onInsertPath,
+          onAttachForNextSend: widget.onAttachForNextSend,
+        ),
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -100,22 +120,30 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
           backend: widget.bridgeBackend,
           onSelectFolder: (absPath) async {
             if (!mounted) return;
-            final activeRoot = (_result?.root ?? '').trim().replaceAll('\\', '/');
+            final activeRoot =
+                (_result?.root ?? '').trim().replaceAll('\\', '/');
             if (activeRoot.isEmpty) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('No active project yet. Open one from the top active-project chip.')),
+                const SnackBar(
+                    content: Text(
+                        'No active project yet. Open one from the top active-project chip.')),
               );
               return;
             }
             final r = absPath.trim().replaceAll('\\', '/');
-            final rootNorm = activeRoot.endsWith('/') ? activeRoot.substring(0, activeRoot.length - 1) : activeRoot;
+            final rootNorm = activeRoot.endsWith('/')
+                ? activeRoot.substring(0, activeRoot.length - 1)
+                : activeRoot;
             final rel = (r == rootNorm)
                 ? '.'
-                : (r.startsWith('$rootNorm/') ? r.substring(rootNorm.length + 1) : '');
+                : (r.startsWith('$rootNorm/')
+                    ? r.substring(rootNorm.length + 1)
+                    : '');
             if (rel.isEmpty && r != rootNorm) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('That folder is outside the active project. Use the top active-project chip to switch project.'),
+                  content: Text(
+                      'That folder is outside the active project. Use the top active-project chip to switch project.'),
                 ),
               );
               return;
@@ -185,6 +213,7 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final mobilePreviewMode = _isMobilePreviewMode(context);
     if (_error != null && _error!.isNotEmpty && !_loading) {
       return Center(
         child: Padding(
@@ -192,7 +221,8 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.folder_off_outlined, size: 48, color: theme.colorScheme.error),
+              Icon(Icons.folder_off_outlined,
+                  size: 48, color: theme.colorScheme.error),
               const SizedBox(height: 12),
               Text(_error!, textAlign: TextAlign.center),
               const SizedBox(height: 16),
@@ -203,7 +233,8 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
       );
     }
 
-    final rootLabel = _result?.root.isNotEmpty == true ? _result!.root : '(no project)';
+    final rootLabel =
+        _result?.root.isNotEmpty == true ? _result!.root : '(no project)';
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -232,7 +263,10 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
                     tooltip: 'Choose review folder',
                     onPressed: _loading ? null : _showRootBrowserDialog,
                     icon: _openFromRootBusy
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2))
                         : const Icon(Icons.folder_open),
                   ),
                   IconButton(
@@ -257,7 +291,9 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
                     final sel = _selected?.relPath == e.relPath;
                     return ListTile(
                       selected: sel,
-                      leading: Icon(isDir ? Icons.folder_outlined : Icons.insert_drive_file_outlined),
+                      leading: Icon(isDir
+                          ? Icons.folder_outlined
+                          : Icons.insert_drive_file_outlined),
                       title: Text(e.name),
                       subtitle: isDir
                           ? const Text('Folder')
@@ -266,14 +302,19 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
                         if (isDir) {
                           _openDir(e.name);
                         } else {
-                          setState(() => _selected = e);
+                          if (mobilePreviewMode) {
+                            _openMobilePreviewPage(e);
+                          } else {
+                            setState(() => _selected = e);
+                          }
                         }
                       },
                       onLongPress: () {
                         if (!isDir && e.absPath.isNotEmpty) {
                           widget.onInsertPath(e.absPath);
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Inserted path: ${e.absPath}')),
+                            SnackBar(
+                                content: Text('Inserted path: ${e.absPath}')),
                           );
                         }
                       },
@@ -288,7 +329,8 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
             ? Center(
                 child: Text(
                   'Select a file for preview and actions',
-                  style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
               )
             : _buildPreview(context);
@@ -298,10 +340,14 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               SizedBox(width: constraints.maxWidth * 0.42, child: listPane),
-              VerticalDivider(width: 1, color: theme.colorScheme.outlineVariant),
+              VerticalDivider(
+                  width: 1, color: theme.colorScheme.outlineVariant),
               Expanded(child: previewPane),
             ],
           );
+        }
+        if (mobilePreviewMode) {
+          return listPane;
         }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -318,8 +364,124 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
   Widget _buildPreview(BuildContext context) {
     final e = _selected!;
     final theme = Theme.of(context);
+    Widget body;
+    if (_isImageName) {
+      body = FutureBuilder<String>(
+        future: widget.coreService.fetchBridgeProjectBrowserUrl(
+          backend: widget.bridgeBackend,
+          relativePath: e.relPath,
+        ),
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snap.hasError || (snap.data?.isEmpty ?? true)) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Text(
+                snap.hasError
+                    ? snap.error.toString()
+                    : 'Could not get preview URL',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.error),
+              ),
+            );
+          }
+          return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(
+                snap.data!,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) =>
+                    const Text('Could not load image'),
+              ),
+            ),
+          );
+        },
+      );
+    } else if (_isPdfName) {
+      body = Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: FutureBuilder<String>(
+          future: widget.coreService.fetchBridgeProjectBrowserUrl(
+            backend: widget.bridgeBackend,
+            relativePath: e.relPath,
+          ),
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snap.hasError || (snap.data?.isEmpty ?? true)) {
+              return Text(
+                snap.hasError
+                    ? snap.error.toString()
+                    : 'Could not get PDF preview URL',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.error),
+              );
+            }
+            final ctrl = WebViewController()
+              ..setJavaScriptMode(JavaScriptMode.unrestricted)
+              ..loadRequest(Uri.parse(snap.data!));
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: WebViewWidget(controller: ctrl),
+            );
+          },
+        ),
+      );
+    } else if (_isTextPreviewName) {
+      body = FutureBuilder<BridgeProjectFilePreview>(
+        future: widget.coreService.fetchBridgeProjectFilePreview(
+          backend: widget.bridgeBackend,
+          relativePath: e.relPath,
+        ),
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final prev = snap.data;
+          if (prev == null || (prev.error != null && prev.error!.isNotEmpty)) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Text(
+                prev?.error ?? 'Preview failed',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.error),
+              ),
+            );
+          }
+          var s = prev.content;
+          if (s.length > 48000) s = '${s.substring(0, 48000)}…';
+          return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: _isMarkdownName
+                ? MarkdownBody(selectable: true, data: s)
+                : SelectableText(s,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(fontFamily: 'monospace')),
+          );
+        },
+      );
+    } else {
+      body = SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            e.name.toLowerCase().endsWith('.pdf')
+                ? 'PDF is not previewed inline here. Tap Open in browser to view in Safari/Chrome, or Attach to next send.'
+                : 'Preview not available for this type. Try Open in browser (PDF, Office, etc.), or Insert path / Attach.',
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+        ),
+      );
+    }
 
-    return SingleChildScrollView(
+    return Padding(
       padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -328,7 +490,8 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
           const SizedBox(height: 8),
           SelectableText(
             e.absPath,
-            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -338,7 +501,8 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
               FilledButton.tonalIcon(
                 onPressed: () {
                   widget.onInsertPath(e.absPath);
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Inserted: ${e.absPath}')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Inserted: ${e.absPath}')));
                 },
                 icon: const Icon(Icons.text_fields, size: 18),
                 label: const Text('Insert path'),
@@ -352,7 +516,9 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
                           widget.onAttachForNextSend(e.absPath);
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Attached — add a message if needed, then Send')),
+                              const SnackBar(
+                                  content: Text(
+                                      'Attached — add a message if needed, then Send')),
                             );
                           }
                         } finally {
@@ -360,7 +526,10 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
                         }
                       },
                 icon: _attachBusy
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.attach_file, size: 18),
                 label: Text(_attachBusy ? '…' : 'Attach to next send'),
               ),
@@ -370,23 +539,28 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
                     : () async {
                         setState(() => _openBrowserBusy = true);
                         try {
-                          final viewUrl = await widget.coreService.fetchBridgeProjectBrowserUrl(
+                          final viewUrl = await widget.coreService
+                              .fetchBridgeProjectBrowserUrl(
                             backend: widget.bridgeBackend,
                             relativePath: e.relPath,
                           );
                           final uri = Uri.parse(viewUrl);
                           if (!context.mounted) return;
-                          final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          final ok = await launchUrl(uri,
+                              mode: LaunchMode.externalApplication);
                           if (!context.mounted) return;
                           if (!ok) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Could not open browser')),
+                              const SnackBar(
+                                  content: Text('Could not open browser')),
                             );
                           }
                         } catch (err) {
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Open in browser failed: $err')),
+                              SnackBar(
+                                  content:
+                                      Text('Open in browser failed: $err')),
                             );
                           }
                         } finally {
@@ -394,112 +568,338 @@ class _BridgeProjectFilesExplorerState extends State<BridgeProjectFilesExplorer>
                         }
                       },
                 icon: _openBrowserBusy
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.open_in_browser, size: 18),
                 label: Text(_openBrowserBusy ? '…' : 'Open in browser'),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          if (_isImageName)
-            FutureBuilder<String>(
-              future: widget.coreService.fetchBridgeProjectBrowserUrl(
-                backend: widget.bridgeBackend,
-                relativePath: e.relPath,
-              ),
-              builder: (context, snap) {
-                if (snap.connectionState != ConnectionState.done) {
-                  return const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
-                if (snap.hasError || (snap.data?.isEmpty ?? true)) {
-                  return Text(
-                    snap.hasError ? snap.error.toString() : 'Could not get preview URL',
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
-                  );
-                }
-                return ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.network(
-                    snap.data!,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const Text('Could not load image'),
-                  ),
-                );
-              },
-            )
-          else if (_isPdfName)
-            FutureBuilder<String>(
-              future: widget.coreService.fetchBridgeProjectBrowserUrl(
-                backend: widget.bridgeBackend,
-                relativePath: e.relPath,
-              ),
-              builder: (context, snap) {
-                if (snap.connectionState != ConnectionState.done) {
-                  return const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
-                if (snap.hasError || (snap.data?.isEmpty ?? true)) {
-                  return Text(
-                    snap.hasError ? snap.error.toString() : 'Could not get PDF preview URL',
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
-                  );
-                }
-                final ctrl = WebViewController()
-                  ..setJavaScriptMode(JavaScriptMode.unrestricted)
-                  ..loadRequest(Uri.parse(snap.data!));
-                return SizedBox(
-                  height: 520,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: WebViewWidget(controller: ctrl),
-                  ),
-                );
-              },
-            )
-          else if (_isTextPreviewName)
-            FutureBuilder<BridgeProjectFilePreview>(
-              future: widget.coreService.fetchBridgeProjectFilePreview(
-                backend: widget.bridgeBackend,
-                relativePath: e.relPath,
-              ),
-              builder: (context, snap) {
-                if (snap.connectionState != ConnectionState.done) {
-                  return const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
-                final prev = snap.data;
-                if (prev == null || (prev.error != null && prev.error!.isNotEmpty)) {
-                  return Text(
-                    prev?.error ?? 'Preview failed',
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
-                  );
-                }
-                var s = prev.content;
-                if (s.length > 48000) s = '${s.substring(0, 48000)}…';
-                if (_isMarkdownName) {
-                  return MarkdownBody(selectable: true, data: s);
-                }
-                return SelectableText(s, style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'));
-              },
-            )
-          else
-            Padding(
-              padding: const EdgeInsets.all(16),
+          const SizedBox(height: 12),
+          Expanded(child: body),
+        ],
+      ),
+    );
+  }
+}
+
+class _BridgeFilePreviewPage extends StatefulWidget {
+  final CoreService coreService;
+  final String bridgeBackend;
+  final BridgeProjectListEntry entry;
+  final void Function(String absolutePathOnDevMachine) onInsertPath;
+  final void Function(String absolutePathOnDevMachine) onAttachForNextSend;
+
+  const _BridgeFilePreviewPage({
+    required this.coreService,
+    required this.bridgeBackend,
+    required this.entry,
+    required this.onInsertPath,
+    required this.onAttachForNextSend,
+  });
+
+  @override
+  State<_BridgeFilePreviewPage> createState() => _BridgeFilePreviewPageState();
+}
+
+class _BridgeFilePreviewPageState extends State<_BridgeFilePreviewPage> {
+  bool _attachBusy = false;
+  bool _openBrowserBusy = false;
+
+  bool get _isImageName {
+    final n = widget.entry.name.toLowerCase();
+    return n.endsWith('.png') ||
+        n.endsWith('.jpg') ||
+        n.endsWith('.jpeg') ||
+        n.endsWith('.gif') ||
+        n.endsWith('.webp');
+  }
+
+  bool get _isTextPreviewName {
+    final n = widget.entry.name.toLowerCase();
+    return n.endsWith('.txt') ||
+        n.endsWith('.md') ||
+        n.endsWith('.csv') ||
+        n.endsWith('.json') ||
+        n.endsWith('.log') ||
+        n.endsWith('.yml') ||
+        n.endsWith('.yaml') ||
+        n.endsWith('.xml') ||
+        n.endsWith('.dart') ||
+        n.endsWith('.py') ||
+        n.endsWith('.ts') ||
+        n.endsWith('.tsx') ||
+        n.endsWith('.js') ||
+        n.endsWith('.jsx') ||
+        n.endsWith('.css') ||
+        n.endsWith('.html') ||
+        n.endsWith('.htm') ||
+        n.endsWith('.rs') ||
+        n.endsWith('.go') ||
+        n.endsWith('.java') ||
+        n.endsWith('.kt') ||
+        n.endsWith('.swift') ||
+        n.endsWith('.c') ||
+        n.endsWith('.h') ||
+        n.endsWith('.cpp') ||
+        n.endsWith('.sh') ||
+        n.endsWith('.toml') ||
+        n.endsWith('.gradle') ||
+        n.endsWith('.properties');
+  }
+
+  bool get _isMarkdownName {
+    final n = widget.entry.name.toLowerCase();
+    return n.endsWith('.md') || n.endsWith('.markdown');
+  }
+
+  bool get _isPdfName {
+    final n = widget.entry.name.toLowerCase();
+    return n.endsWith('.pdf');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final e = widget.entry;
+
+    Widget body;
+    if (_isImageName) {
+      body = FutureBuilder<String>(
+        future: widget.coreService.fetchBridgeProjectBrowserUrl(
+          backend: widget.bridgeBackend,
+          relativePath: e.relPath,
+        ),
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snap.hasError || (snap.data?.isEmpty ?? true)) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
               child: Text(
-                e.name.toLowerCase().endsWith('.pdf')
-                    ? 'PDF is not previewed inline here. Tap Open in browser to view in Safari/Chrome, or Attach to next send.'
-                    : 'Preview not available for this type. Try Open in browser (PDF, Office, etc.), or Insert path / Attach.',
-                style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                snap.hasError
+                    ? snap.error.toString()
+                    : 'Could not get preview URL',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.error),
+              ),
+            );
+          }
+          return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(
+                snap.data!,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) =>
+                    const Text('Could not load image'),
               ),
             ),
-        ],
+          );
+        },
+      );
+    } else if (_isPdfName) {
+      body = Padding(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: FutureBuilder<String>(
+          future: widget.coreService.fetchBridgeProjectBrowserUrl(
+            backend: widget.bridgeBackend,
+            relativePath: e.relPath,
+          ),
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snap.hasError || (snap.data?.isEmpty ?? true)) {
+              return Text(
+                snap.hasError
+                    ? snap.error.toString()
+                    : 'Could not get PDF preview URL',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.error),
+              );
+            }
+            final ctrl = WebViewController()
+              ..setJavaScriptMode(JavaScriptMode.unrestricted)
+              ..loadRequest(Uri.parse(snap.data!));
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: WebViewWidget(controller: ctrl),
+            );
+          },
+        ),
+      );
+    } else if (_isTextPreviewName) {
+      body = FutureBuilder<BridgeProjectFilePreview>(
+        future: widget.coreService.fetchBridgeProjectFilePreview(
+          backend: widget.bridgeBackend,
+          relativePath: e.relPath,
+        ),
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final prev = snap.data;
+          if (prev == null || (prev.error != null && prev.error!.isNotEmpty)) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Text(
+                prev?.error ?? 'Preview failed',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.error),
+              ),
+            );
+          }
+          var s = prev.content;
+          if (s.length > 48000) s = '${s.substring(0, 48000)}…';
+          return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: _isMarkdownName
+                ? MarkdownBody(selectable: true, data: s)
+                : SelectableText(
+                    s,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(fontFamily: 'monospace'),
+                  ),
+          );
+        },
+      );
+    } else {
+      body = SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            e.name.toLowerCase().endsWith('.pdf')
+                ? 'PDF is not previewed inline here. Tap Open in browser to view in Safari/Chrome, or Attach to next send.'
+                : 'Preview not available for this type. Try Open in browser (PDF, Office, etc.), or Insert path / Attach.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(e.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SelectableText(
+              e.absPath,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: () {
+                    widget.onInsertPath(e.absPath);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Inserted: ${e.absPath}')),
+                    );
+                  },
+                  icon: const Icon(Icons.text_fields, size: 18),
+                  label: const Text('Insert path'),
+                ),
+                FilledButton.icon(
+                  onPressed: _attachBusy
+                      ? null
+                      : () async {
+                          setState(() => _attachBusy = true);
+                          try {
+                            widget.onAttachForNextSend(e.absPath);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Attached — add a message if needed, then Send',
+                                  ),
+                                ),
+                              );
+                            }
+                          } finally {
+                            if (mounted) setState(() => _attachBusy = false);
+                          }
+                        },
+                  icon: _attachBusy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.attach_file, size: 18),
+                  label: Text(_attachBusy ? '…' : 'Attach to next send'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _openBrowserBusy
+                      ? null
+                      : () async {
+                          setState(() => _openBrowserBusy = true);
+                          try {
+                            final viewUrl = await widget.coreService
+                                .fetchBridgeProjectBrowserUrl(
+                              backend: widget.bridgeBackend,
+                              relativePath: e.relPath,
+                            );
+                            final uri = Uri.parse(viewUrl);
+                            if (!context.mounted) return;
+                            final ok = await launchUrl(
+                              uri,
+                              mode: LaunchMode.externalApplication,
+                            );
+                            if (!context.mounted) return;
+                            if (!ok) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Could not open browser'),
+                                ),
+                              );
+                            }
+                          } catch (err) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Open in browser failed: $err',
+                                  ),
+                                ),
+                              );
+                            }
+                          } finally {
+                            if (mounted) {
+                              setState(() => _openBrowserBusy = false);
+                            }
+                          }
+                        },
+                  icon: _openBrowserBusy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.open_in_browser, size: 18),
+                  label: Text(_openBrowserBusy ? '…' : 'Open in browser'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Expanded(child: body),
+          ],
+        ),
       ),
     );
   }
@@ -517,7 +917,8 @@ class _BridgeRootBrowserDialog extends StatefulWidget {
   });
 
   @override
-  State<_BridgeRootBrowserDialog> createState() => _BridgeRootBrowserDialogState();
+  State<_BridgeRootBrowserDialog> createState() =>
+      _BridgeRootBrowserDialogState();
 }
 
 class _BridgeRootBrowserDialogState extends State<_BridgeRootBrowserDialog> {
@@ -540,7 +941,8 @@ class _BridgeRootBrowserDialogState extends State<_BridgeRootBrowserDialog> {
       _error = null;
     });
     try {
-      final r = await widget.coreService.fetchBridgeRootList(backend: widget.backend, path: _path);
+      final r = await widget.coreService
+          .fetchBridgeRootList(backend: widget.backend, path: _path);
       if (!mounted) return;
       setState(() {
         _data = r;
@@ -572,10 +974,12 @@ class _BridgeRootBrowserDialogState extends State<_BridgeRootBrowserDialog> {
       await widget.onSelectFolder(absPath);
       if (!mounted) return;
       Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Review folder: $absPath')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Review folder: $absPath')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Open failed: $e')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Open failed: $e')));
     } finally {
       if (mounted) setState(() => _openingPath = null);
     }
@@ -601,8 +1005,12 @@ class _BridgeRootBrowserDialogState extends State<_BridgeRootBrowserDialog> {
             const SizedBox(height: 8),
             Row(
               children: [
-                IconButton(onPressed: _path == '.' || _loading ? null : _goUp, icon: const Icon(Icons.arrow_upward)),
-                IconButton(onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh)),
+                IconButton(
+                    onPressed: _path == '.' || _loading ? null : _goUp,
+                    icon: const Icon(Icons.arrow_upward)),
+                IconButton(
+                    onPressed: _loading ? null : _load,
+                    icon: const Icon(Icons.refresh)),
               ],
             ),
             const Divider(height: 1),
@@ -610,22 +1018,27 @@ class _BridgeRootBrowserDialogState extends State<_BridgeRootBrowserDialog> {
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : (_error != null && _error!.isNotEmpty)
-                      ? Center(child: Text(_error!, textAlign: TextAlign.center))
+                      ? Center(
+                          child: Text(_error!, textAlign: TextAlign.center))
                       : ListView.builder(
                           itemCount: _data?.entries.length ?? 0,
                           itemBuilder: (context, i) {
                             final e = _data!.entries[i];
                             final isDir = e.type == 'dir';
-                            final selected = isDir && _selectedDirAbsPath == e.absPath;
+                            final selected =
+                                isDir && _selectedDirAbsPath == e.absPath;
                             return ListTile(
                               selected: selected,
-                              leading: Icon(isDir ? Icons.folder_outlined : Icons.insert_drive_file_outlined),
+                              leading: Icon(isDir
+                                  ? Icons.folder_outlined
+                                  : Icons.insert_drive_file_outlined),
                               title: Text(e.name),
                               subtitle: Text(e.relPath),
                               onTap: !isDir
                                   ? null
                                   : () {
-                                      setState(() => _selectedDirAbsPath = e.absPath);
+                                      setState(() =>
+                                          _selectedDirAbsPath = e.absPath);
                                     },
                               trailing: !isDir
                                   ? null
@@ -634,7 +1047,8 @@ class _BridgeRootBrowserDialogState extends State<_BridgeRootBrowserDialog> {
                                         setState(() => _path = e.relPath);
                                         _load();
                                       },
-                                      icon: const Icon(Icons.chevron_right, size: 16),
+                                      icon: const Icon(Icons.chevron_right,
+                                          size: 16),
                                       label: const Text('Browse'),
                                     ),
                             );
@@ -651,10 +1065,15 @@ class _BridgeRootBrowserDialogState extends State<_BridgeRootBrowserDialog> {
               : () => _useSelectedFolder(_selectedDirAbsPath!),
           icon: _openingPath == null
               ? const Icon(Icons.check, size: 16)
-              : const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+              : const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2)),
           label: const Text('Use selected'),
         ),
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
+        TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close')),
       ],
     );
   }
