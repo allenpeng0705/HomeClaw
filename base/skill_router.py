@@ -356,9 +356,11 @@ async def load_skills_for_query(
                     except (TypeError, ValueError):
                         _best = 0.0
                     if _best < _rfb:
-                        skills_list = load_skills_from_dirs(
+                        # Reuse _all_skills_union if already loaded to avoid double-load
+                        _fallback_skills = _all_skills_union or load_skills_from_dirs(
                             skills_dirs, disabled_folders=disabled_folders, include_body=False
                         )
+                        skills_list = _fallback_skills
                         logger.debug(
                             "skills_router: best combined score {:.3f} < rerank_fallback_min_combined_score {:.3f}; "
                             "using full skill catalog",
