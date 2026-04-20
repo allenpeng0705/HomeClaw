@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core_service.dart';
+import '../widgets/cc_run_chip.dart';
 
 String _formatClawcodeLastUsage(dynamic raw) {
   if (raw == null) return '—';
@@ -25,7 +26,7 @@ String _formatClawcodeLastUsage(dynamic raw) {
   return parts.isEmpty ? '—' : parts.join(', ');
 }
 
-enum _CcRunState { idle, running, approvalPending, error }
+enum CcRunState { idle, running, approvalPending, error }
 
 String _formatTaskPlanForEdit(dynamic raw) {
   if (raw == null) return '';
@@ -69,7 +70,7 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
   bool _sending = false;
   String _progressLine = '';
   String _lastReply = '';
-  _CcRunState _ccRunState = _CcRunState.idle;
+  CcRunState _ccRunState = CcRunState.idle;
 
   String get _owner {
     final u = widget.coreService.sessionUserId?.trim();
@@ -117,8 +118,8 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
       if (!mounted) return;
       setState(() {
         _approvals = a;
-        if (_ccRunState == _CcRunState.running && a.isNotEmpty) {
-          _ccRunState = _CcRunState.approvalPending;
+        if (_ccRunState == CcRunState.running && a.isNotEmpty) {
+          _ccRunState = CcRunState.approvalPending;
         }
       });
     } catch (_) {}
@@ -179,7 +180,7 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
     setState(() {
       _sending = true;
       _progressLine = '';
-      _ccRunState = _CcRunState.running;
+      _ccRunState = CcRunState.running;
     });
     try {
       await widget.coreService.saveClawcodeComposeDraft(ownerUserId: _owner, sessionId: sid, text: msg);
@@ -198,12 +199,12 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
       final text = r['text']?.toString() ?? '';
       setState(() {
         _lastReply = text;
-        _ccRunState = _CcRunState.idle;
+        _ccRunState = CcRunState.idle;
       });
       await _refresh();
       if (!mounted) return;
       setState(() {
-        _ccRunState = _approvals.isNotEmpty ? _CcRunState.approvalPending : _CcRunState.idle;
+        _ccRunState = _approvals.isNotEmpty ? CcRunState.approvalPending : CcRunState.idle;
       });
     } catch (e) {
       final err = e.toString();
@@ -215,7 +216,7 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
         );
       } catch (_) {}
       if (mounted) {
-        setState(() => _ccRunState = _CcRunState.error);
+        setState(() => _ccRunState = CcRunState.error);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
       }
     } finally {
@@ -1023,35 +1024,10 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
 class _CcRunChip extends StatelessWidget {
   const _CcRunChip({required this.state});
 
-  final _CcRunState state;
+  final CcRunState state;
 
   @override
-  Widget build(BuildContext context) {
-    late final String label;
-    Color? bg;
-    switch (state) {
-      case _CcRunState.idle:
-        label = 'idle';
-        break;
-      case _CcRunState.running:
-        label = 'running';
-        bg = Colors.blue.shade100;
-        break;
-      case _CcRunState.approvalPending:
-        label = 'approval pending';
-        bg = Colors.orange.shade100;
-        break;
-      case _CcRunState.error:
-        label = 'error';
-        bg = Theme.of(context).colorScheme.errorContainer;
-        break;
-    }
-    return Chip(
-      visualDensity: VisualDensity.compact,
-      backgroundColor: bg,
-      label: Text(label, style: const TextStyle(fontSize: 12)),
-    );
-  }
+  Widget build(BuildContext context) => CcRunChip(state: state);
 }
 
 class _ClawcodeMcpSheet extends StatefulWidget {
