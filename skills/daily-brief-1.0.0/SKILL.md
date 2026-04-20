@@ -2,6 +2,7 @@
 name: daily-brief
 description: |
   RSS-based "Daily Brief" / news headline digest: aggregate free public feeds (English + Chinese), optional keyword filter. AST-first VMPrint output by default (browser preview link), Markdown only on explicit request. No API keys. Edit config/feeds.yaml to add or change sources.
+retry_safe: true
 homepage: https://github.com/allenpeng0705/HomeClaw
 trigger:
   patterns:

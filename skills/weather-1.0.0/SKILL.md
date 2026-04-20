@@ -2,6 +2,7 @@
 name: weather
 description: |
   Current weather and forecasts via wttr.in (no API key). Natural language in English or Chinese; optional city or implicit location from Companion/profile (Core injects HOMECLAW_USER_LOCATION / lat/lng). Server time line comes from Core when available. Prefer passing the user's full message as one arg so extraction handles phrasing ("weather in Paris", "How about Beijing's weather?", "明天天气", vague "weather tomorrow" uses device location).
+retry_safe: true
 homepage: https://wttr.in/:help
 keywords: "weather forecast temperature rain wttr.in 天气 气温 预报 明天 怎么样"
 trigger:

@@ -25,7 +25,27 @@ Each skill is a **folder** with at least:
   Optional: longer instructions or usage notes in markdown.
   ```
 
-Optional frontmatter: `homepage`, `user-invocable`, `disable-model-invocation`, `metadata`, **`trigger`**.
+Optional frontmatter: `homepage`, `user-invocable`, `disable-model-invocation`, `metadata`, **`trigger`**, `retry_safe`.
+
+### Retry-safe scripts (opt-in auto retry for `run_skill`)
+
+`run_skill` supports one automatic retry, but it is **disabled by default** for safety.
+To opt in for a specific skill, add this in `SKILL.md` frontmatter:
+
+```yaml
+---
+name: my-skill
+description: Example skill.
+retry_safe: true
+---
+```
+
+Rules:
+
+- `retry_safe: true` enables one retry for that skill when `run_skill` fails.
+- Missing/false `retry_safe` means no automatic retry.
+- Only set this to true for **idempotent** scripts (safe to run twice).
+- Do **not** enable for side-effecting scripts like sending emails, posting to social media, charging APIs, or irreversible writes unless your script has explicit dedupe/idempotency guards.
 
 ### Trigger (force-include and auto_invoke from the skill)
 

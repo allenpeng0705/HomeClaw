@@ -5637,11 +5637,21 @@ async def answer_from_memory(
                     fn = tc.get("function")
                     fn = fn if isinstance(fn, dict) else {}
                     name = (fn.get("name") or "").strip()
+                    args_parse_error = None
                     try:
                         args = json.loads(fn.get("arguments") or "{}")
-                    except (json.JSONDecodeError, TypeError):
-                        args = {}
-                    if not isinstance(args, dict):
+                    except (json.JSONDecodeError, TypeError) as _json_e:
+                        args_parse_error = str(_json_e)
+                        args = None
+                    if args is not None and not isinstance(args, dict):
+                        args_parse_error = "tool arguments must be a JSON object"
+                        args = None
+                    if args_parse_error:
+                        logger.info(
+                            "Tool {} provided invalid arguments JSON ({}); falling back to empty args for normalization/validation.",
+                            name,
+                            args_parse_error,
+                        )
                         args = {}
                     args_redacted = redact_params_for_log(args) if isinstance(args, dict) else args
                     logger.info("Tool selected: name={} parameters={}", name, args_redacted)
