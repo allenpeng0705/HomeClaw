@@ -4,6 +4,7 @@ Multi-language via alias mapping; input normalized (lowercase + Unicode NFC).
 User-addable rules via YAML file (e.g. config/hybrid/heuristic_rules.yml).
 Supports {{open|launch}} {{browser|app}} templates: expanded to keywords at load time.
 """
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import unicodedata
@@ -17,6 +18,29 @@ def _normalize(text: str) -> str:
     if not text or not isinstance(text, str):
         return ""
     return unicodedata.normalize("NFC", text.strip().lower())
+
+
+def _keyword_needs_word_boundary(kw: str) -> bool:
+    """
+    Returns True if the keyword should use word-boundary regex matching.
+    Single-word ASCII letter-only keywords (e.g. 'cpu', 'password') get word boundaries
+    to avoid false positives like 'CPU prices' matching 'cpu'.
+    Keywords with spaces, non-ASCII (Chinese), non-letter chars (e.g. '.pdf', 'api_key',
+    'take a screenshot') use substring matching to avoid under-matching.
+    """
+    if not kw:
+        return False
+    # Contains any non-ASCII or non-letter characters → use substring
+    if not kw.isascii():
+        return False
+    if not kw.isalpha():
+        # Has digits, underscores, hyphens, etc. → use substring (e.g. api_key, .pdf, cpu1)
+        return False
+    # Has spaces → phrase, use substring
+    if " " in kw:
+        return False
+    # Single-word ASCII letter-only keyword → needs word boundary
+    return True
 
 
 def load_heuristic_rules(rules_path: str, root_dir: Optional[Path] = None) -> Optional[Dict[str, Any]]:
@@ -74,7 +98,10 @@ def run_heuristic_layer(
     - If not enabled: return (0.0, None).
     - If rules_data is None or empty: return (0.0, None).
     - If long_input_chars > 0 and len(query) > long_input_chars: return (1.0, long_input_route).
-    - If any rule's keyword (normalized) is a substring of normalized query: return (1.0, rule.route).
+    - If any rule's keyword matches normalized query:
+        - Single-word ASCII keywords (e.g. 'cpu', 'password') use word-boundary regex to avoid false positives.
+        - Phrases, Chinese, or special-char keywords use substring match.
+      → return (1.0, rule.route).
     - Otherwise: return (0.0, None).
     No threshold: first match (long-input or keyword) wins.
     """
@@ -101,7 +128,21 @@ def run_heuristic_layer(
         for kw in rule.get("keywords") or []:
             if not kw:
                 continue
-            if _normalize(kw) in normalized_query:
-                return (1.0, route)
+            kw_norm = _normalize(kw)
+            if _keyword_needs_word_boundary(kw):
+                # Single-word ASCII keyword: use word boundary to avoid false positives
+                # (e.g. 'cpu' should not match 'CPU prices')
+                try:
+                    pattern = r"\b" + re.escape(kw_norm) + r"\b"
+                    if re.search(pattern, normalized_query):
+                        return (1.0, route)
+                except re.error:
+                    # Fall back to substring on invalid pattern
+                    if kw_norm in normalized_query:
+                        return (1.0, route)
+            else:
+                # Phrase, Chinese, or special-char keyword: use substring match
+                if kw_norm in normalized_query:
+                    return (1.0, route)
 
     return (0.0, None)

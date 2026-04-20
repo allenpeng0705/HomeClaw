@@ -119,13 +119,13 @@ Skills can be added/removed but there's no mechanism to handle skill version cha
 
 ### Issues & Improvements
 
-#### Issue 1: Heuristic Layer Uses Simple Substring Matching
+#### Issue 1: Heuristic Layer Uses Simple Substring Matching ~~(DONE)~~
 ```python
 if _normalize(kw) in normalized_query:  # substring match
 ```
-This can produce false positives (e.g., "python" matches "pythonista").
+This produced false positives (e.g., "python" matched "pythonista", "cpu" matched "CPU prices").
 
-**Fix:** Use word boundary regex where appropriate for English keywords.
+**Fix:** Added `_keyword_needs_word_boundary()` helper. Single-word ASCII letter-only keywords (e.g. `cpu`, `password`) now use word-boundary regex (`\bcpu\b`) to avoid false positives. Keywords with spaces, non-ASCII (Chinese), digits, underscores, or special chars (e.g. `api_key`, `.pdf`, `take a screenshot`) continue to use substring matching. Invalid regex patterns fall back to substring match.
 
 #### Issue 2: Heuristic Rules File is Massive (3600+ lines)
 The `config/hybrid/heuristic_rules.yml` is very large and hard to maintain.
@@ -269,15 +269,16 @@ There's no way to test routing changes with a subset of users.
 
 ### Medium Priority
 5. ~~**Hybrid Router:** Fix semantic cache key (Issue 3)~~ - DONE (mtime-based invalidation)
-6. **Intent Router:** Add pattern validation (Issue 3) - Add validation of regex patterns at load time
-7. **Skill Router:** Add weighted scoring (Issue 2) - Scoring weights for semantic vs trigger vs lexical
-8. **Companion App:** Add state management (Issue 1) - Use Riverpod/BLoC
+6. ~~**Hybrid Router:** Heuristic substring matching (Issue 1)~~ - DONE (word boundaries for single-word ASCII keywords)
+7. ~~**Intent Router:** Add pattern validation (Issue 3)~~ - DONE (regex validation at load time already implemented)
+8. **Skill Router:** Add weighted scoring (Issue 2) - Medium/low impact; current order-based heuristic is reasonable
+9. **Companion App:** Add state management (Issue 1) - High complexity; breaking changes
 
 ### Low Priority
-9. ~~**Hybrid Router:** Make perplexity threshold configurable (Issue 5)~~ - DONE (already configurable)
-10. **Hybrid Router:** Add cascade customization (Issue 6) - Significant restructuring required
-11. **Intent Router:** Cache semantic results (Issue 5) - Issue description inaccurate; semantic/hybrid modes are mutually exclusive
-12. **Companion App:** Add unit tests (Issue 5)
+10. ~~**Hybrid Router:** Make perplexity threshold configurable (Issue 5)~~ - DONE (already configurable)
+11. **Hybrid Router:** Add cascade customization (Issue 6) - Significant restructuring required
+12. **Intent Router:** Cache semantic results (Issue 5) - Issue description inaccurate; semantic/hybrid modes are mutually exclusive
+13. **Companion App:** Add unit tests (Issue 5)
 
 ---
 
