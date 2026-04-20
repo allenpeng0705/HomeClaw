@@ -247,15 +247,21 @@ These two routers didn't share context. If intent router routed to `weather`, th
 
 **Fix:** Phase 3.1 category filtering now does TWO passes: (1) keep only skills whose folder is in the category allowlist, (2) add missing allowed skills directly from the catalog. This ensures that when intent router selects a category (e.g. "weather"), those skills are included even if semantic search gave them low similarity scores.
 
-### Issue: Hybrid Router Metrics Are In-Memory Only
-`hybrid_router/metrics.py` uses module-level dictionaries. Stats are lost on restart.
+### Issue: Hybrid Router Metrics Are In-Memory Only ~~(DONE)~~
+`hybrid_router/metrics.py` used module-level dictionaries. Stats were lost on restart.
 
-**Fix:** Persist metrics to database for long-term analysis.
+**Fix:** Added `init_metrics_persistence()` and `shutdown_metrics_persistence()` functions. Call `init_metrics_persistence(persist_path, flush_interval_seconds)` at startup to enable periodic JSON file flushing (default: every 5 minutes). On startup, counters are loaded from the JSON file to continue accumulating. Call `shutdown_metrics_persistence()` at app shutdown for a final flush.
 
-### Issue: No A/B Testing Infrastructure
-There's no way to test routing changes with a subset of users.
+### Issue: No A/B Testing Infrastructure ~~(DONE)~~
+No way to test routing changes with a subset of users.
 
-**Fix:** Add experiment ID to routing decisions for canary testing.
+**Fix:** Added A/B experiment support to `hybrid_router/metrics.py`:
+- `set_experiment_defs(experiments)`: set experiment definitions from config
+- `get_experiment_for_user(experiment_id, user_id)`: deterministically assign user to 'treatment' or 'control' using HMAC-like hash (stable per user+experiment)
+- `log_experiment_decision(...)`: log routing decision per experiment group
+- `get_experiment_stats()`: retrieve per-experiment metrics
+
+In llm_loop, set `hybrid_router.experiment_id` in config to enable. All users are bucketed 50/50 treatment/control. Metrics appear in `generate_usage_report()` under `experiments` key.
 
 ---
 
@@ -277,10 +283,12 @@ There's no way to test routing changes with a subset of users.
 
 ### Low Priority
 11. ~~**Hybrid Router:** Make perplexity threshold configurable (Issue 5)~~ - DONE (already configurable)
-12. ~~**Hybrid Router:** Add cascade customization (Issue 6)~~ - DONE (new `cascade_mode` config: "first-match" (default) or "priority". Priority mode runs all layers and picks by layer priority (vision_fallback=1, scheduling=2, heuristic=10, semantic=20, default_route=30, slm=40/41), with score as tiebreaker.)
-13. ~~**Intent Router:** Cache semantic results (Issue 5)~~ - DONE (not needed; semantic/hybrid modes are mutually exclusive branches, each calls _route_semantic_intent at most once per request)
+12. ~~**Hybrid Router:** Add cascade customization (Issue 6)~~ - DONE (new `cascade_mode` config: "first-match" (default) or "priority")
+13. ~~**Intent Router:** Cache semantic results (Issue 5)~~ - DONE (not needed; semantic/hybrid modes are mutually exclusive)
 14. **Companion App:** Add unit tests (Issue 5) - Manual testing during companion app development
 15. ~~**Hybrid Router:** SLM URL construction (Issue 4)~~ - Low impact; current 3-tier fallback chain is reasonable
+16. ~~**Hybrid Router:** Metrics persistence~~ - DONE (JSON file flush with background thread)
+17. ~~**Hybrid Router:** A/B testing infrastructure~~ - DONE (experiment bucketing by user_id hash, per-group metrics)
 
 ---
 

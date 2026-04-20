@@ -1556,7 +1556,27 @@ async def answer_from_memory(
             )
             # Per-request log and aggregated counts (mix mode only)
             try:
-                from hybrid_router.metrics import log_router_decision
+                from hybrid_router.metrics import log_router_decision, set_experiment_defs, get_experiment_for_user, log_experiment_decision
+                # Initialize A/B experiments from config (idempotent, thread-safe internally)
+                experiments_cfg = hr.get("experiments") if isinstance(hr, dict) else None
+                if experiments_cfg:
+                    set_experiment_defs(experiments_cfg)
+                # Assign user to experiment groups (deterministic by user_id)
+                _req_uid = uid
+                _experiment_id = hr.get("experiment_id") if isinstance(hr, dict) else None
+                _exp_group = None
+                if _experiment_id and _req_uid:
+                    _exp_group = get_experiment_for_user(_experiment_id, _req_uid)
+                    if _exp_group:
+                        log_experiment_decision(
+                            experiment_id=_experiment_id,
+                            group=_exp_group,
+                            route=route,
+                            layer=route_layer,
+                            score=route_score,
+                            request_id=getattr(request, "request_id", None) if request else None,
+                            user_id=_req_uid,
+                        )
                 latency_ms = (time.perf_counter() - _router_t0) * 1000
                 req_id = getattr(request, "request_id", None) if request else None
                 log_router_decision(
