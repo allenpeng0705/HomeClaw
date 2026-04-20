@@ -1,69 +1,59 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core_service.dart';
+import '../providers/reminders_providers.dart';
 
-class RemindersExplorer extends StatefulWidget {
+class RemindersExplorer extends ConsumerStatefulWidget {
   final CoreService coreService;
 
   const RemindersExplorer({super.key, required this.coreService});
 
   @override
-  State<RemindersExplorer> createState() => _RemindersExplorerState();
+  ConsumerState<RemindersExplorer> createState() => _RemindersExplorerState();
 }
 
-class _RemindersExplorerState extends State<RemindersExplorer> {
-  bool _loading = true;
-  String? _error;
-  List<ReminderListItem> _items = const [];
-  String? _deletingId;
+class _RemindersExplorerState extends ConsumerState<RemindersExplorer> {
+  late final RemindersNotifier _notifier;
 
   @override
   void initState() {
     super.initState();
+    _notifier = ref.read(remindersProvider.notifier);
     _load();
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    _notifier.setLoading(true);
     try {
       final items = await widget.coreService.fetchRemindersList();
       if (!mounted) return;
-      setState(() {
-        _items = items;
-        _loading = false;
-      });
+      _notifier.setItems(items);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
-        _loading = false;
-      });
+      _notifier.setError(e.toString().replaceFirst(RegExp(r'^Exception:\s*'), ''));
     }
   }
 
   Future<void> _delete(ReminderListItem item) async {
-    setState(() => _deletingId = item.id);
+    _notifier.setDeletingId(item.id);
     try {
       await widget.coreService.deleteReminder(id: item.id, type: item.type);
       if (!mounted) return;
-      setState(() => _items = _items.where((x) => x.id != item.id).toList());
+      _notifier.removeItem(item.id);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reminder deleted')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
-    } finally {
-      if (mounted) setState(() => _deletingId = null);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(remindersProvider);
     final theme = Theme.of(context);
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null && _error!.isNotEmpty) {
+    if (state.loading) return const Center(child: CircularProgressIndicator());
+    if (state.error != null && state.error!.isNotEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -72,7 +62,7 @@ class _RemindersExplorerState extends State<RemindersExplorer> {
             children: [
               Icon(Icons.event_busy, size: 44, color: theme.colorScheme.error),
               const SizedBox(height: 8),
-              Text(_error!, textAlign: TextAlign.center),
+              Text(state.error!, textAlign: TextAlign.center),
               const SizedBox(height: 12),
               FilledButton(onPressed: _load, child: const Text('Retry')),
             ],
@@ -80,7 +70,7 @@ class _RemindersExplorerState extends State<RemindersExplorer> {
         ),
       );
     }
-    if (_items.isEmpty) {
+    if (state.items.isEmpty) {
       return Center(
         child: Text(
           'No scheduled reminders yet.',
@@ -92,10 +82,10 @@ class _RemindersExplorerState extends State<RemindersExplorer> {
       onRefresh: _load,
       child: ListView.builder(
         padding: const EdgeInsets.all(12),
-        itemCount: _items.length,
+        itemCount: state.items.length,
         itemBuilder: (context, i) {
-          final it = _items[i];
-          final deleting = _deletingId == it.id;
+          final it = state.items[i];
+          final deleting = state.deletingId == it.id;
           return Card(
             margin: const EdgeInsets.symmetric(vertical: 6),
             child: Padding(
