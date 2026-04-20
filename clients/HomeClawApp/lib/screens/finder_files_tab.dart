@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../core_service.dart';
+import '../utils/file_preview_utils.dart';
 
 /// Path relative to user sandbox for LLM tools (strip scope prefix from list API paths).
 String finderModelPathFromFullRel(String fullRelPath, String scope) {
@@ -120,57 +121,10 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
     _load();
   }
 
-  bool get _isImageName {
-    final n = _selected?.name.toLowerCase() ?? '';
-    return n.endsWith('.png') ||
-        n.endsWith('.jpg') ||
-        n.endsWith('.jpeg') ||
-        n.endsWith('.gif') ||
-        n.endsWith('.webp');
-  }
-
-  bool get _isTextPreviewName {
-    final n = _selected?.name.toLowerCase() ?? '';
-    return n.endsWith('.txt') ||
-        n.endsWith('.md') ||
-        n.endsWith('.csv') ||
-        n.endsWith('.json') ||
-        n.endsWith('.log') ||
-        n.endsWith('.yml') ||
-        n.endsWith('.yaml') ||
-        n.endsWith('.xml') ||
-        n.endsWith('.html') ||
-        n.endsWith('.htm') ||
-        n.endsWith('.css') ||
-        n.endsWith('.dart') ||
-        n.endsWith('.py') ||
-        n.endsWith('.ts') ||
-        n.endsWith('.tsx') ||
-        n.endsWith('.js') ||
-        n.endsWith('.jsx') ||
-        n.endsWith('.rs') ||
-        n.endsWith('.go') ||
-        n.endsWith('.java') ||
-        n.endsWith('.kt') ||
-        n.endsWith('.swift') ||
-        n.endsWith('.c') ||
-        n.endsWith('.h') ||
-        n.endsWith('.cpp') ||
-        n.endsWith('.sh') ||
-        n.endsWith('.toml') ||
-        n.endsWith('.gradle') ||
-        n.endsWith('.properties');
-  }
-
-  bool get _isMarkdownName {
-    final n = _selected?.name.toLowerCase() ?? '';
-    return n.endsWith('.md') || n.endsWith('.markdown');
-  }
-
-  bool get _isPdfName {
-    final n = _selected?.name.toLowerCase() ?? '';
-    return n.endsWith('.pdf');
-  }
+  bool get _isImageName => isDisplayableImageName(_selected?.name ?? '');
+  bool get _isTextPreviewName => isTextPreviewName(_selected?.name ?? '');
+  bool get _isMarkdownName => isMarkdownName(_selected?.name ?? '');
+  bool get _isPdfName => isPdfName(_selected?.name ?? '');
 
   @override
   Widget build(BuildContext context) {
@@ -542,57 +496,10 @@ class _FinderFilePreviewPageState extends State<_FinderFilePreviewPage> {
   bool _attachBusy = false;
   bool _openBrowserBusy = false;
 
-  bool get _isImageName {
-    final n = widget.entry.name.toLowerCase();
-    return n.endsWith('.png') ||
-        n.endsWith('.jpg') ||
-        n.endsWith('.jpeg') ||
-        n.endsWith('.gif') ||
-        n.endsWith('.webp');
-  }
-
-  bool get _isTextPreviewName {
-    final n = widget.entry.name.toLowerCase();
-    return n.endsWith('.txt') ||
-        n.endsWith('.md') ||
-        n.endsWith('.csv') ||
-        n.endsWith('.json') ||
-        n.endsWith('.log') ||
-        n.endsWith('.yml') ||
-        n.endsWith('.yaml') ||
-        n.endsWith('.xml') ||
-        n.endsWith('.html') ||
-        n.endsWith('.htm') ||
-        n.endsWith('.css') ||
-        n.endsWith('.dart') ||
-        n.endsWith('.py') ||
-        n.endsWith('.ts') ||
-        n.endsWith('.tsx') ||
-        n.endsWith('.js') ||
-        n.endsWith('.jsx') ||
-        n.endsWith('.rs') ||
-        n.endsWith('.go') ||
-        n.endsWith('.java') ||
-        n.endsWith('.kt') ||
-        n.endsWith('.swift') ||
-        n.endsWith('.c') ||
-        n.endsWith('.h') ||
-        n.endsWith('.cpp') ||
-        n.endsWith('.sh') ||
-        n.endsWith('.toml') ||
-        n.endsWith('.gradle') ||
-        n.endsWith('.properties');
-  }
-
-  bool get _isMarkdownName {
-    final n = widget.entry.name.toLowerCase();
-    return n.endsWith('.md') || n.endsWith('.markdown');
-  }
-
-  bool get _isPdfName {
-    final n = widget.entry.name.toLowerCase();
-    return n.endsWith('.pdf');
-  }
+  bool get _isImageName => isDisplayableImageName(widget.entry.name);
+  bool get _isTextPreviewName => isTextPreviewName(widget.entry.name);
+  bool get _isMarkdownName => isMarkdownName(widget.entry.name);
+  bool get _isPdfName => isPdfName(widget.entry.name);
 
   @override
   Widget build(BuildContext context) {
