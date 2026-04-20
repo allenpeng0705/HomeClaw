@@ -285,7 +285,7 @@ In llm_loop, set `hybrid_router.experiment_id` in config to enable. All users ar
 11. ~~**Hybrid Router:** Make perplexity threshold configurable (Issue 5)~~ - DONE (already configurable)
 12. ~~**Hybrid Router:** Add cascade customization (Issue 6)~~ - DONE (new `cascade_mode` config: "first-match" (default) or "priority")
 13. ~~**Intent Router:** Cache semantic results (Issue 5)~~ - DONE (not needed; semantic/hybrid modes are mutually exclusive)
-14. **Companion App:** Add unit tests (Issue 5) - Manual testing during companion app development
+14. ~~**Companion App:** Add unit tests (Issue 5)~~ - DONE (added test infrastructure: models/, utils/, widgets/ directories with tests for CoreServiceModels, PermissionItem, file_preview_utils, CcRunChip, MessageFileChip, VideoPlayChip)
 15. ~~**Hybrid Router:** SLM URL construction (Issue 4)~~ - Low impact; current 3-tier fallback chain is reasonable
 16. ~~**Hybrid Router:** Metrics persistence~~ - DONE (JSON file flush with background thread)
 17. ~~**Hybrid Router:** A/B testing infrastructure~~ - DONE (experiment bucketing by user_id hash, per-group metrics)
@@ -300,6 +300,7 @@ In llm_loop, set `hybrid_router.experiment_id` in config to enable. All users ar
 | Skill Router | `base/skill_router.py` | High |
 | Hybrid Router | `hybrid_router/heuristic.py` | Medium |
 | Hybrid Router | `hybrid_router/semantic.py` | Medium |
+| Hybrid Router | `hybrid_router/metrics.py` | Low |
 | Companion App | `lib/core_service.dart` | High |
 | Companion App | `lib/screens/chat_screen.dart` | High |
-| Companion App | `lib/core_service.dart` | Medium |
+| Companion App | `test/` | Low |
