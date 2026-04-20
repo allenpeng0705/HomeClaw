@@ -21,7 +21,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:record/record.dart';
 import '../chat_history_store.dart';
 import '../core_service.dart';
@@ -29,6 +28,7 @@ import '../federation_e2e_crypto.dart';
 import '../widgets/homeclaw_snackbars.dart';
 import '../widgets/attachment_chip.dart';
 import '../widgets/video_play_chip.dart';
+import '../widgets/audio_play_button.dart';
 import 'canvas_screen.dart';
 import 'clawcode_screen.dart';
 import 'bridge_project_files_tab.dart';
@@ -5223,98 +5223,12 @@ class _AudioPlayButton extends StatefulWidget {
 }
 
 class _AudioPlayButtonState extends State<_AudioPlayButton> {
-  final AudioPlayer _player = AudioPlayer();
-  bool _playing = false;
-  StreamSubscription<void>? _completeSub;
-
   @override
-  void dispose() {
-    _completeSub?.cancel();
-    _player.dispose();
-    super.dispose();
-  }
-
-  Future<void> _play() async {
-    final ref = widget.audioRef.trim();
-    if (ref.isEmpty) return;
-    try {
-      Source source;
-      if (ref.startsWith('data:audio/') && ref.contains(',')) {
-        final b64 = ref.split(',').last;
-        final bytes = base64Decode(b64);
-        final dir = await getTemporaryDirectory();
-        final mime = ref.startsWith('data:')
-            ? ref.split(';').first.replaceFirst('data:', '')
-            : 'audio';
-        final ext = mime == 'audio/webm'
-            ? 'webm'
-            : (mime == 'audio/ogg'
-                ? 'ogg'
-                : (mime == 'audio/mp4' ? 'm4a' : 'webm'));
-        final file = File(path.join(
-            dir.path, 'voice_${DateTime.now().millisecondsSinceEpoch}.$ext'));
-        await file.writeAsBytes(bytes);
-        source = DeviceFileSource(file.path);
-      } else if (ref.startsWith('/files/') || ref.startsWith('/files/out')) {
-        final base = widget.coreBaseUrl.replaceFirst(RegExp(r'/$'), '');
-        final url = '$base$ref';
-        final h = widget.coreMediaHeaders;
-        if (h != null && h.isNotEmpty) {
-          final resp = await http.get(Uri.parse(url), headers: h);
-          if (resp.statusCode < 200 || resp.statusCode >= 300) {
-            throw Exception('HTTP ${resp.statusCode}');
-          }
-          final dir = await getTemporaryDirectory();
-          final file = File(path.join(dir.path,
-              'hc_audio_${DateTime.now().millisecondsSinceEpoch}.m4a'));
-          await file.writeAsBytes(resp.bodyBytes);
-          source = DeviceFileSource(file.path);
-        } else {
-          source = UrlSource(url);
-        }
-      } else if (ref.startsWith('http://') || ref.startsWith('https://')) {
-        source = UrlSource(ref);
-      } else if (await File(ref).exists()) {
-        source = DeviceFileSource(ref);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-              const SnackBar(content: Text('Audio file not found')));
-        }
-        return;
-      }
-      _completeSub?.cancel();
-      _completeSub = _player.onPlayerComplete.listen((_) {
-        if (mounted) setState(() => _playing = false);
-      });
-      await _player.play(source);
-      if (mounted) setState(() => _playing = true);
-    } catch (_) {
-      if (mounted)
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-            const SnackBar(content: Text('Could not play audio')));
-    }
-  }
-
-  Future<void> _stop() async {
-    await _player.stop();
-    if (mounted) setState(() => _playing = false);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          icon: Icon(_playing ? Icons.stop : Icons.play_arrow),
-          onPressed: _playing ? _stop : _play,
-          tooltip: _playing ? 'Stop' : 'Play voice message',
-        ),
-        Text('Voice message', style: Theme.of(context).textTheme.bodySmall),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => AudioPlayButton(
+        audioRef: widget.audioRef,
+        coreBaseUrl: widget.coreBaseUrl,
+        coreMediaHeaders: widget.coreMediaHeaders,
+      );
 }
 
 /// Full-screen image viewer. Tap anywhere to go back.
