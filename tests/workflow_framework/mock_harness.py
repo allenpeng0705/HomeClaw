@@ -9,6 +9,21 @@ from typing import Any, Dict, List
 from base.workflow_trace import emit_event, start_turn, end_turn
 
 
+def _daily_brief_plain_markdown_requested(user_text: str) -> bool:
+    q = (user_text or "").strip()
+    q_lo = q.lower()
+    return any(
+        k in q_lo
+        for k in (
+            "markdown",
+            "plain text",
+            "text only",
+            "no vmprint",
+            "without vmprint",
+        )
+    ) or any(k in q for k in ("纯文本", "纯文字", "仅文本", "不要 vmprint", "不要VMPrint"))
+
+
 def _derive_daily_brief_args_from_query_local(user_text: str, plain_markdown_requested: bool) -> List[str]:
     q = (user_text or "").strip()
     q_lo = q.lower()
@@ -92,8 +107,8 @@ def run_mock_turn(prompt: str, trace_dir: Path) -> Dict[str, Any]:
     p = (prompt or "").strip()
     p_lo = p.lower()
     if ("今日新闻" in p) or ("daily brief" in p_lo) or ("每日简报" in p):
-        # Mirror HomeClaw default: Markdown unless prompt asks for VMPrint.
-        plain_md = "vmprint" not in p_lo
+        # Mirror HomeClaw default: VMPrint unless prompt asks for plain markdown/text.
+        plain_md = _daily_brief_plain_markdown_requested(p)
         argv = _derive_daily_brief_args_from_query_local(p, plain_md)
         emit_event(
             event_type="skill_call_started",

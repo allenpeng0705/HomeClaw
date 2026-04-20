@@ -3492,6 +3492,106 @@ def _derive_daily_brief_args_from_query(user_text: str) -> List[str]:
     return _normalize_daily_brief_args(args)
 
 
+def _run_skill_retry_decider(
+    arguments: Dict[str, Any],
+    context: ToolContext,
+    error_text: str,
+) -> bool:
+    """
+    Opt-in retries for run_skill.
+    A skill is retry-eligible only when its SKILL.md frontmatter contains:
+      retry_safe: true
+    """
+    try:
+        skill_name = str(arguments.get("skill_name") or arguments.get("skill") or "").strip()
+        if not skill_name:
+            return False
+        skill_folder = resolve_skill_to_path(get_all_skills_dirs(), skill_name)
+        if not skill_folder:
+            return False
+        skill_md = (Path(skill_folder) / "SKILL.md").resolve()
+        if not skill_md.is_file():
+            return False
+        raw = skill_md.read_text(encoding="utf-8", errors="replace")
+        if not raw.startswith("---"):
+            return False
+        end = raw.find("\n---", 3)
+        if end == -1:
+            return False
+        fm_text = raw[3:end].strip()
+        if yaml is None:
+            return False
+        fm = yaml.safe_load(fm_text) or {}
+        if not isinstance(fm, dict):
+            return False
+        return bool(fm.get("retry_safe") is True)
+    except Exception:
+        return False
+
+
+def _web_search_retry_adjuster(
+    arguments: Dict[str, Any],
+    context: ToolContext,
+    attempt: int,
+    error_text: str,
+) -> Dict[str, Any]:
+    """
+    Narrow web_search arguments on retry to improve reliability:
+    - reduce count to a smaller bounded value
+    - trim query length to avoid provider parser/timeouts
+    """
+    out = dict(arguments or {})
+    q = str(out.get("query") or "").strip()
+    if q:
+        q = q.splitlines()[0].strip()[:160]
+        out["query"] = q
+    try:
+        n = int(out.get("count", 5) or 5)
+    except Exception:
+        n = 5
+    out["count"] = max(3, min(8, n))
+    return out
+
+
+def _tavily_retry_adjuster(
+    arguments: Dict[str, Any],
+    context: ToolContext,
+    attempt: int,
+    error_text: str,
+) -> Dict[str, Any]:
+    """
+    Narrow Tavily workloads on retry (depth/limits/chunks/wait) to reduce
+    transient provider failures and long-poll timeouts.
+    """
+    out = dict(arguments or {})
+    if "max_depth" in out:
+        try:
+            out["max_depth"] = max(1, min(2, int(out.get("max_depth", 1) or 1)))
+        except Exception:
+            out["max_depth"] = 1
+    if "max_breadth" in out:
+        try:
+            out["max_breadth"] = max(10, min(30, int(out.get("max_breadth", 20) or 20)))
+        except Exception:
+            out["max_breadth"] = 20
+    if "limit" in out:
+        try:
+            out["limit"] = max(10, min(30, int(out.get("limit", 20) or 20)))
+        except Exception:
+            out["limit"] = 20
+    if "chunks_per_source" in out:
+        try:
+            out["chunks_per_source"] = max(1, min(3, int(out.get("chunks_per_source", 2) or 2)))
+        except Exception:
+            out["chunks_per_source"] = 2
+    if "max_wait_seconds" in out:
+        try:
+            out["max_wait_seconds"] = max(45, min(90, int(out.get("max_wait_seconds", 90) or 90)))
+        except Exception:
+            out["max_wait_seconds"] = 90
+    return out
+
+
 async def _run_skill_executor(arguments: Dict[str, Any], context: ToolContext) -> str:
     """Run a script from a loaded skill's scripts/ folder. All usage (script name, args) is defined in SKILL.md; the model must pass them. Never raises: returns an error string on failure."""
     if not isinstance(arguments, dict):
@@ -8464,6 +8564,9 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             execute_async=_run_skill_executor,
             short_description="Use when: user asks for a skill (email, slides, HTML report, image, etc.). Pass skill_name and script (or skill_name only for instruction-only skills); then continue with document_read/save_result_page.",
             risk_tier="exec",
+            max_retries=1,
+            retry_delay_seconds=0.2,
+            retry_decider=_run_skill_retry_decider,
         )
     )
 
@@ -8943,6 +9046,9 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             },
             execute_async=_web_search_executor,
             risk_tier="network",
+            max_retries=1,
+            retry_delay_seconds=0.4,
+            retry_adjuster=_web_search_retry_adjuster,
         )
     )
     registry.register(
@@ -8963,6 +9069,9 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             },
             execute_async=_tavily_extract_executor,
             risk_tier="network",
+            max_retries=1,
+            retry_delay_seconds=0.4,
+            retry_adjuster=_tavily_retry_adjuster,
         )
     )
     registry.register(
@@ -8984,6 +9093,9 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             },
             execute_async=_tavily_crawl_executor,
             risk_tier="network",
+            max_retries=1,
+            retry_delay_seconds=0.4,
+            retry_adjuster=_tavily_retry_adjuster,
         )
     )
     registry.register(
@@ -9004,6 +9116,9 @@ def register_builtin_tools(registry: ToolRegistry) -> None:
             },
             execute_async=_tavily_research_executor,
             risk_tier="network",
+            max_retries=1,
+            retry_delay_seconds=0.4,
+            retry_adjuster=_tavily_retry_adjuster,
         )
     )
     registry.register(

@@ -564,26 +564,6 @@ async def route(
     except Exception as e:
         logger.debug("Intent router skill-intent pre-check failed (non-fatal): {}", e)
 
-    # Weather: use dedicated category so planner DAG runs run_skill(weather) without main LLM tool rounds.
-    # Falls back to ReAct + web_search when skill returns Error (see planner_executor dag_fail_if_last_starts_with_error).
-    try:
-        if "weather" in categories and query is not None and isinstance(query, str) and query.strip():
-            q = query.strip().lower()
-            q_raw = query.strip()
-            if (
-                "weather" in q
-                or "forecast" in q
-                or "temperature" in q
-                or "wttr" in q
-                or "天气" in q_raw
-                or "气温" in q_raw
-                or "天气预报" in q_raw
-            ):
-                logger.debug("Intent router: query matches weather -> category weather")
-                return "weather"
-    except Exception as e:
-        logger.debug("Intent router weather pre-check failed (non-fatal): {}", e)
-
     # Hot intents: preempt to category so DAG runs (or narrow ReAct) without the classifier LLM.
     # Placed after weather so 天气/forecast queries stay weather, not search_web.
     try:

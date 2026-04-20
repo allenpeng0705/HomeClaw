@@ -10,7 +10,8 @@ See Design.md §3.6 (Plugins vs tools).
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+import asyncio
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from loguru import logger
 
@@ -53,6 +54,70 @@ class ToolContext:
 
 # Executor: async (arguments: dict, context: ToolContext) -> str
 ToolExecutor = Callable[[Dict[str, Any], ToolContext], Awaitable[str]]
+RetryAdjuster = Callable[[Dict[str, Any], ToolContext, int, str], Dict[str, Any]]
+RetryDecider = Callable[[Dict[str, Any], ToolContext, str], bool]
+
+
+def _schema_type_matches(value: Any, expected: str) -> bool:
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "null":
+        return value is None
+    return True
+
+
+def _validate_argument_schema(
+    schema: Dict[str, Any],
+    value: Any,
+    path: str = "$",
+) -> List[str]:
+    errors: List[str] = []
+    if not isinstance(schema, dict):
+        return errors
+    expected = schema.get("type")
+    if isinstance(expected, str) and not _schema_type_matches(value, expected):
+        errors.append(f"{path}: expected {expected}, got {type(value).__name__}")
+        return errors
+
+    if expected == "object" and isinstance(value, dict):
+        props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+        required = schema.get("required") if isinstance(schema.get("required"), list) else []
+        for k in required:
+            if k not in value:
+                errors.append(f"{path}: missing required field '{k}'")
+        additional = schema.get("additionalProperties")
+        if additional is False:
+            for key in value:
+                if key not in props:
+                    errors.append(f"{path}: unknown field '{key}'")
+        for key, subschema in props.items():
+            if key in value and isinstance(subschema, dict):
+                errors.extend(_validate_argument_schema(subschema, value[key], f"{path}.{key}"))
+    elif expected == "array" and isinstance(value, list):
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            for idx, item in enumerate(value):
+                errors.extend(_validate_argument_schema(item_schema, item, f"{path}[{idx}]"))
+    return errors
+
+
+def _looks_like_error_result(result: Any) -> Tuple[bool, str]:
+    if not isinstance(result, str):
+        return False, ""
+    text = result.strip()
+    if text.lower().startswith("error"):
+        return True, text
+    return False, text
 
 
 def filter_openai_tools_for_llm(
@@ -136,6 +201,10 @@ class ToolDefinition:
     # Policy hooks (optional). Used when core.yml tool_policy.default_mode=allow_read_restrict_write.
     risk_tier: Optional[str] = None  # read | write | network | exec | user_data; unset → treated as read
     requires_confirmation: bool = False  # When true, blocked in allow_read_restrict_write (before risk_tier check)
+    max_retries: int = 0  # Retry count after initial attempt (0 = no retry)
+    retry_delay_seconds: float = 0.0  # Optional backoff between retries
+    retry_adjuster: Optional[RetryAdjuster] = None  # Optional strategy hook to mutate args between retries
+    retry_decider: Optional[RetryDecider] = None  # Optional gate to decide whether a retry is allowed
 
     def to_openai_function(self, max_description_chars: Optional[int] = None) -> Dict[str, Any]:
         """OpenAI/OpenAI-compatible function descriptor for chat API. When max_description_chars > 0, use short_description or truncate for local LLM."""
@@ -211,6 +280,15 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if not tool:
             raise KeyError(f"Unknown tool: {name}")
+        if not isinstance(arguments, dict):
+            return "Error: invalid tool arguments: payload must be a JSON object."
+        schema_errors = _validate_argument_schema(
+            {"type": "object", "properties": tool.parameters.get("properties", {}), "required": tool.parameters.get("required", [])},
+            arguments,
+        )
+        if schema_errors:
+            logger.info("[TOOL_CALL] name={} INVALID_SCHEMA errors={}", name, schema_errors)
+            return f"Error: invalid tool arguments: {'; '.join(schema_errors)}"
         try:
             from base.tool_permissions import evaluate_tool_permission
 
@@ -256,29 +334,90 @@ class ToolRegistry:
             summary=f"tool call started: {name}",
             details={"tool_name": name, "arguments": args_redacted},
         )
-        try:
-            result = await tool.execute_async(arguments, context)
-            result = result if result is not None else ""
-            res_len = len(result) if isinstance(result, str) else 0
-            status = "error" if isinstance(result, str) and result.strip().startswith("Error") else "ok"
-            logger.debug("[TOOL_RESULT] name={} result_len={} status={}", name, res_len, status)
-            _trace_emit_event(
-                event_type="tool_call_finished",
-                component="tool_registry",
-                summary=f"tool call finished: {name}",
-                details={"tool_name": name, "status": status, "result_len": res_len},
-            )
-            return result
-        except Exception as e:
-            logger.exception("Tool {} failed: {}", name, e)
-            logger.debug("[TOOL_RESULT] name={} status=exception", name)
-            _trace_emit_event(
-                event_type="tool_call_finished",
-                component="tool_registry",
-                summary=f"tool call exception: {name}",
-                details={"tool_name": name, "status": "exception", "error": str(e)},
-            )
-            return f"Error running tool {name}: {e!s}"
+        max_retries = max(0, int(getattr(tool, "max_retries", 0) or 0))
+        retry_delay = max(0.0, float(getattr(tool, "retry_delay_seconds", 0.0) or 0.0))
+        retry_adjuster = getattr(tool, "retry_adjuster", None)
+        retry_decider = getattr(tool, "retry_decider", None)
+        current_args = dict(arguments)
+        last_error = ""
+        for attempt in range(max_retries + 1):
+            try:
+                result = await tool.execute_async(current_args, context)
+                result = result if result is not None else ""
+                is_error, error_text = _looks_like_error_result(result)
+                if not is_error:
+                    res_len = len(result) if isinstance(result, str) else 0
+                    logger.debug("[TOOL_RESULT] name={} result_len={} status={} attempt={}", name, res_len, "ok", attempt)
+                    _trace_emit_event(
+                        event_type="tool_call_finished",
+                        component="tool_registry",
+                        summary=f"tool call finished: {name}",
+                        details={"tool_name": name, "status": "ok", "result_len": res_len, "attempt": attempt},
+                    )
+                    return result
+                last_error = error_text
+                can_retry = attempt < max_retries
+                if can_retry and callable(retry_decider):
+                    try:
+                        can_retry = bool(retry_decider(dict(current_args), context, error_text))
+                    except Exception as _retry_decider_e:
+                        logger.debug("Retry decider failed for {} (default no-retry): {}", name, _retry_decider_e)
+                        can_retry = False
+                if not can_retry:
+                    logger.debug("[TOOL_RESULT] name={} status={} attempt={}", name, "error", attempt)
+                    _trace_emit_event(
+                        event_type="tool_call_finished",
+                        component="tool_registry",
+                        summary=f"tool call finished: {name}",
+                        details={"tool_name": name, "status": "error", "result_len": len(result), "attempt": attempt},
+                    )
+                    return result
+                if callable(retry_adjuster):
+                    current_args = retry_adjuster(dict(current_args), context, attempt + 1, error_text)
+                    if not isinstance(current_args, dict):
+                        return "Error: invalid retry strategy: adjusted arguments must be a JSON object."
+                logger.warning(
+                    "[TOOL_RETRY] name={} attempt={} reason={} adjusted_args={}",
+                    name,
+                    attempt + 1,
+                    error_text[:200],
+                    redact_params_for_log(current_args),
+                )
+                if retry_delay > 0:
+                    await asyncio.sleep(retry_delay)
+            except Exception as e:
+                last_error = str(e)
+                can_retry = attempt < max_retries
+                if can_retry and callable(retry_decider):
+                    try:
+                        can_retry = bool(retry_decider(dict(current_args), context, str(e)))
+                    except Exception as _retry_decider_e:
+                        logger.debug("Retry decider failed for {} (default no-retry): {}", name, _retry_decider_e)
+                        can_retry = False
+                if not can_retry:
+                    logger.exception("Tool {} failed after {} retries: {}", name, max_retries, e)
+                    logger.debug("[TOOL_RESULT] name={} status=exception attempt={}", name, attempt)
+                    _trace_emit_event(
+                        event_type="tool_call_finished",
+                        component="tool_registry",
+                        summary=f"tool call exception: {name}",
+                        details={"tool_name": name, "status": "exception", "error": str(e), "attempt": attempt},
+                    )
+                    return f"Error running tool {name}: {e!s}"
+                if callable(retry_adjuster):
+                    current_args = retry_adjuster(dict(current_args), context, attempt + 1, str(e))
+                    if not isinstance(current_args, dict):
+                        return "Error: invalid retry strategy: adjusted arguments must be a JSON object."
+                logger.warning(
+                    "[TOOL_RETRY] name={} attempt={} exception={} adjusted_args={}",
+                    name,
+                    attempt + 1,
+                    str(e)[:200],
+                    redact_params_for_log(current_args),
+                )
+                if retry_delay > 0:
+                    await asyncio.sleep(retry_delay)
+        return f"Error running tool {name}: {last_error or 'unknown error'}"
 
 
 # Global registry instance. Core (or bootstrap) can add built-in tools and plugin tools here.
