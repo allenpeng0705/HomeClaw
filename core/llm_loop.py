@@ -2321,7 +2321,9 @@ async def answer_from_memory(
                         if _cat_skills:
                             _allowed_skill_folders = {str(s).strip().lower() for s in _cat_skills if s is not None and str(s).strip()}
                             if _allowed_skill_folders:
+                                # First pass: keep only skills whose folder is in the category allowlist.
                                 _new_list = []
+                                _folders_in_new_list: set = set()
                                 for s in skills_list:
                                     if not isinstance(s, dict):
                                         _new_list.append(s)
@@ -2329,6 +2331,24 @@ async def answer_from_memory(
                                     folder = (s.get("folder") or s.get("name") or "").strip().lower()
                                     if folder in _allowed_skill_folders:
                                         _new_list.append(s)
+                                        _folders_in_new_list.add(folder)
+                                # Second pass: add missing allowed skills directly from the catalog.
+                                # This ensures that when intent router selects a category (e.g. "weather"),
+                                # the skills for that category are included even if semantic similarity was below threshold.
+                                _missing_folders = _allowed_skill_folders - _folders_in_new_list
+                                if _missing_folders:
+                                    _catalog = (
+                                        _skills_full_catalog_cache
+                                        if _skills_full_catalog_cache is not None
+                                        else load_skills_from_dirs(skills_dirs, disabled_folders=disabled_folders, include_body=False)
+                                    )
+                                    for _sk in _catalog:
+                                        if not isinstance(_sk, dict):
+                                            continue
+                                        _fld = (_sk.get("folder") or _sk.get("name") or "").strip().lower()
+                                        if _fld and _fld in _missing_folders:
+                                            _new_list.insert(0, _sk)
+                                            _folders_in_new_list.add(_fld)
                                 skills_list = _new_list
                                 _component_log("intent_router", f"filtered skills by category: {len(skills_list)} skill(s)")
                     except Exception as _e:

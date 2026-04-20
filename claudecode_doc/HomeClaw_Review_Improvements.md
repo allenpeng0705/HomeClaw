@@ -242,10 +242,10 @@ When tapping a push notification, the app routes to chat. But if the app is alre
 
 ## 5. Cross-Cutting Concerns
 
-### Issue: Intent Router and Skill Router Are Independent
-These two routers don't share context. If intent router routes to `weather`, the skill router might not load the weather skill if semantic similarity is below threshold.
+### Issue: Intent Router and Skill Router Are Independent ~~(DONE)~~
+These two routers didn't share context. If intent router routed to `weather`, the skill router might not load the weather skill if semantic similarity was below threshold. The `get_skills_filter_for_category` was used only to FILTER results, not to AUGMENT them.
 
-**Fix:** When intent router returns a specific category, skill router should load skills matching that category directly (similar to how `get_skills_filter_for_category()` works for tools).
+**Fix:** Phase 3.1 category filtering now does TWO passes: (1) keep only skills whose folder is in the category allowlist, (2) add missing allowed skills directly from the catalog. This ensures that when intent router selects a category (e.g. "weather"), those skills are included even if semantic search gave them low similarity scores.
 
 ### Issue: Hybrid Router Metrics Are In-Memory Only
 `hybrid_router/metrics.py` uses module-level dictionaries. Stats are lost on restart.
@@ -271,14 +271,16 @@ There's no way to test routing changes with a subset of users.
 5. ~~**Hybrid Router:** Fix semantic cache key (Issue 3)~~ - DONE (mtime-based invalidation)
 6. ~~**Hybrid Router:** Heuristic substring matching (Issue 1)~~ - DONE (word boundaries for single-word ASCII keywords)
 7. ~~**Intent Router:** Add pattern validation (Issue 3)~~ - DONE (regex validation at load time already implemented)
-8. **Skill Router:** Add weighted scoring (Issue 2) - Medium/low impact; current order-based heuristic is reasonable
-9. **Companion App:** Add state management (Issue 1) - High complexity; breaking changes
+8. ~~**Skill Router:** Add weighted scoring (Issue 2)~~ - DONE (union_trigger_baseline_score already implemented at skill_router.py:312)
+9. ~~**Intent/Skill Router integration**~~ - DONE (Phase 3.1 now augments category skills, not just filters)
+10. **Companion App:** Add state management (Issue 1) - High complexity; breaking changes
 
 ### Low Priority
-10. ~~**Hybrid Router:** Make perplexity threshold configurable (Issue 5)~~ - DONE (already configurable)
-11. **Hybrid Router:** Add cascade customization (Issue 6) - Significant restructuring required
-12. **Intent Router:** Cache semantic results (Issue 5) - Issue description inaccurate; semantic/hybrid modes are mutually exclusive
-13. **Companion App:** Add unit tests (Issue 5)
+11. ~~**Hybrid Router:** Make perplexity threshold configurable (Issue 5)~~ - DONE (already configurable)
+12. **Hybrid Router:** Add cascade customization (Issue 6) - Significant restructuring; current first-match cascade is simple and effective
+13. ~~**Intent Router:** Cache semantic results (Issue 5)~~ - DONE (not needed; semantic/hybrid modes are mutually exclusive branches, each calls _route_semantic_intent at most once per request)
+14. **Companion App:** Add unit tests (Issue 5) - Manual testing during companion app development
+15. ~~**Hybrid Router:** SLM URL construction (Issue 4)~~ - Low impact; current 3-tier fallback chain is reasonable
 
 ---
 
