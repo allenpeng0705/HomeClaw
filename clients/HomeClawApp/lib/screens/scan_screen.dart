@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../core_service.dart';
 
@@ -19,16 +20,16 @@ Map<String, String>? parseHomeClawConnect(String raw) {
   };
 }
 
-class ScanScreen extends StatefulWidget {
+class ScanScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
 
   const ScanScreen({super.key, required this.coreService});
 
   @override
-  State<ScanScreen> createState() => _ScanScreenState();
+  ConsumerState<ScanScreen> createState() => _ScanScreenState();
 }
 
-class _ScanScreenState extends State<ScanScreen> {
+class _ScanScreenState extends ConsumerState<ScanScreen> {
   bool _scanned = false;
 
   void _onDetect(BarcodeCapture capture) {
