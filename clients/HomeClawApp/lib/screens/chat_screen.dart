@@ -28,6 +28,7 @@ import '../widgets/attachment_chip.dart';
 import '../widgets/video_play_chip.dart';
 import '../widgets/audio_play_button.dart';
 import '../widgets/chat_message_text.dart';
+import '../widgets/message_file_chip.dart';
 import 'canvas_screen.dart';
 import 'clawcode_screen.dart';
 import 'bridge_project_files_tab.dart';
@@ -4121,61 +4122,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 ),
                               ),
                             if (fileLabels != null && fileLabels.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Wrap(
-                                  spacing: 6,
-                                  runSpacing: 6,
-                                  children: List<Widget>.generate(
-                                      fileLabels.length, (fi) {
-                                    final name = fileLabels[fi];
-                                    final ref = (fileRefs != null &&
-                                            fi < fileRefs.length)
-                                        ? fileRefs[fi]
-                                        : '';
-                                    return Material(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .surfaceContainerHighest,
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: InkWell(
-                                        onTap: ref.isEmpty
-                                            ? null
-                                            : () =>
-                                                _openUserMessageFileRef(ref),
-                                        borderRadius: BorderRadius.circular(8),
-                                        child: Chip(
-                                          avatar: Icon(
-                                            Icons.insert_drive_file_outlined,
-                                            size: 18,
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .primary,
-                                          ),
-                                          label: ConstrainedBox(
-                                            constraints: const BoxConstraints(
-                                                maxWidth: 220),
-                                            child: Text(
-                                              name,
-                                              overflow: TextOverflow.ellipsis,
-                                              maxLines: 2,
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .bodySmall,
-                                            ),
-                                          ),
-                                          materialTapTargetSize:
-                                              MaterialTapTargetSize.shrinkWrap,
-                                          visualDensity: VisualDensity.compact,
-                                          side: BorderSide(
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .outlineVariant),
-                                        ),
-                                      ),
-                                    );
-                                  }),
-                                ),
+                              MessageFileChips(
+                                fileLabels: fileLabels,
+                                fileRefs: fileRefs,
+                                onTapRef: _openUserMessageFileRef,
                               ),
                             _ChatMessageText(
                               text: entry.key,
