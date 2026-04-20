@@ -1,18 +1,18 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-class VmprintPreviewScreen extends StatefulWidget {
+class VmprintPreviewScreen extends ConsumerStatefulWidget {
   final String url;
   const VmprintPreviewScreen({super.key, required this.url});
 
   @override
-  State<VmprintPreviewScreen> createState() => _VmprintPreviewScreenState();
+  ConsumerState<VmprintPreviewScreen> createState() => _VmprintPreviewScreenState();
 }
 
-class _VmprintPreviewScreenState extends State<VmprintPreviewScreen> {
+class _VmprintPreviewScreenState extends ConsumerState<VmprintPreviewScreen> {
   static bool get _isDesktop => Platform.isMacOS || Platform.isWindows || Platform.isLinux;
   WebViewController? _controller;
 
@@ -54,4 +54,3 @@ class _VmprintPreviewScreenState extends State<VmprintPreviewScreen> {
     );
   }
 }
-
