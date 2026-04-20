@@ -27,8 +27,8 @@ use_workspace_bootstrap: true
 # Which workspace dir to load (e.g. config/workspace_day vs config/workspace_night for day/night agents)
 workspace_dir: config/workspace
 # Root for file/folder tools and links. Required for channel/companion file access. When empty, file tools return a clear error; do not use workspace for user files. Each user has two major folders: (1) their sandbox homeclaw_root/{user_id}/ (private), (2) the share folder homeclaw_root/share/ (accessible by all users). Companion app uses homeclaw_root/companion/. Subfolders: output/, knowledge/.
-#homeclaw_root: "/User/shileipeng/Documents/homeclawroot"
-homeclaw_root: "D:/homeclaw"
+homeclaw_root: "/Users/shileipeng/Documents/homeclawroot"
+#homeclaw_root: "D:/homeclaw"
 # Session management: in config/memory_kb.yml (see memory_kb_config_file above).
 # When an unknown user (not in user.yml) tries to access, notify the owner via last-used channel so they can add to user.yml. See docs_design/OutboundMarkdownAndUnknownRequest.md.
 notify_unknown_request: false
@@ -77,8 +77,8 @@ prompts_dir: config/prompts
 prompt_default_language: en
 prompt_cache_ttl_seconds: 0   # Unit: seconds. 0 = cache by file mtime; >0 = TTL
 # Optional: require API key for /inbound and /ws when exposing Core on the internet; see docs/RemoteAccess.md
-# auth_enabled: true
-# auth_api_key: "1234567890"   # when auth_enabled: true, require X-API-Key or Bearer. Also used to sign file links. Optional encrypted storage: set env HOMECLAW_AUTH_KEY then save via Portal or PATCH — see docs_design/RemoteAccess.md "How to store the API key".
+auth_enabled: true
+auth_api_key: "1234567890"   # when auth_enabled: true, require X-API-Key or Bearer. Also used to sign file links. Optional encrypted storage: set env HOMECLAW_AUTH_KEY then save via Portal or PATCH — see docs_design/RemoteAccess.md "How to store the API key".
 
 peer_pairing_enabled: true   # when false, disable POST /api/peer/invite/create and consume (404). See docs/multi-instance-peers.md
 federation_enabled: true   # when true, allow cross-instance user-to-user messages via peers.yml + POST /api/federation/user-message; see docs/federated-companion-messaging.md
