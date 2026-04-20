@@ -136,8 +136,23 @@ def load_semantic_routes(
     return (loc, cloud)
 
 
-# Cache one router instance per process (keyed by routes_path or "default")
+# Cache one router instance per process (keyed by routes_path + file mtime)
 _semantic_router_cache: Dict[str, Any] = {}
+
+
+def _semantic_router_cache_key(routes_path: Optional[str], root_dir: Optional[Path]) -> str:
+    """Cache key includes mtime of the routes file so stale cache is invalidated on file change."""
+    key = routes_path or "default"
+    if routes_path and root_dir:
+        path = Path(routes_path)
+        if not path.is_absolute():
+            path = Path(root_dir) / path
+        try:
+            if path.is_file():
+                key = f"{key}:{int(path.stat().st_mtime)}"
+        except Exception:
+            pass
+    return key
 
 
 def build_semantic_router(
@@ -150,7 +165,7 @@ def build_semantic_router(
 ) -> Any:
     """Build SemanticRouter with Route('local', ...) and Route('cloud', ...). Uses encoder or creates HomeClawEmbeddingEncoder."""
     _ensure_semantic_router()
-    cache_key = routes_path or "default"
+    cache_key = _semantic_router_cache_key(routes_path, root_dir)
     if use_cache and cache_key in _semantic_router_cache:
         return _semantic_router_cache[cache_key]
     loc, cloud = load_semantic_routes(
