@@ -196,3 +196,28 @@ class FriendRequestsNotifier extends StateNotifier<FriendRequestsState> {
     setBusy('fed_$id', busy);
   }
 }
+
+/// State for open-chat-from-push screen.
+class OpenChatFromPushState {
+  final String? error;
+  const OpenChatFromPushState({this.error});
+  OpenChatFromPushState copyWith({String? error, bool clearError = false}) =>
+      OpenChatFromPushState(error: clearError ? null : (error ?? this.error));
+}
+
+/// Provider for open-chat-from-push state.
+final openChatFromPushProvider = StateNotifierProvider<OpenChatFromPushNotifier, OpenChatFromPushState>(
+  (ref) => OpenChatFromPushNotifier(),
+);
+
+class OpenChatFromPushNotifier extends StateNotifier<OpenChatFromPushState> {
+  OpenChatFromPushNotifier() : super(const OpenChatFromPushState());
+
+  void setError(String? e) {
+    state = state.copyWith(error: e);
+  }
+
+  void clearError() {
+    state = state.copyWith(clearError: true);
+  }
+}
