@@ -14,6 +14,7 @@ import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:homeclaw_voice/homeclaw_voice.dart';
 import 'package:file_picker/file_picker.dart';
 import '../widgets/full_screen_image_page.dart';
+import '../widgets/full_screen_video_page.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -22,12 +23,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:record/record.dart';
-import 'package:video_player/video_player.dart';
 import '../chat_history_store.dart';
 import '../core_service.dart';
 import '../federation_e2e_crypto.dart';
 import '../widgets/homeclaw_snackbars.dart';
 import '../widgets/attachment_chip.dart';
+import '../widgets/video_play_chip.dart';
 import 'canvas_screen.dart';
 import 'clawcode_screen.dart';
 import 'bridge_project_files_tab.dart';
@@ -5173,40 +5174,11 @@ class _VideoPlayChip extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
-        onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (ctx) => _FullScreenVideoPage(
-                videoRef: videoRef,
-                coreBaseUrl: coreBaseUrl,
-                httpHeaders: httpHeaders,
-              ),
-            ),
-          );
-        },
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.videocam,
-                  color: Theme.of(context).colorScheme.primary),
-              const SizedBox(width: 8),
-              Text('Video', style: Theme.of(context).textTheme.labelLarge),
-              const SizedBox(width: 4),
-              const Icon(Icons.play_circle_fill, size: 20),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => VideoPlayChip(
+        videoRef: videoRef,
+        coreBaseUrl: coreBaseUrl,
+        httpHeaders: httpHeaders,
+      );
 }
 
 /// Full-screen video player: data URL, local file, http(s), or Core `/files/...`.
@@ -5226,88 +5198,12 @@ class _FullScreenVideoPage extends StatefulWidget {
 }
 
 class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
-  VideoPlayerController? _controller;
-  String? _error;
-
   @override
-  void initState() {
-    super.initState();
-    _initPlayer();
-  }
-
-  Future<void> _initPlayer() async {
-    final ref = widget.videoRef.trim();
-    if (ref.isEmpty) {
-      if (mounted) setState(() => _error = 'Invalid video');
-      return;
-    }
-    try {
-      if (ref.startsWith('data:video/') && ref.contains(',')) {
-        final b64 = ref.split(',').last;
-        final bytes = base64Decode(b64);
-        final dir = await getTemporaryDirectory();
-        final ext = ref.contains('webm') ? 'webm' : 'mp4';
-        final file = File(path.join(
-            dir.path, 'video_${DateTime.now().millisecondsSinceEpoch}.$ext'));
-        await file.writeAsBytes(bytes);
-        if (!mounted) return;
-        _controller = VideoPlayerController.file(file);
-      } else if (ref.startsWith('/files/') || ref.startsWith('/files/out')) {
-        final base = widget.coreBaseUrl.replaceFirst(RegExp(r'/$'), '');
-        final url = '$base$ref';
-        _controller = VideoPlayerController.networkUrl(
-          Uri.parse(url),
-          httpHeaders: widget.httpHeaders ?? const {},
-        );
-      } else if (ref.startsWith('http://') || ref.startsWith('https://')) {
-        _controller = VideoPlayerController.networkUrl(Uri.parse(ref));
-      } else if (await File(ref).exists()) {
-        _controller = VideoPlayerController.file(File(ref));
-      } else {
-        if (mounted) setState(() => _error = 'Video file not found');
-        return;
-      }
-      await _controller!.initialize();
-      if (mounted) setState(() {});
-      _controller!.play();
-    } catch (e) {
-      if (mounted) setState(() => _error = 'Could not play: $e');
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: const Text('Video'),
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-      ),
-      body: _error != null
-          ? Center(
-              child: Text(_error!, style: const TextStyle(color: Colors.white)))
-          : _controller == null || !_controller!.value.isInitialized
-              ? const Center(
-                  child: CircularProgressIndicator(color: Colors.white))
-              : Center(
-                  child: AspectRatio(
-                    aspectRatio: _controller!.value.aspectRatio,
-                    child: VideoPlayer(_controller!),
-                  ),
-                ),
-    );
-  }
+  Widget build(BuildContext context) => FullScreenVideoPage(
+        videoRef: widget.videoRef,
+        coreBaseUrl: widget.coreBaseUrl,
+        httpHeaders: widget.httpHeaders,
+      );
 }
 
 /// Play button for a voice message (data URL, local path, http(s), or Core `/files/...`).
