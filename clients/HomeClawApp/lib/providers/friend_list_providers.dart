@@ -103,3 +103,96 @@ class FriendListNotifier extends StateNotifier<FriendListState> {
     state = state.copyWith(unreadUserIds: ids);
   }
 }
+
+/// State for friend requests screen.
+class FriendRequestsState {
+  final List<Map<String, dynamic>> requests;
+  final List<Map<String, dynamic>> federatedRequests;
+  final bool loading;
+  final bool loadingFed;
+  final String? error;
+  final String? errorFed;
+  final Set<String> busy;
+
+  const FriendRequestsState({
+    this.requests = const [],
+    this.federatedRequests = const [],
+    this.loading = true,
+    this.loadingFed = true,
+    this.error,
+    this.errorFed,
+    this.busy = const {},
+  });
+
+  FriendRequestsState copyWith({
+    List<Map<String, dynamic>>? requests,
+    List<Map<String, dynamic>>? federatedRequests,
+    bool? loading,
+    bool? loadingFed,
+    String? error,
+    bool clearError = false,
+    String? errorFed,
+    bool clearErrorFed = false,
+    Set<String>? busy,
+  }) =>
+      FriendRequestsState(
+        requests: requests ?? this.requests,
+        federatedRequests: federatedRequests ?? this.federatedRequests,
+        loading: loading ?? this.loading,
+        loadingFed: loadingFed ?? this.loadingFed,
+        error: clearError ? null : (error ?? this.error),
+        errorFed: clearErrorFed ? null : (errorFed ?? this.errorFed),
+        busy: busy ?? this.busy,
+      );
+}
+
+/// Provider for friend requests state.
+final friendRequestsProvider = StateNotifierProvider<FriendRequestsNotifier, FriendRequestsState>(
+  (ref) => FriendRequestsNotifier(ref),
+);
+
+class FriendRequestsNotifier extends StateNotifier<FriendRequestsState> {
+  final Ref _ref;
+
+  FriendRequestsNotifier(this._ref) : super(const FriendRequestsState());
+
+  CoreService get _core => _ref.read(coreServiceProvider);
+
+  void setLoading(bool value) {
+    state = state.copyWith(loading: value);
+  }
+
+  void setRequests(List<Map<String, dynamic>> requests) {
+    state = state.copyWith(requests: requests, loading: false, clearError: true);
+  }
+
+  void setError(String e) {
+    state = state.copyWith(error: e, loading: false, requests: []);
+  }
+
+  void setLoadingFed(bool value) {
+    state = state.copyWith(loadingFed: value);
+  }
+
+  void setFederatedRequests(List<Map<String, dynamic>> requests) {
+    state = state.copyWith(federatedRequests: requests, loadingFed: false, clearErrorFed: true);
+  }
+
+  void setErrorFed(String e) {
+    state = state.copyWith(errorFed: e, loadingFed: false, federatedRequests: []);
+  }
+
+  void setBusy(String id, bool busy) {
+    final newBusy = Set<String>.from(state.busy);
+    if (busy) {
+      newBusy.add(id);
+    } else {
+      newBusy.remove(id);
+    }
+    state = state.copyWith(busy: newBusy);
+  }
+
+  void setBusyFed(String id, bool busy) {
+    setBusy('fed_$id', busy);
+  }
+}
