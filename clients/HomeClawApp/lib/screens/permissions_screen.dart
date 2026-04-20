@@ -26,7 +26,6 @@ Future<bool> getPermissionsIntroShown() async {
 }
 
 /// One permission row: title, description, status, and Allow button.
-class _PermissionItem = PermissionItem;
 
 class PermissionsScreen extends StatefulWidget {
   final CoreService coreService;
@@ -53,11 +52,11 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
   final Map<String, bool> _requesting = {};
   bool _continuing = false;
 
-  List<_PermissionItem> _buildItems() {
-    final items = <_PermissionItem>[];
+  List<PermissionItem> _buildItems() {
+    final items = <PermissionItem>[];
 
     // Microphone + Speech (voice input). On macOS/iOS, speech_to_text triggers both when we call isAvailable.
-    items.add(_PermissionItem(
+    items.add(PermissionItem(
       title: 'Microphone & Speech',
       description: 'For voice input in chat.',
       request: () async {
@@ -67,21 +66,21 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     ));
 
     // Camera (photos & videos)
-    items.add(_PermissionItem(
+    items.add(PermissionItem(
       title: 'Camera',
       description: 'For taking photos and recording videos to send.',
       request: () => Permission.camera.request(),
     ));
 
     // Notifications
-    items.add(_PermissionItem(
+    items.add(PermissionItem(
       title: 'Notifications',
       description: 'To show reply notifications when the app is in the background.',
       request: () => Permission.notification.request(),
     ));
 
     // Location (when in use) – sent to Core so it can use your location in system context (e.g. weather, scheduling).
-    items.add(_PermissionItem(
+    items.add(PermissionItem(
       title: 'Location (when in use)',
       description: 'Send your location to Core so it can use it (e.g. weather, reminders). Stored per user or shared when not combined.',
       request: () => Permission.locationWhenInUse.request(),
@@ -89,7 +88,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
 
     // Screen recording (macOS only) – no API to request; user must allow in System Settings.
     if (Platform.isMacOS) {
-      items.add(_PermissionItem(
+      items.add(PermissionItem(
         title: 'Screen Recording',
         description: 'For sharing your screen when Core asks. Allow in System Settings → Privacy & Security → Screen Recording.',
         request: () async => PermissionStatus.denied,
@@ -100,7 +99,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     return items;
   }
 
-  Future<void> _requestPermission(_PermissionItem item) async {
+  Future<void> _requestPermission(PermissionItem item) async {
     final key = item.title;
     if (item.instructionsOnly != null) return;
     setState(() => _requesting[key] = true);
