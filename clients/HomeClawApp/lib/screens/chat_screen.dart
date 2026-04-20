@@ -13,6 +13,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:homeclaw_voice/homeclaw_voice.dart';
 import 'package:file_picker/file_picker.dart';
+import '../widgets/full_screen_image_page.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -5433,90 +5434,9 @@ class _FullScreenImagePage extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final trimmed = imageRef.trim();
-    Widget bodyChild;
-    if (trimmed.startsWith('data:image/')) {
-      final bytes = _decodeDataUrlToBytes(trimmed);
-      if (bytes != null && bytes.isNotEmpty) {
-        bodyChild = Center(
-          child: InteractiveViewer(
-            minScale: 0.5,
-            maxScale: 4.0,
-            child: Image.memory(
-              bytes,
-              fit: BoxFit.contain,
-              gaplessPlayback: true,
-              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image,
-                  color: Colors.white54, size: 64),
-            ),
-          ),
-        );
-      } else {
-        bodyChild = const Center(
-            child: Icon(Icons.broken_image, color: Colors.white54, size: 64));
-      }
-    } else {
-      String? net;
-      final u = Uri.tryParse(trimmed);
-      if (u != null &&
-          u.hasScheme &&
-          (u.scheme == 'http' || u.scheme == 'https')) {
-        net = trimmed;
-      } else if (trimmed.startsWith('/')) {
-        final base = coreBaseUrl.replaceFirst(RegExp(r'/$'), '');
-        net = '$base$trimmed';
-      }
-      if (net != null) {
-        bodyChild = Center(
-          child: InteractiveViewer(
-            minScale: 0.5,
-            maxScale: 4.0,
-            child: Image.network(
-              net,
-              fit: BoxFit.contain,
-              headers: fetchHeaders,
-              loadingBuilder: (c, child, prog) {
-                if (prog == null) return child;
-                return const SizedBox(
-                  width: 48,
-                  height: 48,
-                  child: CircularProgressIndicator(
-                      color: Colors.white54, strokeWidth: 2),
-                );
-              },
-              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image,
-                  color: Colors.white54, size: 64),
-            ),
-          ),
-        );
-      } else {
-        bodyChild = const Center(
-            child: Icon(Icons.broken_image, color: Colors.white54, size: 64));
-      }
-    }
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: GestureDetector(
-        onTap: () => Navigator.of(context).pop(),
-        behavior: HitTestBehavior.opaque,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            bodyChild,
-            SafeArea(
-              child: Align(
-                alignment: Alignment.topRight,
-                child: IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white, size: 28),
-                  onPressed: () => Navigator.of(context).pop(),
-                  tooltip: 'Close',
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => FullScreenImagePage(
+        imageRef: imageRef,
+        coreBaseUrl: coreBaseUrl,
+        fetchHeaders: fetchHeaders,
+      );
 }
