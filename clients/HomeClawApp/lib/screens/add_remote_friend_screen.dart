@@ -1,18 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core_service.dart';
 import '../widgets/homeclaw_snackbars.dart';
 
 /// Form: send federated friend request (user id on peer Core + peers.yml instance_id).
-class AddRemoteFriendPanel extends StatefulWidget {
+class AddRemoteFriendPanel extends ConsumerStatefulWidget {
   final CoreService coreService;
 
   const AddRemoteFriendPanel({super.key, required this.coreService});
 
   @override
-  State<AddRemoteFriendPanel> createState() => _AddRemoteFriendPanelState();
+  ConsumerState<AddRemoteFriendPanel> createState() => _AddRemoteFriendPanelState();
 }
 
-class _AddRemoteFriendPanelState extends State<AddRemoteFriendPanel> {
+class _AddRemoteFriendPanelState extends ConsumerState<AddRemoteFriendPanel> {
   final _peerCtrl = TextEditingController();
   final _userCtrl = TextEditingController();
   final _msgCtrl = TextEditingController();
@@ -64,7 +65,7 @@ class _AddRemoteFriendPanelState extends State<AddRemoteFriendPanel> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Add someone on another HomeClaw Core. Use their user id on that server and the instance_id from your Core’s peers.yml.',
+            'Add someone on another HomeClaw Core. Use their user id on that server and the instance_id from your Core\'s peers.yml.',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 16),

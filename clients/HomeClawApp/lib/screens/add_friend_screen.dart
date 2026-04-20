@@ -1,28 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core_service.dart';
+import '../providers/add_friend_providers.dart';
 import '../widgets/homeclaw_snackbars.dart';
 import 'add_remote_friend_screen.dart';
 
 /// Add Friend: list users on this Core, or (when federation is on) send a remote request.
-class AddFriendScreen extends StatefulWidget {
+class AddFriendScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
 
   const AddFriendScreen({super.key, required this.coreService});
 
   @override
-  State<AddFriendScreen> createState() => _AddFriendScreenState();
+  ConsumerState<AddFriendScreen> createState() => _AddFriendScreenState();
 }
 
-class _AddFriendScreenState extends State<AddFriendScreen> with SingleTickerProviderStateMixin {
-  List<Map<String, dynamic>> _users = [];
-  bool _loading = true;
-  String? _error;
-  final Set<String> _sending = {};
+class _AddFriendScreenState extends ConsumerState<AddFriendScreen> with SingleTickerProviderStateMixin {
+  late final AddFriendNotifier _notifier;
   TabController? _tabController;
 
   @override
   void initState() {
     super.initState();
+    _notifier = ref.read(addFriendProvider.notifier);
     if (widget.coreService.federationEnabled) {
       _tabController = TabController(length: 2, vsync: this);
     }
@@ -36,10 +36,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> with SingleTickerProv
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    _notifier.setLoading(true);
     try {
       final list = await widget.coreService.getUsers();
       final friends = await widget.coreService.getFriends();
@@ -55,20 +52,9 @@ class _AddFriendScreenState extends State<AddFriendScreen> with SingleTickerProv
         final id = (u['id'] as String?)?.trim() ?? '';
         return id.isNotEmpty && !alreadyFriendIds.contains(id);
       }).toList();
-      if (mounted) {
-        setState(() {
-          _users = filtered;
-          _loading = false;
-        });
-      }
+      if (mounted) _notifier.setUsers(filtered);
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-          _users = [];
-        });
-      }
+      if (mounted) _notifier.setError(e.toString());
     }
   }
 
@@ -88,7 +74,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> with SingleTickerProv
       ),
     );
     if (confirmed != true || !mounted) return;
-    setState(() => _sending.add(id));
+    _notifier.setSending(id, true);
     try {
       await widget.coreService.sendFriendRequest(id);
       if (!mounted) return;
@@ -100,20 +86,20 @@ class _AddFriendScreenState extends State<AddFriendScreen> with SingleTickerProv
         );
       }
     } finally {
-      if (mounted) setState(() => _sending.remove(id));
+      if (mounted) _notifier.setSending(id, false);
     }
   }
 
-  Widget _buildLocalBody() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) {
+  Widget _buildLocalBody(AddFriendState state) {
+    if (state.loading) return const Center(child: CircularProgressIndicator());
+    if (state.error != null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              HomeClawInlineErrorCard(message: _error!),
+              HomeClawInlineErrorCard(message: state.error!),
               const SizedBox(height: 16),
               FilledButton(onPressed: _load, child: const Text('Retry')),
             ],
@@ -121,17 +107,17 @@ class _AddFriendScreenState extends State<AddFriendScreen> with SingleTickerProv
         ),
       );
     }
-    if (_users.isEmpty) {
+    if (state.users.isEmpty) {
       return Center(child: Text('No other users', style: Theme.of(context).textTheme.bodyLarge));
     }
     return ListView.builder(
       padding: const EdgeInsets.all(8),
-      itemCount: _users.length,
+      itemCount: state.users.length,
       itemBuilder: (context, index) {
-        final u = _users[index];
+        final u = state.users[index];
         final id = (u['id'] as String?)?.trim() ?? '';
         final name = (u['name'] as String?)?.trim() ?? id;
-        final sending = _sending.contains(id);
+        final sending = state.sending.contains(id);
         return Card(
           margin: const EdgeInsets.only(bottom: 8),
           child: ListTile(
@@ -154,23 +140,24 @@ class _AddFriendScreenState extends State<AddFriendScreen> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(addFriendProvider);
     final fed = widget.coreService.federationEnabled;
     if (!fed) {
       return Scaffold(
         appBar: AppBar(
           title: const Text('Add friend'),
           actions: [
-            IconButton(icon: const Icon(Icons.refresh), onPressed: _loading ? null : _load, tooltip: 'Refresh'),
+            IconButton(icon: const Icon(Icons.refresh), onPressed: state.loading ? null : _load, tooltip: 'Refresh'),
           ],
         ),
-        body: _buildLocalBody(),
+        body: _buildLocalBody(state),
       );
     }
     return Scaffold(
       appBar: AppBar(
         title: const Text('Add friend'),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loading ? null : _load, tooltip: 'Refresh'),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: state.loading ? null : _load, tooltip: 'Refresh'),
         ],
         bottom: TabBar(
           controller: _tabController,
@@ -183,7 +170,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> with SingleTickerProv
       body: TabBarView(
         controller: _tabController,
         children: [
-          _buildLocalBody(),
+          _buildLocalBody(state),
           AddRemoteFriendPanel(coreService: widget.coreService),
         ],
       ),
