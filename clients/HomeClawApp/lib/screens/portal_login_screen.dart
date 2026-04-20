@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../widgets/homeclaw_snackbars.dart';
 
 import '../core_service.dart';
@@ -6,16 +7,16 @@ import 'portal_ui_screen.dart';
 
 /// Portal admin login: username + password. On success opens Portal UI WebView.
 /// Use same credentials as the Portal's admin account (config/portal_admin.yml).
-class PortalLoginScreen extends StatefulWidget {
+class PortalLoginScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
 
   const PortalLoginScreen({super.key, required this.coreService});
 
   @override
-  State<PortalLoginScreen> createState() => _PortalLoginScreenState();
+  ConsumerState<PortalLoginScreen> createState() => _PortalLoginScreenState();
 }
 
-class _PortalLoginScreenState extends State<PortalLoginScreen> {
+class _PortalLoginScreenState extends ConsumerState<PortalLoginScreen> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _loading = false;
