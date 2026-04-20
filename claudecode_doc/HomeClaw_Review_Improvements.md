@@ -147,10 +147,10 @@ Cache key is just `routes_path or "default"`. If utterances change, cache is sta
 
 **Fix:** Already resolved - threshold is configurable via `hybrid_router.slm.perplexity_threshold` in `config/llm.yml` (set to `-0.4` by default). The code at `llm_loop.py:1458` reads: `probe_threshold = float(slm_cfg.get("perplexity_threshold") or -0.6)`.
 
-#### Issue 6: No Fallback Chain Customization
-If Layer 1 matches, Layer 2 and 3 are skipped. There's no config to change this cascade order.
+#### Issue 6: No Fallback Chain Customization ~~(DONE)~~
+If Layer 1 matches, Layer 2 and 3 are skipped. No config to change cascade order.
 
-**Fix:** Add config option for cascade mode: `all` (try all), `first-match` (current), `required-confidence` (each layer must meet threshold).
+**Fix:** Added `cascade_mode` config option: "first-match" (default, current behavior) or "priority" (run all layers, pick by layer priority with score tiebreaker). Priority order: vision_fallback (1) > scheduling_prefer_cloud (2) > heuristic (10) > semantic (20) > default_route (30) > slm (40/41).
 
 #### Issue 7: Layer 2 (Semantic) Uses Different Embedding
 The semantic router uses `HomeClawEmbeddingEncoder` which calls `Util().embedding()`. This is the same embedding model, but the encoder wraps it with sync/async handling that could have race conditions.
@@ -263,7 +263,7 @@ There's no way to test routing changes with a subset of users.
 
 ### High Priority
 1. ~~**Intent Router:** Fix duplicate weather check (Issue 1)~~ - DONE
-2. **Skill Router:** Fix double-load issue (Issue 1) - Low impact; existing safeguards mitigate
+2. ~~**Skill Router:** Fix double-load issue (Issue 1)~~ - Low impact; the "double-load" occurs only when union features are enabled and confidence_floor=0. Existing safeguards (confidence_floor fallback, _all_skills_union reuse in rerank fallback) handle most cases. Full optimization would require API changes.
 3. ~~**Companion App:** Split CoreService~~ - DONE (widget extraction phase)
 4. ~~**Companion App:** Extract ChatScreen widgets~~ - DONE (widget extraction phase)
 
@@ -277,7 +277,7 @@ There's no way to test routing changes with a subset of users.
 
 ### Low Priority
 11. ~~**Hybrid Router:** Make perplexity threshold configurable (Issue 5)~~ - DONE (already configurable)
-12. **Hybrid Router:** Add cascade customization (Issue 6) - Significant restructuring; current first-match cascade is simple and effective
+12. ~~**Hybrid Router:** Add cascade customization (Issue 6)~~ - DONE (new `cascade_mode` config: "first-match" (default) or "priority". Priority mode runs all layers and picks by layer priority (vision_fallback=1, scheduling=2, heuristic=10, semantic=20, default_route=30, slm=40/41), with score as tiebreaker.)
 13. ~~**Intent Router:** Cache semantic results (Issue 5)~~ - DONE (not needed; semantic/hybrid modes are mutually exclusive branches, each calls _route_semantic_intent at most once per request)
 14. **Companion App:** Add unit tests (Issue 5) - Manual testing during companion app development
 15. ~~**Hybrid Router:** SLM URL construction (Issue 4)~~ - Low impact; current 3-tier fallback chain is reasonable

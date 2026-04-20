@@ -1360,8 +1360,24 @@ async def answer_from_memory(
             default_route = (hr.get("default_route") or "local").strip().lower()
             if default_route not in ("local", "cloud"):
                 default_route = "local"
+            cascade_mode = str(hr.get("cascade_mode") or "first-match").strip().lower()
+            # Priority order for cascade_mode="priority" (lower = higher priority).
+            # Vision and scheduling are unconditional overrides (highest priority).
+            _LAYER_PRIORITY = {
+                "vision_fallback": 1,
+                "scheduling_prefer_cloud": 2,
+                "heuristic": 10,
+                "semantic": 20,
+                "default_route": 30,
+                "perplexity": 40,
+                "classifier": 41,
+            }
+            # In priority mode, collect all triggered routes; in first-match, stop at first hit.
             route = None
             route_layer = "default_route"
+            route_score = 0.0
+            _candidates: list = []  # [(route, score, layer_name, priority), ...] for priority mode
+            _first_match = cascade_mode != "priority"
             # Vision override: if request has images and local model does not support image but cloud does, use cloud so we can understand the image.
             request_images = list(getattr(request, "images", None) or []) if request else []
             if request_images:
@@ -1372,120 +1388,150 @@ async def answer_from_memory(
                 if "image" not in local_media and "image" in cloud_media and cloud_ref:
                     route = "cloud"
                     route_layer = "vision_fallback"
+                    route_score = 1.0
                     logger.info("Mix mode: request has images; local does not support vision, using cloud for this request.")
+                    if _first_match:
+                        _candidates = [(route, route_score, route_layer, _LAYER_PRIORITY[route_layer])]
             # Scheduling/reminder parsing is sensitive (relative time, lead-time, recurring rules).
             # In mix mode, prefer cloud-first for scheduling-like user queries.
-            if route is None and isinstance(query, str) and _query_looks_like_scheduling(query):
+            if (route is None or not _first_match) and isinstance(query, str) and _query_looks_like_scheduling(query):
                 _cloud_ref = (getattr(Util().core_metadata, "main_llm_cloud", None) or "").strip()
                 if _cloud_ref:
-                    route = "cloud"
-                    route_layer = "scheduling_prefer_cloud"
+                    _route2 = "cloud"
+                    _layer2 = "scheduling_prefer_cloud"
+                    _score2 = 1.0
+                    if _first_match:
+                        route = _route2
+                        route_layer = _layer2
+                        route_score = _score2
+                    else:
+                        _candidates.append((_route2, _score2, _layer2, _LAYER_PRIORITY[_layer2]))
                     logger.info("Mix mode: scheduling intent detected; preferring cloud route first.")
-            route_score = 0.0
-            # Layer 1: heuristic (keywords, long-input); no threshold—first match wins when enabled (skip if already chose cloud for vision)
+            # Layer 1: heuristic (keywords, long-input).
             heuristic_cfg = hr.get("heuristic") if isinstance(hr.get("heuristic"), dict) else {}
             h_enabled = bool(heuristic_cfg.get("enabled", False))
-            if h_enabled and route is None:
+            if h_enabled and (route is None or not _first_match):
                 from hybrid_router.heuristic import load_heuristic_rules, run_heuristic_layer
                 root_dir = Path(__file__).resolve().parent.parent
                 rules_path = (heuristic_cfg.get("rules_path") or "").strip()
                 rules_data = load_heuristic_rules(rules_path, root_dir=root_dir) if rules_path else None
                 score, selection = run_heuristic_layer(query or "", rules_data, enabled=h_enabled)
                 if selection:
-                    route = selection
-                    route_layer = "heuristic"
-                    route_score = score
-            # Layer 2: semantic (only when route not yet set, e.g. not overridden by vision_fallback).
-            if route is None:
-                semantic_cfg = hr.get("semantic") if isinstance(hr.get("semantic"), dict) else {}
-                s_enabled = bool(semantic_cfg.get("enabled", False))
-                s_threshold = float(semantic_cfg.get("threshold") or 0)
-                if s_enabled and s_threshold > 0:
-                    try:
-                        from hybrid_router.semantic import (
-                            build_semantic_router,
-                            run_semantic_layer_async,
-                            load_semantic_routes,
-                        )
-                        root_dir = Path(__file__).resolve().parent.parent
-                        routes_path = (semantic_cfg.get("routes_path") or "").strip()
-                        loc, cloud = load_semantic_routes(
-                            routes_path=routes_path or None,
-                            root_dir=root_dir,
-                        )
-                        router = build_semantic_router(
-                            local_utterances=loc,
-                            cloud_utterances=cloud,
-                            routes_path=routes_path or None,
-                            root_dir=root_dir,
-                            use_cache=True,
-                        )
-                        score, selection = await run_semantic_layer_async(
-                            query or "", router, threshold=s_threshold
-                        )
-                        if selection and score >= s_threshold:
+                    if _first_match:
+                        route = selection
+                        route_layer = "heuristic"
+                        route_score = score
+                    else:
+                        _candidates.append((selection, score, "heuristic", _LAYER_PRIORITY["heuristic"]))
+            # Layer 2: semantic.
+            semantic_cfg = hr.get("semantic") if isinstance(hr.get("semantic"), dict) else {}
+            s_enabled = bool(semantic_cfg.get("enabled", False))
+            s_threshold = float(semantic_cfg.get("threshold") or 0)
+            if s_enabled and s_threshold > 0 and (route is None or not _first_match):
+                try:
+                    from hybrid_router.semantic import (
+                        build_semantic_router,
+                        run_semantic_layer_async,
+                        load_semantic_routes,
+                    )
+                    root_dir = Path(__file__).resolve().parent.parent
+                    routes_path = (semantic_cfg.get("routes_path") or "").strip()
+                    loc, cloud = load_semantic_routes(
+                        routes_path=routes_path or None,
+                        root_dir=root_dir,
+                    )
+                    router = build_semantic_router(
+                        local_utterances=loc,
+                        cloud_utterances=cloud,
+                        routes_path=routes_path or None,
+                        root_dir=root_dir,
+                        use_cache=True,
+                    )
+                    score, selection = await run_semantic_layer_async(
+                        query or "", router, threshold=s_threshold
+                    )
+                    if selection and score >= s_threshold:
+                        if _first_match:
                             route = selection
                             route_layer = "semantic"
                             route_score = score
-                    except Exception as e:
-                        logger.debug("Semantic router Layer 2 failed: {}", e)
-            # Optional: long queries use default_route (only when route not yet set).
-            if route is None:
-                prefer_long = hr.get("prefer_cloud_if_long_chars")
-                if prefer_long is not None and isinstance(prefer_long, (int, float)) and int(prefer_long) > 0:
-                    if len((query or "")) > int(prefer_long):
-                        route = default_route
-                        route_layer = "default_route"
-            # Layer 3: classifier (small model) or perplexity (main local model confidence probe)
-            if route is None:
-                slm_cfg = hr.get("slm") if isinstance(hr.get("slm"), dict) else {}
-                slm_enabled = bool(slm_cfg.get("enabled", False))
-                slm_mode = (slm_cfg.get("mode") or "classifier").strip().lower()
-                slm_model_ref = (slm_cfg.get("model") or "").strip()
-                if slm_enabled:
-                    try:
-                        if slm_mode == "perplexity":
-                            # Probe main local model with logprobs; avg logprob >= perplexity_threshold → local
-                            main_local_ref = (getattr(Util().core_metadata, "main_llm_local", None) or "").strip()
-                            if main_local_ref:
-                                from hybrid_router.perplexity import (
-                                    run_perplexity_probe_async,
-                                    resolve_local_model_ref,
-                                )
-                                host, port, raw_id = resolve_local_model_ref(main_local_ref)
-                                if host is not None and port is not None and raw_id:
-                                    probe_max = int(slm_cfg.get("perplexity_max_tokens") or 5)
-                                    probe_threshold = float(slm_cfg.get("perplexity_threshold") or -0.6)
-                                    score, selection = await run_perplexity_probe_async(
-                                        query or "",
-                                        host,
-                                        port,
-                                        raw_id,
-                                        max_tokens=probe_max,
-                                        threshold=probe_threshold,
-                                        timeout_sec=5.0,
-                                    )
-                                    if selection:
-                                        route = selection
-                                        route_layer = "perplexity"
-                                        route_score = score
                         else:
-                            # Classifier: small model returns Local or Cloud; no threshold, we use its answer when valid
-                            if slm_model_ref:
-                                from hybrid_router.slm import run_slm_layer_async, resolve_slm_model_ref
-                                host, port, _path_rel, raw_id = resolve_slm_model_ref(slm_model_ref)
-                                if host is not None and port is not None and raw_id:
-                                    score, selection = await run_slm_layer_async(
-                                        query or "", host, port, raw_id
-                                    )
-                                    if selection:
+                            _candidates.append((selection, score, "semantic", _LAYER_PRIORITY["semantic"]))
+                except Exception as e:
+                    logger.debug("Semantic router Layer 2 failed: {}", e)
+            # Optional: long queries use default_route.
+            prefer_long = hr.get("prefer_cloud_if_long_chars")
+            if prefer_long is not None and isinstance(prefer_long, (int, float)) and int(prefer_long) > 0:
+                if len((query or "")) > int(prefer_long):
+                    if _first_match:
+                        if route is None:
+                            route = default_route
+                            route_layer = "default_route"
+                            route_score = 1.0
+                    else:
+                        _candidates.append((default_route, 1.0, "default_route", _LAYER_PRIORITY["default_route"]))
+            # Layer 3: classifier (small model) or perplexity (main local model confidence probe).
+            slm_cfg = hr.get("slm") if isinstance(hr.get("slm"), dict) else {}
+            slm_enabled = bool(slm_cfg.get("enabled", False))
+            slm_mode = (slm_cfg.get("mode") or "classifier").strip().lower()
+            slm_model_ref = (slm_cfg.get("model") or "").strip()
+            if slm_enabled and (route is None or not _first_match):
+                try:
+                    if slm_mode == "perplexity":
+                        main_local_ref = (getattr(Util().core_metadata, "main_llm_local", None) or "").strip()
+                        if main_local_ref:
+                            from hybrid_router.perplexity import (
+                                run_perplexity_probe_async,
+                                resolve_local_model_ref,
+                            )
+                            host, port, raw_id = resolve_local_model_ref(main_local_ref)
+                            if host is not None and port is not None and raw_id:
+                                probe_max = int(slm_cfg.get("perplexity_max_tokens") or 5)
+                                probe_threshold = float(slm_cfg.get("perplexity_threshold") or -0.6)
+                                score, selection = await run_perplexity_probe_async(
+                                    query or "",
+                                    host,
+                                    port,
+                                    raw_id,
+                                    max_tokens=probe_max,
+                                    threshold=probe_threshold,
+                                    timeout_sec=5.0,
+                                )
+                                if selection:
+                                    _lyr = "perplexity"
+                                    if _first_match:
                                         route = selection
-                                        route_layer = "classifier"
+                                        route_layer = _lyr
                                         route_score = score
-                    except Exception as e:
-                        logger.debug("Layer 3 (slm) failed: {}", e)
+                                    else:
+                                        _candidates.append((selection, score, _lyr, _LAYER_PRIORITY[_lyr]))
+                    else:
+                        if slm_model_ref:
+                            from hybrid_router.slm import run_slm_layer_async, resolve_slm_model_ref
+                            host, port, _path_rel, raw_id = resolve_slm_model_ref(slm_model_ref)
+                            if host is not None and port is not None and raw_id:
+                                score, selection = await run_slm_layer_async(
+                                    query or "", host, port, raw_id
+                                )
+                                if selection:
+                                    _lyr = "classifier"
+                                    if _first_match:
+                                        route = selection
+                                        route_layer = _lyr
+                                        route_score = score
+                                    else:
+                                        _candidates.append((selection, score, _lyr, _LAYER_PRIORITY[_lyr]))
+                except Exception as e:
+                    logger.debug("Layer 3 (slm) failed: {}", e)
+            # Priority mode: pick best candidate by priority (lowest), then highest score.
+            if not _first_match and _candidates:
+                # Sort by priority (asc), then score (desc)
+                _candidates.sort(key=lambda x: (x[3], -x[1]))
+                route, route_score, route_layer, _ = _candidates[0]
             if route is None:
                 route = default_route
+                route_layer = "default_route"
+                route_score = 1.0
             mix_route_this_request = route
             mix_route_layer_this_request = route_layer
             mix_show_route_label = bool(hr.get("show_route_in_response", False))
