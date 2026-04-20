@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as path;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
@@ -18,6 +19,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../providers/providers.dart';
+import '../providers/chat_providers.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:record/record.dart';
 import '../chat_history_store.dart';
@@ -64,7 +67,7 @@ Uint8List? _decodeDataUrlToBytes(String dataUrl) {
   }
 }
 
-class ChatScreen extends StatefulWidget {
+class ChatScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
   final String userId;
   final String userName;
@@ -103,10 +106,22 @@ class ChatScreen extends StatefulWidget {
   });
 
   @override
-  State<ChatScreen> createState() => _ChatScreenState();
+  ConsumerState<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
+class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObserver {
+  /// Chat state notifier for this chat session. Lazily computed per widget params.
+  late final StateNotifier<ChatState> _chat;
+
+  /// Direct access to current chat state (avoids repeated ref.read calls).
+  ChatState get _cs => ref.read(chatStateProvider(_chatStateKey));
+
+  String get _chatStateKey => chatStateKey(
+        userId: widget.userId,
+        friendId: widget.friendId,
+        isUserFriend: widget.isUserFriend,
+      );
+
   final List<MapEntry<String, bool>> _messages = [];
 
   /// Optional image data URLs per message (same index as _messages; null or empty when no images).
@@ -611,6 +626,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _chat = ref.read(chatStateProvider(_chatStateKey).notifier);
     WidgetsBinding.instance.addObserver(this);
     _loadTtsAutoSpeak();
     _loadVoiceInputLocale();
