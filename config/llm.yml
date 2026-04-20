@@ -448,8 +448,19 @@ cloud_models:
     host: 127.0.0.1
     port: 14005
     api_key_name: DEEPSEEK_API_KEY
-    api_key: sk-71daaa97df384e27bdd5741bae0edbf3
+    #api_key:
     capabilities: [Chat]
+    supported_media: [image]
+
+  - id: MiniMax-M2.7
+    alias: MiniMax-M2.7
+    path: minimax/MiniMax-M2.7
+    host: 127.0.0.1
+    port: 14005
+    api_key_name: MINIMAX_API_KEY
+    #api_key: 
+    capabilities: [Chat]
+    supported_media: [image]
   # Alibaba Qwen (Dashscope), Groq, Mistral, xAI, OpenRouter, Cohere, Perplexity: uncomment and set api_key_name as needed.
 
 # ——— Media support (image / audio / video) for main_llm ———
@@ -462,7 +473,7 @@ cloud_models:
 #main_llm: local_models/main_vl_model_4B
 main_llm_mode: mix
 main_llm_local: local_models/gemma-4-E4B-it-Q5_K_M
-main_llm_cloud: cloud_models/DeepSeek-Chat
+main_llm_cloud: cloud_models/MiniMax-M2.7
 # ——— Stability: if tool turns often fail (empty content, 500s, cloud errors), set use_tool_selection_llm: false so main_llm does every turn, or set tool_selection_llm to the same as main_llm_local (e.g. 8B) so one model handles both "which tool" and "after tool result".
 # tool_selection_llm: optional. When use_tool_selection_llm is true, every LLM call in the tool loop uses this model (tool selection + parameter extraction). Good for models fine-tuned on function calling (e.g. Qwen3-4B-toolcalling). When not used (default): main_llm handles everything — all tool selection, parameter extraction, and final replies.
 # When using tool_selection_llm, the main model is still used for: (1) requests that have no tools (chat-only); (2) use_main_llm_for_direct_reply: true — direct (no-tool) replies; (3) long-output turn after document_read/run_skill (mix mode) to avoid cloud 8192 cap; (4) fallback when the tool-selection model fails or returns empty.
