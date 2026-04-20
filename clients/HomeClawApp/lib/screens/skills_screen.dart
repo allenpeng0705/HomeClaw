@@ -1,42 +1,37 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core_service.dart';
+import '../providers/skills_providers.dart';
 
 /// Skills screen: list installed skills and search/install from ClawHub via Core API (Companion->Core direct, no Portal).
-class SkillsScreen extends StatefulWidget {
+class SkillsScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
 
   const SkillsScreen({super.key, required this.coreService});
 
   @override
-  State<SkillsScreen> createState() => _SkillsScreenState();
+  ConsumerState<SkillsScreen> createState() => _SkillsScreenState();
 }
 
-class _SkillsScreenState extends State<SkillsScreen> {
-  List<Map<String, dynamic>> _installed = [];
-  String _installedMsg = 'Loading…';
-  bool _installedLoading = true;
-
-  final TextEditingController _queryController = TextEditingController();
-  List<Map<String, dynamic>> _searchResults = [];
-  String _searchMsg = '';
-  bool _searching = false;
-  String? _installMsg;
-  bool _installing = false;
-
-  bool? _clawhubLoggedIn;
-  String _clawhubStatusMsg = '';
-  bool _clawhubStatusLoading = true;
-  bool _clawhubLoginInProgress = false;
-  String? _clawhubLoginUrl;
-  String _clawhubLoginMessage = '';
-  final TextEditingController _tokenController = TextEditingController();
-  bool _tokenLoginInProgress = false;
+class _SkillsScreenState extends ConsumerState<SkillsScreen> {
+  late final InstalledSkillsNotifier _installedNotifier;
+  late final SearchSkillsNotifier _searchNotifier;
+  late final ClawhubLoginNotifier _clawhubNotifier;
+  late final InstallStateNotifier _installNotifier;
+  late final TextEditingController _queryController;
+  late final TextEditingController _tokenController;
 
   @override
   void initState() {
     super.initState();
+    _installedNotifier = ref.read(installedSkillsProvider.notifier);
+    _searchNotifier = ref.read(searchSkillsProvider.notifier);
+    _clawhubNotifier = ref.read(clawhubLoginProvider.notifier);
+    _installNotifier = ref.read(installStateProvider.notifier);
+    _queryController = TextEditingController();
+    _tokenController = TextEditingController();
     _loadInstalled();
     _loadClawhubLoginStatus();
   }
@@ -49,52 +44,36 @@ class _SkillsScreenState extends State<SkillsScreen> {
   }
 
   Future<void> _loadClawhubLoginStatus() async {
+    _clawhubNotifier.setStatusLoading(true);
     try {
       final status = await widget.coreService.getClawhubLoginStatus();
       if (mounted) {
-        setState(() {
-          _clawhubStatusLoading = false;
-          _clawhubLoggedIn = status['logged_in'] == true;
-          _clawhubStatusMsg = (status['message'] ?? '').toString();
-          if (status['clawhub_available'] == false) _clawhubStatusMsg = 'clawhub not found on PATH';
-        });
+        _clawhubNotifier.setStatus(
+          loggedIn: status['logged_in'] == true,
+          message: (status['message'] ?? '').toString().isEmpty
+              ? (status['clawhub_available'] == false ? 'clawhub not found on PATH' : '')
+              : (status['message'] ?? '').toString(),
+        );
       }
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _clawhubStatusLoading = false;
-          _clawhubLoggedIn = false;
-          _clawhubStatusMsg = 'Could not check status';
-        });
-      }
+      if (mounted) _clawhubNotifier.setStatusError('Could not check status');
     }
   }
 
   Future<void> _startClawhubLogin() async {
-    setState(() {
-      _clawhubLoginInProgress = true;
-      _clawhubLoginUrl = null;
-      _clawhubLoginMessage = '';
-    });
+    _clawhubNotifier.setLoginInProgress(true);
     try {
       final result = await widget.coreService.clawhubLogin();
       if (mounted) {
-        setState(() {
-          _clawhubLoginInProgress = false;
-          final u = result['url'];
-          _clawhubLoginUrl = (u is String && u.trim().isNotEmpty) ? u.trim() : null;
-          _clawhubLoginMessage = (result['message'] ?? '').toString();
-        });
-        if (result['ok'] == true && _clawhubLoginUrl == null) _loadClawhubLoginStatus();
+        final u = result['url'];
+        final url = (u is String && u.trim().isNotEmpty) ? u.trim() : null;
+        _clawhubNotifier.setLoginResult(url: url, message: (result['message'] ?? '').toString());
+        if (result['ok'] == true && url == null) _loadClawhubLoginStatus();
       }
     } catch (e) {
       if (mounted) {
         final msg = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
-        setState(() {
-          _clawhubLoginInProgress = false;
-          _clawhubLoginUrl = null;
-          _clawhubLoginMessage = msg.isNotEmpty ? msg : 'Login request failed';
-        });
+        _clawhubNotifier.setLoginResult(message: msg.isNotEmpty ? msg : 'Login request failed');
       }
     }
   }
@@ -105,18 +84,11 @@ class _SkillsScreenState extends State<SkillsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Paste your ClawHub token first')));
       return;
     }
-    setState(() {
-      _tokenLoginInProgress = true;
-      _clawhubLoginMessage = '';
-      _clawhubLoginUrl = null;
-    });
+    _clawhubNotifier.setTokenLoginInProgress(true);
     try {
       final result = await widget.coreService.clawhubLoginWithToken(token);
       if (mounted) {
-        setState(() {
-          _tokenLoginInProgress = false;
-          _clawhubLoginMessage = (result['message'] ?? '').toString();
-        });
+        _clawhubNotifier.setTokenLoginResult(message: (result['message'] ?? '').toString());
         if (result['ok'] == true) {
           _tokenController.clear();
           _loadClawhubLoginStatus();
@@ -126,71 +98,34 @@ class _SkillsScreenState extends State<SkillsScreen> {
     } catch (e) {
       if (mounted) {
         final msg = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
-        setState(() {
-          _tokenLoginInProgress = false;
-          _clawhubLoginMessage = msg;
-        });
+        _clawhubNotifier.setTokenLoginResult(message: msg);
       }
     }
   }
 
   Future<void> _loadInstalled() async {
-    setState(() {
-      _installedLoading = true;
-      _installedMsg = 'Loading…';
-    });
+    _installedNotifier.setLoading();
     try {
       final list = await widget.coreService.getSkillsList();
-      if (mounted) {
-        setState(() {
-          _installed = list;
-          _installedLoading = false;
-          _installedMsg = '${list.length} skill(s) loaded.';
-        });
-      }
+      _installedNotifier.setLoaded(list);
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _installed = [];
-          _installedLoading = false;
-          _installedMsg = 'Failed to load: $e';
-        });
-      }
+      _installedNotifier.setError('Failed to load: $e');
     }
   }
 
   Future<void> _search() async {
     final q = _queryController.text.trim();
     if (q.isEmpty) {
-      setState(() {
-        _searchMsg = 'Enter a search query.';
-        _searchResults = [];
-      });
+      _searchNotifier.setEmptyQuery('Enter a search query.');
       return;
     }
-    setState(() {
-      _searching = true;
-      _searchMsg = 'Searching…';
-      _searchResults = [];
-    });
+    _searchNotifier.setSearching(q);
     try {
       final results = await widget.coreService.searchSkills(q);
-      if (mounted) {
-        setState(() {
-          _searching = false;
-          _searchMsg = 'Results: ${results.length}';
-          _searchResults = results;
-        });
-      }
+      _searchNotifier.setResults(results);
     } catch (e) {
-      if (mounted) {
-        final msg = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
-        setState(() {
-          _searching = false;
-          _searchMsg = msg.isNotEmpty ? 'Search error: $msg' : 'Search failed.';
-          _searchResults = [];
-        });
-      }
+      final msg = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
+      _searchNotifier.setError(msg.isNotEmpty ? 'Search error: $msg' : 'Search failed.');
     }
   }
 
@@ -214,19 +149,13 @@ class _SkillsScreenState extends State<SkillsScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    setState(() {
-      _installMsg = 'Removing…';
-    });
+    _installNotifier.setRemoving(folder);
     try {
       await widget.coreService.removeSkill(folder);
-      if (mounted) {
-        setState(() => _installMsg = 'Removed.');
-        _loadInstalled();
-      }
+      _installNotifier.setSuccess('Removed.');
+      _loadInstalled();
     } catch (e) {
-      if (mounted) {
-        setState(() => _installMsg = 'Remove failed: $e');
-      }
+      _installNotifier.setError('Remove failed: $e');
     }
   }
 
@@ -249,10 +178,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    setState(() {
-      _installing = true;
-      _installMsg = 'Installing $id…';
-    });
+    _installNotifier.setInstalling(id);
     try {
       final out = await widget.coreService.installSkill(id);
       if (mounted) {
@@ -260,25 +186,23 @@ class _SkillsScreenState extends State<SkillsScreen> {
         final output = convertOut is Map && convertOut['output'] != null
             ? convertOut['output'].toString()
             : '';
-        setState(() {
-          _installing = false;
-          _installMsg = output.isNotEmpty ? 'Installed: $output' : 'Installed.';
-        });
+        _installNotifier.setSuccess(output.isNotEmpty ? 'Installed: $output' : 'Installed.');
         _loadInstalled();
       }
     } catch (e) {
       if (mounted) {
         final msg = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
-        setState(() {
-          _installing = false;
-          _installMsg = msg.isNotEmpty ? 'Install failed: $msg' : 'Install failed.';
-        });
+        _installNotifier.setError(msg.isNotEmpty ? 'Install failed: $msg' : 'Install failed.');
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final installedState = ref.watch(installedSkillsProvider);
+    final searchState = ref.watch(searchSkillsProvider);
+    final clawhubState = ref.watch(clawhubLoginProvider);
+    final installState = ref.watch(installStateProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Skills'),
@@ -293,13 +217,13 @@ class _SkillsScreenState extends State<SkillsScreen> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-            if (_installedLoading)
+            if (installedState.loading)
               const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
             else
-              SelectableText(_installedMsg, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-            if (_installed.isNotEmpty) ...[
+              SelectableText(installedState.message, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            if (installedState.skills.isNotEmpty) ...[
               const SizedBox(height: 8),
-              ..._installed.map((s) {
+              ...installedState.skills.map((s) {
                 final folder = (s['folder'] ?? s['name'] ?? '').toString();
                 final desc = (s['description'] ?? '').toString();
                 return Card(
@@ -321,7 +245,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
                           ),
                         ),
                         FilledButton.tonal(
-                          onPressed: _installing ? null : () => _remove(folder),
+                          onPressed: installState.installing ? null : () => _remove(folder),
                           style: FilledButton.styleFrom(foregroundColor: Theme.of(context).colorScheme.error),
                           child: const Text('Remove'),
                         ),
@@ -337,26 +261,26 @@ class _SkillsScreenState extends State<SkillsScreen> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-            if (_clawhubStatusLoading)
+            if (clawhubState.statusLoading)
               const Text('Checking login status…', style: TextStyle(fontSize: 12))
             else
               SelectableText(
-                _clawhubLoggedIn == true ? 'Logged in. ${_clawhubStatusMsg.isNotEmpty ? _clawhubStatusMsg : "You can search and install skills."}' : _clawhubStatusMsg,
+                clawhubState.loggedIn == true ? 'Logged in. ${clawhubState.statusMessage.isNotEmpty ? clawhubState.statusMessage : "You can search and install skills."}' : clawhubState.statusMessage,
                 style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             const SizedBox(height: 8),
             Row(
               children: [
                 FilledButton.tonal(
-                  onPressed: (_clawhubStatusLoading || _clawhubLoginInProgress) ? null : _startClawhubLogin,
-                  child: _clawhubLoginInProgress
+                  onPressed: (clawhubState.statusLoading || clawhubState.loginInProgress) ? null : _startClawhubLogin,
+                  child: clawhubState.loginInProgress
                       ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                      : Text(_clawhubLoggedIn == true ? 'Re-login to ClawHub' : 'Login to ClawHub'),
+                      : Text(clawhubState.loggedIn == true ? 'Re-login to ClawHub' : 'Login to ClawHub'),
                 ),
-                if (_clawhubLoggedIn == true) ...[
+                if (clawhubState.loggedIn == true) ...[
                   const SizedBox(width: 8),
                   TextButton(
-                    onPressed: _clawhubStatusLoading ? null : _loadClawhubLoginStatus,
+                    onPressed: clawhubState.statusLoading ? null : _loadClawhubLoginStatus,
                     child: const Text('Refresh status'),
                   ),
                 ],
@@ -385,39 +309,39 @@ class _SkillsScreenState extends State<SkillsScreen> {
                 ),
                 const SizedBox(width: 8),
                 FilledButton(
-                  onPressed: (_tokenLoginInProgress || _clawhubLoginInProgress) ? null : _startClawhubTokenLogin,
-                  child: _tokenLoginInProgress
+                  onPressed: (clawhubState.tokenLoginInProgress || clawhubState.loginInProgress) ? null : _startClawhubTokenLogin,
+                  child: clawhubState.tokenLoginInProgress
                       ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Text('Login with token'),
                 ),
               ],
             ),
-            if (_clawhubLoginMessage.isNotEmpty)
+            if (clawhubState.loginMessage.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: SelectableText(_clawhubLoginMessage, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                child: SelectableText(clawhubState.loginMessage, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
               ),
-            if (_clawhubLoginMessage.toLowerCase().contains('missing state')) ...[
+            if (clawhubState.loginMessage.toLowerCase().contains('missing state')) ...[
               const SizedBox(height: 10),
               SelectableText(
                 'Workaround: Use token login. Open clawhub.ai in a browser, sign in with GitHub, get your CLI token. On the machine running Core run: clawhub login --no-browser --token YOUR_TOKEN',
                 style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.primary, fontStyle: FontStyle.italic),
               ),
             ],
-            if (_clawhubLoginUrl != null && _clawhubLoginUrl!.isNotEmpty) ...[
+            if (clawhubState.loginUrl != null && clawhubState.loginUrl!.isNotEmpty) ...[
               const SizedBox(height: 8),
               SelectableText(
                 'Complete login on the machine running Core. If a browser opened there, use it; otherwise open the URL below on that machine only. Do not open the URL on this device—the OAuth callback must reach the Core machine.',
                 style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant, fontStyle: FontStyle.italic),
               ),
               const SizedBox(height: 6),
-              SelectableText(_clawhubLoginUrl!, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.primary)),
+              SelectableText(clawhubState.loginUrl!, style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.primary)),
               const SizedBox(height: 6),
               Row(
                 children: [
                   FilledButton.icon(
                     onPressed: () async {
-                      final uri = Uri.tryParse(_clawhubLoginUrl!);
+                      final uri = Uri.tryParse(clawhubState.loginUrl!);
                       if (uri != null && await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
                     },
                     icon: const Icon(Icons.open_in_browser, size: 18),
@@ -426,7 +350,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
                   const SizedBox(width: 8),
                   OutlinedButton.icon(
                     onPressed: () {
-                      Clipboard.setData(ClipboardData(text: _clawhubLoginUrl!));
+                      Clipboard.setData(ClipboardData(text: clawhubState.loginUrl!));
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copied — open on the machine running Core')));
                     },
                     icon: const Icon(Icons.copy, size: 18),
@@ -461,19 +385,19 @@ class _SkillsScreenState extends State<SkillsScreen> {
                 ),
                 const SizedBox(width: 8),
                 FilledButton(
-                  onPressed: _searching ? null : _search,
-                  child: _searching ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Search'),
+                  onPressed: searchState.searching ? null : _search,
+                  child: searchState.searching ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Search'),
                 ),
               ],
             ),
-            if (_searchMsg.isNotEmpty)
+            if (searchState.message.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: SelectableText(_searchMsg, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                child: SelectableText(searchState.message, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
               ),
-            if (_searchResults.isNotEmpty) ...[
+            if (searchState.results.isNotEmpty) ...[
               const SizedBox(height: 12),
-              ..._searchResults.map((r) {
+              ...searchState.results.map((r) {
                 final id = r['id'] ?? r['name'] ?? '';
                 final desc = (r['description'] ?? '').toString();
                 return Card(
@@ -495,7 +419,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
                           ),
                         ),
                         FilledButton.tonal(
-                          onPressed: _installing ? null : () => _install(id.toString()),
+                          onPressed: installState.installing ? null : () => _install(id.toString()),
                           child: const Text('Install'),
                         ),
                       ],
@@ -504,11 +428,11 @@ class _SkillsScreenState extends State<SkillsScreen> {
                 );
               }),
             ],
-            if (_installMsg != null && _installMsg!.isNotEmpty)
+            if (installState.message != null && installState.message!.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 16),
                 child: SelectableText(
-                  _installMsg!,
+                  installState.message!,
                   style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary),
                 ),
               ),
