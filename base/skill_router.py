@@ -136,10 +136,12 @@ async def load_skills_for_query(
                 folder_name = hit_id
                 skill_dict = load_skill_by_folder_from_dirs(skills_dirs, folder_name, include_body=False)
             if skill_dict is None:
-                try:
-                    core.skills_vector_store.delete(hit_id)
-                except Exception:
-                    pass
+                # Log warning instead of auto-delete; file may be temporarily unavailable
+                logger.warning(
+                    "skills_router: failed to load skill {} from disk; it may be missing or temporarily unavailable. "
+                    "Vector store entry preserved.",
+                    hit_id,
+                )
                 continue
             skills_list.append(skill_dict)
 
@@ -300,7 +302,17 @@ async def load_skills_for_query(
                 candidates: List[Dict[str, str]] = []
                 for sk in ordered:
                     folder = _skill_folder_key(sk)
-                    hsc = hit_sim_by_folder.get(folder, 0.0)
+                    # Union skills (trigger/lexical not in semantic hits) get baseline score
+                    # so explicit pattern matches aren't undervalued vs semantic hits
+                    if folder in hit_sim_by_folder:
+                        hsc = hit_sim_by_folder[folder]
+                    else:
+                        # Union skill: use baseline score to reflect explicit pattern match
+                        try:
+                            _trigger_base = float(sem_cfg.get("union_trigger_baseline_score", 0.7) or 0.7)
+                        except (TypeError, ValueError):
+                            _trigger_base = 0.7
+                        hsc = _trigger_base
                     k = sk.get("keywords")
                     ktxt = (
                         ", ".join([str(x).strip() for x in k if str(x).strip()])

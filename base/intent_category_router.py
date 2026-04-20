@@ -119,7 +119,18 @@ def load_intent_category_manifest(docs_dir: Path) -> Dict[str, Any]:
         out["category_descriptions"][cid] = desc
         pats = fm.get("match_patterns")
         if isinstance(pats, list) and pats:
-            clean = [str(x).strip() for x in pats if x is not None and str(x).strip()]
+            clean = []
+            for x in pats:
+                if x is None or not str(x).strip():
+                    continue
+                pat = str(x).strip()
+                # Validate regex at load time; skip invalid patterns with warning
+                try:
+                    re.compile(pat)
+                except re.error as e:
+                    logger.warning("intent category {} has invalid match_patterns regex {!r}: {}", cid, pat, e)
+                    continue
+                clean.append(pat)
             if clean:
                 pattern_entries.append({"id": cid, "priority": priority, "patterns": clean})
         ct = fm.get("category_tools")
