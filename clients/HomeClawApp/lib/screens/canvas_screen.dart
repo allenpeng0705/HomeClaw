@@ -1,22 +1,22 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../core_service.dart';
 
 /// Canvas screen: on mobile shows the canvas in an embedded WebView; on desktop
 /// opens in the system browser because the embedded WebView does not resize properly.
-class CanvasScreen extends StatefulWidget {
+class CanvasScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
 
   const CanvasScreen({super.key, required this.coreService});
 
   @override
-  State<CanvasScreen> createState() => _CanvasScreenState();
+  ConsumerState<CanvasScreen> createState() => _CanvasScreenState();
 }
 
-class _CanvasScreenState extends State<CanvasScreen> {
+class _CanvasScreenState extends ConsumerState<CanvasScreen> {
   static const double _kWindowFraction = 0.85;
 
   WebViewController? _webController;
