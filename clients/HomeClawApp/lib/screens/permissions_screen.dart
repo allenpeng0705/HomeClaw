@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core_service.dart';
+import '../models/permission_item.dart';
 import 'friend_list_screen.dart';
 import 'login_screen.dart';
 
@@ -25,19 +26,7 @@ Future<bool> getPermissionsIntroShown() async {
 }
 
 /// One permission row: title, description, status, and Allow button.
-class _PermissionItem {
-  final String title;
-  final String description;
-  final Future<PermissionStatus> Function() request;
-  final String? instructionsOnly; // If set, no request button; show instructions (e.g. screen recording)
-
-  _PermissionItem({
-    required this.title,
-    required this.description,
-    required this.request,
-    this.instructionsOnly,
-  });
-}
+class _PermissionItem = PermissionItem;
 
 class PermissionsScreen extends StatefulWidget {
   final CoreService coreService;
