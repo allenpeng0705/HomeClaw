@@ -1157,7 +1157,7 @@ class TAM:
                                     except Exception:
                                         pass
                                 await self._send_reminder_to_channel_safe(text, prms)
-                            return lambda: _run()
+                            return _run
                         task = make_run_skill_task(params)
                     else:
                         task = (
@@ -1230,7 +1230,7 @@ class TAM:
                                     except Exception:
                                         pass
                                 await self._send_reminder_to_channel_safe(text, prms)
-                            return lambda: _run()
+                            return _run
                         task = make_run_plugin_task(params)
                     else:
                         task = (
@@ -1270,7 +1270,7 @@ class TAM:
                                     except Exception:
                                         pass
                                 await self._send_reminder_to_channel_safe(text, prms)
-                            return lambda: _run()
+                            return _run
                         task = make_run_tool_task(params)
                     else:
                         task = (
