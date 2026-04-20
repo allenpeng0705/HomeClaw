@@ -20,10 +20,10 @@
 
 ### Issues & Improvements
 
-#### Issue 1: Redundant Weather Checks
-Weather is checked **twice** (lines 415-429 and lines 569-585) before semantic routing. The second check is unreachable in `semantic` mode because the first check returns early.
+#### Issue 1: Redundant Weather Checks ~~(DONE)~~
+Weather was checked **twice** (lines 415-429 and lines 569-585) before semantic routing. The second check was unreachable in `semantic` and `hybrid` modes because the first early weather preempt returns before hot intents is reached. The `_wx` guard was effectively always True (never False when it mattered).
 
-**Fix:** Remove the duplicate weather check at lines 569-585 or consolidate into one location with a comment explaining the purpose.
+**Fix:** Removed the `_wx` weather-keyword computation and `not _wx` guard from hot intents (former lines 573-581). Simplified `if "search_web" in categories and not _wx:` to `if "search_web" in categories:`. Updated comment to explain that weather queries are caught by the early preempt before reaching hot intents.
 
 #### Issue 2: Hardcoded Category List
 `DEFAULT_CATEGORIES` is a static list at the module level. If new categories are added to intent category docs, this list may become stale.
@@ -132,20 +132,20 @@ The `config/hybrid/heuristic_rules.yml` is very large and hard to maintain.
 
 **Fix:** Consider auto-generating from semantic router feedback or organizing into categories.
 
-#### Issue 3: Semantic Router Cache Key is Too Simple
+#### Issue 3: Semantic Router Cache Key is Too Simple ~~(DONE)~~
 Cache key is just `routes_path or "default"`. If utterances change, cache is stale until process restart.
 
-**Fix:** Include hash of utterances in cache key, or make cache ttl-based.
+**Fix:** Added `_semantic_router_cache_key()` that includes the routes file's mtime in the cache key. When the file changes, the mtime changes → new cache key → fresh router built. Commit `c0d0687`.
 
 #### Issue 4: SLM Layer Assumes Same Model Format
 `resolve_slm_model_ref()` handles both llama.cpp and Ollama, but the parsing logic in `slm.py` line 46-56 is convoluted - it tries multiple URL construction methods.
 
 **Fix:** Simplify URL construction using a helper in `base.util`.
 
-#### Issue 5: Perplexity Threshold is Hardcoded
+#### Issue 5: Perplexity Threshold is Hardcoded ~~(DONE)~~
 `threshold: float = -0.6` in `run_perplexity_probe_async()`. This threshold may need tuning per model.
 
-**Fix:** Make threshold configurable via `hybrid_router.perplexity.threshold` in config.
+**Fix:** Already resolved - threshold is configurable via `hybrid_router.slm.perplexity_threshold` in `config/llm.yml` (set to `-0.4` by default). The code at `llm_loop.py:1458` reads: `probe_threshold = float(slm_cfg.get("perplexity_threshold") or -0.6)`.
 
 #### Issue 6: No Fallback Chain Customization
 If Layer 1 matches, Layer 2 and 3 are skipped. There's no config to change this cascade order.
@@ -262,21 +262,21 @@ There's no way to test routing changes with a subset of users.
 ## 6. Recommended Priority Order
 
 ### High Priority
-1. **Intent Router:** Fix duplicate weather check (Issue 1)
-2. **Skill Router:** Fix double-load issue (Issue 1)
-3. **Companion App:** Split CoreService (Issue 2)
-4. **Companion App:** Extract ChatScreen widgets (Issue 3)
+1. ~~**Intent Router:** Fix duplicate weather check (Issue 1)~~ - DONE
+2. **Skill Router:** Fix double-load issue (Issue 1) - Low impact; existing safeguards mitigate
+3. ~~**Companion App:** Split CoreService~~ - DONE (widget extraction phase)
+4. ~~**Companion App:** Extract ChatScreen widgets~~ - DONE (widget extraction phase)
 
 ### Medium Priority
-5. **Hybrid Router:** Fix semantic cache key (Issue 3)
-6. **Intent Router:** Add pattern validation (Issue 3)
-7. **Skill Router:** Add weighted scoring (Issue 2)
-8. **Companion App:** Add state management (Issue 1)
+5. ~~**Hybrid Router:** Fix semantic cache key (Issue 3)~~ - DONE (mtime-based invalidation)
+6. **Intent Router:** Add pattern validation (Issue 3) - Add validation of regex patterns at load time
+7. **Skill Router:** Add weighted scoring (Issue 2) - Scoring weights for semantic vs trigger vs lexical
+8. **Companion App:** Add state management (Issue 1) - Use Riverpod/BLoC
 
 ### Low Priority
-9. **Hybrid Router:** Make perplexity threshold configurable (Issue 5)
-10. **Hybrid Router:** Add cascade customization (Issue 6)
-11. **Intent Router:** Cache semantic results (Issue 5)
+9. ~~**Hybrid Router:** Make perplexity threshold configurable (Issue 5)~~ - DONE (already configurable)
+10. **Hybrid Router:** Add cascade customization (Issue 6) - Significant restructuring required
+11. **Intent Router:** Cache semantic results (Issue 5) - Issue description inaccurate; semantic/hybrid modes are mutually exclusive
 12. **Companion App:** Add unit tests (Issue 5)
 
 ---

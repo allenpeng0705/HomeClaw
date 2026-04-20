@@ -565,20 +565,14 @@ async def route(
         logger.debug("Intent router skill-intent pre-check failed (non-fatal): {}", e)
 
     # Hot intents: preempt to category so DAG runs (or narrow ReAct) without the classifier LLM.
-    # Placed after weather so 天气/forecast queries stay weather, not search_web.
+    # Note: Weather queries are caught by the early weather preempt (lines ~415) before reaching here,
+    # so no separate weather guard is needed here. If weather keywords appear without "weather" in
+    # categories, semantic/hybrid routing should catch them downstream.
     try:
         if query is not None and isinstance(query, str) and query.strip():
             q_raw = query.strip()
             q_lo = q_raw.lower()
-            _wx = (
-                "天气" in q_raw
-                or "气温" in q_raw
-                or "天气预报" in q_raw
-                or "weather" in q_lo
-                or "forecast" in q_lo
-                or "wttr" in q_lo
-            )
-            if "search_web" in categories and not _wx:
+            if "search_web" in categories:
                 if (
                     "上网搜" in q_raw
                     or "网上搜索" in q_raw
