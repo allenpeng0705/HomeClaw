@@ -693,48 +693,45 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                               fontSize: 13)),
                     ),
                   Expanded(
-                    child: ListView(
-                      children: [
-                        RadioListTile<String?>(
-                          title: const Text('Off — normal chat'),
-                          value: null,
-                          groupValue: bound,
-                          onChanged: (_) async {
-                            await _setClawcodeChatBinding(null);
-                            if (ctx.mounted) Navigator.pop(ctx);
-                          },
-                        ),
-                        if (sessions.isEmpty && loadErr == null)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 8),
-                            child: Text(
-                              'No sessions yet. Create one on the server (e.g. python3 -m main clawcode session new), then pick it here. For approvals, workspace files, or optional browser UI, use the button below.',
-                              style: TextStyle(fontSize: 13),
-                            ),
+                    child: RadioGroup<String?>(
+                      groupValue: bound,
+                      onChanged: (v) async {
+                        await _setClawcodeChatBinding(v);
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      },
+                      child: ListView(
+                        children: [
+                          RadioListTile<String?>(
+                            title: const Text('Off — normal chat'),
+                            value: null,
                           ),
-                        ...sessions.map((s) {
-                          final sid =
-                              (s['clawcode_session_id'] ?? '').toString();
-                          if (sid.isEmpty) return const SizedBox.shrink();
-                          final cwd = (s['cwd'] ?? '').toString();
-                          return RadioListTile<String>(
-                            title: Text(_shortClawcodeId(sid)),
-                            subtitle: cwd.isNotEmpty
-                                ? Text(cwd,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 12))
-                                : null,
-                            value: sid,
-                            groupValue: bound,
-                            onChanged: (_) async {
-                              await _setClawcodeChatBinding(sid);
-                              if (ctx.mounted) Navigator.pop(ctx);
-                            },
-                          );
-                        }),
-                      ],
+                          if (sessions.isEmpty && loadErr == null)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 8),
+                              child: Text(
+                                'No sessions yet. Create one on the server (e.g. python3 -m main clawcode session new), then pick it here. For approvals, workspace files, or optional browser UI, use the button below.',
+                                style: TextStyle(fontSize: 13),
+                              ),
+                            ),
+                          ...sessions.map((s) {
+                            final sid =
+                                (s['clawcode_session_id'] ?? '').toString();
+                            if (sid.isEmpty) return const SizedBox.shrink();
+                            final cwd = (s['cwd'] ?? '').toString();
+                            return RadioListTile<String>(
+                              title: Text(_shortClawcodeId(sid)),
+                              subtitle: cwd.isNotEmpty
+                                  ? Text(cwd,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 12))
+                                  : null,
+                              value: sid,
+                            );
+                          }),
+                        ],
+                      ),
                     ),
                   ),
                   TextButton.icon(

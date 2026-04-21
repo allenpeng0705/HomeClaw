@@ -134,7 +134,7 @@ class _CanvasScreenState extends ConsumerState<CanvasScreen> {
                   color: Theme.of(context)
                       .colorScheme
                       .shadow
-                      .withOpacity(0.15),
+                      .withValues(alpha: 0.15),
                   blurRadius: 16,
                   offset: const Offset(0, 4),
                 ),
