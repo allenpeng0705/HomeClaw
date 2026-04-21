@@ -13,13 +13,11 @@ import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:homeclaw_voice/homeclaw_voice.dart';
 import 'package:file_picker/file_picker.dart';
 import '../widgets/full_screen_image_page.dart';
-import '../widgets/full_screen_video_page.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../providers/providers.dart';
 import '../providers/chat_providers.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:record/record.dart';
@@ -4104,7 +4102,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                       .map((audioDataUrl) => Padding(
                                             padding: const EdgeInsets.only(
                                                 bottom: 6),
-                                            child: _AudioPlayButton(
+                                            child: AudioPlayButton(
                                               audioRef: audioDataUrl,
                                               coreBaseUrl:
                                                   widget.coreService.baseUrl,
@@ -4213,7 +4211,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color:
-                  Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.6),
+                  Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
               border: Border(
                 top: BorderSide(color: Theme.of(context).dividerColor),
               ),
@@ -4333,7 +4331,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               color: Theme.of(context)
                   .colorScheme
                   .primaryContainer
-                  .withOpacity(0.5),
+                  .withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(12),
               child: Padding(
                 padding:
@@ -4395,7 +4393,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               color: Theme.of(context)
                   .colorScheme
                   .secondaryContainer
-                  .withOpacity(0.5),
+                  .withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(12),
               child: Padding(
                 padding:
@@ -4999,45 +4997,6 @@ class _VideoPlayChip extends StatelessWidget {
         videoRef: videoRef,
         coreBaseUrl: coreBaseUrl,
         httpHeaders: httpHeaders,
-      );
-}
-
-/// Full-screen video player: data URL, local file, http(s), or Core `/files/...`.
-class _FullScreenVideoPage extends StatelessWidget {
-  const _FullScreenVideoPage({
-    required this.videoRef,
-    required this.coreBaseUrl,
-    this.httpHeaders,
-  });
-
-  final String videoRef;
-  final String coreBaseUrl;
-  final Map<String, String>? httpHeaders;
-
-  @override
-  Widget build(BuildContext context) => FullScreenVideoPage(
-        videoRef: videoRef,
-        coreBaseUrl: coreBaseUrl,
-        httpHeaders: httpHeaders,
-      );
-}
-
-class _AudioPlayButton extends StatelessWidget {
-  const _AudioPlayButton({
-    required this.audioRef,
-    required this.coreBaseUrl,
-    this.coreMediaHeaders,
-  });
-
-  final String audioRef;
-  final String coreBaseUrl;
-  final Map<String, String>? coreMediaHeaders;
-
-  @override
-  Widget build(BuildContext context) => AudioPlayButton(
-        audioRef: audioRef,
-        coreBaseUrl: coreBaseUrl,
-        coreMediaHeaders: coreMediaHeaders,
       );
 }
 

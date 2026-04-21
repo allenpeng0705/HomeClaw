@@ -8,7 +8,6 @@ import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:home_claw_app/l10n/app_localizations.dart';
 import '../core_service.dart';
 import '../providers/friend_list_providers.dart';
-import '../providers/providers.dart';
 import '../widgets/homeclaw_snackbars.dart';
 import '../utils/friend_localization.dart';
 import 'add_ai_friend_screen.dart';
