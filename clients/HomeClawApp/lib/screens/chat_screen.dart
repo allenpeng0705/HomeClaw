@@ -111,7 +111,7 @@ class ChatScreen extends ConsumerStatefulWidget {
 
 class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObserver {
   /// Chat state notifier for this chat session.
-  late final StateNotifier<ChatState> _chat;
+  late final ChatStateNotifier _chat;
 
   String get _chatStateKey => chatStateKey(
         userId: widget.userId,
@@ -1276,17 +1276,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     }
     await ChatHistoryStore().clear(widget.userId, widget.friendId);
     if (!mounted) return;
-    setState(() {
-      _messages.clear();
-      _messageImages.clear();
-      _messageAudios.clear();
-      _messageVideos.clear();
-      _messageFileLabels.clear();
-      _messageFileRefs.clear();
-      _lastReply = null;
-      _chatHistoryOffset = 0;
-      _hasMoreMessages = true;
-    });
+    _chat.clearMessages();
+    _chat.setHasMore(true);
+    _chat.updateChatHistoryOffset(0);
+    _lastReply = null;
+    _chatHistoryOffset = 0;
+    _hasMoreMessages = true;
     if (widget.isUserFriend &&
         widget.toUserId != null &&
         widget.toUserId!.trim().isNotEmpty) {
