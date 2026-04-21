@@ -676,21 +676,25 @@ class _ConfigCoreScreenState extends ConsumerState<ConfigCoreScreen> {
             const SizedBox(height: 12),
             const Text('Cloud models', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
             const SizedBox(height: 4),
-            ..._cloudModelsList().map((m) {
-              final id = m['id'] as String? ?? '';
-              final alias = m['alias'] as String? ?? id;
-              return RadioListTile<String>(
-                title: Text(alias),
-                subtitle: id != alias ? Text(id, style: const TextStyle(fontSize: 11, color: Colors.grey)) : null,
-                value: id,
-                groupValue: _selectedCloudModelId,
-                onChanged: (v) => setState(() {
-                  _selectedCloudModelId = v;
-                  _selectedLocalModelId = null;
-                  _mainLlmController.text = v != null ? 'cloud_models/$v' : _mainLlmController.text;
-                }),
-              );
-            }),
+            RadioGroup<String?>(
+              groupValue: _selectedCloudModelId,
+              onChanged: (v) => setState(() {
+                _selectedCloudModelId = v;
+                _selectedLocalModelId = null;
+                _mainLlmController.text = v != null ? 'cloud_models/$v' : _mainLlmController.text;
+              }),
+              child: Column(
+                children: _cloudModelsList().map((m) {
+                  final id = m['id'] as String? ?? '';
+                  final alias = m['alias'] as String? ?? id;
+                  return RadioListTile<String>(
+                    title: Text(alias),
+                    subtitle: id != alias ? Text(id, style: const TextStyle(fontSize: 11, color: Colors.grey)) : null,
+                    value: id,
+                  );
+                }).toList(),
+              ),
+            ),
             if (_selectedCloudModelId != null) ...[
               const SizedBox(height: 4),
               TextField(
@@ -707,21 +711,25 @@ class _ConfigCoreScreenState extends ConsumerState<ConfigCoreScreen> {
             const SizedBox(height: 12),
             const Text('Local models', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
             const SizedBox(height: 4),
-            ..._localChatModelsList().map((m) {
-              final id = m['id'] as String? ?? '';
-              final alias = m['alias'] as String? ?? id;
-              return RadioListTile<String>(
-                title: Text(alias),
-                subtitle: id != alias ? Text(id, style: const TextStyle(fontSize: 11, color: Colors.grey)) : null,
-                value: id,
-                groupValue: _selectedLocalModelId,
-                onChanged: (v) => setState(() {
-                  _selectedLocalModelId = v;
-                  _selectedCloudModelId = null;
-                  _mainLlmController.text = v != null ? 'local_models/$v' : _mainLlmController.text;
-                }),
-              );
-            }),
+            RadioGroup<String?>(
+              groupValue: _selectedLocalModelId,
+              onChanged: (v) => setState(() {
+                _selectedLocalModelId = v;
+                _selectedCloudModelId = null;
+                _mainLlmController.text = v != null ? 'local_models/$v' : _mainLlmController.text;
+              }),
+              child: Column(
+                children: _localChatModelsList().map((m) {
+                  final id = m['id'] as String? ?? '';
+                  final alias = m['alias'] as String? ?? id;
+                  return RadioListTile<String>(
+                    title: Text(alias),
+                    subtitle: id != alias ? Text(id, style: const TextStyle(fontSize: 11, color: Colors.grey)) : null,
+                    value: id,
+                  );
+                }).toList(),
+              ),
+            ),
             const SizedBox(height: 12),
             const Text('Embedding model (read-only)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
             const SizedBox(height: 4),
