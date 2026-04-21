@@ -38,6 +38,8 @@ import 'reminders_tab.dart';
 import 'settings_screen.dart';
 import 'vmprint_preview_screen.dart';
 import '../utils/product_preset_chat.dart';
+import '../mixins/chat_voice_handler.dart';
+import '../mixins/chat_tts_handler.dart';
 
 double? _parseTranscriptTimestampSeconds(Map<String, dynamic> m) {
   final t = m['timestamp'];
@@ -108,7 +110,7 @@ class ChatScreen extends ConsumerStatefulWidget {
 }
 
 class _ChatScreenState extends ConsumerState<ChatScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, VoiceHandler, TtsHandler {
   /// Chat state notifier for this chat session.
   late final ChatStateNotifier _chat;
 
@@ -153,14 +155,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   /// When streaming is on, latest progress message from Core (e.g. "Generating your presentation…"); shown under the loading bar.
   String? _loadingMessage;
-  bool _voiceListening = false;
-  String _voiceTranscript = '';
-  StreamSubscription<Map<String, dynamic>>? _voiceSubscription;
-
-  /// Set true when user taps Cancel so a late "final" event does not trigger _send().
-  bool _voiceInputCancelled = false;
   final _native = HomeclawNative();
-  final _voice = HomeclawVoice();
   final _tts = FlutterTts();
   final _imagePicker = ImagePicker();
   String? _lastReply;
@@ -177,10 +172,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// Knowledge preset: optional selected file path used as scoped query context.
   String? _selectedKnowledgeModelPath;
   static const String _keyTtsAutoSpeak = 'tts_auto_speak';
-  bool _ttsAutoSpeak = false;
+  bool ttsAutoSpeak = false;
   static const String _keyVoiceInputLocale = 'voice_input_locale';
-  String? _voiceInputLocale;
-  bool _ttsSpeaking = false;
+  String? voiceInputLocale;
+  bool ttsSpeaking = false;
   bool? _coreConnected;
   bool _connectionChecking = false;
   Timer? _connectionCheckTimer;
@@ -200,9 +195,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   int _userInboxFetchGeneration = 0;
   StreamSubscription<Map<String, dynamic>>? _pushMessageSubscription;
 
-  /// Push-to-talk (user friends only): true while recording.
-  bool _recordingPushToTalk = false;
-  final AudioRecorder _voiceRecorder = AudioRecorder();
   int? _activeUserSendBubbleIndex;
   String? _activeUserSendStage;
 
@@ -577,6 +569,41 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   @override
   void initState() {
     super.initState();
+    initVoiceHandler(
+      coreService: widget.coreService,
+      userId: widget.userId,
+      toUserId: widget.toUserId,
+      remotePeerInstanceId: widget.remotePeerInstanceId,
+      onSendWithText: (text) {
+        _inputController.text = text;
+        _send();
+      },
+      onScrollToBottom: _scrollToBottom,
+      onTranscriptChanged: (t) => setState(() {}),
+      onMessageAppend: (msgs, imgs, audios, vids, fileLabels, fileRefs) {
+        setState(() {
+          _messages.addAll(msgs);
+          _messageImages.addAll(imgs.cast());
+          _messageAudios.addAll(audios.cast());
+          _messageVideos.addAll(vids.cast());
+          _messageFileLabels.addAll(fileLabels.cast());
+          _messageFileRefs.addAll(fileRefs.cast());
+        });
+      },
+      mountedGetter: () => mounted,
+      loadingGetter: () => _loading,
+    );
+    initTtsHandler(
+      ttsInstance: _tts,
+      onTtsAutoSpeakChanged: (v) => setState(() => ttsAutoSpeak = v),
+      onTtsStateChanged: () => setState(() {}),
+      onTtsError: (msg) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      },
+      mountedGetter: () => mounted,
+      lastReplyGetter: () => _lastReply,
+      voiceInputLocaleGetter: () => voiceInputLocale,
+    );
     _chat = ref.read(chatStateProvider(_chatStateKey).notifier);
     WidgetsBinding.instance.addObserver(this);
     _loadTtsAutoSpeak();
@@ -1438,18 +1465,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   Future<void> _loadTtsAutoSpeak() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted)
-      setState(() => _ttsAutoSpeak = prefs.getBool(_keyTtsAutoSpeak) ?? false);
+      setState(() => ttsAutoSpeak = prefs.getBool(_keyTtsAutoSpeak) ?? false);
   }
 
   Future<void> _loadVoiceInputLocale() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted)
-      setState(() => _voiceInputLocale = prefs.getString(_keyVoiceInputLocale));
+      setState(() => voiceInputLocale = prefs.getString(_keyVoiceInputLocale));
   }
 
   Future<void> _setVoiceInputLocale(String? localeId) async {
     setState(
-        () => _voiceInputLocale = localeId?.isEmpty == true ? null : localeId);
+        () => voiceInputLocale = localeId?.isEmpty == true ? null : localeId);
     final prefs = await SharedPreferences.getInstance();
     if (localeId == null || localeId.isEmpty) {
       await prefs.remove(_keyVoiceInputLocale);
@@ -1459,16 +1486,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   Future<void> _setTtsAutoSpeak(bool value) async {
-    setState(() => _ttsAutoSpeak = value);
+    setState(() => ttsAutoSpeak = value);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyTtsAutoSpeak, value);
   }
 
   Future<void> _send() async {
     // When voice is active, use transcript and then stop voice so the stream doesn't repopulate the field.
-    final String text = _voiceListening
-        ? (_voiceTranscript.trim().isNotEmpty
-            ? _voiceTranscript.trim()
+    final String text = voiceListening
+        ? (voiceTranscript.trim().isNotEmpty
+            ? voiceTranscript.trim()
             : _inputController.text.trim())
         : _inputController.text.trim();
     final hasAttachments = _pendingImagePaths.isNotEmpty ||
@@ -1485,19 +1512,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     });
     _startLoadingStatusTimer();
     try {
-      if (_voiceListening) {
+      if (voiceListening) {
         // Cancel subscription first so no more "final" events can trigger _send() and cause double send.
-        _voiceSubscription?.cancel();
-        _voiceSubscription = null;
-        await _voice.stopVoiceListening();
+        voiceSubscription?.cancel();
+        voiceSubscription = null;
+        await voice.stopVoiceListening();
         if (!mounted) {
           _stopLoadingStatusTimer();
           setState(() => _loading = false);
           return;
         }
         setState(() {
-          _voiceListening = false;
-          _voiceTranscript = '';
+          voiceListening = false;
+          voiceTranscript = '';
           _inputController.clear();
         });
       } else {
@@ -1918,7 +1945,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               ? 'No reply'
               : (reply.length > 80 ? '${reply.substring(0, 80)}…' : reply);
           await _native.showNotification(title: 'HomeClaw', body: preview);
-          if (_ttsAutoSpeak && reply.isNotEmpty) _speakReplyText(reply);
+          if (ttsAutoSpeak && reply.isNotEmpty) _speakReplyText(reply);
         }
       } catch (e) {
         if (mounted) {
@@ -2168,16 +2195,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   /// Stop voice listening and send the current transcript.
   Future<void> _stopVoiceAndSend() async {
-    if (!_voiceListening) return;
-    await _voice.stopVoiceListening();
-    _voiceSubscription?.cancel();
-    _voiceSubscription = null;
-    final textToSend = _voiceTranscript.trim();
+    if (!voiceListening) return;
+    await voice.stopVoiceListening();
+    voiceSubscription?.cancel();
+    voiceSubscription = null;
+    final textToSend = voiceTranscript.trim();
     setState(() {
-      _voiceListening = false;
+      voiceListening = false;
       if (textToSend.isNotEmpty) {
         _inputController.text = textToSend;
-        _voiceTranscript = '';
+        voiceTranscript = '';
       }
     });
     if (textToSend.isNotEmpty) _send();
@@ -2186,10 +2213,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// Start push-to-talk recording (user friends only). Call _stopPushToTalkAndSend when user releases.
   Future<void> _startPushToTalk() async {
     if (widget.toUserId == null || widget.toUserId!.trim().isEmpty) return;
-    if (_voiceListening) {
+    if (voiceListening) {
       await _cancelVoiceInput();
     }
-    final hasPermission = await _voiceRecorder.hasPermission();
+    final hasPermission = await voiceRecorder.hasPermission();
     if (!hasPermission) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2203,9 +2230,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     try {
       final dir = await getTemporaryDirectory();
       final recordPath = path.join(
-          dir.path, 'push_voice_${DateTime.now().millisecondsSinceEpoch}.m4a');
-      await _voiceRecorder.start(const RecordConfig(), path: recordPath);
-      if (mounted) setState(() => _recordingPushToTalk = true);
+          dir.path, 'pushvoice_${DateTime.now().millisecondsSinceEpoch}.m4a');
+      await voiceRecorder.start(const RecordConfig(), path: recordPath);
+      if (mounted) setState(() => recordingPushToTalk = true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2216,11 +2243,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   /// Stop push-to-talk, upload audio, send by reference, and add to chat.
   Future<void> _stopPushToTalkAndSend() async {
-    if (!_recordingPushToTalk) return;
+    if (!recordingPushToTalk) return;
     try {
-      final filePath = await _voiceRecorder.stop();
+      final filePath = await voiceRecorder.stop();
       if (!mounted) return;
-      setState(() => _recordingPushToTalk = false);
+      setState(() => recordingPushToTalk = false);
       if (filePath == null || filePath.isEmpty) return;
       final file = File(filePath);
       if (!await file.exists()) return;
@@ -2262,7 +2289,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _recordingPushToTalk = false);
+        setState(() => recordingPushToTalk = false);
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Voice record stop failed: $e')));
       }
@@ -2271,36 +2298,36 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   /// Stop voice listening and discard the transcript (do not send).
   Future<void> _cancelVoiceInput() async {
-    if (!_voiceListening) return;
-    _voiceInputCancelled = true;
-    _voiceSubscription?.cancel();
-    _voiceSubscription = null;
-    await _voice.stopVoiceListening();
+    if (!voiceListening) return;
+    voiceInputCancelled = true;
+    voiceSubscription?.cancel();
+    voiceSubscription = null;
+    await voice.stopVoiceListening();
     if (mounted) {
       setState(() {
-        _voiceListening = false;
-        _voiceTranscript = '';
+        voiceListening = false;
+        voiceTranscript = '';
         _inputController.text = '';
       });
     }
   }
 
   Future<void> _toggleVoice() async {
-    if (_voiceListening) {
+    if (voiceListening) {
       await _stopVoiceAndSend();
       return;
     }
-    _voiceInputCancelled = false;
+    voiceInputCancelled = false;
     try {
-      await _voiceSubscription?.cancel();
-      _voiceSubscription = null;
+      await voiceSubscription?.cancel();
+      voiceSubscription = null;
       if (mounted) {
         setState(() {
-          _voiceTranscript = '';
+          voiceTranscript = '';
           _inputController.clear();
         });
       }
-      _voiceSubscription = _voice.voiceEventStream.listen(
+      voiceSubscription = voice.voiceEventStream.listen(
         (event) {
           try {
             if (!mounted) return;
@@ -2315,22 +2342,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             if (finalText != null && finalText.isNotEmpty) {
               if (!mounted) return;
               setState(() {
-                _voiceTranscript = finalText;
+                voiceTranscript = finalText;
                 _inputController.text = finalText;
                 final len = finalText.length;
                 _inputController.selection = TextSelection.collapsed(
                   offset: len.clamp(0, _inputController.text.length),
                 );
               });
-              if (!_voiceInputCancelled && !_loading) {
+              if (!voiceInputCancelled && !_loading) {
                 _send().then((_) {
-                  if (mounted) setState(() => _voiceTranscript = '');
+                  if (mounted) setState(() => voiceTranscript = '');
                 });
               }
             } else if (partial != null && partial.isNotEmpty) {
               if (!mounted) return;
               setState(() {
-                _voiceTranscript = partial;
+                voiceTranscript = partial;
                 _inputController.text = partial;
                 final len = partial.length;
                 _inputController.selection = TextSelection.collapsed(
@@ -2342,7 +2369,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             FlutterError.reportError(
                 FlutterErrorDetails(exception: e, stack: st));
             if (mounted) {
-              setState(() => _voiceListening = false);
+              setState(() => voiceListening = false);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text('Voice handler error: $e')),
               );
@@ -2351,28 +2378,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         },
         onError: (e) {
           if (mounted) {
-            setState(() => _voiceListening = false);
+            setState(() => voiceListening = false);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Voice error: $e')),
             );
           }
         },
       );
-      await _voice.startVoiceListening(locale: _voiceInputLocale);
-      if (mounted) setState(() => _voiceListening = true);
+      await voice.startVoiceListening(locale: voiceInputLocale);
+      if (mounted) setState(() => voiceListening = true);
     } catch (e, st) {
-      await _voiceSubscription?.cancel();
-      _voiceSubscription = null;
+      await voiceSubscription?.cancel();
+      voiceSubscription = null;
       try {
-        await _voice.stopVoiceListening();
+        await voice.stopVoiceListening();
       } catch (_) {}
       FlutterError.reportError(FlutterErrorDetails(exception: e, stack: st));
       if (mounted) {
-        setState(() => _voiceListening = false);
+        setState(() => voiceListening = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Voice failed: $e. On macOS/iOS allow Microphone + Speech Recognition; on macOS see homeclaw_voice README if the app crashes in the speech plugin.',
+              'Voice failed: $e. On macOS/iOS allow Microphone + Speech Recognition; on macOS see homeclawvoice README if the app crashes in the speech plugin.',
             ),
           ),
         );
@@ -2898,11 +2925,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   Future<void> _speakReplyText(String raw) async {
     final text = _textForTts(raw.trim());
     if (text.isEmpty) return;
-    if (mounted) setState(() => _ttsSpeaking = true);
+    if (mounted) setState(() => ttsSpeaking = true);
     try {
-      if (_voiceInputLocale != null && _voiceInputLocale!.isNotEmpty) {
+      if (voiceInputLocale != null && voiceInputLocale!.isNotEmpty) {
         // Voice input locale is e.g. "en_US" or "zh_CN"; TTS often accepts "en-US" / "zh-CN".
-        final ttsLocale = _voiceInputLocale!.replaceAll('_', '-');
+        final ttsLocale = voiceInputLocale!.replaceAll('_', '-');
         await _tts.setLanguage(ttsLocale);
       }
       await _tts.speak(text);
@@ -2911,7 +2938,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('TTS: $e')));
     } finally {
-      if (mounted) setState(() => _ttsSpeaking = false);
+      if (mounted) setState(() => ttsSpeaking = false);
     }
   }
 
@@ -2919,7 +2946,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     try {
       await _tts.stop();
     } catch (_) {}
-    if (mounted) setState(() => _ttsSpeaking = false);
+    if (mounted) setState(() => ttsSpeaking = false);
   }
 
   Future<void> _speakLastReply() async {
@@ -2946,7 +2973,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     List<String> voiceLocales = [];
     List<String> ttsLanguages = [];
     try {
-      voiceLocales = List<String>.from(await _voice.getAvailableLocales());
+      voiceLocales = List<String>.from(await voice.getAvailableLocales());
       final ttsList = await _tts.getLanguages;
       ttsLanguages = ttsList is List
           ? List<String>.from(ttsList.map((e) => e.toString()))
@@ -2960,10 +2987,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
     if (!mounted) return;
     final voiceOptions = ['System default', ...voiceLocales];
-    String currentVoiceDisplay = _voiceInputLocale == null
+    String currentVoiceDisplay = voiceInputLocale == null
         ? 'System default'
-        : voiceLocales.firstWhere((s) => s.startsWith(_voiceInputLocale!),
-            orElse: () => _voiceInputLocale!);
+        : voiceLocales.firstWhere((s) => s.startsWith(voiceInputLocale!),
+            orElse: () => voiceInputLocale!);
 
     await showDialog<void>(
       context: context,
@@ -3523,9 +3550,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     _userInboxApplyDebounceTimer?.cancel();
     _loadingStatusTimer?.cancel();
     _pushMessageSubscription?.cancel();
-    _voiceSubscription?.cancel();
-    _voice.dispose();
-    _voiceRecorder.dispose();
+    voiceDispose();
     _inputController.dispose();
     _scrollController.removeListener(_onScrollForPagination);
     _scrollController.dispose();
@@ -4273,7 +4298,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               ],
             ),
           ),
-        if (_voiceListening)
+        if (voiceListening)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             child: Material(
@@ -4299,7 +4324,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            _voiceTranscript.isEmpty
+                            voiceTranscript.isEmpty
                                 ? 'Listening...'
                                 : 'Speaking',
                             style: Theme.of(context)
@@ -4309,11 +4334,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                   color: Theme.of(context).colorScheme.primary,
                                 ),
                           ),
-                          if (_voiceTranscript.isNotEmpty)
+                          if (voiceTranscript.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.only(top: 4),
                               child: Text(
-                                _voiceTranscript,
+                                voiceTranscript,
                                 style: Theme.of(context).textTheme.bodyMedium,
                               ),
                             ),
@@ -4335,7 +4360,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               ),
             ),
           ),
-        if (_ttsSpeaking)
+        if (ttsSpeaking)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             child: Material(
@@ -4556,10 +4581,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   style: Theme.of(context).textTheme.bodySmall),
               const SizedBox(width: 8),
               Switch(
-                value: _ttsAutoSpeak,
+                value: ttsAutoSpeak,
                 onChanged: (value) => _setTtsAutoSpeak(value),
               ),
-              if (_ttsSpeaking)
+              if (ttsSpeaking)
                 Padding(
                   padding: const EdgeInsets.only(left: 8.0),
                   child: FilledButton.tonalIcon(
@@ -4590,20 +4615,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 child: IconButton(
                   onPressed: _loading ? null : _toggleVoice,
                   icon: Icon(
-                    _recordingPushToTalk
+                    recordingPushToTalk
                         ? Icons.stop
-                        : (_voiceListening ? Icons.mic : Icons.mic_none),
-                    color: (_recordingPushToTalk || _voiceListening)
+                        : (voiceListening ? Icons.mic : Icons.mic_none),
+                    color: (recordingPushToTalk || voiceListening)
                         ? Theme.of(context).colorScheme.primary
                         : null,
                   ),
                   tooltip: widget.isUserFriend
-                      ? (_recordingPushToTalk
+                      ? (recordingPushToTalk
                           ? 'Recording… release to send voice message'
-                          : (_voiceListening
+                          : (voiceListening
                               ? 'Stop voice input (long press for voice message)'
                               : 'Voice input (long press for voice message)'))
-                      : (_voiceListening ? 'Stop voice input' : 'Voice input'),
+                      : (voiceListening ? 'Stop voice input' : 'Voice input'),
                 ),
               ),
               const SizedBox(width: 4),
@@ -4617,7 +4642,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   onSubmitted: (_) => _send(),
                 ),
               ),
-              if (_ttsSpeaking) ...[
+              if (ttsSpeaking) ...[
                 const SizedBox(width: 4),
                 IconButton(
                   onPressed: _stopTts,
