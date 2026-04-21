@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core_service.dart';
+import '../providers/clawcode_providers.dart';
 import '../widgets/cc_run_chip.dart';
 
 String _formatClawcodeLastUsage(dynamic raw) {
@@ -26,8 +28,6 @@ String _formatClawcodeLastUsage(dynamic raw) {
   return parts.isEmpty ? '—' : parts.join(', ');
 }
 
-enum CcRunState { idle, running, approvalPending, error }
-
 String _formatTaskPlanForEdit(dynamic raw) {
   if (raw == null) return '';
   if (raw is String) return raw;
@@ -40,7 +40,7 @@ String _formatTaskPlanForEdit(dynamic raw) {
 
 /// Claw-Code tools: sessions, approvals, workspace file list, optional browser UI at Core `/clawcode`.
 /// Primary flow is the **main chat** (per-friend session binding). This screen is for approvals, files, and power-user tools.
-class ClawcodeScreen extends StatefulWidget {
+class ClawcodeScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
   /// When set (e.g. from a push deep link), show a hint after load if this approval is still pending.
   final String? initialApprovalId;
@@ -50,27 +50,13 @@ class ClawcodeScreen extends StatefulWidget {
   const ClawcodeScreen({super.key, required this.coreService, this.initialApprovalId, this.chatFriendId});
 
   @override
-  State<ClawcodeScreen> createState() => _ClawcodeScreenState();
+  ConsumerState<ClawcodeScreen> createState() => _ClawcodeScreenState();
 }
 
-class _ClawcodeScreenState extends State<ClawcodeScreen> {
+class _ClawcodeScreenState extends ConsumerState<ClawcodeScreen> {
   late TextEditingController _webUrlController;
   late TextEditingController _composeController;
   Timer? _approvalPollTimer;
-  bool _loading = false;
-  String? _error;
-  List<Map<String, dynamic>> _sessions = [];
-  List<Map<String, dynamic>> _approvals = [];
-  String? _filesSessionId;
-  String _filesRel = '';
-  List<Map<String, dynamic>> _fileEntries = [];
-  bool _filesLoading = false;
-
-  String? _activeSessionId;
-  bool _sending = false;
-  String _progressLine = '';
-  String _lastReply = '';
-  CcRunState _ccRunState = CcRunState.idle;
 
   String get _owner {
     final u = widget.coreService.sessionUserId?.trim();
@@ -86,7 +72,7 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
     _webUrlController = TextEditingController(text: widget.coreService.resolvedClawcodeWebUrl());
     _composeController = TextEditingController();
     _approvalPollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (!mounted || _sending) return;
+      if (!mounted || ref.read(clawcodeProvider).sending) return;
       _lightPollApprovals();
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -113,45 +99,43 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
   }
 
   Future<void> _lightPollApprovals() async {
+    final cs = ref.read(clawcodeProvider);
     try {
       final a = await widget.coreService.fetchClawcodeApprovals(_owner);
       if (!mounted) return;
-      setState(() {
-        _approvals = a;
-        if (_ccRunState == CcRunState.running && a.isNotEmpty) {
-          _ccRunState = CcRunState.approvalPending;
-        }
-      });
+      final notifier = ref.read(clawcodeProvider.notifier);
+      notifier.setApprovals(a);
+      if (cs.ccRunState == CcRunState.running && a.isNotEmpty) {
+        notifier.setCcRunState(CcRunState.approvalPending);
+      }
     } catch (_) {}
   }
 
   Future<void> _selectSession(String? sid) async {
+    final notifier = ref.read(clawcodeProvider.notifier);
     final prefs = await SharedPreferences.getInstance();
     if (sid == null || sid.isEmpty) {
       await prefs.remove(_prefActiveSessionKey(_owner));
       if (!mounted) return;
-      setState(() {
-        _activeSessionId = null;
-        _composeController.clear();
-      });
+      notifier.clearActiveSessionId();
+      _composeController.clear();
       return;
     }
     await prefs.setString(_prefActiveSessionKey(_owner), sid);
     final draft = await widget.coreService.loadClawcodeComposeDraft(ownerUserId: _owner, sessionId: sid);
     if (!mounted) return;
-    setState(() {
-      _activeSessionId = sid;
-      _composeController.text = draft ?? '';
-    });
+    notifier.setActiveSessionId(sid);
+    _composeController.text = draft ?? '';
   }
 
   Future<void> _fixActiveSessionAfterRefresh(List<Map<String, dynamic>> sessions) async {
+    final cs = ref.read(clawcodeProvider);
     final ids = sessions.map((s) => (s['clawcode_session_id'] ?? '').toString()).where((x) => x.isNotEmpty).toList();
     if (ids.isEmpty) {
-      if (_activeSessionId != null) await _selectSession(null);
+      if (cs.activeSessionId != null) await _selectSession(null);
       return;
     }
-    if (_activeSessionId != null && ids.contains(_activeSessionId)) return;
+    if (cs.activeSessionId != null && ids.contains(cs.activeSessionId)) return;
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString(_prefActiveSessionKey(_owner));
     if (saved != null && ids.contains(saved)) {
@@ -162,7 +146,8 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
   }
 
   Future<void> _sendClawcodeInbound() async {
-    final sid = _activeSessionId?.trim();
+    final cs = ref.read(clawcodeProvider);
+    final sid = cs.activeSessionId?.trim();
     if (sid == null || sid.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select an active session first.')));
@@ -177,11 +162,10 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
       return;
     }
     FocusScope.of(context).unfocus();
-    setState(() {
-      _sending = true;
-      _progressLine = '';
-      _ccRunState = CcRunState.running;
-    });
+    final notifier = ref.read(clawcodeProvider.notifier);
+    notifier.setSending(true);
+    notifier.setProgressLine('');
+    notifier.setCcRunState(CcRunState.running);
     try {
       await widget.coreService.saveClawcodeComposeDraft(ownerUserId: _owner, sessionId: sid, text: msg);
       final fid = widget.chatFriendId?.trim();
@@ -191,21 +175,18 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
         friendId: (fid != null && fid.isNotEmpty) ? fid : null,
         useStream: true,
         onProgress: (m) {
-          if (mounted) setState(() => _progressLine = m);
+          if (mounted) ref.read(clawcodeProvider.notifier).setProgressLine(m);
         },
         clawcodeSessionId: sid,
       );
       if (!mounted) return;
       final text = r['text']?.toString() ?? '';
-      setState(() {
-        _lastReply = text;
-        _ccRunState = CcRunState.idle;
-      });
+      notifier.setLastReply(text);
+      notifier.setCcRunState(CcRunState.idle);
       await _refresh();
       if (!mounted) return;
-      setState(() {
-        _ccRunState = _approvals.isNotEmpty ? CcRunState.approvalPending : CcRunState.idle;
-      });
+      final approvals = ref.read(clawcodeProvider).approvals;
+      notifier.setCcRunState(approvals.isNotEmpty ? CcRunState.approvalPending : CcRunState.idle);
     } catch (e) {
       final err = e.toString();
       try {
@@ -216,16 +197,17 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
         );
       } catch (_) {}
       if (mounted) {
-        setState(() => _ccRunState = CcRunState.error);
+        notifier.setCcRunState(CcRunState.error);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
       }
     } finally {
-      if (mounted) setState(() => _sending = false);
+      if (mounted) notifier.setSending(false);
     }
   }
 
   Future<void> _retryLastCompose() async {
-    final sid = _activeSessionId?.trim();
+    final cs = ref.read(clawcodeProvider);
+    final sid = cs.activeSessionId?.trim();
     if (sid == null || sid.isEmpty) return;
     final t = await widget.coreService.loadClawcodeComposeDraft(ownerUserId: _owner, sessionId: sid);
     if (t == null || t.trim().isEmpty) {
@@ -236,7 +218,7 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
       }
       return;
     }
-    setState(() => _composeController.text = t);
+    _composeController.text = t;
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Restored last message — tap Send to run again.')),
@@ -245,7 +227,8 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
   }
 
   Future<void> _showPlanRecoveryDialog(BuildContext screenContext) async {
-    final sid = _activeSessionId?.trim();
+    final cs = ref.read(clawcodeProvider);
+    final sid = cs.activeSessionId?.trim();
     if (sid == null || sid.isEmpty) {
       ScaffoldMessenger.of(screenContext).showSnackBar(
         const SnackBar(content: Text('Select a session first.')),
@@ -434,10 +417,8 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _refresh() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    final notifier = ref.read(clawcodeProvider.notifier);
+    notifier.setLoading(true);
     List<Map<String, dynamic>> approvals = [];
     try {
       final sessions = await widget.coreService.fetchClawcodeSessions(_owner);
@@ -447,21 +428,12 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
         // ignore if empty/error when feature off
       }
       if (!mounted) return approvals;
-      setState(() {
-        _sessions = sessions;
-        _approvals = approvals;
-        _loading = false;
-        _filesSessionId = null;
-        _fileEntries = [];
-        _filesRel = '';
-      });
+      notifier.setSessionsAndApprovals(sessions, approvals);
+      ref.read(clawcodeFilesProvider.notifier).clearFiles();
       await _fixActiveSessionAfterRefresh(sessions);
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-        });
+        notifier.setError(e.toString());
       }
     }
     return approvals;
@@ -486,11 +458,8 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
   }
 
   Future<void> _loadFiles(String sessionId, {String rel = ''}) async {
-    setState(() {
-      _filesLoading = true;
-      _filesSessionId = sessionId;
-      _filesRel = rel;
-    });
+    final notifier = ref.read(clawcodeFilesProvider.notifier);
+    notifier.setLoading(true);
     try {
       final entries = await widget.coreService.fetchClawcodeWorkspaceFiles(
         sessionId: sessionId,
@@ -498,16 +467,10 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
         relativePath: rel,
       );
       if (!mounted) return;
-      setState(() {
-        _fileEntries = entries;
-        _filesLoading = false;
-      });
+      notifier.setFiles(sessionId: sessionId, rel: rel, entries: entries);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _fileEntries = [];
-        _filesLoading = false;
-      });
+      notifier.clearFiles();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Files: $e')));
     }
   }
@@ -744,11 +707,13 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = ref.watch(clawcodeProvider);
+    final fs = ref.watch(clawcodeFilesProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Claw-Code'),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loading ? null : _refresh, tooltip: 'Refresh'),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: cs.loading ? null : _refresh, tooltip: 'Refresh'),
         ],
       ),
       body: RefreshIndicator(
@@ -785,30 +750,28 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
-            if (_loading)
+            if (cs.loading)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))),
               )
-            else if (_sessions.isEmpty)
+            else if (cs.sessions.isEmpty)
               Text(
                 'No sessions yet. Create one on the Core host, then pull to refresh.',
                 style: Theme.of(context).textTheme.bodySmall,
               )
             else
               DropdownButtonFormField<String>(
-                // Controlled selection updates after refresh; initialValue does not track state.
-                // ignore: deprecated_member_use
-                value: _activeSessionId != null &&
-                        _sessions.any((s) => (s['clawcode_session_id'] ?? '').toString() == _activeSessionId)
-                    ? _activeSessionId
+                initialValue: cs.activeSessionId != null &&
+                        cs.sessions.any((s) => (s['clawcode_session_id'] ?? '').toString() == cs.activeSessionId)
+                    ? cs.activeSessionId
                     : null,
                 decoration: const InputDecoration(
                   labelText: 'Active session',
                   border: OutlineInputBorder(),
                 ),
                 hint: const Text('Select session'),
-                items: _sessions
+                items: cs.sessions
                     .map((s) => (s['clawcode_session_id'] ?? '').toString())
                     .where((id) => id.isNotEmpty)
                     .map(
@@ -821,7 +784,7 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
                       ),
                     )
                     .toList(),
-                onChanged: _sending
+                onChanged: cs.sending
                     ? null
                     : (v) {
                         if (v != null) _selectSession(v);
@@ -830,7 +793,7 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
             const SizedBox(height: 12),
             TextField(
               controller: _composeController,
-              enabled: !_sending,
+              enabled: !cs.sending,
               decoration: const InputDecoration(
                 labelText: 'Message to Claw-Code',
                 border: OutlineInputBorder(),
@@ -846,49 +809,49 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
               runSpacing: 8,
               children: [
                 FilledButton.icon(
-                  onPressed: _sending ? null : _sendClawcodeInbound,
-                  icon: _sending
+                  onPressed: cs.sending ? null : _sendClawcodeInbound,
+                  icon: cs.sending
                       ? const SizedBox(
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.send),
-                  label: Text(_sending ? 'Running…' : 'Send'),
+                  label: Text(cs.sending ? 'Running…' : 'Send'),
                 ),
                 OutlinedButton.icon(
-                  onPressed: _sending ? null : _retryLastCompose,
+                  onPressed: cs.sending ? null : _retryLastCompose,
                   icon: const Icon(Icons.replay),
                   label: const Text('Retry (load last)'),
                 ),
                 OutlinedButton.icon(
-                  onPressed: _sending ? null : () => _showPlanRecoveryDialog(context),
+                  onPressed: cs.sending ? null : () => _showPlanRecoveryDialog(context),
                   icon: const Icon(Icons.flag_outlined),
                   label: const Text('Plan & recovery'),
                 ),
                 OutlinedButton.icon(
-                  onPressed: _sending ? null : () => _showMcpDiagnosticsSheet(context),
+                  onPressed: cs.sending ? null : () => _showMcpDiagnosticsSheet(context),
                   icon: const Icon(Icons.health_and_safety_outlined),
                   label: const Text('MCP'),
                 ),
               ],
             ),
-            if (_progressLine.isNotEmpty) ...[
+            if (cs.progressLine.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Text(_progressLine, style: Theme.of(context).textTheme.bodySmall),
+              Text(cs.progressLine, style: Theme.of(context).textTheme.bodySmall),
             ],
             const SizedBox(height: 8),
             Row(
               children: [
                 Text('Run state: ', style: Theme.of(context).textTheme.bodySmall),
-                _CcRunChip(state: _ccRunState),
+                _CcRunChip(state: cs.ccRunState),
               ],
             ),
-            if (_lastReply.isNotEmpty) ...[
+            if (cs.lastReply.isNotEmpty) ...[
               const SizedBox(height: 12),
               Text('Last reply', style: Theme.of(context).textTheme.titleSmall),
               const SizedBox(height: 4),
-              SelectableText(_lastReply, style: const TextStyle(fontSize: 13)),
+              SelectableText(cs.lastReply, style: const TextStyle(fontSize: 13)),
             ],
             const SizedBox(height: 16),
             if (widget.coreService.apiKey == null || widget.coreService.apiKey!.isEmpty)
@@ -899,17 +862,17 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
                   child: Text('Set an API key in Settings if Core has auth_enabled — Claw-Code REST uses the same key as /inbound.'),
                 ),
               ),
-            if (_error != null) ...[
+            if (cs.error != null) ...[
               const SizedBox(height: 12),
-              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(cs.error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
             ],
             const SizedBox(height: 16),
             Text('Pending approvals', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
-            if (_approvals.isEmpty)
+            if (cs.approvals.isEmpty)
               Text('None', style: Theme.of(context).textTheme.bodySmall)
             else
-              ..._approvals.map((a) {
+              ...cs.approvals.map((a) {
                 final id = (a['approval_id'] ?? '').toString();
                 final tool = (a['tool_name'] ?? '').toString();
                 final sum = (a['summary'] ?? '').toString();
@@ -935,12 +898,12 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
             const SizedBox(height: 24),
             Text('Sessions', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
-            if (_loading)
+            if (cs.loading)
               const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
-            else if (_sessions.isEmpty)
+            else if (cs.sessions.isEmpty)
               Text('No sessions for this owner. Create one with: python3 -m main clawcode session new', style: Theme.of(context).textTheme.bodySmall)
             else
-              ..._sessions.map((s) {
+              ...cs.sessions.map((s) {
                 final sid = (s['clawcode_session_id'] ?? '').toString();
                 final cwd = (s['cwd'] ?? '').toString();
                 final mode = (s['mode'] ?? 'agent').toString();
@@ -978,22 +941,22 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
                           onTap: () => _loadFiles(sid, rel: ''),
                         ),
                       ],
-                      if (_filesSessionId == sid) ...[
-                        if (_filesRel.isNotEmpty)
+                      if (fs.sessionId == sid) ...[
+                        if (fs.rel.isNotEmpty)
                           ListTile(
                             dense: true,
                             leading: const Icon(Icons.arrow_upward),
                             title: const Text('Up'),
                             onTap: () {
-                              final parts = _filesRel.split('/')..removeWhere((e) => e.isEmpty);
+                              final parts = fs.rel.split('/')..removeWhere((e) => e.isEmpty);
                               parts.removeLast();
                               _loadFiles(sid, rel: parts.join('/'));
                             },
                           ),
-                        if (_filesLoading)
+                        if (fs.loading)
                           const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()))
                         else
-                          ..._fileEntries.map((e) {
+                          ...fs.entries.map((e) {
                             final name = (e['name'] ?? '').toString();
                             final t = (e['type'] ?? '').toString();
                             final isDir = t == 'directory';
@@ -1003,7 +966,7 @@ class _ClawcodeScreenState extends State<ClawcodeScreen> {
                               title: Text(name, style: const TextStyle(fontFamily: 'monospace', fontSize: 13)),
                               onTap: isDir
                                   ? () {
-                                      final next = _filesRel.isEmpty ? name : '$_filesRel/$name';
+                                      final next = fs.rel.isEmpty ? name : '${fs.rel}/$name';
                                       _loadFiles(sid, rel: next);
                                     }
                                   : null,

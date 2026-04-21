@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
 
-/// Run state for Clawcode agent.
-enum CcRunState { idle, running, approvalPending, error }
-
 /// Chip showing Clawcode run state (idle / running / approval pending / error).
 class CcRunChip extends StatelessWidget {
   const CcRunChip({super.key, required this.state});
