@@ -1662,7 +1662,7 @@ class CoreService {
   Future<bool> checkConnection() async {
     try {
       final url = Uri.parse('$_baseUrl/api/config/core');
-      final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 5));
+      await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 5));
       return true;
     } catch (_) {
       return false;
@@ -1859,7 +1859,7 @@ class CoreService {
       return _sendMessageAsync(url, body, onProgress ?? (_) {});
     }
     if (useStreamPath) {
-      final result = await _sendMessageStream(url, body, onProgress!);
+      final result = await _sendMessageStream(url, body, onProgress);
       await _persistInboundResultToStore(userId, friendId, result);
       return result;
     }
@@ -2346,8 +2346,8 @@ class CoreService {
       final responseImages = map?['images'];
       final responseImage = map?['image'];
       final imageList = responseImages is List
-          ? (responseImages as List<dynamic>).whereType<String>().toList()
-          : (responseImage is String ? <String>[responseImage as String] : null);
+          ? responseImages.whereType<String>().toList()
+          : (responseImage is String ? <String>[responseImage] : null);
       final result = {
         'text': cancelled ? (err ?? 'Request cancelled.') : (ok ? text : (err ?? text)),
         'images': imageList != null && imageList.isNotEmpty ? imageList : null,
@@ -2462,8 +2462,8 @@ class CoreService {
       final responseImages = msg['images'];
       final responseImage = msg['image'];
       final imageList = responseImages is List
-          ? (responseImages as List<dynamic>).whereType<String>().toList()
-          : (responseImage is String ? <String>[responseImage as String] : null);
+          ? responseImages.whereType<String>().toList()
+          : (responseImage is String ? <String>[responseImage] : null);
       try {
         final map = <String, dynamic>{
           'text': text,
@@ -2496,8 +2496,8 @@ class CoreService {
     final responseImages = msg['images'];
     final responseImage = msg['image'];
     final imageList = responseImages is List
-        ? (responseImages as List<dynamic>).whereType<String>().toList()
-        : (responseImage is String ? <String>[responseImage as String] : null);
+        ? responseImages.whereType<String>().toList()
+        : (responseImage is String ? <String>[responseImage] : null);
     final resultMap = {
       'text': cancelled ? (err ?? 'Request cancelled.') : (ok ? text : (err ?? text)),
       'images': imageList != null && imageList.isNotEmpty ? imageList : null,
@@ -2734,8 +2734,8 @@ class CoreService {
         final responseImages = map?['images'];
         final responseImage = map?['image'];
         final imageList = responseImages is List
-            ? (responseImages as List<dynamic>).whereType<String>().toList()
-            : (responseImage is String ? <String>[responseImage as String] : null);
+            ? responseImages.whereType<String>().toList()
+            : (responseImage is String ? <String>[responseImage] : null);
         final result = {
           'text': cancelled ? (err ?? 'Request cancelled.') : (ok ? text : (err ?? text)),
           'images': imageList != null && imageList.isNotEmpty ? imageList : null,
@@ -2804,8 +2804,8 @@ class CoreService {
                     final responseImages = json['images'];
                     final responseImage = json['image'];
                     final imageList = responseImages is List
-                        ? (responseImages as List<dynamic>).whereType<String>().toList()
-                        : (responseImage is String ? <String>[responseImage as String] : null);
+                        ? responseImages.whereType<String>().toList()
+                        : (responseImage is String ? <String>[responseImage] : null);
                     return {
                       'text': ok ? outText : (err ?? outText),
                       'images': imageList != null && imageList.isNotEmpty ? imageList : null,
@@ -2833,8 +2833,8 @@ class CoreService {
                 final responseImages = json['images'];
                 final responseImage = json['image'];
                 final imageList = responseImages is List
-                    ? (responseImages as List<dynamic>).whereType<String>().toList()
-                    : (responseImage is String ? <String>[responseImage as String] : null);
+                    ? responseImages.whereType<String>().toList()
+                    : (responseImage is String ? <String>[responseImage] : null);
                 return {
                   'text': ok ? outText : (err ?? outText),
                   'images': imageList != null && imageList.isNotEmpty ? imageList : null,
@@ -2967,7 +2967,7 @@ class CoreService {
     final response = await http
         .get(url, headers: _authHeaders())
         .timeout(const Duration(seconds: 60));
-    final body = jsonDecode(response.body is String ? response.body as String : '{}') as Map<String, dynamic>? ?? {};
+    final body = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
     if (response.statusCode != 200) {
       throw Exception(body['detail']?.toString() ?? 'Sync failed: ${response.statusCode}');
     }

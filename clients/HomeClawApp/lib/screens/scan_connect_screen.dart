@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../core_service.dart';
 
 /// Scan a QR code from `homeclaw pair` (homeclaw://connect?url=...&api_key=...)
 /// and save URL + API key to CoreService.
-class ScanConnectScreen extends StatefulWidget {
+class ScanConnectScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
   final VoidCallback? onSaved;
 
@@ -15,10 +16,10 @@ class ScanConnectScreen extends StatefulWidget {
   });
 
   @override
-  State<ScanConnectScreen> createState() => _ScanConnectScreenState();
+  ConsumerState<ScanConnectScreen> createState() => _ScanConnectScreenState();
 }
 
-class _ScanConnectScreenState extends State<ScanConnectScreen> {
+class _ScanConnectScreenState extends ConsumerState<ScanConnectScreen> {
   bool _scanned = false;
 
   void _onDetect(BarcodeCapture capture) {

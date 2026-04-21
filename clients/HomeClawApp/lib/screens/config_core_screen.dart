@@ -1,23 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core_service.dart';
+import '../providers/config_core_providers.dart';
 
 /// Manage Core config (core.yml) and users (user.yml) via Core's config API.
 /// All whitelisted core.yml keys are loadable/editable; sections match config structure.
-class ConfigCoreScreen extends StatefulWidget {
+class ConfigCoreScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
 
   const ConfigCoreScreen({super.key, required this.coreService});
 
   @override
-  State<ConfigCoreScreen> createState() => _ConfigCoreScreenState();
+  ConsumerState<ConfigCoreScreen> createState() => _ConfigCoreScreenState();
 }
 
-class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
-  List<Map<String, dynamic>> _users = [];
-  bool _loading = true;
-  String? _error;
-  Map<String, dynamic> _core = {};
+class _ConfigCoreScreenState extends ConsumerState<ConfigCoreScreen> {
+  late final ConfigCoreNotifier _notifier;
+  ConfigCoreState get _cs => ref.watch(configCoreProvider);
 
   // Server
   late TextEditingController _nameController;
@@ -80,6 +80,7 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
   @override
   void initState() {
     super.initState();
+    _notifier = ref.read(configCoreProvider.notifier);
     _nameController = TextEditingController();
     _hostController = TextEditingController();
     _portController = TextEditingController();
@@ -161,13 +162,13 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
   }
 
   List<Map<String, dynamic>> _cloudModelsList() {
-    final list = _core['cloud_models'];
+    final list = _cs.core['cloud_models'];
     if (list == null || list is! List) return [];
     return list.map((e) => Map<String, dynamic>.from(e is Map ? e : {})).toList();
   }
 
   List<Map<String, dynamic>> _localChatModelsList() {
-    final list = _core['local_models'];
+    final list = _cs.core['local_models'];
     if (list == null || list is! List) return [];
     return list.map((e) {
       final m = Map<String, dynamic>.from(e is Map ? e : {});
@@ -178,7 +179,6 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
   }
 
   void _applyCore(Map<String, dynamic> core) {
-    _core = core;
     _nameController.text = _str(core['name']);
     _hostController.text = _str(core['host']).isEmpty ? '0.0.0.0' : _str(core['host']);
     _portController.text = core['port']?.toString() ?? '9000';
@@ -258,25 +258,16 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    _notifier.setLoading(true);
     try {
       final core = await widget.coreService.getConfigCore();
       final users = await widget.coreService.getConfigUsers();
       if (!mounted) return;
-      setState(() {
-        _users = users;
-        _applyCore(core);
-        _loading = false;
-      });
+      _applyCore(core);
+      _notifier.setLoaded(core, users);
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-        });
+        _notifier.setError(e.toString());
       }
     }
   }
@@ -637,13 +628,14 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
+    final state = ref.watch(configCoreProvider);
+    if (state.loading) {
       return Scaffold(
         appBar: AppBar(title: const Text('Manage Core')),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
-    if (_error != null) {
+    if (state.error != null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Manage Core')),
         body: Padding(
@@ -651,7 +643,7 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SelectableText(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              SelectableText(state.error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
               const SizedBox(height: 16),
               FilledButton(onPressed: _load, child: const Text('Retry')),
             ],
@@ -663,7 +655,7 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
       appBar: AppBar(
         title: const Text('Manage Core'),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _load, tooltip: 'Refresh'),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: state.loading ? null : _load, tooltip: 'Refresh'),
         ],
       ),
       body: ListView(
@@ -684,21 +676,25 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
             const SizedBox(height: 12),
             const Text('Cloud models', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
             const SizedBox(height: 4),
-            ..._cloudModelsList().map((m) {
-              final id = m['id'] as String? ?? '';
-              final alias = m['alias'] as String? ?? id;
-              return RadioListTile<String>(
-                title: Text(alias),
-                subtitle: id != alias ? Text(id, style: const TextStyle(fontSize: 11, color: Colors.grey)) : null,
-                value: id,
-                groupValue: _selectedCloudModelId,
-                onChanged: (v) => setState(() {
-                  _selectedCloudModelId = v;
-                  _selectedLocalModelId = null;
-                  _mainLlmController.text = v != null ? 'cloud_models/$v' : _mainLlmController.text;
-                }),
-              );
-            }),
+            RadioGroup<String?>(
+              groupValue: _selectedCloudModelId,
+              onChanged: (v) => setState(() {
+                _selectedCloudModelId = v;
+                _selectedLocalModelId = null;
+                _mainLlmController.text = v != null ? 'cloud_models/$v' : _mainLlmController.text;
+              }),
+              child: Column(
+                children: _cloudModelsList().map((m) {
+                  final id = m['id'] as String? ?? '';
+                  final alias = m['alias'] as String? ?? id;
+                  return RadioListTile<String>(
+                    title: Text(alias),
+                    subtitle: id != alias ? Text(id, style: const TextStyle(fontSize: 11, color: Colors.grey)) : null,
+                    value: id,
+                  );
+                }).toList(),
+              ),
+            ),
             if (_selectedCloudModelId != null) ...[
               const SizedBox(height: 4),
               TextField(
@@ -715,21 +711,25 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
             const SizedBox(height: 12),
             const Text('Local models', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
             const SizedBox(height: 4),
-            ..._localChatModelsList().map((m) {
-              final id = m['id'] as String? ?? '';
-              final alias = m['alias'] as String? ?? id;
-              return RadioListTile<String>(
-                title: Text(alias),
-                subtitle: id != alias ? Text(id, style: const TextStyle(fontSize: 11, color: Colors.grey)) : null,
-                value: id,
-                groupValue: _selectedLocalModelId,
-                onChanged: (v) => setState(() {
-                  _selectedLocalModelId = v;
-                  _selectedCloudModelId = null;
-                  _mainLlmController.text = v != null ? 'local_models/$v' : _mainLlmController.text;
-                }),
-              );
-            }),
+            RadioGroup<String?>(
+              groupValue: _selectedLocalModelId,
+              onChanged: (v) => setState(() {
+                _selectedLocalModelId = v;
+                _selectedCloudModelId = null;
+                _mainLlmController.text = v != null ? 'local_models/$v' : _mainLlmController.text;
+              }),
+              child: Column(
+                children: _localChatModelsList().map((m) {
+                  final id = m['id'] as String? ?? '';
+                  final alias = m['alias'] as String? ?? id;
+                  return RadioListTile<String>(
+                    title: Text(alias),
+                    subtitle: id != alias ? Text(id, style: const TextStyle(fontSize: 11, color: Colors.grey)) : null,
+                    value: id,
+                  );
+                }).toList(),
+              ),
+            ),
             const SizedBox(height: 12),
             const Text('Embedding model (read-only)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
             const SizedBox(height: 4),
@@ -886,7 +886,7 @@ class _ConfigCoreScreenState extends State<ConfigCoreScreen> {
           const SizedBox(height: 24),
           const Text('Users (user.yml)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 8),
-          ..._users.map((u) {
+          ...state.users.map((u) {
             final name = u['name'] as String? ?? '?';
             final id = u['id'] as String? ?? name;
             final im = (u['im'] as List<dynamic>?)?.join(', ') ?? '';

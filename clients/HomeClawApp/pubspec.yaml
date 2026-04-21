@@ -44,6 +44,7 @@ dependencies:
   cryptography: ^2.9.0
   flutter_secure_storage: ^10.0.0
   image: ^4.3.0
+  flutter_riverpod: ^2.6.1  # State management (non-breaking addition)
 
 dev_dependencies:
   flutter_test:

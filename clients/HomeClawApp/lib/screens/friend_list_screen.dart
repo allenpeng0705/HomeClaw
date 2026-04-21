@@ -3,9 +3,11 @@ import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:home_claw_app/l10n/app_localizations.dart';
 import '../core_service.dart';
+import '../providers/friend_list_providers.dart';
 import '../widgets/homeclaw_snackbars.dart';
 import '../utils/friend_localization.dart';
 import 'add_ai_friend_screen.dart';
@@ -36,15 +38,10 @@ const Map<String, String> _localizedNameToPreset = {
   '리마인더': 'reminder', '비공개 메모': 'note',
 };
 
-bool _isPersonFriendType(String? t) {
-  final x = (t ?? '').trim().toLowerCase();
-  return x == 'user' || x == 'remote_user';
-}
-
 /// Derive preset key from friend name when API does not return preset (e.g. Reminder→reminder, Note/Notes→note, Finder/Files→finder).
 /// Handles English and localized names (zh, es, fr, de, it, ja, ko) so thumbnails show regardless of locale.
 String? _presetKeyFromFriendName(String name) {
-  final n = (name is String ? name : '').trim();
+  final n = name.trim();
   if (n.isEmpty) return null;
   final nLower = n.toLowerCase();
   final byKey = _localizedNameToPreset[nLower];
@@ -66,7 +63,7 @@ String? _presetKeyFromFriendName(String name) {
 /// If not logged in, shows LoginScreen. Tap a friend to open chat with friendId.
 /// When [initialPushFromFriend] is set (app opened by tapping FCM notification), open that chat after friends load.
 /// When [initialClawcodeApprovalId] is set (e.g. Claw-Code approval push), open [ClawcodeScreen] after friends load. Day-to-day Claw-Code: **`preset: clawcode`** friend in user.yml — open that chat (terminal / More → Claw-Code).
-class FriendListScreen extends StatefulWidget {
+class FriendListScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
   final String? initialMessage;
   final String? initialPushFromFriend;
@@ -81,23 +78,20 @@ class FriendListScreen extends StatefulWidget {
   });
 
   @override
-  State<FriendListScreen> createState() => _FriendListScreenState();
+  ConsumerState<FriendListScreen> createState() => _FriendListScreenState();
 }
 
-class _FriendListScreenState extends State<FriendListScreen> {
-  List<Map<String, dynamic>> _friends = [];
-  bool _loading = true;
-  String? _error;
+class _FriendListScreenState extends ConsumerState<FriendListScreen> {
+  String get _friendListKey => widget.coreService.sessionUserId ?? '';
+  late final FriendListNotifier _friendListNotifier;
   String? _initialPushFromFriend;
   String? _initialClawcodeApprovalId;
-  Uint8List? _myAvatarBytes;
-  /// User ids (of user friends) that have at least one unread message in inbox.
-  Set<String> _unreadUserIds = {};
   StreamSubscription<Map<String, dynamic>>? _pushSubscription;
 
   @override
   void initState() {
     super.initState();
+    _friendListNotifier = ref.read(friendListProvider(_friendListKey).notifier);
     _initialPushFromFriend = widget.initialPushFromFriend;
     _initialClawcodeApprovalId = widget.initialClawcodeApprovalId;
     _loadFriends();
@@ -132,13 +126,14 @@ class _FriendListScreenState extends State<FriendListScreen> {
   Future<void> _loadUnreadState() async {
     final userId = widget.coreService.sessionUserId?.trim();
     if (userId == null || userId.isEmpty || !mounted) return;
+    final friends = _friendListNotifier.friends;
     try {
       final data = await widget.coreService.getUserInbox(userId: userId, limit: 200);
       final list = data['messages'] as List<dynamic>? ?? [];
       final unread = <String>{};
-      for (final f in _friends) {
-        if (!_isPersonFriendType(f['type'] as String?)) continue;
-        final otherId = (f['user_id'] as String?)?.trim();
+      for (final f in friends) {
+        if (!f.isPerson) continue;
+        final otherId = f.userId;
         if (otherId == null || otherId.isEmpty) continue;
         final lastRead = await widget.coreService.getUserInboxLastRead(userId, otherId);
         for (final m in list) {
@@ -152,45 +147,38 @@ class _FriendListScreenState extends State<FriendListScreen> {
           }
         }
       }
-      if (mounted) setState(() => _unreadUserIds = unread);
+      if (mounted) _friendListNotifier.setUnreadUserIds(unread);
     } catch (_) {}
   }
 
   Future<void> _loadMyAvatar() async {
     final bytes = await widget.coreService.getMyAvatarCached();
     if (mounted && bytes != null && bytes.isNotEmpty) {
-      setState(() => _myAvatarBytes = bytes);
+      _friendListNotifier.setMyAvatar(bytes);
     }
   }
 
   Future<void> _loadFriends() async {
     if (!widget.coreService.isLoggedIn) return;
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    _friendListNotifier.setLoading(true);
     try {
       unawaited(widget.coreService.ensureFederationE2eKeysRegistered());
       final list = await widget.coreService.getFriends();
       final sorted = List<Map<String, dynamic>>.from(list);
       sortFriendsWithSystemFirst(sorted);
-      if (mounted) {
-        setState(() {
-          _friends = sorted;
-          _loading = false;
-        });
-        _loadUnreadState();
-        _openInitialClawcodeIfNeeded();
-        _openInitialPushChatIfNeeded();
-      }
+      _friendListNotifier.setFriends(sorted.map((f) => FriendEntry(
+        id: (f['id'] as String?) ?? '',
+        name: (f['name'] as String?) ?? '',
+        type: f['type'] as String?,
+        preset: f['preset'] as String?,
+        userId: f['user_id'] as String?,
+        remoteInstanceId: f['peer_instance_id'] as String?,
+      )).toList());
+      _loadUnreadState();
+      _openInitialClawcodeIfNeeded();
+      _openInitialPushChatIfNeeded();
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-          _friends = [];
-        });
-      }
+      _friendListNotifier.setError(e.toString());
     }
   }
 
@@ -212,37 +200,35 @@ class _FriendListScreenState extends State<FriendListScreen> {
   }
 
   void _openInitialPushChatIfNeeded() {
+    final friends = _friendListNotifier.friends;
     final name = _initialPushFromFriend?.trim();
-    if (name == null || name.isEmpty || _friends.isEmpty) return;
+    if (name == null || name.isEmpty || friends.isEmpty) return;
     _initialPushFromFriend = null;
     final nameLower = name.toLowerCase();
-    Map<String, dynamic>? match;
-    for (final f in _friends) {
-      final n = (f['name'] as String?)?.trim() ?? '';
-      if (n.isNotEmpty && (n == name || n.toLowerCase() == nameLower)) {
+    FriendEntry? match;
+    for (final f in friends) {
+      if (f.name.isNotEmpty && (f.name == name || f.name.toLowerCase() == nameLower)) {
         match = f;
         break;
       }
     }
     if (match == null) {
-      for (final f in _friends) {
-        if ((f['name'] as String?)?.trim().toLowerCase() == 'homeclaw') {
+      for (final f in friends) {
+        if (f.name.toLowerCase() == 'homeclaw') {
           match = f;
           break;
         }
       }
     }
     if (match == null) return;
-    final m = match;
     final userId = widget.coreService.sessionUserId;
     if (userId == null || userId.isEmpty) return;
-    final friendId = (m['name'] as String?)?.trim() ?? 'HomeClaw';
-    final isUserFriend = _isPersonFriendType(m['type'] as String?);
-    final toUserId = (m['user_id'] as String?)?.trim();
-    final presetFromApi = (m['preset'] as String?)?.trim();
+    final friendId = match.name;
+    final isUserFriend = match.isPerson;
+    final toUserId = match.userId;
+    final presetFromApi = match.preset;
     final locale = Localizations.localeOf(context);
-    final displayName = localizedFriendDisplayName(friend: m, locale: locale);
-    final remotePeer = _peerInstanceIdFromFriend(m);
+    final displayName = localizedFriendDisplayName(friend: {'name': match.name, 'type': match.type, 'preset': match.preset, 'user_id': match.userId, 'peer_instance_id': match.remoteInstanceId}, locale: locale);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       Navigator.maybeOf(context)?.push(
@@ -253,19 +239,14 @@ class _FriendListScreenState extends State<FriendListScreen> {
             userName: displayName,
             friendId: friendId,
             friendPreset: (presetFromApi != null && presetFromApi.isNotEmpty) ? presetFromApi : null,
-                initialMessage: widget.initialMessage,
-                isUserFriend: isUserFriend,
-                toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
-                remotePeerInstanceId: remotePeer,
-              ),
+            initialMessage: widget.initialMessage,
+            isUserFriend: isUserFriend,
+            toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
+            remotePeerInstanceId: match?.remoteInstanceId,
+          ),
         ),
       );
     });
-  }
-
-  String? _peerInstanceIdFromFriend(Map<String, dynamic> f) {
-    final p = (f['peer_instance_id'] as String?)?.trim();
-    return p != null && p.isNotEmpty ? p : null;
   }
 
   Future<void> _logout() async {
@@ -280,11 +261,13 @@ class _FriendListScreenState extends State<FriendListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Watch the friend list state to rebuild on changes (avoids manual setState for data updates).
+    final friendListState = ref.watch(friendListProvider(_friendListKey));
     if (!widget.coreService.isLoggedIn) {
       return LoginScreen(coreService: widget.coreService);
     }
     final l10n = AppLocalizations.of(context)!;
-    final hasMyAvatar = _myAvatarBytes != null && _myAvatarBytes!.isNotEmpty;
+    final hasMyAvatar = friendListState.myAvatarBytes != null && friendListState.myAvatarBytes!.isNotEmpty;
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -293,7 +276,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
             CircleAvatar(
               radius: 18,
               backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-              backgroundImage: hasMyAvatar ? MemoryImage(_myAvatarBytes!) : null,
+              backgroundImage: hasMyAvatar ? MemoryImage(friendListState.myAvatarBytes!) : null,
               child: hasMyAvatar ? null : Icon(Icons.person, color: Theme.of(context).colorScheme.onPrimaryContainer, size: 22),
             ),
             const SizedBox(width: 10),
@@ -346,7 +329,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
             onSelected: (value) {
               switch (value) {
                 case 'refresh':
-                  if (!_loading) _loadFriends();
+                  if (!friendListState.loading) _loadFriends();
                   break;
                 case 'settings':
                   Navigator.push(
@@ -362,48 +345,47 @@ class _FriendListScreenState extends State<FriendListScreen> {
               }
             },
             itemBuilder: (context) => [
-              PopupMenuItem(value: 'refresh', enabled: !_loading, child: Row(children: [const Icon(Icons.refresh, size: 20), const SizedBox(width: 16), Text(l10n.refreshFriends)])),
+              PopupMenuItem(value: 'refresh', enabled: !friendListState.loading, child: Row(children: [const Icon(Icons.refresh, size: 20), const SizedBox(width: 16), Text(l10n.refreshFriends)])),
               const PopupMenuItem(value: 'settings', child: Row(children: [Icon(Icons.settings, size: 20), SizedBox(width: 16), Text('Settings')])),
               PopupMenuItem(value: 'logout', child: Row(children: [const Icon(Icons.logout, size: 20), const SizedBox(width: 16), Text(l10n.logOut)])),
             ],
           ),
         ],
       ),
-      body: _loading
+      body: friendListState.loading
           ? const Center(child: CircularProgressIndicator())
-          : _error != null
+          : friendListState.error != null
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                        Text(friendListState.error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
                         const SizedBox(height: 16),
                         FilledButton(onPressed: _loadFriends, child: Text(l10n.retry)),
                       ],
                     ),
                   ),
                 )
-              : _friends.isEmpty
+              : friendListState.friends.isEmpty
                   ? Center(child: Text(l10n.noFriends))
                   : ListView.builder(
                       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                      itemCount: _friends.length,
+                      itemCount: friendListState.friends.length,
                       itemBuilder: (context, index) {
-                        final f = _friends[index];
-                        final friendId = (f['name'] as String?)?.trim() ?? 'HomeClaw';
+                        final f = friendListState.friends[index];
+                        final friendId = f.name.isNotEmpty ? f.name : 'HomeClaw';
                         final locale = Localizations.localeOf(context);
-                        final displayName = localizedFriendDisplayName(friend: f, locale: locale);
-                        final isUserFriend = _isPersonFriendType(f['type'] as String?);
-                        final toUserId = (f['user_id'] as String?)?.trim();
-                        final peerInst = (f['peer_instance_id'] as String?)?.trim();
-                        final hasUnread = isUserFriend && toUserId != null && _unreadUserIds.contains(toUserId);
-                        final preset = (f['preset'] as String?)?.trim();
-                        final presetForAvatar = preset?.isNotEmpty == true
-                            ? preset
+                        final displayName = localizedFriendDisplayName(friend: {'name': f.name, 'type': f.type, 'preset': f.preset, 'user_id': f.userId, 'peer_instance_id': f.remoteInstanceId}, locale: locale);
+                        final isUserFriend = f.isPerson;
+                        final toUserId = f.userId;
+                        final peerInst = f.remoteInstanceId;
+                        final hasUnread = isUserFriend && toUserId != null && friendListState.unreadUserIds.contains(toUserId);
+                        final presetForAvatar = f.preset?.isNotEmpty == true
+                            ? f.preset
                             : _presetKeyFromFriendName(friendId);
-                        final friendPresetForChat = preset?.isNotEmpty == true ? preset : null;
+                        final friendPresetForChat = f.preset?.isNotEmpty == true ? f.preset : null;
                         return _FriendTile(
                           userId: widget.coreService.sessionUserId!,
                           friendId: friendId,
@@ -414,7 +396,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
                           initialMessage: index == 0 ? widget.initialMessage : null,
                           isUserFriend: isUserFriend,
                           toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
-                          peerInstanceId: peerInst != null && peerInst.isNotEmpty ? peerInst : null,
+                          peerInstanceId: peerInst,
                           hasUnread: hasUnread,
                           onRemoved: _loadFriends,
                           onReturnFromChat: _loadUnreadState,
@@ -425,7 +407,7 @@ class _FriendListScreenState extends State<FriendListScreen> {
   }
 }
 
-class _FriendTile extends StatefulWidget {
+class _FriendTile extends ConsumerStatefulWidget {
   final String userId;
   final String friendId;
   final String displayName;
@@ -464,10 +446,10 @@ class _FriendTile extends StatefulWidget {
   });
 
   @override
-  State<_FriendTile> createState() => _FriendTileState();
+  ConsumerState<_FriendTile> createState() => _FriendTileState();
 }
 
-class _FriendTileState extends State<_FriendTile> {
+class _FriendTileState extends ConsumerState<_FriendTile> {
   Uint8List? _avatarBytes;
 
   @override

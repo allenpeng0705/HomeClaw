@@ -1,28 +1,33 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../core_service.dart';
+import '../providers/add_ai_friend_providers.dart';
 
 /// Add AI Friend: create a custom AI friend (e.g. Sabrina, Gary) and persist to user.yml on Core.
 /// Fields: name (required), relation (optional), identity text (optional), thumbnail (optional).
-class AddAIFriendScreen extends StatefulWidget {
+class AddAIFriendScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
 
   const AddAIFriendScreen({super.key, required this.coreService});
 
   @override
-  State<AddAIFriendScreen> createState() => _AddAIFriendScreenState();
+  ConsumerState<AddAIFriendScreen> createState() => _AddAIFriendScreenState();
 }
 
-class _AddAIFriendScreenState extends State<AddAIFriendScreen> {
+class _AddAIFriendScreenState extends ConsumerState<AddAIFriendScreen> {
   final _nameController = TextEditingController();
   final _relationController = TextEditingController();
   final _identityController = TextEditingController();
-  File? _avatarFile;
-  bool _saving = false;
-  String? _error;
+  late final AddAIFriendNotifier _notifier;
+
+  @override
+  void initState() {
+    super.initState();
+    _notifier = ref.read(addAIFriendProvider.notifier);
+  }
 
   @override
   void dispose() {
@@ -38,7 +43,7 @@ class _AddAIFriendScreenState extends State<AddAIFriendScreen> {
       final x = await picker.pickImage(source: ImageSource.gallery, maxWidth: 512, imageQuality: 85);
       if (x != null && mounted) {
         final path = x.path;
-        if (path.isNotEmpty) setState(() => _avatarFile = File(path));
+        if (path.isNotEmpty) _notifier.setAvatar(File(path));
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Pick image failed: $e')));
@@ -48,36 +53,32 @@ class _AddAIFriendScreenState extends State<AddAIFriendScreen> {
   Future<void> _submit() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      setState(() => _error = 'Name is required');
+      _notifier.setError('Name is required');
       return;
     }
     if (name.toLowerCase() == 'homeclaw') {
-      setState(() => _error = 'Cannot use the name HomeClaw');
+      _notifier.setError('Cannot use the name HomeClaw');
       return;
     }
-    setState(() {
-      _error = null;
-      _saving = true;
-    });
+    _notifier.setSubmitting(true);
     try {
       await widget.coreService.addAIFriend(
         name: name,
         relation: _relationController.text.trim().isNotEmpty ? _relationController.text.trim() : null,
         identityText: _identityController.text.trim().isNotEmpty ? _identityController.text.trim() : null,
-        avatarFile: _avatarFile,
+        avatarFile: ref.read(addAIFriendProvider).avatarFile,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('AI friend added')));
       Navigator.maybeOf(context)?.pop(true);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
-    } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) _notifier.setError(e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(addAIFriendProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Add AI friend'),
@@ -95,7 +96,7 @@ class _AddAIFriendScreenState extends State<AddAIFriendScreen> {
                 border: OutlineInputBorder(),
               ),
               textCapitalization: TextCapitalization.words,
-              onChanged: (_) => setState(() => _error = null),
+              onChanged: (_) => _notifier.clearError(),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -123,27 +124,27 @@ class _AddAIFriendScreenState extends State<AddAIFriendScreen> {
                 Text('Thumbnail (optional)', style: Theme.of(context).textTheme.titleSmall),
                 const SizedBox(width: 8),
                 OutlinedButton.icon(
-                  onPressed: _saving ? null : _pickImage,
+                  onPressed: state.saving ? null : _pickImage,
                   icon: const Icon(Icons.photo_library_outlined, size: 20),
-                  label: Text(_avatarFile != null ? 'Change' : 'Pick image'),
+                  label: Text(state.avatarFile != null ? 'Change' : 'Pick image'),
                 ),
               ],
             ),
-            if (_avatarFile != null) ...[
+            if (state.avatarFile != null) ...[
               const SizedBox(height: 8),
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.file(_avatarFile!, height: 80, width: 80, fit: BoxFit.cover),
+                child: Image.file(state.avatarFile!, height: 80, width: 80, fit: BoxFit.cover),
               ),
             ],
-            if (_error != null) ...[
+            if (state.error != null) ...[
               const SizedBox(height: 12),
-              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(state.error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
             ],
             const SizedBox(height: 24),
             FilledButton(
-              onPressed: _saving ? null : _submit,
-              child: _saving ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Add AI friend'),
+              onPressed: state.saving ? null : _submit,
+              child: state.saving ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Add AI friend'),
             ),
           ],
         ),

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/friend_list_providers.dart';
 import '../widgets/homeclaw_snackbars.dart';
 
 import '../core_service.dart';
@@ -7,7 +9,7 @@ import 'chat_screen.dart';
 
 /// Shown when user opens the app by tapping an FCM (or APNs) notification.
 /// Loads friends, finds the one matching [fromFriendName], then pushes [ChatScreen] and pops.
-class OpenChatFromPushScreen extends StatefulWidget {
+class OpenChatFromPushScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
   final String fromFriendName;
 
@@ -18,15 +20,16 @@ class OpenChatFromPushScreen extends StatefulWidget {
   });
 
   @override
-  State<OpenChatFromPushScreen> createState() => _OpenChatFromPushScreenState();
+  ConsumerState<OpenChatFromPushScreen> createState() => _OpenChatFromPushScreenState();
 }
 
-class _OpenChatFromPushScreenState extends State<OpenChatFromPushScreen> {
-  String? _error;
+class _OpenChatFromPushScreenState extends ConsumerState<OpenChatFromPushScreen> {
+  late final OpenChatFromPushNotifier _notifier;
 
   @override
   void initState() {
     super.initState();
+    _notifier = ref.read(openChatFromPushProvider.notifier);
     WidgetsBinding.instance.addPostFrameCallback((_) => _openChat());
   }
 
@@ -34,7 +37,7 @@ class _OpenChatFromPushScreenState extends State<OpenChatFromPushScreen> {
     if (!mounted) return;
     final userId = widget.coreService.sessionUserId;
     if (userId == null || userId.isEmpty) {
-      if (mounted) setState(() => _error = 'Not logged in');
+      if (mounted) _notifier.setError('Not logged in');
       return;
     }
     try {
@@ -61,12 +64,12 @@ class _OpenChatFromPushScreenState extends State<OpenChatFromPushScreen> {
             }
           }
         } else {
-          setState(() => _error = 'Friend not found: $name');
+          _notifier.setError('Friend not found: $name');
           return;
         }
       }
       if (match == null) {
-        setState(() => _error = 'No friends');
+        _notifier.setError('No friends');
         return;
       }
       final friendId = (match['name'] as String?)?.trim() ?? 'HomeClaw';
@@ -93,22 +96,23 @@ class _OpenChatFromPushScreenState extends State<OpenChatFromPushScreen> {
         ),
       );
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted) _notifier.setError(e.toString());
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(openChatFromPushProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('Opening…')),
       body: Center(
-        child: _error != null
+        child: state.error != null
             ? Padding(
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    HomeClawInlineErrorCard(message: _error!, textAlign: TextAlign.center),
+                    HomeClawInlineErrorCard(message: state.error!, textAlign: TextAlign.center),
                     const SizedBox(height: 16),
                     FilledButton(
                       onPressed: () => Navigator.maybeOf(context)?.maybePop(),

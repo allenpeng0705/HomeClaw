@@ -1,39 +1,38 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../chat_history_store.dart';
 import '../core_service.dart';
+import '../providers/settings_providers.dart';
 import 'change_password_screen.dart';
 import 'permissions_screen.dart';
 import 'scan_connect_screen.dart';
 import 'skills_screen.dart';
 
-class SettingsScreen extends StatefulWidget {
+class SettingsScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
 
   const SettingsScreen({super.key, required this.coreService});
 
   @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late TextEditingController _urlController;
   late TextEditingController _apiKeyController;
   late TextEditingController _canvasUrlController;
   late TextEditingController _nodesUrlController;
   late TextEditingController _nodeIdController;
   late TextEditingController _execCommandController;
-  bool _nodeConnecting = false;
-  Uint8List? _myAvatarBytes;
-  bool _avatarLoading = true;
-  bool _avatarUploading = false;
+  late final SettingsNotifier _settingsNotifier;
 
   @override
   void initState() {
     super.initState();
+    _settingsNotifier = ref.read(settingsProvider.notifier);
     _urlController = TextEditingController(text: widget.coreService.baseUrl);
     _apiKeyController = TextEditingController(text: widget.coreService.apiKey ?? '');
     _canvasUrlController = TextEditingController(text: widget.coreService.canvasUrl ?? '');
@@ -45,12 +44,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadMyAvatar() async {
     if (!widget.coreService.isLoggedIn) return;
-    setState(() => _avatarLoading = true);
+    _settingsNotifier.setAvatarLoading(true);
     try {
       final bytes = await widget.coreService.fetchAvatarWithAuth(widget.coreService.meAvatarUrl);
-      if (mounted) setState(() { _myAvatarBytes = bytes; _avatarLoading = false; });
+      _settingsNotifier.setMyAvatar(bytes);
     } catch (_) {
-      if (mounted) setState(() { _myAvatarBytes = null; _avatarLoading = false; });
+      _settingsNotifier.setMyAvatar(null);
     }
   }
 
@@ -62,11 +61,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (x == null || !mounted) return;
       final path = x.path;
       if (path.isEmpty) return;
-      setState(() => _avatarUploading = true);
+      _settingsNotifier.setAvatarUploading(true);
       await widget.coreService.uploadMyAvatar(File(path));
       await _loadMyAvatar();
-      if (mounted && _myAvatarBytes != null && _myAvatarBytes!.isNotEmpty) {
-        await widget.coreService.saveMyAvatarToCache(_myAvatarBytes!);
+      final state = ref.read(settingsProvider);
+      if (mounted && state.myAvatarBytes != null && state.myAvatarBytes!.isNotEmpty) {
+        await widget.coreService.saveMyAvatarToCache(state.myAvatarBytes!);
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile picture updated')));
@@ -74,7 +74,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload failed: $e')));
     } finally {
-      if (mounted) setState(() => _avatarUploading = false);
+      _settingsNotifier.setAvatarUploading(false);
     }
   }
 
@@ -109,13 +109,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final list = List<String>.from(widget.coreService.execAllowlist)..add(cmd);
     await widget.coreService.saveExecAllowlist(list);
     _execCommandController.clear();
-    if (mounted) setState(() {});
+    _settingsNotifier.setExecAllowlist(list);
   }
 
   Future<void> _removeExecCommand(String cmd) async {
     final list = widget.coreService.execAllowlist.where((c) => c != cmd).toList();
     await widget.coreService.saveExecAllowlist(list);
-    if (mounted) setState(() {});
+    _settingsNotifier.setExecAllowlist(list);
   }
 
   Future<void> _clearMemory(BuildContext context) async {
@@ -160,6 +160,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final settings = ref.watch(settingsProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings'),
@@ -176,21 +177,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   CircleAvatar(
                     radius: 32,
                     backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    backgroundImage: _avatarLoading
+                    backgroundImage: settings.avatarLoading
                         ? null
-                        : (_myAvatarBytes != null && _myAvatarBytes!.isNotEmpty
-                            ? MemoryImage(_myAvatarBytes!)
+                        : (settings.myAvatarBytes != null && settings.myAvatarBytes!.isNotEmpty
+                            ? MemoryImage(settings.myAvatarBytes!)
                             : null),
-                    child: _avatarLoading
+                    child: settings.avatarLoading
                         ? const Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator(strokeWidth: 2))
-                        : (_myAvatarBytes == null || _myAvatarBytes!.isEmpty ? const Icon(Icons.person, size: 32) : null),
+                        : (settings.myAvatarBytes == null || settings.myAvatarBytes!.isEmpty ? const Icon(Icons.person, size: 32) : null),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: _avatarUploading ? null : _uploadProfilePicture,
-                      icon: _avatarUploading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.photo_camera),
-                      label: Text(_avatarUploading ? 'Uploading…' : 'Upload profile picture'),
+                      onPressed: settings.avatarUploading ? null : _uploadProfilePicture,
+                      icon: settings.avatarUploading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.photo_camera),
+                      label: Text(settings.avatarUploading ? 'Uploading…' : 'Upload profile picture'),
                     ),
                   ),
                 ],
@@ -413,13 +414,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 FilledButton(
-                  onPressed: _nodeConnecting
+                  onPressed: settings.nodeConnecting
                       ? null
                       : () async {
                           if (widget.coreService.nodeService?.isConnected == true) {
-                            setState(() => _nodeConnecting = true);
+                            _settingsNotifier.setNodeConnecting(true);
                             await widget.coreService.disconnectNode();
-                            if (mounted) setState(() => _nodeConnecting = false);
+                            _settingsNotifier.setNodeConnecting(false);
                             return;
                           }
                           final url = _nodesUrlController.text.trim();
@@ -431,18 +432,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             return;
                           }
                           final messenger = ScaffoldMessenger.of(context);
-                          setState(() => _nodeConnecting = true);
+                          _settingsNotifier.setNodeConnecting(true);
                           try {
                             await widget.coreService.connectAsNode(nodesUrl: url, nodeId: nodeId);
+                            _settingsNotifier.setNodeConnecting(false);
                             if (mounted) {
-                              setState(() => _nodeConnecting = false);
                               messenger.showSnackBar(
                                 SnackBar(content: Text('Connected as $nodeId')),
                               );
                             }
                           } catch (e) {
+                            _settingsNotifier.setNodeConnecting(false);
                             if (mounted) {
-                              setState(() => _nodeConnecting = false);
                               messenger.showSnackBar(
                                 SnackBar(content: Text('Node connect failed: $e')),
                               );

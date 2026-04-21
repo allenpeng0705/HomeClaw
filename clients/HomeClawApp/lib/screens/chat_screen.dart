@@ -6,18 +6,19 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as path;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:homeclaw_voice/homeclaw_voice.dart';
 import 'package:file_picker/file_picker.dart';
 import '../widgets/full_screen_image_page.dart';
-import '../widgets/full_screen_video_page.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../providers/chat_providers.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:record/record.dart';
 import '../chat_history_store.dart';
@@ -37,6 +38,8 @@ import 'reminders_tab.dart';
 import 'settings_screen.dart';
 import 'vmprint_preview_screen.dart';
 import '../utils/product_preset_chat.dart';
+import '../mixins/chat_voice_handler.dart';
+import '../mixins/chat_tts_handler.dart';
 
 double? _parseTranscriptTimestampSeconds(Map<String, dynamic> m) {
   final t = m['timestamp'];
@@ -64,7 +67,7 @@ Uint8List? _decodeDataUrlToBytes(String dataUrl) {
   }
 }
 
-class ChatScreen extends StatefulWidget {
+class ChatScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
   final String userId;
   final String userName;
@@ -103,10 +106,20 @@ class ChatScreen extends StatefulWidget {
   });
 
   @override
-  State<ChatScreen> createState() => _ChatScreenState();
+  ConsumerState<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
+class _ChatScreenState extends ConsumerState<ChatScreen>
+    with WidgetsBindingObserver, VoiceHandler, TtsHandler {
+  /// Chat state notifier for this chat session.
+  late final ChatStateNotifier _chat;
+
+  String get _chatStateKey => chatStateKey(
+        userId: widget.userId,
+        friendId: widget.friendId,
+        isUserFriend: widget.isUserFriend,
+      );
+
   final List<MapEntry<String, bool>> _messages = [];
 
   /// Optional image data URLs per message (same index as _messages; null or empty when no images).
@@ -142,14 +155,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// When streaming is on, latest progress message from Core (e.g. "Generating your presentation…"); shown under the loading bar.
   String? _loadingMessage;
-  bool _voiceListening = false;
-  String _voiceTranscript = '';
-  StreamSubscription<Map<String, dynamic>>? _voiceSubscription;
-
-  /// Set true when user taps Cancel so a late "final" event does not trigger _send().
-  bool _voiceInputCancelled = false;
   final _native = HomeclawNative();
-  final _voice = HomeclawVoice();
   final _tts = FlutterTts();
   final _imagePicker = ImagePicker();
   String? _lastReply;
@@ -166,10 +172,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// Knowledge preset: optional selected file path used as scoped query context.
   String? _selectedKnowledgeModelPath;
   static const String _keyTtsAutoSpeak = 'tts_auto_speak';
-  bool _ttsAutoSpeak = false;
+  bool ttsAutoSpeak = false;
   static const String _keyVoiceInputLocale = 'voice_input_locale';
-  String? _voiceInputLocale;
-  bool _ttsSpeaking = false;
+  String? voiceInputLocale;
+  bool ttsSpeaking = false;
   bool? _coreConnected;
   bool _connectionChecking = false;
   Timer? _connectionCheckTimer;
@@ -189,9 +195,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   int _userInboxFetchGeneration = 0;
   StreamSubscription<Map<String, dynamic>>? _pushMessageSubscription;
 
-  /// Push-to-talk (user friends only): true while recording.
-  bool _recordingPushToTalk = false;
-  final AudioRecorder _voiceRecorder = AudioRecorder();
   int? _activeUserSendBubbleIndex;
   String? _activeUserSendStage;
 
@@ -513,37 +516,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _startInteractiveSessionIfNeeded() async {
-    if (!_isDevBridgeFriend || _interactiveSessionId != null) return;
-    try {
-      final cwd =
-          _cursorActiveCwd.trim().isNotEmpty ? _cursorActiveCwd.trim() : null;
-      final fid = (widget.friendId ?? '').trim().toLowerCase();
-      final bridgePlugin = fid == 'trae'
-          ? 'trae-bridge'
-          : (fid == 'claudecode' ? 'claude-code-bridge' : 'cursor-bridge');
-      final result = await widget.coreService.interactiveStart(
-        bridgePlugin: bridgePlugin,
-        cwd: cwd,
-      );
-      final sid = (result['session_id'] as String?)?.trim();
-      final initial = (result['initial_output'] as String?) ?? '';
-      if (!mounted || sid == null || sid.isEmpty) return;
-      setState(() {
-        _interactiveSessionId = sid;
-        _interactiveLastSeq = 1;
-        _interactiveOutput = initial;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _interactiveOutput =
-            'Failed to start interactive agent: ${e.toString().replaceFirst(RegExp(r'^Exception:?\s*'), '')}. '
-            'Ensure the bridge is running and Core can reach it.';
-      });
-    }
-  }
-
   Future<void> _sendInteractiveInput() async {
     final sid = _interactiveSessionId;
     if (sid == null) return;
@@ -583,20 +555,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } catch (_) {}
   }
 
-  Future<void> _stopInteractiveSession() async {
-    final sid = _interactiveSessionId;
-    if (sid == null) return;
-    try {
-      await widget.coreService.interactiveStop(sessionId: sid);
-    } catch (_) {}
-    if (!mounted) return;
-    setState(() {
-      _interactiveSessionId = null;
-      _interactiveLastSeq = 1;
-      _interactiveOutput = '';
-    });
-  }
-
   Future<void> _loadChatPartnerAvatar() async {
     final url = widget.isUserFriend && (widget.toUserId ?? '').trim().isNotEmpty
         ? widget.coreService.userAvatarUrl(widget.toUserId!.trim())
@@ -611,6 +569,42 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    initVoiceHandler(
+      coreService: widget.coreService,
+      userId: widget.userId,
+      toUserId: widget.toUserId,
+      remotePeerInstanceId: widget.remotePeerInstanceId,
+      onSendWithText: (text) {
+        _inputController.text = text;
+        _send();
+      },
+      onScrollToBottom: _scrollToBottom,
+      onTranscriptChanged: (t) => setState(() {}),
+      onMessageAppend: (msgs, imgs, audios, vids, fileLabels, fileRefs) {
+        setState(() {
+          _messages.addAll(msgs);
+          _messageImages.addAll(imgs.cast());
+          _messageAudios.addAll(audios.cast());
+          _messageVideos.addAll(vids.cast());
+          _messageFileLabels.addAll(fileLabels.cast());
+          _messageFileRefs.addAll(fileRefs.cast());
+        });
+      },
+      mountedGetter: () => mounted,
+      loadingGetter: () => _loading,
+    );
+    initTtsHandler(
+      ttsInstance: _tts,
+      onTtsAutoSpeakChanged: (v) => setState(() => ttsAutoSpeak = v),
+      onTtsStateChanged: () => setState(() {}),
+      onTtsError: (msg) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      },
+      mountedGetter: () => mounted,
+      lastReplyGetter: () => _lastReply,
+      voiceInputLocaleGetter: () => voiceInputLocale,
+    );
+    _chat = ref.read(chatStateProvider(_chatStateKey).notifier);
     WidgetsBinding.instance.addObserver(this);
     _loadTtsAutoSpeak();
     _loadVoiceInputLocale();
@@ -726,48 +720,45 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                               fontSize: 13)),
                     ),
                   Expanded(
-                    child: ListView(
-                      children: [
-                        RadioListTile<String?>(
-                          title: const Text('Off — normal chat'),
-                          value: null,
-                          groupValue: bound,
-                          onChanged: (_) async {
-                            await _setClawcodeChatBinding(null);
-                            if (ctx.mounted) Navigator.pop(ctx);
-                          },
-                        ),
-                        if (sessions.isEmpty && loadErr == null)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 8),
-                            child: Text(
-                              'No sessions yet. Create one on the server (e.g. python3 -m main clawcode session new), then pick it here. For approvals, workspace files, or optional browser UI, use the button below.',
-                              style: TextStyle(fontSize: 13),
-                            ),
+                    child: RadioGroup<String?>(
+                      groupValue: bound,
+                      onChanged: (v) async {
+                        await _setClawcodeChatBinding(v);
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      },
+                      child: ListView(
+                        children: [
+                          RadioListTile<String?>(
+                            title: const Text('Off — normal chat'),
+                            value: null,
                           ),
-                        ...sessions.map((s) {
-                          final sid =
-                              (s['clawcode_session_id'] ?? '').toString();
-                          if (sid.isEmpty) return const SizedBox.shrink();
-                          final cwd = (s['cwd'] ?? '').toString();
-                          return RadioListTile<String>(
-                            title: Text(_shortClawcodeId(sid)),
-                            subtitle: cwd.isNotEmpty
-                                ? Text(cwd,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 12))
-                                : null,
-                            value: sid,
-                            groupValue: bound,
-                            onChanged: (_) async {
-                              await _setClawcodeChatBinding(sid);
-                              if (ctx.mounted) Navigator.pop(ctx);
-                            },
-                          );
-                        }),
-                      ],
+                          if (sessions.isEmpty && loadErr == null)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 8),
+                              child: Text(
+                                'No sessions yet. Create one on the server (e.g. python3 -m main clawcode session new), then pick it here. For approvals, workspace files, or optional browser UI, use the button below.',
+                                style: TextStyle(fontSize: 13),
+                              ),
+                            ),
+                          ...sessions.map((s) {
+                            final sid =
+                                (s['clawcode_session_id'] ?? '').toString();
+                            if (sid.isEmpty) return const SizedBox.shrink();
+                            final cwd = (s['cwd'] ?? '').toString();
+                            return RadioListTile<String>(
+                              title: Text(_shortClawcodeId(sid)),
+                              subtitle: cwd.isNotEmpty
+                                  ? Text(cwd,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 12))
+                                  : null,
+                              value: sid,
+                            );
+                          }),
+                        ],
+                      ),
                     ),
                   ),
                   TextButton.icon(
@@ -1263,17 +1254,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     await ChatHistoryStore().clear(widget.userId, widget.friendId);
     if (!mounted) return;
-    setState(() {
-      _messages.clear();
-      _messageImages.clear();
-      _messageAudios.clear();
-      _messageVideos.clear();
-      _messageFileLabels.clear();
-      _messageFileRefs.clear();
-      _lastReply = null;
-      _chatHistoryOffset = 0;
-      _hasMoreMessages = true;
-    });
+    _chat.clearMessages();
+    _chat.setHasMore(true);
+    _chat.updateChatHistoryOffset(0);
+    _lastReply = null;
+    _chatHistoryOffset = 0;
+    _hasMoreMessages = true;
     if (widget.isUserFriend &&
         widget.toUserId != null &&
         widget.toUserId!.trim().isNotEmpty) {
@@ -1479,18 +1465,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _loadTtsAutoSpeak() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted)
-      setState(() => _ttsAutoSpeak = prefs.getBool(_keyTtsAutoSpeak) ?? false);
+      setState(() => ttsAutoSpeak = prefs.getBool(_keyTtsAutoSpeak) ?? false);
   }
 
   Future<void> _loadVoiceInputLocale() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted)
-      setState(() => _voiceInputLocale = prefs.getString(_keyVoiceInputLocale));
+      setState(() => voiceInputLocale = prefs.getString(_keyVoiceInputLocale));
   }
 
   Future<void> _setVoiceInputLocale(String? localeId) async {
     setState(
-        () => _voiceInputLocale = localeId?.isEmpty == true ? null : localeId);
+        () => voiceInputLocale = localeId?.isEmpty == true ? null : localeId);
     final prefs = await SharedPreferences.getInstance();
     if (localeId == null || localeId.isEmpty) {
       await prefs.remove(_keyVoiceInputLocale);
@@ -1500,16 +1486,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _setTtsAutoSpeak(bool value) async {
-    setState(() => _ttsAutoSpeak = value);
+    setState(() => ttsAutoSpeak = value);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyTtsAutoSpeak, value);
   }
 
   Future<void> _send() async {
     // When voice is active, use transcript and then stop voice so the stream doesn't repopulate the field.
-    final String text = _voiceListening
-        ? (_voiceTranscript.trim().isNotEmpty
-            ? _voiceTranscript.trim()
+    final String text = voiceListening
+        ? (voiceTranscript.trim().isNotEmpty
+            ? voiceTranscript.trim()
             : _inputController.text.trim())
         : _inputController.text.trim();
     final hasAttachments = _pendingImagePaths.isNotEmpty ||
@@ -1526,19 +1512,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
     _startLoadingStatusTimer();
     try {
-      if (_voiceListening) {
+      if (voiceListening) {
         // Cancel subscription first so no more "final" events can trigger _send() and cause double send.
-        _voiceSubscription?.cancel();
-        _voiceSubscription = null;
-        await _voice.stopVoiceListening();
+        voiceSubscription?.cancel();
+        voiceSubscription = null;
+        await voice.stopVoiceListening();
         if (!mounted) {
           _stopLoadingStatusTimer();
           setState(() => _loading = false);
           return;
         }
         setState(() {
-          _voiceListening = false;
-          _voiceTranscript = '';
+          voiceListening = false;
+          voiceTranscript = '';
           _inputController.clear();
         });
       } else {
@@ -1959,7 +1945,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ? 'No reply'
               : (reply.length > 80 ? '${reply.substring(0, 80)}…' : reply);
           await _native.showNotification(title: 'HomeClaw', body: preview);
-          if (_ttsAutoSpeak && reply.isNotEmpty) _speakReplyText(reply);
+          if (ttsAutoSpeak && reply.isNotEmpty) _speakReplyText(reply);
         }
       } catch (e) {
         if (mounted) {
@@ -2049,9 +2035,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     'gif': 'image/gif',
     'webp': 'image/webp',
   };
-
-  /// Build data URL for one short video (e.g. 10s). Max one video, max 15MB. Returns empty list if none or too large.
-  static const int _maxVideoBytes = 15 * 1024 * 1024;
 
   /// User-to-user on one Core: keep JSON modest (still data URLs for Companion bubbles).
   static const int _userMsgImageMaxJpegBytes = 768 * 1024;
@@ -2212,16 +2195,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Stop voice listening and send the current transcript.
   Future<void> _stopVoiceAndSend() async {
-    if (!_voiceListening) return;
-    await _voice.stopVoiceListening();
-    _voiceSubscription?.cancel();
-    _voiceSubscription = null;
-    final textToSend = _voiceTranscript.trim();
+    if (!voiceListening) return;
+    await voice.stopVoiceListening();
+    voiceSubscription?.cancel();
+    voiceSubscription = null;
+    final textToSend = voiceTranscript.trim();
     setState(() {
-      _voiceListening = false;
+      voiceListening = false;
       if (textToSend.isNotEmpty) {
         _inputController.text = textToSend;
-        _voiceTranscript = '';
+        voiceTranscript = '';
       }
     });
     if (textToSend.isNotEmpty) _send();
@@ -2230,10 +2213,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// Start push-to-talk recording (user friends only). Call _stopPushToTalkAndSend when user releases.
   Future<void> _startPushToTalk() async {
     if (widget.toUserId == null || widget.toUserId!.trim().isEmpty) return;
-    if (_voiceListening) {
+    if (voiceListening) {
       await _cancelVoiceInput();
     }
-    final hasPermission = await _voiceRecorder.hasPermission();
+    final hasPermission = await voiceRecorder.hasPermission();
     if (!hasPermission) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2247,9 +2230,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       final dir = await getTemporaryDirectory();
       final recordPath = path.join(
-          dir.path, 'push_voice_${DateTime.now().millisecondsSinceEpoch}.m4a');
-      await _voiceRecorder.start(const RecordConfig(), path: recordPath);
-      if (mounted) setState(() => _recordingPushToTalk = true);
+          dir.path, 'pushvoice_${DateTime.now().millisecondsSinceEpoch}.m4a');
+      await voiceRecorder.start(const RecordConfig(), path: recordPath);
+      if (mounted) setState(() => recordingPushToTalk = true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2260,11 +2243,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Stop push-to-talk, upload audio, send by reference, and add to chat.
   Future<void> _stopPushToTalkAndSend() async {
-    if (!_recordingPushToTalk) return;
+    if (!recordingPushToTalk) return;
     try {
-      final filePath = await _voiceRecorder.stop();
+      final filePath = await voiceRecorder.stop();
       if (!mounted) return;
-      setState(() => _recordingPushToTalk = false);
+      setState(() => recordingPushToTalk = false);
       if (filePath == null || filePath.isEmpty) return;
       final file = File(filePath);
       if (!await file.exists()) return;
@@ -2306,7 +2289,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _recordingPushToTalk = false);
+        setState(() => recordingPushToTalk = false);
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Voice record stop failed: $e')));
       }
@@ -2315,36 +2298,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Stop voice listening and discard the transcript (do not send).
   Future<void> _cancelVoiceInput() async {
-    if (!_voiceListening) return;
-    _voiceInputCancelled = true;
-    _voiceSubscription?.cancel();
-    _voiceSubscription = null;
-    await _voice.stopVoiceListening();
+    if (!voiceListening) return;
+    voiceInputCancelled = true;
+    voiceSubscription?.cancel();
+    voiceSubscription = null;
+    await voice.stopVoiceListening();
     if (mounted) {
       setState(() {
-        _voiceListening = false;
-        _voiceTranscript = '';
+        voiceListening = false;
+        voiceTranscript = '';
         _inputController.text = '';
       });
     }
   }
 
   Future<void> _toggleVoice() async {
-    if (_voiceListening) {
+    if (voiceListening) {
       await _stopVoiceAndSend();
       return;
     }
-    _voiceInputCancelled = false;
+    voiceInputCancelled = false;
     try {
-      await _voiceSubscription?.cancel();
-      _voiceSubscription = null;
+      await voiceSubscription?.cancel();
+      voiceSubscription = null;
       if (mounted) {
         setState(() {
-          _voiceTranscript = '';
+          voiceTranscript = '';
           _inputController.clear();
         });
       }
-      _voiceSubscription = _voice.voiceEventStream.listen(
+      voiceSubscription = voice.voiceEventStream.listen(
         (event) {
           try {
             if (!mounted) return;
@@ -2359,22 +2342,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             if (finalText != null && finalText.isNotEmpty) {
               if (!mounted) return;
               setState(() {
-                _voiceTranscript = finalText;
+                voiceTranscript = finalText;
                 _inputController.text = finalText;
                 final len = finalText.length;
                 _inputController.selection = TextSelection.collapsed(
                   offset: len.clamp(0, _inputController.text.length),
                 );
               });
-              if (!_voiceInputCancelled && !_loading) {
+              if (!voiceInputCancelled && !_loading) {
                 _send().then((_) {
-                  if (mounted) setState(() => _voiceTranscript = '');
+                  if (mounted) setState(() => voiceTranscript = '');
                 });
               }
             } else if (partial != null && partial.isNotEmpty) {
               if (!mounted) return;
               setState(() {
-                _voiceTranscript = partial;
+                voiceTranscript = partial;
                 _inputController.text = partial;
                 final len = partial.length;
                 _inputController.selection = TextSelection.collapsed(
@@ -2386,7 +2369,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             FlutterError.reportError(
                 FlutterErrorDetails(exception: e, stack: st));
             if (mounted) {
-              setState(() => _voiceListening = false);
+              setState(() => voiceListening = false);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text('Voice handler error: $e')),
               );
@@ -2395,28 +2378,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         },
         onError: (e) {
           if (mounted) {
-            setState(() => _voiceListening = false);
+            setState(() => voiceListening = false);
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Voice error: $e')),
             );
           }
         },
       );
-      await _voice.startVoiceListening(locale: _voiceInputLocale);
-      if (mounted) setState(() => _voiceListening = true);
+      await voice.startVoiceListening(locale: voiceInputLocale);
+      if (mounted) setState(() => voiceListening = true);
     } catch (e, st) {
-      await _voiceSubscription?.cancel();
-      _voiceSubscription = null;
+      await voiceSubscription?.cancel();
+      voiceSubscription = null;
       try {
-        await _voice.stopVoiceListening();
+        await voice.stopVoiceListening();
       } catch (_) {}
       FlutterError.reportError(FlutterErrorDetails(exception: e, stack: st));
       if (mounted) {
-        setState(() => _voiceListening = false);
+        setState(() => voiceListening = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Voice failed: $e. On macOS/iOS allow Microphone + Speech Recognition; on macOS see homeclaw_voice README if the app crashes in the speech plugin.',
+              'Voice failed: $e. On macOS/iOS allow Microphone + Speech Recognition; on macOS see homeclawvoice README if the app crashes in the speech plugin.',
             ),
           ),
         );
@@ -2442,7 +2425,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     // 1) Try copy via path (works if path is still valid, e.g. camera or some galleries).
     final rawPath = xFile.path;
-    if (rawPath != null && rawPath.isNotEmpty) {
+    if (rawPath.isNotEmpty) {
       try {
         final srcPath =
             rawPath.startsWith('file://') ? Uri.parse(rawPath).path : rawPath;
@@ -2676,7 +2659,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       } else {
         filePath = xFile.path;
       }
-      if (filePath == null || !mounted) {
+      if (!mounted) {
         setState(() {
           _messages.add(MapEntry(
               'Video error: could not read or copy the video.', false));
@@ -2942,11 +2925,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _speakReplyText(String raw) async {
     final text = _textForTts(raw.trim());
     if (text.isEmpty) return;
-    if (mounted) setState(() => _ttsSpeaking = true);
+    if (mounted) setState(() => ttsSpeaking = true);
     try {
-      if (_voiceInputLocale != null && _voiceInputLocale!.isNotEmpty) {
+      if (voiceInputLocale != null && voiceInputLocale!.isNotEmpty) {
         // Voice input locale is e.g. "en_US" or "zh_CN"; TTS often accepts "en-US" / "zh-CN".
-        final ttsLocale = _voiceInputLocale!.replaceAll('_', '-');
+        final ttsLocale = voiceInputLocale!.replaceAll('_', '-');
         await _tts.setLanguage(ttsLocale);
       }
       await _tts.speak(text);
@@ -2955,7 +2938,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('TTS: $e')));
     } finally {
-      if (mounted) setState(() => _ttsSpeaking = false);
+      if (mounted) setState(() => ttsSpeaking = false);
     }
   }
 
@@ -2963,7 +2946,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       await _tts.stop();
     } catch (_) {}
-    if (mounted) setState(() => _ttsSpeaking = false);
+    if (mounted) setState(() => ttsSpeaking = false);
   }
 
   Future<void> _speakLastReply() async {
@@ -2990,10 +2973,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     List<String> voiceLocales = [];
     List<String> ttsLanguages = [];
     try {
-      voiceLocales = List<String>.from(await _voice.getAvailableLocales());
+      voiceLocales = List<String>.from(await voice.getAvailableLocales());
       final ttsList = await _tts.getLanguages;
       ttsLanguages = ttsList is List
-          ? List<String>.from((ttsList as List).map((e) => e.toString()))
+          ? List<String>.from(ttsList.map((e) => e.toString()))
           : [];
     } catch (e) {
       if (mounted) {
@@ -3004,10 +2987,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     if (!mounted) return;
     final voiceOptions = ['System default', ...voiceLocales];
-    String currentVoiceDisplay = _voiceInputLocale == null
+    String currentVoiceDisplay = voiceInputLocale == null
         ? 'System default'
-        : voiceLocales.firstWhere((s) => s.startsWith(_voiceInputLocale!),
-            orElse: () => _voiceInputLocale!);
+        : voiceLocales.firstWhere((s) => s.startsWith(voiceInputLocale!),
+            orElse: () => voiceInputLocale!);
 
     await showDialog<void>(
       context: context,
@@ -3567,9 +3550,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _userInboxApplyDebounceTimer?.cancel();
     _loadingStatusTimer?.cancel();
     _pushMessageSubscription?.cancel();
-    _voiceSubscription?.cancel();
-    _voice.dispose();
-    _voiceRecorder.dispose();
+    voiceDispose();
     _inputController.dispose();
     _scrollController.removeListener(_onScrollForPagination);
     _scrollController.dispose();
@@ -3578,6 +3559,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // Watch the chat state so the ListView rebuilds when messages change.
+    final notifier = ref.read(chatStateProvider(_chatStateKey).notifier);
+    final cs = ref.watch(chatStateProvider(_chatStateKey));
     final isCurrent = ModalRoute.of(context)?.isCurrent ?? false;
     if (isCurrent && !_wasRouteCurrent) {
       _wasRouteCurrent = true;
@@ -3947,30 +3931,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
                 Expanded(
                   child: _isFinderPreset
-                      ? _buildFinderTabbedBody()
+                      ? _buildFinderTabbedBody(notifier.forChatView(cs))
                       : (_isBridgeProjectExplorerPreset
-                          ? _buildBridgeProjectTabbedBody()
+                          ? _buildBridgeProjectTabbedBody(
+                              notifier.forChatView(cs))
                           : (_isReminderPreset
-                              ? _buildReminderTabbedBody()
+                              ? _buildReminderTabbedBody(
+                                  notifier.forChatView(cs))
                               : (_isKnowledgePreset
-                                  ? _buildKnowledgeTabbedBody()
-                                  : _buildChatBody()))),
+                                  ? _buildKnowledgeTabbedBody(
+                                      notifier.forChatView(cs))
+                                  : _buildChatBody(notifier.forChatView(cs))))),
                 ),
               ],
             )
           : (_isFinderPreset
-              ? _buildFinderTabbedBody()
+              ? _buildFinderTabbedBody(notifier.forChatView(cs))
               : (_isBridgeProjectExplorerPreset
-                  ? _buildBridgeProjectTabbedBody()
+                  ? _buildBridgeProjectTabbedBody(notifier.forChatView(cs))
                   : (_isReminderPreset
-                      ? _buildReminderTabbedBody()
+                      ? _buildReminderTabbedBody(notifier.forChatView(cs))
                       : (_isKnowledgePreset
-                          ? _buildKnowledgeTabbedBody()
-                          : _buildChatBody())))),
+                          ? _buildKnowledgeTabbedBody(notifier.forChatView(cs))
+                          : _buildChatBody(notifier.forChatView(cs)))))),
     );
   }
 
-  Widget _buildChatBody() {
+  Widget _buildChatBody(ChatViewSnapshot snapshot) {
     return Column(
       children: [
         _buildProductPresetBar(),
@@ -3978,9 +3965,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           child: ListView.builder(
             controller: _scrollController,
             padding: const EdgeInsets.all(8),
-            itemCount: _messages.length + (_loadingMoreMessages ? 1 : 0),
+            itemCount: snapshot.messages.length +
+                (snapshot.loadingMoreMessages ? 1 : 0),
             itemBuilder: (context, i) {
-              if (_loadingMoreMessages && i == 0) {
+              if (snapshot.loadingMoreMessages && i == 0) {
                 return const Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: Center(
@@ -3990,28 +3978,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           child: CircularProgressIndicator(strokeWidth: 2))),
                 );
               }
-              final msgIndex = _loadingMoreMessages ? i - 1 : i;
-              final entry = _messages[msgIndex];
+              final msgIndex = snapshot.loadingMoreMessages ? i - 1 : i;
+              final entry = snapshot.messages[msgIndex];
               final isUser = entry.value;
               final isErrorBubble = !isUser && entry.key.startsWith('Error:');
               final isUploadingUserBubble = isUser &&
                   _loading &&
                   _activeUserSendBubbleIndex != null &&
                   _activeUserSendBubbleIndex == msgIndex;
-              final imageUrls = msgIndex < _messageImages.length
-                  ? _messageImages[msgIndex]
+              final imageUrls = msgIndex < snapshot.messageImages.length
+                  ? snapshot.messageImages[msgIndex]
                   : null;
-              final audioUrls = msgIndex < _messageAudios.length
-                  ? _messageAudios[msgIndex]
+              final audioUrls = msgIndex < snapshot.messageAudios.length
+                  ? snapshot.messageAudios[msgIndex]
                   : null;
-              final videoUrls = msgIndex < _messageVideos.length
-                  ? _messageVideos[msgIndex]
+              final videoUrls = msgIndex < snapshot.messageVideos.length
+                  ? snapshot.messageVideos[msgIndex]
                   : null;
-              final fileLabels = msgIndex < _messageFileLabels.length
-                  ? _messageFileLabels[msgIndex]
+              final fileLabels = msgIndex < snapshot.messageFileLabels.length
+                  ? snapshot.messageFileLabels[msgIndex]
                   : null;
-              final fileRefs = msgIndex < _messageFileRefs.length
-                  ? _messageFileRefs[msgIndex]
+              final fileRefs = msgIndex < snapshot.messageFileRefs.length
+                  ? snapshot.messageFileRefs[msgIndex]
                   : null;
               return Align(
                 alignment:
@@ -4088,7 +4076,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                       .map((audioDataUrl) => Padding(
                                             padding: const EdgeInsets.only(
                                                 bottom: 6),
-                                            child: _AudioPlayButton(
+                                            child: AudioPlayButton(
                                               audioRef: audioDataUrl,
                                               coreBaseUrl:
                                                   widget.coreService.baseUrl,
@@ -4197,7 +4185,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color:
-                  Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.6),
+                  Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
               border: Border(
                 top: BorderSide(color: Theme.of(context).dividerColor),
               ),
@@ -4310,14 +4298,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ],
             ),
           ),
-        if (_voiceListening)
+        if (voiceListening)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             child: Material(
               color: Theme.of(context)
                   .colorScheme
                   .primaryContainer
-                  .withOpacity(0.5),
+                  .withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(12),
               child: Padding(
                 padding:
@@ -4336,7 +4324,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            _voiceTranscript.isEmpty
+                            voiceTranscript.isEmpty
                                 ? 'Listening...'
                                 : 'Speaking',
                             style: Theme.of(context)
@@ -4346,11 +4334,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   color: Theme.of(context).colorScheme.primary,
                                 ),
                           ),
-                          if (_voiceTranscript.isNotEmpty)
+                          if (voiceTranscript.isNotEmpty)
                             Padding(
                               padding: const EdgeInsets.only(top: 4),
                               child: Text(
-                                _voiceTranscript,
+                                voiceTranscript,
                                 style: Theme.of(context).textTheme.bodyMedium,
                               ),
                             ),
@@ -4372,14 +4360,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ),
             ),
           ),
-        if (_ttsSpeaking)
+        if (ttsSpeaking)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             child: Material(
               color: Theme.of(context)
                   .colorScheme
                   .secondaryContainer
-                  .withOpacity(0.5),
+                  .withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(12),
               child: Padding(
                 padding:
@@ -4593,10 +4581,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   style: Theme.of(context).textTheme.bodySmall),
               const SizedBox(width: 8),
               Switch(
-                value: _ttsAutoSpeak,
+                value: ttsAutoSpeak,
                 onChanged: (value) => _setTtsAutoSpeak(value),
               ),
-              if (_ttsSpeaking)
+              if (ttsSpeaking)
                 Padding(
                   padding: const EdgeInsets.only(left: 8.0),
                   child: FilledButton.tonalIcon(
@@ -4627,20 +4615,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 child: IconButton(
                   onPressed: _loading ? null : _toggleVoice,
                   icon: Icon(
-                    _recordingPushToTalk
+                    recordingPushToTalk
                         ? Icons.stop
-                        : (_voiceListening ? Icons.mic : Icons.mic_none),
-                    color: (_recordingPushToTalk || _voiceListening)
+                        : (voiceListening ? Icons.mic : Icons.mic_none),
+                    color: (recordingPushToTalk || voiceListening)
                         ? Theme.of(context).colorScheme.primary
                         : null,
                   ),
                   tooltip: widget.isUserFriend
-                      ? (_recordingPushToTalk
+                      ? (recordingPushToTalk
                           ? 'Recording… release to send voice message'
-                          : (_voiceListening
+                          : (voiceListening
                               ? 'Stop voice input (long press for voice message)'
                               : 'Voice input (long press for voice message)'))
-                      : (_voiceListening ? 'Stop voice input' : 'Voice input'),
+                      : (voiceListening ? 'Stop voice input' : 'Voice input'),
                 ),
               ),
               const SizedBox(width: 4),
@@ -4654,7 +4642,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   onSubmitted: (_) => _send(),
                 ),
               ),
-              if (_ttsSpeaking) ...[
+              if (ttsSpeaking) ...[
                 const SizedBox(width: 4),
                 IconButton(
                   onPressed: _stopTts,
@@ -4700,7 +4688,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildFinderTabbedBody() {
+  Widget _buildFinderTabbedBody(ChatViewSnapshot snapshot) {
     return DefaultTabController(
       length: 2,
       child: Column(
@@ -4718,7 +4706,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           Expanded(
             child: TabBarView(
               children: [
-                _buildChatBody(),
+                _buildChatBody(snapshot),
                 FinderFilesExplorer(
                   coreService: widget.coreService,
                   sandboxScope: _finderSandboxScope,
@@ -4742,7 +4730,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildBridgeProjectTabbedBody() {
+  Widget _buildBridgeProjectTabbedBody(ChatViewSnapshot snapshot) {
     return DefaultTabController(
       length: 2,
       child: Column(
@@ -4763,7 +4751,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           Expanded(
             child: TabBarView(
               children: [
-                _buildChatBody(),
+                _buildChatBody(snapshot),
                 BridgeProjectFilesExplorer(
                   coreService: widget.coreService,
                   bridgeBackend: _bridgeExplorerBackend,
@@ -4793,7 +4781,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildReminderTabbedBody() {
+  Widget _buildReminderTabbedBody(ChatViewSnapshot snapshot) {
     return DefaultTabController(
       length: 2,
       child: Column(
@@ -4811,7 +4799,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           Expanded(
             child: TabBarView(
               children: [
-                _buildChatBody(),
+                _buildChatBody(snapshot),
                 RemindersExplorer(coreService: widget.coreService),
               ],
             ),
@@ -4821,7 +4809,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildKnowledgeTabbedBody() {
+  Widget _buildKnowledgeTabbedBody(ChatViewSnapshot snapshot) {
     return DefaultTabController(
       length: 2,
       child: Column(
@@ -4839,7 +4827,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           Expanded(
             child: TabBarView(
               children: [
-                _buildChatBody(),
+                _buildChatBody(snapshot),
                 FinderFilesExplorer(
                   coreService: widget.coreService,
                   sandboxScope: _finderSandboxScope,
@@ -4925,10 +4913,12 @@ class _AttachmentChip extends StatelessWidget {
   final String label;
   final VoidCallback onRemove;
 
-  const _AttachmentChip({required this.icon, required this.label, required this.onRemove});
+  const _AttachmentChip(
+      {required this.icon, required this.label, required this.onRemove});
 
   @override
-  Widget build(BuildContext context) => AttachmentChip(icon: icon, label: label, onRemove: onRemove);
+  Widget build(BuildContext context) =>
+      AttachmentChip(icon: icon, label: label, onRemove: onRemove);
 }
 
 /// Renders chat message text as Markdown (bold, lists, code, links, etc.) with selectable text and tappable links.
@@ -4981,56 +4971,6 @@ class _VideoPlayChip extends StatelessWidget {
         videoRef: videoRef,
         coreBaseUrl: coreBaseUrl,
         httpHeaders: httpHeaders,
-      );
-}
-
-/// Full-screen video player: data URL, local file, http(s), or Core `/files/...`.
-class _FullScreenVideoPage extends StatefulWidget {
-  final String videoRef;
-  final String coreBaseUrl;
-  final Map<String, String>? httpHeaders;
-
-  const _FullScreenVideoPage({
-    required this.videoRef,
-    required this.coreBaseUrl,
-    this.httpHeaders,
-  });
-
-  @override
-  State<_FullScreenVideoPage> createState() => _FullScreenVideoPageState();
-}
-
-class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
-  @override
-  Widget build(BuildContext context) => FullScreenVideoPage(
-        videoRef: widget.videoRef,
-        coreBaseUrl: widget.coreBaseUrl,
-        httpHeaders: widget.httpHeaders,
-      );
-}
-
-/// Play button for a voice message (data URL, local path, http(s), or Core `/files/...`).
-class _AudioPlayButton extends StatefulWidget {
-  final String audioRef;
-  final String coreBaseUrl;
-  final Map<String, String>? coreMediaHeaders;
-
-  const _AudioPlayButton({
-    required this.audioRef,
-    required this.coreBaseUrl,
-    this.coreMediaHeaders,
-  });
-
-  @override
-  State<_AudioPlayButton> createState() => _AudioPlayButtonState();
-}
-
-class _AudioPlayButtonState extends State<_AudioPlayButton> {
-  @override
-  Widget build(BuildContext context) => AudioPlayButton(
-        audioRef: widget.audioRef,
-        coreBaseUrl: widget.coreBaseUrl,
-        coreMediaHeaders: widget.coreMediaHeaders,
       );
 }
 

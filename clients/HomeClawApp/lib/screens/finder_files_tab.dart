@@ -2,10 +2,12 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../core_service.dart';
+import '../providers/finder_files_providers.dart';
 import '../utils/file_preview_utils.dart';
 
 /// Path relative to user sandbox for LLM tools (strip scope prefix from list API paths).
@@ -26,7 +28,7 @@ String finderParentPath(String currentPath) {
 }
 
 /// Finder preset: browse Core sandbox (GET /api/sandbox/list), preview, insert path, attach for next send.
-class FinderFilesExplorer extends StatefulWidget {
+class FinderFilesExplorer extends ConsumerStatefulWidget {
   final CoreService coreService;
   final String sandboxScope;
   final String initialPath;
@@ -45,17 +47,12 @@ class FinderFilesExplorer extends StatefulWidget {
   });
 
   @override
-  State<FinderFilesExplorer> createState() => _FinderFilesExplorerState();
+  ConsumerState<FinderFilesExplorer> createState() => _FinderFilesExplorerState();
 }
 
-class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
+class _FinderFilesExplorerState extends ConsumerState<FinderFilesExplorer> {
   String _currentPath = '.';
-  SandboxListResult? _result;
-  String? _error;
-  bool _loading = true;
   SandboxListEntry? _selected;
-  bool _attachBusy = false;
-  bool _openBrowserBusy = false;
 
   bool _isMobilePreviewMode(BuildContext context) =>
       MediaQuery.of(context).size.shortestSide < 600;
@@ -84,28 +81,18 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    final notifier = ref.read(finderFilesProvider(widget.sandboxScope).notifier);
+    notifier.setLoading(true);
     try {
       final r = await widget.coreService.fetchSandboxList(
         scope: widget.sandboxScope,
         path: _currentPath,
       );
       if (!mounted) return;
-      setState(() {
-        _result = r;
-        _loading = false;
-        _selected = null;
-      });
+      notifier.setResult(r);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
-        _loading = false;
-        _result = null;
-      });
+      notifier.setError(e.toString().replaceFirst(RegExp(r'^Exception:\s*'), ''));
     }
   }
 
@@ -129,8 +116,9 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final state = ref.watch(finderFilesProvider(widget.sandboxScope));
     final mobilePreviewMode = _isMobilePreviewMode(context);
-    if (_error != null && _result == null && !_loading) {
+    if (state.error != null && state.result == null && !state.loading) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -140,7 +128,7 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
               Icon(Icons.error_outline,
                   size: 48, color: theme.colorScheme.error),
               const SizedBox(height: 12),
-              Text(_error!, textAlign: TextAlign.center),
+              Text(state.error!, textAlign: TextAlign.center),
               const SizedBox(height: 16),
               FilledButton(onPressed: _load, child: const Text('Retry')),
             ],
@@ -174,22 +162,22 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
                   ),
                   IconButton(
                     tooltip: 'Refresh',
-                    onPressed: _loading ? null : _load,
+                    onPressed: state.loading ? null : _load,
                     icon: const Icon(Icons.refresh),
                   ),
                 ],
               ),
             ),
-            if (_loading)
+            if (state.loading)
               const Expanded(
                 child: Center(child: CircularProgressIndicator()),
               )
             else
               Expanded(
                 child: ListView.builder(
-                  itemCount: _result?.entries.length ?? 0,
+                  itemCount: state.result?.entries.length ?? 0,
                   itemBuilder: (context, i) {
-                    final e = _result!.entries[i];
+                    final e = state.result!.entries[i];
                     final isDir = e.type == 'dir';
                     final sel = _selected?.path == e.path;
                     return ListTile(
@@ -267,6 +255,9 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
 
   Widget _buildPreview(BuildContext context) {
     final e = _selected!;
+    final state = ref.watch(finderFilesProvider(widget.sandboxScope));
+    final attachBusy = state.attachBusy;
+    final openBrowserBusy = state.openBrowserBusy;
     final modelPath = finderModelPathFromFullRel(e.path, widget.sandboxScope);
     final theme = Theme.of(context);
     final uri = widget.coreService.sandboxFileUri(e.path);
@@ -391,10 +382,10 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
                   child: const Text('Ask about this file'),
                 ),
               FilledButton.icon(
-                onPressed: _attachBusy
+                onPressed: attachBusy
                     ? null
                     : () async {
-                        setState(() => _attachBusy = true);
+                        ref.read(finderFilesProvider(widget.sandboxScope).notifier).setAttachBusy(true);
                         try {
                           await widget.onAttachFile(e.path);
                           if (context.mounted) {
@@ -411,22 +402,22 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
                             );
                           }
                         } finally {
-                          if (mounted) setState(() => _attachBusy = false);
+                          ref.read(finderFilesProvider(widget.sandboxScope).notifier).setAttachBusy(false);
                         }
                       },
-                icon: _attachBusy
+                icon: attachBusy
                     ? const SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.attach_file, size: 18),
-                label: Text(_attachBusy ? '…' : 'Attach to next send'),
+                label: Text(attachBusy ? '…' : 'Attach to next send'),
               ),
               OutlinedButton.icon(
-                onPressed: _openBrowserBusy
+                onPressed: openBrowserBusy
                     ? null
                     : () async {
-                        setState(() => _openBrowserBusy = true);
+                        ref.read(finderFilesProvider(widget.sandboxScope).notifier).setOpenBrowserBusy(true);
                         try {
                           final viewUrl = await widget.coreService
                               .fetchSandboxFileViewUrl(e.path);
@@ -450,16 +441,16 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
                             );
                           }
                         } finally {
-                          if (mounted) setState(() => _openBrowserBusy = false);
+                          ref.read(finderFilesProvider(widget.sandboxScope).notifier).setOpenBrowserBusy(false);
                         }
                       },
-                icon: _openBrowserBusy
+                icon: openBrowserBusy
                     ? const SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.open_in_browser, size: 18),
-                label: Text(_openBrowserBusy ? '…' : 'Open in browser'),
+                label: Text(openBrowserBusy ? '…' : 'Open in browser'),
               ),
             ],
           ),
@@ -471,7 +462,7 @@ class _FinderFilesExplorerState extends State<FinderFilesExplorer> {
   }
 }
 
-class _FinderFilePreviewPage extends StatefulWidget {
+class _FinderFilePreviewPage extends ConsumerStatefulWidget {
   final CoreService coreService;
   final String sandboxScope;
   final SandboxListEntry entry;
@@ -489,12 +480,14 @@ class _FinderFilePreviewPage extends StatefulWidget {
   });
 
   @override
-  State<_FinderFilePreviewPage> createState() => _FinderFilePreviewPageState();
+  ConsumerState<_FinderFilePreviewPage> createState() => _FinderFilePreviewPageState();
 }
 
-class _FinderFilePreviewPageState extends State<_FinderFilePreviewPage> {
-  bool _attachBusy = false;
-  bool _openBrowserBusy = false;
+class _FinderFilePreviewPageState extends ConsumerState<_FinderFilePreviewPage> {
+  bool get _attachBusy =>
+      ref.watch(finderFilePreviewAttachBusyProvider(widget.sandboxScope));
+  bool get _openBrowserBusy =>
+      ref.watch(finderFilePreviewBrowserBusyProvider(widget.sandboxScope));
 
   bool get _isImageName => isDisplayableImageName(widget.entry.name);
   bool get _isTextPreviewName => isTextPreviewName(widget.entry.name);
@@ -634,7 +627,8 @@ class _FinderFilePreviewPageState extends State<_FinderFilePreviewPage> {
                   onPressed: _attachBusy
                       ? null
                       : () async {
-                          setState(() => _attachBusy = true);
+                          final notifier = ref.read(finderFilePreviewAttachBusyProvider(widget.sandboxScope).notifier);
+                          notifier.state = true;
                           try {
                             await widget.onAttachFile(e.path);
                             if (context.mounted) {
@@ -651,7 +645,7 @@ class _FinderFilePreviewPageState extends State<_FinderFilePreviewPage> {
                               );
                             }
                           } finally {
-                            if (mounted) setState(() => _attachBusy = false);
+                            notifier.state = false;
                           }
                         },
                   icon: _attachBusy
@@ -666,7 +660,8 @@ class _FinderFilePreviewPageState extends State<_FinderFilePreviewPage> {
                   onPressed: _openBrowserBusy
                       ? null
                       : () async {
-                          setState(() => _openBrowserBusy = true);
+                          final notifier = ref.read(finderFilePreviewBrowserBusyProvider(widget.sandboxScope).notifier);
+                          notifier.state = true;
                           try {
                             final viewUrl = await widget.coreService
                                 .fetchSandboxFileViewUrl(e.path);
@@ -690,9 +685,7 @@ class _FinderFilePreviewPageState extends State<_FinderFilePreviewPage> {
                               );
                             }
                           } finally {
-                            if (mounted) {
-                              setState(() => _openBrowserBusy = false);
-                            }
+                            notifier.state = false;
                           }
                         },
                   icon: _openBrowserBusy

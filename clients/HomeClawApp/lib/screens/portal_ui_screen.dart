@@ -1,20 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../core_service.dart';
 
 /// WebView that loads Core's /portal-ui (Portal proxy). Passes token in URL so Core allows access.
 /// Back button clears token and returns to login.
-class PortalUiScreen extends StatefulWidget {
+class PortalUiScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
 
   const PortalUiScreen({super.key, required this.coreService});
 
   @override
-  State<PortalUiScreen> createState() => _PortalUiScreenState();
+  ConsumerState<PortalUiScreen> createState() => _PortalUiScreenState();
 }
 
-class _PortalUiScreenState extends State<PortalUiScreen> {
+class _PortalUiScreenState extends ConsumerState<PortalUiScreen> {
   late final WebViewController _controller;
   String? _token;
   String _baseUrl = '';

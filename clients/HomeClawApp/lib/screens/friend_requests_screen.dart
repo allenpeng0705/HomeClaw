@@ -1,31 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core_service.dart';
+import '../providers/friend_list_providers.dart';
 import '../widgets/homeclaw_snackbars.dart';
 
 /// Friend requests: same-instance and (when federation is on) cross-instance tabs.
-class FriendRequestsScreen extends StatefulWidget {
+class FriendRequestsScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
   final VoidCallback? onAccept;
 
   const FriendRequestsScreen({super.key, required this.coreService, this.onAccept});
 
   @override
-  State<FriendRequestsScreen> createState() => _FriendRequestsScreenState();
+  ConsumerState<FriendRequestsScreen> createState() => _FriendRequestsScreenState();
 }
 
-class _FriendRequestsScreenState extends State<FriendRequestsScreen> with SingleTickerProviderStateMixin {
-  List<Map<String, dynamic>> _requests = [];
-  List<Map<String, dynamic>> _federatedRequests = [];
-  bool _loading = true;
-  bool _loadingFed = true;
-  String? _error;
-  String? _errorFed;
-  final Set<String> _busy = {};
+class _FriendRequestsScreenState extends ConsumerState<FriendRequestsScreen> with SingleTickerProviderStateMixin {
+  late final FriendRequestsNotifier _notifier;
   TabController? _tabController;
 
   @override
   void initState() {
     super.initState();
+    _notifier = ref.read(friendRequestsProvider.notifier);
     if (widget.coreService.federationEnabled) {
       _tabController = TabController(length: 2, vsync: this);
     }
@@ -40,56 +37,28 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> with Single
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    _notifier.setLoading(true);
     try {
       final list = await widget.coreService.getFriendRequests();
-      if (mounted) {
-        setState(() {
-          _requests = list;
-          _loading = false;
-        });
-      }
+      if (mounted) _notifier.setRequests(list);
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-          _requests = [];
-        });
-      }
+      if (mounted) _notifier.setError(e.toString());
     }
   }
 
   Future<void> _loadFederated() async {
     if (!widget.coreService.federationEnabled) return;
-    setState(() {
-      _loadingFed = true;
-      _errorFed = null;
-    });
+    _notifier.setLoadingFed(true);
     try {
       final list = await widget.coreService.getFederatedFriendRequests();
-      if (mounted) {
-        setState(() {
-          _federatedRequests = list;
-          _loadingFed = false;
-        });
-      }
+      if (mounted) _notifier.setFederatedRequests(list);
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorFed = e.toString();
-          _loadingFed = false;
-          _federatedRequests = [];
-        });
-      }
+      if (mounted) _notifier.setErrorFed(e.toString());
     }
   }
 
   Future<void> _accept(String requestId) async {
-    setState(() => _busy.add(requestId));
+    _notifier.setBusy(requestId, true);
     try {
       await widget.coreService.acceptFriendRequest(requestId);
       if (!mounted) return;
@@ -103,12 +72,12 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> with Single
         );
       }
     } finally {
-      if (mounted) setState(() => _busy.remove(requestId));
+      if (mounted) _notifier.setBusy(requestId, false);
     }
   }
 
   Future<void> _reject(String requestId) async {
-    setState(() => _busy.add(requestId));
+    _notifier.setBusy(requestId, true);
     try {
       await widget.coreService.rejectFriendRequest(requestId);
       if (!mounted) return;
@@ -121,12 +90,12 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> with Single
         );
       }
     } finally {
-      if (mounted) setState(() => _busy.remove(requestId));
+      if (mounted) _notifier.setBusy(requestId, false);
     }
   }
 
   Future<void> _acceptFed(String requestId) async {
-    setState(() => _busy.add('fed_$requestId'));
+    _notifier.setBusyFed(requestId, true);
     try {
       await widget.coreService.acceptFederatedFriendRequest(requestId);
       if (!mounted) return;
@@ -140,12 +109,12 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> with Single
         );
       }
     } finally {
-      if (mounted) setState(() => _busy.remove('fed_$requestId'));
+      if (mounted) _notifier.setBusyFed(requestId, false);
     }
   }
 
   Future<void> _rejectFed(String requestId) async {
-    setState(() => _busy.add('fed_$requestId'));
+    _notifier.setBusyFed(requestId, true);
     try {
       await widget.coreService.rejectFederatedFriendRequest(requestId);
       if (!mounted) return;
@@ -158,20 +127,20 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> with Single
         );
       }
     } finally {
-      if (mounted) setState(() => _busy.remove('fed_$requestId'));
+      if (mounted) _notifier.setBusyFed(requestId, false);
     }
   }
 
-  Widget _localList() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) {
+  Widget _localList(FriendRequestsState state) {
+    if (state.loading) return const Center(child: CircularProgressIndicator());
+    if (state.error != null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              HomeClawInlineErrorCard(message: _error!),
+              HomeClawInlineErrorCard(message: state.error!),
               const SizedBox(height: 16),
               FilledButton(onPressed: _load, child: const Text('Retry')),
             ],
@@ -179,18 +148,18 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> with Single
         ),
       );
     }
-    if (_requests.isEmpty) {
+    if (state.requests.isEmpty) {
       return Center(child: Text('No pending requests', style: Theme.of(context).textTheme.bodyLarge));
     }
     return ListView.builder(
       padding: const EdgeInsets.all(8),
-      itemCount: _requests.length,
+      itemCount: state.requests.length,
       itemBuilder: (context, index) {
-        final r = _requests[index];
+        final r = state.requests[index];
         final requestId = (r['id'] as String?)?.trim() ?? '';
         final fromName = (r['from_user_name'] as String?)?.trim() ?? (r['from_user_id'] as String?) ?? 'Someone';
         final message = (r['message'] as String?)?.trim();
-        final busy = _busy.contains(requestId);
+        final busy = state.busy.contains(requestId);
         return Card(
           margin: const EdgeInsets.only(bottom: 8),
           child: Padding(
@@ -228,16 +197,16 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> with Single
     );
   }
 
-  Widget _federatedList() {
-    if (_loadingFed) return const Center(child: CircularProgressIndicator());
-    if (_errorFed != null) {
+  Widget _federatedList(FriendRequestsState state) {
+    if (state.loadingFed) return const Center(child: CircularProgressIndicator());
+    if (state.errorFed != null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              HomeClawInlineErrorCard(message: _errorFed!),
+              HomeClawInlineErrorCard(message: state.errorFed!),
               const SizedBox(height: 16),
               FilledButton(onPressed: _loadFederated, child: const Text('Retry')),
             ],
@@ -245,18 +214,18 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> with Single
         ),
       );
     }
-    if (_federatedRequests.isEmpty) {
+    if (state.federatedRequests.isEmpty) {
       return Center(child: Text('No remote requests', style: Theme.of(context).textTheme.bodyLarge));
     }
     return ListView.builder(
       padding: const EdgeInsets.all(8),
-      itemCount: _federatedRequests.length,
+      itemCount: state.federatedRequests.length,
       itemBuilder: (context, index) {
-        final r = _federatedRequests[index];
+        final r = state.federatedRequests[index];
         final requestId = (r['id'] as String?)?.trim() ?? '';
         final fromFid = (r['from_fid'] as String?)?.trim() ?? '';
         final message = (r['message'] as String?)?.trim();
-        final busy = _busy.contains('fed_$requestId');
+        final busy = state.busy.contains('fed_$requestId');
         return Card(
           margin: const EdgeInsets.only(bottom: 8),
           child: Padding(
@@ -307,16 +276,17 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> with Single
 
   @override
   Widget build(BuildContext context) {
+    final state = ref.watch(friendRequestsProvider);
     final fed = widget.coreService.federationEnabled;
     if (!fed) {
       return Scaffold(
         appBar: AppBar(
           title: const Text('Friend requests'),
           actions: [
-            IconButton(icon: const Icon(Icons.refresh), onPressed: _loading ? null : _load, tooltip: 'Refresh'),
+            IconButton(icon: const Icon(Icons.refresh), onPressed: state.loading ? null : _load, tooltip: 'Refresh'),
           ],
         ),
-        body: _localList(),
+        body: _localList(state),
       );
     }
     return Scaffold(
@@ -325,7 +295,7 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> with Single
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _loading && _loadingFed
+            onPressed: state.loading && state.loadingFed
                 ? null
                 : () {
                     _load();
@@ -345,8 +315,8 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> with Single
       body: TabBarView(
         controller: _tabController,
         children: [
-          _localList(),
-          _federatedList(),
+          _localList(state),
+          _federatedList(state),
         ],
       ),
     );

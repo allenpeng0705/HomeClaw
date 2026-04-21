@@ -1,19 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core_service.dart';
 
 /// Screen to change the current user's password (Companion session).
 /// Requires current password and new password (with confirmation).
-class ChangePasswordScreen extends StatefulWidget {
+class ChangePasswordScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
 
   const ChangePasswordScreen({super.key, required this.coreService});
 
   @override
-  State<ChangePasswordScreen> createState() => _ChangePasswordScreenState();
+  ConsumerState<ChangePasswordScreen> createState() => _ChangePasswordScreenState();
 }
 
-class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
+class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
   final _formKey = GlobalKey<FormState>();
   final _currentController = TextEditingController();
   final _newController = TextEditingController();

@@ -5,10 +5,12 @@ import 'package:app_links/app_links.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:home_claw_app/l10n/app_localizations.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
 import 'chat_history_store.dart';
 import 'core_service.dart';
+import 'providers/providers.dart';
 import 'screens/clawcode_screen.dart';
 import 'screens/friend_list_screen.dart';
 import 'screens/login_screen.dart';
@@ -143,13 +145,20 @@ void main() async {
       });
     } catch (_) {}
   }
-  runApp(HomeClawCompanionApp(
-    coreService: coreService,
-    navigatorKey: navigatorKey,
-    initialMessage: initialMessage,
-    initialPushFromFriend: initialPushFromFriend,
-    initialClawcodeApprovalId: initialClawcodeApprovalId,
-  ));
+  runApp(
+    ProviderScope(
+      overrides: [
+        coreServiceProvider.overrideWithValue(coreService),
+      ],
+      child: HomeClawCompanionApp(
+        coreService: coreService,
+        navigatorKey: navigatorKey,
+        initialMessage: initialMessage,
+        initialPushFromFriend: initialPushFromFriend,
+        initialClawcodeApprovalId: initialClawcodeApprovalId,
+      ),
+    ),
+  );
 }
 
 class HomeClawCompanionApp extends StatelessWidget {
