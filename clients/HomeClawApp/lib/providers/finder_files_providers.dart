@@ -1,6 +1,20 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/core_service_models.dart';
 
+/// Busy flag for Finder file preview attach action.
+/// Keyed by sandboxScope so all previews for the same scope share state.
+final finderFilePreviewAttachBusyProvider =
+    StateProvider.autoDispose.family<bool, String>(
+  (ref, sandboxScope) => false,
+);
+
+/// Busy flag for Finder file preview open-in-browser action.
+/// Keyed by sandboxScope so all previews for the same scope share state.
+final finderFilePreviewBrowserBusyProvider =
+    StateProvider.autoDispose.family<bool, String>(
+  (ref, sandboxScope) => false,
+);
+
 /// State for the finder files tab.
 class FinderFilesState {
   final SandboxListResult? result;

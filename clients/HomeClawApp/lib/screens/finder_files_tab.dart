@@ -462,7 +462,7 @@ class _FinderFilesExplorerState extends ConsumerState<FinderFilesExplorer> {
   }
 }
 
-class _FinderFilePreviewPage extends StatefulWidget {
+class _FinderFilePreviewPage extends ConsumerStatefulWidget {
   final CoreService coreService;
   final String sandboxScope;
   final SandboxListEntry entry;
@@ -480,12 +480,14 @@ class _FinderFilePreviewPage extends StatefulWidget {
   });
 
   @override
-  State<_FinderFilePreviewPage> createState() => _FinderFilePreviewPageState();
+  ConsumerState<_FinderFilePreviewPage> createState() => _FinderFilePreviewPageState();
 }
 
-class _FinderFilePreviewPageState extends State<_FinderFilePreviewPage> {
-  bool _attachBusy = false;
-  bool _openBrowserBusy = false;
+class _FinderFilePreviewPageState extends ConsumerState<_FinderFilePreviewPage> {
+  bool get _attachBusy =>
+      ref.watch(finderFilePreviewAttachBusyProvider(widget.sandboxScope));
+  bool get _openBrowserBusy =>
+      ref.watch(finderFilePreviewBrowserBusyProvider(widget.sandboxScope));
 
   bool get _isImageName => isDisplayableImageName(widget.entry.name);
   bool get _isTextPreviewName => isTextPreviewName(widget.entry.name);
@@ -625,7 +627,8 @@ class _FinderFilePreviewPageState extends State<_FinderFilePreviewPage> {
                   onPressed: _attachBusy
                       ? null
                       : () async {
-                          setState(() => _attachBusy = true);
+                          final notifier = ref.read(finderFilePreviewAttachBusyProvider(widget.sandboxScope).notifier);
+                          notifier.state = true;
                           try {
                             await widget.onAttachFile(e.path);
                             if (context.mounted) {
@@ -642,7 +645,7 @@ class _FinderFilePreviewPageState extends State<_FinderFilePreviewPage> {
                               );
                             }
                           } finally {
-                            if (mounted) setState(() => _attachBusy = false);
+                            notifier.state = false;
                           }
                         },
                   icon: _attachBusy
@@ -657,7 +660,8 @@ class _FinderFilePreviewPageState extends State<_FinderFilePreviewPage> {
                   onPressed: _openBrowserBusy
                       ? null
                       : () async {
-                          setState(() => _openBrowserBusy = true);
+                          final notifier = ref.read(finderFilePreviewBrowserBusyProvider(widget.sandboxScope).notifier);
+                          notifier.state = true;
                           try {
                             final viewUrl = await widget.coreService
                                 .fetchSandboxFileViewUrl(e.path);
@@ -681,9 +685,7 @@ class _FinderFilePreviewPageState extends State<_FinderFilePreviewPage> {
                               );
                             }
                           } finally {
-                            if (mounted) {
-                              setState(() => _openBrowserBusy = false);
-                            }
+                            notifier.state = false;
                           }
                         },
                   icon: _openBrowserBusy

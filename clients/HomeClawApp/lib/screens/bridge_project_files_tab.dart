@@ -531,7 +531,7 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
   }
 }
 
-class _BridgeFilePreviewPage extends StatefulWidget {
+class _BridgeFilePreviewPage extends ConsumerStatefulWidget {
   final CoreService coreService;
   final String bridgeBackend;
   final BridgeProjectListEntry entry;
@@ -547,12 +547,14 @@ class _BridgeFilePreviewPage extends StatefulWidget {
   });
 
   @override
-  State<_BridgeFilePreviewPage> createState() => _BridgeFilePreviewPageState();
+  ConsumerState<_BridgeFilePreviewPage> createState() => _BridgeFilePreviewPageState();
 }
 
-class _BridgeFilePreviewPageState extends State<_BridgeFilePreviewPage> {
-  bool _attachBusy = false;
-  bool _openBrowserBusy = false;
+class _BridgeFilePreviewPageState extends ConsumerState<_BridgeFilePreviewPage> {
+  bool get _attachBusy =>
+      ref.watch(bridgeFilePreviewAttachBusyProvider(widget.bridgeBackend));
+  bool get _openBrowserBusy =>
+      ref.watch(bridgeFilePreviewBrowserBusyProvider(widget.bridgeBackend));
 
   bool get _isImageName => isDisplayableImageName(widget.entry.name);
   bool get _isTextPreviewName => isTextPreviewName(widget.entry.name);
@@ -718,7 +720,8 @@ class _BridgeFilePreviewPageState extends State<_BridgeFilePreviewPage> {
                   onPressed: _attachBusy
                       ? null
                       : () async {
-                          setState(() => _attachBusy = true);
+                          final notifier = ref.read(bridgeFilePreviewAttachBusyProvider(widget.bridgeBackend).notifier);
+                          notifier.state = true;
                           try {
                             widget.onAttachForNextSend(e.absPath);
                             if (context.mounted) {
@@ -731,7 +734,7 @@ class _BridgeFilePreviewPageState extends State<_BridgeFilePreviewPage> {
                               );
                             }
                           } finally {
-                            if (mounted) setState(() => _attachBusy = false);
+                            notifier.state = false;
                           }
                         },
                   icon: _attachBusy
@@ -747,7 +750,8 @@ class _BridgeFilePreviewPageState extends State<_BridgeFilePreviewPage> {
                   onPressed: _openBrowserBusy
                       ? null
                       : () async {
-                          setState(() => _openBrowserBusy = true);
+                          final notifier = ref.read(bridgeFilePreviewBrowserBusyProvider(widget.bridgeBackend).notifier);
+                          notifier.state = true;
                           try {
                             final viewUrl = await widget.coreService
                                 .fetchBridgeProjectBrowserUrl(
@@ -779,9 +783,7 @@ class _BridgeFilePreviewPageState extends State<_BridgeFilePreviewPage> {
                               );
                             }
                           } finally {
-                            if (mounted) {
-                              setState(() => _openBrowserBusy = false);
-                            }
+                            notifier.state = false;
                           }
                         },
                   icon: _openBrowserBusy

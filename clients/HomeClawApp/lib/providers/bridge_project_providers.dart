@@ -1,6 +1,20 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/core_service_models.dart';
 
+/// Busy flag for Bridge project file preview attach action.
+/// Keyed by bridgeBackend so all previews for the same backend share state.
+final bridgeFilePreviewAttachBusyProvider =
+    StateProvider.autoDispose.family<bool, String>(
+  (ref, bridgeBackend) => false,
+);
+
+/// Busy flag for Bridge project file preview open-in-browser action.
+/// Keyed by bridgeBackend so all previews for the same backend share state.
+final bridgeFilePreviewBrowserBusyProvider =
+    StateProvider.autoDispose.family<bool, String>(
+  (ref, bridgeBackend) => false,
+);
+
 /// State for BridgeProjectFilesExplorer (Dev Bridge project browser).
 class BridgeProjectState {
   final BridgeProjectListResult? result;
