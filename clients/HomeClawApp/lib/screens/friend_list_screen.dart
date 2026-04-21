@@ -38,15 +38,10 @@ const Map<String, String> _localizedNameToPreset = {
   '리마인더': 'reminder', '비공개 메모': 'note',
 };
 
-bool _isPersonFriendType(String? t) {
-  final x = (t ?? '').trim().toLowerCase();
-  return x == 'user' || x == 'remote_user';
-}
-
 /// Derive preset key from friend name when API does not return preset (e.g. Reminder→reminder, Note/Notes→note, Finder/Files→finder).
 /// Handles English and localized names (zh, es, fr, de, it, ja, ko) so thumbnails show regardless of locale.
 String? _presetKeyFromFriendName(String name) {
-  final n = (name is String ? name : '').trim();
+  final n = name.trim();
   if (n.isEmpty) return null;
   final nLower = n.toLowerCase();
   final byKey = _localizedNameToPreset[nLower];
@@ -131,12 +126,12 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
   Future<void> _loadUnreadState() async {
     final userId = widget.coreService.sessionUserId?.trim();
     if (userId == null || userId.isEmpty || !mounted) return;
-    final state = _friendListNotifier.state;
+    final friends = _friendListNotifier.friends;
     try {
       final data = await widget.coreService.getUserInbox(userId: userId, limit: 200);
       final list = data['messages'] as List<dynamic>? ?? [];
       final unread = <String>{};
-      for (final f in state.friends) {
+      for (final f in friends) {
         if (!f.isPerson) continue;
         final otherId = f.userId;
         if (otherId == null || otherId.isEmpty) continue;
@@ -205,20 +200,20 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
   }
 
   void _openInitialPushChatIfNeeded() {
-    final state = _friendListNotifier.state;
+    final friends = _friendListNotifier.friends;
     final name = _initialPushFromFriend?.trim();
-    if (name == null || name.isEmpty || state.friends.isEmpty) return;
+    if (name == null || name.isEmpty || friends.isEmpty) return;
     _initialPushFromFriend = null;
     final nameLower = name.toLowerCase();
     FriendEntry? match;
-    for (final f in state.friends) {
+    for (final f in friends) {
       if (f.name.isNotEmpty && (f.name == name || f.name.toLowerCase() == nameLower)) {
         match = f;
         break;
       }
     }
     if (match == null) {
-      for (final f in state.friends) {
+      for (final f in friends) {
         if (f.name.toLowerCase() == 'homeclaw') {
           match = f;
           break;
@@ -252,10 +247,6 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
         ),
       );
     });
-  }
-
-  String? _peerInstanceIdFromFriend(FriendEntry f) {
-    return f.remoteInstanceId;
   }
 
   Future<void> _logout() async {

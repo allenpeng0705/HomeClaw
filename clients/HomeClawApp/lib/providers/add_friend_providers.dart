@@ -1,6 +1,4 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../core_service.dart';
-import 'providers.dart';
 
 /// State for the add-friend screen (local user list).
 class AddFriendState {
@@ -33,15 +31,11 @@ class AddFriendState {
 
 /// Provider for add-friend screen state.
 final addFriendProvider = StateNotifierProvider<AddFriendNotifier, AddFriendState>(
-  (ref) => AddFriendNotifier(ref),
+  (ref) => AddFriendNotifier(),
 );
 
 class AddFriendNotifier extends StateNotifier<AddFriendState> {
-  final Ref _ref;
-
-  AddFriendNotifier(this._ref) : super(const AddFriendState());
-
-  CoreService get _core => _ref.read(coreServiceProvider);
+  AddFriendNotifier() : super(const AddFriendState());
 
   void setLoading(bool value) {
     state = state.copyWith(loading: value);

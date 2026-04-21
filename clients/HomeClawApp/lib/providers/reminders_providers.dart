@@ -1,6 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core_service.dart';
-import 'providers.dart';
 
 /// State for reminders tab.
 class RemindersState {
@@ -33,15 +32,11 @@ class RemindersState {
 }
 
 final remindersProvider = StateNotifierProvider<RemindersNotifier, RemindersState>(
-  (ref) => RemindersNotifier(ref),
+  (ref) => RemindersNotifier(),
 );
 
 class RemindersNotifier extends StateNotifier<RemindersState> {
-  final Ref _ref;
-
-  RemindersNotifier(this._ref) : super(const RemindersState());
-
-  CoreService get _core => _ref.read(coreServiceProvider);
+  RemindersNotifier() : super(const RemindersState());
 
   void setLoading(bool value) {
     state = state.copyWith(loading: value);

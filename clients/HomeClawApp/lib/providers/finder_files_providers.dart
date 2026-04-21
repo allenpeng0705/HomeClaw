@@ -56,13 +56,11 @@ class FinderFilesState {
 
 final finderFilesProvider = StateNotifierProvider.autoDispose
     .family<FinderFilesNotifier, FinderFilesState, String>(
-  (ref, sandboxScope) => FinderFilesNotifier(sandboxScope),
+  (ref, sandboxScope) => FinderFilesNotifier(),
 );
 
 class FinderFilesNotifier extends StateNotifier<FinderFilesState> {
-  final String _sandboxScope;
-
-  FinderFilesNotifier(this._sandboxScope) : super(const FinderFilesState());
+  FinderFilesNotifier() : super(const FinderFilesState());
 
   void setLoading(bool value) {
     state = state.copyWith(loading: value, clearError: true, clearSelectedPath: true);

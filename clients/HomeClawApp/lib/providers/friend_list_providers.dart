@@ -1,7 +1,5 @@
 import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../core_service.dart';
-import 'providers.dart';
 
 /// Friend list entry from GET /api/me/friends.
 class FriendEntry {
@@ -64,16 +62,11 @@ class FriendListState {
 
 /// Provider for friend list state (per-user, so family keyed by userId).
 final friendListProvider = StateNotifierProvider.family<FriendListNotifier, FriendListState, String>(
-  (ref, userId) => FriendListNotifier(userId, ref),
+  (ref, userId) => FriendListNotifier(),
 );
 
 class FriendListNotifier extends StateNotifier<FriendListState> {
-  final String _userId;
-  final Ref _ref;
-
-  FriendListNotifier(this._userId, this._ref) : super(const FriendListState());
-
-  CoreService get _core => _ref.read(coreServiceProvider);
+  FriendListNotifier() : super(const FriendListState());
 
   void setLoading(bool value) {
     state = state.copyWith(loading: value);
@@ -102,6 +95,9 @@ class FriendListNotifier extends StateNotifier<FriendListState> {
   void setUnreadUserIds(Set<String> ids) {
     state = state.copyWith(unreadUserIds: ids);
   }
+
+  List<FriendEntry> get friends => state.friends;
+  Set<String> get unreadUserIds => state.unreadUserIds;
 }
 
 /// State for friend requests screen.
@@ -148,15 +144,11 @@ class FriendRequestsState {
 
 /// Provider for friend requests state.
 final friendRequestsProvider = StateNotifierProvider<FriendRequestsNotifier, FriendRequestsState>(
-  (ref) => FriendRequestsNotifier(ref),
+  (ref) => FriendRequestsNotifier(),
 );
 
 class FriendRequestsNotifier extends StateNotifier<FriendRequestsState> {
-  final Ref _ref;
-
-  FriendRequestsNotifier(this._ref) : super(const FriendRequestsState());
-
-  CoreService get _core => _ref.read(coreServiceProvider);
+  FriendRequestsNotifier() : super(const FriendRequestsState());
 
   void setLoading(bool value) {
     state = state.copyWith(loading: value);

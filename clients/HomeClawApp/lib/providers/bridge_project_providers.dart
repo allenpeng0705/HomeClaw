@@ -137,13 +137,11 @@ class BridgeProjectState {
 
 final bridgeProjectProvider = StateNotifierProvider.autoDispose
     .family<BridgeProjectNotifier, BridgeProjectState, String>(
-  (ref, bridgeBackend) => BridgeProjectNotifier(bridgeBackend),
+  (ref, bridgeBackend) => BridgeProjectNotifier(),
 );
 
 class BridgeProjectNotifier extends StateNotifier<BridgeProjectState> {
-  final String _bridgeBackend;
-
-  BridgeProjectNotifier(this._bridgeBackend) : super(const BridgeProjectState());
+  BridgeProjectNotifier() : super(const BridgeProjectState());
 
   void setLoading(bool value) {
     state = state.copyWith(loading: value, clearError: true, clearSelected: true);

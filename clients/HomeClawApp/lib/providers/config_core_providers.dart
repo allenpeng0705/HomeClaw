@@ -1,6 +1,4 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../core_service.dart';
-import 'providers.dart';
 
 /// State for the ConfigCoreScreen.
 class ConfigCoreState {
@@ -32,15 +30,11 @@ class ConfigCoreState {
 }
 
 final configCoreProvider = StateNotifierProvider<ConfigCoreNotifier, ConfigCoreState>(
-  (ref) => ConfigCoreNotifier(ref),
+  (ref) => ConfigCoreNotifier(),
 );
 
 class ConfigCoreNotifier extends StateNotifier<ConfigCoreState> {
-  final Ref _ref;
-
-  ConfigCoreNotifier(this._ref) : super(const ConfigCoreState());
-
-  CoreService get _core => _ref.read(coreServiceProvider);
+  ConfigCoreNotifier() : super(const ConfigCoreState());
 
   void setLoading(bool value) {
     state = state.copyWith(loading: value);

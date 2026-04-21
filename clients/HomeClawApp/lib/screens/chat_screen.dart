@@ -524,37 +524,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
   }
 
-  Future<void> _startInteractiveSessionIfNeeded() async {
-    if (!_isDevBridgeFriend || _interactiveSessionId != null) return;
-    try {
-      final cwd =
-          _cursorActiveCwd.trim().isNotEmpty ? _cursorActiveCwd.trim() : null;
-      final fid = (widget.friendId ?? '').trim().toLowerCase();
-      final bridgePlugin = fid == 'trae'
-          ? 'trae-bridge'
-          : (fid == 'claudecode' ? 'claude-code-bridge' : 'cursor-bridge');
-      final result = await widget.coreService.interactiveStart(
-        bridgePlugin: bridgePlugin,
-        cwd: cwd,
-      );
-      final sid = (result['session_id'] as String?)?.trim();
-      final initial = (result['initial_output'] as String?) ?? '';
-      if (!mounted || sid == null || sid.isEmpty) return;
-      setState(() {
-        _interactiveSessionId = sid;
-        _interactiveLastSeq = 1;
-        _interactiveOutput = initial;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _interactiveOutput =
-            'Failed to start interactive agent: ${e.toString().replaceFirst(RegExp(r'^Exception:?\s*'), '')}. '
-            'Ensure the bridge is running and Core can reach it.';
-      });
-    }
-  }
-
   Future<void> _sendInteractiveInput() async {
     final sid = _interactiveSessionId;
     if (sid == null) return;
@@ -592,20 +561,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         _interactiveLastSeq = maxSeq + 1;
       });
     } catch (_) {}
-  }
-
-  Future<void> _stopInteractiveSession() async {
-    final sid = _interactiveSessionId;
-    if (sid == null) return;
-    try {
-      await widget.coreService.interactiveStop(sessionId: sid);
-    } catch (_) {}
-    if (!mounted) return;
-    setState(() {
-      _interactiveSessionId = null;
-      _interactiveLastSeq = 1;
-      _interactiveOutput = '';
-    });
   }
 
   Future<void> _loadChatPartnerAvatar() async {
@@ -2057,9 +2012,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     'webp': 'image/webp',
   };
 
-  /// Build data URL for one short video (e.g. 10s). Max one video, max 15MB. Returns empty list if none or too large.
-  static const int _maxVideoBytes = 15 * 1024 * 1024;
-
   /// User-to-user on one Core: keep JSON modest (still data URLs for Companion bubbles).
   static const int _userMsgImageMaxJpegBytes = 768 * 1024;
   static const double _userMsgImageMaxLongEdge = 1600;
@@ -2449,7 +2401,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
     // 1) Try copy via path (works if path is still valid, e.g. camera or some galleries).
     final rawPath = xFile.path;
-    if (rawPath != null && rawPath.isNotEmpty) {
+    if (rawPath.isNotEmpty) {
       try {
         final srcPath =
             rawPath.startsWith('file://') ? Uri.parse(rawPath).path : rawPath;
@@ -2683,7 +2635,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       } else {
         filePath = xFile.path;
       }
-      if (filePath == null || !mounted) {
+      if (!mounted) {
         setState(() {
           _messages.add(MapEntry(
               'Video error: could not read or copy the video.', false));
