@@ -5003,52 +5003,41 @@ class _VideoPlayChip extends StatelessWidget {
 }
 
 /// Full-screen video player: data URL, local file, http(s), or Core `/files/...`.
-class _FullScreenVideoPage extends StatefulWidget {
-  final String videoRef;
-  final String coreBaseUrl;
-  final Map<String, String>? httpHeaders;
-
+class _FullScreenVideoPage extends StatelessWidget {
   const _FullScreenVideoPage({
     required this.videoRef,
     required this.coreBaseUrl,
     this.httpHeaders,
   });
 
-  @override
-  State<_FullScreenVideoPage> createState() => _FullScreenVideoPageState();
-}
+  final String videoRef;
+  final String coreBaseUrl;
+  final Map<String, String>? httpHeaders;
 
-class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
   @override
   Widget build(BuildContext context) => FullScreenVideoPage(
-        videoRef: widget.videoRef,
-        coreBaseUrl: widget.coreBaseUrl,
-        httpHeaders: widget.httpHeaders,
+        videoRef: videoRef,
+        coreBaseUrl: coreBaseUrl,
+        httpHeaders: httpHeaders,
       );
 }
 
-/// Play button for a voice message (data URL, local path, http(s), or Core `/files/...`).
-class _AudioPlayButton extends StatefulWidget {
-  final String audioRef;
-  final String coreBaseUrl;
-  final Map<String, String>? coreMediaHeaders;
-
+class _AudioPlayButton extends StatelessWidget {
   const _AudioPlayButton({
     required this.audioRef,
     required this.coreBaseUrl,
     this.coreMediaHeaders,
   });
 
-  @override
-  State<_AudioPlayButton> createState() => _AudioPlayButtonState();
-}
+  final String audioRef;
+  final String coreBaseUrl;
+  final Map<String, String>? coreMediaHeaders;
 
-class _AudioPlayButtonState extends State<_AudioPlayButton> {
   @override
   Widget build(BuildContext context) => AudioPlayButton(
-        audioRef: widget.audioRef,
-        coreBaseUrl: widget.coreBaseUrl,
-        coreMediaHeaders: widget.coreMediaHeaders,
+        audioRef: audioRef,
+        coreBaseUrl: coreBaseUrl,
+        coreMediaHeaders: coreMediaHeaders,
       );
 }
 
