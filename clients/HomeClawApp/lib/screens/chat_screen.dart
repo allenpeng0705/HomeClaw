@@ -2952,7 +2952,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       voiceLocales = List<String>.from(await _voice.getAvailableLocales());
       final ttsList = await _tts.getLanguages;
       ttsLanguages = ttsList is List
-          ? List<String>.from((ttsList as List).map((e) => e.toString()))
+          ? List<String>.from(ttsList.map((e) => e.toString()))
           : [];
     } catch (e) {
       if (mounted) {
