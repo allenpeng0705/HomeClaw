@@ -993,22 +993,18 @@ class _CcRunChip extends StatelessWidget {
   Widget build(BuildContext context) => CcRunChip(state: state);
 }
 
-class _ClawcodeMcpSheet extends StatefulWidget {
+class _ClawcodeMcpSheet extends ConsumerStatefulWidget {
   const _ClawcodeMcpSheet({required this.coreService});
 
   final CoreService coreService;
 
   @override
-  State<_ClawcodeMcpSheet> createState() => _ClawcodeMcpSheetState();
+  ConsumerState<_ClawcodeMcpSheet> createState() => _ClawcodeMcpSheetState();
 }
 
-class _ClawcodeMcpSheetState extends State<_ClawcodeMcpSheet> {
-  bool _loading = true;
-  String? _error;
-  List<Map<String, dynamic>> _servers = [];
-  bool _mcpEnabled = false;
-  bool _healthBusy = false;
-  List<Map<String, dynamic>> _healthResults = [];
+class _ClawcodeMcpSheetState extends ConsumerState<_ClawcodeMcpSheet> {
+  ClawcodeState get _cs => ref.watch(clawcodeProvider);
+  ClawcodeNotifier get _notifier => ref.read(clawcodeProvider.notifier);
 
   @override
   void initState() {
@@ -1017,10 +1013,7 @@ class _ClawcodeMcpSheetState extends State<_ClawcodeMcpSheet> {
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    _notifier.setMcpLoading(true);
     try {
       final m = await widget.coreService.fetchClawcodeMcpServers();
       final list = m['servers'];
@@ -1035,25 +1028,16 @@ class _ClawcodeMcpSheetState extends State<_ClawcodeMcpSheet> {
         }
       }
       if (!mounted) return;
-      setState(() {
-        _mcpEnabled = m['mcp_enabled'] == true;
-        _servers = servers;
-        _loading = false;
-      });
+      _notifier.setMcpData(servers: servers, enabled: m['mcp_enabled'] == true);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      _notifier.setMcpError(e.toString());
     }
   }
 
   Future<void> _health() async {
-    setState(() {
-      _healthBusy = true;
-      _healthResults = [];
-    });
+    _notifier.setHealthBusy(true);
+    _notifier.clearHealthResults();
     try {
       final m = await widget.coreService.postClawcodeMcpHealth();
       final list = m['results'];
@@ -1068,13 +1052,10 @@ class _ClawcodeMcpSheetState extends State<_ClawcodeMcpSheet> {
         }
       }
       if (!mounted) return;
-      setState(() {
-        _healthResults = out;
-        _healthBusy = false;
-      });
+      _notifier.setHealthResults(out);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _healthBusy = false);
+      _notifier.setHealthBusy(false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
@@ -1092,22 +1073,22 @@ class _ClawcodeMcpSheetState extends State<_ClawcodeMcpSheet> {
             children: [
               Text('MCP diagnostics', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
-              if (_loading)
+              if (_cs.mcpLoading)
                 const Expanded(child: Center(child: CircularProgressIndicator()))
               else ...[
-                Text('mcp_enabled: $_mcpEnabled', style: Theme.of(context).textTheme.bodySmall),
-                if (_error != null)
+                Text('mcp_enabled: ${_cs.mcpEnabled}', style: Theme.of(context).textTheme.bodySmall),
+                if (_cs.mcpError != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
-                    child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
+                    child: Text(_cs.mcpError!, style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12)),
                   ),
                 Row(
                   children: [
                     TextButton(onPressed: _load, child: const Text('Refresh list')),
                     const Spacer(),
                     FilledButton(
-                      onPressed: _healthBusy ? null : _health,
-                      child: _healthBusy
+                      onPressed: _cs.healthBusy ? null : _health,
+                      child: _cs.healthBusy
                           ? const SizedBox(
                               width: 20,
                               height: 20,
@@ -1120,7 +1101,7 @@ class _ClawcodeMcpSheetState extends State<_ClawcodeMcpSheet> {
                 Expanded(
                   child: ListView(
                     children: [
-                      ..._servers.map((s) {
+                      ..._cs.mcpServers.map((s) {
                         final id = (s['server_id'] ?? '').toString();
                         final t = (s['transport'] ?? '').toString();
                         final cmd = (s['command'] ?? '').toString();
@@ -1134,10 +1115,10 @@ class _ClawcodeMcpSheetState extends State<_ClawcodeMcpSheet> {
                           ),
                         );
                       }),
-                      if (_healthResults.isNotEmpty) ...[
+                      if (_cs.healthResults.isNotEmpty) ...[
                         const Divider(height: 24),
                         Text('Health', style: Theme.of(context).textTheme.titleSmall),
-                        ..._healthResults.map((r) {
+                        ..._cs.healthResults.map((r) {
                           final ok = r['ok'] == true;
                           final sid = (r['server_id'] ?? '').toString();
                           final err = (r['error'] ?? '').toString();

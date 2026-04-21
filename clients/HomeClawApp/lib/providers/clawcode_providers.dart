@@ -12,6 +12,13 @@ class ClawcodeState {
   final String progressLine;
   final String lastReply;
   final CcRunState ccRunState;
+  // MCP diagnostics sheet state
+  final bool mcpLoading;
+  final String? mcpError;
+  final List<Map<String, dynamic>> mcpServers;
+  final bool mcpEnabled;
+  final bool healthBusy;
+  final List<Map<String, dynamic>> healthResults;
 
   const ClawcodeState({
     this.loading = true,
@@ -23,6 +30,12 @@ class ClawcodeState {
     this.progressLine = '',
     this.lastReply = '',
     this.ccRunState = CcRunState.idle,
+    this.mcpLoading = true,
+    this.mcpError,
+    this.mcpServers = const [],
+    this.mcpEnabled = false,
+    this.healthBusy = false,
+    this.healthResults = const [],
   });
 
   ClawcodeState copyWith({
@@ -37,6 +50,13 @@ class ClawcodeState {
     String? progressLine,
     String? lastReply,
     CcRunState? ccRunState,
+    bool? mcpLoading,
+    String? mcpError,
+    bool clearMcpError = false,
+    List<Map<String, dynamic>>? mcpServers,
+    bool? mcpEnabled,
+    bool? healthBusy,
+    List<Map<String, dynamic>>? healthResults,
   }) =>
       ClawcodeState(
         loading: loading ?? this.loading,
@@ -48,6 +68,12 @@ class ClawcodeState {
         progressLine: progressLine ?? this.progressLine,
         lastReply: lastReply ?? this.lastReply,
         ccRunState: ccRunState ?? this.ccRunState,
+        mcpLoading: mcpLoading ?? this.mcpLoading,
+        mcpError: clearMcpError ? null : (mcpError ?? this.mcpError),
+        mcpServers: mcpServers ?? this.mcpServers,
+        mcpEnabled: mcpEnabled ?? this.mcpEnabled,
+        healthBusy: healthBusy ?? this.healthBusy,
+        healthResults: healthResults ?? this.healthResults,
       );
 }
 
@@ -103,6 +129,31 @@ class ClawcodeNotifier extends StateNotifier<ClawcodeState> {
 
   void setApprovals(List<Map<String, dynamic>> a) {
     state = state.copyWith(approvals: a);
+  }
+
+  // MCP sheet methods
+  void setMcpLoading(bool v) {
+    state = state.copyWith(mcpLoading: v, clearMcpError: true);
+  }
+
+  void setMcpData({required List<Map<String, dynamic>> servers, required bool enabled}) {
+    state = state.copyWith(mcpServers: servers, mcpEnabled: enabled, mcpLoading: false);
+  }
+
+  void setMcpError(String e) {
+    state = state.copyWith(mcpError: e, mcpLoading: false);
+  }
+
+  void setHealthBusy(bool v) {
+    state = state.copyWith(healthBusy: v);
+  }
+
+  void setHealthResults(List<Map<String, dynamic>> results) {
+    state = state.copyWith(healthResults: results, healthBusy: false);
+  }
+
+  void clearHealthResults() {
+    state = state.copyWith(healthResults: [], healthBusy: false);
   }
 }
 
