@@ -417,7 +417,7 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
   }
 }
 
-class _FriendTile extends StatefulWidget {
+class _FriendTile extends ConsumerStatefulWidget {
   final String userId;
   final String friendId;
   final String displayName;
@@ -456,10 +456,10 @@ class _FriendTile extends StatefulWidget {
   });
 
   @override
-  State<_FriendTile> createState() => _FriendTileState();
+  ConsumerState<_FriendTile> createState() => _FriendTileState();
 }
 
-class _FriendTileState extends State<_FriendTile> {
+class _FriendTileState extends ConsumerState<_FriendTile> {
   Uint8List? _avatarBytes;
 
   @override
