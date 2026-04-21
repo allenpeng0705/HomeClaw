@@ -1,6 +1,83 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/core_service_models.dart';
 
+/// State for Bridge project root browser dialog.
+class BridgeRootBrowserState {
+  final BridgeRootListResult? data;
+  final String path;
+  final String? error;
+  final bool loading;
+  final String? openingPath;
+  final String? selectedDirAbsPath;
+
+  const BridgeRootBrowserState({
+    this.data,
+    this.path = '.',
+    this.error,
+    this.loading = true,
+    this.openingPath,
+    this.selectedDirAbsPath,
+  });
+
+  BridgeRootBrowserState copyWith({
+    BridgeRootListResult? data,
+    bool clearData = false,
+    String? path,
+    String? error,
+    bool clearError = false,
+    bool? loading,
+    String? openingPath,
+    bool clearOpeningPath = false,
+    String? selectedDirAbsPath,
+    bool clearSelectedDirAbsPath = false,
+  }) =>
+      BridgeRootBrowserState(
+        data: clearData ? null : (data ?? this.data),
+        path: path ?? this.path,
+        error: clearError ? null : (error ?? this.error),
+        loading: loading ?? this.loading,
+        openingPath: clearOpeningPath ? null : (openingPath ?? this.openingPath),
+        selectedDirAbsPath: clearSelectedDirAbsPath ? null : (selectedDirAbsPath ?? this.selectedDirAbsPath),
+      );
+}
+
+final bridgeRootBrowserProvider =
+    StateNotifierProvider.autoDispose.family<BridgeRootBrowserNotifier, BridgeRootBrowserState, String>(
+  (ref, backend) => BridgeRootBrowserNotifier(),
+);
+
+class BridgeRootBrowserNotifier extends StateNotifier<BridgeRootBrowserState> {
+  BridgeRootBrowserNotifier() : super(const BridgeRootBrowserState());
+
+  void setLoading(bool value) {
+    state = state.copyWith(loading: value, clearError: true);
+  }
+
+  void setData(BridgeRootListResult r) {
+    state = state.copyWith(data: r, loading: false, error: r.error);
+  }
+
+  void setError(String e) {
+    state = state.copyWith(loading: false, error: e, clearData: true);
+  }
+
+  void setPath(String path) {
+    state = state.copyWith(path: path);
+  }
+
+  void setOpeningPath(String? absPath) {
+    state = state.copyWith(openingPath: absPath);
+  }
+
+  void clearOpeningPath() {
+    state = state.copyWith(clearOpeningPath: true);
+  }
+
+  void setSelectedDirAbsPath(String? absPath) {
+    state = state.copyWith(selectedDirAbsPath: absPath);
+  }
+}
+
 /// Busy flag for Bridge project file preview attach action.
 /// Keyed by bridgeBackend so all previews for the same backend share state.
 final bridgeFilePreviewAttachBusyProvider =

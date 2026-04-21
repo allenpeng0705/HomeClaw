@@ -806,7 +806,7 @@ class _BridgeFilePreviewPageState extends ConsumerState<_BridgeFilePreviewPage> 
   }
 }
 
-class _BridgeRootBrowserDialog extends StatefulWidget {
+class _BridgeRootBrowserDialog extends ConsumerStatefulWidget {
   final CoreService coreService;
   final String backend;
   final Future<void> Function(String absPath) onSelectFolder;
@@ -818,17 +818,15 @@ class _BridgeRootBrowserDialog extends StatefulWidget {
   });
 
   @override
-  State<_BridgeRootBrowserDialog> createState() =>
+  ConsumerState<_BridgeRootBrowserDialog> createState() =>
       _BridgeRootBrowserDialogState();
 }
 
-class _BridgeRootBrowserDialogState extends State<_BridgeRootBrowserDialog> {
-  BridgeRootListResult? _data;
-  String _path = '.';
-  String? _error;
-  bool _loading = true;
-  String? _openingPath;
-  String? _selectedDirAbsPath;
+class _BridgeRootBrowserDialogState extends ConsumerState<_BridgeRootBrowserDialog> {
+  BridgeRootBrowserState get _cs =>
+      ref.watch(bridgeRootBrowserProvider(widget.backend));
+  BridgeRootBrowserNotifier get _notifier =>
+      ref.read(bridgeRootBrowserProvider(widget.backend).notifier);
 
   @override
   void initState() {
@@ -837,40 +835,31 @@ class _BridgeRootBrowserDialogState extends State<_BridgeRootBrowserDialog> {
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    _notifier.setLoading(true);
     try {
       final r = await widget.coreService
-          .fetchBridgeRootList(backend: widget.backend, path: _path);
+          .fetchBridgeRootList(backend: widget.backend, path: _cs.path);
       if (!mounted) return;
-      setState(() {
-        _data = r;
-        _loading = false;
-        _error = r.error;
-      });
+      _notifier.setData(r);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
-      });
+      _notifier.setError(e.toString().replaceFirst(RegExp(r'^Exception:\s*'), ''));
     }
   }
 
   void _goUp() {
-    if (_path == '.' || _path.isEmpty) return;
-    final parts = _path.split('/').where((s) => s.isNotEmpty).toList();
+    if (_cs.path == '.' || _cs.path.isEmpty) return;
+    final parts = _cs.path.split('/').where((s) => s.isNotEmpty).toList();
     if (parts.isNotEmpty) {
       parts.removeLast();
     }
-    setState(() => _path = parts.isEmpty ? '.' : parts.join('/'));
+    final next = parts.isEmpty ? '.' : parts.join('/');
+    _notifier.setPath(next);
     _load();
   }
 
   Future<void> _useSelectedFolder(String absPath) async {
-    setState(() => _openingPath = absPath);
+    _notifier.setOpeningPath(absPath);
     try {
       await widget.onSelectFolder(absPath);
       if (!mounted) return;
@@ -882,7 +871,7 @@ class _BridgeRootBrowserDialogState extends State<_BridgeRootBrowserDialog> {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Open failed: $e')));
     } finally {
-      if (mounted) setState(() => _openingPath = null);
+      if (mounted) _notifier.clearOpeningPath();
     }
   }
 
@@ -898,7 +887,7 @@ class _BridgeRootBrowserDialogState extends State<_BridgeRootBrowserDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '${_data?.root ?? "(root unknown)"}\n${_path == "." ? "(root)" : _path}',
+              '${_cs.data?.root ?? "(root unknown)"}\n${_cs.path == "." ? "(root)" : _cs.path}',
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall,
@@ -907,27 +896,27 @@ class _BridgeRootBrowserDialogState extends State<_BridgeRootBrowserDialog> {
             Row(
               children: [
                 IconButton(
-                    onPressed: _path == '.' || _loading ? null : _goUp,
+                    onPressed: _cs.path == '.' || _cs.loading ? null : _goUp,
                     icon: const Icon(Icons.arrow_upward)),
                 IconButton(
-                    onPressed: _loading ? null : _load,
+                    onPressed: _cs.loading ? null : _load,
                     icon: const Icon(Icons.refresh)),
               ],
             ),
             const Divider(height: 1),
             Expanded(
-              child: _loading
+              child: _cs.loading
                   ? const Center(child: CircularProgressIndicator())
-                  : (_error != null && _error!.isNotEmpty)
+                  : (_cs.error != null && _cs.error!.isNotEmpty)
                       ? Center(
-                          child: Text(_error!, textAlign: TextAlign.center))
+                          child: Text(_cs.error!, textAlign: TextAlign.center))
                       : ListView.builder(
-                          itemCount: _data?.entries.length ?? 0,
+                          itemCount: _cs.data?.entries.length ?? 0,
                           itemBuilder: (context, i) {
-                            final e = _data!.entries[i];
+                            final e = _cs.data!.entries[i];
                             final isDir = e.type == 'dir';
                             final selected =
-                                isDir && _selectedDirAbsPath == e.absPath;
+                                isDir && _cs.selectedDirAbsPath == e.absPath;
                             return ListTile(
                               selected: selected,
                               leading: Icon(isDir
@@ -937,15 +926,12 @@ class _BridgeRootBrowserDialogState extends State<_BridgeRootBrowserDialog> {
                               subtitle: Text(e.relPath),
                               onTap: !isDir
                                   ? null
-                                  : () {
-                                      setState(() =>
-                                          _selectedDirAbsPath = e.absPath);
-                                    },
+                                  : () => _notifier.setSelectedDirAbsPath(e.absPath),
                               trailing: !isDir
                                   ? null
                                   : TextButton.icon(
                                       onPressed: () {
-                                        setState(() => _path = e.relPath);
+                                        _notifier.setPath(e.relPath);
                                         _load();
                                       },
                                       icon: const Icon(Icons.chevron_right,
@@ -961,10 +947,10 @@ class _BridgeRootBrowserDialogState extends State<_BridgeRootBrowserDialog> {
       ),
       actions: [
         FilledButton.icon(
-          onPressed: (_openingPath != null || _selectedDirAbsPath == null)
+          onPressed: (_cs.openingPath != null || _cs.selectedDirAbsPath == null)
               ? null
-              : () => _useSelectedFolder(_selectedDirAbsPath!),
-          icon: _openingPath == null
+              : () => _useSelectedFolder(_cs.selectedDirAbsPath!),
+          icon: _cs.openingPath == null
               ? const Icon(Icons.check, size: 16)
               : const SizedBox(
                   width: 14,
