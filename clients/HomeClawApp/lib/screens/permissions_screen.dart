@@ -1,12 +1,14 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:homeclaw_voice/homeclaw_voice.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core_service.dart';
 import '../models/permission_item.dart';
+import '../providers/permissions_providers.dart';
 import 'friend_list_screen.dart';
 import 'login_screen.dart';
 
@@ -27,7 +29,7 @@ Future<bool> getPermissionsIntroShown() async {
 
 /// One permission row: title, description, status, and Allow button.
 
-class PermissionsScreen extends StatefulWidget {
+class PermissionsScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
   final String? initialMessage;
   final String? initialClawcodeApprovalId;
@@ -43,14 +45,11 @@ class PermissionsScreen extends StatefulWidget {
   });
 
   @override
-  State<PermissionsScreen> createState() => _PermissionsScreenState();
+  ConsumerState<PermissionsScreen> createState() => _PermissionsScreenState();
 }
 
-class _PermissionsScreenState extends State<PermissionsScreen> {
+class _PermissionsScreenState extends ConsumerState<PermissionsScreen> {
   final _voice = HomeclawVoice();
-  final Map<String, PermissionStatus> _status = {};
-  final Map<String, bool> _requesting = {};
-  bool _continuing = false;
 
   List<PermissionItem> _buildItems() {
     final items = <PermissionItem>[];
@@ -101,24 +100,26 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
 
   Future<void> _requestPermission(PermissionItem item) async {
     final key = item.title;
+    final notifier = ref.read(permissionsProvider.notifier);
     if (item.instructionsOnly != null) return;
-    setState(() => _requesting[key] = true);
+    notifier.setRequesting(key, true);
     try {
       final status = await item.request();
-      if (mounted) setState(() {
-        _requesting[key] = false;
-        _status[key] = status;
-      });
+      if (mounted) {
+        notifier.setStatus(key, status);
+        notifier.setRequesting(key, false);
+      }
     } catch (e) {
-      if (mounted) setState(() {
-        _requesting[key] = false;
-        _status[key] = PermissionStatus.denied;
-      });
+      if (mounted) {
+        notifier.setStatus(key, PermissionStatus.denied);
+        notifier.setRequesting(key, false);
+      }
     }
   }
 
   Future<void> _continue() async {
-    setState(() => _continuing = true);
+    final notifier = ref.read(permissionsProvider.notifier);
+    notifier.setContinuing(true);
     if (!widget.fromSettings) await markPermissionsIntroShown();
     if (!mounted) return;
     if (widget.fromSettings) {
@@ -142,6 +143,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final ps = ref.watch(permissionsProvider);
     final items = _buildItems();
 
     return Scaffold(
@@ -165,8 +167,8 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
                   itemBuilder: (context, index) {
                     final item = items[index];
                     final key = item.title;
-                    final status = _status[key];
-                    final requesting = _requesting[key] ?? false;
+                    final status = ps.status[key];
+                    final requesting = ps.requesting[key] ?? false;
                     final isInstructionsOnly = item.instructionsOnly != null;
 
                     return Card(
@@ -239,8 +241,8 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
               ),
               const SizedBox(height: 16),
               FilledButton(
-                onPressed: _continuing ? null : _continue,
-                child: _continuing
+                onPressed: ps.continuing ? null : _continue,
+                child: ps.continuing
                     ? const SizedBox(
                         height: 24,
                         width: 24,

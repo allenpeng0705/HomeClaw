@@ -110,11 +110,8 @@ class ChatScreen extends ConsumerStatefulWidget {
 }
 
 class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObserver {
-  /// Chat state notifier for this chat session. Lazily computed per widget params.
+  /// Chat state notifier for this chat session.
   late final StateNotifier<ChatState> _chat;
-
-  /// Direct access to current chat state (avoids repeated ref.read calls).
-  ChatState get _cs => ref.read(chatStateProvider(_chatStateKey));
 
   String get _chatStateKey => chatStateKey(
         userId: widget.userId,
