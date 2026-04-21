@@ -17,6 +17,34 @@ String chatStateKey({
   return '$userId|${friendId ?? ""}|${isUserFriend ? "1" : "0"}';
 }
 
+/// Snapshot of chat state needed for the main ListView body.
+/// All fields are plain data (no methods) so it can be used as a value type.
+class ChatViewSnapshot {
+  final List<MapEntry<String, bool>> messages;
+  final List<List<String>?> messageImages;
+  final List<List<String>?> messageAudios;
+  final List<List<String>?> messageVideos;
+  final List<List<String>?> messageFileLabels;
+  final List<List<String>?> messageFileRefs;
+  final bool loading;
+  final bool loadingMoreMessages;
+  final bool hasMoreMessages;
+  final int chatHistoryOffset;
+
+  const ChatViewSnapshot({
+    required this.messages,
+    required this.messageImages,
+    required this.messageAudios,
+    required this.messageVideos,
+    required this.messageFileLabels,
+    required this.messageFileRefs,
+    required this.loading,
+    required this.loadingMoreMessages,
+    required this.hasMoreMessages,
+    required this.chatHistoryOffset,
+  });
+}
+
 /// Core state for a single chat screen.
 ///
 /// This notifier is owned by ChatScreen but managed via Riverpod.
@@ -333,6 +361,20 @@ class ChatStateNotifier extends StateNotifier<ChatState> {
   void updateChatHistoryOffset(int offset) {
     state = state.copyWith(chatHistoryOffset: offset);
   }
+
+  /// Returns a minimal snapshot of only the fields needed for the main chat list view.
+  ChatViewSnapshot forChatView(ChatState state) => ChatViewSnapshot(
+        messages: state.messages,
+        messageImages: state.messageImages,
+        messageAudios: state.messageAudios,
+        messageVideos: state.messageVideos,
+        messageFileLabels: state.messageFileLabels,
+        messageFileRefs: state.messageFileRefs,
+        loading: state.loading,
+        loadingMoreMessages: state.loadingMoreMessages,
+        hasMoreMessages: state.hasMoreMessages,
+        chatHistoryOffset: state.chatHistoryOffset,
+      );
 
   // ─── Hide-before timestamps ──────────────────────────────────────
 

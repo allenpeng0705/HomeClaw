@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../providers/clawcode_providers.dart';
 
 /// Chip showing Clawcode run state (idle / running / approval pending / error).
 class CcRunChip extends StatelessWidget {

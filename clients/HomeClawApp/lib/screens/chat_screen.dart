@@ -109,7 +109,8 @@ class ChatScreen extends ConsumerStatefulWidget {
   ConsumerState<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObserver {
+class _ChatScreenState extends ConsumerState<ChatScreen>
+    with WidgetsBindingObserver {
   /// Chat state notifier for this chat session.
   late final ChatStateNotifier _chat;
 
@@ -3586,6 +3587,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
 
   @override
   Widget build(BuildContext context) {
+    // Watch the chat state so the ListView rebuilds when messages change.
+    final notifier = ref.read(chatStateProvider(_chatStateKey).notifier);
+    final cs = ref.watch(chatStateProvider(_chatStateKey));
     final isCurrent = ModalRoute.of(context)?.isCurrent ?? false;
     if (isCurrent && !_wasRouteCurrent) {
       _wasRouteCurrent = true;
@@ -3955,30 +3959,33 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                 ),
                 Expanded(
                   child: _isFinderPreset
-                      ? _buildFinderTabbedBody()
+                      ? _buildFinderTabbedBody(notifier.forChatView(cs))
                       : (_isBridgeProjectExplorerPreset
-                          ? _buildBridgeProjectTabbedBody()
+                          ? _buildBridgeProjectTabbedBody(
+                              notifier.forChatView(cs))
                           : (_isReminderPreset
-                              ? _buildReminderTabbedBody()
+                              ? _buildReminderTabbedBody(
+                                  notifier.forChatView(cs))
                               : (_isKnowledgePreset
-                                  ? _buildKnowledgeTabbedBody()
-                                  : _buildChatBody()))),
+                                  ? _buildKnowledgeTabbedBody(
+                                      notifier.forChatView(cs))
+                                  : _buildChatBody(notifier.forChatView(cs))))),
                 ),
               ],
             )
           : (_isFinderPreset
-              ? _buildFinderTabbedBody()
+              ? _buildFinderTabbedBody(notifier.forChatView(cs))
               : (_isBridgeProjectExplorerPreset
-                  ? _buildBridgeProjectTabbedBody()
+                  ? _buildBridgeProjectTabbedBody(notifier.forChatView(cs))
                   : (_isReminderPreset
-                      ? _buildReminderTabbedBody()
+                      ? _buildReminderTabbedBody(notifier.forChatView(cs))
                       : (_isKnowledgePreset
-                          ? _buildKnowledgeTabbedBody()
-                          : _buildChatBody())))),
+                          ? _buildKnowledgeTabbedBody(notifier.forChatView(cs))
+                          : _buildChatBody(notifier.forChatView(cs)))))),
     );
   }
 
-  Widget _buildChatBody() {
+  Widget _buildChatBody(ChatViewSnapshot snapshot) {
     return Column(
       children: [
         _buildProductPresetBar(),
@@ -3986,9 +3993,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
           child: ListView.builder(
             controller: _scrollController,
             padding: const EdgeInsets.all(8),
-            itemCount: _messages.length + (_loadingMoreMessages ? 1 : 0),
+            itemCount: snapshot.messages.length +
+                (snapshot.loadingMoreMessages ? 1 : 0),
             itemBuilder: (context, i) {
-              if (_loadingMoreMessages && i == 0) {
+              if (snapshot.loadingMoreMessages && i == 0) {
                 return const Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: Center(
@@ -3998,28 +4006,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                           child: CircularProgressIndicator(strokeWidth: 2))),
                 );
               }
-              final msgIndex = _loadingMoreMessages ? i - 1 : i;
-              final entry = _messages[msgIndex];
+              final msgIndex = snapshot.loadingMoreMessages ? i - 1 : i;
+              final entry = snapshot.messages[msgIndex];
               final isUser = entry.value;
               final isErrorBubble = !isUser && entry.key.startsWith('Error:');
               final isUploadingUserBubble = isUser &&
                   _loading &&
                   _activeUserSendBubbleIndex != null &&
                   _activeUserSendBubbleIndex == msgIndex;
-              final imageUrls = msgIndex < _messageImages.length
-                  ? _messageImages[msgIndex]
+              final imageUrls = msgIndex < snapshot.messageImages.length
+                  ? snapshot.messageImages[msgIndex]
                   : null;
-              final audioUrls = msgIndex < _messageAudios.length
-                  ? _messageAudios[msgIndex]
+              final audioUrls = msgIndex < snapshot.messageAudios.length
+                  ? snapshot.messageAudios[msgIndex]
                   : null;
-              final videoUrls = msgIndex < _messageVideos.length
-                  ? _messageVideos[msgIndex]
+              final videoUrls = msgIndex < snapshot.messageVideos.length
+                  ? snapshot.messageVideos[msgIndex]
                   : null;
-              final fileLabels = msgIndex < _messageFileLabels.length
-                  ? _messageFileLabels[msgIndex]
+              final fileLabels = msgIndex < snapshot.messageFileLabels.length
+                  ? snapshot.messageFileLabels[msgIndex]
                   : null;
-              final fileRefs = msgIndex < _messageFileRefs.length
-                  ? _messageFileRefs[msgIndex]
+              final fileRefs = msgIndex < snapshot.messageFileRefs.length
+                  ? snapshot.messageFileRefs[msgIndex]
                   : null;
               return Align(
                 alignment:
@@ -4708,7 +4716,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     );
   }
 
-  Widget _buildFinderTabbedBody() {
+  Widget _buildFinderTabbedBody(ChatViewSnapshot snapshot) {
     return DefaultTabController(
       length: 2,
       child: Column(
@@ -4726,7 +4734,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
           Expanded(
             child: TabBarView(
               children: [
-                _buildChatBody(),
+                _buildChatBody(snapshot),
                 FinderFilesExplorer(
                   coreService: widget.coreService,
                   sandboxScope: _finderSandboxScope,
@@ -4750,7 +4758,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     );
   }
 
-  Widget _buildBridgeProjectTabbedBody() {
+  Widget _buildBridgeProjectTabbedBody(ChatViewSnapshot snapshot) {
     return DefaultTabController(
       length: 2,
       child: Column(
@@ -4771,7 +4779,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
           Expanded(
             child: TabBarView(
               children: [
-                _buildChatBody(),
+                _buildChatBody(snapshot),
                 BridgeProjectFilesExplorer(
                   coreService: widget.coreService,
                   bridgeBackend: _bridgeExplorerBackend,
@@ -4801,7 +4809,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     );
   }
 
-  Widget _buildReminderTabbedBody() {
+  Widget _buildReminderTabbedBody(ChatViewSnapshot snapshot) {
     return DefaultTabController(
       length: 2,
       child: Column(
@@ -4819,7 +4827,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
           Expanded(
             child: TabBarView(
               children: [
-                _buildChatBody(),
+                _buildChatBody(snapshot),
                 RemindersExplorer(coreService: widget.coreService),
               ],
             ),
@@ -4829,7 +4837,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     );
   }
 
-  Widget _buildKnowledgeTabbedBody() {
+  Widget _buildKnowledgeTabbedBody(ChatViewSnapshot snapshot) {
     return DefaultTabController(
       length: 2,
       child: Column(
@@ -4847,7 +4855,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
           Expanded(
             child: TabBarView(
               children: [
-                _buildChatBody(),
+                _buildChatBody(snapshot),
                 FinderFilesExplorer(
                   coreService: widget.coreService,
                   sandboxScope: _finderSandboxScope,
@@ -4933,10 +4941,12 @@ class _AttachmentChip extends StatelessWidget {
   final String label;
   final VoidCallback onRemove;
 
-  const _AttachmentChip({required this.icon, required this.label, required this.onRemove});
+  const _AttachmentChip(
+      {required this.icon, required this.label, required this.onRemove});
 
   @override
-  Widget build(BuildContext context) => AttachmentChip(icon: icon, label: label, onRemove: onRemove);
+  Widget build(BuildContext context) =>
+      AttachmentChip(icon: icon, label: label, onRemove: onRemove);
 }
 
 /// Renders chat message text as Markdown (bold, lists, code, links, etc.) with selectable text and tappable links.
