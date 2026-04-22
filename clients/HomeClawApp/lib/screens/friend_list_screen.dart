@@ -9,6 +9,7 @@ import 'package:home_claw_app/l10n/app_localizations.dart';
 import '../core_service.dart';
 import '../providers/friend_list_providers.dart';
 import '../widgets/homeclaw_snackbars.dart';
+import '../utils/dev_bridge_friend.dart';
 import '../utils/friend_localization.dart';
 import 'add_ai_friend_screen.dart';
 import 'add_friend_screen.dart';
@@ -94,8 +95,11 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
     _friendListNotifier = ref.read(friendListProvider(_friendListKey).notifier);
     _initialPushFromFriend = widget.initialPushFromFriend;
     _initialClawcodeApprovalId = widget.initialClawcodeApprovalId;
-    _loadFriends();
-    _loadMyAvatar();
+    Future.microtask(() {
+      if (!mounted) return;
+      _loadFriends();
+      _loadMyAvatar();
+    });
     _pushSubscription = widget.coreService.pushMessageStream.listen((push) {
       final source = (push['source'] as String?)?.trim();
       if (source == 'user_message' && mounted) _loadUnreadState();
@@ -451,11 +455,45 @@ class _FriendTile extends ConsumerStatefulWidget {
 
 class _FriendTileState extends ConsumerState<_FriendTile> {
   Uint8List? _avatarBytes;
+  String? _activeProjectName;
+  bool _loadingActiveProject = false;
 
   @override
   void initState() {
     super.initState();
     _loadAvatar();
+    _maybeLoadActiveProject();
+  }
+
+  Future<void> _maybeLoadActiveProject() async {
+    if (widget.isUserFriend) return;
+    final backend = devBridgeBackend(
+      friendPreset: widget.friendPreset,
+      friendId: widget.friendId,
+    );
+    if (backend != null) {
+      await _loadActiveProject(backend);
+    }
+  }
+
+  Future<void> _loadActiveProject(String backend) async {
+    setState(() => _loadingActiveProject = true);
+    try {
+      final map = await widget.coreService.getCursorBridgeStatus(
+        backend: backend,
+        userId: widget.userId,
+        friendId: widget.friendId,
+      );
+      final cwd = (map['active_cwd'] as String?)?.trim() ?? '';
+      if (!mounted) return;
+      setState(() {
+        _activeProjectName = cwd.isNotEmpty ? cwd.split('/').last : null;
+        _loadingActiveProject = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingActiveProject = false);
+    }
   }
 
   Future<void> _loadAvatar() async {
@@ -596,7 +634,20 @@ class _FriendTileState extends ConsumerState<_FriendTile> {
                     : 'User',
                 style: Theme.of(context).textTheme.bodySmall,
               )
-            : null,
+            : (devBridgeBackend(
+                        friendPreset: widget.friendPreset,
+                        friendId: widget.friendId) !=
+                    null
+                ? _loadingActiveProject
+                    ? Text(
+                        'Loading project…',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      )
+                    : Text(
+                        _activeProjectName ?? 'No project',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      )
+                : null),
         onLongPress: _canRemove ? () => _removeFriend(context) : null,
         onTap: () {
           Navigator.push(

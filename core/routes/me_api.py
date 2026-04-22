@@ -129,7 +129,7 @@ def get_api_users_avatar_handler(core):  # noqa: ARG001
 
 
 def get_api_me_friends_post_handler(core):  # noqa: ARG001
-    """POST /api/me/friends. Body: { name, relation?, who?, identity_filename? }. Add custom AI friend to user.yml."""
+    """POST /api/me/friends. Body: { name, relation?, who?, identity_filename?, preset? }. Add custom AI friend to user.yml. preset can be 'cursor', 'claude', 'trae', 'clawcode' to create a Dev Bridge chat."""
 
     async def handler(
         request: Request,
@@ -149,7 +149,10 @@ def get_api_me_friends_post_handler(core):  # noqa: ARG001
             relation = body.get("relation")
             who = body.get("who") if isinstance(body.get("who"), dict) else None
             identity_filename = (body.get("identity_filename") or "identity.md").strip() or "identity.md"
-            if Util().add_ai_friend(user_id, name, relation=relation, who=who, identity_filename=identity_filename):
+            preset = body.get("preset")
+            if preset is not None and not isinstance(preset, str):
+                preset = None
+            if Util().add_ai_friend(user_id, name, relation=relation, who=who, identity_filename=identity_filename, preset=preset if preset else None):
                 try:
                     meta = Util().get_core_metadata()
                     root = (getattr(meta, "homeclaw_root", None) or "").strip() if meta else ""

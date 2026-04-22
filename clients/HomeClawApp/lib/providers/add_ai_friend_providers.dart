@@ -6,11 +6,13 @@ class AddAIFriendState {
   final File? avatarFile;
   final bool saving;
   final String? error;
+  final String? preset; // 'cursor', 'claude', or null for custom AI
 
   const AddAIFriendState({
     this.avatarFile,
     this.saving = false,
     this.error,
+    this.preset,
   });
 
   AddAIFriendState copyWith({
@@ -19,11 +21,14 @@ class AddAIFriendState {
     bool? saving,
     String? error,
     bool clearError = false,
+    String? preset,
+    bool clearPreset = false,
   }) =>
       AddAIFriendState(
         avatarFile: clearAvatar ? null : (avatarFile ?? this.avatarFile),
         saving: saving ?? this.saving,
         error: clearError ? null : (error ?? this.error),
+        preset: clearPreset ? null : (preset ?? this.preset),
       );
 }
 
@@ -60,5 +65,10 @@ class AddAIFriendNotifier extends StateNotifier<AddAIFriendState> {
     } else {
       state = state.copyWith(saving: value, clearError: true);
     }
+  }
+
+  void setPreset(String? p) {
+    final v = (p != null && p.trim().toLowerCase() == 'trae') ? null : p;
+    state = state.copyWith(preset: v, clearPreset: v == null);
   }
 }

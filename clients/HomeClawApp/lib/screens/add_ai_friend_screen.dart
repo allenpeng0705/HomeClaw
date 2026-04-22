@@ -67,6 +67,7 @@ class _AddAIFriendScreenState extends ConsumerState<AddAIFriendScreen> {
         relation: _relationController.text.trim().isNotEmpty ? _relationController.text.trim() : null,
         identityText: _identityController.text.trim().isNotEmpty ? _identityController.text.trim() : null,
         avatarFile: ref.read(addAIFriendProvider).avatarFile,
+        preset: ref.read(addAIFriendProvider).preset,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('AI friend added')));
@@ -88,6 +89,20 @@ class _AddAIFriendScreenState extends ConsumerState<AddAIFriendScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            DropdownButtonFormField<String?>(
+              decoration: const InputDecoration(
+                labelText: 'Type',
+                border: OutlineInputBorder(),
+              ),
+              value: state.preset,
+              items: const [
+                DropdownMenuItem<String?>(value: null, child: Text('Custom AI')),
+                DropdownMenuItem<String?>(value: 'cursor', child: Text('Cursor Dev Bridge')),
+                DropdownMenuItem<String?>(value: 'claude', child: Text('Claude Code Dev Bridge')),
+              ],
+              onChanged: state.saving ? null : (v) => _notifier.setPreset(v),
+            ),
+            const SizedBox(height: 12),
             TextField(
               controller: _nameController,
               decoration: const InputDecoration(

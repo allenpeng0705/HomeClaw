@@ -31,7 +31,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     _urlController = TextEditingController(text: widget.coreService.baseUrl);
     _apiKeyController = TextEditingController(text: widget.coreService.apiKey ?? '');
     _passwordController = TextEditingController();
-    _initOrAutoLogin();
+    Future.microtask(() {
+      if (!mounted) return;
+      _initOrAutoLogin();
+    });
   }
 
   @override

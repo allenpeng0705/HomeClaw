@@ -254,7 +254,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             SwitchListTile(
               title: const Text('Bridge agent streaming preview'),
               subtitle: const Text(
-                'For Cursor/Claude/Trae bridge chats: stream partial output while polling async results. Turn off if large streaming responses cause errors.',
+                'For Cursor and Claude Code bridge chats: stream partial output while polling async results. Turn off if large streaming responses cause errors.',
               ),
               value: widget.coreService.bridgeAgentStreamPreview,
               onChanged: (bool value) async {

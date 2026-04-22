@@ -8,14 +8,27 @@ def test_bridge_project_token_roundtrip(monkeypatch):
     tok = rv.create_bridge_project_file_token("cursor", "src/foo.txt", expiry_sec=3600)
     assert tok and len(tok) >= 33
     got = rv.verify_bridge_project_file_token(tok)
-    assert got == ("cursor", "src/foo.txt")
+    assert got == ("cursor", "src/foo.txt", "", "")
 
 
 def test_bridge_project_token_claude_backend(monkeypatch):
     monkeypatch.setattr(rv, "_get_file_token_secret", lambda: b"unit-test-bridge-file-secret")
     tok = rv.create_bridge_project_file_token("claude", "README.md")
     got = rv.verify_bridge_project_file_token(tok)
-    assert got == ("claude", "README.md")
+    assert got == ("claude", "README.md", "", "")
+
+
+def test_bridge_project_token_includes_friend_scope(monkeypatch):
+    monkeypatch.setattr(rv, "_get_file_token_secret", lambda: b"unit-test-bridge-file-secret")
+    tok = rv.create_bridge_project_file_token(
+        "cursor",
+        "src/foo.txt",
+        expiry_sec=3600,
+        user_id="u1",
+        friend_id="proj-a",
+    )
+    got = rv.verify_bridge_project_file_token(tok)
+    assert got == ("cursor", "src/foo.txt", "u1", "proj-a")
 
 
 def test_build_bridge_project_browser_url_requires_base(monkeypatch):

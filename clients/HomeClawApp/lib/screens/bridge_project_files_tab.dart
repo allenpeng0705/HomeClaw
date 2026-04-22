@@ -25,6 +25,8 @@ class BridgeProjectFilesExplorer extends ConsumerStatefulWidget {
   final String bridgeBackend;
   final void Function(String absolutePathOnDevMachine) onInsertPath;
   final void Function(String absolutePathOnDevMachine) onAttachForNextSend;
+  final String? userId;
+  final String? friendId;
 
   const BridgeProjectFilesExplorer({
     super.key,
@@ -32,6 +34,8 @@ class BridgeProjectFilesExplorer extends ConsumerStatefulWidget {
     required this.bridgeBackend,
     required this.onInsertPath,
     required this.onAttachForNextSend,
+    this.userId,
+    this.friendId,
   });
 
   @override
@@ -42,6 +46,8 @@ class BridgeProjectFilesExplorer extends ConsumerStatefulWidget {
 class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesExplorer> {
   String _currentPath = '.';
 
+  String get _scope => bridgeRiverpodScope(widget.bridgeBackend, widget.friendId);
+
   bool _isMobilePreviewMode(BuildContext context) =>
       MediaQuery.of(context).size.shortestSide < 600;
 
@@ -51,9 +57,12 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
         builder: (_) => _BridgeFilePreviewPage(
           coreService: widget.coreService,
           bridgeBackend: widget.bridgeBackend,
+          providerScope: _scope,
           entry: entry,
           onInsertPath: widget.onInsertPath,
           onAttachForNextSend: widget.onAttachForNextSend,
+          userId: widget.userId,
+          friendId: widget.friendId,
         ),
       ),
     );
@@ -62,16 +71,33 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
   @override
   void initState() {
     super.initState();
-    _load();
+    Future.microtask(() {
+      if (!mounted) return;
+      _load();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant BridgeProjectFilesExplorer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.bridgeBackend != widget.bridgeBackend ||
+        (oldWidget.friendId ?? '').trim() != (widget.friendId ?? '').trim()) {
+      setState(() => _currentPath = '.');
+      Future.microtask(() {
+        if (mounted) _load();
+      });
+    }
   }
 
   Future<void> _load() async {
-    final notifier = ref.read(bridgeProjectProvider(widget.bridgeBackend).notifier);
+    final notifier = ref.read(bridgeProjectProvider(_scope).notifier);
     notifier.setLoading(true);
     try {
       final r = await widget.coreService.fetchBridgeProjectList(
         backend: widget.bridgeBackend,
         path: _currentPath,
+        userId: widget.userId,
+        friendId: widget.friendId,
       );
       if (!mounted) return;
       notifier.setResult(r);
@@ -94,19 +120,23 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
   }
 
   Future<void> _showRootBrowserDialog() async {
-    final state = ref.read(bridgeProjectProvider(widget.bridgeBackend));
+    final state = ref.read(bridgeProjectProvider(_scope));
     if (state.openFromRootBusy) return;
-    ref.read(bridgeProjectProvider(widget.bridgeBackend).notifier).setOpenFromRootBusy(true);
+    ref.read(bridgeProjectProvider(_scope).notifier).setOpenFromRootBusy(true);
     try {
       await showDialog<void>(
         context: context,
         builder: (ctx) => _BridgeRootBrowserDialog(
           coreService: widget.coreService,
           backend: widget.bridgeBackend,
+          providerScope: _scope,
+          userId: widget.userId,
+          friendId: widget.friendId,
           onSelectFolder: (absPath) async {
             if (!mounted) return;
+            final fresh = ref.read(bridgeProjectProvider(_scope));
             final activeRoot =
-                (state.result?.root ?? '').trim().replaceAll('\\', '/');
+                (fresh.result?.root ?? '').trim().replaceAll('\\', '/');
             if (activeRoot.isEmpty) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
@@ -139,11 +169,11 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
         ),
       );
     } finally {
-      ref.read(bridgeProjectProvider(widget.bridgeBackend).notifier).setOpenFromRootBusy(false);
+      ref.read(bridgeProjectProvider(_scope).notifier).setOpenFromRootBusy(false);
     }
   }
 
-  BridgeProjectState get _cs => ref.watch(bridgeProjectProvider(widget.bridgeBackend));
+  BridgeProjectState get _cs => ref.watch(bridgeProjectProvider(_scope));
 
   bool get _isImageName => isDisplayableImageName(_cs.selected?.name ?? '');
   bool get _isTextPreviewName => isTextPreviewName(_cs.selected?.name ?? '');
@@ -247,7 +277,7 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
                             _openMobilePreviewPage(e);
                           } else {
                             setState(() {
-                              ref.read(bridgeProjectProvider(widget.bridgeBackend).notifier).setSelected(e);
+                              ref.read(bridgeProjectProvider(_scope).notifier).setSelected(e);
                             });
                           }
                         }
@@ -305,10 +335,12 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
   }
 
   Widget _buildPreview(BuildContext context) {
-    final state = ref.watch(bridgeProjectProvider(widget.bridgeBackend));
+    final state = ref.watch(bridgeProjectProvider(_scope));
     final e = state.selected!;
     final attachBusy = state.attachBusy;
     final openBrowserBusy = state.openBrowserBusy;
+    final uid = widget.userId;
+    final fid = widget.friendId;
     final theme = Theme.of(context);
     Widget body;
     if (_isImageName) {
@@ -316,6 +348,8 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
         future: widget.coreService.fetchBridgeProjectBrowserUrl(
           backend: widget.bridgeBackend,
           relativePath: e.relPath,
+          userId: uid,
+          friendId: fid,
         ),
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
@@ -354,6 +388,8 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
           future: widget.coreService.fetchBridgeProjectBrowserUrl(
             backend: widget.bridgeBackend,
             relativePath: e.relPath,
+            userId: uid,
+            friendId: fid,
           ),
           builder: (context, snap) {
             if (snap.connectionState != ConnectionState.done) {
@@ -383,6 +419,8 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
         future: widget.coreService.fetchBridgeProjectFilePreview(
           backend: widget.bridgeBackend,
           relativePath: e.relPath,
+          userId: widget.userId,
+          friendId: widget.friendId,
         ),
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
@@ -457,7 +495,7 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
                 onPressed: attachBusy
                     ? null
                     : () async {
-                        ref.read(bridgeProjectProvider(widget.bridgeBackend).notifier).setAttachBusy(true);
+                        ref.read(bridgeProjectProvider(_scope).notifier).setAttachBusy(true);
                         try {
                           widget.onAttachForNextSend(e.absPath);
                           if (context.mounted) {
@@ -468,7 +506,7 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
                             );
                           }
                         } finally {
-                          ref.read(bridgeProjectProvider(widget.bridgeBackend).notifier).setAttachBusy(false);
+                          ref.read(bridgeProjectProvider(_scope).notifier).setAttachBusy(false);
                         }
                       },
                 icon: attachBusy
@@ -483,12 +521,14 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
                 onPressed: openBrowserBusy
                     ? null
                     : () async {
-                        ref.read(bridgeProjectProvider(widget.bridgeBackend).notifier).setOpenBrowserBusy(true);
+                        ref.read(bridgeProjectProvider(_scope).notifier).setOpenBrowserBusy(true);
                         try {
                           final viewUrl = await widget.coreService
                               .fetchBridgeProjectBrowserUrl(
                             backend: widget.bridgeBackend,
                             relativePath: e.relPath,
+                            userId: uid,
+                            friendId: fid,
                           );
                           final uri = Uri.parse(viewUrl);
                           if (!context.mounted) return;
@@ -510,7 +550,7 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
                             );
                           }
                         } finally {
-                          ref.read(bridgeProjectProvider(widget.bridgeBackend).notifier).setOpenBrowserBusy(false);
+                          ref.read(bridgeProjectProvider(_scope).notifier).setOpenBrowserBusy(false);
                         }
                       },
                 icon: openBrowserBusy
@@ -534,16 +574,23 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
 class _BridgeFilePreviewPage extends ConsumerStatefulWidget {
   final CoreService coreService;
   final String bridgeBackend;
+  /// [bridgeRiverpodScope] for busy flags / isolation per AI friend.
+  final String providerScope;
   final BridgeProjectListEntry entry;
   final void Function(String absolutePathOnDevMachine) onInsertPath;
   final void Function(String absolutePathOnDevMachine) onAttachForNextSend;
+  final String? userId;
+  final String? friendId;
 
   const _BridgeFilePreviewPage({
     required this.coreService,
     required this.bridgeBackend,
+    required this.providerScope,
     required this.entry,
     required this.onInsertPath,
     required this.onAttachForNextSend,
+    this.userId,
+    this.friendId,
   });
 
   @override
@@ -552,9 +599,9 @@ class _BridgeFilePreviewPage extends ConsumerStatefulWidget {
 
 class _BridgeFilePreviewPageState extends ConsumerState<_BridgeFilePreviewPage> {
   bool get _attachBusy =>
-      ref.watch(bridgeFilePreviewAttachBusyProvider(widget.bridgeBackend));
+      ref.watch(bridgeFilePreviewAttachBusyProvider(widget.providerScope));
   bool get _openBrowserBusy =>
-      ref.watch(bridgeFilePreviewBrowserBusyProvider(widget.bridgeBackend));
+      ref.watch(bridgeFilePreviewBrowserBusyProvider(widget.providerScope));
 
   bool get _isImageName => isDisplayableImageName(widget.entry.name);
   bool get _isTextPreviewName => isTextPreviewName(widget.entry.name);
@@ -572,6 +619,8 @@ class _BridgeFilePreviewPageState extends ConsumerState<_BridgeFilePreviewPage> 
         future: widget.coreService.fetchBridgeProjectBrowserUrl(
           backend: widget.bridgeBackend,
           relativePath: e.relPath,
+          userId: widget.userId,
+          friendId: widget.friendId,
         ),
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
@@ -610,6 +659,8 @@ class _BridgeFilePreviewPageState extends ConsumerState<_BridgeFilePreviewPage> 
           future: widget.coreService.fetchBridgeProjectBrowserUrl(
             backend: widget.bridgeBackend,
             relativePath: e.relPath,
+            userId: widget.userId,
+            friendId: widget.friendId,
           ),
           builder: (context, snap) {
             if (snap.connectionState != ConnectionState.done) {
@@ -639,6 +690,8 @@ class _BridgeFilePreviewPageState extends ConsumerState<_BridgeFilePreviewPage> 
         future: widget.coreService.fetchBridgeProjectFilePreview(
           backend: widget.bridgeBackend,
           relativePath: e.relPath,
+          userId: widget.userId,
+          friendId: widget.friendId,
         ),
         builder: (context, snap) {
           if (snap.connectionState != ConnectionState.done) {
@@ -720,7 +773,7 @@ class _BridgeFilePreviewPageState extends ConsumerState<_BridgeFilePreviewPage> 
                   onPressed: _attachBusy
                       ? null
                       : () async {
-                          final notifier = ref.read(bridgeFilePreviewAttachBusyProvider(widget.bridgeBackend).notifier);
+                          final notifier = ref.read(bridgeFilePreviewAttachBusyProvider(widget.providerScope).notifier);
                           notifier.state = true;
                           try {
                             widget.onAttachForNextSend(e.absPath);
@@ -750,13 +803,15 @@ class _BridgeFilePreviewPageState extends ConsumerState<_BridgeFilePreviewPage> 
                   onPressed: _openBrowserBusy
                       ? null
                       : () async {
-                          final notifier = ref.read(bridgeFilePreviewBrowserBusyProvider(widget.bridgeBackend).notifier);
+                          final notifier = ref.read(bridgeFilePreviewBrowserBusyProvider(widget.providerScope).notifier);
                           notifier.state = true;
                           try {
                             final viewUrl = await widget.coreService
                                 .fetchBridgeProjectBrowserUrl(
                               backend: widget.bridgeBackend,
                               relativePath: e.relPath,
+                              userId: widget.userId,
+                              friendId: widget.friendId,
                             );
                             final uri = Uri.parse(viewUrl);
                             if (!context.mounted) return;
@@ -809,12 +864,19 @@ class _BridgeFilePreviewPageState extends ConsumerState<_BridgeFilePreviewPage> 
 class _BridgeRootBrowserDialog extends ConsumerStatefulWidget {
   final CoreService coreService;
   final String backend;
+  /// [bridgeRiverpodScope] — must match parent explorer so dialog state is not shared across friends.
+  final String providerScope;
   final Future<void> Function(String absPath) onSelectFolder;
+  final String? userId;
+  final String? friendId;
 
   const _BridgeRootBrowserDialog({
     required this.coreService,
     required this.backend,
+    required this.providerScope,
     required this.onSelectFolder,
+    this.userId,
+    this.friendId,
   });
 
   @override
@@ -824,9 +886,9 @@ class _BridgeRootBrowserDialog extends ConsumerStatefulWidget {
 
 class _BridgeRootBrowserDialogState extends ConsumerState<_BridgeRootBrowserDialog> {
   BridgeRootBrowserState get _cs =>
-      ref.watch(bridgeRootBrowserProvider(widget.backend));
+      ref.watch(bridgeRootBrowserProvider(widget.providerScope));
   BridgeRootBrowserNotifier get _notifier =>
-      ref.read(bridgeRootBrowserProvider(widget.backend).notifier);
+      ref.read(bridgeRootBrowserProvider(widget.providerScope).notifier);
 
   @override
   void initState() {
@@ -838,7 +900,7 @@ class _BridgeRootBrowserDialogState extends ConsumerState<_BridgeRootBrowserDial
     _notifier.setLoading(true);
     try {
       final r = await widget.coreService
-          .fetchBridgeRootList(backend: widget.backend, path: _cs.path);
+          .fetchBridgeRootList(backend: widget.backend, path: _cs.path, userId: widget.userId, friendId: widget.friendId);
       if (!mounted) return;
       _notifier.setData(r);
     } catch (e) {

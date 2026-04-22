@@ -18,7 +18,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../providers/chat_providers.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:record/record.dart';
 import '../chat_history_store.dart';
@@ -37,6 +36,7 @@ import 'finder_files_tab.dart';
 import 'reminders_tab.dart';
 import 'settings_screen.dart';
 import 'vmprint_preview_screen.dart';
+import '../utils/dev_bridge_friend.dart';
 import '../utils/product_preset_chat.dart';
 import '../mixins/chat_voice_handler.dart';
 import '../mixins/chat_tts_handler.dart';
@@ -111,15 +111,6 @@ class ChatScreen extends ConsumerStatefulWidget {
 
 class _ChatScreenState extends ConsumerState<ChatScreen>
     with WidgetsBindingObserver, VoiceHandler, TtsHandler {
-  /// Chat state notifier for this chat session.
-  late final ChatStateNotifier _chat;
-
-  String get _chatStateKey => chatStateKey(
-        userId: widget.userId,
-        friendId: widget.friendId,
-        isUserFriend: widget.isUserFriend,
-      );
-
   final List<MapEntry<String, bool>> _messages = [];
 
   /// Optional image data URLs per message (same index as _messages; null or empty when no images).
@@ -272,13 +263,36 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       !widget.isUserFriend &&
       (widget.friendPreset ?? '').trim().toLowerCase() == 'clawcode';
 
-  bool get _isDevBridgeFriend {
-    final fid = (widget.friendId ?? '').trim().toLowerCase();
-    return fid == 'cursor' || fid == 'claudecode' || fid == 'trae';
+  bool get _isDevBridgeFriend => isDevBridgeFriend(
+        isUserFriend: widget.isUserFriend,
+        friendPreset: widget.friendPreset,
+        friendId: widget.friendId,
+      );
+
+  /// Trae dev bridge is not supported in the Companion app (cannot add; sending is blocked).
+  bool get _traeDisabledInCompanion => isTraeDisabledInCompanion(
+        isUserFriend: widget.isUserFriend,
+        friendPreset: widget.friendPreset,
+        friendId: widget.friendId,
+      );
+
+  void _snackTraeNotSupported() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Trae is not supported in this app. Remove this AI friend or use Cursor / Claude Code.',
+        ),
+      ),
+    );
   }
 
   Future<void> _loadCursorAgentYoloPref() async {
-    if ((widget.friendId ?? '').trim().toLowerCase() != 'cursor') return;
+    if (devBridgeBackend(
+            friendPreset: widget.friendPreset, friendId: widget.friendId) !=
+        'cursor') {
+      return;
+    }
     try {
       final p = await SharedPreferences.getInstance();
       if (!mounted) return;
@@ -297,7 +311,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   Future<void> _loadClaudeSkipPermissionsPref() async {
-    if ((widget.friendId ?? '').trim().toLowerCase() != 'claudecode') return;
+    if (devBridgeBackend(
+            friendPreset: widget.friendPreset, friendId: widget.friendId) !=
+        'claude') {
+      return;
+    }
     try {
       final p = await SharedPreferences.getInstance();
       if (!mounted) return;
@@ -318,11 +336,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   Future<void> _refreshCursorActiveProject() async {
     if (!_isDevBridgeFriend) return;
     try {
-      final fid = (widget.friendId ?? '').trim().toLowerCase();
-      final backend =
-          fid == 'trae' ? 'trae' : (fid == 'claudecode' ? 'claude' : 'cursor');
-      final map =
-          await widget.coreService.getCursorBridgeStatus(backend: backend);
+      final backend = devBridgeBackend(
+        friendPreset: widget.friendPreset,
+        friendId: widget.friendId,
+      )!;
+      final map = await widget.coreService.getCursorBridgeStatus(
+        backend: backend,
+        userId: widget.userId,
+        friendId: widget.friendId,
+      );
       final cwd = (map['active_cwd'] as String?)?.trim() ?? '';
       if (!mounted) return;
       setState(() {
@@ -335,9 +357,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   Future<void> _showChangeProjectDialogFromActiveChip() async {
     if (!_isDevBridgeFriend || !mounted) return;
-    final fid = (widget.friendId ?? '').trim().toLowerCase();
-    if (fid == 'trae') return;
-    final backend = fid == 'claudecode' ? 'claude' : 'cursor';
+    final backend = devBridgeBackend(
+      friendPreset: widget.friendPreset,
+      friendId: widget.friendId,
+    )!;
+    if (backend == 'trae') return;
     var relPath = '.';
     BridgeRootListResult? data;
     String? err;
@@ -352,7 +376,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       });
       try {
         final r = await widget.coreService
-            .fetchBridgeRootList(backend: backend, path: relPath);
+            .fetchBridgeRootList(backend: backend, path: relPath, userId: widget.userId, friendId: widget.friendId);
         if (!mounted) return;
         setModalState(() {
           data = r;
@@ -477,6 +501,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                             await widget.coreService.openBridgeProject(
                               backend: backend,
                               path: target,
+                              userId: widget.userId,
+                              friendId: widget.friendId,
                             );
                             await _refreshCursorActiveProject();
                             if (!ctx.mounted) return;
@@ -517,6 +543,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   Future<void> _sendInteractiveInput() async {
+    if (_traeDisabledInCompanion) return;
     final sid = _interactiveSessionId;
     if (sid == null) return;
     final text = _interactiveInputController.text;
@@ -604,7 +631,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       lastReplyGetter: () => _lastReply,
       voiceInputLocaleGetter: () => voiceInputLocale,
     );
-    _chat = ref.read(chatStateProvider(_chatStateKey).notifier);
     WidgetsBinding.instance.addObserver(this);
     _loadTtsAutoSpeak();
     _loadVoiceInputLocale();
@@ -1254,9 +1280,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
     await ChatHistoryStore().clear(widget.userId, widget.friendId);
     if (!mounted) return;
-    _chat.clearMessages();
-    _chat.setHasMore(true);
-    _chat.updateChatHistoryOffset(0);
+    _messages.clear();
+    _messageImages.clear();
+    _messageAudios.clear();
+    _messageVideos.clear();
+    _messageFileLabels.clear();
+    _messageFileRefs.clear();
     _lastReply = null;
     _chatHistoryOffset = 0;
     _hasMoreMessages = true;
@@ -1315,6 +1344,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         }
       }
     } else if (mounted) {
+      setState(() {
+        _activeUserSendBubbleIndex = null;
+        _activeUserSendStage = null;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Chat history cleared')),
       );
@@ -1503,6 +1536,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         _pendingFilePaths.isNotEmpty ||
         _pendingBridgeProjectAttachPaths.isNotEmpty;
     if ((text.isEmpty && !hasAttachments) || _loading) return;
+    if (_traeDisabledInCompanion) {
+      _snackTraeNotSupported();
+      return;
+    }
     if (!mounted) return;
     // Claim sending immediately so a concurrent "final" voice event or double tap cannot trigger a second send.
     setState(() {
@@ -1884,11 +1921,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           videos: videoPaths.isEmpty ? null : videoPaths,
           files: filePaths.isEmpty ? null : filePaths,
           cursorAgentYolo:
-              (widget.friendId ?? '').trim().toLowerCase() == 'cursor'
+              devBridgeBackend(
+                          friendPreset: widget.friendPreset,
+                          friendId: widget.friendId) ==
+                      'cursor'
                   ? _cursorAgentYolo
                   : null,
           claudeSkipPermissions:
-              (widget.friendId ?? '').trim().toLowerCase() == 'claudecode'
+              devBridgeBackend(
+                          friendPreset: widget.friendPreset,
+                          friendId: widget.friendId) ==
+                      'claude'
                   ? _claudeSkipPermissions
                   : null,
           clawcodeSessionId: clawOn ? ccSid : null,
@@ -2482,6 +2525,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       }
       return;
     }
+    if (_traeDisabledInCompanion) {
+      _snackTraeNotSupported();
+      return;
+    }
     await Future<void>.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
     ImageSource? source = presetSource;
@@ -2586,6 +2633,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   Future<void> _recordVideo() async {
     if (_federatedE2eAttachmentsDisabled) {
       _snackFedE2eMediaBlocked();
+      return;
+    }
+    if (_traeDisabledInCompanion) {
+      _snackTraeNotSupported();
       return;
     }
     await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -2703,6 +2754,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       _snackFedE2eMediaBlocked();
       return;
     }
+    if (_traeDisabledInCompanion) {
+      _snackTraeNotSupported();
+      return;
+    }
     await Future<void>.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
     try {
@@ -2760,6 +2815,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   Future<void> _attachDocument() async {
     if (_federatedE2eAttachmentsDisabled) {
       _snackFedE2eMediaBlocked();
+      return;
+    }
+    if (_traeDisabledInCompanion) {
+      _snackTraeNotSupported();
       return;
     }
     try {
@@ -3120,6 +3179,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   Future<void> _runCommand() async {
+    if (_traeDisabledInCompanion) {
+      _snackTraeNotSupported();
+      return;
+    }
     final isDesktop =
         Platform.isMacOS || Platform.isWindows || Platform.isLinux;
     if (!isDesktop) {
@@ -3463,6 +3526,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   }
 
   String _inputHintText() {
+    if (_traeDisabledInCompanion) {
+      return 'Trae is not supported — use Cursor or Claude Code';
+    }
     if (_pendingImagePaths.isNotEmpty ||
         _pendingVideoPaths.isNotEmpty ||
         _pendingFilePaths.isNotEmpty ||
@@ -3559,9 +3625,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   @override
   Widget build(BuildContext context) {
-    // Watch the chat state so the ListView rebuilds when messages change.
-    final notifier = ref.read(chatStateProvider(_chatStateKey).notifier);
-    final cs = ref.watch(chatStateProvider(_chatStateKey));
     final isCurrent = ModalRoute.of(context)?.isCurrent ?? false;
     if (isCurrent && !_wasRouteCurrent) {
       _wasRouteCurrent = true;
@@ -3711,7 +3774,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
-          if ((widget.friendId ?? '').trim().toLowerCase() == 'cursor')
+          if (devBridgeBackend(
+                  friendPreset: widget.friendPreset,
+                  friendId: widget.friendId) ==
+              'cursor')
             IconButton(
               icon: Icon(
                   _cursorAgentYolo ? Icons.flash_on : Icons.flash_off_outlined),
@@ -3723,7 +3789,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   : null,
               onPressed: () => _setCursorAgentYolo(!_cursorAgentYolo),
             ),
-          if ((widget.friendId ?? '').trim().toLowerCase() == 'claudecode')
+          if (devBridgeBackend(
+                  friendPreset: widget.friendPreset,
+                  friendId: widget.friendId) ==
+              'claude')
             IconButton(
               icon: Icon(_claudeSkipPermissions
                   ? Icons.flash_on
@@ -3931,44 +4000,64 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 ),
                 Expanded(
                   child: _isFinderPreset
-                      ? _buildFinderTabbedBody(notifier.forChatView(cs))
+                      ? _buildFinderTabbedBody()
                       : (_isBridgeProjectExplorerPreset
-                          ? _buildBridgeProjectTabbedBody(
-                              notifier.forChatView(cs))
+                          ? _buildBridgeProjectTabbedBody()
                           : (_isReminderPreset
-                              ? _buildReminderTabbedBody(
-                                  notifier.forChatView(cs))
+                              ? _buildReminderTabbedBody()
                               : (_isKnowledgePreset
-                                  ? _buildKnowledgeTabbedBody(
-                                      notifier.forChatView(cs))
-                                  : _buildChatBody(notifier.forChatView(cs))))),
+                                  ? _buildKnowledgeTabbedBody()
+                                  : _buildChatBody()))),
                 ),
               ],
             )
           : (_isFinderPreset
-              ? _buildFinderTabbedBody(notifier.forChatView(cs))
+              ? _buildFinderTabbedBody()
               : (_isBridgeProjectExplorerPreset
-                  ? _buildBridgeProjectTabbedBody(notifier.forChatView(cs))
+                  ? _buildBridgeProjectTabbedBody()
                   : (_isReminderPreset
-                      ? _buildReminderTabbedBody(notifier.forChatView(cs))
+                      ? _buildReminderTabbedBody()
                       : (_isKnowledgePreset
-                          ? _buildKnowledgeTabbedBody(notifier.forChatView(cs))
-                          : _buildChatBody(notifier.forChatView(cs)))))),
+                          ? _buildKnowledgeTabbedBody()
+                          : _buildChatBody())))),
     );
   }
 
-  Widget _buildChatBody(ChatViewSnapshot snapshot) {
+  Widget _buildChatBody() {
     return Column(
       children: [
+        if (_traeDisabledInCompanion)
+          Material(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    size: 20,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Trae is disabled in this app. Past messages stay visible; new messages are not sent. Remove this friend and add Cursor or Claude Code for a dev bridge.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         _buildProductPresetBar(),
         Expanded(
           child: ListView.builder(
             controller: _scrollController,
             padding: const EdgeInsets.all(8),
-            itemCount: snapshot.messages.length +
-                (snapshot.loadingMoreMessages ? 1 : 0),
+            itemCount: _messages.length + (_loadingMoreMessages ? 1 : 0),
             itemBuilder: (context, i) {
-              if (snapshot.loadingMoreMessages && i == 0) {
+              if (_loadingMoreMessages && i == 0) {
                 return const Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: Center(
@@ -3978,28 +4067,28 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                           child: CircularProgressIndicator(strokeWidth: 2))),
                 );
               }
-              final msgIndex = snapshot.loadingMoreMessages ? i - 1 : i;
-              final entry = snapshot.messages[msgIndex];
+              final msgIndex = _loadingMoreMessages ? i - 1 : i;
+              final entry = _messages[msgIndex];
               final isUser = entry.value;
               final isErrorBubble = !isUser && entry.key.startsWith('Error:');
               final isUploadingUserBubble = isUser &&
                   _loading &&
                   _activeUserSendBubbleIndex != null &&
                   _activeUserSendBubbleIndex == msgIndex;
-              final imageUrls = msgIndex < snapshot.messageImages.length
-                  ? snapshot.messageImages[msgIndex]
+              final imageUrls = msgIndex < _messageImages.length
+                  ? _messageImages[msgIndex]
                   : null;
-              final audioUrls = msgIndex < snapshot.messageAudios.length
-                  ? snapshot.messageAudios[msgIndex]
+              final audioUrls = msgIndex < _messageAudios.length
+                  ? _messageAudios[msgIndex]
                   : null;
-              final videoUrls = msgIndex < snapshot.messageVideos.length
-                  ? snapshot.messageVideos[msgIndex]
+              final videoUrls = msgIndex < _messageVideos.length
+                  ? _messageVideos[msgIndex]
                   : null;
-              final fileLabels = msgIndex < snapshot.messageFileLabels.length
-                  ? snapshot.messageFileLabels[msgIndex]
+              final fileLabels = msgIndex < _messageFileLabels.length
+                  ? _messageFileLabels[msgIndex]
                   : null;
-              final fileRefs = msgIndex < snapshot.messageFileRefs.length
-                  ? snapshot.messageFileRefs[msgIndex]
+              final fileRefs = msgIndex < _messageFileRefs.length
+                  ? _messageFileRefs[msgIndex]
                   : null;
               return Align(
                 alignment:
@@ -4613,7 +4702,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                     ? (_) => _stopPushToTalkAndSend()
                     : null,
                 child: IconButton(
-                  onPressed: _loading ? null : _toggleVoice,
+                  onPressed:
+                      (_loading || _traeDisabledInCompanion) ? null : _toggleVoice,
                   icon: Icon(
                     recordingPushToTalk
                         ? Icons.stop
@@ -4635,6 +4725,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               Expanded(
                 child: TextField(
                   controller: _inputController,
+                  readOnly: _traeDisabledInCompanion,
                   decoration: InputDecoration(
                     hintText: _inputHintText(),
                     border: const OutlineInputBorder(),
@@ -4655,7 +4746,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               ],
               if (!_federatedE2eAttachmentsDisabled)
                 PopupMenuButton<String>(
-                  enabled: !_loading,
+                  enabled: !_loading && !_traeDisabledInCompanion,
                   tooltip: 'Photo',
                   icon: const Icon(Icons.add_a_photo_outlined),
                   onSelected: (value) async {
@@ -4678,7 +4769,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 ),
               const SizedBox(width: 4),
               IconButton.filled(
-                onPressed: _loading ? null : () => _send(),
+                onPressed: (_loading || _traeDisabledInCompanion)
+                    ? null
+                    : () => _send(),
                 icon: const Icon(Icons.send),
               ),
             ],
@@ -4688,7 +4781,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
   }
 
-  Widget _buildFinderTabbedBody(ChatViewSnapshot snapshot) {
+  Widget _buildFinderTabbedBody() {
     return DefaultTabController(
       length: 2,
       child: Column(
@@ -4706,7 +4799,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           Expanded(
             child: TabBarView(
               children: [
-                _buildChatBody(snapshot),
+                _buildChatBody(),
                 FinderFilesExplorer(
                   coreService: widget.coreService,
                   sandboxScope: _finderSandboxScope,
@@ -4730,7 +4823,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
   }
 
-  Widget _buildBridgeProjectTabbedBody(ChatViewSnapshot snapshot) {
+  Widget _buildBridgeProjectTabbedBody() {
     return DefaultTabController(
       length: 2,
       child: Column(
@@ -4751,10 +4844,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           Expanded(
             child: TabBarView(
               children: [
-                _buildChatBody(snapshot),
+                _buildChatBody(),
                 BridgeProjectFilesExplorer(
+                  key: ValueKey(
+                    'bridge_proj_${(widget.friendId ?? '').trim()}_$_bridgeExplorerBackend',
+                  ),
                   coreService: widget.coreService,
                   bridgeBackend: _bridgeExplorerBackend,
+                  userId: widget.userId,
+                  friendId: widget.friendId,
                   onInsertPath: (absPath) {
                     setState(() {
                       final t = _inputController.text;
@@ -4781,7 +4879,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
   }
 
-  Widget _buildReminderTabbedBody(ChatViewSnapshot snapshot) {
+  Widget _buildReminderTabbedBody() {
     return DefaultTabController(
       length: 2,
       child: Column(
@@ -4799,7 +4897,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           Expanded(
             child: TabBarView(
               children: [
-                _buildChatBody(snapshot),
+                _buildChatBody(),
                 RemindersExplorer(coreService: widget.coreService),
               ],
             ),
@@ -4809,7 +4907,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     );
   }
 
-  Widget _buildKnowledgeTabbedBody(ChatViewSnapshot snapshot) {
+  Widget _buildKnowledgeTabbedBody() {
     return DefaultTabController(
       length: 2,
       child: Column(
@@ -4827,7 +4925,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           Expanded(
             child: TabBarView(
               children: [
-                _buildChatBody(snapshot),
+                _buildChatBody(),
                 FinderFilesExplorer(
                   coreService: widget.coreService,
                   sandboxScope: _finderSandboxScope,
@@ -4870,14 +4968,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// Cursor / Claude Code: Chat | Project files on Dev Bridge (not Trae).
   bool get _isBridgeProjectExplorerPreset {
     if (widget.isUserFriend) return false;
+    final p = (widget.friendPreset ?? '').trim().toLowerCase();
+    if (p == 'cursor' || p == 'claude' || p == 'trae') return true;
+    // Fallback for legacy friends (preset missing; id was the bridge key).
     final fid = (widget.friendId ?? '').trim().toLowerCase();
-    return fid == 'cursor' || fid == 'claudecode';
+    return fid == 'cursor' || fid == 'claudecode' || fid == 'trae';
   }
 
-  String get _bridgeExplorerBackend =>
-      (widget.friendId ?? '').trim().toLowerCase() == 'claudecode'
-          ? 'claude'
-          : 'cursor';
+  String get _bridgeExplorerBackend {
+    final p = (widget.friendPreset ?? '').trim().toLowerCase();
+    if (p == 'claude') return 'claude';
+    if (p == 'cursor' || p == 'trae') return 'cursor';
+    // fallback based on friendId name for legacy data
+    final fid = (widget.friendId ?? '').trim().toLowerCase();
+    if (fid == 'claudecode') return 'claude';
+    return 'cursor';
+  }
 
   bool get _isPhoneLayout => MediaQuery.of(context).size.shortestSide < 600;
 

@@ -161,11 +161,17 @@ def validate_bridge_project_rel_path(backend: str, rel_path: str) -> bool:
 
 
 def create_bridge_project_file_token(
-    backend: str, rel_path: str, expiry_sec: int = DEFAULT_BRIDGE_PROJECT_LINK_EXPIRY_SEC
+    backend: str,
+    rel_path: str,
+    expiry_sec: int = DEFAULT_BRIDGE_PROJECT_LINK_EXPIRY_SEC,
+    user_id: str = "",
+    friend_id: str = "",
 ) -> Optional[str]:
     """
     Signed token for GET /files/bridge-project (Cursor/Claude project file on dev bridge, proxied by Core).
-    Payload: bridgep\\0backend\\0rel_path\\0expiry. Requires auth_api_key.
+    Payload v1 (legacy): bridgep\\0backend\\0rel_path\\0expiry
+    Payload v2: bridgep\\0backend\\0rel_path\\0user_id\\0friend_id\\0expiry — scopes bridge /project/raw to the right chat.
+    Requires auth_api_key.
     """
     try:
         b = (backend or "").strip().lower()
@@ -176,7 +182,9 @@ def create_bridge_project_file_token(
         if not secret:
             return None
         expiry = int(time.time()) + max(60, min(int(expiry_sec) if isinstance(expiry_sec, (int, float)) else DEFAULT_BRIDGE_PROJECT_LINK_EXPIRY_SEC, 86400))
-        payload = f"bridgep\0{b}\0{p}\0{expiry}"
+        uid = (user_id or "").strip().replace("\0", "")
+        fid = (friend_id or "").strip().replace("\0", "")
+        payload = f"bridgep\0{b}\0{p}\0{uid}\0{fid}\0{expiry}"
         full_sig = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
         sig = full_sig[:32]
         b64 = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
@@ -186,8 +194,8 @@ def create_bridge_project_file_token(
         return None
 
 
-def verify_bridge_project_file_token(token: str) -> Optional[Tuple[str, str]]:
-    """Verify bridge project token; return (backend, rel_path) or None. Never raises."""
+def verify_bridge_project_file_token(token: str) -> Optional[Tuple[str, str, str, str]]:
+    """Verify bridge project token; return (backend, rel_path, user_id, friend_id) or None. Never raises."""
     try:
         raw = (token or "").strip()
         if not raw or len(raw) > 800:
@@ -216,9 +224,15 @@ def verify_bridge_project_file_token(token: str) -> Optional[Tuple[str, str]]:
         if not (hmac.compare_digest(expected_sig, sig) or hmac.compare_digest(expected_full, sig)):
             return None
         parts = payload.split("\0")
-        if len(parts) != 4 or parts[0] != "bridgep":
+        if parts[0] != "bridgep":
             return None
-        _, backend, rel_path, expiry_str = parts
+        if len(parts) == 4:
+            _, backend, rel_path, expiry_str = parts
+            user_id, friend_id = "", ""
+        elif len(parts) == 6:
+            _, backend, rel_path, user_id, friend_id, expiry_str = parts
+        else:
+            return None
         try:
             if time.time() > int(expiry_str):
                 return None
@@ -226,14 +240,18 @@ def verify_bridge_project_file_token(token: str) -> Optional[Tuple[str, str]]:
             return None
         if not validate_bridge_project_rel_path(backend, rel_path):
             return None
-        return (backend.strip().lower(), rel_path)
+        return (backend.strip().lower(), rel_path, (user_id or "").strip(), (friend_id or "").strip())
     except Exception as e:
         logger.debug("verify_bridge_project_file_token failed: {}", e)
         return None
 
 
 def build_bridge_project_browser_url(
-    backend: str, rel_path: str, preferred_base_url: Optional[str] = None
+    backend: str,
+    rel_path: str,
+    preferred_base_url: Optional[str] = None,
+    user_id: str = "",
+    friend_id: str = "",
 ) -> Tuple[Optional[str], Optional[str]]:
     """Build GET /files/bridge-project URL (token or dev_unsigned). Returns (url, error). Never raises."""
     try:
@@ -247,7 +265,9 @@ def build_bridge_project_browser_url(
                 None,
                 "Set core_public_url in config to the URL clients use to reach Core (e.g. tunnel or LAN IP).",
             )
-        tok = create_bridge_project_file_token(b, p)
+        uid = (user_id or "").strip()
+        fid = (friend_id or "").strip()
+        tok = create_bridge_project_file_token(b, p, user_id=uid, friend_id=fid)
         if tok:
             token_safe = "".join(c for c in tok if c in _TOKEN_ALPHABET)
             if len(token_safe) < 33:
@@ -256,10 +276,12 @@ def build_bridge_project_browser_url(
             return (normalize_public_url_for_clients(u), None)
         if file_unsigned_dev_mode_active():
             _maybe_warn_dev_unsigned_file_links()
-            u = (
-                f"{base_url.rstrip('/')}/files/bridge-project?"
-                f"backend={quote(b, safe='')}&path={quote(p, safe='/')}&dev_unsigned=1"
-            )
+            q = f"backend={quote(b, safe='')}&path={quote(p, safe='/')}&dev_unsigned=1"
+            if uid:
+                q += f"&user_id={quote(uid, safe='')}"
+            if fid:
+                q += f"&friend_id={quote(fid, safe='')}"
+            u = f"{base_url.rstrip('/')}/files/bridge-project?{q}"
             return (normalize_public_url_for_clients(u), None)
         return (None, "Set auth_api_key in config for shareable bridge file links (or use dev_unsigned with no auth_api_key).")
     except Exception as e:

@@ -661,13 +661,20 @@ class CoreService {
     if (response.statusCode != 200) throw Exception(response.body.isNotEmpty ? response.body : 'Upload failed ${response.statusCode}');
   }
 
-  /// POST /api/me/friends — add a custom AI friend (name, relation?, who?, identity text). Persisted to user.yml.
+  /// POST /api/me/friends — add a custom AI friend (name, relation?, who?, identity text?). Persisted to user.yml.
   /// If [avatarFile] is provided, uploads it after adding the friend.
-  Future<void> addAIFriend({required String name, String? relation, Map<String, dynamic>? who, String? identityText, File? avatarFile}) async {
+  /// [preset] can be set to 'cursor', 'claude', or 'clawcode' to create a Dev Bridge chat (Trae is not offered in the Companion app).
+  Future<void> addAIFriend({required String name, String? relation, Map<String, dynamic>? who, String? identityText, File? avatarFile, String? preset}) async {
+    final presetNorm = preset?.trim().toLowerCase() ?? '';
+    if (presetNorm == 'trae') {
+      throw Exception(
+          'Trae is not available in the Companion app. Choose Cursor or Claude Code for a dev bridge friend.');
+    }
     final url = Uri.parse('$_baseUrl/api/me/friends');
     final body = <String, dynamic>{'name': name.trim()};
     if (relation != null && relation.trim().isNotEmpty) body['relation'] = relation.trim();
     if (who != null && who.isNotEmpty) body['who'] = who;
+    if (preset != null && preset.trim().isNotEmpty) body['preset'] = preset.trim();
     final response = await http.post(
       url,
       headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
@@ -1892,10 +1899,13 @@ class CoreService {
   /// `active_cwd`, `backend`, `cursor_stored_session_active`, `claude_stored_session_active`,
   /// `cursor_stored_sessions_count`, `claude_stored_sessions_count`.
   /// backend: "cursor" | "claude" | "trae" (default "cursor").
-  Future<Map<String, dynamic>> getCursorBridgeStatus({String backend = 'cursor'}) async {
+  Future<Map<String, dynamic>> getCursorBridgeStatus({String backend = 'cursor', String? userId, String? friendId}) async {
     final b = backend.trim().toLowerCase();
     final eff = (b == 'trae') ? 'trae' : ((b == 'claude') ? 'claude' : 'cursor');
-    final url = Uri.parse('$_baseUrl/api/cursor-bridge/status?backend=$eff');
+    final queryParams = {'backend': eff};
+    if (userId != null) queryParams['user_id'] = userId;
+    if (friendId != null) queryParams['friend_id'] = friendId;
+    final url = Uri.parse('$_baseUrl/api/cursor-bridge/status').replace(queryParameters: queryParams);
     final response = await http
         .get(url, headers: _authHeaders(forCompanionApi: true))
         .timeout(const Duration(seconds: 10));
@@ -1914,8 +1924,8 @@ class CoreService {
   }
 
   /// Active project cwd on the bridge machine (see [getCursorBridgeStatus] for session flags).
-  Future<String> getCursorBridgeActiveCwd({String backend = 'cursor'}) async {
-    final map = await getCursorBridgeStatus(backend: backend);
+  Future<String> getCursorBridgeActiveCwd({String backend = 'cursor', String? userId, String? friendId}) async {
+    final map = await getCursorBridgeStatus(backend: backend, userId: userId, friendId: friendId);
     return (map['active_cwd'] as String?)?.trim() ?? '';
   }
 
@@ -1923,11 +1933,16 @@ class CoreService {
   Future<BridgeProjectListResult> fetchBridgeProjectList({
     required String backend,
     String path = '.',
+    String? userId,
+    String? friendId,
   }) async {
     final b = backend.trim().toLowerCase();
     final eff = (b == 'claude') ? 'claude' : 'cursor';
+    final queryParams = {'backend': eff, 'path': path};
+    if (userId != null) queryParams['user_id'] = userId;
+    if (friendId != null) queryParams['friend_id'] = friendId;
     final url = Uri.parse('$_baseUrl/api/cursor-bridge/project-list').replace(
-      queryParameters: {'backend': eff, 'path': path},
+      queryParameters: queryParams,
     );
     final response = await http
         .get(url, headers: _authHeaders(forCompanionApi: true))
@@ -1979,15 +1994,20 @@ class CoreService {
     required String backend,
     required String relativePath,
     int maxChars = 48000,
+    String? userId,
+    String? friendId,
   }) async {
     final b = backend.trim().toLowerCase();
     final eff = (b == 'claude') ? 'claude' : 'cursor';
+    final queryParams = {
+      'backend': eff,
+      'path': relativePath,
+      'max_chars': '$maxChars',
+    };
+    if (userId != null) queryParams['user_id'] = userId;
+    if (friendId != null) queryParams['friend_id'] = friendId;
     final url = Uri.parse('$_baseUrl/api/cursor-bridge/project-file').replace(
-      queryParameters: {
-        'backend': eff,
-        'path': relativePath,
-        'max_chars': '$maxChars',
-      },
+      queryParameters: queryParams,
     );
     final response = await http
         .get(url, headers: _authHeaders(forCompanionApi: true))
@@ -2019,11 +2039,16 @@ class CoreService {
   Future<BridgeRootListResult> fetchBridgeRootList({
     required String backend,
     String path = '.',
+    String? userId,
+    String? friendId,
   }) async {
     final b = backend.trim().toLowerCase();
     final eff = (b == 'claude') ? 'claude' : 'cursor';
+    final queryParams = {'backend': eff, 'path': path};
+    if (userId != null) queryParams['user_id'] = userId;
+    if (friendId != null) queryParams['friend_id'] = friendId;
     final url = Uri.parse('$_baseUrl/api/cursor-bridge/root-list').replace(
-      queryParameters: {'backend': eff, 'path': path},
+      queryParameters: queryParams,
     );
     final response = await http
         .get(url, headers: _authHeaders(forCompanionApi: true))
@@ -2074,11 +2099,16 @@ class CoreService {
   Future<void> openBridgeProject({
     required String backend,
     required String path,
+    String? userId,
+    String? friendId,
   }) async {
     final b = backend.trim().toLowerCase();
     final eff = (b == 'claude') ? 'claude' : 'cursor';
     final url = Uri.parse('$_baseUrl/api/cursor-bridge/open-project');
-    final body = jsonEncode({'backend': eff, 'path': path});
+    final reqBody = {'backend': eff, 'path': path};
+    if (userId != null) reqBody['user_id'] = userId;
+    if (friendId != null) reqBody['friend_id'] = friendId;
+    final body = jsonEncode(reqBody);
     final response = await http
         .post(
           url,
@@ -2100,11 +2130,20 @@ class CoreService {
   Future<String> fetchBridgeProjectBrowserUrl({
     required String backend,
     required String relativePath,
+    String? userId,
+    String? friendId,
   }) async {
     final b = backend.trim().toLowerCase();
     final eff = (b == 'claude') ? 'claude' : 'cursor';
+    final qp = <String, String>{'backend': eff, 'path': relativePath};
+    if (userId != null && userId.trim().isNotEmpty) {
+      qp['user_id'] = userId.trim();
+    }
+    if (friendId != null && friendId.trim().isNotEmpty) {
+      qp['friend_id'] = friendId.trim();
+    }
     final url = Uri.parse('$_baseUrl/api/cursor-bridge/project-browser-url').replace(
-      queryParameters: {'backend': eff, 'path': relativePath},
+      queryParameters: qp,
     );
     final response = await http
         .get(url, headers: _authHeaders(forCompanionApi: true))

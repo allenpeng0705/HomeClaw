@@ -1,6 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/core_service_models.dart';
 
+/// Riverpod family key: isolate Dev Bridge UI state per [backend] and per [friendId]
+/// (multiple Cursor/Claude friends share the same backend string).
+String bridgeRiverpodScope(String backend, String? friendId) {
+  final b = backend.trim().toLowerCase();
+  final f = (friendId ?? '').trim();
+  return '$b\x1f$f';
+}
+
 /// State for Bridge project root browser dialog.
 class BridgeRootBrowserState {
   final BridgeRootListResult? data;
@@ -43,7 +51,7 @@ class BridgeRootBrowserState {
 
 final bridgeRootBrowserProvider =
     StateNotifierProvider.autoDispose.family<BridgeRootBrowserNotifier, BridgeRootBrowserState, String>(
-  (ref, backend) => BridgeRootBrowserNotifier(),
+  (ref, scope) => BridgeRootBrowserNotifier(),
 );
 
 class BridgeRootBrowserNotifier extends StateNotifier<BridgeRootBrowserState> {
@@ -79,17 +87,17 @@ class BridgeRootBrowserNotifier extends StateNotifier<BridgeRootBrowserState> {
 }
 
 /// Busy flag for Bridge project file preview attach action.
-/// Keyed by bridgeBackend so all previews for the same backend share state.
+/// Keyed by [bridgeRiverpodScope] so each AI friend has independent busy state.
 final bridgeFilePreviewAttachBusyProvider =
     StateProvider.autoDispose.family<bool, String>(
-  (ref, bridgeBackend) => false,
+  (ref, scope) => false,
 );
 
 /// Busy flag for Bridge project file preview open-in-browser action.
-/// Keyed by bridgeBackend so all previews for the same backend share state.
+/// Keyed by [bridgeRiverpodScope].
 final bridgeFilePreviewBrowserBusyProvider =
     StateProvider.autoDispose.family<bool, String>(
-  (ref, bridgeBackend) => false,
+  (ref, scope) => false,
 );
 
 /// State for BridgeProjectFilesExplorer (Dev Bridge project browser).
@@ -137,7 +145,7 @@ class BridgeProjectState {
 
 final bridgeProjectProvider = StateNotifierProvider.autoDispose
     .family<BridgeProjectNotifier, BridgeProjectState, String>(
-  (ref, bridgeBackend) => BridgeProjectNotifier(),
+  (ref, scope) => BridgeProjectNotifier(),
 );
 
 class BridgeProjectNotifier extends StateNotifier<BridgeProjectState> {

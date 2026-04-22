@@ -114,13 +114,16 @@ if not STATE_FILE:
     STATE_FILE = os.path.join(os.path.expanduser("~"), ".homeclaw", "cursor_bridge_state.json")
 
 _ACTIVE_CWD_LOCK = threading.Lock()
-# Track active project per backend so Cursor and ClaudeCode don't step on each other.
-# Keys: "cursor" | "claude" | "trae"
-_ACTIVE_CWD_BY_BACKEND: Dict[str, Optional[str]] = {"cursor": None, "claude": None, "trae": None}
-# Claude Code: last known session_id per normalized project cwd (from JSON output). Used with --resume when CURSOR_BRIDGE_CLAUDE_CONTINUE is on.
-_CLAUDE_SESSION_BY_CWD: Dict[str, str] = {}
-# Cursor CLI agent: last known session_id per normalized project cwd (from --output-format json). Used with --resume when CURSOR_BRIDGE_CURSOR_CONTINUE is on.
-_CURSOR_SESSION_BY_CWD: Dict[str, str] = {}
+# Track active project per (backend, user_id, friend_id) so each chat has its own project.
+# Keys: (backend, user_id, friend_id) → cwd string or None
+# backend: "cursor" | "claude" | "trae"
+# user_id: arbitrary string identifying the user
+# friend_id: arbitrary string identifying the chat/friend
+_ACTIVE_CWD: Dict[Tuple[str, str, str], Optional[str]] = {}
+# Claude Code: last known session_id per (backend, user_id, friend_id, cwd_key) for --resume.
+_CLAUDE_SESSION_BY_KEY: Dict[Tuple[str, str, str, str], str] = {}
+# Cursor CLI agent: last known session_id per (backend, user_id, friend_id, cwd_key) for --resume.
+_CURSOR_SESSION_BY_KEY: Dict[Tuple[str, str, str, str], str] = {}
 
 def _cwd_key(path: str) -> str:
     """Stable dict key for a project directory (abs + normpath; normcase on Windows)."""
@@ -182,7 +185,11 @@ def _sanitize_stored_session_id_for_cli(s: Optional[Any]) -> Optional[str]:
 
 
 def _load_state() -> None:
-    """Load persisted active cwd (best-effort)."""
+    """Load persisted active cwd and sessions (best-effort).
+
+    Supports v2 format (active_cwds dict with tuple keys) and legacy v1 format
+    (cursor_active_cwd/claude_active_cwd top-level fields) for migration.
+    """
     try:
         if not STATE_FILE or not os.path.isfile(STATE_FILE):
             return
@@ -190,9 +197,6 @@ def _load_state() -> None:
             obj = json.load(f)
         if not isinstance(obj, dict):
             return
-        cursor_cwd = (obj.get("cursor_active_cwd") or "").strip()
-        claude_cwd = (obj.get("claude_active_cwd") or "").strip()
-        trae_cwd = (obj.get("trae_active_cwd") or "").strip()
 
         def _is_dir_safe(p: str) -> bool:
             try:
@@ -207,73 +211,122 @@ def _load_state() -> None:
                 return False
             except Exception:
                 return False
-        raw_claude_sessions = obj.get("claude_sessions")
-        claude_sessions: Dict[str, str] = {}
-        if isinstance(raw_claude_sessions, dict):
-            for k, v in raw_claude_sessions.items():
-                if not k or v is None:
-                    continue
-                ks = str(k).strip()
-                vs = _sanitize_stored_session_id_for_cli(v)
-                if ks and vs:
-                    claude_sessions[_cwd_key(ks)] = vs
-        raw_cursor_sessions = obj.get("cursor_sessions")
-        cursor_sessions: Dict[str, str] = {}
-        if isinstance(raw_cursor_sessions, dict):
-            for k, v in raw_cursor_sessions.items():
-                if not k or v is None:
-                    continue
-                ks = str(k).strip()
-                vs = _sanitize_stored_session_id_for_cli(v)
-                if ks and vs:
-                    cursor_sessions[_cwd_key(ks)] = vs
+
         with _ACTIVE_CWD_LOCK:
-            if _is_dir_safe(cursor_cwd):
-                _ACTIVE_CWD_BY_BACKEND["cursor"] = cursor_cwd
-            if _is_dir_safe(claude_cwd):
-                _ACTIVE_CWD_BY_BACKEND["claude"] = claude_cwd
-            if _is_dir_safe(trae_cwd):
-                _ACTIVE_CWD_BY_BACKEND["trae"] = trae_cwd
-            _CLAUDE_SESSION_BY_CWD.clear()
-            _CLAUDE_SESSION_BY_CWD.update(claude_sessions)
-            _CURSOR_SESSION_BY_CWD.clear()
-            _CURSOR_SESSION_BY_CWD.update(cursor_sessions)
-        if _ACTIVE_CWD_BY_BACKEND.get("cursor") or _ACTIVE_CWD_BY_BACKEND.get("claude") or _ACTIVE_CWD_BY_BACKEND.get("trae"):
-            logger.info(
-                "Loaded cursor bridge state: cursor_active_cwd=%s claude_active_cwd=%s trae_active_cwd=%s claude_sessions=%d cursor_sessions=%d",
-                _ACTIVE_CWD_BY_BACKEND.get("cursor"),
-                _ACTIVE_CWD_BY_BACKEND.get("claude"),
-                _ACTIVE_CWD_BY_BACKEND.get("trae"),
-                len(_CLAUDE_SESSION_BY_CWD),
-                len(_CURSOR_SESSION_BY_CWD),
+            version = obj.get("version", 1)
+            if version >= 2:
+                # v2: active_cwds keyed as "backend|user_id|friend_id"
+                raw_active_cwds = obj.get("active_cwds")
+                if isinstance(raw_active_cwds, dict):
+                    for k, v in raw_active_cwds.items():
+                        if not v or not isinstance(v, str):
+                            continue
+                        parts = str(k).split("|")
+                        if len(parts) != 3:
+                            continue
+                        b, uid, fid = parts
+                        if _is_dir_safe(v):
+                            _ACTIVE_CWD[(b, uid, fid)] = v
+                # v2 sessions keyed as "backend|user_id|friend_id|cwd_key"
+                raw_claude_sessions = obj.get("claude_sessions")
+                if isinstance(raw_claude_sessions, dict):
+                    for k, v in raw_claude_sessions.items():
+                        if not v or not isinstance(v, str):
+                            continue
+                        parts = str(k).split("|")
+                        if len(parts) != 4:
+                            continue
+                        b, uid, fid, k_cwd = parts
+                        vs = _sanitize_stored_session_id_for_cli(v)
+                        if vs:
+                            _CLAUDE_SESSION_BY_KEY[(b, uid, fid, k_cwd)] = vs
+                raw_cursor_sessions = obj.get("cursor_sessions")
+                if isinstance(raw_cursor_sessions, dict):
+                    for k, v in raw_cursor_sessions.items():
+                        if not v or not isinstance(v, str):
+                            continue
+                        parts = str(k).split("|")
+                        if len(parts) != 4:
+                            continue
+                        b, uid, fid, k_cwd = parts
+                        vs = _sanitize_stored_session_id_for_cli(v)
+                        if vs:
+                            _CURSOR_SESSION_BY_KEY[(b, uid, fid, k_cwd)] = vs
+            else:
+                # v1/legacy: top-level cursor_active_cwd etc. (no per-user isolation)
+                cursor_cwd = (obj.get("cursor_active_cwd") or "").strip()
+                claude_cwd = (obj.get("claude_active_cwd") or "").strip()
+                trae_cwd = (obj.get("trae_active_cwd") or "").strip()
+                if _is_dir_safe(cursor_cwd):
+                    _ACTIVE_CWD[("cursor", "", "")] = cursor_cwd
+                if _is_dir_safe(claude_cwd):
+                    _ACTIVE_CWD[("claude", "", "")] = claude_cwd
+                if _is_dir_safe(trae_cwd):
+                    _ACTIVE_CWD[("trae", "", "")] = trae_cwd
+                raw_claude_sessions = obj.get("claude_sessions")
+                if isinstance(raw_claude_sessions, dict):
+                    for k, v in raw_claude_sessions.items():
+                        if not k or v is None:
+                            continue
+                        ks = str(k).strip()
+                        vs = _sanitize_stored_session_id_for_cli(v)
+                        if ks and vs:
+                            _CLAUDE_SESSION_BY_KEY[("claude", "", "", _cwd_key(ks))] = vs
+                raw_cursor_sessions = obj.get("cursor_sessions")
+                if isinstance(raw_cursor_sessions, dict):
+                    for k, v in raw_cursor_sessions.items():
+                        if not k or v is None:
+                            continue
+                        ks = str(k).strip()
+                        vs = _sanitize_stored_session_id_for_cli(v)
+                        if ks and vs:
+                            _CURSOR_SESSION_BY_KEY[("cursor", "", "", _cwd_key(ks))] = vs
+        if _ACTIVE_CWD:
+            logger.info("Loaded cursor bridge state (v%d): %d active_cwds, %d claude sessions, %d cursor sessions",
+                version,
+                len(_ACTIVE_CWD),
+                len(_CLAUDE_SESSION_BY_KEY),
+                len(_CURSOR_SESSION_BY_KEY),
             )
+    except Exception as e:
+        logger.warning("Failed to load cursor bridge state: %s", e)
     except Exception as e:
         logger.warning("Failed to load cursor bridge state: %s", e)
 
 
 def _save_state() -> None:
-    """Persist active cwd (best-effort)."""
+    """Persist active cwd and sessions (best-effort).
+
+    Saves all entries keyed by (backend, user_id, friend_id) for per-chat isolation.
+    """
     try:
         if not STATE_FILE:
             return
         base = os.path.dirname(STATE_FILE)
         if base and not os.path.isdir(base):
             os.makedirs(base, exist_ok=True)
-        cursor_cwd = _get_active_cwd("cursor") or ""
-        claude_cwd = _get_active_cwd("claude") or ""
-        trae_cwd = _get_active_cwd("trae") or ""
         with _ACTIVE_CWD_LOCK:
-            claude_sessions = dict(_CLAUDE_SESSION_BY_CWD)
-            cursor_sessions = dict(_CURSOR_SESSION_BY_CWD)
+            # Serialize: tuple keys become "backend|user_id|friend_id" strings
+            active_cwds = {}
+            for (b, uid, fid), cwd in _ACTIVE_CWD.items():
+                if cwd:
+                    active_cwds[f"{b}|{uid}|{fid}"] = cwd
+            claude_sessions = {}
+            for (b, uid, fid, k), sid in _CLAUDE_SESSION_BY_KEY.items():
+                if sid:
+                    claude_sessions[f"{b}|{uid}|{fid}|{k}"] = sid
+            cursor_sessions = {}
+            for (b, uid, fid, k), sid in _CURSOR_SESSION_BY_KEY.items():
+                if sid:
+                    cursor_sessions[f"{b}|{uid}|{fid}|{k}"] = sid
         tmp = STATE_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(
                 {
-                    "cursor_active_cwd": cursor_cwd,
-                    "claude_active_cwd": claude_cwd,
-                    "trae_active_cwd": trae_cwd,
+                    "active_cwds": active_cwds,
                     "claude_sessions": claude_sessions,
                     "cursor_sessions": cursor_sessions,
+                    "version": 2,
                 },
                 f,
                 ensure_ascii=False,
@@ -294,14 +347,16 @@ if _gate is not None:
     )
 
 
-def _set_active_cwd(path: str, backend: str = "cursor") -> None:
-    """Set active cwd for a backend if path is an existing directory (and under CURSOR_BRIDGE_ALLOWED_ROOT when set)."""
+def _set_active_cwd(path: str, backend: str = "cursor", user_id: str = "", friend_id: str = "") -> None:
+    """Set active cwd for a (backend, user_id, friend_id) tuple if path is a valid directory."""
     p = (path or "").strip()
     if not p:
         return
     b = (backend or "cursor").strip().lower()
     if b not in ("cursor", "claude", "trae"):
         b = "cursor"
+    uid = (user_id or "").strip()
+    fid = (friend_id or "").strip()
     try:
         if not os.path.isdir(p):
             return
@@ -313,19 +368,21 @@ def _set_active_cwd(path: str, backend: str = "cursor") -> None:
                 logger.warning("Refusing set_active_cwd outside CURSOR_BRIDGE_ALLOWED_ROOT: %s", p)
                 return
         with _ACTIVE_CWD_LOCK:
-            _ACTIVE_CWD_BY_BACKEND[b] = p
+            _ACTIVE_CWD[(b, uid, fid)] = p
         _save_state()
     except Exception:
         return
 
 
-def _get_active_cwd(backend: str = "cursor") -> Optional[str]:
+def _get_active_cwd(backend: str = "cursor", user_id: str = "", friend_id: str = "") -> Optional[str]:
     try:
         b = (backend or "cursor").strip().lower()
         if b not in ("cursor", "claude", "trae"):
             b = "cursor"
+        uid = (user_id or "").strip()
+        fid = (friend_id or "").strip()
         with _ACTIVE_CWD_LOCK:
-            raw = _ACTIVE_CWD_BY_BACKEND.get(b)
+            raw = _ACTIVE_CWD.get((b, uid, fid))
         if not raw:
             return None
         gate = _allowed_root_resolved()
@@ -339,13 +396,13 @@ def _get_active_cwd(backend: str = "cursor") -> Optional[str]:
             return str(rp)
         except ValueError:
             with _ACTIVE_CWD_LOCK:
-                if _ACTIVE_CWD_BY_BACKEND.get(b) == raw:
-                    _ACTIVE_CWD_BY_BACKEND[b] = None
+                if _ACTIVE_CWD.get((b, uid, fid)) == raw:
+                    _ACTIVE_CWD[(b, uid, fid)] = None
             try:
                 _save_state()
             except Exception:
                 pass
-            logger.info("Cleared active cwd for %s (outside CURSOR_BRIDGE_ALLOWED_ROOT): %s", b, raw)
+            logger.info("Cleared active cwd for %s/%s/%s (outside CURSOR_BRIDGE_ALLOWED_ROOT): %s", b, uid, fid, raw)
             return None
         except Exception:
             return None
@@ -442,12 +499,12 @@ def _safe_resolve_under_project_root(root: str, rel: str) -> Optional[str]:
         return None
 
 
-def _list_project_dir_payload(backend: str, rel_path: str) -> Dict[str, Any]:
+def _list_project_dir_payload(backend: str, rel_path: str, user_id: str = "", friend_id: str = "") -> Dict[str, Any]:
     """List files and folders under the active project for this backend (Companion project explorer)."""
     b = (backend or "cursor").strip().lower()
     if b not in ("cursor", "claude"):
         return {"error": "backend must be cursor or claude", "root": "", "path": "", "entries": []}
-    root = (_get_active_cwd(b) or "").strip()
+    root = (_get_active_cwd(b, user_id, friend_id) or "").strip()
     if not root or not os.path.isdir(root):
         return {
             "error": "No active project on the bridge. Open a folder first (open_project or set_cwd).",
@@ -509,7 +566,7 @@ def _list_project_dir_payload(backend: str, rel_path: str) -> Dict[str, Any]:
     return {"error": None, "root": os.path.normpath(root), "path": rel_display, "entries": entries}
 
 
-def _read_project_file_payload(backend: str, rel_path: str, max_chars: int) -> Dict[str, Any]:
+def _read_project_file_payload(backend: str, rel_path: str, max_chars: int, user_id: str = "", friend_id: str = "") -> Dict[str, Any]:
     """Read a text preview of a file under the active project (UTF-8; binary rejected)."""
     b = (backend or "cursor").strip().lower()
     if b not in ("cursor", "claude"):
@@ -517,7 +574,7 @@ def _read_project_file_payload(backend: str, rel_path: str, max_chars: int) -> D
     rel_path = (rel_path or "").strip().replace("\\", "/")
     if not rel_path or rel_path in (".", "./"):
         return {"error": "path must be a file relative to the project root"}
-    root = (_get_active_cwd(b) or "").strip()
+    root = (_get_active_cwd(b, user_id, friend_id) or "").strip()
     if not root or not os.path.isdir(root):
         return {"error": "No active project on the bridge."}
     abs_file = _safe_resolve_under_project_root(root, rel_path)
@@ -557,25 +614,25 @@ def _read_project_file_payload(backend: str, rel_path: str, max_chars: int) -> D
     return {"content": text, "truncated": truncated, "abs_path": abs_file}
 
 
-def _get_claude_session_for_cwd(work_dir: str) -> Optional[str]:
+def _get_claude_session_for_cwd(work_dir: str, backend: str = "claude", user_id: str = "", friend_id: str = "") -> Optional[str]:
     try:
         k = _cwd_key(work_dir)
         with _ACTIVE_CWD_LOCK:
-            sid = _CLAUDE_SESSION_BY_CWD.get(k)
+            sid = _CLAUDE_SESSION_BY_KEY.get((backend, user_id, friend_id, k))
         return _sanitize_stored_session_id_for_cli(sid)
     except Exception:
         return None
 
 
-def _set_claude_session_for_cwd(work_dir: str, session_id: Optional[str]) -> None:
+def _set_claude_session_for_cwd(work_dir: str, session_id: Optional[str], backend: str = "claude", user_id: str = "", friend_id: str = "") -> None:
     try:
         k = _cwd_key(work_dir)
         clean = _sanitize_stored_session_id_for_cli(session_id) if session_id else None
         with _ACTIVE_CWD_LOCK:
             if clean:
-                _CLAUDE_SESSION_BY_CWD[k] = clean
+                _CLAUDE_SESSION_BY_KEY[(backend, user_id, friend_id, k)] = clean
             else:
-                _CLAUDE_SESSION_BY_CWD.pop(k, None)
+                _CLAUDE_SESSION_BY_KEY.pop((backend, user_id, friend_id, k), None)
         _save_state()
     except Exception as e:
         logger.warning("set_claude_session_for_cwd failed: %s", e)
@@ -676,25 +733,25 @@ def _headless_stderr_suggests_stale_session(out: str, err: str) -> bool:
     )
 
 
-def _get_cursor_session_for_cwd(work_dir: str) -> Optional[str]:
+def _get_cursor_session_for_cwd(work_dir: str, backend: str = "cursor", user_id: str = "", friend_id: str = "") -> Optional[str]:
     try:
         k = _cwd_key(work_dir)
         with _ACTIVE_CWD_LOCK:
-            sid = _CURSOR_SESSION_BY_CWD.get(k)
+            sid = _CURSOR_SESSION_BY_KEY.get((backend, user_id, friend_id, k))
         return _sanitize_stored_session_id_for_cli(sid)
     except Exception:
         return None
 
 
-def _set_cursor_session_for_cwd(work_dir: str, session_id: Optional[str]) -> None:
+def _set_cursor_session_for_cwd(work_dir: str, session_id: Optional[str], backend: str = "cursor", user_id: str = "", friend_id: str = "") -> None:
     try:
         k = _cwd_key(work_dir)
         clean = _sanitize_stored_session_id_for_cli(session_id) if session_id else None
         with _ACTIVE_CWD_LOCK:
             if clean:
-                _CURSOR_SESSION_BY_CWD[k] = clean
+                _CURSOR_SESSION_BY_KEY[(backend, user_id, friend_id, k)] = clean
             else:
-                _CURSOR_SESSION_BY_CWD.pop(k, None)
+                _CURSOR_SESSION_BY_KEY.pop((backend, user_id, friend_id, k), None)
         _save_state()
     except Exception as e:
         logger.warning("set_cursor_session_for_cwd failed: %s", e)
@@ -1096,26 +1153,31 @@ def _agent_interactive_command(backend: str) -> Tuple[str, Optional[str]]:
     return cmd, cwd
 
 
-def _status_payload() -> Dict[str, Any]:
-    """Return bridge status for UI/debugging. Never raises."""
+def _status_payload(user_id: str = "", friend_id: str = "") -> Dict[str, Any]:
+    """Return bridge status for UI/debugging. Never raises.
+
+    When user_id/friend_id are provided, returns the per-chat active project.
+    Otherwise returns a best-effort global fallback (first active project found).
+    """
     try:
-        _claude_cwd = _get_active_cwd("claude")
+        # Get per-chat active projects
+        _claude_cwd = _get_active_cwd("claude", user_id, friend_id)
         _claude_sid = None
         try:
             if _claude_cwd and os.path.isdir(_claude_cwd):
-                _claude_sid = _get_claude_session_for_cwd(_claude_cwd)
+                _claude_sid = _get_claude_session_for_cwd(_claude_cwd, "claude", user_id, friend_id)
         except Exception:
             pass
-        _cursor_cwd = _get_active_cwd("cursor")
+        _cursor_cwd = _get_active_cwd("cursor", user_id, friend_id)
         _cursor_sid = None
         try:
             if _cursor_cwd and os.path.isdir(_cursor_cwd):
-                _cursor_sid = _get_cursor_session_for_cwd(_cursor_cwd)
+                _cursor_sid = _get_cursor_session_for_cwd(_cursor_cwd, "cursor", user_id, friend_id)
         except Exception:
             pass
         with _ACTIVE_CWD_LOCK:
-            _n_claude_sessions = len(_CLAUDE_SESSION_BY_CWD)
-            _n_cursor_sessions = len(_CURSOR_SESSION_BY_CWD)
+            _n_claude_sessions = len(_CLAUDE_SESSION_BY_KEY)
+            _n_cursor_sessions = len(_CURSOR_SESSION_BY_KEY)
         _ar = _allowed_root_resolved()
         return {
             "default_cwd": DEFAULT_CWD,
@@ -1126,7 +1188,7 @@ def _status_payload() -> Dict[str, Any]:
             "claude_active_cwd": _claude_cwd,
             "claude_stored_session_id": _claude_sid,
             "claude_stored_sessions_count": _n_claude_sessions,
-            "trae_active_cwd": _get_active_cwd("trae"),
+            "trae_active_cwd": _get_active_cwd("trae", user_id, friend_id),
             "state_file": STATE_FILE,
             "auth_enabled": bool(BRIDGE_API_KEY),
         }
@@ -1288,7 +1350,7 @@ def _trae_agent_config_file() -> Optional[str]:
     return None
 
 
-def _open_in_trae(path: str) -> Tuple[bool, str]:
+def _open_in_trae(path: str, user_id: str = "", friend_id: str = "") -> Tuple[bool, str]:
     """Trae Agent has no IDE to open; set active project cwd so run_agent uses this folder. Returns (success, message)."""
     if not (path or str(path).strip()):
         return False, "Error: path is empty."
@@ -1300,7 +1362,7 @@ def _open_in_trae(path: str) -> Tuple[bool, str]:
         return False, f"Path does not exist: {path}"
     if not os.path.isdir(p):
         p = os.path.dirname(p)
-    _set_active_cwd(p, backend="trae")
+    _set_active_cwd(p, backend="trae", user_id=user_id, friend_id=friend_id)
     return True, f"Project folder set to: {p}. Use run_agent to run tasks in this directory (Trae Agent has no IDE to open)."
 
 
@@ -2124,7 +2186,9 @@ async def _ndjson_stream_run_impl(body: Dict[str, Any]):
         return
 
     if not cwd:
-        cwd = _get_active_cwd(backend) or None
+        uid = (params.get("user_id") or "").strip()
+        fid = (params.get("friend_id") or "").strip()
+        cwd = _get_active_cwd(backend, uid, fid) or None
 
     if backend == "claude":
         _sk = _parse_claude_skip_permissions_override(params)
@@ -2243,7 +2307,9 @@ def project_raw(request: Request):
     rel = (request.query_params.get("path") or "").strip().replace("\\", "/")
     if not rel or rel in (".", "./"):
         return JSONResponse(status_code=400, content={"detail": "path must be a file relative to project root"})
-    root = (_get_active_cwd(backend) or "").strip()
+    uid = (request.query_params.get("user_id") or "").strip()
+    fid = (request.query_params.get("friend_id") or "").strip()
+    root = (_get_active_cwd(backend, uid, fid) or "").strip()
     if not root or not os.path.isdir(root):
         return JSONResponse(status_code=404, content={"detail": "No active project on the bridge"})
     gate_pr = _allowed_root_resolved()
@@ -2292,6 +2358,8 @@ def root_list(request: Request):
     backend = (request.query_params.get("backend") or "cursor").strip().lower()
     if backend not in ("cursor", "claude", "trae"):
         backend = "cursor"
+    uid = (request.query_params.get("user_id") or "").strip()
+    fid = (request.query_params.get("friend_id") or "").strip()
     gate = _allowed_root_resolved()
     if gate is None:
         return JSONResponse(status_code=400, content={"error": "CURSOR_BRIDGE_ALLOWED_ROOT is not configured"})
@@ -2340,7 +2408,7 @@ def root_list(request: Request):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
     entries.sort(key=lambda x: (x.get("type") != "dir", (x.get("name") or "").lower()))
-    active = (_get_active_cwd(backend) or "").strip()
+    active = (_get_active_cwd(backend, uid, fid) or "").strip()
     return JSONResponse(
         content={
             "error": None,
@@ -2371,7 +2439,9 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
         # Return bridge status (active project cwd, default cwd, etc.)
         success = True
         backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
-        payload = _status_payload()
+        uid = (params.get("user_id") or "").strip()
+        fid = (params.get("friend_id") or "").strip()
+        payload = _status_payload(user_id=uid, friend_id=fid)
         if backend in ("cursor", "claude", "trae"):
             payload["active_cwd"] = payload.get(f"{backend}_active_cwd")
         else:
@@ -2380,18 +2450,22 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
 
     elif cap_id in ("list_project_dir", "project_list", "list_dir_project"):
         backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
+        uid = (params.get("user_id") or "").strip()
+        fid = (params.get("friend_id") or "").strip()
         rel = (params.get("path") or params.get("rel_path") or ".").strip() or "."
-        payload = _list_project_dir_payload(backend, rel)
+        payload = _list_project_dir_payload(backend, rel, user_id=uid, friend_id=fid)
         text = json.dumps(payload, ensure_ascii=False)
 
     elif cap_id in ("read_project_file", "project_file_read", "preview_project_file"):
         backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
+        uid = (params.get("user_id") or "").strip()
+        fid = (params.get("friend_id") or "").strip()
         rel_file = (params.get("path") or params.get("rel_path") or "").strip()
         try:
             mx = int(params.get("max_chars") or 48_000)
         except (TypeError, ValueError):
             mx = 48_000
-        payload = _read_project_file_payload(backend, rel_file, mx)
+        payload = _read_project_file_payload(backend, rel_file, mx, user_id=uid, friend_id=fid)
         text = json.dumps(payload, ensure_ascii=False)
 
     elif cap_id in ("set_cwd", "set_project", "set_project_cwd"):
@@ -2410,8 +2484,10 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
                     success = False
                     error = f"Path is not a directory: {resolved}"
                 else:
-                    backend = _infer_backend_from_plugin_id(plugin_id)
-                    _set_active_cwd(resolved, backend=backend)
+                    backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
+                    uid = (params.get("user_id") or "").strip()
+                    fid = (params.get("friend_id") or "").strip()
+                    _set_active_cwd(resolved, backend=backend, user_id=uid, friend_id=fid)
                     text = f"Active project set: {resolved}"
 
     elif cap_id == "run_command":
@@ -2424,8 +2500,10 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
             if backend not in ("cursor", "claude", "trae"):
                 backend = "cursor"
+            uid = (params.get("user_id") or "").strip()
+            fid = (params.get("friend_id") or "").strip()
             if not cwd:
-                cwd = _get_active_cwd(backend) or None
+                cwd = _get_active_cwd(backend, uid, fid) or None
             success, text = await _run_command(command, cwd=cwd)
 
     elif cap_id == "open_file":
@@ -2435,6 +2513,8 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             error = "open_file requires 'path' in capability_parameters."
         else:
             backend = _infer_backend_from_plugin_id(plugin_id)
+            uid = (params.get("user_id") or "").strip()
+            fid = (params.get("friend_id") or "").strip()
             try:
                 abs_path = _resolve_path(path)
             except ValueError as e:
@@ -2443,13 +2523,11 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 try:
                     if backend == "trae":
-                        success, text = _open_in_trae(abs_path)
-                        if success:
-                            _set_active_cwd(os.path.dirname(abs_path), backend="trae")
+                        success, text = _open_in_trae(abs_path, user_id=uid, friend_id=fid)
                     else:
                         success, text = _open_in_cursor(abs_path)
                         if success:
-                            _set_active_cwd(os.path.dirname(abs_path), backend="cursor")
+                            _set_active_cwd(os.path.dirname(abs_path), backend="cursor", user_id=uid, friend_id=fid)
                 except Exception as e:
                     success = False
                     text = f"Could not open {path}: {e!s}."
@@ -2457,6 +2535,8 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
     elif cap_id == "open_project":
         # Open a folder in Cursor IDE (Cursor backend), or set active project cwd for Claude/Trae (no IDE).
         path = (params.get("path") or params.get("folder") or "").strip()
+        uid = (params.get("user_id") or "").strip()
+        fid = (params.get("friend_id") or "").strip()
         if not path:
             success = False
             error = "open_project requires 'path' or 'folder' in capability_parameters."
@@ -2469,12 +2549,10 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 backend = _infer_backend_from_plugin_id(plugin_id)
                 if backend == "trae":
-                    success, text = _open_in_trae(resolved)
-                    if success and os.path.isdir(resolved):
-                        _set_active_cwd(resolved, backend="trae")
+                    success, text = _open_in_trae(resolved, user_id=uid, friend_id=fid)
                 elif backend == "claude":
                     if os.path.isdir(resolved):
-                        _set_active_cwd(resolved, backend="claude")
+                        _set_active_cwd(resolved, backend="claude", user_id=uid, friend_id=fid)
                         success = True
                         text = f"Set Claude Code project cwd: {resolved}"
                     else:
@@ -2483,11 +2561,13 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
                 else:
                     success, text = _open_in_cursor(resolved)
                     if success and os.path.isdir(resolved):
-                        _set_active_cwd(resolved, backend="cursor")
+                        _set_active_cwd(resolved, backend="cursor", user_id=uid, friend_id=fid)
 
     elif cap_id == "clear_claude_session":
         # Drop stored Claude Code session id for a project (next run_agent uses --continue, not --resume <id>).
         raw = (params.get("cwd") or params.get("path") or "").strip()
+        uid = (params.get("user_id") or "").strip()
+        fid = (params.get("friend_id") or "").strip()
         if raw:
             try:
                 resolved = _resolve_path(raw)
@@ -2496,7 +2576,7 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
                 error = str(e)
                 resolved = ""
         else:
-            resolved = (_get_active_cwd("claude") or "").strip()
+            resolved = (_get_active_cwd("claude", uid, fid) or "").strip()
         if not success:
             pass
         elif not resolved or not os.path.isdir(resolved):
@@ -2504,7 +2584,7 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             error = "clear_claude_session requires a valid project directory (set_cwd first or pass path/cwd)."
         else:
             try:
-                _set_claude_session_for_cwd(resolved, None)
+                _set_claude_session_for_cwd(resolved, None, backend="claude", user_id=uid, friend_id=fid)
                 text = f"Cleared stored Claude Code session for: {resolved}"
             except Exception as e:
                 success = False
@@ -2512,6 +2592,8 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
 
     elif cap_id == "clear_cursor_session":
         raw = (params.get("cwd") or params.get("path") or "").strip()
+        uid = (params.get("user_id") or "").strip()
+        fid = (params.get("friend_id") or "").strip()
         if raw:
             try:
                 resolved = _resolve_path(raw)
@@ -2520,7 +2602,7 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
                 error = str(e)
                 resolved = ""
         else:
-            resolved = (_get_active_cwd("cursor") or "").strip()
+            resolved = (_get_active_cwd("cursor", uid, fid) or "").strip()
         if not success:
             pass
         elif not resolved or not os.path.isdir(resolved):
@@ -2528,7 +2610,7 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             error = "clear_cursor_session requires a valid project directory (open_project first or pass path/cwd)."
         else:
             try:
-                _set_cursor_session_for_cwd(resolved, None)
+                _set_cursor_session_for_cwd(resolved, None, backend="cursor", user_id=uid, friend_id=fid)
                 text = f"Cleared stored Cursor agent session for: {resolved}"
             except Exception as e:
                 success = False
@@ -2539,6 +2621,8 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
         task = (params.get("task") or params.get("prompt") or user_input or "").strip()
         cwd = (params.get("cwd") or "").strip() or None
         backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
+        uid = (params.get("user_id") or "").strip()
+        fid = (params.get("friend_id") or "").strip()
         timeout = 600  # default 10 min; allow up to 1800 (30 min) to match plugin HTTP timeout
         try:
             t = int(params.get("timeout_sec", timeout))
@@ -2552,7 +2636,7 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
         else:
             raw_cwd_param = (params.get("cwd") or "").strip() or None
             if not cwd:
-                cwd = _get_active_cwd(backend) or None
+                cwd = _get_active_cwd(backend, uid, fid) or None
             gate_ra = _allowed_root_resolved()
             if raw_cwd_param and gate_ra is not None and cwd:
                 try:
@@ -2609,7 +2693,9 @@ async def _run_impl(body: Dict[str, Any]) -> Dict[str, Any]:
             cwd = (params.get("cwd") or "").strip() or None
             if not cwd:
                 backend = (params.get("backend") or "").strip().lower() or _infer_backend_from_plugin_id(plugin_id)
-                cwd = _get_active_cwd(backend) or DEFAULT_CWD
+                uid = (params.get("user_id") or "").strip()
+                fid = (params.get("friend_id") or "").strip()
+                cwd = _get_active_cwd(backend, uid, fid) or DEFAULT_CWD
             if not os.path.isdir(cwd):
                 cwd = DEFAULT_CWD
             gate_ci = _allowed_root_resolved()

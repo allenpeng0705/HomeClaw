@@ -280,14 +280,18 @@ def get_files_bridge_project_handler(core):
             token = (qp.get("token") or "").strip()
             backend = ""
             rel_path = ""
+            uid_for_bridge = ""
+            fid_for_bridge = ""
             if token:
                 got = verify_bridge_project_file_token(token)
                 if not got:
                     return JSONResponse(status_code=403, content={"error": "Invalid or expired link"})
-                backend, rel_path = got
+                backend, rel_path, uid_for_bridge, fid_for_bridge = got
             elif file_unsigned_dev_mode_active() and _dev_unsigned_query_truthy(qp.get("dev_unsigned")):
                 backend = (qp.get("backend") or "").strip().lower()
                 rel_path = unquote((qp.get("path") or "").strip()).replace("\\", "/")
+                uid_for_bridge = (qp.get("user_id") or "").strip()
+                fid_for_bridge = (qp.get("friend_id") or "").strip()
                 if not validate_bridge_project_rel_path(backend, rel_path):
                     return JSONResponse(status_code=400, content={"error": "Invalid backend or path"})
             else:
@@ -310,7 +314,12 @@ def get_files_bridge_project_handler(core):
             headers = {}
             if bridge_key:
                 headers["X-HomeClaw-Bridge-Key"] = bridge_key
-            req_url = f"{base_url}/project/raw?backend={quote(backend, safe='')}&path={quote(rel_path, safe='/')}"
+            q_bridge = f"backend={quote(backend, safe='')}&path={quote(rel_path, safe='/')}"
+            if uid_for_bridge:
+                q_bridge += f"&user_id={quote(uid_for_bridge, safe='')}"
+            if fid_for_bridge:
+                q_bridge += f"&friend_id={quote(fid_for_bridge, safe='')}"
+            req_url = f"{base_url}/project/raw?{q_bridge}"
             async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
                 resp = await client.get(req_url, headers=headers or None)
             ct = (resp.headers.get("content-type") or "").strip() or "application/octet-stream"

@@ -36,6 +36,8 @@ def get_api_cursor_bridge_status_handler(core):
                     status_code=403,
                     content={"detail": "Trae Agent is disabled. Set trae_agent_enabled: true in config/skills_and_plugins.yml and restart Core."},
                 )
+            uid = (request.query_params.get("user_id") or "").strip()
+            fid = (request.query_params.get("friend_id") or "").strip()
             plugin_id = "trae-bridge" if backend == "trae" else ("claude-code-bridge" if backend == "claude" else "cursor-bridge")
             plug = pm.get_plugin_by_id(plugin_id)
             if plug is None or not isinstance(plug, dict):
@@ -44,7 +46,7 @@ def get_api_cursor_bridge_status_handler(core):
             req = PromptRequest(
                 request_id="cursor-bridge-status",
                 channel_name="companion",
-                request_metadata={"capability_id": "get_status", "capability_parameters": {"backend": backend}},
+                request_metadata={"capability_id": "get_status", "capability_parameters": {"backend": backend, "user_id": uid, "friend_id": fid}},
                 channelType=ChannelType.IM,
                 user_name="companion",
                 app_id="homeclaw",
@@ -107,6 +109,8 @@ def get_api_cursor_bridge_project_list_handler(core):
             backend = (request.query_params.get("backend") or "cursor").strip().lower()
             if backend not in ("cursor", "claude"):
                 return JSONResponse(status_code=400, content={"detail": "backend must be cursor or claude"})
+            uid = (request.query_params.get("user_id") or "").strip()
+            fid = (request.query_params.get("friend_id") or "").strip()
             plugin_id = "claude-code-bridge" if backend == "claude" else "cursor-bridge"
             plug = pm.get_plugin_by_id(plugin_id)
             if plug is None or not isinstance(plug, dict):
@@ -117,7 +121,7 @@ def get_api_cursor_bridge_project_list_handler(core):
                 channel_name="companion",
                 request_metadata={
                     "capability_id": "list_project_dir",
-                    "capability_parameters": {"backend": backend, "path": rel_path},
+                    "capability_parameters": {"backend": backend, "path": rel_path, "user_id": uid, "friend_id": fid},
                 },
                 channelType=ChannelType.IM,
                 user_name="companion",
@@ -166,6 +170,8 @@ def get_api_cursor_bridge_project_file_handler(core):
             backend = (request.query_params.get("backend") or "cursor").strip().lower()
             if backend not in ("cursor", "claude"):
                 return JSONResponse(status_code=400, content={"detail": "backend must be cursor or claude"})
+            uid = (request.query_params.get("user_id") or "").strip()
+            fid = (request.query_params.get("friend_id") or "").strip()
             rel_path = (request.query_params.get("path") or "").strip()
             if not rel_path:
                 return JSONResponse(status_code=400, content={"detail": "path query parameter is required"})
@@ -182,7 +188,7 @@ def get_api_cursor_bridge_project_file_handler(core):
                 channel_name="companion",
                 request_metadata={
                     "capability_id": "read_project_file",
-                    "capability_parameters": {"backend": backend, "path": rel_path, "max_chars": max_chars},
+                    "capability_parameters": {"backend": backend, "path": rel_path, "max_chars": max_chars, "user_id": uid, "friend_id": fid},
                 },
                 channelType=ChannelType.IM,
                 user_name="companion",
@@ -233,12 +239,20 @@ def get_api_cursor_bridge_project_browser_url_handler(core):  # noqa: ARG001
             backend = (request.query_params.get("backend") or "cursor").strip().lower()
             if backend not in ("cursor", "claude"):
                 return JSONResponse(status_code=400, content={"detail": "backend must be cursor or claude"})
+            uid = (request.query_params.get("user_id") or "").strip()
+            fid = (request.query_params.get("friend_id") or "").strip()
             raw_path = (request.query_params.get("path") or "").strip()
             if not raw_path:
                 return JSONResponse(status_code=400, content={"detail": "path query parameter is required"})
             rel_path = unquote(raw_path).replace("\\", "/").strip()
             preferred_base_url = infer_public_base_url_from_http_request(request)
-            url, err = build_bridge_project_browser_url(backend, rel_path, preferred_base_url=preferred_base_url)
+            url, err = build_bridge_project_browser_url(
+                backend,
+                rel_path,
+                preferred_base_url=preferred_base_url,
+                user_id=uid,
+                friend_id=fid,
+            )
             if not url:
                 return JSONResponse(
                     status_code=503,
@@ -264,6 +278,8 @@ def get_api_cursor_bridge_root_list_handler(core):  # noqa: ARG001
             backend = (request.query_params.get("backend") or "cursor").strip().lower()
             if backend not in ("cursor", "claude"):
                 return JSONResponse(status_code=400, content={"detail": "backend must be cursor or claude"})
+            uid = (request.query_params.get("user_id") or "").strip()
+            fid = (request.query_params.get("friend_id") or "").strip()
             rel_path = (request.query_params.get("path") or ".").strip() or "."
             pm = getattr(core, "plugin_manager", None)
             if pm is None:
@@ -281,7 +297,7 @@ def get_api_cursor_bridge_root_list_handler(core):  # noqa: ARG001
             bridge_key = (cfg.get("bridge_api_key") or "").strip()
             headers = {"X-HomeClaw-Bridge-Key": bridge_key} if bridge_key else None
             url = f"{base_url}/root/list"
-            params = {"backend": backend, "path": rel_path}
+            params = {"backend": backend, "path": rel_path, "user_id": uid, "friend_id": fid}
             async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
                 resp = await client.get(url, params=params, headers=headers)
             data = {}
@@ -313,6 +329,8 @@ def get_api_cursor_bridge_open_project_handler(core):  # noqa: ARG001
             backend = (body.get("backend") or "cursor").strip().lower()
             if backend not in ("cursor", "claude"):
                 return JSONResponse(status_code=400, content={"detail": "backend must be cursor or claude"})
+            uid = (body.get("user_id") or "").strip()
+            fid = (body.get("friend_id") or "").strip()
             p = (body.get("path") or "").strip()
             if not p:
                 return JSONResponse(status_code=400, content={"detail": "path is required"})
@@ -326,7 +344,7 @@ def get_api_cursor_bridge_open_project_handler(core):  # noqa: ARG001
             req = PromptRequest(
                 request_id="cursor-bridge-open-project",
                 channel_name="companion",
-                request_metadata={"capability_id": "open_project", "capability_parameters": {"path": p}},
+                request_metadata={"capability_id": "open_project", "capability_parameters": {"path": p, "user_id": uid, "friend_id": fid}},
                 channelType=ChannelType.IM,
                 user_name="companion",
                 app_id="homeclaw",
