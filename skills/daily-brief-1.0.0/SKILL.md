@@ -10,7 +10,7 @@ trigger:
   instruction: |
     The user wants a news digest from RSS.
 
-    Default behavior (AST-first):
+    Default behavior (AST-first VMPrint):
     1) Run daily-brief VMPrint path by default:
        run_skill(skill_name='daily-brief-1.0.0', script='fetch_rss.py', args=['fetch-vmprint', '--max', '25', '--lang', 'all'])
        - For Chinese-only use --lang cn; English-only use --lang en.
@@ -18,16 +18,10 @@ trigger:
        - For a one-line feed list use args=['list'].
     2) Reply with 3–6 highlight bullets + the returned preview link. Keep in-chat text concise; the link is the primary formatted view.
 
-    Markdown/text-only fallback:
-    - Use plain Markdown output only when the user explicitly asks for plain text/Markdown/no link/no HTML.
+    VMPrint uses magazine-render skill if available; falls back to plain Markdown if not installed.
+    Markdown/text-only fallback: use plain output only when user explicitly asks for no link/no HTML.
 
-    Generate PDF only when the user explicitly asks for download/print/PDF export:
-       run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
-                args=["render-daily-brief-ast", "--title", "Daily Brief", "--theme", "dispatch", "--json", "<DAILY_BRIEF_JSON>", "--output_format", "pdf", "--out", "daily_brief.pdf"])
-
-  auto_invoke:
-    script: fetch_rss.py
-    args: ["fetch-vmprint", "--max", "20", "--lang", "all"]
+    PDF generation: only when user explicitly asks for download/print/export.
 ---
 
 # Daily Brief (RSS news digest)
