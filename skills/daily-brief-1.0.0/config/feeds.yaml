@@ -1,21 +1,68 @@
-# Default RSS sources for daily-brief-1.0.0 (edit freely; URLs change over time).
-# lang: en | cn — used by fetch_rss.py --lang
+# RSS feeds for daily-brief-1.0.0. Edit freely; some feeds change URLs over time.
+# lang: en | cn | news — used by --lang filter.
+# category: tech | business | general — optional grouping for future use.
+# Use --feed NAME (exact or prefix match) to select specific feeds regardless of --lang.
 #
 # No API keys required. Respect each site’s terms and rate limits.
 
 feeds:
-  # English / global tech
+  # --- English: Tech ---
+
   - name: Hacker News
     url: https://news.ycombinator.com/rss
     lang: en
+    category: tech
+
+  - name: The Verge
+    url: https://www.theverge.com/rss/index.xml
+    lang: en
+    category: tech
+
+  - name: TechCrunch
+    url: https://techcrunch.com/feed/
+    lang: en
+    category: tech
+
+  - name: Wired
+    url: https://www.wired.com/feed/rss
+    lang: en
+    category: tech
+
   - name: Ars Technica
     url: https://feeds.arstechnica.com/arstechnica/index
     lang: en
+    category: tech
 
-  # Chinese (大陆/中文科技 — verify URLs occasionally; some feeds move)
+  - name: Product Hunt
+    url: https://www.producthunt.com/feed
+    lang: en
+    category: tech
+
+  # --- English: Business / Finance ---
+
+  - name: Reuters World News
+    url: https://feeds.a.dj.com/rss/RSSWorldNews.xml
+    lang: en
+    category: business
+
+  # --- Chinese: Tech / Business ---
+
+  - name: 36氪
+    url: https://www.36kr.com/feed
+    lang: cn
+    category: tech
+
   - name: IT之家
     url: https://www.ithome.com/rss/
     lang: cn
-  - name: 36氪
-    url: https://36kr.com/feed
+    category: tech
+
+  - name: 知乎
+    url: https://www.zhihu.com/rss
     lang: cn
+    category: general
+
+  - name: 雷峰网
+    url: https://www.leiphone.com/feed
+    lang: cn
+    category: tech

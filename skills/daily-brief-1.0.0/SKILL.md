@@ -13,14 +13,14 @@ trigger:
     Default behavior (AST-first VMPrint):
     1) Run daily-brief VMPrint path by default:
        run_skill(skill_name='daily-brief-1.0.0', script='fetch_rss.py', args=['fetch-vmprint', '--max', '25', '--lang', 'all'])
-       - For Chinese-only use --lang cn; English-only use --lang en.
-       - To narrow topics use --filter KEYWORD (matches title/summary).
-       - For a one-line feed list use args=['list'].
+       - --lang en|cn|news|all (default all)
+       - --feed NAME to select a specific feed by name (prefix match, case-insensitive)
+       - --filter KEYWORD to narrow by title/summary
+       - --max N to limit items (default 20 for vmprint, 30 for fetch)
     2) Reply with 3–6 highlight bullets + the returned preview link. Keep in-chat text concise; the link is the primary formatted view.
 
     VMPrint uses magazine-render skill if available; falls back to plain Markdown if not installed.
     Markdown/text-only fallback: use plain output only when user explicitly asks for no link/no HTML.
-
     PDF generation: only when user explicitly asks for download/print/export.
 ---
 
@@ -34,10 +34,11 @@ Human-oriented setup, CLI examples, cron examples, and real-life usage scenarios
 
 Edit **`config/feeds.yaml`** in this skill folder:
 
-- **`lang`**: `en` or `cn` — selects feeds when using `--lang en|cn|all`.
+- **`lang`**: `en`, `cn`, or `news` — selects feeds when using `--lang en|cn|news|all`.
+- **`category`**: optional — `tech`, `business`, `general` — for future category filtering.
 - Add or remove **`name`** + **`url`** pairs. Some sites change feed URLs; update if a feed breaks.
 
-Default mix includes **English** (e.g. Hacker News, Ars Technica) and **Chinese** (Solidot, IT之家, 少数派, 36氪).
+Default mix includes **English** (Hacker News, The Verge, TechCrunch, Wired, Ars Technica, Product Hunt, Reuters) and **Chinese** (36氪, IT之家, 知乎, 雷峰网).
 
 ## Scripts (run_skill)
 
@@ -49,6 +50,8 @@ Default mix includes **English** (e.g. Hacker News, Ars Technica) and **Chinese*
 | Chinese feeds only | `["fetch", "--max", "25", "--lang", "cn"]` |
 | English feeds only | `["fetch", "--max", "25", "--lang", "en"]` |
 | Keyword filter (title/summary) | `["fetch", "--max", "20", "--lang", "all", "--filter", "AI"]` |
+| Single feed by name (prefix match) | `["fetch", "--max", "20", "--feed", "36"]` |
+| News/business only | `["fetch", "--max", "20", "--lang", "news"]` |
 
 Example:
 

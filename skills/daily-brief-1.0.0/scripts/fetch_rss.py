@@ -79,13 +79,14 @@ def _load_feeds() -> List[Dict[str, Any]]:
         name = str(f.get("name") or "").strip() or "feed"
         url = str(f.get("url") or "").strip()
         lang = str(f.get("lang") or "en").strip().lower()
+        category = str(f.get("category") or lang).strip().lower()
         if not url:
             continue
         if len(url) > 2048:
             continue
-        if lang not in ("en", "cn"):
+        if lang not in ("en", "cn", "news"):
             lang = "en"
-        out.append({"name": name, "url": url, "lang": lang})
+        out.append({"name": name, "url": url, "lang": lang, "category": category})
     return out
 
 
@@ -231,6 +232,7 @@ def _fetch_one_feed(meta: Dict[str, Any], max_per_feed: int) -> Tuple[List[Dict[
     url = meta["url"]
     name = meta["name"]
     lang = meta["lang"]
+    category = meta.get("category", lang)
     warnings: List[str] = []
 
     body, fetch_err, resp_headers = _fetch_feed_bytes(url)
@@ -275,6 +277,7 @@ def _fetch_one_feed(meta: Dict[str, Any], max_per_feed: int) -> Tuple[List[Dict[
                 {
                     "feed": name,
                     "feed_lang": lang,
+                    "feed_category": category,
                     "title": title,
                     "link": link,
                     "summary": summary,
@@ -299,7 +302,7 @@ def cmd_list() -> int:
         return 1
     lines = ["Configured RSS feeds:\n"]
     for f in feeds:
-        lines.append(f"- [{f['lang']}] {f['name']}: {f['url']}")
+        lines.append(f"- [{f['lang']}/{f.get('category', f['lang'])}] {f['name']}: {f['url']}")
     print("\n".join(lines))
     return 0
 
@@ -311,8 +314,10 @@ def _build_digest(args: argparse.Namespace) -> Optional[Tuple[List[Dict[str, Any
         return None
 
     lang_filter = (args.lang or "all").strip().lower()
-    if lang_filter not in ("en", "cn", "all"):
+    if lang_filter not in ("en", "cn", "news", "all"):
         lang_filter = "all"
+
+    feed_filter = (getattr(args, "feed", None) or "").strip()
 
     try:
         max_total = int(args.max if args.max is not None else 30)
@@ -325,12 +330,26 @@ def _build_digest(args: argparse.Namespace) -> Optional[Tuple[List[Dict[str, Any
         days_ago = 0
     days_ago = max(0, min(7, days_ago))
 
-    active_feeds = [f for f in feeds if lang_filter == "all" or f["lang"] == lang_filter]
+    # Apply feed name filter first (exact or prefix match)
+    if feed_filter:
+        fl_lower = feed_filter.lower()
+        candidates = [f for f in feeds if fl_lower in f["name"].lower()]
+        if candidates:
+            active_feeds = candidates
+            lang_filter = "all"  # feed filter overrides lang
+        else:
+            active_feeds = []
+    else:
+        active_feeds = [f for f in feeds if lang_filter == "all" or f["lang"] == lang_filter]
+
     if not active_feeds:
-        print(
-            f"Error: no feeds match --lang {lang_filter!r}. Check config/feeds.yaml or use --lang all.",
-            file=sys.stderr,
-        )
+        if feed_filter:
+            print(f"Error: no feeds match --feed {feed_filter!r}. Run 'list' to see available feeds.", file=sys.stderr)
+        else:
+            print(
+                f"Error: no feeds match --lang {lang_filter!r}. Check config/feeds.yaml or use --lang all.",
+                file=sys.stderr,
+            )
         return None
 
     n_active = len(active_feeds)
@@ -762,9 +781,10 @@ def main() -> int:
         default=30,
         help=f"Max items after merge (default 30, cap {_MAX_OUTPUT_ITEMS})",
     )
-    pf.add_argument("--lang", type=str, default="all", help="en | cn | all")
+    pf.add_argument("--lang", type=str, default="all", help="en | cn | news | all")
     pf.add_argument("--filter", type=str, default="", help="Keyword filter (title/summary substring)")
     pf.add_argument("--days-ago", type=int, default=0, help="0=today/latest (default), 1=yesterday, max 7")
+    pf.add_argument("--feed", type=str, default="", help="Select specific feed by name (prefix match, case-insensitive)")
 
     pvp = sub.add_parser("fetch-vmprint", help="Fetch digest then render VMPrint preview artifact")
     pvp.add_argument(
@@ -773,9 +793,10 @@ def main() -> int:
         default=20,
         help=f"Max items after merge (default 20, cap {_MAX_OUTPUT_ITEMS})",
     )
-    pvp.add_argument("--lang", type=str, default="all", help="en | cn | all")
+    pvp.add_argument("--lang", type=str, default="all", help="en | cn | news | all")
     pvp.add_argument("--filter", type=str, default="", help="Keyword filter (title/summary substring)")
     pvp.add_argument("--days-ago", type=int, default=0, help="0=today/latest (default), 1=yesterday, max 7")
+    pvp.add_argument("--feed", type=str, default="", help="Select specific feed by name (prefix match, case-insensitive)")
     pvp.add_argument("--theme", type=str, default="dispatch", help="dispatch | minimal")
     pvp.add_argument(
         "--output_format",
