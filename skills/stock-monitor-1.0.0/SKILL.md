@@ -5,22 +5,13 @@ description: |
 homepage: https://github.com/allenpeng0705/HomeClaw
 keywords: "stock portfolio NVDA AAPL ticker yfinance Yahoo Finance akshare tushare 股票 行情 持仓 alert cron BTC"
 trigger:
-  patterns: ["portfolio|watchlist|stock|ticker|NVDA|AAPL|shares|行情|股票|持仓|股价|涨跌|alert.*stock"]
+  patterns: ["(my|my\\s).*(stock|portfolio|watchlist|holdings)|自选股|持仓|股票.*行情|我的.*股票|我的.*持仓|how('s|is).*(my|the).*portfolio|check.*(my.*stock|stock.*alert)|watchlist|stock.*monitor"]
   instruction: |
     The user asked about stocks, portfolio, or price alerts. Use run_skill(skill_name='stock-monitor-1.0.0', script='stock_monitor.py', args=[...]).
     Summary of holdings/watchlist: args=["portfolio"]. Evaluate alert rules from config: args=["check"]. Quick news for a symbol: args=["news", "SYMBOL"] or args=["context", "SYMBOL"] for price + headlines.
     Edit config/watchlist.yml for watchlist, optional holdings, and alerts. For recurring push alerts use cron_schedule with task_type run_skill and script stock_monitor.py args ["check"].
     Quotes use `quote_provider` in watchlist YAML: default **akshare** (no token), optional **tushare** (token), or **yfinance**; `quote_fallback_yfinance: true` retries Yahoo if primary fails. Headlines stay Yahoo. Not financial advice. For deeper "why" use web_search after context.
-    If the user asks for prettier/magazine-style output:
-    1) Run stock-monitor as usual to get output.
-    2) Build structured stock JSON from the result (watchlist/items).
-    3) Call AST-first renderer:
-       run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
-                args=["render-template-ast", "--template", "stock", "--title", "Stock Brief", "--theme", "dispatch", "--json", "<STOCK_JSON>", "--output_format", "browser_preview_html", "--out", "stock_brief.preview.html"])
-    4) Create PDF only when user explicitly asks for print/download/export (same call with --output_format pdf and .pdf out file).
-  auto_invoke:
-    script: stock_monitor.py
-    args: ["portfolio"]
+    For prettier/magazine-style output: first run stock-monitor normally, then if magazine-render skill exists, call it; otherwise just present the script output. Only create PDF when user explicitly asks for print/download/export.
 ---
 
 # Stock monitor (multi-source quotes)

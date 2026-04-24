@@ -211,7 +211,7 @@ def _fmt_money(x: float, cur: str) -> str:
     return f"{x:,.2f}"
 
 
-def cmd_portfolio(cfg: Dict[str, Any], cfg_path: Path) -> int:
+def cmd_portfolio(cfg: Dict[str, Any], cfg_path: Path, json_out: bool = False) -> int:
     holdings = cfg.get("holdings") or []
     if not isinstance(holdings, list):
         holdings = []
@@ -220,11 +220,11 @@ def cmd_portfolio(cfg: Dict[str, Any], cfg_path: Path) -> int:
     fetch_quote = make_quote_fetcher(cfg, _provider_overrides_from_cfg(cfg))
 
     if not symbols:
-        print(
-            "*Nothing to show.* Add `watchlist:` symbols and/or `holdings:` in `config/watchlist.yml` "
-            "(see `watchlist.example.yml`).",
-            file=sys.stderr,
-        )
+        msg = "*Nothing to show.* Add `watchlist:` symbols and/or `holdings:` in `config/watchlist.yml` (see `watchlist.example.yml`)."
+        if json_out:
+            print(json.dumps({"success": False, "error": msg, "holdings": [], "rows": []}))
+        else:
+            print(msg, file=sys.stderr)
         return 2
 
     quote_cache: Dict[str, Optional[Dict[str, Any]]] = {}
@@ -247,6 +247,7 @@ def cmd_portfolio(cfg: Dict[str, Any], cfg_path: Path) -> int:
 
     # Holdings valuation
     h_lines: List[str] = []
+    h_items: List[Dict[str, Any]] = []
     for h in holdings:
         if not isinstance(h, dict):
             continue
@@ -264,10 +265,13 @@ def cmd_portfolio(cfg: Dict[str, Any], cfg_path: Path) -> int:
             q = fetch_quote(sym)
         if not q:
             h_lines.append(f"- **{sym}**: (no quote)")
+            h_items.append({"symbol": sym, "shares": sh, "quote": None})
             continue
         v = sh * q["price"]
         total_val += v
         line = f"- **{sym}** × {sh:g} @ {_fmt_money(q['price'], q['currency'])} {q['currency']} ≈ **{_fmt_money(v, q['currency'])}** {q['currency']}"
+        pnl = None
+        pctp = None
         ac = h.get("avg_cost")
         if ac is not None:
             try:
@@ -280,6 +284,27 @@ def cmd_portfolio(cfg: Dict[str, Any], cfg_path: Path) -> int:
             except (TypeError, ValueError):
                 pass
         h_lines.append(line)
+        h_items.append({
+            "symbol": sym,
+            "shares": sh,
+            "avg_cost": ac,
+            "price": q["price"],
+            "currency": q["currency"],
+            "market_value": v,
+            "unrealized_pnl": pnl,
+            "unrealized_pnl_pct": pctp,
+        })
+
+    if json_out:
+        out = {
+            "success": True,
+            "symbols": symbols,
+            "rows": [{"symbol": r[0], "name": r[1], "price": r[2], "day_change_pct": r[3], "currency": r[4]} for r in rows],
+            "holdings": h_items,
+            "total_market_value": total_val if total_val > 0 else None,
+        }
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+        return 0
 
     print("## Portfolio / watchlist\n")
     print("| Symbol | Name | Price | Day Δ | Cur |")
@@ -500,10 +525,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Stock monitor (AKShare / TuShare / yfinance)")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("portfolio", help="Markdown table for watchlist + optional holdings")
-
     p_check = sub.add_parser("check", help="Evaluate YAML alerts")
     p_check.add_argument("--json", action="store_true", help="Machine-readable output")
+
+    p_portfolio = sub.add_parser("portfolio", help="Markdown table for watchlist + optional holdings")
+    p_portfolio.add_argument("--json", action="store_true", help="Machine-readable output")
 
     p_news = sub.add_parser("news", help="Headlines for a symbol")
     p_news.add_argument("symbol")
@@ -521,7 +547,7 @@ def main() -> None:
 
     cfg = _load_yaml(cfg_path)
     if args.cmd == "portfolio":
-        sys.exit(cmd_portfolio(cfg, cfg_path))
+        sys.exit(cmd_portfolio(cfg, cfg_path, bool(getattr(args, "json", False))))
     if args.cmd == "check":
         sys.exit(cmd_check(cfg, args.json))
     sys.exit(2)

@@ -470,5 +470,5 @@ def provider_summary_line(cfg: Dict[str, Any]) -> str:
     bits = [p]
     if fallback and p != "yfinance":
         bits.append("Yahoo fallback")
-    extra = "/".join(bits)
-    return f"*Data: quotes primary **{extra}** (see `quote_provider` in YAML); headlines still Yahoo. Not financial advice.*"
+    provider_str = "/".join(bits)
+    return f"*Data: quotes primary **{provider_str}** (see `quote_provider` in YAML); headlines still Yahoo. Not financial advice.*"

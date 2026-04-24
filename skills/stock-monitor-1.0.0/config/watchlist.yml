@@ -8,32 +8,27 @@
 #
 # Examples: US (NVDA), China index, crypto (BTC-USD).
 
-watchlist:
+watchlist: []  # Example: [NVDA, 000001.SS, 300418.SZ]
+  # Example watchlist — replace with your own symbols
   # - NVDA
   # - AAPL
   # - "000001.SS"    # 上证综指
-  - "300418.SZ"    # 深证成指
-  - "688049.SS"    # example A-share
+  # - "300418.SZ"    # 深证成指
+  # - "688049.SS"    # example A-share
   # - "0700.HK"      # example HK
   # - BTC-USD
 
 # Optional: shares held — used for "portfolio" total value and P&L estimates.
-# Example:
+# Example (replace with your actual holdings):
 # holdings:
 #   - symbol: NVDA
 #     shares: 10
 #     avg_cost: 120.0
-holdings: 
-  - symbol: 300418.SZ
-    shares: 30000
-    avg_cost: 53.0
-  - symbol: 688049.SS
-    shares: 50000
-    avg_cost: 50.0
+holdings: []
 
 # Alert rules (evaluated by: stock_monitor.py check).
 # Cooldown prevents the same alert from firing every cron tick (default 24h).
-alert_cooldown_hours: 12
+alert_cooldown_hours: 24
 
 # Example alerts (one trigger type per rule). Use cron_schedule + run_skill check to get notified.
 # alerts:
@@ -49,11 +44,5 @@ alert_cooldown_hours: 12
 #   - id: btc-100k
 #     symbol: BTC-USD
 #     price_at_or_above: 100000
-alerts:
-  - id: 300418-below-50
-    symbol: 300418.SZ
-    price_at_or_below: 50.0
-  - id: 688049-below-50
-    symbol: 688049.SS
-    price_at_or_below: 45.0
+alerts: []
 
