@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>演示文稿</title>
   
-  <!-- TailwindCSS CDN -->
-  <script src="https://lf26-cdn-tos.bytecdntp.com/cdn/expire-1-M/tailwindcss/3.0.23/tailwind.min.js"></script>
-  
+  <!-- TailwindCSS 3.4 CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/tailwindcss@3.4.0/dist/tailwind.min.js"></script>
+
   <!-- 字体 -->
-  <link href="https://fonts.loli.net/css2?family=Inter:wght@300;400;700;900&display=swap" rel="stylesheet">
-  <link href="https://fonts.loli.net/css2?family=Noto+Sans+SC:wght@300;400;700;900&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;700;900&family=Noto+Sans+SC:wght@300;400;700;900&display=swap" rel="stylesheet">
   
   <style>
     * {
@@ -18,11 +19,27 @@
       padding: 0;
       box-sizing: border-box;
     }
-    
+
+    :root {
+      --bg-primary: #0a0a0a;
+      --bg-secondary: #000000;
+      --text-primary: #ffffff;
+      --text-secondary: #9ca3af;
+      --spot-opacity: 0.3;
+    }
+
+    body.light {
+      --bg-primary: #f8f8f8;
+      --bg-secondary: #ffffff;
+      --text-primary: #111111;
+      --text-secondary: #6b7280;
+      --spot-opacity: 0.15;
+    }
+
     body {
       font-family: 'Noto Sans SC', 'Inter', sans-serif;
-      background: #000;
-      color: #fff;
+      background: var(--bg-primary);
+      color: var(--text-primary);
       overflow: hidden;
     }
     
@@ -40,8 +57,6 @@
     .slide {
       width: 100%;
       height: 100%;
-      max-width: 450px;
-      max-height: 800px;
       aspect-ratio: 9/16;
       position: absolute;
       display: flex;
@@ -53,7 +68,13 @@
       transform: translateX(100%);
       transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
       overflow: hidden;
-      background: linear-gradient(180deg, #0a0a0a 0%, #000000 100%);
+      background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+    }
+
+    /* 16:9 横屏支持 */
+    .slide[data-ratio="16/9"] {
+      aspect-ratio: 16/9;
+      max-width: 800px;
     }
     
     .slide.active {
@@ -71,7 +92,7 @@
       position: absolute;
       border-radius: 50%;
       filter: blur(100px);
-      opacity: 0.3;
+      opacity: var(--spot-opacity);
       pointer-events: none;
     }
     
@@ -144,20 +165,20 @@
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: rgba(255,255,255,0.3);
+      background: rgba(128,128,128,0.3);
       cursor: pointer;
       transition: all 0.3s;
     }
-    
+
     .progress-dot.active {
-      background: #fff;
+      background: var(--text-primary);
       transform: scale(1.3);
     }
-    
+
     .progress-dot:hover {
-      background: rgba(255,255,255,0.6);
+      background: rgba(128,128,128,0.6);
     }
-    
+
     /* 页码 */
     .page-number {
       position: fixed;
@@ -165,8 +186,77 @@
       left: 50%;
       transform: translateX(-50%);
       font-size: 0.875rem;
-      color: rgba(255,255,255,0.4);
+      color: var(--text-secondary);
       z-index: 100;
+    }
+
+    /* 暗亮模式切换按钮 */
+    .mode-toggle {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 200;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 1px solid rgba(128,128,128,0.3);
+      background: rgba(128,128,128,0.1);
+      color: var(--text-secondary);
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s;
+    }
+    .mode-toggle:hover {
+      background: rgba(128,128,128,0.2);
+      color: var(--text-primary);
+    }
+
+    /* 触控滑动方向提示 */
+    .swipe-hint {
+      position: fixed;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 150;
+      font-size: 2rem;
+      color: rgba(128,128,128,0);
+      transition: color 0.3s;
+      pointer-events: none;
+    }
+    .swipe-hint.show-left  { color: rgba(128,128,128,0.4); }
+    .swipe-hint.show-right { color: rgba(128,128,128,0.4); }
+    .swipe-hint.left  { left: 20px; }
+    .swipe-hint.right { right: 20px; }
+
+    /* 演讲者备注面板 */
+    .notes-panel {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      max-height: 0;
+      overflow: hidden;
+      background: var(--bg-primary);
+      border-top: 1px solid rgba(128,128,128,0.2);
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      line-height: 1.6;
+      padding: 0 1.5rem;
+      transition: max-height 0.4s ease, padding 0.4s ease;
+      z-index: 300;
+    }
+    .notes-panel.open {
+      max-height: 40vh;
+      padding: 1rem 1.5rem;
+    }
+    .notes-panel-header {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-secondary);
+      margin-bottom: 0.5rem;
     }
   </style>
 </head>
@@ -174,17 +264,17 @@
   <div class="slides-container">
     
     <!-- 幻灯片 1: 封面页 -->
-    <div class="slide active">
+    <div class="slide active" data-notes="欢迎大家。今天我来分享关于……的核心观点。">
       <div class="light-spot light-spot-1"></div>
       <div class="light-spot light-spot-2"></div>
       <div class="slide-content">
         <h1 class="text-5xl font-black mb-6 leading-tight">主标题</h1>
-        <p class="text-xl font-light text-gray-400">副标题</p>
+        <p class="text-xl font-light" style="color: var(--text-secondary)">副标题</p>
       </div>
     </div>
-    
+
     <!-- 幻灯片 2: 标题冲击页 -->
-    <div class="slide">
+    <div class="slide" data-notes="这里要制造悬念，让观众思考：为什么这件事很重要？">
       <div class="light-spot light-spot-2"></div>
       <div class="light-spot light-spot-3"></div>
       <div class="slide-content">
@@ -193,26 +283,26 @@
         </h1>
       </div>
     </div>
-    
+
     <!-- 幻灯片 3: 金句强调页 -->
-    <div class="slide">
+    <div class="slide" data-notes="停顿三秒再读金句，让它沉淀。">
       <div class="light-spot light-spot-1"></div>
       <div class="light-spot light-spot-3"></div>
       <div class="slide-content">
-        <span class="text-6xl text-gray-600 block mb-2">"</span>
+        <span class="text-6xl block mb-2" style="color: var(--text-secondary); opacity: 0.4">"</span>
         <p class="text-2xl font-bold mb-6">金句内容</p>
-        <span class="text-lg font-light text-gray-500">— 来源</span>
+        <span class="text-lg font-light" style="color: var(--text-secondary); opacity: 0.6">— 来源</span>
       </div>
     </div>
-    
+
     <!-- 幻灯片 4: 结尾行动页 -->
-    <div class="slide">
+    <div class="slide" data-notes="CTA：扫码联系我们，或者访问官网了解更多。">
       <div class="light-spot light-spot-1"></div>
       <div class="light-spot light-spot-2"></div>
       <div class="light-spot light-spot-3"></div>
       <div class="slide-content">
         <h1 class="text-3xl font-bold mb-8">总结金句</h1>
-        <p class="text-xl font-light text-gray-400">行动号召</p>
+        <p class="text-xl font-light" style="color: var(--text-secondary)">行动号召</p>
       </div>
     </div>
     
@@ -223,13 +313,29 @@
   
   <!-- 页码 -->
   <div class="page-number" id="pageNumber">1 / 4</div>
+
+  <!-- 暗亮模式切换 -->
+  <button class="mode-toggle" id="modeToggle" title="切换暗/亮模式">☀</button>
+
+  <!-- 触控滑动方向提示 -->
+  <div class="swipe-hint left" id="swipeHintLeft">‹</div>
+  <div class="swipe-hint right" id="swipeHintRight">›</div>
+
+  <!-- 演讲者备注浮层（向上滑动查看） -->
+  <div class="notes-panel" id="notesPanel"></div>
   
   <script>
     const slides = document.querySelectorAll('.slide');
     const progressBar = document.getElementById('progressBar');
     const pageNumber = document.getElementById('pageNumber');
+    const modeToggle = document.getElementById('modeToggle');
+    const swipeHintLeft = document.getElementById('swipeHintLeft');
+    const swipeHintRight = document.getElementById('swipeHintRight');
+    const notesPanel = document.getElementById('notesPanel');
     let currentSlide = 0;
-    
+    let notesOpen = false;
+    let hintTimeout = null;
+
     // 初始化进度条
     slides.forEach((_, index) => {
       const dot = document.createElement('div');
@@ -237,7 +343,16 @@
       dot.addEventListener('click', () => goToSlide(index));
       progressBar.appendChild(dot);
     });
-    
+
+    // 初始化备注面板（从当前 slide 读取 data-notes）
+    function updateNotes() {
+      const current = slides[currentSlide];
+      const notes = current ? (current.dataset.notes || '') : '';
+      notesPanel.innerHTML = notes
+        ? `<div class="notes-panel-header">演讲者备注</div><div>${notes}</div>`
+        : '<div class="notes-panel-header">无备注</div>';
+    }
+
     function updateSlides() {
       slides.forEach((slide, index) => {
         slide.classList.remove('active', 'prev');
@@ -247,58 +362,124 @@
           slide.classList.add('prev');
         }
       });
-      
+
       // 更新进度条
       document.querySelectorAll('.progress-dot').forEach((dot, index) => {
         dot.classList.toggle('active', index === currentSlide);
       });
-      
+
       // 更新页码
       pageNumber.textContent = `${currentSlide + 1} / ${slides.length}`;
+
+      // 更新备注
+      updateNotes();
+
+      // 关闭备注面板（切换幻灯片时）
+      notesPanel.classList.remove('open');
+      notesOpen = false;
     }
-    
+
     function nextSlide() {
       if (currentSlide < slides.length - 1) {
         currentSlide++;
         updateSlides();
       }
     }
-    
+
     function prevSlide() {
       if (currentSlide > 0) {
         currentSlide--;
         updateSlides();
       }
     }
-    
+
     function goToSlide(index) {
       currentSlide = index;
       updateSlides();
     }
-    
+
+    function showSwipeHint(direction) {
+      const el = direction === 'left' ? swipeHintLeft : swipeHintRight;
+      el.classList.add(direction === 'left' ? 'show-left' : 'show-right');
+      clearTimeout(hintTimeout);
+      hintTimeout = setTimeout(() => {
+        el.classList.remove('show-left', 'show-right');
+      }, 600);
+    }
+
     // 键盘控制
     document.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowRight' || e.key === ' ') {
         nextSlide();
       } else if (e.key === 'ArrowLeft') {
         prevSlide();
+      } else if (e.key === 'ArrowUp' && notesPanel.innerHTML.includes('演讲者备注')) {
+        // N 键或上箭头滑出备注
+        notesPanel.classList.toggle('open', !notesOpen);
+        notesOpen = !notesOpen;
       }
     });
-    
+
     // 触摸滑动支持
     let touchStartX = 0;
+    let touchStartY = 0;
     document.addEventListener('touchstart', (e) => {
       touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
     });
-    
+
     document.addEventListener('touchend', (e) => {
       const touchEndX = e.changedTouches[0].clientX;
-      const diff = touchStartX - touchEndX;
-      if (Math.abs(diff) > 50) {
-        if (diff > 0) nextSlide();
-        else prevSlide();
+      const touchEndY = e.changedTouches[0].clientY;
+      const diffX = touchStartX - touchEndX;
+      const diffY = touchStartY - touchEndY;
+
+      // 竖直方向滑动 > 水平方向 → 备注面板
+      if (Math.abs(diffY) > Math.abs(diffX) && diffY > 50 && !notesOpen) {
+        // 向上滑动 → 打开备注
+        const notes = slides[currentSlide]?.dataset.notes;
+        if (notes) {
+          notesPanel.classList.add('open');
+          notesOpen = true;
+        }
+        return;
+      }
+      if (Math.abs(diffY) > Math.abs(diffX) && diffY < -50 && notesOpen) {
+        // 向下滑动 → 关闭备注
+        notesPanel.classList.remove('open');
+        notesOpen = false;
+        return;
+      }
+
+      // 水平滑动 → 翻页
+      if (Math.abs(diffX) > 50) {
+        if (diffX > 0) {
+          showSwipeHint('right');
+          nextSlide();
+        } else {
+          showSwipeHint('left');
+          prevSlide();
+        }
       }
     });
+
+    // 暗亮模式切换
+    function updateToggleIcon() {
+      modeToggle.textContent = document.body.classList.contains('light') ? '🌙' : '☀';
+    }
+    modeToggle.addEventListener('click', () => {
+      document.body.classList.toggle('light');
+      updateToggleIcon();
+    });
+    updateToggleIcon();
+
+    // URL 参数支持：?ratio=16/9
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('ratio') === '16/9') {
+      slides.forEach(slide => {
+        slide.dataset.ratio = '16/9';
+      });
+    }
   </script>
 </body>
 </html>

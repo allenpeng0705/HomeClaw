@@ -5,10 +5,12 @@ keywords: "ppt powerpoint presentation 演示 幻灯片 生成 PPT"
 trigger:
   patterns:
     - "生成.*PPT|做个PPT|做.*PPT|生成.*演示|create.*ppt|make.*presentation|powerpoint|幻灯片.*生成|\\.pptx|做.*幻灯片|从.*做.*PPT"
-  instruction: "The user asked to create a PPT or PowerPoint. Use run_skill(skill_name='ppt-generation-1.0.0', script='create_pptx.py', args=['--capability', '<outline|source|presentation|documents>', ...]). Choose capability by content: outline (markdown ## / -), source (raw text or JSON), presentation (main_title + slides JSON), documents (paths or document_contents). Include the link Core returns in your reply."
-  auto_invoke:
-    script: create_pptx.py
-    args: ["--capability", "source", "--source", "{{query}}"]
+  instruction: >
+    The user asked to create a PPT or PowerPoint. Use run_skill(skill_name='ppt-generation-1.0.0', script='create_pptx.py', args=['--capability', '<outline|source|presentation|documents>', ...]).
+    Choose capability by content: outline (markdown ## / -), source (raw text or JSON), presentation (main_title + slides JSON), documents (paths or document_contents).
+    Prefer --slides-file (path to JSON file) over passing raw JSON in --slides when the JSON is large, to avoid shell-escaping issues.
+    Use --dry-run to preview slides without writing a file.
+    Include the link Core returns in your reply.
 ---
 
 # PPT Generation (PowerPoint .pptx)
@@ -31,10 +33,10 @@ run_skill(skill_name='ppt-generation-1.0.0', script='create_pptx.py', args=[...]
 |---------------------|--------------|-----------|
 | Markdown outline (## titles, - bullets) | `outline` | `--outline "## Title\n- Point"` or `--outline-file <path>` |
 | Raw text, web search result, or pasted content | `source` | `--source "<text or JSON>"` or `--source-file <path>` |
-| Already have title + slides (e.g. from your parsing) | `presentation` | `--main_title "..."` `--subtitle "..."` `--slides '[{"title":"A","bullets":["b"]}]'` |
+| Already have title + slides (e.g. from your parsing) | `presentation` | `--main_title "..."` `--subtitle "..."` `--slides '[{"title":"A","bullets":["b"]}]'` or `--slides-file <path>` |
 | One or more documents (paths or pre-read content) | `documents` | `--document_paths '["path.md"]'` and/or `--document_contents '[{"title":"A","content":"..."}]'` |
 
-Common optional: `--output_filename report.pptx`, `--language en`.
+Common optional: `--output_filename report.pptx`, `--language en`, `--dry-run`.
 
 ## Examples
 
@@ -48,9 +50,19 @@ args: ["--capability", "outline", "--outline", "## Intro\n- Point A\n- Point B\n
 args: ["--capability", "source", "--source", "<paste the text or JSON array of {title, content}>"]
 ```
 
-**From structured slides:**
+**From structured slides (inline JSON — for small arrays):**
 ```text
 args: ["--capability", "presentation", "--main_title", "Q4 Report", "--subtitle", "Summary", "--slides", "[{\"title\":\"Sales\",\"bullets\":[\"Item 1\",\"Item 2\"]}]"]
+```
+
+**From structured slides (file — preferred for large JSON):**
+```text
+args: ["--capability", "presentation", "--main_title", "Q4 Report", "--subtitle", "Summary", "--slides-file", "/path/to/slides.json"]
+```
+
+**Preview / dry-run (no file written):**
+```text
+args: ["--capability", "presentation", "--main_title", "Q4 Report", "--slides-file", "/path/to/slides.json", "--dry-run"]
 ```
 
 **From documents (paths relative to project/workspace):**
@@ -63,10 +75,17 @@ Or pass content you already read: `--document_contents '[{"title":"Doc 1","conte
 
 The script prints JSON with `success`, `path`, `message`, and when run via Core `output_rel_path`. Core appends the open link to the tool result. Tell the user the presentation was created and give them the link.
 
+On `--dry-run`, `success` is `true` and `path`/`output_rel_path` are absent — the model should describe what would be created without claiming a file was saved.
+
+## Language / font support
+
+`--language zh` uses system CJK fonts for better Chinese rendering. Default is `en`.
+
 ## Do not
 
 - Use this skill for HTML/乔布斯-style slides (use **html-slides-1.0.0**).
 - Claim the file was created without calling run_skill; only the tool result contains the real path/link.
+- Pass large JSON inline in `--slides`; use `--slides-file` instead to avoid shell-escaping errors.
 
 ## Dependencies
 
