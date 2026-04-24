@@ -5,11 +5,69 @@ Passes argv to the real CLI with no shell. See SKILL.md in the parent folder.
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# Module-level cache for resolved CLI path (survives multiple exec calls per runner process)
+_cli_path_cache: str | None = None
+
+# Write-operation subcommands that should suggest --dry-run first
+_WRITE_OPS = frozenset({
+    "messages-send", "messages-reply", "+create", "create",
+    "mail send", "send",
+    "task add", "task create",
+    "approval submit", "submit",
+})
+
+
+def _is_write_op(forwarded: list[str]) -> bool:
+    """Return True if forwarded argv contains a write/send operation."""
+    # Check for domain subcommand patterns like "im messages-send"
+    tokens = set(forwarded)
+    # Also check consecutive pairs: ["im", "messages-send"]
+    for i, tok in enumerate(forwarded):
+        if tok in _WRITE_OPS:
+            return True
+        if i + 1 < len(forwarded) and tok in ("im", "docs", "mail", "task", "approval", "calendar") and forwarded[i + 1] in _WRITE_OPS:
+            return True
+    return False
+
+
+def _check_dry_run(forwarded: list[str]) -> str:
+    """Return a warning if a write op is attempted without --dry-run or -n."""
+    if not _is_write_op(forwarded):
+        return ""
+    if any(tok in ("--dry-run", "-n", "--preview", "--check") for tok in forwarded):
+        return ""
+    return "[Warning: --dry-run missing for a write/send operation. Pass --dry-run first to preview what will be sent.]"
+
+
+def _parse_feishu_error(proc: subprocess.CompletedProcess[str]) -> str:
+    """
+    Extract a clean Feishu API error message from stdout/stderr on non-zero exit.
+    The CLI returns JSON like {"code": 99991663, "msg": "..."} on API failures.
+    """
+    for stream in (proc.stdout or "", proc.stderr or ""):
+        stream = stream.strip()
+        if stream.startswith("{"):
+            try:
+                obj = json.loads(stream)
+                code = obj.get("code")
+                msg = obj.get("msg", "")
+                if code is not None or msg:
+                    parts = []
+                    if code is not None:
+                        parts.append(f"code={code}")
+                    if msg:
+                        parts.append(msg)
+                    return "Feishu API error: " + ", ".join(parts)
+            except Exception:
+                pass
+    return ""
 
 
 def _npm_global_bin() -> list[Path]:
@@ -43,18 +101,24 @@ def _npm_global_bin() -> list[Path]:
 
 
 def _resolve_cli() -> str | None:
+    global _cli_path_cache
+    if _cli_path_cache:
+        return _cli_path_cache
     env_bin = (os.environ.get("LARK_CLI") or "").strip()
     if env_bin and Path(env_bin).is_file():
+        _cli_path_cache = env_bin
         return env_bin
     for name in ("lark-cli", "feishu-cli"):
         p = shutil.which(name)
         if p:
+            _cli_path_cache = p
             return p
     for d in _npm_global_bin():
         for name in ("lark-cli", "feishu-cli"):
             cand = d / name
             if cand.is_file() and os.access(cand, os.X_OK):
-                return str(cand)
+                _cli_path_cache = str(cand)
+                return _cli_path_cache
     return None
 
 
@@ -195,6 +259,12 @@ def main() -> int:
             )
             return 127
         forwarded = sys.argv[2:]
+
+        # Issue dry-run warning for write operations
+        dry_run_warning = _check_dry_run(forwarded)
+        if dry_run_warning:
+            sys.stderr.write(dry_run_warning + "\n")
+
         try:
             proc = subprocess.run(
                 [cli, *forwarded],
@@ -209,11 +279,20 @@ def main() -> int:
         except FileNotFoundError:
             print(f"Error: executable not found: {cli}", file=sys.stderr)
             return 127
+
         if proc.stdout:
             sys.stdout.write(proc.stdout)
         if proc.stderr:
             sys.stderr.write(proc.stderr)
-        return int(proc.returncode or 0)
+
+        # On failure, try to parse Feishu API error JSON for cleaner output
+        rc = int(proc.returncode or 0)
+        if rc != 0:
+            feishu_err = _parse_feishu_error(proc)
+            if feishu_err:
+                sys.stderr.write(feishu_err + "\n")
+
+        return rc
 
     print(f"Unknown command: {sys.argv[1]!r}. Use discover or exec.", file=sys.stderr)
     return 2
