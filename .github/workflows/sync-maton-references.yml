@@ -1,0 +1,31 @@
+# Auto-sync Maton API Gateway reference docs from upstream
+# Runs weekly or can be triggered manually.
+name: Sync Maton API Gateway References
+
+on:
+  schedule:
+    - cron: "0 4 * * 0"   # Weekly Sunday 4am UTC
+  workflow_dispatch:          # Manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Sync reference files from upstream
+        run: python skills/maton-api-gateway-1.0.0/scripts/sync_references.py
+
+      - name: Create PR with updated references
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore(skills/maton-api-gateway): sync upstream reference docs"
+          title: "chore: sync maton-api-gateway upstream reference docs"
+          body: "Weekly sync of Maton API Gateway reference docs from [maton-ai/api-gateway-skill](https://github.com/maton-ai/api-gateway-skill)."
+          branch: chore/sync-maton-references
+          delete-branch: true
+          signoff: false

@@ -4,6 +4,10 @@ description: |
   Call 100+ third-party APIs (Slack, HubSpot, Outlook, Notion, Google Workspace, Airtable, Salesforce, Stripe, etc.) with a single API key via Maton. Use when the user wants to interact with any of these services and you have MATON_API_KEY set.
 keywords: [slack, linkedin, outlook, hubspot, notion, gmail, stripe, google calendar, google sheets, salesforce, airtable, calendly, github, maton, api gateway]
 compatibility: Requires network access and MATON_API_KEY (get key at maton.ai/settings; connect each app via OAuth at maton.ai)
+auto_invoke: |
+  Check active connections before making a gateway call when the user wants to interact with a specific app:
+  - run_skill(skill_name='maton-api-gateway-1.0.0', script='request.py', args=['connection', '<app>'])
+  Example: if user wants to post to LinkedIn, first check connection with `args=['connection', 'linkedin']`.
 trigger:
   patterns: ["maton|api gateway|gateway\\.maton|maton\\.ai.*connect|connect.*(slack|hubspot|notion|salesforce|stripe).*api|post.*linkedin|发送.*linkedin|发.*领英|linkedin.*post|publish.*linkedin|share.*linkedin|send.*slack|slack.*message|outlook.*(email|mail|calendar)|hubspot.*(contact|deal)|notion.*(database|page)|gmail|google.*calendar|google.*sheet|stripe.*(customer|payment)|salesforce|airtable|calendly|github.*(repo|issue|pr)"]
   instruction: "User asked to use an external service (Slack, LinkedIn, Outlook, HubSpot, Notion, Gmail, Stripe, etc.). Use run_skill(skill_name='maton-api-gateway-1.0.0', script='request.py') with app and path from this skill's Supported Services table and references/. For LinkedIn post: GET linkedin/rest/me then POST linkedin/rest/posts with commentary. Do not reply that the action was done without calling the skill."
@@ -327,6 +331,18 @@ This skill includes a **references/** folder copied from [maton-ai/api-gateway-s
 - Zoho People – Employees, departments, designations, attendance, leave
 - Zoho Recruit – Candidates, job openings, interviews, applications
 
+## Subcommands (request.py)
+
+`request.py` supports additional subcommands for connection management:
+
+| Command | Description |
+|---------|-------------|
+| `request.py discover` | List all active connections |
+| `request.py connection <app>` | Check if a specific app has an active connection |
+| `request.py services` | List all supported services from the `references/` folder |
+
+Usage via run_skill: `run_skill(..., args=['discover'])` or `args=['connection', 'slack']`.
+
 ## Examples (exec / Python)
 
 ### Slack – Post message
@@ -351,7 +367,7 @@ req.add_header('Content-Type', 'application/json')
 print(json.dumps(json.load(urllib.request.urlopen(req)), indent=2))
 ```
 
-### Outlook – List messages (or use skill outlook-api-1.0.3)
+### Outlook – List messages
 
 ```python
 import urllib.request, os, json
@@ -366,8 +382,11 @@ print(json.dumps(json.load(urllib.request.urlopen(req)), indent=2))
 |--------|---------|
 | 400 | No connection for the requested app (connect app at maton.ai first) |
 | 401 | Invalid or missing MATON_API_KEY |
-| 429 | Rate limited (10 req/s per account) |
+| 429 | Rate limited — request.py retries with `Retry-After` delay (up to 3 attempts) |
+| 500/502/503/504 | Gateway error — request.py retries with exponential backoff (up to 3 attempts) |
 | 4xx/5xx | Passthrough from target API |
+
+For connection issues, run `request.py discover` to list active connections, or `request.py connection <app>` to check a specific app.
 
 ## Rate limits
 
@@ -388,4 +407,4 @@ print(json.dumps(json.load(urllib.request.urlopen(req)), indent=2))
 - [Maton API Reference](https://www.maton.ai/docs/api-reference)
 - [Maton Community](https://discord.com/invite/dBfFAcefs2)
 - [Maton Support](mailto:support@maton.ai)
-- HomeClaw Outlook-only skill: `skills/outlook-api-1.0.3` (same gateway, app=`outlook`)
+- HomeClaw skill: `skills/maton-api-gateway-1.0.0` (this skill)

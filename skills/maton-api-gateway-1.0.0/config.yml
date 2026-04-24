@@ -1,5 +1,8 @@
 # Maton API Gateway skill — API key for gateway.maton.ai and ctrl.maton.ai
-# Get key at https://www.maton.ai/settings
+# Get your key at https://www.maton.ai/settings
 # Environment variable MATON_API_KEY overrides this value when set.
+#
+# IMPORTANT: Replace the placeholder below with your actual key from maton.ai/settings.
+# Do NOT commit your real API key to version control.
 
-maton_api_key: "epDkYSZ1u_PpusWWcLoCX3L5IQ3zYrSVLkLtDWUwo5Oc8nSgrpZB9wi1NMswNgvtCwbp4m0ZUBrjG4OgkSj81XjTfWu97d2Ch78"
+maton_api_key: "YOUR_MATON_API_KEY"
